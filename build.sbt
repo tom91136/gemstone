@@ -3,27 +3,31 @@ import scala.sys.process.Process
 
 Global / onChangedBuildSource := ReloadOnSourceChanges
 
-lazy val scala3Version    = "3.8.3"
-lazy val munitVersion     = "1.3.4"
-lazy val catsParseVersion = "1.1.0"
-lazy val jsoupVersion     = "1.23.2"
-lazy val llvmVersion      = "23.1.0"
-lazy val mesaVersion      = "26.2.1"
-lazy val cudaPtxVersion   = "13.3.0"
-lazy val ptxIsaVersion    = "9.3"
-lazy val ptxIsaPackage    = "v" + ptxIsaVersion.replace('.', '_')
-lazy val amdIsaXmlVersion = "2026_08_06"
+lazy val scala3Version        = "3.8.3"
+lazy val munitVersion         = "1.3.4"
+lazy val catsParseVersion     = "1.1.0"
+lazy val jsoupVersion         = "1.23.2"
+lazy val llvmVersion          = "23.1.0"
+lazy val mesaVersion          = "26.2.1"
+lazy val cudaPtxVersion       = "13.3.0"
+lazy val ptxIsaVersion        = "9.3"
+lazy val ptxIsaPackage        = "v" + ptxIsaVersion.replace('.', '_')
+lazy val amdIsaXmlVersion     = "2026_08_06"
 lazy val openClHeadersVersion = "2026.05.29"
 lazy val levelZeroVersion     = "1.33.0"
 lazy val spirvHeadersVersion  = "vulkan-sdk-1.4.357.0"
 lazy val spirvToolsVersion    = "vulkan-sdk-1.4.357.0"
 lazy val spirvVersion         = "1.6"
 lazy val spirvPackage         = "v" + spirvVersion.replace('.', '_')
+lazy val thrustVersion        = "1.15.0"
+lazy val thrustCommit         = "67d6622e48ea44cfaa462d44772cc7663026c952"
 
-lazy val llvmSourceSha256  = "ab1f0e3ec52448c33e8782eaf0422504b87c7b016b22514653ee0d8fcee479ff"
-lazy val mesaSourceSha256  = "c47e81bddc4760360a41ac3c5acec38acb81f9d750ecef47e7f3adc7021a4442"
-lazy val cudaPtxHtmlSha256 = "40026f79b65fee3f8c8b3e717c6f80c6385e8d97215318d6e4b7f6106f58d5a4"
-lazy val amdIsaXmlSha256   = "82404f1126761b7877595b622afa7e1f311f2f41e89a3abe9aaf8ad045c082e2"
+lazy val ThrustTest = config("thrust").extend(Test)
+
+lazy val llvmSourceSha256    = "ab1f0e3ec52448c33e8782eaf0422504b87c7b016b22514653ee0d8fcee479ff"
+lazy val mesaSourceSha256    = "c47e81bddc4760360a41ac3c5acec38acb81f9d750ecef47e7f3adc7021a4442"
+lazy val cudaPtxHtmlSha256   = "40026f79b65fee3f8c8b3e717c6f80c6385e8d97215318d6e4b7f6106f58d5a4"
+lazy val amdIsaXmlSha256     = "82404f1126761b7877595b622afa7e1f311f2f41e89a3abe9aaf8ad045c082e2"
 lazy val openClHeadersSha256 = "0bdef6f653c577827a75fac3e3f18b0bf000171e39fa65c2eb84ec804c822cab"
 lazy val levelZeroSha256     = "d697c61a2f4897ec9c676c6056dba5368c9c266bb173ff7249f71ef63bf445e0"
 lazy val spirvHeadersSha256  = "7d40c8c1983c1aba6f6f2fcbcf7be345d33a5693aeee0cc5b8c579fb8e3f2fea"
@@ -42,15 +46,15 @@ lazy val isaReferenceManifestMarkers = Vector(
 
 lazy val isaReferenceCacheDirectory = settingKey[File]("Persistent cache for pinned ISA reference artifacts.")
 lazy val prepareIsaReferences       = taskKey[Unit]("Download, verify, and selectively extract pinned ISA references.")
-@transient lazy val generatePtxSources = taskKey[Seq[File]]("Update checked-in PTX instruction metadata.")
+@transient lazy val generatePtxSources        = taskKey[Seq[File]]("Update checked-in PTX instruction metadata.")
 @transient lazy val generatePtxReferenceTests =
   taskKey[Seq[File]]("Update checked-in PTX documentation conformance tests.")
-@transient lazy val generateAmdGpuSources = taskKey[Seq[File]]("Update checked-in normalized AMDGPU metadata.")
+@transient lazy val generateAmdGpuSources     = taskKey[Seq[File]]("Update checked-in normalized AMDGPU metadata.")
 @transient lazy val generateAmdGpuGoldenTests =
   taskKey[Seq[File]]("Update the checked-in LLVM AMDGPU golden-test corpus.")
 @transient lazy val generateComputeApiSources =
   taskKey[Seq[File]]("Update checked-in OpenCL and Level Zero API surfaces.")
-@transient lazy val generateSpirvSources = taskKey[Seq[File]]("Update checked-in SPIR-V grammar metadata.")
+@transient lazy val generateSpirvSources        = taskKey[Seq[File]]("Update checked-in SPIR-V grammar metadata.")
 @transient lazy val generateSpirvReferenceTests =
   taskKey[Seq[File]]("Update checked-in SPIRV-Tools-derived tests.")
 
@@ -139,8 +143,8 @@ lazy val codegen = projectMatrix
       )
       val converter = fileConverter.value
       val classpath = (Compile / fullClasspath).value.map(entry => converter.toPath(entry.data).toString)
-      val java = file(sys.props("java.home")) / "bin" / "java"
-      val exit = Process(Seq(
+      val java      = file(sys.props("java.home")) / "bin" / "java"
+      val exit      = Process(Seq(
         java.getAbsolutePath,
         "-cp",
         classpath.mkString(sys.props("path.separator")),
@@ -263,7 +267,7 @@ lazy val isa_amdgpu = projectMatrix
         case found => sys.error(s"expected one prepared ISA reference view, found ${found.size} in $referenceRoot")
       }
       val exporter = root / "codegen" / "amdgpu" / "export_aco.py"
-      val output = root / "isa_amdgpu" / "src" / "main" / "scala" / "net" / "kurobako" / "gemstone" / "isa" /
+      val output   = root / "isa_amdgpu" / "src" / "main" / "scala" / "net" / "kurobako" / "gemstone" / "isa" /
         "amdgpu" / "common" / "generated" / "Database.scala"
       val converter = fileConverter.value
       val classpath =
@@ -337,14 +341,14 @@ lazy val isa_spirv = projectMatrix
         manifest.isFile && isaReferenceManifestMarkers.forall(IO.read(manifest).contains)
       }.toVector match {
         case Vector(directory) => directory
-        case found => sys.error(s"expected one prepared SPIR-V reference view, found ${found.size}")
+        case found             => sys.error(s"expected one prepared SPIR-V reference view, found ${found.size}")
       }
       val output = root / "isa_spirv" / "src" / "main" / "scala" / "net" / "kurobako" / "gemstone" / "isa" /
         "spirv" / spirvPackage / "generated" / "Catalog.scala"
       val converter = fileConverter.value
       val classpath = (codegen.jvm(scala3Version) / Compile / fullClasspath).value
         .map(entry => converter.toPath(entry.data).toString)
-      val java = file(sys.props("java.home")) / "bin" / "java"
+      val java    = file(sys.props("java.home")) / "bin" / "java"
       val grammar = references / "khronos" / "spirv-headers" / "include" / "spirv" / "unified1" /
         "spirv.core.grammar.json"
       val exit = Process(Seq(
@@ -369,18 +373,18 @@ lazy val isa_spirv = projectMatrix
         manifest.isFile && isaReferenceManifestMarkers.forall(IO.read(manifest).contains)
       }.toVector match {
         case Vector(directory) => directory
-        case found => sys.error(s"expected one prepared SPIR-V test reference view, found ${found.size}")
+        case found             => sys.error(s"expected one prepared SPIR-V test reference view, found ${found.size}")
       }
       val output = root / "isa_spirv" / "src" / "test" / "scala" / "net" / "kurobako" / "gemstone" / "isa" /
         "spirv" / spirvPackage / "generated" / "ReferenceSuite.scala"
       val converter = fileConverter.value
       val classpath = (codegen.jvm(scala3Version) / Compile / fullClasspath).value
         .map(entry => converter.toPath(entry.data).toString)
-      val java = file(sys.props("java.home")) / "bin" / "java"
+      val java    = file(sys.props("java.home")) / "bin" / "java"
       val grammar = references / "khronos" / "spirv-headers" / "include" / "spirv" / "unified1" /
         "spirv.core.grammar.json"
       val tests = references / "khronos" / "spirv-tools" / "test"
-      val exit = Process(Seq(
+      val exit  = Process(Seq(
         java.getAbsolutePath,
         "-cp",
         classpath.mkString(sys.props("path.separator")),
@@ -399,9 +403,21 @@ lazy val isa_spirv = projectMatrix
   .nativePlatform(scalaVersions = Seq(scala3Version))
 
 lazy val server = projectMatrix
+  .configs(ThrustTest)
   .dependsOn(api, core, isa_ptx, isa_amdgpu, isa_spirv)
-  .settings(commonSettings, name := "gemstone-server")
+  .settings(
+    commonSettings,
+    inConfig(ThrustTest)(Defaults.testSettings),
+    name                     := "gemstone-server",
+    ThrustTest / scalaSource := (LocalRootProject / baseDirectory).value / "server" / "src" / "thrust" / "scala",
+    ThrustTest / resourceDirectory := (LocalRootProject / baseDirectory).value / "server" / "src" / "thrust" / "resources",
+    ThrustTest / parallelExecution         := false,
+    ThrustTest / test / fork               := false,
+    libraryDependencies += "org.scalameta" %% "munit" % munitVersion % ThrustTest
+  )
   .jvmPlatform(scalaVersions = Seq(scala3Version))
+
+addCommandAlias("testThrust", "server / Thrust / testOnly net.kurobako.gemstone.server.ThrustConformanceSuite")
 
 lazy val native = projectMatrix
   .dependsOn(core, isa_ptx, isa_amdgpu, isa_spirv)

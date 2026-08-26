@@ -87,7 +87,9 @@ object IsaReferences {
       Artifact(
         "opencl-headers",
         s"OpenCL-Headers-${pins.openClHeadersVersion}.zip",
-        URI.create(s"https://github.com/KhronosGroup/OpenCL-Headers/archive/refs/tags/v${pins.openClHeadersVersion}.zip"),
+        URI.create(
+          s"https://github.com/KhronosGroup/OpenCL-Headers/archive/refs/tags/v${pins.openClHeadersVersion}.zip"
+        ),
         pins.openClHeadersSha256
       ),
       Artifact(

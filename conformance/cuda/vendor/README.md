@@ -6,7 +6,7 @@ driver, but must not take Thrust, CUB, sample helpers, or sample implementations
 
 | Directory | Upstream | Pin | Licence | Contents |
 | --- | --- | --- | --- | --- |
-| `thrust` | <https://github.com/NVIDIA/thrust> | tag `1.15.0`, commit `67d6622e48ea44cfaa462d44772cc7663026c952` | Apache-2.0 with exceptions detailed in `thrust/LICENSE` | Complete `thrust/` public header tree |
+| `thrust` | <https://github.com/NVIDIA/thrust> | tag `1.15.0`, commit `67d6622e48ea44cfaa462d44772cc7663026c952` | Apache-2.0 with exceptions detailed in `thrust/LICENSE` | Complete `thrust/` public header tree and unmodified `testing/` tree |
 | `cub` | <https://github.com/NVIDIA/cub> | tag `1.15.0`, commit `0905d7effcb3395d4157895e1d77bbcb252e55c8` | BSD-3-Clause (`cub/LICENSE.TXT`) | Complete `cub/` public header tree |
 | `cuda-samples` | <https://github.com/NVIDIA/cuda-samples> | commit `b7c5481c556c3fe98db060207ecaa41a4b9a9abc` | BSD-3-Clause plus the notice in `cuda-samples/LICENSE` | Licence for selected, locally adapted sample sources |
 
@@ -18,6 +18,11 @@ The Scala suite verifies that both vendored trees occur in that dependency file 
 The Thrust command also pre-includes `{cuda_host_compat}`. This small local header disables only newer libstdc++
 language/builtin fast paths that NVIDIA's CUDA device front end may not parse when the host compiler is newer than
 the toolkit. It does not provide any CUDA or algorithm implementation.
+
+The official test harness is compiled directly from `thrust/testing/unittest`. Gemstone's Scala runner follows the
+CPP/CUDA source selection in upstream's `testing/CMakeLists.txt`: 160 common, 16 split async, and 61 CUDA device-side
+launch tests. The nine sources under `testing/regression` are retained verbatim but remain disabled by default because
+that directory immediately returns from its upstream CMake file.
 
 CUDA Samples are not imported wholesale. A selected kernel is adapted into a standalone `check_*.cu` translation
 unit under `../samples`, retains NVIDIA's licence header, identifies its exact upstream revision, performs its own

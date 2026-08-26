@@ -1,0 +1,2 @@
+# Preserve pinned third-party sources byte-for-byte, including upstream whitespace.
+conformance/cuda/vendor/thrust/testing/** -whitespace

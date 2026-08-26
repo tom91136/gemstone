@@ -47,6 +47,36 @@ runtime/driver libraries. Thrust cases use the additional metadata and command v
 The suite audits the dependency file and fails if compilation falls back to toolkit-provided Thrust or CUB headers.
 See `vendor/README.md` for exact upstream revisions and licence details.
 
+## Official Thrust suite
+
+The full, unmodified Thrust 1.15.0 test tree and unittest harness are vendored under `vendor/thrust/testing`. They run
+in a dedicated SBT configuration because compiling 237 CUDA executables is intentionally much more expensive than
+the compact conformance corpus:
+
+```console
+sbt testThrust
+```
+
+The Scala suite discovers the same 160 common, 16 async, and 61 CUDA-specific translation units selected by Thrust's
+own CPP/CUDA CMake configuration. Each executable links the official two-file unittest framework and runs at the
+`tiny` size tier by default. Successful compilation is cached under `target/conformance/thrust-1.15.0`; source,
+compiler, architecture, backend, and compile-command changes invalidate it.
+
+Useful controls are:
+
+```console
+GEMSTONE_THRUST_FILTER='^(transform|cuda\\.transform)$' sbt testThrust
+GEMSTONE_THRUST_SIZES=default sbt testThrust
+GEMSTONE_THRUST_ARCH=sm_89 sbt testThrust
+GEMSTONE_THRUST_INCLUDE_DISABLED=1 sbt testThrust
+GEMSTONE_THRUST_BACKENDS=cuda,gemstone sbt testThrust
+```
+
+`GEMSTONE_THRUST_FILTER` is a Scala regular expression over upstream-relative names. The default backend is the
+NVIDIA reference runtime. The Gemstone backend uses the exact same discovered sources and compiler path; it is an
+explicit opt-in while CUDA Runtime fatbinary registration and the broader PTX semantics required by Thrust are being
+implemented. Dependency files are audited to ensure Thrust and CUB never fall back to toolkit copies.
+
 ## Provenance and licence boundary
 
 These are compact adaptations of tests in GPUOcelot revision `b16039dc940dc6bc4ea0a98380495769ff35ed99` under
