@@ -1,5 +1,8 @@
 package net.kurobako.gemstone.isa.amdgpu.common
 
+private[common] def normalizeOpcode(value: String): String =
+  value.map(character => if (character >= 'A' && character <= 'Z') (character + ('a' - 'A')).toChar else character)
+
 /** A parsed AMDGPU assembly program. Source locations are deliberately kept out of the semantic tree. */
 final case class Program(statements: Vector[Statement])
 
@@ -13,8 +16,9 @@ enum Statement {
   case Directive(name: String, arguments: String)
 }
 
-/** One instruction shape is shared by the entire ISA. Architecture-specific validity and encodings live in
-  * [[InstructionDatabase]], rather than being multiplied into the Scala type hierarchy.
+/** Raw assembly retains one instruction shape. [[KnownInstruction]] supplies the generated opcode-specific layer, while
+  * architecture-specific validity and encodings live in [[InstructionDatabase]] rather than multiplying generation
+  * variants into the Scala type hierarchy.
   */
 final case class Instruction(
     opcode: Opcode,
@@ -22,13 +26,21 @@ final case class Instruction(
     modifiers: Vector[Modifier] = Vector.empty
 )
 
+/** Arguments shared by the generated per-opcode cases. Encoding and generation variants remain normalized metadata. */
+final case class InstructionArguments(
+    operands: Vector[Operand] = Vector.empty,
+    modifiers: Vector[Modifier] = Vector.empty
+) {
+  def toSyntax(opcode: Opcode): Instruction = Instruction(opcode, operands, modifiers)
+}
+
 opaque type Opcode = String
 
 object Opcode {
   private val Syntax = "[A-Za-z][A-Za-z0-9_.]*".r
 
   def fromString(value: String): Either[String, Opcode] = value match {
-    case Syntax() => Right(value.toLowerCase)
+    case Syntax() => Right(normalizeOpcode(value))
     case _        => Left(s"invalid AMDGPU opcode '$value'")
   }
 

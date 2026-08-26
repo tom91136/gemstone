@@ -112,8 +112,17 @@ object Lowering {
   private def lowerInstruction(
       instruction: Instruction,
       labels: Map[Int, Pc]
+  ): Either[LoweringError, ExecutableInstruction] =
+    KnownInstruction.fromSyntax(instruction) match {
+      case Left(_)      => Right(ExecutableInstruction.Unsupported(instruction.name, "unknown SPIR-V opcode"))
+      case Right(known) => lowerKnownInstruction(known, labels)
+    }
+
+  private def lowerKnownInstruction(
+      instruction: KnownInstruction,
+      labels: Map[Int, Pc]
   ): Either[LoweringError, ExecutableInstruction] = {
-    val operands                                                 = instruction.operands.map(_.bits)
+    val operands                                                 = instruction.arguments.operands.map(_.bits)
     def requireOperands(count: Int): Either[LoweringError, Unit] =
       if (operands.size >= count) Right(())
       else Left(LoweringError.Malformed(instruction.name, s"expected $count operands, found ${operands.size}"))
@@ -121,39 +130,42 @@ object Lowering {
       requireOperands(4).map(_ =>
         ExecutableInstruction.Binary(instruction.name, operands(1), operands(2), operands(3), operation)
       )
-    instruction.name match {
-      case "OpConstant" | "OpSpecConstant" =>
+    instruction match {
+      case KnownInstruction.OpConstant(_) | KnownInstruction.OpSpecConstant(_) =>
         requireOperands(3).map(_ => ExecutableInstruction.Constant(operands(1), operands(2).toLong & 0xffffffffL))
-      case "OpConstantTrue" | "OpSpecConstantTrue" =>
+      case KnownInstruction.OpConstantTrue(_) | KnownInstruction.OpSpecConstantTrue(_) =>
         requireOperands(2).map(_ => ExecutableInstruction.Constant(operands(1), 1L))
-      case "OpConstantFalse" | "OpSpecConstantFalse" =>
+      case KnownInstruction.OpConstantFalse(_) | KnownInstruction.OpSpecConstantFalse(_) =>
         requireOperands(2).map(_ => ExecutableInstruction.Constant(operands(1), 0L))
-      case "OpVariable" =>
+      case KnownInstruction.OpVariable(_) =>
         requireOperands(3).map(_ => ExecutableInstruction.Variable(operands(1), operands.lift(3)))
-      case "OpLoad"              => requireOperands(3).map(_ => ExecutableInstruction.Load(operands(1), operands(2)))
-      case "OpStore"             => requireOperands(2).map(_ => ExecutableInstruction.Store(operands(0), operands(1)))
-      case "OpCopyObject"        => requireOperands(3).map(_ => ExecutableInstruction.Copy(operands(1), operands(2)))
-      case "OpIAdd"              => binary(BinaryOperation.Add)
-      case "OpISub"              => binary(BinaryOperation.Subtract)
-      case "OpIMul"              => binary(BinaryOperation.Multiply)
-      case "OpBitwiseAnd"        => binary(BinaryOperation.BitAnd)
-      case "OpBitwiseOr"         => binary(BinaryOperation.BitOr)
-      case "OpBitwiseXor"        => binary(BinaryOperation.BitXor)
-      case "OpShiftLeftLogical"  => binary(BinaryOperation.ShiftLeft)
-      case "OpShiftRightLogical" => binary(BinaryOperation.LogicalShiftRight)
-      case "OpIEqual"            => binary(BinaryOperation.Equal)
-      case "OpINotEqual"         => binary(BinaryOperation.NotEqual)
-      case "OpULessThan"         => binary(BinaryOperation.UnsignedLessThan)
-      case "OpULessThanEqual"    => binary(BinaryOperation.UnsignedLessThanEqual)
-      case "OpUGreaterThan"      => binary(BinaryOperation.UnsignedGreaterThan)
-      case "OpUGreaterThanEqual" => binary(BinaryOperation.UnsignedGreaterThanEqual)
-      case "OpSelect"            =>
+      case KnownInstruction.OpLoad(_) =>
+        requireOperands(3).map(_ => ExecutableInstruction.Load(operands(1), operands(2)))
+      case KnownInstruction.OpStore(_) =>
+        requireOperands(2).map(_ => ExecutableInstruction.Store(operands(0), operands(1)))
+      case KnownInstruction.OpCopyObject(_) =>
+        requireOperands(3).map(_ => ExecutableInstruction.Copy(operands(1), operands(2)))
+      case KnownInstruction.OpIAdd(_)              => binary(BinaryOperation.Add)
+      case KnownInstruction.OpISub(_)              => binary(BinaryOperation.Subtract)
+      case KnownInstruction.OpIMul(_)              => binary(BinaryOperation.Multiply)
+      case KnownInstruction.OpBitwiseAnd(_)        => binary(BinaryOperation.BitAnd)
+      case KnownInstruction.OpBitwiseOr(_)         => binary(BinaryOperation.BitOr)
+      case KnownInstruction.OpBitwiseXor(_)        => binary(BinaryOperation.BitXor)
+      case KnownInstruction.OpShiftLeftLogical(_)  => binary(BinaryOperation.ShiftLeft)
+      case KnownInstruction.OpShiftRightLogical(_) => binary(BinaryOperation.LogicalShiftRight)
+      case KnownInstruction.OpIEqual(_)            => binary(BinaryOperation.Equal)
+      case KnownInstruction.OpINotEqual(_)         => binary(BinaryOperation.NotEqual)
+      case KnownInstruction.OpULessThan(_)         => binary(BinaryOperation.UnsignedLessThan)
+      case KnownInstruction.OpULessThanEqual(_)    => binary(BinaryOperation.UnsignedLessThanEqual)
+      case KnownInstruction.OpUGreaterThan(_)      => binary(BinaryOperation.UnsignedGreaterThan)
+      case KnownInstruction.OpUGreaterThanEqual(_) => binary(BinaryOperation.UnsignedGreaterThanEqual)
+      case KnownInstruction.OpSelect(_)            =>
         requireOperands(5).map(_ => ExecutableInstruction.Select(operands(1), operands(2), operands(3), operands(4)))
-      case "OpBranch" =>
+      case KnownInstruction.OpBranch(_) =>
         requireOperands(1).flatMap(_ =>
           labels.get(operands(0)).toRight(LoweringError.Malformed(instruction.name, s"unknown label %${operands(0)}"))
         ).map(ExecutableInstruction.Jump.apply)
-      case "OpBranchConditional" =>
+      case KnownInstruction.OpBranchConditional(_) =>
         requireOperands(3).flatMap { _ =>
           for {
             whenTrue <- labels.get(operands(1)).toRight(
@@ -164,10 +176,11 @@ object Lowering {
             )
           } yield ExecutableInstruction.JumpIf(operands(0), whenTrue, whenFalse)
         }
-      case "OpReturn"              => Right(ExecutableInstruction.Return(None))
-      case "OpReturnValue"         => requireOperands(1).map(_ => ExecutableInstruction.Return(Some(operands(0))))
-      case name if isIgnored(name) => Right(ExecutableInstruction.Ignore(name))
-      case name => Right(ExecutableInstruction.Unsupported(name, "semantic lowering is not implemented"))
+      case KnownInstruction.OpReturn(_)      => Right(ExecutableInstruction.Return(None))
+      case KnownInstruction.OpReturnValue(_) =>
+        requireOperands(1).map(_ => ExecutableInstruction.Return(Some(operands(0))))
+      case value if isIgnored(value.name) => Right(ExecutableInstruction.Ignore(value.name))
+      case value => Right(ExecutableInstruction.Unsupported(value.name, "semantic lowering is not implemented"))
     }
   }
 

@@ -28,7 +28,24 @@ object GenerateSpirvIsa {
   def main(arguments: Array[String]): Unit = arguments.toVector match {
     case Vector("catalog", grammar, output, packageVersion) =>
       val entries = readGrammar(Paths.get(grammar))
-      write(Paths.get(output), renderCatalog(entries, packageVersion))
+      val catalog = Paths.get(output)
+      write(catalog, renderCatalog(entries, packageVersion))
+      write(
+        catalog.resolveSibling("Instructions.scala"),
+        GenerateInstructionAdt.renderEntries(
+          entries.map(entry => GenerateInstructionAdt.Entry(entry.opcode.toString, entry.name)),
+          GenerateInstructionAdt.Shape(
+            packageName = s"net.kurobako.gemstone.isa.spirv.$packageVersion",
+            sourceDescription = "the pinned Khronos SPIR-V core grammar",
+            syntaxType = "Instruction",
+            argumentsType = "InstructionArguments",
+            opcodeType = "Opcode",
+            keyExpression = "value.opcode.number.toString",
+            argumentsExpression = "InstructionArguments(value.operands)",
+            opcodeExpression = name => s"Opcode.unsafe(${entries.find(_.name == name).fold(-1)(_.opcode)})"
+          )
+        )
+      )
       println(s"generated ${entries.size} SPIR-V core instructions")
     case Vector("tests", grammar, tests, output, packageVersion) =>
       val entries  = readGrammar(Paths.get(grammar))
@@ -142,9 +159,12 @@ object GenerateSpirvIsa {
         |    assertEquals(InstructionCatalog.instructions.size, $opcodeCount)
         |    InstructionCatalog.instructions.foreach { info =>
         |      val operands = Vector.fill(info.minimumOperandCount)(Word(0))
+        |      val syntax = Instruction(info.opcode, operands)
+        |      val known = KnownInstruction.fromSyntax(syntax).fold(error => fail(s"$${info.name}: $$error"), identity)
+        |      assertEquals(known.syntax, syntax, info.name)
         |      val module = Module(
         |        Header(Version.V1_6, Word(0), Word(1), Word(0)),
-        |        Vector(Instruction(info.opcode, operands)),
+        |        Vector(syntax),
         |        Endianness.Little
         |      )
         |      val bytes = Binary.serialize(module).fold(error => fail(error.message), identity)

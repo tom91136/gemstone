@@ -14,9 +14,12 @@ final class ReferenceSuite extends munit.FunSuite {
     assertEquals(InstructionCatalog.instructions.size, 875)
     InstructionCatalog.instructions.foreach { info =>
       val operands = Vector.fill(info.minimumOperandCount)(Word(0))
+      val syntax = Instruction(info.opcode, operands)
+      val known = KnownInstruction.fromSyntax(syntax).fold(error => fail(s"${info.name}: $error"), identity)
+      assertEquals(known.syntax, syntax, info.name)
       val module = Module(
         Header(Version.V1_6, Word(0), Word(1), Word(0)),
-        Vector(Instruction(info.opcode, operands)),
+        Vector(syntax),
         Endianness.Little
       )
       val bytes = Binary.serialize(module).fold(error => fail(error.message), identity)

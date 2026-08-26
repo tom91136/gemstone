@@ -189,29 +189,40 @@ object PtxLowerer {
   private def lowerInstruction(
       instruction: Instruction,
       labels: Map[String, Pc]
+  ): Either[PtxLoweringError, PtxExecutable] =
+    KnownInstruction.fromSyntax(instruction) match {
+      case Left(_)      => Left(PtxLoweringError.Unsupported(Printer.render(instruction), "unknown PTX opcode"))
+      case Right(known) => lowerKnownInstruction(known, labels)
+    }
+
+  private def lowerKnownInstruction(
+      instruction: KnownInstruction,
+      labels: Map[String, Pc]
   ): Either[PtxLoweringError, PtxExecutable] = {
-    val operands = instruction.operands
-    val lowered  = instruction.mnemonic match {
-      case "ld.param.u32" | "ld.param.u64" if operands.size == 2 =>
+    val syntax   = instruction.syntax
+    val operands = syntax.operands
+    val mnemonic = syntax.mnemonic
+    val lowered  = instruction match {
+      case KnownInstruction.Ld(_) if (mnemonic == "ld.param.u32" || mnemonic == "ld.param.u64") && operands.size == 2 =>
         for {
           destination <- registerName(operands(0))
           parameter   <- addressSymbol(operands(1))
         } yield PtxInstruction.LoadParameter(
           destination,
           parameter,
-          if (instruction.mnemonic.endsWith("32")) 32 else 64
+          if (mnemonic.endsWith("32")) 32 else 64
         )
-      case "mov.u32" | "mov.b32" if operands.size == 2 =>
+      case KnownInstruction.Mov(_) if (mnemonic == "mov.u32" || mnemonic == "mov.b32") && operands.size == 2 =>
         for {
           destination <- registerName(operands(0))
           source      <- value(operands(1))
         } yield PtxInstruction.Move(destination, source, 32)
-      case "mov.u64" | "mov.b64" if operands.size == 2 =>
+      case KnownInstruction.Mov(_) if (mnemonic == "mov.u64" || mnemonic == "mov.b64") && operands.size == 2 =>
         for {
           destination <- registerName(operands(0))
           source      <- value(operands(1))
         } yield PtxInstruction.Move(destination, source, 64)
-      case "mul.wide.u32" if operands.size == 3 =>
+      case KnownInstruction.Mul(_) if mnemonic == "mul.wide.u32" && operands.size == 3 =>
         for {
           destination <- registerName(operands(0))
           left        <- value(operands(1))
@@ -223,48 +234,54 @@ object PtxLowerer {
           right,
           64
         )
-      case "shl.b32" if operands.size == 3    => integerBinary(PtxIntegerOperation.ShiftLeft, 32, operands)
-      case "mad.lo.s32" if operands.size == 4 =>
+      case KnownInstruction.Shl(_) if mnemonic == "shl.b32" && operands.size == 3 =>
+        integerBinary(PtxIntegerOperation.ShiftLeft, 32, operands)
+      case KnownInstruction.Mad(_) if mnemonic == "mad.lo.s32" && operands.size == 4 =>
         for {
           destination <- registerName(operands(0))
           left        <- value(operands(1))
           right       <- value(operands(2))
           addend      <- value(operands(3))
         } yield PtxInstruction.MultiplyAddLow32(destination, left, right, addend)
-      case "add.u32" | "add.s32" if operands.size == 3 => integerBinary(PtxIntegerOperation.Add, 32, operands)
-      case "add.u64" | "add.s64" if operands.size == 3 => integerBinary(PtxIntegerOperation.Add, 64, operands)
-      case "sub.u32" | "sub.s32" if operands.size == 3 => integerBinary(PtxIntegerOperation.Subtract, 32, operands)
-      case "sub.u64" | "sub.s64" if operands.size == 3 => integerBinary(PtxIntegerOperation.Subtract, 64, operands)
-      case "ld.global.u32" if operands.size == 2       =>
+      case KnownInstruction.Add(_) if (mnemonic == "add.u32" || mnemonic == "add.s32") && operands.size == 3 =>
+        integerBinary(PtxIntegerOperation.Add, 32, operands)
+      case KnownInstruction.Add(_) if (mnemonic == "add.u64" || mnemonic == "add.s64") && operands.size == 3 =>
+        integerBinary(PtxIntegerOperation.Add, 64, operands)
+      case KnownInstruction.Sub(_) if (mnemonic == "sub.u32" || mnemonic == "sub.s32") && operands.size == 3 =>
+        integerBinary(PtxIntegerOperation.Subtract, 32, operands)
+      case KnownInstruction.Sub(_) if (mnemonic == "sub.u64" || mnemonic == "sub.s64") && operands.size == 3 =>
+        integerBinary(PtxIntegerOperation.Subtract, 64, operands)
+      case KnownInstruction.Ld(_) if mnemonic == "ld.global.u32" && operands.size == 2 =>
         for {
           destination <- registerName(operands(0))
           address     <- addressValue(operands(1))
         } yield PtxInstruction.LoadGlobal32(destination, address)
-      case "st.global.u32" if operands.size == 2 =>
+      case KnownInstruction.St(_) if mnemonic == "st.global.u32" && operands.size == 2 =>
         for {
           address <- addressValue(operands(0))
           source  <- value(operands(1))
         } yield PtxInstruction.StoreGlobal32(address, source)
-      case mnemonic if mnemonic.startsWith("setp.") && operands.size == 3 => lowerSetPredicate(instruction, operands)
-      case "bra" | "bra.uni" if operands.size == 1                        =>
+      case KnownInstruction.Setp(_) if mnemonic.startsWith("setp.") && operands.size == 3 =>
+        lowerSetPredicate(syntax, operands)
+      case KnownInstruction.Bra(_) if (mnemonic == "bra" || mnemonic == "bra.uni") && operands.size == 1 =>
         operands.head match {
           case Operand.Symbol(label) => labels.get(label).toRight(PtxLoweringError.Invalid(s"unknown label: $label"))
               .map(PtxInstruction.Branch.apply)
           case other => invalid(s"expected branch label, found ${Printer.render(other)}")
         }
-      case "bar.sync" if instruction.predication.nonEmpty =>
+      case KnownInstruction.Bar(_) if mnemonic == "bar.sync" && syntax.predication.nonEmpty =>
         invalid("bar.sync must not be predicated in the supported execution profile")
-      case "bar.sync" if operands.size == 1 =>
+      case KnownInstruction.Bar(_) if mnemonic == "bar.sync" && operands.size == 1 =>
         immediate(operands.head).flatMap { value =>
           if (value >= 0L && value <= Int.MaxValue.toLong) Right(PtxInstruction.BarrierSync(value.toInt))
           else invalid(s"barrier id is outside Int range: $value")
         }
-      case "ret" if operands.isEmpty => Right(PtxInstruction.Return)
-      case _ => Left(PtxLoweringError.Unsupported(Printer.render(instruction), "no handwritten semantic family"))
+      case KnownInstruction.Ret(_) if operands.isEmpty => Right(PtxInstruction.Return)
+      case _ => Left(PtxLoweringError.Unsupported(Printer.render(syntax), "no handwritten semantic family"))
     }
     for {
       operation <- lowered
-      predicate <- lowerPredicate(instruction.predication)
+      predicate <- lowerPredicate(syntax.predication)
     } yield PtxExecutable(operation, predicate)
   }
 

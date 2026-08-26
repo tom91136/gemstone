@@ -190,8 +190,9 @@ lazy val isa_ptx = projectMatrix
       val input  = references / "nvidia" / "ptx" / "index.html"
       val output = root / "isa_ptx" / "src" / "main" / "scala" / "net" / "kurobako" / "gemstone" / "isa" / "ptx" /
         ptxIsaPackage / "generated" / "Catalog.scala"
-      val converter = fileConverter.value
-      val classpath = (codegen.jvm(scala3Version) / Compile / fullClasspath).value
+      val instructions = output.getParentFile / "Instructions.scala"
+      val converter    = fileConverter.value
+      val classpath    = (codegen.jvm(scala3Version) / Compile / fullClasspath).value
         .map(entry => converter.toPath(entry.data).toString)
       val java = file(sys.props("java.home")) / "bin" / "java"
       val exit = Process(Seq(
@@ -206,7 +207,7 @@ lazy val isa_ptx = projectMatrix
         ptxIsaPackage
       )).!
       require(exit == 0, s"PTX metadata generator exited with $exit")
-      Seq(output)
+      Seq(output, instructions)
     },
     generatePtxReferenceTests := Def.uncached {
       val root          = (LocalRootProject / baseDirectory).value
@@ -269,8 +270,9 @@ lazy val isa_amdgpu = projectMatrix
       val exporter = root / "codegen" / "amdgpu" / "export_aco.py"
       val output   = root / "isa_amdgpu" / "src" / "main" / "scala" / "net" / "kurobako" / "gemstone" / "isa" /
         "amdgpu" / "common" / "generated" / "Database.scala"
-      val converter = fileConverter.value
-      val classpath =
+      val instructions = output.getParentFile / "Instructions.scala"
+      val converter    = fileConverter.value
+      val classpath    =
         (codegen.jvm(scala3Version) / Compile / fullClasspath).value.map(entry => converter.toPath(entry.data).toString)
       val java = file(sys.props("java.home")) / "bin" / "java"
       val exit = Process(Seq(
@@ -283,7 +285,7 @@ lazy val isa_amdgpu = projectMatrix
         output.getAbsolutePath
       )).!
       require(exit == 0, s"AMDGPU metadata generator exited with $exit")
-      Seq(output)
+      Seq(output, instructions)
     },
     generateAmdGpuGoldenTests := Def.uncached {
       val root          = (LocalRootProject / baseDirectory).value
@@ -345,8 +347,9 @@ lazy val isa_spirv = projectMatrix
       }
       val output = root / "isa_spirv" / "src" / "main" / "scala" / "net" / "kurobako" / "gemstone" / "isa" /
         "spirv" / spirvPackage / "generated" / "Catalog.scala"
-      val converter = fileConverter.value
-      val classpath = (codegen.jvm(scala3Version) / Compile / fullClasspath).value
+      val instructions = output.getParentFile / "Instructions.scala"
+      val converter    = fileConverter.value
+      val classpath    = (codegen.jvm(scala3Version) / Compile / fullClasspath).value
         .map(entry => converter.toPath(entry.data).toString)
       val java    = file(sys.props("java.home")) / "bin" / "java"
       val grammar = references / "khronos" / "spirv-headers" / "include" / "spirv" / "unified1" /
@@ -362,7 +365,7 @@ lazy val isa_spirv = projectMatrix
         spirvPackage
       )).!
       require(exit == 0, s"SPIR-V metadata generator exited with $exit")
-      Seq(output)
+      Seq(output, instructions)
     },
     generateSpirvReferenceTests := Def.uncached {
       val root          = (LocalRootProject / baseDirectory).value

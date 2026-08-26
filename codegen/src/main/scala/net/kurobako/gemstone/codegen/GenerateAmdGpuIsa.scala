@@ -30,10 +30,29 @@ object GenerateAmdGpuIsa {
       source: String
   )
   private final case class SoppRule(prefix: Long, opcodeShift: Int, immediateBits: Int)
+  private final case class Extracted(records: Vector[Instruction], acoCount: Int, xmlCount: Int, sopp: SoppRule)
 
   def main(arguments: Array[String]): Unit = arguments.toVector match {
     case Vector(references, exporter, output) =>
-      write(Paths.get(output), generate(Paths.get(references), Paths.get(exporter)))
+      val result  = extract(Paths.get(references), Paths.get(exporter))
+      val catalog = Paths.get(output)
+      write(catalog, render(result.records, result.acoCount, result.xmlCount, result.sopp))
+      write(
+        catalog.resolveSibling("Instructions.scala"),
+        GenerateInstructionAdt.render(
+          result.records.map(_.name),
+          GenerateInstructionAdt.Shape(
+            packageName = "net.kurobako.gemstone.isa.amdgpu.common",
+            sourceDescription = "the pinned Mesa ACO and AMD machine-readable ISA inputs",
+            syntaxType = "Instruction",
+            argumentsType = "InstructionArguments",
+            opcodeType = "Opcode",
+            keyExpression = "normalizeOpcode(value.opcode.value)",
+            argumentsExpression = "InstructionArguments(value.operands, value.modifiers)",
+            opcodeExpression = opcode => s"Opcode.unsafe(\"$opcode\")"
+          )
+        )
+      )
     case _ =>
       throw new IllegalArgumentException(
         "usage: GenerateAmdGpuIsa <prepared-references> <aco-exporter.py> <output.scala>"
@@ -41,6 +60,11 @@ object GenerateAmdGpuIsa {
   }
 
   private[codegen] def generate(references: Path, exporter: Path): String = {
+    val result = extract(references, exporter)
+    render(result.records, result.acoCount, result.xmlCount, result.sopp)
+  }
+
+  private def extract(references: Path, exporter: Path): Extracted = {
     require(
       Files.isRegularFile(references.resolve("MANIFEST.tsv")),
       s"not a prepared ISA reference directory: $references"
@@ -58,7 +82,7 @@ object GenerateAmdGpuIsa {
     val sopp     = parseAcoSoppRule(references.resolve("mesa/src/amd/compiler"))
     val records  = (aco ++ official)
       .sortBy(record => (record.name, record.generation, record.target, record.format, record.opcode))
-    render(records, aco.size, official.size, sopp)
+    Extracted(records, aco.size, official.size, sopp)
   }
 
   private def parseOfficialXml(input: Path): Vector[Instruction] = {

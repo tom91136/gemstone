@@ -1,9 +1,11 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
-/** Lossless-enough syntax tree for parsing, transforming, and canonically printing PTX source.
-  *
-  * Instructions deliberately share one representation. Opcode metadata is generated separately from the pinned PTX
-  * specification, avoiding one Scala class for every opcode/modifier combination.
+private[v9_3] def normalizeOpcode(value: String): String =
+  value.map(character => if (character >= 'A' && character <= 'Z') (character + ('a' - 'A')).toChar else character)
+
+/** Lossless-enough syntax tree for parsing, transforming, and canonically printing PTX source. Raw instructions retain
+  * one uniform representation; [[KnownInstruction]] provides the generated opcode-specific typed layer without
+  * multiplying modifier combinations.
   */
 enum Operand {
   case Immediate(raw: String)
@@ -37,6 +39,17 @@ final case class Instruction(
     predication: Option[Predication] = None
 ) {
   def mnemonic: String = (opcode.mnemonic +: modifiers.map(_.name)).mkString(".")
+}
+
+/** Arguments shared by the generated per-opcode instruction cases. Modifier combinations remain data rather than
+  * multiplying the instruction hierarchy.
+  */
+final case class InstructionArguments(
+    operands: Vector[Operand] = Vector.empty,
+    modifiers: Vector[Modifier] = Vector.empty,
+    predication: Option[Predication] = None
+) {
+  def toSyntax(opcode: Opcode): Instruction = Instruction(opcode, operands, modifiers, predication)
 }
 
 enum DirectiveSeparator {

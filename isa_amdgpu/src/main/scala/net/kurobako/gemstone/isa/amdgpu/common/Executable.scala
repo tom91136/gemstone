@@ -77,31 +77,50 @@ object AmdLowering {
       instruction: Instruction,
       target: Target,
       database: InstructionDatabase = Database
+  ): Either[LoweringError, AmdExecutable] =
+    KnownInstruction.fromSyntax(instruction) match {
+      case Left(_) =>
+        Right(
+          AmdExecutable.Unsupported(
+            target,
+            instruction.opcode.value,
+            Vector.empty,
+            "no instruction metadata for the exact target"
+          )
+        )
+      case Right(known) => lowerKnown(known, target, database)
+    }
+
+  private def lowerKnown(
+      instruction: KnownInstruction,
+      target: Target,
+      database: InstructionDatabase
   ): Either[LoweringError, AmdExecutable] = {
-    val opcode      = instruction.opcode.value
+    val syntax      = instruction.syntax
+    val opcode      = instruction.name
     val definitions = database.lookup(opcode, target)
     val formats     = definitions.map(_.format.toUpperCase).distinct.sorted
     if (definitions.isEmpty)
       Right(AmdExecutable.Unsupported(target, opcode, Vector.empty, "no instruction metadata for the exact target"))
     else if (!formats.contains("SOPP"))
       Right(AmdExecutable.Unsupported(target, opcode, formats, "semantic lowering is implemented only for SOPP"))
-    else opcode match {
-      case "s_nop"            => unsignedImmediate(instruction).map(AmdExecutable.Nop(target, _))
-      case "s_branch"         => branchImmediate(instruction).map(AmdExecutable.Branch(target, _))
-      case "s_cbranch_scc0"   => conditional(instruction, target, BranchCondition.Scc(false))
-      case "s_cbranch_scc1"   => conditional(instruction, target, BranchCondition.Scc(true))
-      case "s_cbranch_vccz"   => conditional(instruction, target, BranchCondition.VccZero(true))
-      case "s_cbranch_vccnz"  => conditional(instruction, target, BranchCondition.VccZero(false))
-      case "s_cbranch_execz"  => conditional(instruction, target, BranchCondition.ExecZero(true))
-      case "s_cbranch_execnz" => conditional(instruction, target, BranchCondition.ExecZero(false))
-      case "s_waitcnt"        =>
-        unsignedImmediate(instruction).map(value => AmdExecutable.Wait(target, WaitOperation.Counters(value)))
-      case "s_sleep" =>
-        unsignedImmediate(instruction).map(value => AmdExecutable.Wait(target, WaitOperation.Sleep(value)))
-      case "s_barrier" => noOperands(instruction).map(_ => AmdExecutable.Barrier(target, 0))
-      case "s_endpgm"  => noOperands(instruction).map(_ => AmdExecutable.EndProgram(target))
-      case "s_trap"    => unsignedImmediate(instruction).map(AmdExecutable.Trap(target, _))
-      case _           => Right(AmdExecutable.Unsupported(target, opcode, formats, "SOPP behavior is not implemented"))
+    else instruction match {
+      case KnownInstruction.SNop(_)           => unsignedImmediate(syntax).map(AmdExecutable.Nop(target, _))
+      case KnownInstruction.SBranch(_)        => branchImmediate(syntax).map(AmdExecutable.Branch(target, _))
+      case KnownInstruction.SCbranchScc0(_)   => conditional(syntax, target, BranchCondition.Scc(false))
+      case KnownInstruction.SCbranchScc1(_)   => conditional(syntax, target, BranchCondition.Scc(true))
+      case KnownInstruction.SCbranchVccz(_)   => conditional(syntax, target, BranchCondition.VccZero(true))
+      case KnownInstruction.SCbranchVccnz(_)  => conditional(syntax, target, BranchCondition.VccZero(false))
+      case KnownInstruction.SCbranchExecz(_)  => conditional(syntax, target, BranchCondition.ExecZero(true))
+      case KnownInstruction.SCbranchExecnz(_) => conditional(syntax, target, BranchCondition.ExecZero(false))
+      case KnownInstruction.SWaitcnt(_)       =>
+        unsignedImmediate(syntax).map(value => AmdExecutable.Wait(target, WaitOperation.Counters(value)))
+      case KnownInstruction.SSleep(_) =>
+        unsignedImmediate(syntax).map(value => AmdExecutable.Wait(target, WaitOperation.Sleep(value)))
+      case KnownInstruction.SBarrier(_) => noOperands(syntax).map(_ => AmdExecutable.Barrier(target, 0))
+      case KnownInstruction.SEndpgm(_)  => noOperands(syntax).map(_ => AmdExecutable.EndProgram(target))
+      case KnownInstruction.STrap(_)    => unsignedImmediate(syntax).map(AmdExecutable.Trap(target, _))
+      case _ => Right(AmdExecutable.Unsupported(target, opcode, formats, "SOPP behavior is not implemented"))
     }
   }
 

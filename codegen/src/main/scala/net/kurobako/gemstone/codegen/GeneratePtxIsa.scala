@@ -57,7 +57,24 @@ object GeneratePtxIsa {
   def main(arguments: Array[String]): Unit = arguments.toVector match {
     case Vector("catalog", input, output, version, packageVersion) =>
       val sections = checkedSections(Paths.get(input))
-      write(Paths.get(output), renderCatalog(version, packageVersion, sections))
+      val catalog  = Paths.get(output)
+      write(catalog, renderCatalog(version, packageVersion, sections))
+      write(
+        catalog.resolveSibling("Instructions.scala"),
+        GenerateInstructionAdt.render(
+          sections.flatMap(_.mnemonics),
+          GenerateInstructionAdt.Shape(
+            packageName = s"net.kurobako.gemstone.isa.ptx.$packageVersion",
+            sourceDescription = s"the pinned NVIDIA PTX ISA $version specification",
+            syntaxType = "Instruction",
+            argumentsType = "InstructionArguments",
+            opcodeType = "Opcode",
+            keyExpression = "normalizeOpcode(value.opcode.mnemonic)",
+            argumentsExpression = "InstructionArguments(value.operands, value.modifiers, value.predication)",
+            opcodeExpression = opcode => s"Opcode(${literal(opcode)})"
+          )
+        )
+      )
     case Vector("tests", input, output, version, packageVersion) =>
       val sections = checkedSections(Paths.get(input))
       val examples = checkedExamples(sections)
@@ -351,6 +368,7 @@ object GeneratePtxIsa {
         |import net.kurobako.gemstone.isa.ptx.$packageVersion.Printer
         |import net.kurobako.gemstone.isa.ptx.$packageVersion.Statement
         |import net.kurobako.gemstone.isa.ptx.$packageVersion.Parser
+        |import net.kurobako.gemstone.isa.ptx.$packageVersion.KnownInstruction
         |
         |// Generated from examples in the pinned NVIDIA PTX ISA $version specification. Do not edit.
         |class DocumentationSuite extends munit.FunSuite {
@@ -363,8 +381,8 @@ object GeneratePtxIsa {
         |      Parser.parse(source) match {
         |        case Left(error) => Vector(s"$$id: $$source\\n  $$error")
         |        case Right(program) => program.statements.collectFirst { case Statement.Instruction(instruction) => instruction }
-        |          .filterNot(instruction => Catalog.isKnown(instruction.opcode))
-        |          .map(instruction => s"$$id: unknown mnemonic $${instruction.opcode.mnemonic}: $$source")
+        |          .flatMap(instruction => KnownInstruction.fromSyntax(instruction).left.toOption
+        |            .map(error => s"$$id: missing typed instruction case $$error: $$source"))
         |          .toVector
         |      }
         |    }

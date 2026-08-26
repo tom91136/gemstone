@@ -55,6 +55,11 @@ final case class Instruction(opcode: Opcode, operands: Vector[Word]) {
   def name: String   = opcode.name.getOrElse(s"Op<${opcode.number}>")
 }
 
+/** Raw SPIR-V words associated with one generated, opcode-specific instruction case. */
+final case class InstructionArguments(operands: Vector[Word]) {
+  def toSyntax(opcode: Opcode): Instruction = Instruction(opcode, operands)
+}
+
 final case class Module(header: Header, instructions: Vector[Instruction], endianness: Endianness)
 
 final case class OperandInfo(kind: String, name: Option[String], quantifier: Option[String])

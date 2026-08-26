@@ -3,6 +3,7 @@ package net.kurobako.gemstone.isa.ptx.v9_3.generated
 import net.kurobako.gemstone.isa.ptx.v9_3.Printer
 import net.kurobako.gemstone.isa.ptx.v9_3.Statement
 import net.kurobako.gemstone.isa.ptx.v9_3.Parser
+import net.kurobako.gemstone.isa.ptx.v9_3.KnownInstruction
 
 // Generated from examples in the pinned NVIDIA PTX ISA 9.3 specification. Do not edit.
 class DocumentationSuite extends munit.FunSuite {
@@ -813,8 +814,8 @@ class DocumentationSuite extends munit.FunSuite {
       Parser.parse(source) match {
         case Left(error) => Vector(s"$id: $source\n  $error")
         case Right(program) => program.statements.collectFirst { case Statement.Instruction(instruction) => instruction }
-          .filterNot(instruction => Catalog.isKnown(instruction.opcode))
-          .map(instruction => s"$id: unknown mnemonic ${instruction.opcode.mnemonic}: $source")
+          .flatMap(instruction => KnownInstruction.fromSyntax(instruction).left.toOption
+            .map(error => s"$id: missing typed instruction case $error: $source"))
           .toVector
       }
     }
