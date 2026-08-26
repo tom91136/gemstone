@@ -39,7 +39,10 @@ class PtxInterpreterSuite extends munit.FunSuite {
   test("parse and deterministically execute integer vector addition") {
     val kernel = PtxParser.parse(vectorAdd).toOption.get
     assertEquals(kernel.name, "vector_add")
-    assertEquals(kernel.parameters, Vector("input_a", "input_b", "output"))
+    assertEquals(
+      kernel.parameters,
+      Vector(PtxParameter("input_a", 8), PtxParameter("input_b", 8), PtxParameter("output", 8))
+    )
 
     val memory = ArrayCheckedMemory.allocate(192, provenance = "vector-add arena")
     val base   = memory.allocation.start
@@ -57,7 +60,11 @@ class PtxInterpreterSuite extends munit.FunSuite {
       .execute(
         kernel,
         LaunchShape.create(1, values.size).toOption.get,
-        Map("input_a" -> a, "input_b" -> b, "output" -> output),
+        Map(
+          "input_a" -> PtxArgument(a.value),
+          "input_b" -> PtxArgument(b.value),
+          "output"  -> PtxArgument(output.value)
+        ),
         memory
       )
       .toOption
@@ -109,7 +116,7 @@ class PtxInterpreterSuite extends munit.FunSuite {
     val result = PtxInterpreter.execute(
       kernel,
       LaunchShape.create(1, 4).toOption.get,
-      Map("output" -> memory.allocation.start),
+      Map("output" -> PtxArgument(memory.allocation.start.value)),
       memory
     )
     assert(result.isRight, result.left.toOption.map(_.message).getOrElse(""))

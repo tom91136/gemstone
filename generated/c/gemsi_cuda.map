@@ -146,6 +146,13 @@ GEMSI_0.1 {
     cuTexRefSetFilterMode;
     cuTexRefSetFlags;
     cuTexRefSetFormat;
+    cudaFree;
+    cudaGetErrorString;
+    cudaMalloc;
+    cudaMemcpy;
+    __cudaRegisterFatBinary;
+    __cudaRegisterFatBinaryEnd;
+    __cudaUnregisterFatBinary;
   local:
     *;
 };

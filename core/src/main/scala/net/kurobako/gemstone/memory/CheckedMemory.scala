@@ -24,6 +24,10 @@ sealed trait MemoryError extends Product with Serializable {
 }
 
 object MemoryError {
+  final case class InvalidAddress(address: GuestAddress, width: Int, detail: String) extends MemoryError {
+    override def message: String = s"${address.show} + $width bytes is invalid: $detail"
+  }
+
   final case class OutOfBounds(address: GuestAddress, width: Int, allocation: Allocation) extends MemoryError {
     override def message: String =
       s"${address.show} + $width bytes is outside ${allocation.start.show} + ${allocation.size} (${allocation.provenance})"

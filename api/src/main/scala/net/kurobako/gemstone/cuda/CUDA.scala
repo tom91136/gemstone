@@ -18,9 +18,19 @@ trait CUDA {
   def cuMemcpyDtoD_v2(destination: DevicePtr, source: DevicePtr, byteCount: SizeT): CudaResult[Unit]
   def cuMemsetD8_v2(destination: DevicePtr, value: UInt8, count: SizeT): CudaResult[Unit]
 
+  def cuModuleLoadData(image: ModuleImage): CudaResult[CudaModule]
+  def cuModuleGetFunction(module: CudaModule, name: FunctionName): CudaResult[KernelFunction]
+  def cuModuleUnload(module: CudaModule): CudaResult[Unit]
+  def cuLaunchKernel(function: CudaFunction, launch: KernelLaunch): CudaResult[Unit]
+
   def cudaGetDeviceCount(): CudaResult[Int]
   def cudaMalloc(bytesize: SizeT): CudaResult[DevicePtr]
   def cudaFree(pointer: DevicePtr): CudaResult[Unit]
+  def cudaMemcpy(): CudaResult[Nothing]                 = unsupported("cudaMemcpy")
+  def cudaGetErrorString(): CudaResult[Nothing]         = unsupported("cudaGetErrorString")
+  def __cudaRegisterFatBinary(): CudaResult[Nothing]    = unsupported("__cudaRegisterFatBinary")
+  def __cudaRegisterFatBinaryEnd(): CudaResult[Nothing] = unsupported("__cudaRegisterFatBinaryEnd")
+  def __cudaUnregisterFatBinary(): CudaResult[Nothing]  = unsupported("__cudaUnregisterFatBinary")
 
   /** Stub-only symbols deliberately have no logical parameters: their native entry points ignore vendor ABI arguments
     * and return `CUDA_ERROR_NOT_SUPPORTED` without transport. Implementing one means replacing its concrete method with
@@ -152,7 +162,6 @@ trait CUDA {
   def cuGraphicsGLRegisterBuffer(): CudaResult[Nothing]          = unsupported("cuGraphicsGLRegisterBuffer")
   def cuGraphicsGLRegisterImage(): CudaResult[Nothing]           = unsupported("cuGraphicsGLRegisterImage")
   def cuLaunchHostFunc(): CudaResult[Nothing]                    = unsupported("cuLaunchHostFunc")
-  def cuLaunchKernel(): CudaResult[Nothing]                      = unsupported("cuLaunchKernel")
   def cuMemAllocHost(): CudaResult[Nothing]                      = unsupported("cuMemAllocHost")
   def cuMemAllocManaged(): CudaResult[Nothing]                   = unsupported("cuMemAllocManaged")
   def cuMemcpyHtoH_v2(): CudaResult[Nothing]                     = unsupported("cuMemcpyHtoH_v2")

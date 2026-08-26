@@ -13,8 +13,14 @@ enum WireType {
   case Device
   case DevicePtr
   case Context
+  case CudaModule
+  case CudaFunction
   case HostInput
   case HostOutput
+  case ModuleImage
+  case FunctionName
+  case KernelFunction
+  case KernelLaunch
 }
 
 final case class RpcParameter(name: String, wireType: WireType)
@@ -41,8 +47,14 @@ enum WireValue {
   case DeviceValue(value: net.kurobako.gemstone.cuda.Device)
   case DevicePtrValue(value: net.kurobako.gemstone.cuda.DevicePtr)
   case ContextValue(value: net.kurobako.gemstone.cuda.Context)
+  case CudaModuleValue(value: net.kurobako.gemstone.cuda.CudaModule)
+  case CudaFunctionValue(value: net.kurobako.gemstone.cuda.CudaFunction)
   case HostInputValue(value: net.kurobako.gemstone.cuda.HostInput)
   case HostOutputValue(value: net.kurobako.gemstone.cuda.HostOutput)
+  case ModuleImageValue(value: net.kurobako.gemstone.cuda.ModuleImage)
+  case FunctionNameValue(value: net.kurobako.gemstone.cuda.FunctionName)
+  case KernelFunctionValue(value: net.kurobako.gemstone.cuda.KernelFunction)
+  case KernelLaunchValue(value: net.kurobako.gemstone.cuda.KernelLaunch)
 }
 
 final case class RpcRequest(

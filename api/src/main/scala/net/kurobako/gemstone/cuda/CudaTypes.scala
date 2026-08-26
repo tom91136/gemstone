@@ -56,8 +56,53 @@ object Context {
   extension (context: Context) def handle: Long = context
 }
 
+opaque type CudaModule = Long
+
+object CudaModule {
+  val Null: CudaModule                            = 0L
+  def apply(handle: Long): CudaModule             = handle
+  extension (module: CudaModule) def handle: Long = module
+}
+
+opaque type CudaFunction = Long
+
+object CudaFunction {
+  val Null: CudaFunction                              = 0L
+  def apply(handle: Long): CudaFunction               = handle
+  extension (function: CudaFunction) def handle: Long = function
+}
+
 final case class HostInput(bytes: IArray[Byte])
 final case class HostOutput(bytes: IArray[Byte])
+
+/** A copied CUDA module image. The native boundary currently accepts textual PTX and never retains the caller's
+  * pointer.
+  */
+final case class ModuleImage(bytes: IArray[Byte])
+
+final case class FunctionName(value: String) {
+  require(value.nonEmpty, "CUDA function name must not be empty")
+  require(!value.exists(_ == '\u0000'), "CUDA function name must not contain NUL")
+}
+
+/** The logical result of `cuModuleGetFunction`. Parameter widths are returned to the C facade so it can safely copy the
+  * otherwise untyped `void **kernelParams` array at launch time.
+  */
+final case class KernelFunction(handle: CudaFunction, parameterWidths: IArray[Byte])
+
+final case class KernelArgument(bytes: IArray[Byte])
+
+/** Fully copied launch data; no native process pointer crosses the RPC boundary. */
+final case class KernelLaunch(
+    gridX: UInt32,
+    gridY: UInt32,
+    gridZ: UInt32,
+    blockX: UInt32,
+    blockY: UInt32,
+    blockZ: UInt32,
+    sharedMemoryBytes: UInt32,
+    arguments: IArray[KernelArgument]
+)
 
 final case class CudaError(code: Int, message: String)
 

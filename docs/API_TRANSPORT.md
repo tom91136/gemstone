@@ -92,4 +92,12 @@ Host blobs currently travel inline as owned copies. Content-addressed or shared-
 representation above a size threshold without changing the generated dispatcher; the JVM will continue to receive
 owned bytes rather than a foreign address.
 
+Kernel launches follow the same rule. The facade retains only opaque module/function handles and the parameter-width
+signature returned by function lookup. It copies the caller's parameter values into a bounded launch message before
+RPC; the server never sees or dereferences the native `kernelParams` pointers.
+
+The initial CUDA Runtime compatibility calls are C-side compositions over this Driver transport. This lets host-only
+allocation/copy programs use the same server without introducing a second RPC schema; Runtime registration and launch
+machinery remain a separate, fail-closed boundary.
+
 Callbacks will use reverse messages. C-owned callback dispatchers—not Scala code—will invoke host function pointers.

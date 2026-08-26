@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: BSD-3-Clause
  */
 #pragma region case: driver-module-launch
-#pragma region targets: cuda
+#pragma region targets: cuda,gemstone
 #pragma region do: {nvcc} --allow-unsupported-compiler -std=c++17 -O2 {cuda_driver_defines} -x cu -o {output} {input} {cuda_driver_link}
 #pragma region do: {output}
 #pragma region requires: pass
@@ -87,7 +87,7 @@ int main() {
   CUDA_REQUIRE(cuMemAlloc_v2(&values, result.size() * sizeof(int)));
   unsigned int element_count = static_cast<unsigned int>(size);
   void *parameters[] = {&values, &element_count};
-  CUDA_REQUIRE(cuLaunchKernel(function, 3, 1, 1, 128, 1, 1, 0, nullptr, parameters, nullptr));
+  CUDA_REQUIRE(cuLaunchKernel(function, 5, 1, 1, 64, 1, 1, 0, nullptr, parameters, nullptr));
   CUDA_REQUIRE(cuCtxSynchronize());
   CUDA_REQUIRE(cuMemcpyDtoH_v2(result.data(), values, result.size() * sizeof(int)));
 

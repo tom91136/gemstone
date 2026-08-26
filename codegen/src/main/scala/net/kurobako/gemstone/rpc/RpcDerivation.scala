@@ -149,22 +149,34 @@ object RpcDerivation {
     else if (value =:= TypeRepr.of[cuda.Device]) WireType.Device
     else if (value =:= TypeRepr.of[cuda.DevicePtr]) WireType.DevicePtr
     else if (value =:= TypeRepr.of[cuda.Context]) WireType.Context
+    else if (value =:= TypeRepr.of[cuda.CudaModule]) WireType.CudaModule
+    else if (value =:= TypeRepr.of[cuda.CudaFunction]) WireType.CudaFunction
     else if (value =:= TypeRepr.of[cuda.HostInput]) WireType.HostInput
     else if (value =:= TypeRepr.of[cuda.HostOutput]) WireType.HostOutput
+    else if (value =:= TypeRepr.of[cuda.ModuleImage]) WireType.ModuleImage
+    else if (value =:= TypeRepr.of[cuda.FunctionName]) WireType.FunctionName
+    else if (value =:= TypeRepr.of[cuda.KernelFunction]) WireType.KernelFunction
+    else if (value =:= TypeRepr.of[cuda.KernelLaunch]) WireType.KernelLaunch
     else abortAt(method, s"unsupported RPC wire type ${value.show} in ${method.name}")
   }
 
   private def wireTypeExpression(wireType: WireType)(using Quotes): Expr[WireType] = wireType match {
-    case WireType.UnitValue  => '{ WireType.UnitValue }
-    case WireType.Int32      => '{ WireType.Int32 }
-    case WireType.UInt8      => '{ WireType.UInt8 }
-    case WireType.UInt32     => '{ WireType.UInt32 }
-    case WireType.SizeT      => '{ WireType.SizeT }
-    case WireType.Device     => '{ WireType.Device }
-    case WireType.DevicePtr  => '{ WireType.DevicePtr }
-    case WireType.Context    => '{ WireType.Context }
-    case WireType.HostInput  => '{ WireType.HostInput }
-    case WireType.HostOutput => '{ WireType.HostOutput }
+    case WireType.UnitValue      => '{ WireType.UnitValue }
+    case WireType.Int32          => '{ WireType.Int32 }
+    case WireType.UInt8          => '{ WireType.UInt8 }
+    case WireType.UInt32         => '{ WireType.UInt32 }
+    case WireType.SizeT          => '{ WireType.SizeT }
+    case WireType.Device         => '{ WireType.Device }
+    case WireType.DevicePtr      => '{ WireType.DevicePtr }
+    case WireType.Context        => '{ WireType.Context }
+    case WireType.CudaModule     => '{ WireType.CudaModule }
+    case WireType.CudaFunction   => '{ WireType.CudaFunction }
+    case WireType.HostInput      => '{ WireType.HostInput }
+    case WireType.HostOutput     => '{ WireType.HostOutput }
+    case WireType.ModuleImage    => '{ WireType.ModuleImage }
+    case WireType.FunctionName   => '{ WireType.FunctionName }
+    case WireType.KernelFunction => '{ WireType.KernelFunction }
+    case WireType.KernelLaunch   => '{ WireType.KernelLaunch }
   }
 
   private def hashName(name: String): (Long, Long) = {

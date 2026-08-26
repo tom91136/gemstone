@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: BSD-3-Clause
  */
 #pragma region case: runtime-pointer-offsets
-#pragma region targets: cuda
-#pragma region do: {nvcc} --allow-unsupported-compiler -std=c++17 -O2 -o {output} {input}
+#pragma region targets: cuda,gemstone
+#pragma region do: {nvcc} --allow-unsupported-compiler -std=c++17 -O2 -o {output} {input} {cuda_runtime_link}
 #pragma region do: {output}
 #pragma region requires: pass
 

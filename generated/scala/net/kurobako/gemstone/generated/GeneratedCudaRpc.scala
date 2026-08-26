@@ -4,7 +4,7 @@ import net.kurobako.gemstone.cuda.*
 import net.kurobako.gemstone.rpc.*
 
 object GeneratedCudaRpc {
-  val SchemaFingerprint: String = "c98d0ee5da0348ca4f1bc94405b4b2bb89e36231ce6e1595384e2d761ddec230"
+  val SchemaFingerprint: String = "639c93e36ccba7921e326fd8c375efad7e5f086750854fe1ab71d6c4ab391217"
 
   private val cuCtxCreate_v2Id = MessageId(0xe6eb5473c0a097e3L, 0xa17c8d63cec75a44L)
   private val cuCtxDestroy_v2Id = MessageId(0xb574aacc9b35ee6aL, 0x8135b883071cc261L)
@@ -13,12 +13,16 @@ object GeneratedCudaRpc {
   private val cuDeviceGetCountId = MessageId(0x831f6fffdf16f0d4L, 0x3c498239d16d9867L)
   private val cuDriverGetVersionId = MessageId(0xe584ec56943a425dL, 0x3c512e60803234f9L)
   private val cuInitId = MessageId(0x3c1688958f08660eL, 0x1c2a40d0799c268cL)
+  private val cuLaunchKernelId = MessageId(0x0541d9142559d437L, 0x4cd345cbce10e2dfL)
   private val cuMemAlloc_v2Id = MessageId(0x7077a5441f532f0eL, 0x677e154cf996113dL)
   private val cuMemFree_v2Id = MessageId(0xb5fdc569871ec54eL, 0x418d186e2d8efa3aL)
   private val cuMemcpyDtoD_v2Id = MessageId(0xe27c11476bbea751L, 0x681167b2aac69936L)
   private val cuMemcpyDtoH_v2Id = MessageId(0x0cc3708077b8e76aL, 0xaa0bf9a6432ca141L)
   private val cuMemcpyHtoD_v2Id = MessageId(0x9a8f59036790ef69L, 0x4808ed612739b8faL)
   private val cuMemsetD8_v2Id = MessageId(0x2c1383458eec311aL, 0x73e621c93fd80644L)
+  private val cuModuleGetFunctionId = MessageId(0x4b6b65a1226b0723L, 0xc3ac0d7e32b1d4b5L)
+  private val cuModuleLoadDataId = MessageId(0xfef489c6c628b458L, 0x480e5cb6fe964d3fL)
+  private val cuModuleUnloadId = MessageId(0xb94c365c6c5c3902L, 0x2a1466600700709aL)
   private val cudaFreeId = MessageId(0xc9831c51cb850c1eL, 0x0300fb6b734556b4L)
   private val cudaGetDeviceCountId = MessageId(0x29770d4f155d9a98L, 0xccec9231bf109befL)
   private val cudaMallocId = MessageId(0x36207ff276ba04dbL, 0x8ed2474e0fef125dL)
@@ -31,12 +35,16 @@ object GeneratedCudaRpc {
     RpcMethod("cuDeviceGetCount", cuDeviceGetCountId, Vector(), WireType.Int32),
     RpcMethod("cuDriverGetVersion", cuDriverGetVersionId, Vector(), WireType.Int32),
     RpcMethod("cuInit", cuInitId, Vector(RpcParameter("flags", WireType.UInt32)), WireType.UnitValue),
+    RpcMethod("cuLaunchKernel", cuLaunchKernelId, Vector(RpcParameter("function", WireType.CudaFunction), RpcParameter("launch", WireType.KernelLaunch)), WireType.UnitValue),
     RpcMethod("cuMemAlloc_v2", cuMemAlloc_v2Id, Vector(RpcParameter("bytesize", WireType.SizeT)), WireType.DevicePtr),
     RpcMethod("cuMemFree_v2", cuMemFree_v2Id, Vector(RpcParameter("pointer", WireType.DevicePtr)), WireType.UnitValue),
     RpcMethod("cuMemcpyDtoD_v2", cuMemcpyDtoD_v2Id, Vector(RpcParameter("destination", WireType.DevicePtr), RpcParameter("source", WireType.DevicePtr), RpcParameter("byteCount", WireType.SizeT)), WireType.UnitValue),
     RpcMethod("cuMemcpyDtoH_v2", cuMemcpyDtoH_v2Id, Vector(RpcParameter("source", WireType.DevicePtr), RpcParameter("byteCount", WireType.SizeT)), WireType.HostOutput),
     RpcMethod("cuMemcpyHtoD_v2", cuMemcpyHtoD_v2Id, Vector(RpcParameter("destination", WireType.DevicePtr), RpcParameter("source", WireType.HostInput)), WireType.UnitValue),
     RpcMethod("cuMemsetD8_v2", cuMemsetD8_v2Id, Vector(RpcParameter("destination", WireType.DevicePtr), RpcParameter("value", WireType.UInt8), RpcParameter("count", WireType.SizeT)), WireType.UnitValue),
+    RpcMethod("cuModuleGetFunction", cuModuleGetFunctionId, Vector(RpcParameter("module", WireType.CudaModule), RpcParameter("name", WireType.FunctionName)), WireType.KernelFunction),
+    RpcMethod("cuModuleLoadData", cuModuleLoadDataId, Vector(RpcParameter("image", WireType.ModuleImage)), WireType.CudaModule),
+    RpcMethod("cuModuleUnload", cuModuleUnloadId, Vector(RpcParameter("module", WireType.CudaModule)), WireType.UnitValue),
     RpcMethod("cudaFree", cudaFreeId, Vector(RpcParameter("pointer", WireType.DevicePtr)), WireType.UnitValue),
     RpcMethod("cudaGetDeviceCount", cudaGetDeviceCountId, Vector(), WireType.Int32),
     RpcMethod("cudaMalloc", cudaMallocId, Vector(RpcParameter("bytesize", WireType.SizeT)), WireType.DevicePtr)
@@ -69,6 +77,9 @@ object GeneratedCudaRpc {
     override def cuInit(flags: UInt32): CudaResult[Unit] =
       decodeUnitValue(transport.call(RpcRequest(cuInitId, "cuInit", Vector(WireValue.UInt32Value(flags)))))
 
+    override def cuLaunchKernel(function: CudaFunction, launch: KernelLaunch): CudaResult[Unit] =
+      decodeUnitValue(transport.call(RpcRequest(cuLaunchKernelId, "cuLaunchKernel", Vector(WireValue.CudaFunctionValue(function), WireValue.KernelLaunchValue(launch)))))
+
     override def cuMemAlloc_v2(bytesize: SizeT): CudaResult[DevicePtr] =
       decodeDevicePtr(transport.call(RpcRequest(cuMemAlloc_v2Id, "cuMemAlloc_v2", Vector(WireValue.SizeTValue(bytesize)))))
 
@@ -86,6 +97,15 @@ object GeneratedCudaRpc {
 
     override def cuMemsetD8_v2(destination: DevicePtr, value: UInt8, count: SizeT): CudaResult[Unit] =
       decodeUnitValue(transport.call(RpcRequest(cuMemsetD8_v2Id, "cuMemsetD8_v2", Vector(WireValue.DevicePtrValue(destination), WireValue.UInt8Value(value), WireValue.SizeTValue(count)))))
+
+    override def cuModuleGetFunction(module: CudaModule, name: FunctionName): CudaResult[KernelFunction] =
+      decodeKernelFunction(transport.call(RpcRequest(cuModuleGetFunctionId, "cuModuleGetFunction", Vector(WireValue.CudaModuleValue(module), WireValue.FunctionNameValue(name)))))
+
+    override def cuModuleLoadData(image: ModuleImage): CudaResult[CudaModule] =
+      decodeCudaModule(transport.call(RpcRequest(cuModuleLoadDataId, "cuModuleLoadData", Vector(WireValue.ModuleImageValue(image)))))
+
+    override def cuModuleUnload(module: CudaModule): CudaResult[Unit] =
+      decodeUnitValue(transport.call(RpcRequest(cuModuleUnloadId, "cuModuleUnload", Vector(WireValue.CudaModuleValue(module)))))
 
     override def cudaFree(pointer: DevicePtr): CudaResult[Unit] =
       decodeUnitValue(transport.call(RpcRequest(cudaFreeId, "cudaFree", Vector(WireValue.DevicePtrValue(pointer)))))
@@ -137,6 +157,11 @@ object GeneratedCudaRpc {
           case Vector(WireValue.UInt32Value(flags)) => encodeUnitValue(implementation.cuInit(flags))
           case _ => invalid("invalid arguments for cuInit")
         }
+      case `cuLaunchKernelId` if request.functionName == "cuLaunchKernel" =>
+        request.arguments match {
+          case Vector(WireValue.CudaFunctionValue(function), WireValue.KernelLaunchValue(launch)) => encodeUnitValue(implementation.cuLaunchKernel(function, launch))
+          case _ => invalid("invalid arguments for cuLaunchKernel")
+        }
       case `cuMemAlloc_v2Id` if request.functionName == "cuMemAlloc_v2" =>
         request.arguments match {
           case Vector(WireValue.SizeTValue(bytesize)) => encodeDevicePtr(implementation.cuMemAlloc_v2(bytesize))
@@ -166,6 +191,21 @@ object GeneratedCudaRpc {
         request.arguments match {
           case Vector(WireValue.DevicePtrValue(destination), WireValue.UInt8Value(value), WireValue.SizeTValue(count)) => encodeUnitValue(implementation.cuMemsetD8_v2(destination, value, count))
           case _ => invalid("invalid arguments for cuMemsetD8_v2")
+        }
+      case `cuModuleGetFunctionId` if request.functionName == "cuModuleGetFunction" =>
+        request.arguments match {
+          case Vector(WireValue.CudaModuleValue(module), WireValue.FunctionNameValue(name)) => encodeKernelFunction(implementation.cuModuleGetFunction(module, name))
+          case _ => invalid("invalid arguments for cuModuleGetFunction")
+        }
+      case `cuModuleLoadDataId` if request.functionName == "cuModuleLoadData" =>
+        request.arguments match {
+          case Vector(WireValue.ModuleImageValue(image)) => encodeCudaModule(implementation.cuModuleLoadData(image))
+          case _ => invalid("invalid arguments for cuModuleLoadData")
+        }
+      case `cuModuleUnloadId` if request.functionName == "cuModuleUnload" =>
+        request.arguments match {
+          case Vector(WireValue.CudaModuleValue(module)) => encodeUnitValue(implementation.cuModuleUnload(module))
+          case _ => invalid("invalid arguments for cuModuleUnload")
         }
       case `cudaFreeId` if request.functionName == "cudaFree" =>
         request.arguments match {
@@ -251,6 +291,28 @@ object GeneratedCudaRpc {
 
   private def encodeHostOutput(result: CudaResult[HostOutput]): RpcResponse = result match {
     case CudaResult.Success(value) => RpcResponse.Success(WireValue.HostOutputValue(value))
+    case CudaResult.Failure(error) => RpcResponse.Failure(error)
+  }
+
+  private def decodeKernelFunction(response: RpcResponse): CudaResult[KernelFunction] = response match {
+    case RpcResponse.Success(WireValue.KernelFunctionValue(value)) => CudaResult.Success(value)
+    case RpcResponse.Success(_) => CudaResult.Failure(CudaError(999, "invalid KernelFunction response payload"))
+    case RpcResponse.Failure(error) => CudaResult.Failure(error)
+  }
+
+  private def encodeKernelFunction(result: CudaResult[KernelFunction]): RpcResponse = result match {
+    case CudaResult.Success(value) => RpcResponse.Success(WireValue.KernelFunctionValue(value))
+    case CudaResult.Failure(error) => RpcResponse.Failure(error)
+  }
+
+  private def decodeCudaModule(response: RpcResponse): CudaResult[CudaModule] = response match {
+    case RpcResponse.Success(WireValue.CudaModuleValue(value)) => CudaResult.Success(value)
+    case RpcResponse.Success(_) => CudaResult.Failure(CudaError(999, "invalid CudaModule response payload"))
+    case RpcResponse.Failure(error) => CudaResult.Failure(error)
+  }
+
+  private def encodeCudaModule(result: CudaResult[CudaModule]): RpcResponse = result match {
+    case CudaResult.Success(value) => RpcResponse.Success(WireValue.CudaModuleValue(value))
     case CudaResult.Failure(error) => RpcResponse.Failure(error)
   }
 }

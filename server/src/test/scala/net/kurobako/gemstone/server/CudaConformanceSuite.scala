@@ -5,6 +5,7 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.security.SecureRandom
 import net.kurobako.gemstone.isa.ptx.v9_3.PtxInterpreter
+import net.kurobako.gemstone.isa.ptx.v9_3.PtxArgument
 import net.kurobako.gemstone.isa.ptx.v9_3.PtxParser
 import net.kurobako.gemstone.memory.ArrayCheckedMemory
 import net.kurobako.gemstone.scheduler.LaunchShape
@@ -86,7 +87,8 @@ class CudaConformanceSuite extends munit.FunSuite {
       "cuda_vendor_includes" -> vendorIncludeFlags(root),
       "cuda_host_compat"     -> root.resolve("conformance/cuda/support/nvcc-libstdcxx-compat.h").toString,
       "cuda_driver_defines"  -> backend.driverDefines,
-      "cuda_driver_link"     -> backend.driverLink(libraryDir)
+      "cuda_driver_link"     -> backend.driverLink(libraryDir),
+      "cuda_runtime_link"    -> backend.runtimeLink(libraryDir)
     )
 
     cudaCase.commands.zipWithIndex.foreach { case (command, index) =>
@@ -144,7 +146,7 @@ class CudaConformanceSuite extends munit.FunSuite {
     val _ = PtxInterpreter.execute(
       kernel,
       LaunchShape.create(semantic.blocks, semantic.threads).fold(error => fail(error), identity),
-      addresses,
+      addresses.view.mapValues(address => PtxArgument(address.value)).toMap,
       memory
     ).fold(error => fail(error.message), identity)
     val actual = semantic.output._2.indices.map { index =>
@@ -191,6 +193,11 @@ object CudaConformanceSuite {
     def driverLink(libraryDir: Path): String = this match {
       case Cuda     => "-lcuda"
       case Gemstone => s"-L$libraryDir -Xlinker=-rpath -Xlinker=$libraryDir -lcuda"
+    }
+
+    def runtimeLink(libraryDir: Path): String = this match {
+      case Cuda     => ""
+      case Gemstone => s"--cudart=none -L$libraryDir -Xlinker=-rpath -Xlinker=$libraryDir -lcuda"
     }
   }
 

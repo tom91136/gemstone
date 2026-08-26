@@ -113,8 +113,6 @@ int32_t cuLaunchGridAsync() { return GEMSI_STATUS_NOT_SUPPORTED; }
 
 int32_t cuLaunchHostFunc() { return GEMSI_STATUS_NOT_SUPPORTED; }
 
-int32_t cuLaunchKernel() { return GEMSI_STATUS_NOT_SUPPORTED; }
-
 int32_t cuMemAllocHost() { return GEMSI_STATUS_NOT_SUPPORTED; }
 
 int32_t cuMemAllocHost_v2() { return GEMSI_STATUS_NOT_SUPPORTED; }
@@ -189,8 +187,6 @@ int32_t cuMemsetD32_v2() { return GEMSI_STATUS_NOT_SUPPORTED; }
 
 int32_t cuMemsetD8Async() { return GEMSI_STATUS_NOT_SUPPORTED; }
 
-int32_t cuModuleGetFunction() { return GEMSI_STATUS_NOT_SUPPORTED; }
-
 int32_t cuModuleGetGlobal_v2() { return GEMSI_STATUS_NOT_SUPPORTED; }
 
 int32_t cuModuleGetSurfRef() { return GEMSI_STATUS_NOT_SUPPORTED; }
@@ -199,13 +195,9 @@ int32_t cuModuleGetTexRef() { return GEMSI_STATUS_NOT_SUPPORTED; }
 
 int32_t cuModuleLoad() { return GEMSI_STATUS_NOT_SUPPORTED; }
 
-int32_t cuModuleLoadData() { return GEMSI_STATUS_NOT_SUPPORTED; }
-
 int32_t cuModuleLoadDataEx() { return GEMSI_STATUS_NOT_SUPPORTED; }
 
 int32_t cuModuleLoadFatBinary() { return GEMSI_STATUS_NOT_SUPPORTED; }
-
-int32_t cuModuleUnload() { return GEMSI_STATUS_NOT_SUPPORTED; }
 
 int32_t cuParamSetSize() { return GEMSI_STATUS_NOT_SUPPORTED; }
 

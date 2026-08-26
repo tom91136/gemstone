@@ -20,8 +20,9 @@ sbt server/test
 ```
 
 No Scala registry needs updating when a translation unit is added. With no `targets:` pragma a new test runs against
-both `cuda` and `gemstone`; an explicit target list narrows it. Cases whose APIs are not implemented yet are marked
-`targets: cuda`, while `driver/check_memory.cu` is enabled for both.
+both `cuda` and `gemstone`; an explicit target list narrows it. Cases whose APIs or instructions are not implemented
+yet are marked `targets: cuda`. Both Driver cases, the compact PTX semantic case, and the allocation/copy plus
+interior-pointer Runtime cases currently run on Gemstone.
 
 The suite builds the facade, starts a loopback-only JVM server with a random authentication token, substitutes
 backend-specific link variables into the same pragma commands, executes each case in an isolated directory, and
@@ -31,7 +32,8 @@ compares stdout exactly with `requires:`. It also records Gemstone RPC calls and
 Semantic cases additionally declare `ptx-kernel`, `ptx-shape`, `ptx-input`, and `ptx-output` pragmas and embed their
 module in an `R"ptx(...)ptx"` literal. The CUDA test loads that literal through NVIDIA's Driver API. The same Scala
 suite discovers and extracts the identical PTX, runs it through Gemstone, and compares the declared output, so adding
-a semantic case does not require a Scala registry edit.
+a semantic case does not require a Scala registry edit. Enabled semantic cases also run end to end through Gemstone's
+generated `libcuda.so.1`, RPC server, module registry, and PTX executor.
 
 More substantial reference cases live under `samples/` and `thrust/`. Their implementation sources and licences are
 vendored under `vendor/`; the system toolkit supplies only the CUDA compiler, ABI/runtime headers, and reference

@@ -31,10 +31,20 @@ validates the schema fingerprint, derived ID, exact function name, framing lengt
 Host buffers are copied into bounded messages; no application pointer is dereferenced by the JVM process. Shared
 memory can later optimize large blobs without changing the trait or dispatcher.
 
+The typed subset now includes textual PTX module load/unload, entry-point lookup, and kernel launch. Function lookup
+returns a checked parameter-width signature to the native facade. At launch, that facade uses the signature to copy
+each value behind CUDA's otherwise untyped `void **kernelParams` array into the request. The JVM therefore receives
+owned argument bytes, dimensions, and opaque handles rather than process addresses.
+
 `CudaConformanceSuite` is the external-language path. It discovers the pragma-described CUDA translation units,
 compiles each enabled backend with `nvcc`, and runs them against either NVIDIA CUDA or the generated Gemstone
-`libcuda.so.1`. `driver/check_memory.cu` executes 13 calls in the in-process JVM `CUDAEmulatorServer`; its JSON-lines
-recording includes exact names, IDs, payload sizes, statuses, and response sizes.
+`libcuda.so.1`. The GPUOcelot-derived memory and module-launch Driver cases now run on both backends. The PTX vector
+addition case additionally runs through the same external ABI/RPC path and through the direct Scala semantic oracle.
+JSON-lines recordings include exact names, IDs, payload sizes, statuses, and response sizes.
+
+For Runtime tests that contain no device code, the generated facade also provides local `cudaMalloc`, `cudaFree`, and
+`cudaMemcpy` compatibility wrappers composed from the typed Driver RPC methods. Minimal fat-binary registration hooks
+allow current `nvcc --cudart=none` host objects to link, but do not claim Runtime kernel-registration support.
 
 The GPUOcelot CUDA 3.2 Driver inventory is now expressed directly by the trait and checked to contain 144 unique
 symbols. A call moves from a concrete not-supported method to the abstract RPC subset only after its pointer direction,

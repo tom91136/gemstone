@@ -16,7 +16,7 @@ class RpcDerivationSuite extends munit.FunSuite {
   }
 
   test("derives stable identities solely from exact C function names") {
-    assertEquals(schema.methods.size, 16)
+    assertEquals(schema.methods.size, 20)
     assertEquals(schema.methods.map(_.name), schema.methods.map(_.name).sorted)
     assertEquals(schema.methods.map(_.name).distinct.size, schema.methods.size)
     assertEquals(schema.methods.map(_.messageId).distinct.size, schema.methods.size)

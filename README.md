@@ -16,7 +16,7 @@ This repository currently contains the first vertical scaffold:
 - a version-packaged SPIR-V 1.6 binary model with the complete grammar catalogue, exact endian round trips, OpenCL
   Compute validation, and an initial bounded integer/control/memory executor;
 - generated exact-C-name OpenCL and Level Zero API surfaces;
-- a small PTX single-block integer vector-add interpreter;
+- a bounded PTX integer/control executor wired through module load, function lookup, and kernel launch RPC;
 - deterministic JSON-lines instruction and output-write traces;
 - a generated `libcuda.so.1`, pure-C dispatcher/recorder, and separated Scala Native core ABI;
 - the same semantic tests compiled and run on the JVM and Scala Native.
@@ -52,6 +52,7 @@ references or rewrite the worktree.
 
 The [CUDA conformance corpus](conformance/cuda/README.md) contains self-checking, one-file tests adapted from the
 BSD-licensed GPUOcelot suite. `CudaConformanceSuite` discovers them during `server` tests and runs their
-`#pragma region` commands against NVIDIA CUDA and the enabled Gemstone implementation.
+`#pragma region` commands against NVIDIA CUDA and the enabled Gemstone implementation. The active Gemstone set now
+includes Driver memory and PTX launch flows plus host-only Runtime allocation/copy cases.
 
 See [GEMSTONE_PLAN.md](GEMSTONE_PLAN.md) for the architecture, milestones, and permanent invariants.

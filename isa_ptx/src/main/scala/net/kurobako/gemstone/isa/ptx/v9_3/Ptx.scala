@@ -13,12 +13,15 @@ enum PtxValue {
   case Register(name: String)
   case Immediate(value: Long)
   case ThreadIdX
+  case BlockIdX
+  case BlockDimX
 }
 
 enum PtxIntegerOperation {
   case Add
   case Subtract
   case MultiplyWideUnsigned32
+  case ShiftLeft
 }
 
 enum PtxComparison {
@@ -35,8 +38,8 @@ sealed trait PtxInstruction extends Product with Serializable {
 }
 
 object PtxInstruction {
-  final case class LoadParameter64(destination: String, parameter: String) extends PtxInstruction {
-    override val opcode: String = "ld.param.u64"
+  final case class LoadParameter(destination: String, parameter: String, width: Int) extends PtxInstruction {
+    override val opcode: String = s"ld.param.u$width"
   }
 
   final case class Move(destination: String, source: PtxValue, width: Int) extends PtxInstruction {
@@ -54,7 +57,13 @@ object PtxInstruction {
       case PtxIntegerOperation.Add                    => s"add.u$width"
       case PtxIntegerOperation.Subtract               => s"sub.u$width"
       case PtxIntegerOperation.MultiplyWideUnsigned32 => "mul.wide.u32"
+      case PtxIntegerOperation.ShiftLeft              => s"shl.b$width"
     }
+  }
+
+  final case class MultiplyAddLow32(destination: String, left: PtxValue, right: PtxValue, addend: PtxValue)
+      extends PtxInstruction {
+    override val opcode: String = "mad.lo.s32"
   }
 
   final case class LoadGlobal32(destination: String, address: PtxValue) extends PtxInstruction {
@@ -95,7 +104,10 @@ final case class PtxExecutable(instruction: PtxInstruction, predication: Option[
   def opcode: String = instruction.opcode
 }
 
-final case class PtxKernel(name: String, parameters: Vector[String], program: ExecutableProgram[PtxExecutable]) {
+final case class PtxParameter(name: String, widthBytes: Int)
+final case class PtxArgument(value: Long)
+
+final case class PtxKernel(name: String, parameters: Vector[PtxParameter], program: ExecutableProgram[PtxExecutable]) {
   def instructions: Vector[PtxInstruction] = program.instructions.map(_.instruction)
 }
 
@@ -142,7 +154,31 @@ object PtxLowerer {
       }
       statementIndex += 1
     }
-    Right(PtxKernel(name, parameters.map(_.name), ExecutableProgram(lowered.result())))
+    lowerParameters(parameters).map(loweredParameters =>
+      PtxKernel(name, loweredParameters, ExecutableProgram(lowered.result()))
+    )
+  }
+
+  private def lowerParameters(parameters: Vector[Parameter]): Either[PtxLoweringError, Vector[PtxParameter]] = {
+    val result = Vector.newBuilder[PtxParameter]
+    var index  = 0
+    while (index < parameters.length) {
+      val parameter = parameters(index)
+      val widths    = parameter.qualifiers.collect {
+        case "u8" | "s8" | "b8"            => 1
+        case "u16" | "s16" | "b16"         => 2
+        case "u32" | "s32" | "b32" | "f32" => 4
+        case "u64" | "s64" | "b64" | "f64" => 8
+      }
+      if (parameter.dimensions.nonEmpty)
+        return Left(PtxLoweringError.Unsupported(parameter.name, "array-valued kernel parameters"))
+      widths.lastOption match {
+        case Some(width) => result += PtxParameter(parameter.name, width)
+        case None => return Left(PtxLoweringError.Invalid(s"kernel parameter ${parameter.name} has no scalar width"))
+      }
+      index += 1
+    }
+    Right(result.result())
   }
 
   private def flatten(statements: Vector[Statement]): Vector[Statement] = statements.flatMap {
@@ -156,11 +192,15 @@ object PtxLowerer {
   ): Either[PtxLoweringError, PtxExecutable] = {
     val operands = instruction.operands
     val lowered  = instruction.mnemonic match {
-      case "ld.param.u64" if operands.size == 2 =>
+      case "ld.param.u32" | "ld.param.u64" if operands.size == 2 =>
         for {
           destination <- registerName(operands(0))
           parameter   <- addressSymbol(operands(1))
-        } yield PtxInstruction.LoadParameter64(destination, parameter)
+        } yield PtxInstruction.LoadParameter(
+          destination,
+          parameter,
+          if (instruction.mnemonic.endsWith("32")) 32 else 64
+        )
       case "mov.u32" | "mov.b32" if operands.size == 2 =>
         for {
           destination <- registerName(operands(0))
@@ -183,6 +223,14 @@ object PtxLowerer {
           right,
           64
         )
+      case "shl.b32" if operands.size == 3    => integerBinary(PtxIntegerOperation.ShiftLeft, 32, operands)
+      case "mad.lo.s32" if operands.size == 4 =>
+        for {
+          destination <- registerName(operands(0))
+          left        <- value(operands(1))
+          right       <- value(operands(2))
+          addend      <- value(operands(3))
+        } yield PtxInstruction.MultiplyAddLow32(destination, left, right, addend)
       case "add.u32" | "add.s32" if operands.size == 3 => integerBinary(PtxIntegerOperation.Add, 32, operands)
       case "add.u64" | "add.s64" if operands.size == 3 => integerBinary(PtxIntegerOperation.Add, 64, operands)
       case "sub.u32" | "sub.s32" if operands.size == 3 => integerBinary(PtxIntegerOperation.Subtract, 32, operands)
@@ -281,10 +329,12 @@ object PtxLowerer {
   }
 
   private def value(operand: Operand): Either[PtxLoweringError, PtxValue] = operand match {
-    case Operand.Register("%tid.x", None) => Right(PtxValue.ThreadIdX)
-    case Operand.Register(name, None)     => Right(PtxValue.Register(name))
-    case other: Operand.Immediate         => immediate(other).map(PtxValue.Immediate.apply)
-    case other                            => invalid(s"expected register or immediate, found ${Printer.render(other)}")
+    case Operand.Register("%tid.x", None)   => Right(PtxValue.ThreadIdX)
+    case Operand.Register("%ctaid.x", None) => Right(PtxValue.BlockIdX)
+    case Operand.Register("%ntid.x", None)  => Right(PtxValue.BlockDimX)
+    case Operand.Register(name, None)       => Right(PtxValue.Register(name))
+    case other: Operand.Immediate           => immediate(other).map(PtxValue.Immediate.apply)
+    case other => invalid(s"expected register or immediate, found ${Printer.render(other)}")
   }
 
   private def immediate(operand: Operand): Either[PtxLoweringError, Long] = operand match {
@@ -341,7 +391,7 @@ private final class PtxExecutionContext(
     val state: PtxBlockState,
     val pc: Pc,
     val active: LaneMask,
-    val arguments: Map[String, GuestAddress],
+    val arguments: Map[String, PtxArgument],
     val memory: CheckedMemory
 ) {
   def read(lane: Int, value: PtxValue): Either[ExecutionFault, Long] = value match {
@@ -349,6 +399,8 @@ private final class PtxExecutionContext(
         .toRight(ExecutionFault.UndefinedRegister(name, pc, lane))
     case PtxValue.Immediate(immediate) => Right(immediate)
     case PtxValue.ThreadIdX            => Right(lane.toLong)
+    case PtxValue.BlockIdX             => Right(block.toLong)
+    case PtxValue.BlockDimX            => Right(state.laneCount.toLong)
   }
 }
 
@@ -356,11 +408,13 @@ private object PtxSemantics {
   extension (instruction: PtxInstruction) {
     def execute(context: PtxExecutionContext, effects: Effects[PtxWrite]): Either[ExecutionFault, Step] =
       instruction match {
-        case PtxInstruction.LoadParameter64(destination, parameter) =>
+        case PtxInstruction.LoadParameter(destination, parameter, width) =>
           context.arguments.get(parameter).toRight(
             ExecutionFault.InvalidState(s"missing kernel argument $parameter")
           ).map { address =>
-            context.active.foreachLane(lane => effects.stage(PtxWrite.Register(lane, destination, address.value)))
+            context.active.foreachLane(lane =>
+              effects.stage(PtxWrite.Register(lane, destination, truncate(address.value, width)))
+            )
             Step.Advance
           }
         case PtxInstruction.Move(destination, source, width) =>
@@ -380,9 +434,20 @@ private object PtxSemantics {
                 case PtxIntegerOperation.Subtract               => leftValue - rightValue
                 case PtxIntegerOperation.MultiplyWideUnsigned32 =>
                   (leftValue & 0xffffffffL) * (rightValue & 0xffffffffL)
+                case PtxIntegerOperation.ShiftLeft => leftValue << (rightValue & 0x1fL).toInt
               }
               effects.stage(PtxWrite.Register(lane, destination, truncate(result, width)))
             }
+          }.map(_ => Step.Advance)
+        case PtxInstruction.MultiplyAddLow32(destination, left, right, addend) =>
+          forEveryLane(context) { lane =>
+            for {
+              leftValue   <- context.read(lane, left)
+              rightValue  <- context.read(lane, right)
+              addendValue <- context.read(lane, addend)
+            } yield effects.stage(
+              PtxWrite.Register(lane, destination, truncate(leftValue * rightValue + addendValue, 32))
+            )
           }.map(_ => Step.Advance)
         case PtxInstruction.LoadGlobal32(destination, address) =>
           forEveryLane(context) { lane =>
@@ -467,7 +532,7 @@ object PtxInterpreter {
   def execute(
       kernel: PtxKernel,
       shape: LaunchShape,
-      arguments: Map[String, GuestAddress],
+      arguments: Map[String, PtxArgument],
       memory: CheckedMemory,
       limits: ExecutionLimits = ExecutionLimits.Default,
       cancellation: CancellationToken = CancellationToken.Never
@@ -512,7 +577,7 @@ object PtxInterpreter {
       kernel: PtxKernel,
       block: Int,
       laneCount: Int,
-      arguments: Map[String, GuestAddress],
+      arguments: Map[String, PtxArgument],
       memory: CheckedMemory,
       limits: ExecutionLimits,
       budget: ExecutionBudget,

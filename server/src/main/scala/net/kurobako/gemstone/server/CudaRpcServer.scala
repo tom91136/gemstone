@@ -99,7 +99,7 @@ object CudaRpcServer {
     try {
       socket.setTcpNoDelay(true)
       socket.setSoTimeout(30000)
-      val implementation = new CUDAEmulatorServer
+      val implementation = new CUDAEmulatorServer(new PtxCudaKernelExecution)
       val input          = new DataInputStream(socket.getInputStream)
       val output         = new DataOutputStream(socket.getOutputStream)
       var open           = true
@@ -162,16 +162,39 @@ object CudaRpcServer {
     }
 
   private def decodeValue(wireType: WireType, buffer: ByteBuffer): WireValue = wireType match {
-    case WireType.UnitValue  => WireValue.UnitValue
-    case WireType.Int32      => WireValue.Int32Value(buffer.getInt())
-    case WireType.UInt8      => WireValue.UInt8Value(UInt8(buffer.get() & 0xff))
-    case WireType.UInt32     => WireValue.UInt32Value(UInt32(Integer.toUnsignedLong(buffer.getInt())))
-    case WireType.SizeT      => WireValue.SizeTValue(SizeT(nonNegativeLong(buffer, "SizeT")))
-    case WireType.Device     => WireValue.DeviceValue(Device(buffer.getInt()))
-    case WireType.DevicePtr  => WireValue.DevicePtrValue(DevicePtr(buffer.getLong()))
-    case WireType.Context    => WireValue.ContextValue(Context(buffer.getLong()))
-    case WireType.HostInput  => WireValue.HostInputValue(HostInput(IArray.unsafeFromArray(readByteArray(buffer))))
-    case WireType.HostOutput => WireValue.HostOutputValue(HostOutput(IArray.unsafeFromArray(readByteArray(buffer))))
+    case WireType.UnitValue    => WireValue.UnitValue
+    case WireType.Int32        => WireValue.Int32Value(buffer.getInt())
+    case WireType.UInt8        => WireValue.UInt8Value(UInt8(buffer.get() & 0xff))
+    case WireType.UInt32       => WireValue.UInt32Value(UInt32(Integer.toUnsignedLong(buffer.getInt())))
+    case WireType.SizeT        => WireValue.SizeTValue(SizeT(nonNegativeLong(buffer, "SizeT")))
+    case WireType.Device       => WireValue.DeviceValue(Device(buffer.getInt()))
+    case WireType.DevicePtr    => WireValue.DevicePtrValue(DevicePtr(buffer.getLong()))
+    case WireType.Context      => WireValue.ContextValue(Context(buffer.getLong()))
+    case WireType.CudaModule   => WireValue.CudaModuleValue(CudaModule(buffer.getLong()))
+    case WireType.CudaFunction => WireValue.CudaFunctionValue(CudaFunction(buffer.getLong()))
+    case WireType.HostInput    => WireValue.HostInputValue(HostInput(IArray.unsafeFromArray(readByteArray(buffer))))
+    case WireType.HostOutput   => WireValue.HostOutputValue(HostOutput(IArray.unsafeFromArray(readByteArray(buffer))))
+    case WireType.ModuleImage  => WireValue.ModuleImageValue(ModuleImage(IArray.unsafeFromArray(readByteArray(buffer))))
+    case WireType.FunctionName =>
+      WireValue.FunctionNameValue(FunctionName(new String(readByteArray(buffer), StandardCharsets.UTF_8)))
+    case WireType.KernelFunction =>
+      throw new IllegalArgumentException("KernelFunction is a response-only wire type")
+    case WireType.KernelLaunch =>
+      val gridX       = UInt32(Integer.toUnsignedLong(buffer.getInt()))
+      val gridY       = UInt32(Integer.toUnsignedLong(buffer.getInt()))
+      val gridZ       = UInt32(Integer.toUnsignedLong(buffer.getInt()))
+      val blockX      = UInt32(Integer.toUnsignedLong(buffer.getInt()))
+      val blockY      = UInt32(Integer.toUnsignedLong(buffer.getInt()))
+      val blockZ      = UInt32(Integer.toUnsignedLong(buffer.getInt()))
+      val sharedBytes = UInt32(Integer.toUnsignedLong(buffer.getInt()))
+      val count       = buffer.getInt()
+      if (count < 0 || count > 4096) throw new IllegalArgumentException(s"invalid kernel argument count: $count")
+      val arguments = IArray.unsafeFromArray(Array.tabulate(count) { _ =>
+        KernelArgument(IArray.unsafeFromArray(readByteArray(buffer)))
+      })
+      WireValue.KernelLaunchValue(
+        KernelLaunch(gridX, gridY, gridZ, blockX, blockY, blockZ, sharedBytes, arguments)
+      )
   }
 
   private def writeResponse(output: DataOutputStream, response: RpcResponse): Unit = {
@@ -195,16 +218,27 @@ object CudaRpcServer {
     val bytes  = new ByteArrayOutputStream
     val output = new DataOutputStream(bytes)
     value match {
-      case WireValue.UnitValue              => ()
-      case WireValue.Int32Value(value)      => output.writeInt(value)
-      case WireValue.UInt8Value(value)      => output.writeByte(value.toInt)
-      case WireValue.UInt32Value(value)     => output.writeInt(value.toLong.toInt)
-      case WireValue.SizeTValue(value)      => output.writeLong(value.toLong)
-      case WireValue.DeviceValue(value)     => output.writeInt(value.ordinal)
-      case WireValue.DevicePtrValue(value)  => output.writeLong(value.address)
-      case WireValue.ContextValue(value)    => output.writeLong(value.handle)
-      case WireValue.HostInputValue(value)  => writeByteArray(output, value.bytes)
-      case WireValue.HostOutputValue(value) => writeByteArray(output, value.bytes)
+      case WireValue.UnitValue                => ()
+      case WireValue.Int32Value(value)        => output.writeInt(value)
+      case WireValue.UInt8Value(value)        => output.writeByte(value.toInt)
+      case WireValue.UInt32Value(value)       => output.writeInt(value.toLong.toInt)
+      case WireValue.SizeTValue(value)        => output.writeLong(value.toLong)
+      case WireValue.DeviceValue(value)       => output.writeInt(value.ordinal)
+      case WireValue.DevicePtrValue(value)    => output.writeLong(value.address)
+      case WireValue.ContextValue(value)      => output.writeLong(value.handle)
+      case WireValue.CudaModuleValue(value)   => output.writeLong(value.handle)
+      case WireValue.CudaFunctionValue(value) => output.writeLong(value.handle)
+      case WireValue.HostInputValue(value)    => writeByteArray(output, value.bytes)
+      case WireValue.HostOutputValue(value)   => writeByteArray(output, value.bytes)
+      case WireValue.ModuleImageValue(value)  => writeByteArray(output, value.bytes)
+      case WireValue.FunctionNameValue(value) =>
+        writeByteArray(output, IArray.unsafeFromArray(value.value.getBytes(StandardCharsets.UTF_8)))
+      case WireValue.KernelFunctionValue(value) =>
+        output.writeLong(value.handle.handle)
+        output.writeInt(value.parameterWidths.length)
+        value.parameterWidths.iterator.foreach(width => output.writeByte(width.toInt))
+      case WireValue.KernelLaunchValue(_) =>
+        throw new IllegalArgumentException("KernelLaunch is a request-only wire type")
     }
     output.flush()
     bytes.toByteArray

@@ -1,4 +1,4 @@
-{"interface":"net.kurobako.gemstone.cuda.CUDA","identity":"exact-c-function-name","messageId":"sha256-128(function-name-utf8)","fingerprint":"c98d0ee5da0348ca4f1bc94405b4b2bb89e36231ce6e1595384e2d761ddec230","methods":[
+{"interface":"net.kurobako.gemstone.cuda.CUDA","identity":"exact-c-function-name","messageId":"sha256-128(function-name-utf8)","fingerprint":"639c93e36ccba7921e326fd8c375efad7e5f086750854fe1ab71d6c4ab391217","methods":[
     {"name":"cuCtxCreate_v2","messageId":"e6eb5473c0a097e3a17c8d63cec75a44","parameters":[{"name":"flags","wireType":"UInt32"},{"name":"device","wireType":"Device"}],"result":"Context"},
     {"name":"cuCtxDestroy_v2","messageId":"b574aacc9b35ee6a8135b883071cc261","parameters":[{"name":"context","wireType":"Context"}],"result":"UnitValue"},
     {"name":"cuCtxSynchronize","messageId":"e21f80c194a589d44af681a7ef75bb10","parameters":[],"result":"UnitValue"},
@@ -6,12 +6,16 @@
     {"name":"cuDeviceGetCount","messageId":"831f6fffdf16f0d43c498239d16d9867","parameters":[],"result":"Int32"},
     {"name":"cuDriverGetVersion","messageId":"e584ec56943a425d3c512e60803234f9","parameters":[],"result":"Int32"},
     {"name":"cuInit","messageId":"3c1688958f08660e1c2a40d0799c268c","parameters":[{"name":"flags","wireType":"UInt32"}],"result":"UnitValue"},
+    {"name":"cuLaunchKernel","messageId":"0541d9142559d4374cd345cbce10e2df","parameters":[{"name":"function","wireType":"CudaFunction"},{"name":"launch","wireType":"KernelLaunch"}],"result":"UnitValue"},
     {"name":"cuMemAlloc_v2","messageId":"7077a5441f532f0e677e154cf996113d","parameters":[{"name":"bytesize","wireType":"SizeT"}],"result":"DevicePtr"},
     {"name":"cuMemFree_v2","messageId":"b5fdc569871ec54e418d186e2d8efa3a","parameters":[{"name":"pointer","wireType":"DevicePtr"}],"result":"UnitValue"},
     {"name":"cuMemcpyDtoD_v2","messageId":"e27c11476bbea751681167b2aac69936","parameters":[{"name":"destination","wireType":"DevicePtr"},{"name":"source","wireType":"DevicePtr"},{"name":"byteCount","wireType":"SizeT"}],"result":"UnitValue"},
     {"name":"cuMemcpyDtoH_v2","messageId":"0cc3708077b8e76aaa0bf9a6432ca141","parameters":[{"name":"source","wireType":"DevicePtr"},{"name":"byteCount","wireType":"SizeT"}],"result":"HostOutput"},
     {"name":"cuMemcpyHtoD_v2","messageId":"9a8f59036790ef694808ed612739b8fa","parameters":[{"name":"destination","wireType":"DevicePtr"},{"name":"source","wireType":"HostInput"}],"result":"UnitValue"},
     {"name":"cuMemsetD8_v2","messageId":"2c1383458eec311a73e621c93fd80644","parameters":[{"name":"destination","wireType":"DevicePtr"},{"name":"value","wireType":"UInt8"},{"name":"count","wireType":"SizeT"}],"result":"UnitValue"},
+    {"name":"cuModuleGetFunction","messageId":"4b6b65a1226b0723c3ac0d7e32b1d4b5","parameters":[{"name":"module","wireType":"CudaModule"},{"name":"name","wireType":"FunctionName"}],"result":"KernelFunction"},
+    {"name":"cuModuleLoadData","messageId":"fef489c6c628b458480e5cb6fe964d3f","parameters":[{"name":"image","wireType":"ModuleImage"}],"result":"CudaModule"},
+    {"name":"cuModuleUnload","messageId":"b94c365c6c5c39022a1466600700709a","parameters":[{"name":"module","wireType":"CudaModule"}],"result":"UnitValue"},
     {"name":"cudaFree","messageId":"c9831c51cb850c1e0300fb6b734556b4","parameters":[{"name":"pointer","wireType":"DevicePtr"}],"result":"UnitValue"},
     {"name":"cudaGetDeviceCount","messageId":"29770d4f155d9a98ccec9231bf109bef","parameters":[],"result":"Int32"},
     {"name":"cudaMalloc","messageId":"36207ff276ba04db8ed2474e0fef125d","parameters":[{"name":"bytesize","wireType":"SizeT"}],"result":"DevicePtr"}

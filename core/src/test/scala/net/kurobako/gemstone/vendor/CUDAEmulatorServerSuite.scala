@@ -3,6 +3,7 @@ package net.kurobako.gemstone.vendor
 import net.kurobako.gemstone.cuda.CudaResult
 import net.kurobako.gemstone.cuda.DevicePtr
 import net.kurobako.gemstone.cuda.HostInput
+import net.kurobako.gemstone.cuda.ModuleImage
 import net.kurobako.gemstone.cuda.SizeT
 import net.kurobako.gemstone.generated.GeneratedCudaRpc
 import net.kurobako.gemstone.rpc.RpcRequest
@@ -11,9 +12,9 @@ import net.kurobako.gemstone.rpc.RpcTransport
 
 class CUDAEmulatorServerSuite extends munit.FunSuite {
   test("unimplemented Driver methods return CUDA_ERROR_NOT_SUPPORTED locally") {
-    new CUDAEmulatorServer().cuLaunchKernel() match {
+    new CUDAEmulatorServer().cuModuleLoadData(ModuleImage(IArray.empty[Byte])) match {
       case CudaResult.Failure(error) => assertEquals(error.code, 801)
-      case null                      => fail("stub returned null")
+      case CudaResult.Success(value) => fail(s"unsupported backend loaded module $value")
     }
   }
 

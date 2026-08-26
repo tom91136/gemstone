@@ -20,6 +20,8 @@ object GenerateApi {
   private val cudaDriverSurface  = RpcDerivation.methodNames[CUDA].filter(name =>
     name.startsWith("cu") && !name.startsWith("cuda")
   )
+  private val cudaRuntimeSurface   = RpcDerivation.methodNames[CUDA].filter(_.startsWith("cuda"))
+  private val cudaBootstrapSurface = RpcDerivation.methodNames[CUDA].filter(_.startsWith("__cuda"))
   require(cudaDriverSurface.size == 144, s"expected 144 CUDA Driver methods, found ${cudaDriverSurface.size}")
 
   def main(arguments: Array[String]): Unit = {
@@ -240,9 +242,10 @@ object GenerateApi {
   }
 
   private def renderVersionMap(api: Api): String = {
-    val symbols = (api.functions.map(_.name) ++ cudaDriverSurface).distinct
-      .map(symbol => s"    $symbol;")
-      .mkString("\n")
+    val symbols =
+      (api.functions.map(_.name) ++ cudaDriverSurface ++ cudaRuntimeSurface ++ cudaBootstrapSurface).distinct
+        .map(symbol => s"    $symbol;")
+        .mkString("\n")
     s"""|${api.symbolVersion} {
         |  global:
         |$symbols
@@ -390,6 +393,7 @@ object GenerateApi {
         |#include "gemsi_rpc_transport.h"
         |
         |#include <limits.h>
+        |#include <pthread.h>
         |#include <stddef.h>
         |#include <stdint.h>
         |#include <stdlib.h>
@@ -415,6 +419,59 @@ object GenerateApi {
         |
         |static uint64_t gemsi_get_u64(const uint8_t *source) {
         |  return ((uint64_t)gemsi_get_u32(source) << 32) | gemsi_get_u32(source + 4);
+        |}
+        |
+        |static size_t gemsi_bounded_string_length(const char *value, size_t limit) {
+        |  size_t size = 0;
+        |  while (size < limit && value[size] != '\\0') ++size;
+        |  return size;
+        |}
+        |
+        |typedef struct GemsiKernelSignature {
+        |  uint64_t function;
+        |  uint64_t module;
+        |  uint32_t count;
+        |  uint8_t *widths;
+        |  struct GemsiKernelSignature *next;
+        |} GemsiKernelSignature;
+        |
+        |static pthread_mutex_t gemsi_kernel_mutex = PTHREAD_MUTEX_INITIALIZER;
+        |static GemsiKernelSignature *gemsi_kernel_signatures = NULL;
+        |
+        |static int gemsi_store_kernel_signature(
+        |    uint64_t function,
+        |    uint64_t module,
+        |    const uint8_t *widths,
+        |    uint32_t count) {
+        |  GemsiKernelSignature *entry = (GemsiKernelSignature *)calloc(1, sizeof(*entry));
+        |  if (entry == NULL) return -1;
+        |  if (count != 0) {
+        |    entry->widths = (uint8_t *)malloc(count);
+        |    if (entry->widths == NULL) { free(entry); return -1; }
+        |    memcpy(entry->widths, widths, count);
+        |  }
+        |  entry->function = function;
+        |  entry->module = module;
+        |  entry->count = count;
+        |  pthread_mutex_lock(&gemsi_kernel_mutex);
+        |  entry->next = gemsi_kernel_signatures;
+        |  gemsi_kernel_signatures = entry;
+        |  pthread_mutex_unlock(&gemsi_kernel_mutex);
+        |  return 0;
+        |}
+        |
+        |static void gemsi_forget_module(uint64_t module) {
+        |  pthread_mutex_lock(&gemsi_kernel_mutex);
+        |  GemsiKernelSignature **cursor = &gemsi_kernel_signatures;
+        |  while (*cursor != NULL) {
+        |    GemsiKernelSignature *entry = *cursor;
+        |    if (entry->module == module) {
+        |      *cursor = entry->next;
+        |      free(entry->widths);
+        |      free(entry);
+        |    } else cursor = &entry->next;
+        |  }
+        |  pthread_mutex_unlock(&gemsi_kernel_mutex);
         |}
         |
         |static int32_t gemsi_call(
@@ -567,6 +624,191 @@ object GenerateApi {
         |  return gemsi_expect_unit(gemsi_call(gemsi_cuMemsetD8_v2_high, gemsi_cuMemsetD8_v2_low, "cuMemsetD8_v2", payload, sizeof(payload), &response), &response);
         |}
         |
+        |int32_t cuModuleLoadData(void **module, const void *image) {
+        |  if (module == NULL || image == NULL) return GEMSI_STATUS_INVALID_VALUE;
+        |  const size_t size = gemsi_bounded_string_length((const char *)image, GEMSI_RPC_MAXIMUM_PAYLOAD_SIZE);
+        |  if (size == GEMSI_RPC_MAXIMUM_PAYLOAD_SIZE || size > GEMSI_RPC_MAXIMUM_PAYLOAD_SIZE - 4) {
+        |    return GEMSI_STATUS_INVALID_VALUE;
+        |  }
+        |  const uint32_t payload_size = (uint32_t)size + 4;
+        |  uint8_t *payload = (uint8_t *)malloc(payload_size);
+        |  if (payload == NULL) return GEMSI_STATUS_UNKNOWN;
+        |  gemsi_put_u32(payload, (uint32_t)size);
+        |  memcpy(payload + 4, image, size);
+        |  uint64_t handle = 0;
+        |  GemsiRpcBuffer response = {0};
+        |  const int32_t status = gemsi_expect_u64(
+        |      gemsi_call(gemsi_cuModuleLoadData_high, gemsi_cuModuleLoadData_low, "cuModuleLoadData", payload, payload_size, &response),
+        |      &response,
+        |      &handle);
+        |  free(payload);
+        |  if (status == GEMSI_STATUS_SUCCESS) *module = (void *)(uintptr_t)handle;
+        |  return status;
+        |}
+        |
+        |int32_t cuModuleGetFunction(void **function, void *module, const char *name) {
+        |  if (function == NULL || module == NULL || name == NULL) return GEMSI_STATUS_INVALID_VALUE;
+        |  const size_t name_size = gemsi_bounded_string_length(name, 4096);
+        |  if (name_size == 0 || name_size == 4096) return GEMSI_STATUS_INVALID_VALUE;
+        |  const uint32_t payload_size = (uint32_t)name_size + 12;
+        |  uint8_t *payload = (uint8_t *)malloc(payload_size);
+        |  if (payload == NULL) return GEMSI_STATUS_UNKNOWN;
+        |  gemsi_put_u64(payload, (uint64_t)(uintptr_t)module);
+        |  gemsi_put_u32(payload + 8, (uint32_t)name_size);
+        |  memcpy(payload + 12, name, name_size);
+        |  GemsiRpcBuffer response = {0};
+        |  int32_t status = gemsi_call(
+        |      gemsi_cuModuleGetFunction_high,
+        |      gemsi_cuModuleGetFunction_low,
+        |      "cuModuleGetFunction",
+        |      payload,
+        |      payload_size,
+        |      &response);
+        |  free(payload);
+        |  if (status == GEMSI_STATUS_SUCCESS) {
+        |    if (response.size < 12) status = GEMSI_STATUS_UNKNOWN;
+        |    else {
+        |      const uint64_t handle = gemsi_get_u64(response.data);
+        |      const uint32_t count = gemsi_get_u32(response.data + 8);
+        |      if (count > 4096 || response.size != 12 + count ||
+        |          gemsi_store_kernel_signature(handle, (uint64_t)(uintptr_t)module, response.data + 12, count) != 0) {
+        |        status = GEMSI_STATUS_UNKNOWN;
+        |      } else *function = (void *)(uintptr_t)handle;
+        |    }
+        |  }
+        |  gemsi_rpc_buffer_release(&response);
+        |  return status;
+        |}
+        |
+        |int32_t cuModuleUnload(void *module) {
+        |  if (module == NULL) return GEMSI_STATUS_INVALID_VALUE;
+        |  uint8_t payload[8];
+        |  gemsi_put_u64(payload, (uint64_t)(uintptr_t)module);
+        |  GemsiRpcBuffer response = {0};
+        |  const int32_t status = gemsi_expect_unit(
+        |      gemsi_call(gemsi_cuModuleUnload_high, gemsi_cuModuleUnload_low, "cuModuleUnload", payload, sizeof(payload), &response),
+        |      &response);
+        |  if (status == GEMSI_STATUS_SUCCESS) gemsi_forget_module((uint64_t)(uintptr_t)module);
+        |  return status;
+        |}
+        |
+        |int32_t cuLaunchKernel(
+        |    void *function,
+        |    uint32_t grid_x,
+        |    uint32_t grid_y,
+        |    uint32_t grid_z,
+        |    uint32_t block_x,
+        |    uint32_t block_y,
+        |    uint32_t block_z,
+        |    uint32_t shared_memory_bytes,
+        |    void *stream,
+        |    void **kernel_params,
+        |    void **extra) {
+        |  if (function == NULL || grid_x == 0 || grid_y == 0 || grid_z == 0 ||
+        |      block_x == 0 || block_y == 0 || block_z == 0 || stream != NULL || extra != NULL) {
+        |    return GEMSI_STATUS_INVALID_VALUE;
+        |  }
+        |  pthread_mutex_lock(&gemsi_kernel_mutex);
+        |  GemsiKernelSignature *signature = gemsi_kernel_signatures;
+        |  while (signature != NULL && signature->function != (uint64_t)(uintptr_t)function) signature = signature->next;
+        |  if (signature == NULL || (signature->count != 0 && kernel_params == NULL)) {
+        |    pthread_mutex_unlock(&gemsi_kernel_mutex);
+        |    return GEMSI_STATUS_INVALID_VALUE;
+        |  }
+        |  size_t payload_size = 40;
+        |  for (uint32_t index = 0; index < signature->count; ++index) {
+        |    const uint8_t width = signature->widths[index];
+        |    if ((width != 1 && width != 2 && width != 4 && width != 8) || kernel_params[index] == NULL ||
+        |        payload_size > GEMSI_RPC_MAXIMUM_PAYLOAD_SIZE - 4 - width) {
+        |      pthread_mutex_unlock(&gemsi_kernel_mutex);
+        |      return GEMSI_STATUS_INVALID_VALUE;
+        |    }
+        |    payload_size += 4 + width;
+        |  }
+        |  uint8_t *payload = (uint8_t *)malloc(payload_size);
+        |  if (payload == NULL) { pthread_mutex_unlock(&gemsi_kernel_mutex); return GEMSI_STATUS_UNKNOWN; }
+        |  gemsi_put_u64(payload, (uint64_t)(uintptr_t)function);
+        |  gemsi_put_u32(payload + 8, grid_x);
+        |  gemsi_put_u32(payload + 12, grid_y);
+        |  gemsi_put_u32(payload + 16, grid_z);
+        |  gemsi_put_u32(payload + 20, block_x);
+        |  gemsi_put_u32(payload + 24, block_y);
+        |  gemsi_put_u32(payload + 28, block_z);
+        |  gemsi_put_u32(payload + 32, shared_memory_bytes);
+        |  gemsi_put_u32(payload + 36, signature->count);
+        |  size_t offset = 40;
+        |  for (uint32_t index = 0; index < signature->count; ++index) {
+        |    const uint8_t width = signature->widths[index];
+        |    gemsi_put_u32(payload + offset, width);
+        |    memcpy(payload + offset + 4, kernel_params[index], width);
+        |    offset += 4 + width;
+        |  }
+        |  pthread_mutex_unlock(&gemsi_kernel_mutex);
+        |  GemsiRpcBuffer response = {0};
+        |  const int32_t status = gemsi_expect_unit(
+        |      gemsi_call(gemsi_cuLaunchKernel_high, gemsi_cuLaunchKernel_low, "cuLaunchKernel", payload, (uint32_t)payload_size, &response),
+        |      &response);
+        |  free(payload);
+        |  return status;
+        |}
+        |
+        |#if defined(__GNUC__)
+        |__attribute__((weak))
+        |#endif
+        |int32_t cudaGetDeviceCount(int32_t *count) {
+        |  return cuDeviceGetCount(count);
+        |}
+        |
+        |int32_t cudaMalloc(void **pointer, size_t size) {
+        |  if (pointer == NULL) return GEMSI_STATUS_INVALID_VALUE;
+        |  uint64_t device_pointer = 0;
+        |  const int32_t status = cuMemAlloc_v2(&device_pointer, size);
+        |  if (status == GEMSI_STATUS_SUCCESS) *pointer = (void *)(uintptr_t)device_pointer;
+        |  return status;
+        |}
+        |
+        |int32_t cudaFree(void *pointer) {
+        |  return cuMemFree_v2((uint64_t)(uintptr_t)pointer);
+        |}
+        |
+        |int32_t cudaMemcpy(void *destination, const void *source, size_t size, int32_t kind) {
+        |  switch (kind) {
+        |    case 1:
+        |      return cuMemcpyHtoD_v2((uint64_t)(uintptr_t)destination, source, size);
+        |    case 2:
+        |      return cuMemcpyDtoH_v2(destination, (uint64_t)(uintptr_t)source, size);
+        |    case 3:
+        |      return cuMemcpyDtoD_v2((uint64_t)(uintptr_t)destination, (uint64_t)(uintptr_t)source, size);
+        |    default:
+        |      return GEMSI_STATUS_INVALID_VALUE;
+        |  }
+        |}
+        |
+        |const char *cudaGetErrorString(int32_t status) {
+        |  switch (status) {
+        |    case GEMSI_STATUS_SUCCESS: return "success";
+        |    case GEMSI_STATUS_INVALID_VALUE: return "invalid value";
+        |    case GEMSI_STATUS_NOT_SUPPORTED: return "not supported";
+        |    case GEMSI_STATUS_INITIALIZATION_ERROR: return "initialization error";
+        |    default: return "Gemstone CUDA error";
+        |  }
+        |}
+        |
+        |static void *gemsi_fat_binary_token = NULL;
+        |
+        |void **__cudaRegisterFatBinary(void *fat_binary) {
+        |  gemsi_fat_binary_token = fat_binary;
+        |  return &gemsi_fat_binary_token;
+        |}
+        |
+        |void __cudaRegisterFatBinaryEnd(void **handle) {
+        |  (void)handle;
+        |}
+        |
+        |void __cudaUnregisterFatBinary(void **handle) {
+        |  if (handle == &gemsi_fat_binary_token) gemsi_fat_binary_token = NULL;
+        |}
+        |
         |""".stripMargin
   }
 
@@ -671,42 +913,60 @@ object GenerateApi {
   }
 
   private def scalaType(wireType: WireType): String = wireType match {
-    case WireType.UnitValue  => "Unit"
-    case WireType.Int32      => "Int"
-    case WireType.UInt8      => "UInt8"
-    case WireType.UInt32     => "UInt32"
-    case WireType.SizeT      => "SizeT"
-    case WireType.Device     => "Device"
-    case WireType.DevicePtr  => "DevicePtr"
-    case WireType.Context    => "Context"
-    case WireType.HostInput  => "HostInput"
-    case WireType.HostOutput => "HostOutput"
+    case WireType.UnitValue      => "Unit"
+    case WireType.Int32          => "Int"
+    case WireType.UInt8          => "UInt8"
+    case WireType.UInt32         => "UInt32"
+    case WireType.SizeT          => "SizeT"
+    case WireType.Device         => "Device"
+    case WireType.DevicePtr      => "DevicePtr"
+    case WireType.Context        => "Context"
+    case WireType.CudaModule     => "CudaModule"
+    case WireType.CudaFunction   => "CudaFunction"
+    case WireType.HostInput      => "HostInput"
+    case WireType.HostOutput     => "HostOutput"
+    case WireType.ModuleImage    => "ModuleImage"
+    case WireType.FunctionName   => "FunctionName"
+    case WireType.KernelFunction => "KernelFunction"
+    case WireType.KernelLaunch   => "KernelLaunch"
   }
 
   private def encodeWire(wireType: WireType, value: String): String = wireType match {
-    case WireType.UnitValue  => "WireValue.UnitValue"
-    case WireType.Int32      => s"WireValue.Int32Value($value)"
-    case WireType.UInt8      => s"WireValue.UInt8Value($value)"
-    case WireType.UInt32     => s"WireValue.UInt32Value($value)"
-    case WireType.SizeT      => s"WireValue.SizeTValue($value)"
-    case WireType.Device     => s"WireValue.DeviceValue($value)"
-    case WireType.DevicePtr  => s"WireValue.DevicePtrValue($value)"
-    case WireType.Context    => s"WireValue.ContextValue($value)"
-    case WireType.HostInput  => s"WireValue.HostInputValue($value)"
-    case WireType.HostOutput => s"WireValue.HostOutputValue($value)"
+    case WireType.UnitValue      => "WireValue.UnitValue"
+    case WireType.Int32          => s"WireValue.Int32Value($value)"
+    case WireType.UInt8          => s"WireValue.UInt8Value($value)"
+    case WireType.UInt32         => s"WireValue.UInt32Value($value)"
+    case WireType.SizeT          => s"WireValue.SizeTValue($value)"
+    case WireType.Device         => s"WireValue.DeviceValue($value)"
+    case WireType.DevicePtr      => s"WireValue.DevicePtrValue($value)"
+    case WireType.Context        => s"WireValue.ContextValue($value)"
+    case WireType.CudaModule     => s"WireValue.CudaModuleValue($value)"
+    case WireType.CudaFunction   => s"WireValue.CudaFunctionValue($value)"
+    case WireType.HostInput      => s"WireValue.HostInputValue($value)"
+    case WireType.HostOutput     => s"WireValue.HostOutputValue($value)"
+    case WireType.ModuleImage    => s"WireValue.ModuleImageValue($value)"
+    case WireType.FunctionName   => s"WireValue.FunctionNameValue($value)"
+    case WireType.KernelFunction => s"WireValue.KernelFunctionValue($value)"
+    case WireType.KernelLaunch   => s"WireValue.KernelLaunchValue($value)"
   }
 
   private def decodePattern(wireType: WireType, binding: String): String = wireType match {
-    case WireType.UnitValue  => "WireValue.UnitValue"
-    case WireType.Int32      => s"WireValue.Int32Value($binding)"
-    case WireType.UInt8      => s"WireValue.UInt8Value($binding)"
-    case WireType.UInt32     => s"WireValue.UInt32Value($binding)"
-    case WireType.SizeT      => s"WireValue.SizeTValue($binding)"
-    case WireType.Device     => s"WireValue.DeviceValue($binding)"
-    case WireType.DevicePtr  => s"WireValue.DevicePtrValue($binding)"
-    case WireType.Context    => s"WireValue.ContextValue($binding)"
-    case WireType.HostInput  => s"WireValue.HostInputValue($binding)"
-    case WireType.HostOutput => s"WireValue.HostOutputValue($binding)"
+    case WireType.UnitValue      => "WireValue.UnitValue"
+    case WireType.Int32          => s"WireValue.Int32Value($binding)"
+    case WireType.UInt8          => s"WireValue.UInt8Value($binding)"
+    case WireType.UInt32         => s"WireValue.UInt32Value($binding)"
+    case WireType.SizeT          => s"WireValue.SizeTValue($binding)"
+    case WireType.Device         => s"WireValue.DeviceValue($binding)"
+    case WireType.DevicePtr      => s"WireValue.DevicePtrValue($binding)"
+    case WireType.Context        => s"WireValue.ContextValue($binding)"
+    case WireType.CudaModule     => s"WireValue.CudaModuleValue($binding)"
+    case WireType.CudaFunction   => s"WireValue.CudaFunctionValue($binding)"
+    case WireType.HostInput      => s"WireValue.HostInputValue($binding)"
+    case WireType.HostOutput     => s"WireValue.HostOutputValue($binding)"
+    case WireType.ModuleImage    => s"WireValue.ModuleImageValue($binding)"
+    case WireType.FunctionName   => s"WireValue.FunctionNameValue($binding)"
+    case WireType.KernelFunction => s"WireValue.KernelFunctionValue($binding)"
+    case WireType.KernelLaunch   => s"WireValue.KernelLaunchValue($binding)"
   }
 
   private def upperSnake(value: String): String = value
