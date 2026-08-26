@@ -1,0 +1,7 @@
+GEMSI_CORE_0.1 {
+  global:
+    ScalaNativeInit;
+    gemsiStartServer;
+  local:
+    *;
+};

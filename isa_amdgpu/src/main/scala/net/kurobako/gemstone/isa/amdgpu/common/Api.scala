@@ -1,0 +1,76 @@
+package net.kurobako.gemstone.isa.amdgpu.common
+
+import net.kurobako.gemstone.isa.amdgpu.common.generated.Database
+
+/** Text parser vocabulary shared by every AMD architectural family package. */
+object Parser {
+  def parse(source: String): Either[ParseError, Program]                = Assembly.parse(source)
+  def parseInstruction(source: String): Either[ParseError, Instruction] = Assembly.parseInstruction(source)
+}
+
+/** Canonical assembly printer shared by every AMD architectural family package. */
+object Printer {
+  def render(program: Program): String         = Assembly.print(program)
+  def render(instruction: Instruction): String = Assembly.print(instruction)
+}
+
+/** A package-level AMD ISA family. Syntax is shared; validity, metadata, and binary encoding are family-bound. */
+abstract class Architecture private[amdgpu] (private[amdgpu] val generation: Generation) {
+  final val version: String             = generation.number
+  final val catalog: InstructionCatalog = new GenerationCatalog(generation, Database)
+
+  final def encodeSopp(instruction: Instruction, target: Target): Either[CodecError, Vector[Byte]] =
+    if (target.generation != generation) Left(CodecError.WrongGeneration(target, generation))
+    else Binary.encodeSopp(instruction, target, Database)
+
+  final def decodeSopp(bytes: Seq[Byte], target: Target): Either[CodecError, Instruction] =
+    if (target.generation != generation) Left(CodecError.WrongGeneration(target, generation))
+    else Binary.decodeSopp(bytes, target, Database)
+}
+
+/** Names exported by each versioned package. */
+object Api {
+  type Program = _root_.net.kurobako.gemstone.isa.amdgpu.common.Program
+  val Program: _root_.net.kurobako.gemstone.isa.amdgpu.common.Program.type =
+    _root_.net.kurobako.gemstone.isa.amdgpu.common.Program
+  type Statement = _root_.net.kurobako.gemstone.isa.amdgpu.common.Statement
+  val Statement: _root_.net.kurobako.gemstone.isa.amdgpu.common.Statement.type =
+    _root_.net.kurobako.gemstone.isa.amdgpu.common.Statement
+  type Instruction = _root_.net.kurobako.gemstone.isa.amdgpu.common.Instruction
+  val Instruction: _root_.net.kurobako.gemstone.isa.amdgpu.common.Instruction.type =
+    _root_.net.kurobako.gemstone.isa.amdgpu.common.Instruction
+  type Opcode = _root_.net.kurobako.gemstone.isa.amdgpu.common.Opcode
+  val Opcode: _root_.net.kurobako.gemstone.isa.amdgpu.common.Opcode.type =
+    _root_.net.kurobako.gemstone.isa.amdgpu.common.Opcode
+  type Operand = _root_.net.kurobako.gemstone.isa.amdgpu.common.Operand
+  val Operand: _root_.net.kurobako.gemstone.isa.amdgpu.common.Operand.type =
+    _root_.net.kurobako.gemstone.isa.amdgpu.common.Operand
+  type Modifier = _root_.net.kurobako.gemstone.isa.amdgpu.common.Modifier
+  val Modifier: _root_.net.kurobako.gemstone.isa.amdgpu.common.Modifier.type =
+    _root_.net.kurobako.gemstone.isa.amdgpu.common.Modifier
+  type RegisterFile = _root_.net.kurobako.gemstone.isa.amdgpu.common.RegisterFile
+  val RegisterFile: _root_.net.kurobako.gemstone.isa.amdgpu.common.RegisterFile.type =
+    _root_.net.kurobako.gemstone.isa.amdgpu.common.RegisterFile
+  type Target = _root_.net.kurobako.gemstone.isa.amdgpu.common.Target
+  val Target: _root_.net.kurobako.gemstone.isa.amdgpu.common.Target.type =
+    _root_.net.kurobako.gemstone.isa.amdgpu.common.Target
+  type ParseError         = _root_.net.kurobako.gemstone.isa.amdgpu.common.ParseError
+  type InstructionInfo    = _root_.net.kurobako.gemstone.isa.amdgpu.common.InstructionInfo
+  type OperandInfo        = _root_.net.kurobako.gemstone.isa.amdgpu.common.OperandInfo
+  type InstructionCatalog = _root_.net.kurobako.gemstone.isa.amdgpu.common.InstructionCatalog
+  type CodecError         = _root_.net.kurobako.gemstone.isa.amdgpu.common.CodecError
+  val CodecError: _root_.net.kurobako.gemstone.isa.amdgpu.common.CodecError.type =
+    _root_.net.kurobako.gemstone.isa.amdgpu.common.CodecError
+  type ValidationError = _root_.net.kurobako.gemstone.isa.amdgpu.common.ValidationError
+  val ValidationError: _root_.net.kurobako.gemstone.isa.amdgpu.common.ValidationError.type =
+    _root_.net.kurobako.gemstone.isa.amdgpu.common.ValidationError
+  type ValidationResult = _root_.net.kurobako.gemstone.isa.amdgpu.common.ValidationResult
+  val ValidationResult: _root_.net.kurobako.gemstone.isa.amdgpu.common.ValidationResult.type =
+    _root_.net.kurobako.gemstone.isa.amdgpu.common.ValidationResult
+  val Validator: _root_.net.kurobako.gemstone.isa.amdgpu.common.Validator.type =
+    _root_.net.kurobako.gemstone.isa.amdgpu.common.Validator
+  val Parser: _root_.net.kurobako.gemstone.isa.amdgpu.common.Parser.type =
+    _root_.net.kurobako.gemstone.isa.amdgpu.common.Parser
+  val Printer: _root_.net.kurobako.gemstone.isa.amdgpu.common.Printer.type =
+    _root_.net.kurobako.gemstone.isa.amdgpu.common.Printer
+}

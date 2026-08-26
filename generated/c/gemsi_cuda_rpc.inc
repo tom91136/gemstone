@@ -1,0 +1,25 @@
+#ifndef GEMSI_CUDA_RPC_INC
+#define GEMSI_CUDA_RPC_INC
+
+#include <stdint.h>
+
+#define GEMSI_CUDA_RPC_SCHEMA_FINGERPRINT "c98d0ee5da0348ca4f1bc94405b4b2bb89e36231ce6e1595384e2d761ddec230"
+#define GEMSI_CUDA_RPC_METHODS(X) \
+  X(cuCtxCreate_v2, UINT64_C(0xe6eb5473c0a097e3), UINT64_C(0xa17c8d63cec75a44)) \
+  X(cuCtxDestroy_v2, UINT64_C(0xb574aacc9b35ee6a), UINT64_C(0x8135b883071cc261)) \
+  X(cuCtxSynchronize, UINT64_C(0xe21f80c194a589d4), UINT64_C(0x4af681a7ef75bb10)) \
+  X(cuDeviceGet, UINT64_C(0xc91170009b2ba6c9), UINT64_C(0x263d0d32e04e06a7)) \
+  X(cuDeviceGetCount, UINT64_C(0x831f6fffdf16f0d4), UINT64_C(0x3c498239d16d9867)) \
+  X(cuDriverGetVersion, UINT64_C(0xe584ec56943a425d), UINT64_C(0x3c512e60803234f9)) \
+  X(cuInit, UINT64_C(0x3c1688958f08660e), UINT64_C(0x1c2a40d0799c268c)) \
+  X(cuMemAlloc_v2, UINT64_C(0x7077a5441f532f0e), UINT64_C(0x677e154cf996113d)) \
+  X(cuMemFree_v2, UINT64_C(0xb5fdc569871ec54e), UINT64_C(0x418d186e2d8efa3a)) \
+  X(cuMemcpyDtoD_v2, UINT64_C(0xe27c11476bbea751), UINT64_C(0x681167b2aac69936)) \
+  X(cuMemcpyDtoH_v2, UINT64_C(0x0cc3708077b8e76a), UINT64_C(0xaa0bf9a6432ca141)) \
+  X(cuMemcpyHtoD_v2, UINT64_C(0x9a8f59036790ef69), UINT64_C(0x4808ed612739b8fa)) \
+  X(cuMemsetD8_v2, UINT64_C(0x2c1383458eec311a), UINT64_C(0x73e621c93fd80644)) \
+  X(cudaFree, UINT64_C(0xc9831c51cb850c1e), UINT64_C(0x0300fb6b734556b4)) \
+  X(cudaGetDeviceCount, UINT64_C(0x29770d4f155d9a98), UINT64_C(0xccec9231bf109bef)) \
+  X(cudaMalloc, UINT64_C(0x36207ff276ba04db), UINT64_C(0x8ed2474e0fef125d))
+
+#endif

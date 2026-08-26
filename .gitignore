@@ -1,0 +1,37 @@
+# sbt, Scala, and IDE state
+**/target/
+/.bloop/
+/.bsp/
+/.metals/
+/.scala-build/
+/.sbt/
+/.idea/
+/.vscode/
+*.class
+*.tasty
+*.semanticdb
+*.iml
+
+# Native build products
+*.a
+*.dll
+*.dylib
+*.exe
+*.o
+*.obj
+*.pdb
+*.so
+
+# Tool and editor scratch files
+/command-*.stderr
+/command-*.stdout
+*.log
+*.swp
+*.tmp
+*~
+.DS_Store
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
