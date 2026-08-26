@@ -18,4 +18,12 @@ class ArchitectureSuite extends munit.FunSuite {
     assert(gfx9.Isa.catalog.instructions.forall(_.generation.number == "gfx9"))
     assert(gfx11.Isa.catalog.instructions.forall(_.generation.number == "gfx11"))
   }
+
+  test("architectural lowering rejects a target from another family") {
+    val instruction = gfx10.Parser.parseInstruction("s_nop 0").toOption.get
+    assertEquals(
+      gfx10.Isa.lower(instruction, gfx11.Target.unsafe("gfx1100")),
+      Left(gfx10.LoweringError.WrongGeneration(gfx11.Target.unsafe("gfx1100"), common.Generation.Gfx10))
+    )
+  }
 }

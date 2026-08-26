@@ -13,6 +13,9 @@ This repository currently contains the first vertical scaffold:
 - bounds-checked guest memory with provenance and use-after-free detection;
 - deterministic block/lane ordering;
 - aligned, version-packaged PTX 9.3 and AMDGPU ISA models with checked-in generated catalogs and oracle corpora;
+- a version-packaged SPIR-V 1.6 binary model with the complete grammar catalogue, exact endian round trips, OpenCL
+  Compute validation, and an initial bounded integer/control/memory executor;
+- generated exact-C-name OpenCL and Level Zero API surfaces;
 - a small PTX single-block integer vector-add interpreter;
 - deterministic JSON-lines instruction and output-write traces;
 - a generated `libcuda.so.1`, pure-C dispatcher/recorder, and separated Scala Native core ABI;
@@ -23,7 +26,7 @@ through the C queue without entering Scala. See [docs/API_TRANSPORT.md](docs/API
 [docs/PHASE_0_FINDINGS.md](docs/PHASE_0_FINDINGS.md). The hand-written semantics boundary and scheduler design are
 described in [docs/ISA_EXECUTION.md](docs/ISA_EXECUTION.md).
 
-The build has seven module boundaries: `api`, `codegen`, `core`, `isa_ptx`, `isa_amdgpu`, `server`, and `native`.
+The build has eight module boundaries: `api`, `codegen`, `core`, `isa_ptx`, `isa_amdgpu`, `isa_spirv`, `server`, and `native`.
 Each bare `projectMatrix` uses its matching repository directory directly; there are no manual source mappings or
 redundant `.in(file(...))` declarations.
 
@@ -34,6 +37,7 @@ sbt scalafmtCheckAll
 sbt 'codegen/run --check generated'
 sbt 'isa_ptx / generatePtxSources; isa_ptx / generatePtxReferenceTests'
 sbt 'isa_amdgpu / generateAmdGpuSources; isa_amdgpu / generateAmdGpuGoldenTests'
+sbt 'codegen / generateComputeApiSources; isa_spirv / generateSpirvSources; isa_spirv / generateSpirvReferenceTests'
 sbt test
 sbt testFull
 sbt nativeNative/nativeLink

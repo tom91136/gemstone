@@ -32,7 +32,15 @@ object IsaReferences {
       cudaPtxVersion: String,
       cudaPtxSha256: String,
       amdXmlVersion: String,
-      amdXmlSha256: String
+      amdXmlSha256: String,
+      openClHeadersVersion: String,
+      openClHeadersSha256: String,
+      levelZeroVersion: String,
+      levelZeroSha256: String,
+      spirvHeadersVersion: String,
+      spirvHeadersSha256: String,
+      spirvToolsVersion: String,
+      spirvToolsSha256: String
   )
 
   private final case class Artifact(id: String, fileName: String, url: URI, sha256: String)
@@ -75,6 +83,32 @@ object IsaReferences {
         s"AMD_GPU_MR_ISA_XML_${pins.amdXmlVersion}.zip",
         URI.create(s"https://gpuopen.com/download/AMD_GPU_MR_ISA_XML_${pins.amdXmlVersion}.zip"),
         pins.amdXmlSha256
+      ),
+      Artifact(
+        "opencl-headers",
+        s"OpenCL-Headers-${pins.openClHeadersVersion}.zip",
+        URI.create(s"https://github.com/KhronosGroup/OpenCL-Headers/archive/refs/tags/v${pins.openClHeadersVersion}.zip"),
+        pins.openClHeadersSha256
+      ),
+      Artifact(
+        "level-zero",
+        s"level-zero-${pins.levelZeroVersion}.zip",
+        URI.create(s"https://github.com/oneapi-src/level-zero/archive/refs/tags/v${pins.levelZeroVersion}.zip"),
+        pins.levelZeroSha256
+      ),
+      Artifact(
+        "spirv-headers",
+        s"SPIRV-Headers-${pins.spirvHeadersVersion}.zip",
+        URI.create(
+          s"https://github.com/KhronosGroup/SPIRV-Headers/archive/refs/tags/${pins.spirvHeadersVersion}.zip"
+        ),
+        pins.spirvHeadersSha256
+      ),
+      Artifact(
+        "spirv-tools",
+        s"SPIRV-Tools-${pins.spirvToolsVersion}.zip",
+        URI.create(s"https://github.com/KhronosGroup/SPIRV-Tools/archive/refs/tags/${pins.spirvToolsVersion}.zip"),
+        pins.spirvToolsSha256
       )
     )
     artifacts.foreach(artifact => requireSha256(artifact.id, artifact.sha256))
@@ -115,6 +149,35 @@ object IsaReferences {
         relative => relative.getNameCount == 1 && relative.getFileName.toString.matches("amdgpu_isa_[a-z0-9_]+\\.xml")
       )
       copyFile(cached("nvidia-ptx"), stage.resolve("nvidia/ptx/index.html"))
+      extractZipRoot(
+        cached("opencl-headers"),
+        stage.resolve("khronos/opencl"),
+        s"OpenCL-Headers-${pins.openClHeadersVersion}",
+        relative => relative == Path.of("LICENSE") || relative.startsWith("CL")
+      )
+      extractZipRoot(
+        cached("level-zero"),
+        stage.resolve("oneapi/level-zero"),
+        s"level-zero-${pins.levelZeroVersion}",
+        relative => relative == Path.of("LICENSE") || relative.startsWith("include") || relative.startsWith("doc")
+      )
+      extractZipRoot(
+        cached("spirv-headers"),
+        stage.resolve("khronos/spirv-headers"),
+        s"SPIRV-Headers-${pins.spirvHeadersVersion}",
+        relative =>
+          relative == Path.of("LICENSE") || relative.startsWith("LICENSES") ||
+            relative.startsWith("include/spirv/unified1")
+      )
+      extractZipRoot(
+        cached("spirv-tools"),
+        stage.resolve("khronos/spirv-tools"),
+        s"SPIRV-Tools-${pins.spirvToolsVersion}",
+        relative =>
+          relative == Path.of("LICENSE") || relative == Path.of("test/binary_parse_test.cpp") ||
+            relative == Path.of("test/binary_endianness_test.cpp") ||
+            relative == Path.of("test/val/val_opencl_test.cpp")
+      )
       val _ = Files.writeString(stage.resolve("MANIFEST.tsv"), manifest, StandardCharsets.UTF_8)
       verifyPrepared(stage, manifest)
       try Files.move(stage, output, StandardCopyOption.ATOMIC_MOVE)
@@ -228,6 +291,30 @@ object IsaReferences {
     } finally zipInput.close()
   }
 
+  private def extractZipRoot(
+      archive: Path,
+      destination: Path,
+      archiveRoot: String,
+      select: Path => Boolean
+  ): Unit = {
+    val _        = Files.createDirectories(destination)
+    val zipInput = new ZipInputStream(new BufferedInputStream(Files.newInputStream(archive)))
+    var total    = 0L
+    try {
+      var entry = zipInput.getNextEntry
+      while (entry != null) {
+        val relative = archiveRelative(entry.getName, archiveRoot)
+        if (!entry.isDirectory && relative.exists(select)) {
+          val target = safeTarget(destination, relative.get)
+          total += copyEntry(zipInput, target, entry.getSize)
+          require(total <= MaximumTotalBytes, s"archive expands beyond $MaximumTotalBytes bytes: $archive")
+        }
+        zipInput.closeEntry()
+        entry = zipInput.getNextEntry
+      }
+    } finally zipInput.close()
+  }
+
   private def archiveRelative(name: String, archiveRoot: String): Option[Path] = {
     val path = safeRelative(name)
     require(path.getNameCount >= 1 && path.getName(0).toString == archiveRoot, s"unexpected archive root: $name")
@@ -289,7 +376,11 @@ object IsaReferences {
       s"llvm-version\t${pins.llvmVersion}",
       s"mesa-version\t${pins.mesaVersion}",
       s"cuda-ptx-version\t${pins.cudaPtxVersion}",
-      s"amd-xml-version\t${pins.amdXmlVersion}"
+      s"amd-xml-version\t${pins.amdXmlVersion}",
+      s"opencl-headers-version\t${pins.openClHeadersVersion}",
+      s"level-zero-version\t${pins.levelZeroVersion}",
+      s"spirv-headers-version\t${pins.spirvHeadersVersion}",
+      s"spirv-tools-version\t${pins.spirvToolsVersion}"
     )
     val sources = artifacts.map(artifact => s"artifact\t${artifact.id}\t${artifact.sha256}\t${artifact.url}")
     (header ++ sources).mkString("", "\n", "\n")
@@ -312,6 +403,20 @@ object IsaReferences {
     require(Files.isRegularFile(output.resolve("mesa/licenses/MIT")), "Mesa MIT licence is absent")
     require(Files.isRegularFile(output.resolve("amd/xml/amdgpu_isa_rdna2.xml")), "AMD RDNA2 XML is absent")
     require(Files.isRegularFile(output.resolve("nvidia/ptx/index.html")), "NVIDIA PTX specification is absent")
+    require(Files.isRegularFile(output.resolve("khronos/opencl/CL/cl.h")), "OpenCL headers are absent")
+    require(Files.isRegularFile(output.resolve("khronos/opencl/LICENSE")), "OpenCL headers licence is absent")
+    require(Files.isRegularFile(output.resolve("oneapi/level-zero/include/ze_api.h")), "Level Zero header is absent")
+    require(Files.isRegularFile(output.resolve("oneapi/level-zero/LICENSE")), "Level Zero licence is absent")
+    require(
+      Files.isRegularFile(output.resolve("khronos/spirv-headers/include/spirv/unified1/spirv.core.grammar.json")),
+      "SPIR-V grammar is absent"
+    )
+    require(Files.isRegularFile(output.resolve("khronos/spirv-headers/LICENSE")), "SPIR-V headers licence is absent")
+    require(
+      Files.isRegularFile(output.resolve("khronos/spirv-tools/test/binary_parse_test.cpp")),
+      "SPIRV-Tools binary tests are absent"
+    )
+    require(Files.isRegularFile(output.resolve("khronos/spirv-tools/LICENSE")), "SPIRV-Tools licence is absent")
   }
 
   private def requireSha256(id: String, value: String): Unit =

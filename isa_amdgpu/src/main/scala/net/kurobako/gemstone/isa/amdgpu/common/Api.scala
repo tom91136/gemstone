@@ -26,10 +26,16 @@ abstract class Architecture private[amdgpu] (private[amdgpu] val generation: Gen
   final def decodeSopp(bytes: Seq[Byte], target: Target): Either[CodecError, Instruction] =
     if (target.generation != generation) Left(CodecError.WrongGeneration(target, generation))
     else Binary.decodeSopp(bytes, target, Database)
+
+  final def lower(instruction: Instruction, target: Target): Either[LoweringError, AmdExecutable] =
+    if (target.generation != generation) Left(LoweringError.WrongGeneration(target, generation))
+    else AmdLowering.lower(instruction, target, Database)
 }
 
 /** Names exported by each versioned package. */
 object Api {
+  export _root_.net.kurobako.gemstone.isa.amdgpu.common.AmdSemantics.*
+
   type Program = _root_.net.kurobako.gemstone.isa.amdgpu.common.Program
   val Program: _root_.net.kurobako.gemstone.isa.amdgpu.common.Program.type =
     _root_.net.kurobako.gemstone.isa.amdgpu.common.Program
@@ -67,6 +73,31 @@ object Api {
   type ValidationResult = _root_.net.kurobako.gemstone.isa.amdgpu.common.ValidationResult
   val ValidationResult: _root_.net.kurobako.gemstone.isa.amdgpu.common.ValidationResult.type =
     _root_.net.kurobako.gemstone.isa.amdgpu.common.ValidationResult
+  type AmdExecutable = _root_.net.kurobako.gemstone.isa.amdgpu.common.AmdExecutable
+  val AmdExecutable: _root_.net.kurobako.gemstone.isa.amdgpu.common.AmdExecutable.type =
+    _root_.net.kurobako.gemstone.isa.amdgpu.common.AmdExecutable
+  type AmdWrite = _root_.net.kurobako.gemstone.isa.amdgpu.common.AmdWrite
+  val AmdWrite: _root_.net.kurobako.gemstone.isa.amdgpu.common.AmdWrite.type =
+    _root_.net.kurobako.gemstone.isa.amdgpu.common.AmdWrite
+  type BranchCondition = _root_.net.kurobako.gemstone.isa.amdgpu.common.BranchCondition
+  val BranchCondition: _root_.net.kurobako.gemstone.isa.amdgpu.common.BranchCondition.type =
+    _root_.net.kurobako.gemstone.isa.amdgpu.common.BranchCondition
+  type WaitOperation = _root_.net.kurobako.gemstone.isa.amdgpu.common.WaitOperation
+  val WaitOperation: _root_.net.kurobako.gemstone.isa.amdgpu.common.WaitOperation.type =
+    _root_.net.kurobako.gemstone.isa.amdgpu.common.WaitOperation
+  type SemanticClass = _root_.net.kurobako.gemstone.isa.amdgpu.common.SemanticClass
+  val SemanticClass: _root_.net.kurobako.gemstone.isa.amdgpu.common.SemanticClass.type =
+    _root_.net.kurobako.gemstone.isa.amdgpu.common.SemanticClass
+  type LoweringError = _root_.net.kurobako.gemstone.isa.amdgpu.common.LoweringError
+  val LoweringError: _root_.net.kurobako.gemstone.isa.amdgpu.common.LoweringError.type =
+    _root_.net.kurobako.gemstone.isa.amdgpu.common.LoweringError
+  type WaveState = _root_.net.kurobako.gemstone.isa.amdgpu.common.WaveState
+  val WaveState: _root_.net.kurobako.gemstone.isa.amdgpu.common.WaveState.type =
+    _root_.net.kurobako.gemstone.isa.amdgpu.common.WaveState
+  val AmdLowering: _root_.net.kurobako.gemstone.isa.amdgpu.common.AmdLowering.type =
+    _root_.net.kurobako.gemstone.isa.amdgpu.common.AmdLowering
+  val SemanticsCoverage: _root_.net.kurobako.gemstone.isa.amdgpu.common.SemanticsCoverage.type =
+    _root_.net.kurobako.gemstone.isa.amdgpu.common.SemanticsCoverage
   val Validator: _root_.net.kurobako.gemstone.isa.amdgpu.common.Validator.type =
     _root_.net.kurobako.gemstone.isa.amdgpu.common.Validator
   val Parser: _root_.net.kurobako.gemstone.isa.amdgpu.common.Parser.type =

@@ -1,5 +1,7 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
+import net.kurobako.gemstone.execution.CancellationToken
+import net.kurobako.gemstone.execution.ExecutionLimits
 import net.kurobako.gemstone.memory.ArrayCheckedMemory
 import net.kurobako.gemstone.memory.GuestAddress
 import net.kurobako.gemstone.scheduler.LaunchShape
@@ -72,8 +74,82 @@ class PtxInterpreterSuite extends munit.FunSuite {
   }
 
   test("reject unsupported instructions with a source line") {
-    val error = PtxParser.parse(vectorAdd.replace("add.u32", "sub.u32")).left.toOption.get
+    val error = PtxParser.parse(vectorAdd.replace("add.u32", "xor.b32")).left.toOption.get
     assert(error.line > 0)
     assert(error.message.contains("unsupported instruction"))
+  }
+
+  test("predicated branches reconverge at a block barrier") {
+    val source = """
+      |.version 8.0
+      |.target sm_80
+      |.address_size 64
+      |.visible .entry choose(.param .u64 output) {
+      |  .reg .pred %p;
+      |  .reg .b32 %r<3>;
+      |  .reg .b64 %rd<2>;
+      |  ld.param.u64 %rd0, [output];
+      |  mov.u32 %r0, %tid.x;
+      |  setp.lt.u32 %p, %r0, 2;
+      |  @%p bra low;
+      |  mov.u32 %r1, 9;
+      |  bra join;
+      |low:
+      |  mov.u32 %r1, 7;
+      |join:
+      |  bar.sync 0;
+      |  mul.wide.u32 %rd1, %r0, 4;
+      |  add.u64 %rd1, %rd0, %rd1;
+      |  st.global.u32 [%rd1], %r1;
+      |  ret;
+      |}
+      |""".stripMargin
+    val kernel = PtxParser.parse(source).fold(error => fail(error.message), identity)
+    val memory = ArrayCheckedMemory.allocate(16, provenance = "divergent-barrier")
+    val result = PtxInterpreter.execute(
+      kernel,
+      LaunchShape.create(1, 4).toOption.get,
+      Map("output" -> memory.allocation.start),
+      memory
+    )
+    assert(result.isRight, result.left.toOption.map(_.message).getOrElse(""))
+    assertEquals(
+      Vector.tabulate(4)(index => memory.readInt32(memory.allocation.start.offset(index.toLong * 4L)).toOption.get),
+      Vector(7, 7, 9, 9)
+    )
+  }
+
+  test("an infinite branch is stopped by its instruction budget") {
+    val source = """
+      |.version 8.0
+      |.target sm_80
+      |.visible .entry spin() {
+      |again:
+      |  bra again;
+      |}
+      |""".stripMargin
+    val kernel = PtxParser.parse(source).fold(error => fail(error.message), identity)
+    val result = PtxInterpreter.execute(
+      kernel,
+      LaunchShape.create(1, 1).toOption.get,
+      Map.empty,
+      ArrayCheckedMemory.allocate(4),
+      ExecutionLimits(maxInstructions = 8L, quantum = 2)
+    )
+    assert(result.left.exists(_.message.contains("instruction budget of 8")))
+  }
+
+  test("execution observes cancellation before fetching an instruction") {
+    val kernel       = PtxParser.parse(vectorAdd).fold(error => fail(error.message), identity)
+    val cancellation = new CancellationToken.Source
+    cancellation.cancel()
+    val result = PtxInterpreter.execute(
+      kernel,
+      LaunchShape.create(1, 1).toOption.get,
+      Map.empty,
+      ArrayCheckedMemory.allocate(4),
+      cancellation = cancellation
+    )
+    assertEquals(result, Left(PtxExecutionError("execution was cancelled")))
   }
 }
