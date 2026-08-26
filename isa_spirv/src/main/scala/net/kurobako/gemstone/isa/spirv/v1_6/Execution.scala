@@ -121,52 +121,84 @@ object Lowering {
   private def lowerKnownInstruction(
       instruction: KnownInstruction,
       labels: Map[Int, Pc]
-  ): Either[LoweringError, ExecutableInstruction] = {
-    val operands                                                 = instruction.arguments.operands.map(_.bits)
-    def requireOperands(count: Int): Either[LoweringError, Unit] =
-      if (operands.size >= count) Right(())
-      else Left(LoweringError.Malformed(instruction.name, s"expected $count operands, found ${operands.size}"))
-    def binary(operation: BinaryOperation): Either[LoweringError, ExecutableInstruction] =
-      requireOperands(4).map(_ =>
-        ExecutableInstruction.Binary(instruction.name, operands(1), operands(2), operands(3), operation)
-      )
+  ): Either[LoweringError, ExecutableInstruction] =
     instruction match {
-      case KnownInstruction.OpConstant(_) | KnownInstruction.OpSpecConstant(_) =>
-        requireOperands(3).map(_ => ExecutableInstruction.Constant(operands(1), operands(2).toLong & 0xffffffffL))
-      case KnownInstruction.OpConstantTrue(_) | KnownInstruction.OpSpecConstantTrue(_) =>
-        requireOperands(2).map(_ => ExecutableInstruction.Constant(operands(1), 1L))
-      case KnownInstruction.OpConstantFalse(_) | KnownInstruction.OpSpecConstantFalse(_) =>
-        requireOperands(2).map(_ => ExecutableInstruction.Constant(operands(1), 0L))
-      case KnownInstruction.OpVariable(_) =>
-        requireOperands(3).map(_ => ExecutableInstruction.Variable(operands(1), operands.lift(3)))
-      case KnownInstruction.OpLoad(_) =>
-        requireOperands(3).map(_ => ExecutableInstruction.Load(operands(1), operands(2)))
-      case KnownInstruction.OpStore(_) =>
-        requireOperands(2).map(_ => ExecutableInstruction.Store(operands(0), operands(1)))
-      case KnownInstruction.OpCopyObject(_) =>
-        requireOperands(3).map(_ => ExecutableInstruction.Copy(operands(1), operands(2)))
-      case KnownInstruction.OpIAdd(_)              => binary(BinaryOperation.Add)
-      case KnownInstruction.OpISub(_)              => binary(BinaryOperation.Subtract)
-      case KnownInstruction.OpIMul(_)              => binary(BinaryOperation.Multiply)
-      case KnownInstruction.OpBitwiseAnd(_)        => binary(BinaryOperation.BitAnd)
-      case KnownInstruction.OpBitwiseOr(_)         => binary(BinaryOperation.BitOr)
-      case KnownInstruction.OpBitwiseXor(_)        => binary(BinaryOperation.BitXor)
-      case KnownInstruction.OpShiftLeftLogical(_)  => binary(BinaryOperation.ShiftLeft)
-      case KnownInstruction.OpShiftRightLogical(_) => binary(BinaryOperation.LogicalShiftRight)
-      case KnownInstruction.OpIEqual(_)            => binary(BinaryOperation.Equal)
-      case KnownInstruction.OpINotEqual(_)         => binary(BinaryOperation.NotEqual)
-      case KnownInstruction.OpULessThan(_)         => binary(BinaryOperation.UnsignedLessThan)
-      case KnownInstruction.OpULessThanEqual(_)    => binary(BinaryOperation.UnsignedLessThanEqual)
-      case KnownInstruction.OpUGreaterThan(_)      => binary(BinaryOperation.UnsignedGreaterThan)
-      case KnownInstruction.OpUGreaterThanEqual(_) => binary(BinaryOperation.UnsignedGreaterThanEqual)
-      case KnownInstruction.OpSelect(_)            =>
-        requireOperands(5).map(_ => ExecutableInstruction.Select(operands(1), operands(2), operands(3), operands(4)))
-      case KnownInstruction.OpBranch(_) =>
-        requireOperands(1).flatMap(_ =>
+      case KnownInstruction.OpConstant(arguments) =>
+        val operands = operandBits(arguments)
+        requireOperands(instruction.name, operands, 3)
+          .map(_ => ExecutableInstruction.Constant(operands(1), operands(2).toLong & 0xffffffffL))
+      case KnownInstruction.OpSpecConstant(arguments) =>
+        val operands = operandBits(arguments)
+        requireOperands(instruction.name, operands, 3)
+          .map(_ => ExecutableInstruction.Constant(operands(1), operands(2).toLong & 0xffffffffL))
+      case KnownInstruction.OpConstantTrue(arguments) =>
+        val operands = operandBits(arguments)
+        requireOperands(instruction.name, operands, 2).map(_ => ExecutableInstruction.Constant(operands(1), 1L))
+      case KnownInstruction.OpSpecConstantTrue(arguments) =>
+        val operands = operandBits(arguments)
+        requireOperands(instruction.name, operands, 2).map(_ => ExecutableInstruction.Constant(operands(1), 1L))
+      case KnownInstruction.OpConstantFalse(arguments) =>
+        val operands = operandBits(arguments)
+        requireOperands(instruction.name, operands, 2).map(_ => ExecutableInstruction.Constant(operands(1), 0L))
+      case KnownInstruction.OpSpecConstantFalse(arguments) =>
+        val operands = operandBits(arguments)
+        requireOperands(instruction.name, operands, 2).map(_ => ExecutableInstruction.Constant(operands(1), 0L))
+      case KnownInstruction.OpVariable(arguments) =>
+        val operands = operandBits(arguments)
+        requireOperands(instruction.name, operands, 3)
+          .map(_ => ExecutableInstruction.Variable(operands(1), operands.lift(3)))
+      case KnownInstruction.OpLoad(arguments) =>
+        val operands = operandBits(arguments)
+        requireOperands(instruction.name, operands, 3)
+          .map(_ => ExecutableInstruction.Load(operands(1), operands(2)))
+      case KnownInstruction.OpStore(arguments) =>
+        val operands = operandBits(arguments)
+        requireOperands(instruction.name, operands, 2)
+          .map(_ => ExecutableInstruction.Store(operands(0), operands(1)))
+      case KnownInstruction.OpCopyObject(arguments) =>
+        val operands = operandBits(arguments)
+        requireOperands(instruction.name, operands, 3)
+          .map(_ => ExecutableInstruction.Copy(operands(1), operands(2)))
+      case KnownInstruction.OpIAdd(arguments) =>
+        binary(instruction.name, arguments, BinaryOperation.Add)
+      case KnownInstruction.OpISub(arguments) =>
+        binary(instruction.name, arguments, BinaryOperation.Subtract)
+      case KnownInstruction.OpIMul(arguments) =>
+        binary(instruction.name, arguments, BinaryOperation.Multiply)
+      case KnownInstruction.OpBitwiseAnd(arguments) =>
+        binary(instruction.name, arguments, BinaryOperation.BitAnd)
+      case KnownInstruction.OpBitwiseOr(arguments) =>
+        binary(instruction.name, arguments, BinaryOperation.BitOr)
+      case KnownInstruction.OpBitwiseXor(arguments) =>
+        binary(instruction.name, arguments, BinaryOperation.BitXor)
+      case KnownInstruction.OpShiftLeftLogical(arguments) =>
+        binary(instruction.name, arguments, BinaryOperation.ShiftLeft)
+      case KnownInstruction.OpShiftRightLogical(arguments) =>
+        binary(instruction.name, arguments, BinaryOperation.LogicalShiftRight)
+      case KnownInstruction.OpIEqual(arguments) =>
+        binary(instruction.name, arguments, BinaryOperation.Equal)
+      case KnownInstruction.OpINotEqual(arguments) =>
+        binary(instruction.name, arguments, BinaryOperation.NotEqual)
+      case KnownInstruction.OpULessThan(arguments) =>
+        binary(instruction.name, arguments, BinaryOperation.UnsignedLessThan)
+      case KnownInstruction.OpULessThanEqual(arguments) =>
+        binary(instruction.name, arguments, BinaryOperation.UnsignedLessThanEqual)
+      case KnownInstruction.OpUGreaterThan(arguments) =>
+        binary(instruction.name, arguments, BinaryOperation.UnsignedGreaterThan)
+      case KnownInstruction.OpUGreaterThanEqual(arguments) =>
+        binary(instruction.name, arguments, BinaryOperation.UnsignedGreaterThanEqual)
+      case KnownInstruction.OpSelect(arguments) =>
+        val operands = operandBits(arguments)
+        requireOperands(instruction.name, operands, 5)
+          .map(_ => ExecutableInstruction.Select(operands(1), operands(2), operands(3), operands(4)))
+      case KnownInstruction.OpBranch(arguments) =>
+        val operands = operandBits(arguments)
+        requireOperands(instruction.name, operands, 1).flatMap(_ =>
           labels.get(operands(0)).toRight(LoweringError.Malformed(instruction.name, s"unknown label %${operands(0)}"))
         ).map(ExecutableInstruction.Jump.apply)
-      case KnownInstruction.OpBranchConditional(_) =>
-        requireOperands(3).flatMap { _ =>
+      case KnownInstruction.OpBranchConditional(arguments) =>
+        val operands = operandBits(arguments)
+        requireOperands(instruction.name, operands, 3).flatMap { _ =>
           for {
             whenTrue <- labels.get(operands(1)).toRight(
               LoweringError.Malformed(instruction.name, s"unknown label %${operands(1)}")
@@ -176,12 +208,33 @@ object Lowering {
             )
           } yield ExecutableInstruction.JumpIf(operands(0), whenTrue, whenFalse)
         }
-      case KnownInstruction.OpReturn(_)      => Right(ExecutableInstruction.Return(None))
-      case KnownInstruction.OpReturnValue(_) =>
-        requireOperands(1).map(_ => ExecutableInstruction.Return(Some(operands(0))))
+      case KnownInstruction.OpReturn(_)              => Right(ExecutableInstruction.Return(None))
+      case KnownInstruction.OpReturnValue(arguments) =>
+        val operands = operandBits(arguments)
+        requireOperands(instruction.name, operands, 1)
+          .map(_ => ExecutableInstruction.Return(Some(operands(0))))
       case value if isIgnored(value.name) => Right(ExecutableInstruction.Ignore(value.name))
       case value => Right(ExecutableInstruction.Unsupported(value.name, "semantic lowering is not implemented"))
     }
+
+  private def operandBits(arguments: InstructionArguments): Vector[Int] = arguments.operands.map(_.bits)
+
+  private def requireOperands(
+      name: String,
+      operands: Vector[Int],
+      count: Int
+  ): Either[LoweringError, Unit] =
+    if (operands.size >= count) Right(())
+    else Left(LoweringError.Malformed(name, s"expected $count operands, found ${operands.size}"))
+
+  private def binary(
+      name: String,
+      arguments: InstructionArguments,
+      operation: BinaryOperation
+  ): Either[LoweringError, ExecutableInstruction] = {
+    val operands = operandBits(arguments)
+    requireOperands(name, operands, 4)
+      .map(_ => ExecutableInstruction.Binary(name, operands(1), operands(2), operands(3), operation))
   }
 
   private def isIgnored(name: String): Boolean =
