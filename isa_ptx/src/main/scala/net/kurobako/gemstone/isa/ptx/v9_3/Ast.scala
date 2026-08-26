@@ -3,10 +3,7 @@ package net.kurobako.gemstone.isa.ptx.v9_3
 private[v9_3] def normalizeOpcode(value: String): String =
   value.map(character => if (character >= 'A' && character <= 'Z') (character + ('a' - 'A')).toChar else character)
 
-/** Lossless-enough syntax tree for parsing, transforming, and canonically printing PTX source. Raw instructions retain
-  * one uniform representation; [[KnownInstruction]] provides the generated opcode-specific typed layer without
-  * multiplying modifier combinations.
-  */
+/** Lossless syntax used by generated, opcode-specific [[Instruction]] cases. */
 enum Operand {
   case Immediate(raw: String)
   case Register(name: String, part: Option[String])
@@ -27,30 +24,7 @@ final case class Program(statements: Vector[Statement])
 
 final case class Predication(negated: Boolean, operand: Operand)
 
-final case class Opcode(mnemonic: String)
-
 final case class Modifier(name: String)
-
-/** The common instruction shape used by both ISA modules. PTX adds predication as an orthogonal optional field. */
-final case class Instruction(
-    opcode: Opcode,
-    operands: Vector[Operand] = Vector.empty,
-    modifiers: Vector[Modifier] = Vector.empty,
-    predication: Option[Predication] = None
-) {
-  def mnemonic: String = (opcode.mnemonic +: modifiers.map(_.name)).mkString(".")
-}
-
-/** Arguments shared by the generated per-opcode instruction cases. Modifier combinations remain data rather than
-  * multiplying the instruction hierarchy.
-  */
-final case class InstructionArguments(
-    operands: Vector[Operand] = Vector.empty,
-    modifiers: Vector[Modifier] = Vector.empty,
-    predication: Option[Predication] = None
-) {
-  def toSyntax(opcode: Opcode): Instruction = Instruction(opcode, operands, modifiers, predication)
-}
 
 enum DirectiveSeparator {
   case Space
@@ -92,39 +66,15 @@ final case class ParseError(offset: Int, line: Int, column: Int, expected: Vecto
   }
 }
 
-/** Runtime metadata generated from an instruction section in the pinned NVIDIA PTX document. */
-final case class InstructionInfo(
+/** Specification metadata generated alongside [[Instruction]] from the pinned NVIDIA PTX document. */
+final case class InstructionSpec(
     id: String,
     heading: String,
     title: String,
     category: String,
-    mnemonics: Vector[String],
+    opcodes: Vector[String],
     syntax: Vector[String],
     introduced: PtxVersion = PtxVersion(1, 0),
     minimumTarget: SmTarget = SmTarget(10),
     forms: Vector[InstructionForm] = Vector.empty
 )
-
-trait InstructionCatalog {
-  def version: String
-  def instructions: Vector[InstructionInfo]
-
-  lazy val byMnemonic: Map[String, Vector[InstructionInfo]] = {
-    val pairs = instructions.flatMap { instruction =>
-      val normalized = instruction.forms.map(_.mnemonic).distinct
-      val mnemonics  = if (normalized.nonEmpty) normalized else instruction.mnemonics
-      mnemonics.map(_.toLowerCase -> instruction)
-    }
-    pairs.groupMap(_._1)(_._2)
-  }
-
-  private lazy val knownMnemonics: Set[String] = instructions.flatMap(_.mnemonics).map(_.toLowerCase).toSet
-
-  final def isKnown(opcode: Opcode): Boolean = knownMnemonics.contains(opcode.mnemonic.toLowerCase)
-}
-
-/** PTX ISA 9.3, as specified by the CUDA 13.3 archived PTX document. */
-object Isa {
-  val version: String             = "9.3"
-  val catalog: InstructionCatalog = generated.Catalog
-}

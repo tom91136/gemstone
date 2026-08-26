@@ -189,134 +189,121 @@ object PtxLowerer {
   private def lowerInstruction(
       instruction: Instruction,
       labels: Map[String, Pc]
-  ): Either[PtxLoweringError, PtxExecutable] =
-    KnownInstruction.fromSyntax(instruction) match {
-      case Left(_)      => Left(PtxLoweringError.Unsupported(Printer.render(instruction), "unknown PTX opcode"))
-      case Right(known) => lowerKnownInstruction(known, labels)
-    }
-
-  private def lowerKnownInstruction(
-      instruction: KnownInstruction,
-      labels: Map[String, Pc]
   ): Either[PtxLoweringError, PtxExecutable] = {
     val lowered = instruction match {
-      case KnownInstruction.Ld(InstructionArguments(operands, modifiers, _))
-          if Set("ld.param.u32", "ld.param.u64").contains(renderMnemonic("ld", modifiers)) && operands.size == 2 =>
+      case Instruction.Ld(destination, address, None, _, _)
+          if instruction.qualifiedOpcode == "ld.param.u32" || instruction.qualifiedOpcode == "ld.param.u64" =>
         for {
-          destination <- registerName(operands(0))
-          parameter   <- addressSymbol(operands(1))
+          destinationName <- registerName(destination)
+          parameter       <- addressSymbol(address)
         } yield PtxInstruction.LoadParameter(
-          destination,
+          destinationName,
           parameter,
-          if (renderMnemonic("ld", modifiers).endsWith("32")) 32 else 64
+          if (instruction.qualifiedOpcode.endsWith("32")) 32 else 64
         )
-      case KnownInstruction.Mov(InstructionArguments(operands, modifiers, _))
-          if Set("mov.u32", "mov.b32").contains(renderMnemonic("mov", modifiers)) && operands.size == 2 =>
+      case Instruction.Mov(destination, source, _, _)
+          if instruction.qualifiedOpcode == "mov.u32" || instruction.qualifiedOpcode == "mov.b32" =>
         for {
-          destination <- registerName(operands(0))
-          source      <- value(operands(1))
-        } yield PtxInstruction.Move(destination, source, 32)
-      case KnownInstruction.Mov(InstructionArguments(operands, modifiers, _))
-          if Set("mov.u64", "mov.b64").contains(renderMnemonic("mov", modifiers)) && operands.size == 2 =>
+          destinationName <- registerName(destination)
+          sourceValue     <- value(source)
+        } yield PtxInstruction.Move(destinationName, sourceValue, 32)
+      case Instruction.Mov(destination, source, _, _)
+          if instruction.qualifiedOpcode == "mov.u64" || instruction.qualifiedOpcode == "mov.b64" =>
         for {
-          destination <- registerName(operands(0))
-          source      <- value(operands(1))
-        } yield PtxInstruction.Move(destination, source, 64)
-      case KnownInstruction.Mul(InstructionArguments(operands, modifiers, _))
-          if renderMnemonic("mul", modifiers) == "mul.wide.u32" && operands.size == 3 =>
+          destinationName <- registerName(destination)
+          sourceValue     <- value(source)
+        } yield PtxInstruction.Move(destinationName, sourceValue, 64)
+      case Instruction.Mul(destination, left, right, _, _) if instruction.qualifiedOpcode == "mul.wide.u32" =>
         for {
-          destination <- registerName(operands(0))
-          left        <- value(operands(1))
-          right       <- value(operands(2))
+          destinationName <- registerName(destination)
+          leftValue       <- value(left)
+          rightValue      <- value(right)
         } yield PtxInstruction.IntegerBinary(
           PtxIntegerOperation.MultiplyWideUnsigned32,
-          destination,
-          left,
-          right,
+          destinationName,
+          leftValue,
+          rightValue,
           64
         )
-      case KnownInstruction.Shl(InstructionArguments(operands, modifiers, _))
-          if renderMnemonic("shl", modifiers) == "shl.b32" && operands.size == 3 =>
-        integerBinary(PtxIntegerOperation.ShiftLeft, 32, operands)
-      case KnownInstruction.Mad(InstructionArguments(operands, modifiers, _))
-          if renderMnemonic("mad", modifiers) == "mad.lo.s32" && operands.size == 4 =>
+      case Instruction.Shl(destination, left, right, _, _) if instruction.qualifiedOpcode == "shl.b32" =>
+        integerBinary(PtxIntegerOperation.ShiftLeft, 32, destination, left, right)
+      case Instruction.Mad(destination, left, right, addend, _, _)
+          if instruction.qualifiedOpcode == "mad.lo.s32" =>
         for {
-          destination <- registerName(operands(0))
-          left        <- value(operands(1))
-          right       <- value(operands(2))
-          addend      <- value(operands(3))
-        } yield PtxInstruction.MultiplyAddLow32(destination, left, right, addend)
-      case KnownInstruction.Add(InstructionArguments(operands, modifiers, _))
-          if Set("add.u32", "add.s32").contains(renderMnemonic("add", modifiers)) && operands.size == 3 =>
-        integerBinary(PtxIntegerOperation.Add, 32, operands)
-      case KnownInstruction.Add(InstructionArguments(operands, modifiers, _))
-          if Set("add.u64", "add.s64").contains(renderMnemonic("add", modifiers)) && operands.size == 3 =>
-        integerBinary(PtxIntegerOperation.Add, 64, operands)
-      case KnownInstruction.Sub(InstructionArguments(operands, modifiers, _))
-          if Set("sub.u32", "sub.s32").contains(renderMnemonic("sub", modifiers)) && operands.size == 3 =>
-        integerBinary(PtxIntegerOperation.Subtract, 32, operands)
-      case KnownInstruction.Sub(InstructionArguments(operands, modifiers, _))
-          if Set("sub.u64", "sub.s64").contains(renderMnemonic("sub", modifiers)) && operands.size == 3 =>
-        integerBinary(PtxIntegerOperation.Subtract, 64, operands)
-      case KnownInstruction.Ld(InstructionArguments(operands, modifiers, _))
-          if renderMnemonic("ld", modifiers) == "ld.global.u32" && operands.size == 2 =>
+          destinationName <- registerName(destination)
+          leftValue       <- value(left)
+          rightValue      <- value(right)
+          addendValue     <- value(addend)
+        } yield PtxInstruction.MultiplyAddLow32(destinationName, leftValue, rightValue, addendValue)
+      case Instruction.Add(destination, left, right, _, _)
+          if instruction.qualifiedOpcode == "add.u32" || instruction.qualifiedOpcode == "add.s32" =>
+        integerBinary(PtxIntegerOperation.Add, 32, destination, left, right)
+      case Instruction.Add(destination, left, right, _, _)
+          if instruction.qualifiedOpcode == "add.u64" || instruction.qualifiedOpcode == "add.s64" =>
+        integerBinary(PtxIntegerOperation.Add, 64, destination, left, right)
+      case Instruction.Sub(destination, left, right, _, _)
+          if instruction.qualifiedOpcode == "sub.u32" || instruction.qualifiedOpcode == "sub.s32" =>
+        integerBinary(PtxIntegerOperation.Subtract, 32, destination, left, right)
+      case Instruction.Sub(destination, left, right, _, _)
+          if instruction.qualifiedOpcode == "sub.u64" || instruction.qualifiedOpcode == "sub.s64" =>
+        integerBinary(PtxIntegerOperation.Subtract, 64, destination, left, right)
+      case Instruction.Ld(destination, address, None, _, _) if instruction.qualifiedOpcode == "ld.global.u32" =>
         for {
-          destination <- registerName(operands(0))
-          address     <- addressValue(operands(1))
-        } yield PtxInstruction.LoadGlobal32(destination, address)
-      case KnownInstruction.St(InstructionArguments(operands, modifiers, _))
-          if renderMnemonic("st", modifiers) == "st.global.u32" && operands.size == 2 =>
+          destinationName <- registerName(destination)
+          addressValue    <- addressValue(address)
+        } yield PtxInstruction.LoadGlobal32(destinationName, addressValue)
+      case Instruction.St(address, source, None, _, _) if instruction.qualifiedOpcode == "st.global.u32" =>
         for {
-          address <- addressValue(operands(0))
-          source  <- value(operands(1))
-        } yield PtxInstruction.StoreGlobal32(address, source)
-      case KnownInstruction.Setp(arguments @ InstructionArguments(operands, _, _)) if operands.size == 3 =>
-        lowerSetPredicate(arguments)
-      case KnownInstruction.Bra(InstructionArguments(operands, modifiers, _))
-          if Set("bra", "bra.uni").contains(renderMnemonic("bra", modifiers)) && operands.size == 1 =>
-        operands.head match {
+          addressValue <- addressValue(address)
+          sourceValue  <- value(source)
+        } yield PtxInstruction.StoreGlobal32(addressValue, sourceValue)
+      case Instruction.Setp(destination, left, right, None, modifiers, _) =>
+        lowerSetPredicate(destination, left, right, modifiers)
+      case Instruction.Bra(target, _, _)
+          if instruction.qualifiedOpcode == "bra" || instruction.qualifiedOpcode == "bra.uni" =>
+        target match {
           case Operand.Symbol(label) => labels.get(label).toRight(PtxLoweringError.Invalid(s"unknown label: $label"))
               .map(PtxInstruction.Branch.apply)
           case other => invalid(s"expected branch label, found ${Printer.render(other)}")
         }
-      case KnownInstruction.Bar(InstructionArguments(_, modifiers, predication))
-          if renderMnemonic("bar", modifiers) == "bar.sync" && predication.nonEmpty =>
+      case Instruction.Bar(_, _, _, _, _, Some(_)) if instruction.qualifiedOpcode == "bar.sync" =>
         invalid("bar.sync must not be predicated in the supported execution profile")
-      case KnownInstruction.Bar(InstructionArguments(operands, modifiers, _))
-          if renderMnemonic("bar", modifiers) == "bar.sync" && operands.size == 1 =>
-        immediate(operands.head).flatMap { value =>
+      case Instruction.Bar(barrier, None, None, None, _, _) if instruction.qualifiedOpcode == "bar.sync" =>
+        immediate(barrier).flatMap { value =>
           if (value >= 0L && value <= Int.MaxValue.toLong) Right(PtxInstruction.BarrierSync(value.toInt))
           else invalid(s"barrier id is outside Int range: $value")
         }
-      case KnownInstruction.Ret(InstructionArguments(operands, _, _)) if operands.isEmpty =>
-        Right(PtxInstruction.Return)
-      case _ =>
-        Left(PtxLoweringError.Unsupported(Printer.render(instruction.syntax), "no handwritten semantic family"))
+      case Instruction.Ret(_, _) => Right(PtxInstruction.Return)
+      case _                     =>
+        Left(PtxLoweringError.Unsupported(Printer.render(instruction), "no handwritten semantic family"))
     }
     for {
       operation <- lowered
-      predicate <- lowerPredicate(instruction.arguments.predication)
+      predicate <- lowerPredicate(instruction.predication)
     } yield PtxExecutable(operation, predicate)
   }
-
-  private def renderMnemonic(opcode: String, modifiers: Vector[Modifier]): String =
-    (opcode +: modifiers.map(_.name)).mkString(".")
 
   private def integerBinary(
       operation: PtxIntegerOperation,
       width: Int,
-      operands: Vector[Operand]
+      destination: Operand,
+      left: Operand,
+      right: Operand
   ): Either[PtxLoweringError, PtxInstruction] =
     for {
-      destination <- registerName(operands(0))
-      left        <- value(operands(1))
-      right       <- value(operands(2))
-    } yield PtxInstruction.IntegerBinary(operation, destination, left, right, width)
+      destinationName <- registerName(destination)
+      leftValue       <- value(left)
+      rightValue      <- value(right)
+    } yield PtxInstruction.IntegerBinary(operation, destinationName, leftValue, rightValue, width)
 
-  private def lowerSetPredicate(arguments: InstructionArguments): Either[PtxLoweringError, PtxInstruction] = {
-    val operands    = arguments.operands
-    val modifiers   = arguments.modifiers.map(_.name)
-    val instruction = renderMnemonic("setp", arguments.modifiers)
+  private def lowerSetPredicate(
+      destination: Operand,
+      left: Operand,
+      right: Operand,
+      instructionModifiers: Vector[Modifier]
+  ): Either[PtxLoweringError, PtxInstruction] = {
+    val modifiers   = instructionModifiers.map(_.name)
+    val instruction = ("setp" +: modifiers).mkString(".")
     val comparison  = modifiers.collectFirst(Function.unlift {
       case "eq" => Some(PtxComparison.Equal)
       case "ne" => Some(PtxComparison.NotEqual)
@@ -333,12 +320,19 @@ object PtxLowerer {
       case "s64" => true  -> 64
     }
     for {
-      predicate      <- comparison.toRight(PtxLoweringError.Invalid(s"unsupported setp comparison: $instruction"))
-      signedAndWidth <- kind.toRight(PtxLoweringError.Invalid(s"unsupported setp type: $instruction"))
-      destination    <- registerName(operands(0))
-      left           <- value(operands(1))
-      right          <- value(operands(2))
-    } yield PtxInstruction.SetPredicate(destination, predicate, signedAndWidth._1, left, right, signedAndWidth._2)
+      predicate       <- comparison.toRight(PtxLoweringError.Invalid(s"unsupported setp comparison: $instruction"))
+      signedAndWidth  <- kind.toRight(PtxLoweringError.Invalid(s"unsupported setp type: $instruction"))
+      destinationName <- registerName(destination)
+      leftValue       <- value(left)
+      rightValue      <- value(right)
+    } yield PtxInstruction.SetPredicate(
+      destinationName,
+      predicate,
+      signedAndWidth._1,
+      leftValue,
+      rightValue,
+      signedAndWidth._2
+    )
   }
 
   private def lowerPredicate(value: Option[Predication]): Either[PtxLoweringError, Option[PtxPredicate]] = value match {

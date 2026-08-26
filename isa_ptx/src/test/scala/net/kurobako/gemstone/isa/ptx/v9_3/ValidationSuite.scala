@@ -1,13 +1,13 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
-class ValidationSuite extends munit.FunSuite {
+final class ValidationSuite extends munit.FunSuite {
   private def instruction(source: String): Instruction =
     Parser.parseStatement(source).toOption.get match {
       case Statement.Instruction(value) => value
       case other                        => fail(s"expected instruction, found $other")
     }
 
-  test("typed forms enforce modifier groups and operand counts") {
+  test("typed forms enforce modifier groups after decoding enforces operand counts") {
     assertEquals(
       Validator.validate(instruction("mul.wide.u32 %rd0, %r1, 4;"), PtxVersion(9, 3), SmTarget(100)),
       ValidationResult.Valid
@@ -15,9 +15,7 @@ class ValidationSuite extends munit.FunSuite {
     assert(Validator.validate(instruction("mul.u32 %r0, %r1, %r2;"), PtxVersion(9, 3), SmTarget(100)).isInstanceOf[
       ValidationResult.Invalid
     ])
-    assert(Validator.validate(instruction("mul.wide.u32 %r0, %r1;"), PtxVersion(9, 3), SmTarget(100)).isInstanceOf[
-      ValidationResult.Invalid
-    ])
+    assert(Parser.parseStatement("mul.wide.u32 %r0, %r1;").isLeft)
   }
 
   test("instruction introduction and minimum SM are enforced") {
@@ -40,11 +38,7 @@ class ValidationSuite extends munit.FunSuite {
     )
   }
 
-  test("unknown instructions are invalid") {
-    assert(
-      Validator.validate(instruction("not_a_ptx_instruction.u32 %r0;"), PtxVersion(9, 3), SmTarget(100)).isInstanceOf[
-        ValidationResult.Invalid
-      ]
-    )
+  test("unknown instructions fail during decoding") {
+    assert(Parser.parseStatement("not_a_ptx_instruction.u32 %r0;").isLeft)
   }
 }

@@ -189,10 +189,9 @@ lazy val isa_ptx = projectMatrix
       }
       val input  = references / "nvidia" / "ptx" / "index.html"
       val output = root / "isa_ptx" / "src" / "main" / "scala" / "net" / "kurobako" / "gemstone" / "isa" / "ptx" /
-        ptxIsaPackage / "generated" / "Catalog.scala"
-      val instructions = output.getParentFile / "Instructions.scala"
-      val converter    = fileConverter.value
-      val classpath    = (codegen.jvm(scala3Version) / Compile / fullClasspath).value
+        ptxIsaPackage / "generated" / "Instructions.scala"
+      val converter = fileConverter.value
+      val classpath = (codegen.jvm(scala3Version) / Compile / fullClasspath).value
         .map(entry => converter.toPath(entry.data).toString)
       val java = file(sys.props("java.home")) / "bin" / "java"
       val exit = Process(Seq(
@@ -200,14 +199,14 @@ lazy val isa_ptx = projectMatrix
         "-cp",
         classpath.mkString(sys.props("path.separator")),
         "net.kurobako.gemstone.codegen.GeneratePtxIsa",
-        "catalog",
+        "instructions",
         input.getAbsolutePath,
         output.getAbsolutePath,
         ptxIsaVersion,
         ptxIsaPackage
       )).!
       require(exit == 0, s"PTX metadata generator exited with $exit")
-      Seq(output, instructions)
+      Seq(output)
     },
     generatePtxReferenceTests := Def.uncached {
       val root          = (LocalRootProject / baseDirectory).value

@@ -1,27 +1,27 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
-class SyntaxSuite extends munit.FunSuite {
+final class SyntaxSuite extends munit.FunSuite {
   private def statement(source: String): Statement =
     Parser.parseStatement(source) match {
       case Right(value) => value
       case Left(error)  => fail(s"failed to parse '$source': $error")
     }
 
-  test("version package owns the instruction catalog") {
-    assertEquals(Isa.version, "9.3")
-    assertEquals(Isa.catalog.version, Isa.version)
-    assert(Isa.catalog.instructions.size >= 170)
+  test("version and instruction specifications are generated at package level") {
+    assertEquals(Version, PtxVersion(9, 3))
+    assert(Instructions.size >= 170)
   }
 
   test("instruction operands retain modifiers, registers, vectors, and addresses") {
     statement("@p ld.global.nc.L1::evict_last.v2.f64 {%f0,%f1}, [%rd3+8];") match {
-      case Statement.Instruction(Instruction(opcode, operands, modifiers, Some(predicate))) =>
+      case Statement.Instruction(
+            instruction @ Instruction.LdGlobalNc(destination, address, None, modifiers, Some(predicate))
+          ) =>
         assertEquals(predicate.negated, false)
-        assertEquals(opcode, Opcode("ld"))
-        assertEquals(modifiers.map(_.name), Vector("global", "nc", "L1::evict_last", "v2", "f64"))
-        assertEquals(operands.size, 2)
-        assert(operands.head.isInstanceOf[Operand.VectorLiteral])
-        assert(operands(1).isInstanceOf[Operand.Address])
+        assertEquals(instruction.opcode, "ld.global.nc")
+        assertEquals(modifiers.map(_.name), Vector("L1::evict_last", "v2", "f64"))
+        assert(destination.isInstanceOf[Operand.VectorLiteral])
+        assert(address.isInstanceOf[Operand.Address])
       case other => fail(s"unexpected statement: $other")
     }
   }

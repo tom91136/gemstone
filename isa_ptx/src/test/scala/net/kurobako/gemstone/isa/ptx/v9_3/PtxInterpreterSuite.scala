@@ -7,7 +7,7 @@ import net.kurobako.gemstone.memory.GuestAddress
 import net.kurobako.gemstone.scheduler.LaunchShape
 import net.kurobako.gemstone.trace.TraceEvent
 
-class PtxInterpreterSuite extends munit.FunSuite {
+final class PtxInterpreterSuite extends munit.FunSuite {
   private val vectorAdd = """
     |.version 8.0
     |.target sm_80

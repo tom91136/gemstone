@@ -36,7 +36,7 @@ object Printer {
     val prefix       = instruction.predication.map(render).map(_ + " ").getOrElse("")
     val operandsText =
       if (instruction.operands.isEmpty) "" else instruction.operands.map(render).mkString(" ", ", ", "")
-    s"$prefix${instruction.mnemonic}$operandsText;"
+    s"$prefix${instruction.qualifiedOpcode}$operandsText;"
   }
 
   def render(statement: Statement): String = statement match {

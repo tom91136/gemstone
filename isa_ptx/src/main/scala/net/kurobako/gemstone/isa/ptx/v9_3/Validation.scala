@@ -41,7 +41,7 @@ enum OperandConstraint {
   * member; optional modifiers may appear independently.
   */
 final case class InstructionForm(
-    mnemonic: String,
+    opcode: String,
     operands: Vector[OperandConstraint],
     requiredModifierGroups: Vector[Set[String]],
     optionalModifiers: Set[String],
@@ -49,11 +49,10 @@ final case class InstructionForm(
 )
 
 enum ValidationError {
-  case UnknownInstruction(mnemonic: String)
-  case VersionTooOld(mnemonic: String, required: PtxVersion, selected: PtxVersion)
-  case TargetTooOld(mnemonic: String, required: SmTarget, selected: SmTarget)
-  case InvalidOperands(mnemonic: String, message: String)
-  case InvalidModifiers(mnemonic: String, message: String)
+  case VersionTooOld(opcode: String, required: PtxVersion, selected: PtxVersion)
+  case TargetTooOld(opcode: String, required: SmTarget, selected: SmTarget)
+  case InvalidOperands(opcode: String, message: String)
+  case InvalidModifiers(opcode: String, message: String)
 }
 
 enum ValidationResult {
@@ -66,47 +65,42 @@ object Validator {
   def validate(
       instruction: Instruction,
       version: PtxVersion,
-      target: SmTarget,
-      catalog: InstructionCatalog = Isa.catalog
+      target: SmTarget
   ): ValidationResult = {
-    val candidates = catalog.byMnemonic.getOrElse(instruction.opcode.mnemonic.toLowerCase, Vector.empty)
-    if (candidates.isEmpty)
-      ValidationResult.Invalid(Vector(ValidationError.UnknownInstruction(instruction.opcode.mnemonic)))
-    else {
-      val available = candidates.filter(info => version >= info.introduced && target >= info.minimumTarget)
-      if (available.isEmpty) {
-        val versionErrors = candidates.filter(_.introduced > version).map(info =>
-          ValidationError.VersionTooOld(instruction.opcode.mnemonic, info.introduced, version)
-        )
-        val targetErrors = candidates.filter(_.minimumTarget > target).map(info =>
-          ValidationError.TargetTooOld(instruction.opcode.mnemonic, info.minimumTarget, target)
-        )
-        ValidationResult.Invalid((versionErrors ++ targetErrors).distinct)
-      } else validateForms(instruction, available.flatMap(_.forms))
-    }
+    val candidates = InstructionsByOpcode(instruction.opcode)
+    val available  = candidates.filter(info => version >= info.introduced && target >= info.minimumTarget)
+    if (available.isEmpty) {
+      val versionErrors = candidates.filter(_.introduced > version).map(info =>
+        ValidationError.VersionTooOld(instruction.opcode, info.introduced, version)
+      )
+      val targetErrors = candidates.filter(_.minimumTarget > target).map(info =>
+        ValidationError.TargetTooOld(instruction.opcode, info.minimumTarget, target)
+      )
+      ValidationResult.Invalid((versionErrors ++ targetErrors).distinct)
+    } else validateForms(instruction, available.flatMap(_.forms).filter(_.opcode == instruction.opcode))
   }
 
   def validate(
       program: Program,
       version: PtxVersion,
-      target: SmTarget,
-      catalog: InstructionCatalog
+      target: SmTarget
   ): ValidationResult = {
     val instructions = collectInstructions(program.statements)
-    val results      = instructions.map(validate(_, version, target, catalog))
+    val results      = instructions.map(validate(_, version, target))
     val errors       = results.collect { case ValidationResult.Invalid(values) => values }.flatten
     if (errors.nonEmpty) ValidationResult.Invalid(errors)
     else results.collectFirst { case value: ValidationResult.Unsupported => value }.getOrElse(ValidationResult.Valid)
   }
 
   private def validateForms(instruction: Instruction, forms: Vector[InstructionForm]): ValidationResult = {
-    if (forms.isEmpty) return ValidationResult.Unsupported(s"no normalized syntax form for ${instruction.mnemonic}")
+    if (forms.isEmpty)
+      return ValidationResult.Unsupported(s"no normalized syntax form for ${instruction.qualifiedOpcode}")
     val sameCount = forms.filter(_.operands.size == instruction.operands.size)
     if (sameCount.isEmpty)
       return ValidationResult.Invalid(
         Vector(
           ValidationError.InvalidOperands(
-            instruction.opcode.mnemonic,
+            instruction.opcode,
             s"expected ${forms.map(_.operands.size).distinct.sorted.mkString(" or ")} operands, found ${instruction.operands.size}"
           )
         )
@@ -117,7 +111,7 @@ object Validator {
     if (matchingMods.isEmpty)
       return ValidationResult.Invalid(
         Vector(ValidationError.InvalidModifiers(
-          instruction.opcode.mnemonic,
+          instruction.opcode,
           s"unsupported modifier set: ${modifiers.toVector.sorted.mkString(".")}"
         ))
       )
@@ -128,11 +122,12 @@ object Validator {
       case None if complete.nonEmpty =>
         ValidationResult.Invalid(
           Vector(ValidationError.InvalidOperands(
-            instruction.opcode.mnemonic,
+            instruction.opcode,
             "operand kinds do not match the syntax form"
           ))
         )
-      case None => ValidationResult.Unsupported(s"syntax form for ${instruction.mnemonic} is not fully normalized")
+      case None =>
+        ValidationResult.Unsupported(s"syntax form for ${instruction.qualifiedOpcode} is not fully normalized")
     }
   }
 

@@ -147,9 +147,9 @@ object Parser {
     }
   }
 
-  private val opcode: P[(Opcode, Vector[Modifier])] =
+  private val opcode: P[(String, Vector[Modifier])] =
     ((segment ~ (P.char('.') *> adjacentSegment).rep0) <* skipped).map { case (mnemonic, modifiers) =>
-      Opcode(mnemonic) -> modifiers.toVector.map(Modifier.apply)
+      mnemonic -> modifiers.toVector.map(Modifier.apply)
     }
 
   private val strictOperands: P0[Vector[Operand]] = separated0(operand.backtrack, comma)
@@ -228,8 +228,8 @@ object Parser {
 
   private val instruction: P[Statement] =
     (predication.backtrack.?.with1 ~ opcode).flatMap { case (predicate, (operation, modifiers)) =>
-      (strictOperands ~ semicolon.backtrack.?).map { case (operands, _) =>
-        Statement.Instruction(Instruction(operation, operands, modifiers, predicate))
+      (strictOperands ~ semicolon.backtrack.?).mapFilter { case (operands, _) =>
+        Instruction.decode(operation, operands, modifiers, predicate).toOption.map(Statement.Instruction.apply)
       }
     }
 
