@@ -74,43 +74,10 @@ final case class Encoding(
     source: MetadataSource
 )
 
-final case class Metadata private[amdgpu] (private val encoded: String) {
-  lazy val encodings: Vector[Encoding] =
-    if (encoded.isEmpty) Vector.empty
-    else encoded.linesIterator.map(Metadata.decode).toVector
-
+final case class Metadata(encodings: Vector[Encoding]) {
   def supports(generation: Generation): Boolean = encodings.exists(_.generation == generation)
   def supports(target: Target): Boolean         =
     encodings.exists(encoding => encoding.generation == target.generation && encoding.target == target.metadataTarget)
-}
-
-object Metadata {
-  private def decode(row: String): Encoding = {
-    val columns  = row.split("\\t", -1)
-    val operands = if (columns(5).isEmpty) Vector.empty
-    else columns(5).split(';').toVector.map { value =>
-      val fields = value.split(",", -1)
-      OperandInfo(
-        option(fields(0)),
-        fields(1),
-        fields(2).toInt,
-        fields(3) == "1",
-        fields(4) == "1",
-        fields(5) == "1"
-      )
-    }
-    Encoding(
-      Generation.valueOf(columns(0)),
-      columns(1),
-      columns(2),
-      columns(3).toInt,
-      operands,
-      option(columns(4)),
-      MetadataSource.valueOf(columns(6))
-    )
-  }
-
-  private def option(value: String): Option[String] = if (value.isEmpty) None else Some(value)
 }
 
 private[amdgpu] def instructionsFor(generation: Generation): Vector[InstructionDef] =

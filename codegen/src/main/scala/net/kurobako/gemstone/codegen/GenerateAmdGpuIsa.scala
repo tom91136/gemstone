@@ -37,8 +37,7 @@ object GenerateAmdGpuIsa {
       definitionName: String,
       caseName: String,
       fields: Vector[Field],
-      operandCount: Int,
-      metadataIndex: Int
+      operandCount: Int
   )
 
   def main(arguments: Array[String]): Unit = arguments.toVector match {
@@ -204,10 +203,7 @@ object GenerateAmdGpuIsa {
         |""".stripMargin
 
   private def renderInstructions(records: Vector[Instruction]): String = {
-    val grouped      = records.groupBy(_.name).toVector.sortBy(_._1)
-    val metadataRows = grouped.map { case (_, definitions) =>
-      s"\"\"\"${definitions.map(encodeMetadata).mkString("\n")}\"\"\""
-    }
+    val metadataByOpcode = records.groupBy(_.name)
     val forms            = instructionForms(records)
     val definitionGroups = forms
       .groupBy(_.opcode)
@@ -218,15 +214,11 @@ object GenerateAmdGpuIsa {
       groups.map(forms => forms.head.opcode -> s"InstructionDefs$chunkIndex.${forms.head.definitionName}")
     }.toMap
     val definitionChunks = definitionGroups.grouped(100).zipWithIndex.map { case (groups, chunkIndex) =>
-      renderDefinitionChunk(chunkIndex, groups)
+      renderDefinitionChunk(chunkIndex, groups, metadataByOpcode)
     }.toVector
     val definitionChunkNames =
       definitionChunks.indices.map(index => s"InstructionDefs$index.definitions").mkString(", ")
     val instructionCases = forms.map(form => renderInstructionCase(form, definitionReferences(form.opcode)))
-    val metadataChunks   = metadataRows.grouped(100).zipWithIndex.map { case (rows, index) =>
-      s"private val MetadataRows$index: Vector[String] = Vector(\n  ${rows.mkString(",\n  ")}\n)"
-    }.toVector
-    val metadataChunkNames = metadataChunks.indices.map(index => s"MetadataRows$index").mkString(", ")
     s"""|// Generated from the pinned Mesa ACO and AMD machine-readable ISA inputs. Do not edit by hand.
         |package net.kurobako.gemstone.isa.amdgpu.common
         |
@@ -251,11 +243,6 @@ object GenerateAmdGpuIsa {
         |    forms.flatMap(_.decode(operands, mods))
         |}
         |
-        |${metadataChunks.mkString("\n\n")}
-        |
-        |private lazy val DefinitionMetadata: Vector[Metadata] =
-        |  Vector($metadataChunkNames).flatten.map(Metadata.apply)
-        |private def metadata(index: Int): Metadata = DefinitionMetadata(index)
         |private def form(
         |    operandCount: Int
         |)(construct: (Vector[Operand], Vector[Modifier]) => Instruction): InstructionFormDecoder =
@@ -363,7 +350,7 @@ object GenerateAmdGpuIsa {
   private def instructionForms(records: Vector[Instruction]): Vector[InstructionForm] = {
     val grouped = records.groupBy(_.name).toVector.sortBy(_._1)
     val names   = uniqueCaseNames(grouped.map(_._1))
-    grouped.zipWithIndex.flatMap { case ((opcode, definitions), metadataIndex) =>
+    grouped.flatMap { case (opcode, definitions) =>
       val rawSignatures = definitions.map(_.operands.filter(!_.implicitOperand)).distinct
       val nonEmpty      = rawSignatures.filter(_.nonEmpty)
       val counts        = (nonEmpty.map(_.size) ++ compatibilityOperandCounts(opcode)).distinct.sorted match {
@@ -377,7 +364,7 @@ object GenerateAmdGpuIsa {
           Field(preferredFieldName(opcode, index, operands, operandCount))
         }
         val caseName = if (counts.size == 1) names(opcode) else s"${names(opcode)}_$operandCount"
-        InstructionForm(opcode, names(opcode), caseName, uniqueFields(fields), operandCount, metadataIndex)
+        InstructionForm(opcode, names(opcode), caseName, uniqueFields(fields), operandCount)
       }
     }
   }
@@ -407,8 +394,12 @@ object GenerateAmdGpuIsa {
     case _                                                                      => Vector.empty
   }
 
-  private def renderDefinitionChunk(index: Int, groups: Vector[Vector[InstructionForm]]): String = {
-    val cases      = groups.map(renderDefinitionCase)
+  private def renderDefinitionChunk(
+      index: Int,
+      groups: Vector[Vector[InstructionForm]],
+      metadataByOpcode: Map[String, Vector[Instruction]]
+  ): String = {
+    val cases      = groups.map(forms => renderDefinitionCase(forms, metadataByOpcode(forms.head.opcode)))
     val references = groups.map(_.head.definitionName).mkString(", ")
     s"""|private object InstructionDefs$index {
         |${cases.mkString("\n")}
@@ -417,7 +408,7 @@ object GenerateAmdGpuIsa {
         |}""".stripMargin
   }
 
-  private def renderDefinitionCase(forms: Vector[InstructionForm]): String = {
+  private def renderDefinitionCase(forms: Vector[InstructionForm], records: Vector[Instruction]): String = {
     val first    = forms.head
     val decoders = forms.map { form =>
       val arguments        = form.fields.indices.map(index => s"operands($index)") :+ "mods"
@@ -427,8 +418,33 @@ object GenerateAmdGpuIsa {
     s"""|  case object ${first.definitionName} extends InstructionDef(
         |    ${literal(first.opcode)},
         |    decoder(${decoders.mkString(", ")}),
-        |    metadata(${first.metadataIndex})
+        |    ${renderMetadata(records)}
         |  )""".stripMargin
+  }
+
+  private def renderMetadata(records: Vector[Instruction]): String = {
+    val encodings = records.map { record =>
+      val operands = record.operands.map { operand =>
+        val field = Option.when(operand.field.nonEmpty)(s"Some(${literal(operand.field)})").getOrElse("None")
+        s"          OperandInfo($field, ${literal(operand.kind)}, ${operand.bits}, ${operand.input}, ${operand.output}, ${operand.implicitOperand})"
+      }
+      val operandVector =
+        if (operands.isEmpty) "Vector.empty"
+        else s"Vector(\n${operands.mkString(",\n")}\n        )"
+      val group = Option.when(record.group.nonEmpty)(s"Some(${literal(record.group)})").getOrElse("None")
+      s"""|      Encoding(
+          |        Generation.${record.generation},
+          |        ${literal(record.target)},
+          |        ${literal(record.format)},
+          |        ${record.opcode},
+          |        $operandVector,
+          |        $group,
+          |        MetadataSource.${record.source}
+          |      )""".stripMargin
+    }
+    s"""|Metadata(Vector(
+        |${encodings.mkString(",\n")}
+        |    ))""".stripMargin
   }
 
   private def renderInstructionCase(form: InstructionForm, definitionReference: String): String = {
@@ -546,28 +562,6 @@ object GenerateAmdGpuIsa {
     s"\"$escaped\""
   }
 
-  private def encodeMetadata(record: Instruction): String = {
-    val operands = record.operands.map { operand =>
-      Vector(
-        operand.field,
-        operand.kind,
-        operand.bits.toString,
-        flag(operand.input),
-        flag(operand.output),
-        flag(operand.implicitOperand)
-      ).mkString(",")
-    }.mkString(";")
-    Vector(
-      safeField(record.generation),
-      safeField(record.target),
-      safeField(record.format),
-      record.opcode.toString,
-      safeField(record.group),
-      operands,
-      safeField(record.source)
-    ).mkString("\t")
-  }
-
   private def generationFor(fileName: String): String = fileName match {
     case "amdgpu_isa_rdna1.xml"   => "Gfx10"
     case "amdgpu_isa_rdna2.xml"   => "Gfx10"
@@ -614,16 +608,6 @@ object GenerateAmdGpuIsa {
     Vector.tabulate(children.getLength)(children.item).collect {
       case child: Element if child.getTagName == name => child
     }
-  }
-
-  private def flag(value: Boolean): String = if (value) "1" else "0"
-
-  private def safeField(value: String): String = {
-    require(
-      !value.exists(char => char == '\t' || char == '\n' || char == '\r' || char == ',' || char == ';'),
-      s"unsafe metadata field: $value"
-    )
-    value
   }
 
   private def write(output: Path, content: String): Unit = {
