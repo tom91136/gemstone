@@ -383,6 +383,7 @@ object ThrustConformanceSuite {
         dispatch.resolve("gemstone_rpc_boundary.c").toString,
         s"-I$generated",
         s"-I$dispatch",
+        s"-I${cudaHeaderInclude(root)}",
         "-Wl,-soname,libcuda.so.1",
         s"-Wl,--version-script=${generated.resolve("gemstone_cuda.map")}",
         "-pthread",
@@ -395,6 +396,25 @@ object ThrustConformanceSuite {
     val link = libraryDir.resolve("libcuda.so")
     Files.deleteIfExists(link)
     val _ = Files.createSymbolicLink(link, library.getFileName)
+  }
+
+  private def cudaHeaderInclude(root: Path): Path = {
+    val target = root.resolve("target/out")
+    require(Files.isDirectory(target), s"prepared API reference root is absent: $target")
+    val stream = Files.find(
+      target,
+      20,
+      (path, attributes) =>
+        attributes.isRegularFile && path.getFileName.toString == "cuda.h" &&
+          path.toString.contains("/gemstone-codegen/isa-references/") &&
+          path.toString.contains("/nvidia/cuda/usr/local/cuda-13.3/targets/")
+    )
+    try
+      stream.iterator.asScala.toVector
+        .maxByOption(path => Files.getLastModifiedTime(path).toMillis)
+        .map(_.getParent)
+        .getOrElse(throw new IllegalStateException("pinned CUDA 13.3 headers were not prepared"))
+    finally stream.close()
   }
 
   private def randomToken(): String = {

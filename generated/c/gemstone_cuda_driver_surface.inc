@@ -8,85 +8,341 @@
   X(cuArrayCreate_v2) \
   X(cuArrayDestroy) \
   X(cuArrayGetDescriptor_v2) \
+  X(cuArrayGetMemoryRequirements) \
+  X(cuArrayGetPlane) \
+  X(cuArrayGetSparseProperties) \
+  X(cuCheckpointProcessCheckpoint) \
+  X(cuCheckpointProcessGetRestoreThreadId) \
+  X(cuCheckpointProcessGetState) \
+  X(cuCheckpointProcessLock) \
+  X(cuCheckpointProcessRestore) \
+  X(cuCheckpointProcessUnlock) \
+  X(cuCoredumpDeregisterCompleteCallback) \
+  X(cuCoredumpDeregisterStartCallback) \
+  X(cuCoredumpGetAttribute) \
+  X(cuCoredumpGetAttributeGlobal) \
+  X(cuCoredumpRegisterCompleteCallback) \
+  X(cuCoredumpRegisterStartCallback) \
+  X(cuCoredumpSetAttribute) \
+  X(cuCoredumpSetAttributeGlobal) \
   X(cuCtxAttach) \
-  X(cuCtxCreate) \
   X(cuCtxCreate_v2) \
-  X(cuCtxDestroy) \
+  X(cuCtxCreate_v4) \
   X(cuCtxDestroy_v2) \
   X(cuCtxDetach) \
+  X(cuCtxDisablePeerAccess) \
+  X(cuCtxEnablePeerAccess) \
+  X(cuCtxFromGreenCtx) \
   X(cuCtxGetApiVersion) \
   X(cuCtxGetCacheConfig) \
+  X(cuCtxGetCurrent) \
+  X(cuCtxGetDevResource) \
   X(cuCtxGetDevice) \
+  X(cuCtxGetDevice_v2) \
+  X(cuCtxGetExecAffinity) \
+  X(cuCtxGetFlags) \
+  X(cuCtxGetId) \
   X(cuCtxGetLimit) \
-  X(cuCtxPopCurrent) \
-  X(cuCtxPushCurrent) \
+  X(cuCtxGetSharedMemConfig) \
+  X(cuCtxGetStreamPriorityRange) \
+  X(cuCtxPopCurrent_v2) \
   X(cuCtxPushCurrent_v2) \
+  X(cuCtxRecordEvent) \
+  X(cuCtxResetPersistingL2Cache) \
   X(cuCtxSetCacheConfig) \
+  X(cuCtxSetCurrent) \
+  X(cuCtxSetFlags) \
   X(cuCtxSetLimit) \
+  X(cuCtxSetSharedMemConfig) \
   X(cuCtxSynchronize) \
+  X(cuCtxSynchronize_v2) \
+  X(cuCtxWaitEvent) \
+  X(cuDestroyExternalMemory) \
+  X(cuDestroyExternalSemaphore) \
+  X(cuDevResourceGenerateDesc) \
+  X(cuDevSmResourceSplit) \
+  X(cuDevSmResourceSplitByCount) \
+  X(cuDeviceCanAccessPeer) \
   X(cuDeviceComputeCapability) \
   X(cuDeviceGet) \
   X(cuDeviceGetAttribute) \
+  X(cuDeviceGetByPCIBusId) \
   X(cuDeviceGetCount) \
+  X(cuDeviceGetDefaultMemPool) \
+  X(cuDeviceGetDevResource) \
+  X(cuDeviceGetExecAffinitySupport) \
+  X(cuDeviceGetGraphMemAttribute) \
+  X(cuDeviceGetHostAtomicCapabilities) \
+  X(cuDeviceGetLuid) \
+  X(cuDeviceGetMemPool) \
   X(cuDeviceGetName) \
+  X(cuDeviceGetNvSciSyncAttributes) \
+  X(cuDeviceGetP2PAtomicCapabilities) \
+  X(cuDeviceGetP2PAttribute) \
+  X(cuDeviceGetPCIBusId) \
   X(cuDeviceGetProperties) \
-  X(cuDevicePrimaryCtxRelease) \
+  X(cuDeviceGetTexture1DLinearMaxWidth) \
+  X(cuDeviceGetUuid_v2) \
+  X(cuDeviceGraphMemTrim) \
+  X(cuDevicePrimaryCtxGetState) \
+  X(cuDevicePrimaryCtxRelease_v2) \
+  X(cuDevicePrimaryCtxReset_v2) \
   X(cuDevicePrimaryCtxRetain) \
-  X(cuDeviceTotalMem) \
+  X(cuDevicePrimaryCtxSetFlags_v2) \
+  X(cuDeviceRegisterAsyncNotification) \
+  X(cuDeviceSetGraphMemAttribute) \
+  X(cuDeviceSetMemPool) \
   X(cuDeviceTotalMem_v2) \
+  X(cuDeviceUnregisterAsyncNotification) \
   X(cuDriverGetVersion) \
   X(cuEventCreate) \
-  X(cuEventDestroy) \
-  X(cuEventElapsedTime) \
+  X(cuEventDestroy_v2) \
+  X(cuEventElapsedTime_v2) \
   X(cuEventQuery) \
   X(cuEventRecord) \
+  X(cuEventRecordWithFlags) \
   X(cuEventSynchronize) \
+  X(cuExternalMemoryGetMappedBuffer) \
+  X(cuExternalMemoryGetMappedMipmappedArray) \
+  X(cuFlushGPUDirectRDMAWrites) \
   X(cuFuncGetAttribute) \
+  X(cuFuncGetModule) \
+  X(cuFuncGetName) \
+  X(cuFuncGetParamCount) \
+  X(cuFuncGetParamInfo) \
+  X(cuFuncIsLoaded) \
+  X(cuFuncLoad) \
+  X(cuFuncSetAttribute) \
   X(cuFuncSetBlockShape) \
   X(cuFuncSetCacheConfig) \
+  X(cuFuncSetSharedMemConfig) \
   X(cuFuncSetSharedSize) \
-  X(cuGLCtxCreate) \
-  X(cuGLInit) \
-  X(cuGLRegisterBufferObject) \
-  X(cuGLSetBufferObjectMapFlags) \
   X(cuGetErrorName) \
   X(cuGetErrorString) \
   X(cuGetExportTable) \
-  X(cuGraphicsGLRegisterBuffer) \
-  X(cuGraphicsGLRegisterImage) \
+  X(cuGetProcAddress_v2) \
+  X(cuGraphAddBatchMemOpNode) \
+  X(cuGraphAddChildGraphNode) \
+  X(cuGraphAddDependencies_v2) \
+  X(cuGraphAddEmptyNode) \
+  X(cuGraphAddEventRecordNode) \
+  X(cuGraphAddEventWaitNode) \
+  X(cuGraphAddExternalSemaphoresSignalNode) \
+  X(cuGraphAddExternalSemaphoresWaitNode) \
+  X(cuGraphAddHostNode) \
+  X(cuGraphAddKernelNode_v2) \
+  X(cuGraphAddMemAllocNode) \
+  X(cuGraphAddMemFreeNode) \
+  X(cuGraphAddMemcpyNode) \
+  X(cuGraphAddMemsetNode) \
+  X(cuGraphAddNode_v2) \
+  X(cuGraphBatchMemOpNodeGetParams) \
+  X(cuGraphBatchMemOpNodeSetParams) \
+  X(cuGraphChildGraphNodeGetGraph) \
+  X(cuGraphClone) \
+  X(cuGraphConditionalHandleCreate) \
+  X(cuGraphCreate) \
+  X(cuGraphDebugDotPrint) \
+  X(cuGraphDestroy) \
+  X(cuGraphDestroyNode) \
+  X(cuGraphEventRecordNodeGetEvent) \
+  X(cuGraphEventRecordNodeSetEvent) \
+  X(cuGraphEventWaitNodeGetEvent) \
+  X(cuGraphEventWaitNodeSetEvent) \
+  X(cuGraphExecBatchMemOpNodeSetParams) \
+  X(cuGraphExecChildGraphNodeSetParams) \
+  X(cuGraphExecDestroy) \
+  X(cuGraphExecEventRecordNodeSetEvent) \
+  X(cuGraphExecEventWaitNodeSetEvent) \
+  X(cuGraphExecExternalSemaphoresSignalNodeSetParams) \
+  X(cuGraphExecExternalSemaphoresWaitNodeSetParams) \
+  X(cuGraphExecGetFlags) \
+  X(cuGraphExecGetId) \
+  X(cuGraphExecHostNodeSetParams) \
+  X(cuGraphExecKernelNodeSetParams_v2) \
+  X(cuGraphExecMemcpyNodeSetParams) \
+  X(cuGraphExecMemsetNodeSetParams) \
+  X(cuGraphExecNodeSetParams) \
+  X(cuGraphExecUpdate_v2) \
+  X(cuGraphExternalSemaphoresSignalNodeGetParams) \
+  X(cuGraphExternalSemaphoresSignalNodeSetParams) \
+  X(cuGraphExternalSemaphoresWaitNodeGetParams) \
+  X(cuGraphExternalSemaphoresWaitNodeSetParams) \
+  X(cuGraphGetEdges_v2) \
+  X(cuGraphGetId) \
+  X(cuGraphGetNodes) \
+  X(cuGraphGetRootNodes) \
+  X(cuGraphHostNodeGetParams) \
+  X(cuGraphHostNodeSetParams) \
+  X(cuGraphInstantiateWithFlags) \
+  X(cuGraphInstantiateWithParams) \
+  X(cuGraphKernelNodeCopyAttributes) \
+  X(cuGraphKernelNodeGetAttribute) \
+  X(cuGraphKernelNodeGetParams_v2) \
+  X(cuGraphKernelNodeSetAttribute) \
+  X(cuGraphKernelNodeSetParams_v2) \
+  X(cuGraphLaunch) \
+  X(cuGraphMemAllocNodeGetParams) \
+  X(cuGraphMemFreeNodeGetParams) \
+  X(cuGraphMemcpyNodeGetParams) \
+  X(cuGraphMemcpyNodeSetParams) \
+  X(cuGraphMemsetNodeGetParams) \
+  X(cuGraphMemsetNodeSetParams) \
+  X(cuGraphNodeFindInClone) \
+  X(cuGraphNodeGetContainingGraph) \
+  X(cuGraphNodeGetDependencies_v2) \
+  X(cuGraphNodeGetDependentNodes_v2) \
+  X(cuGraphNodeGetEnabled) \
+  X(cuGraphNodeGetLocalId) \
+  X(cuGraphNodeGetParams) \
+  X(cuGraphNodeGetToolsId) \
+  X(cuGraphNodeGetType) \
+  X(cuGraphNodeSetEnabled) \
+  X(cuGraphNodeSetParams) \
+  X(cuGraphReleaseUserObject) \
+  X(cuGraphRemoveDependencies_v2) \
+  X(cuGraphRetainUserObject) \
+  X(cuGraphUpload) \
   X(cuGraphicsMapResources) \
+  X(cuGraphicsResourceGetMappedMipmappedArray) \
   X(cuGraphicsResourceGetMappedPointer_v2) \
-  X(cuGraphicsResourceSetMapFlags) \
+  X(cuGraphicsResourceSetMapFlags_v2) \
   X(cuGraphicsSubResourceGetMappedArray) \
   X(cuGraphicsUnmapResources) \
   X(cuGraphicsUnregisterResource) \
+  X(cuGreenCtxCreate) \
+  X(cuGreenCtxDestroy) \
+  X(cuGreenCtxGetDevResource) \
+  X(cuGreenCtxGetId) \
+  X(cuGreenCtxRecordEvent) \
+  X(cuGreenCtxStreamCreate) \
+  X(cuGreenCtxWaitEvent) \
+  X(cuImportExternalMemory) \
+  X(cuImportExternalSemaphore) \
   X(cuInit) \
+  X(cuIpcCloseMemHandle) \
+  X(cuIpcGetEventHandle) \
+  X(cuIpcGetMemHandle) \
+  X(cuIpcOpenEventHandle) \
+  X(cuIpcOpenMemHandle_v2) \
+  X(cuKernelGetAttribute) \
+  X(cuKernelGetFunction) \
+  X(cuKernelGetLibrary) \
+  X(cuKernelGetName) \
+  X(cuKernelGetParamCount) \
+  X(cuKernelGetParamInfo) \
+  X(cuKernelSetAttribute) \
+  X(cuKernelSetCacheConfig) \
   X(cuLaunch) \
+  X(cuLaunchCooperativeKernel) \
+  X(cuLaunchCooperativeKernelMultiDevice) \
   X(cuLaunchGrid) \
   X(cuLaunchGridAsync) \
   X(cuLaunchHostFunc) \
+  X(cuLaunchHostFunc_v2) \
   X(cuLaunchKernel) \
-  X(cuMemAllocHost) \
+  X(cuLaunchKernelEx) \
+  X(cuLibraryEnumerateKernels) \
+  X(cuLibraryGetGlobal) \
+  X(cuLibraryGetKernel) \
+  X(cuLibraryGetKernelCount) \
+  X(cuLibraryGetManaged) \
+  X(cuLibraryGetModule) \
+  X(cuLibraryGetUnifiedFunction) \
+  X(cuLibraryLoadData) \
+  X(cuLibraryLoadFromFile) \
+  X(cuLibraryUnload) \
+  X(cuLinkAddData_v2) \
+  X(cuLinkAddFile_v2) \
+  X(cuLinkComplete) \
+  X(cuLinkCreate_v2) \
+  X(cuLinkDestroy) \
+  X(cuLogicalEndpointAddDevice) \
+  X(cuLogicalEndpointBindAddr) \
+  X(cuLogicalEndpointBindMem) \
+  X(cuLogicalEndpointCreate) \
+  X(cuLogicalEndpointDestroy) \
+  X(cuLogicalEndpointExport) \
+  X(cuLogicalEndpointGetLimits) \
+  X(cuLogicalEndpointIdRelease) \
+  X(cuLogicalEndpointIdReserve) \
+  X(cuLogicalEndpointImport) \
+  X(cuLogicalEndpointQuery) \
+  X(cuLogicalEndpointUnbind) \
+  X(cuLogsCurrent) \
+  X(cuLogsDumpToFile) \
+  X(cuLogsDumpToMemory) \
+  X(cuLogsRegisterCallback) \
+  X(cuLogsUnregisterCallback) \
+  X(cuMemAddressFree) \
+  X(cuMemAddressReserve) \
+  X(cuMemAdvise_v2) \
+  X(cuMemAllocAsync) \
+  X(cuMemAllocFromPoolAsync) \
   X(cuMemAllocHost_v2) \
   X(cuMemAllocManaged) \
   X(cuMemAllocPitch_v2) \
   X(cuMemAlloc_v2) \
+  X(cuMemBatchDecompressAsync) \
+  X(cuMemCreate) \
+  X(cuMemDiscardAndPrefetchBatchAsync) \
+  X(cuMemDiscardBatchAsync) \
+  X(cuMemExportToShareableHandle) \
+  X(cuMemFreeAsync) \
   X(cuMemFreeHost) \
   X(cuMemFree_v2) \
+  X(cuMemGetAccess) \
   X(cuMemGetAddressRange_v2) \
+  X(cuMemGetAllocationGranularity) \
+  X(cuMemGetAllocationPropertiesFromHandle) \
+  X(cuMemGetDefaultMemPool) \
+  X(cuMemGetHandleForAddressRange) \
   X(cuMemGetInfo_v2) \
+  X(cuMemGetMemPool) \
   X(cuMemHostAlloc) \
   X(cuMemHostGetDevicePointer_v2) \
   X(cuMemHostGetFlags) \
+  X(cuMemHostRegister_v2) \
+  X(cuMemHostUnregister) \
+  X(cuMemImportFromShareableHandle) \
+  X(cuMemMap) \
+  X(cuMemMapArrayAsync) \
+  X(cuMemPoolCreate) \
+  X(cuMemPoolDestroy) \
+  X(cuMemPoolExportPointer) \
+  X(cuMemPoolExportToShareableHandle) \
+  X(cuMemPoolGetAccess) \
+  X(cuMemPoolGetAttribute) \
+  X(cuMemPoolImportFromShareableHandle) \
+  X(cuMemPoolImportPointer) \
+  X(cuMemPoolSetAccess) \
+  X(cuMemPoolSetAttribute) \
+  X(cuMemPoolTrimTo) \
+  X(cuMemPrefetchAsync_v2) \
+  X(cuMemPrefetchBatchAsync) \
+  X(cuMemRangeGetAttribute) \
+  X(cuMemRangeGetAttributes) \
+  X(cuMemRelease) \
+  X(cuMemRetainAllocationHandle) \
+  X(cuMemSetAccess) \
+  X(cuMemSetMemPool) \
+  X(cuMemUnmap) \
+  X(cuMemcpy) \
   X(cuMemcpy2DAsync_v2) \
   X(cuMemcpy2DUnaligned_v2) \
   X(cuMemcpy2D_v2) \
   X(cuMemcpy3DAsync_v2) \
+  X(cuMemcpy3DBatchAsync_v2) \
+  X(cuMemcpy3DPeer) \
+  X(cuMemcpy3DPeerAsync) \
+  X(cuMemcpy3DWithAttributesAsync) \
   X(cuMemcpy3D_v2) \
+  X(cuMemcpyAsync) \
   X(cuMemcpyAtoA_v2) \
   X(cuMemcpyAtoD_v2) \
   X(cuMemcpyAtoHAsync_v2) \
   X(cuMemcpyAtoH_v2) \
+  X(cuMemcpyBatchAsync_v2) \
   X(cuMemcpyDtoA_v2) \
   X(cuMemcpyDtoDAsync_v2) \
   X(cuMemcpyDtoD_v2) \
@@ -96,7 +352,9 @@
   X(cuMemcpyHtoA_v2) \
   X(cuMemcpyHtoDAsync_v2) \
   X(cuMemcpyHtoD_v2) \
-  X(cuMemcpyHtoH_v2) \
+  X(cuMemcpyPeer) \
+  X(cuMemcpyPeerAsync) \
+  X(cuMemcpyWithAttributesAsync) \
   X(cuMemsetD16Async) \
   X(cuMemsetD16_v2) \
   X(cuMemsetD2D16Async) \
@@ -109,8 +367,16 @@
   X(cuMemsetD32_v2) \
   X(cuMemsetD8Async) \
   X(cuMemsetD8_v2) \
+  X(cuMipmappedArrayCreate) \
+  X(cuMipmappedArrayDestroy) \
+  X(cuMipmappedArrayGetLevel) \
+  X(cuMipmappedArrayGetMemoryRequirements) \
+  X(cuMipmappedArrayGetSparseProperties) \
+  X(cuModuleEnumerateFunctions) \
   X(cuModuleGetFunction) \
+  X(cuModuleGetFunctionCount) \
   X(cuModuleGetGlobal_v2) \
+  X(cuModuleGetLoadingMode) \
   X(cuModuleGetSurfRef) \
   X(cuModuleGetTexRef) \
   X(cuModuleLoad) \
@@ -118,34 +384,108 @@
   X(cuModuleLoadDataEx) \
   X(cuModuleLoadFatBinary) \
   X(cuModuleUnload) \
+  X(cuMulticastAddDevice) \
+  X(cuMulticastBindAddr) \
+  X(cuMulticastBindAddr_v2) \
+  X(cuMulticastBindMem) \
+  X(cuMulticastBindMem_v2) \
+  X(cuMulticastCreate) \
+  X(cuMulticastGetGranularity) \
+  X(cuMulticastUnbind) \
+  X(cuOccupancyAvailableDynamicSMemPerBlock) \
+  X(cuOccupancyMaxActiveBlocksPerMultiprocessor) \
+  X(cuOccupancyMaxActiveBlocksPerMultiprocessorWithFlags) \
+  X(cuOccupancyMaxActiveClusters) \
+  X(cuOccupancyMaxPotentialBlockSize) \
+  X(cuOccupancyMaxPotentialBlockSizeWithFlags) \
+  X(cuOccupancyMaxPotentialClusterSize) \
   X(cuParamSetSize) \
   X(cuParamSetTexRef) \
   X(cuParamSetf) \
   X(cuParamSeti) \
   X(cuParamSetv) \
+  X(cuPointerGetAttribute) \
+  X(cuPointerGetAttributes) \
+  X(cuPointerSetAttribute) \
+  X(cuSignalExternalSemaphoresAsync) \
   X(cuStreamAddCallback) \
+  X(cuStreamAttachMemAsync) \
+  X(cuStreamBatchMemOp_v2) \
+  X(cuStreamBeginCaptureToCig) \
+  X(cuStreamBeginCaptureToGraph) \
+  X(cuStreamBeginCapture_v2) \
+  X(cuStreamBeginRecaptureToGraph) \
+  X(cuStreamCopyAttributes) \
   X(cuStreamCreate) \
-  X(cuStreamDestroy) \
+  X(cuStreamCreateWithPriority) \
   X(cuStreamDestroy_v2) \
+  X(cuStreamEndCapture) \
+  X(cuStreamEndCaptureToCig) \
+  X(cuStreamGetAttribute) \
+  X(cuStreamGetCaptureInfo_v3) \
+  X(cuStreamGetCtx) \
+  X(cuStreamGetCtx_v2) \
+  X(cuStreamGetDevResource) \
+  X(cuStreamGetDevice) \
+  X(cuStreamGetFlags) \
+  X(cuStreamGetGreenCtx) \
+  X(cuStreamGetId) \
+  X(cuStreamGetPriority) \
+  X(cuStreamIsCapturing) \
   X(cuStreamQuery) \
+  X(cuStreamSetAttribute) \
   X(cuStreamSynchronize) \
+  X(cuStreamUpdateCaptureDependencies_v2) \
   X(cuStreamWaitEvent) \
+  X(cuStreamWaitValue32_v2) \
+  X(cuStreamWaitValue64_v2) \
+  X(cuStreamWriteValue32_v2) \
+  X(cuStreamWriteValue64_v2) \
+  X(cuSurfObjectCreate) \
+  X(cuSurfObjectDestroy) \
+  X(cuSurfObjectGetResourceDesc) \
   X(cuSurfRefGetArray) \
   X(cuSurfRefSetArray) \
+  X(cuTensorMapEncodeIm2col) \
+  X(cuTensorMapEncodeIm2colWide) \
+  X(cuTensorMapEncodeTiled) \
+  X(cuTensorMapReplaceAddress) \
+  X(cuTexObjectCreate) \
+  X(cuTexObjectDestroy) \
+  X(cuTexObjectGetResourceDesc) \
+  X(cuTexObjectGetResourceViewDesc) \
+  X(cuTexObjectGetTextureDesc) \
   X(cuTexRefCreate) \
   X(cuTexRefDestroy) \
   X(cuTexRefGetAddressMode) \
   X(cuTexRefGetAddress_v2) \
   X(cuTexRefGetArray) \
+  X(cuTexRefGetBorderColor) \
   X(cuTexRefGetFilterMode) \
   X(cuTexRefGetFlags) \
   X(cuTexRefGetFormat) \
-  X(cuTexRefSetAddress2D_v2) \
+  X(cuTexRefGetMaxAnisotropy) \
+  X(cuTexRefGetMipmapFilterMode) \
+  X(cuTexRefGetMipmapLevelBias) \
+  X(cuTexRefGetMipmapLevelClamp) \
+  X(cuTexRefGetMipmappedArray) \
+  X(cuTexRefSetAddress2D_v3) \
   X(cuTexRefSetAddressMode) \
   X(cuTexRefSetAddress_v2) \
   X(cuTexRefSetArray) \
+  X(cuTexRefSetBorderColor) \
   X(cuTexRefSetFilterMode) \
   X(cuTexRefSetFlags) \
-  X(cuTexRefSetFormat)
+  X(cuTexRefSetFormat) \
+  X(cuTexRefSetMaxAnisotropy) \
+  X(cuTexRefSetMipmapFilterMode) \
+  X(cuTexRefSetMipmapLevelBias) \
+  X(cuTexRefSetMipmapLevelClamp) \
+  X(cuTexRefSetMipmappedArray) \
+  X(cuThreadExchangeStreamCaptureMode) \
+  X(cuUserObjectCreate) \
+  X(cuUserObjectRelease) \
+  X(cuUserObjectRetain) \
+  X(cuWaitExternalSemaphoresAsync)
 
 #endif

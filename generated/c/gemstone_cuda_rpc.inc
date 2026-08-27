@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 
-#define GEMSTONE_CUDA_RPC_SCHEMA_FINGERPRINT "1ae87a17c50a68a74c188e6e082f84ea151d7977ddc8201c323a240c64510069"
+#define GEMSTONE_CUDA_RPC_SCHEMA_FINGERPRINT "4aa09e44add4ef88141eca24add2130cbb31a2d28bb67f1f4b9ebf5a432f28c3"
 #define GEMSTONE_CUDA_RPC_METHODS(X) \
   X(__cudaGemstoneManagedRegister, UINT64_C(0xc6207aea8d73f5ba), UINT64_C(0x2db4cd6e3a364b1a)) \
   X(__cudaGemstoneManagedUnregister, UINT64_C(0x93e5439ad242c3c0), UINT64_C(0x8e20904fec96004c)) \

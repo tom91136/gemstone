@@ -1,8 +1,11 @@
 package net.kurobako.gemstone.vendor
 
-import net.kurobako.gemstone.cuda.CUDAResult
+import net.kurobako.gemstone.abi.CountedBy
+import net.kurobako.gemstone.abi.One
+import net.kurobako.gemstone.abi.Pointer
+import net.kurobako.gemstone.cuda.CUDAModule
+import net.kurobako.gemstone.cuda.CUDAStatus
 import net.kurobako.gemstone.cuda.DevicePtr
-import net.kurobako.gemstone.cuda.HostInput
 import net.kurobako.gemstone.cuda.ModuleImage
 import net.kurobako.gemstone.cuda.SizeT
 import net.kurobako.gemstone.generated.GeneratedCUDARPC
@@ -12,10 +15,12 @@ import net.kurobako.gemstone.rpc.RPCTransport
 
 class CUDAEmulatorServerSuite extends munit.FunSuite {
   test("unimplemented Driver methods return CUDA_ERROR_NOT_SUPPORTED locally") {
-    new CUDAEmulatorServer().cuModuleLoadData(ModuleImage(IArray.empty[Byte])) match {
-      case CUDAResult.Failure(error) => assertEquals(error.code, 801)
-      case CUDAResult.Success(value) => fail(s"unsupported backend loaded module $value")
-    }
+    val module = Pointer.output[CUDAModule, One](1)
+    assertEquals(
+      new CUDAEmulatorServer().cuModuleLoadData(module, ModuleImage(IArray.empty[Byte])),
+      CUDAStatus.NotSupported
+    )
+    assertEquals(module.snapshot, None)
   }
 
   test("generated client and dispatcher round-trip allocation and bytes") {
@@ -26,21 +31,19 @@ class CUDAEmulatorServerSuite extends munit.FunSuite {
     }
     val client = new GeneratedCUDARPC.Client(transport)
 
-    val pointer = client.cudaMalloc(SizeT(4L)) match {
-      case CUDAResult.Success(value) => value
-      case CUDAResult.Failure(error) => fail(error.toString)
-    }
-    assert(pointer.address != DevicePtr.Null.address)
+    val allocated = Pointer.output[DevicePtr, One](1)
+    assertEquals(client.cudaMalloc(allocated, SizeT(4L)), CUDAStatus.Success)
+    val pointer = allocated.snapshot.flatMap(_.headOption).getOrElse(fail("cudaMalloc did not initialize its output"))
+    assert(pointer.address != DevicePtr.Null.address, "cudaMalloc returned the null pointer")
+    val input = Pointer.input[Byte, CountedBy["ByteCount"]](IArray[Byte](10, 20, 30, 40))
     assertEquals(
-      client.cuMemcpyHtoD_v2(pointer, HostInput(IArray[Byte](10, 20, 30, 40))),
-      CUDAResult.Success(())
+      client.cuMemcpyHtoD_v2(pointer, input, SizeT(4L)),
+      CUDAStatus.Success
     )
-    val output = client.cuMemcpyDtoH_v2(pointer, SizeT(4L)) match {
-      case CUDAResult.Success(value) => value
-      case CUDAResult.Failure(error) => fail(error.toString)
-    }
-    assertEquals(output.bytes.toSeq, Seq[Byte](10, 20, 30, 40))
-    assertEquals(client.cudaFree(pointer), CUDAResult.Success(()))
+    val output = Pointer.output[Byte, CountedBy["ByteCount"]](4)
+    assertEquals(client.cuMemcpyDtoH_v2(output, pointer, SizeT(4L)), CUDAStatus.Success)
+    assertEquals(output.snapshot.getOrElse(Vector.empty), Vector[Byte](10, 20, 30, 40))
+    assertEquals(client.cudaFree(pointer), CUDAStatus.Success)
   }
 
   test("generated dispatcher rejects a correct ID paired with the wrong name") {
@@ -53,7 +56,9 @@ class CUDAEmulatorServerSuite extends munit.FunSuite {
         GeneratedCUDARPC.Dispatcher.dispatch(request, server)
       }
     }
-    assertEquals(new GeneratedCUDARPC.Client(capture).cudaGetDeviceCount(), CUDAResult.Success(1))
+    val count = Pointer.output[Int, One](1)
+    assertEquals(new GeneratedCUDARPC.Client(capture).cudaGetDeviceCount(count), CUDAStatus.Success)
+    assertEquals(count.snapshot.flatMap(_.headOption), Some(1))
     val request = validRequest.head.copy(functionName = "cuDeviceGetCount")
     GeneratedCUDARPC.Dispatcher.dispatch(request, server) match {
       case RPCResponse.Failure(_) => ()

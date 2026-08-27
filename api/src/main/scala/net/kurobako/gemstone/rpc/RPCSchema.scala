@@ -21,29 +21,58 @@ enum WireType {
   case FunctionName
   case KernelFunction
   case KernelLaunch
+  case Stream
+  case ByteBuffer
+  case KernelParameters
+  case NullableOpaquePointer
+  case CUDAStatus
 
   /** Stable protocol spelling. Scala identifier casing may evolve without silently changing the RPC schema. */
   def protocolName: String = this match {
-    case UnitValue      => "UnitValue"
-    case Int32          => "Int32"
-    case UInt8          => "UInt8"
-    case UInt32         => "UInt32"
-    case SizeT          => "SizeT"
-    case Device         => "Device"
-    case DevicePtr      => "DevicePtr"
-    case Context        => "Context"
-    case CUDAModule     => "CudaModule"
-    case CUDAFunction   => "CudaFunction"
-    case HostInput      => "HostInput"
-    case HostOutput     => "HostOutput"
-    case ModuleImage    => "ModuleImage"
-    case FunctionName   => "FunctionName"
-    case KernelFunction => "KernelFunction"
-    case KernelLaunch   => "KernelLaunch"
+    case UnitValue             => "UnitValue"
+    case Int32                 => "Int32"
+    case UInt8                 => "UInt8"
+    case UInt32                => "UInt32"
+    case SizeT                 => "SizeT"
+    case Device                => "Device"
+    case DevicePtr             => "DevicePtr"
+    case Context               => "Context"
+    case CUDAModule            => "CudaModule"
+    case CUDAFunction          => "CudaFunction"
+    case HostInput             => "HostInput"
+    case HostOutput            => "HostOutput"
+    case ModuleImage           => "ModuleImage"
+    case FunctionName          => "FunctionName"
+    case KernelFunction        => "KernelFunction"
+    case KernelLaunch          => "KernelLaunch"
+    case Stream                => "Stream"
+    case ByteBuffer            => "ByteBuffer"
+    case KernelParameters      => "KernelParameters"
+    case NullableOpaquePointer => "NullableOpaquePointer"
+    case CUDAStatus            => "CUDAStatus"
   }
 }
 
-final case class RPCParameter(name: String, wireType: WireType)
+enum WireDirection {
+  case In
+  case Out
+  case InOut
+}
+
+enum WireExtent {
+  case Value
+  case One
+  case Opaque
+  case CountedBy(parameter: String)
+  case Fixed(count: Int)
+}
+
+final case class RPCParameter(
+    name: String,
+    wireType: WireType,
+    direction: WireDirection = WireDirection.In,
+    extent: WireExtent = WireExtent.Value
+)
 
 final case class RPCMethod(
     name: String,
@@ -75,6 +104,12 @@ enum WireValue {
   case FunctionNameValue(value: net.kurobako.gemstone.cuda.FunctionName)
   case KernelFunctionValue(value: net.kurobako.gemstone.cuda.KernelFunction)
   case KernelLaunchValue(value: net.kurobako.gemstone.cuda.KernelLaunch)
+  case StreamValue(value: net.kurobako.gemstone.cuda.Stream)
+  case ByteBufferValue(value: IArray[Byte])
+  case KernelParametersValue(value: net.kurobako.gemstone.cuda.KernelParameters)
+  case NullableOpaquePointerValue(present: Boolean)
+  case CUDAStatusValue(value: net.kurobako.gemstone.cuda.CUDAStatus)
+  case CallResult(status: net.kurobako.gemstone.cuda.CUDAStatus, outputs: Vector[WireValue])
 }
 
 final case class RPCRequest(

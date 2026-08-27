@@ -7,16 +7,16 @@ import scala.compiletime.testing.typeCheckErrors
 class RPCDerivationSuite extends munit.FunSuite {
   private val schema = RPCDerivation.schema[CUDA]
 
-  test("CUDA trait owns the complete GPUOcelot Driver surface") {
+  test("CUDA trait owns the complete pinned Driver surface plus the legacy v2 context entry point") {
     val driver = RPCDerivation.methodNames[CUDA].filter(name => name.startsWith("cu") && !name.startsWith("cuda"))
-    assertEquals(driver.size, 144)
-    assertEquals(driver.distinct.size, 144)
+    assertEquals(driver.size, 484)
+    assertEquals(driver.distinct.size, 484)
     assert(driver.contains("cuMemAlloc_v2"))
     assert(driver.contains("cuLaunchKernel"))
   }
 
   test("derives stable identities solely from exact C function names") {
-    assertEquals(schema.methods.size, 20)
+    assertEquals(schema.methods.size, 22)
     assertEquals(schema.methods.map(_.name), schema.methods.map(_.name).sorted)
     assertEquals(schema.methods.map(_.name).distinct.size, schema.methods.size)
     assertEquals(schema.methods.map(_.messageId).distinct.size, schema.methods.size)
@@ -26,10 +26,10 @@ class RPCDerivationSuite extends munit.FunSuite {
 
   test("rejects a Scala name that is not a CUDA C symbol") {
     val errors = typeCheckErrors("""
-      import net.kurobako.gemstone.cuda.CUDAResult
+      import net.kurobako.gemstone.cuda.CUDAStatus
       import net.kurobako.gemstone.rpc.RPCDerivation
       trait InvalidName {
-        def free(pointer: Long): CUDAResult[Unit]
+        def free(pointer: Long): CUDAStatus
       }
       RPCDerivation.schema[InvalidName]
     """)
@@ -38,11 +38,11 @@ class RPCDerivationSuite extends munit.FunSuite {
 
   test("rejects overloaded endpoints") {
     val errors = typeCheckErrors("""
-      import net.kurobako.gemstone.cuda.CUDAResult
+      import net.kurobako.gemstone.cuda.CUDAStatus
       import net.kurobako.gemstone.rpc.RPCDerivation
       trait Overloaded {
-        def cuThing(value: Int): CUDAResult[Unit]
-        def cuThing(value: Int, other: Int): CUDAResult[Unit]
+        def cuThing(value: Int): CUDAStatus
+        def cuThing(value: Int, other: Int): CUDAStatus
       }
       RPCDerivation.schema[Overloaded]
     """)
@@ -51,10 +51,10 @@ class RPCDerivationSuite extends munit.FunSuite {
 
   test("rejects a parameter without an explicit wire type") {
     val errors = typeCheckErrors("""
-      import net.kurobako.gemstone.cuda.CUDAResult
+      import net.kurobako.gemstone.cuda.CUDAStatus
       import net.kurobako.gemstone.rpc.RPCDerivation
       trait UnsafePointer {
-        def cuUnsafe(pointer: Long): CUDAResult[Unit]
+        def cuUnsafe(pointer: Long): CUDAStatus
       }
       RPCDerivation.schema[UnsafePointer]
     """)

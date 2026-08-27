@@ -6,15 +6,41 @@ import scala.quoted.Type
 import scala.quoted.Varargs
 
 object ABIDerivation {
-  inline def methods[T]: Vector[ABIMethod]    = ${ methodsImpl[T] }
-  inline def cFunctions[T]: Vector[CFunction] = ${ cFunctionsImpl[T] }
+  inline def methods[T]: Vector[ABIMethod]              = ${ methodsImpl[T] }
+  inline def cFunctions[T]: Vector[CFunction]           = ${ cFunctionsImpl[T] }
+  inline def nativeDelegates[T]: Vector[ABIDeclaration] = ${ nativeDelegatesImpl[T] }
+
+  private def nativeDelegatesImpl[T: Type](using quotes: Quotes): Expr[Vector[ABIDeclaration]] = {
+    import quotes.reflect.*
+    val interface = TypeRepr.of[T].typeSymbol
+    if (!interface.flags.is(Flags.Trait)) report.errorAndAbort(s"ABI interface must be a trait: ${interface.fullName}")
+    val methods = publicMethods(interface).filter(method => nativeDelegate(method).nonEmpty)
+    rejectOverloads(methods)
+    val expressions = methods.map { method =>
+      val signature = annotationString(method, "net.kurobako.gemstone.abi.CSignature", "CSignature")
+        .getOrElse(abortAt(method, s"native delegate ${method.name} is missing CSignature"))
+      val parameterNames = method.paramSymss.flatten.map(parameter => Expr(parameter.name))
+      val target         = nativeDelegate(method).get
+      '{
+        ABIDeclaration(
+          ${ Expr(method.name) },
+          ${ Expr(signature) },
+          Vector(${ Varargs(parameterNames) }*),
+          MethodImplementation.NativeDelegate(${ Expr(target) })
+        )
+      }
+    }
+    '{ Vector(${ Varargs(expressions) }*) }
+  }
 
   private def cFunctionsImpl[T: Type](using quotes: Quotes): Expr[Vector[CFunction]] = {
     import quotes.reflect.*
 
     val interface = TypeRepr.of[T].typeSymbol
     if (!interface.flags.is(Flags.Trait)) report.errorAndAbort(s"ABI interface must be a trait: ${interface.fullName}")
-    val methods = publicMethods(interface)
+    val methods = publicMethods(interface).filter(method =>
+      method.annotations.exists(_.tpe.typeSymbol.fullName == "net.kurobako.gemstone.abi.CSignature")
+    )
     rejectOverloads(methods)
     val expressions = methods.map { method =>
       val signature = annotationString(method, "net.kurobako.gemstone.abi.CSignature", "CSignature")
@@ -37,16 +63,22 @@ object ABIDerivation {
       if (!method.name.matches("[A-Za-z_][A-Za-z0-9_]*"))
         abortAt(method, s"ABI method name must be its exact C identifier: ${method.name}")
 
-      val implementation =
-        if (method.flags.is(Flags.Deferred)) '{ MethodImplementation.Remote }
-        else
-          nativeDelegate(method).fold[Expr[MethodImplementation]]('{ MethodImplementation.Unsupported }) { target =>
-            '{ MethodImplementation.NativeDelegate(${ Expr(target) }) }
-          }
+      val implementation = implementationExpression(method)
       '{ ABIMethod(${ Expr(method.name) }, $implementation) }
     }
     '{ Vector(${ Varargs(expressions) }*) }
   }
+
+  private def implementationExpression(using
+      quotes: Quotes
+  )(
+      method: quotes.reflect.Symbol
+  ): Expr[MethodImplementation] =
+    if (method.flags.is(quotes.reflect.Flags.Deferred)) '{ MethodImplementation.Remote }
+    else
+      nativeDelegate(method).fold[Expr[MethodImplementation]]('{ MethodImplementation.Unsupported }) { target =>
+        '{ MethodImplementation.NativeDelegate(${ Expr(target) }) }
+      }
 
   private def publicMethods(using quotes: Quotes)(interface: quotes.reflect.Symbol): Vector[quotes.reflect.Symbol] = {
     import quotes.reflect.*

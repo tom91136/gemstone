@@ -72,6 +72,14 @@ object CUDAFunction {
   extension (function: CUDAFunction) def handle: Long = function
 }
 
+opaque type Stream = Long
+
+object Stream {
+  val Default: Stream                         = 0L
+  def apply(handle: Long): Stream             = handle
+  extension (stream: Stream) def handle: Long = stream
+}
+
 final case class HostInput(bytes: IArray[Byte])
 final case class HostOutput(bytes: IArray[Byte])
 
@@ -91,6 +99,7 @@ final case class FunctionName(value: String) {
 final case class KernelFunction(handle: CUDAFunction, parameterWidths: IArray[Byte])
 
 final case class KernelArgument(bytes: IArray[Byte])
+final case class KernelParameters(arguments: IArray[KernelArgument])
 
 /** Fully copied launch data; no native process pointer crosses the RPC boundary. */
 final case class KernelLaunch(
@@ -105,6 +114,28 @@ final case class KernelLaunch(
 )
 
 final case class CUDAError(code: Int, message: String)
+
+/** Status returned by the CUDA Driver and Runtime C APIs. Transport failures are represented separately by
+  * `CUDAResult.Failure`; a successfully transported API call always returns one of these vendor status values.
+  */
+opaque type CUDAStatus = Int
+
+object CUDAStatus {
+  val Success: CUDAStatus             = 0
+  val InvalidValue: CUDAStatus        = 1
+  val InitializationError: CUDAStatus = 3
+  val InvalidDevice: CUDAStatus       = 101
+  val InvalidContext: CUDAStatus      = 201
+  val NotSupported: CUDAStatus        = 801
+  val Unknown: CUDAStatus             = 999
+
+  def apply(code: Int): CUDAStatus = code
+
+  extension (status: CUDAStatus) {
+    def code: Int          = status
+    def isSuccess: Boolean = status == Success
+  }
+}
 
 enum CUDAResult[+A] {
   case Success(value: A)

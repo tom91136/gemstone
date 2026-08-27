@@ -120,6 +120,7 @@ type size_t                               = CValue["size_t"]
 type textureReference                     = CValue["textureReference"]
 type uint32_t                             = CValue["uint32_t"]
 type uint64_t                             = CValue["uint64_t"]
+type unsigned_char                        = CValue["unsigned char"]
 type unsigned_int                         = CValue["unsigned int"]
 type unsigned_long_long                   = CValue["unsigned long long"]
 type unsigned_short                       = CValue["unsigned short"]
@@ -160,7 +161,7 @@ trait HIP {
   def hipBindTexture(
       offset: Pointer[size_t, ReadWrite, Opaque],
       tex: Pointer[textureReference, Read, Opaque],
-      devPtr: Pointer[Unit, Read, Opaque],
+      devPtr: Pointer[CVoid, Read, Opaque],
       desc: Pointer[hipChannelFormatDesc, Read, Opaque],
       size: size_t
   ): hipError_t = unsupported
@@ -170,7 +171,7 @@ trait HIP {
   def hipBindTexture2D(
       offset: Pointer[size_t, ReadWrite, Opaque],
       tex: Pointer[textureReference, Read, Opaque],
-      devPtr: Pointer[Unit, Read, Opaque],
+      devPtr: Pointer[CVoid, Read, Opaque],
       desc: Pointer[hipChannelFormatDesc, Read, Opaque],
       width: size_t,
       height: size_t,
@@ -287,7 +288,7 @@ trait HIP {
   def hipDeviceGetGraphMemAttribute(
       device: Int,
       attr: hipGraphMemAttributeType,
-      value: Pointer[Unit, ReadWrite, Opaque]
+      value: Pointer[CVoid, ReadWrite, Opaque]
   ): hipError_t = unsupported
   @CSignature("hipError_t (size_t *, enum hipLimit_t)")
   def hipDeviceGetLimit(pValue: Pointer[size_t, ReadWrite, Opaque], limit: hipLimit_t): hipError_t = unsupported
@@ -343,7 +344,7 @@ trait HIP {
   def hipDeviceSetGraphMemAttribute(
       device: Int,
       attr: hipGraphMemAttributeType,
-      value: Pointer[Unit, ReadWrite, Opaque]
+      value: Pointer[CVoid, ReadWrite, Opaque]
   ): hipError_t = unsupported
   @CSignature("hipError_t (enum hipLimit_t, size_t)")
   def hipDeviceSetLimit(limit: hipLimit_t, value: size_t): hipError_t = unsupported
@@ -425,8 +426,8 @@ trait HIP {
   def hipDrvLaunchKernelEx(
       config: Pointer[HIP_LAUNCH_CONFIG, Read, Opaque],
       f: hipFunction_t,
-      params: Pointer[Pointer[Unit, ReadWrite, Opaque], ReadWrite, Opaque],
-      extra: Pointer[Pointer[Unit, ReadWrite, Opaque], ReadWrite, Opaque]
+      params: Pointer[Pointer[CVoid, ReadWrite, Opaque], ReadWrite, Opaque],
+      extra: Pointer[Pointer[CVoid, ReadWrite, Opaque], ReadWrite, Opaque]
   ): hipError_t = unsupported
   @CSignature("hipError_t (const hip_Memcpy2D *)")
   def hipDrvMemcpy2DUnaligned(pCopy: Pointer[hip_Memcpy2D, Read, Opaque]): hipError_t = unsupported
@@ -438,7 +439,7 @@ trait HIP {
   def hipDrvPointerGetAttributes(
       numAttributes: unsigned_int,
       attributes: Pointer[hipPointer_attribute, ReadWrite, Opaque],
-      data: Pointer[Pointer[Unit, ReadWrite, Opaque], ReadWrite, Opaque],
+      data: Pointer[Pointer[CVoid, ReadWrite, Opaque], ReadWrite, Opaque],
       ptr: hipDeviceptr_t
   ): hipError_t = unsupported
   @CSignature("hipError_t (hipEvent_t *)")
@@ -472,10 +473,10 @@ trait HIP {
   ): hipError_t = unsupported
   @CSignature("hipError_t (const void *, dim3, dim3, void **, size_t, hipStream_t, hipEvent_t, hipEvent_t, int)")
   def hipExtLaunchKernel(
-      function_address: Pointer[Unit, Read, Opaque],
+      function_address: Pointer[CVoid, Read, Opaque],
       numBlocks: dim3,
       dimBlocks: dim3,
-      args: Pointer[Pointer[Unit, ReadWrite, Opaque], ReadWrite, Opaque],
+      args: Pointer[Pointer[CVoid, ReadWrite, Opaque], ReadWrite, Opaque],
       sharedMemBytes: size_t,
       stream: hipStream_t,
       startEvent: hipEvent_t,
@@ -490,7 +491,7 @@ trait HIP {
   ): hipError_t = unsupported
   @CSignature("hipError_t (void **, size_t, unsigned int)")
   def hipExtMallocWithFlags(
-      ptr: Pointer[Pointer[Unit, ReadWrite, Opaque], ReadWrite, Opaque],
+      ptr: Pointer[Pointer[CVoid, ReadWrite, Opaque], ReadWrite, Opaque],
       sizeBytes: size_t,
       flags: unsigned_int
   ): hipError_t = unsupported
@@ -508,7 +509,7 @@ trait HIP {
   ): hipError_t = unsupported
   @CSignature("hipError_t (void **, hipExternalMemory_t, const hipExternalMemoryBufferDesc *)")
   def hipExternalMemoryGetMappedBuffer(
-      devPtr: Pointer[Pointer[Unit, ReadWrite, Opaque], ReadWrite, Opaque],
+      devPtr: Pointer[Pointer[CVoid, ReadWrite, Opaque], ReadWrite, Opaque],
       extMem: hipExternalMemory_t,
       bufferDesc: Pointer[hipExternalMemoryBufferDesc, Read, Opaque]
   ): hipError_t = unsupported
@@ -519,13 +520,13 @@ trait HIP {
       mipmapDesc: Pointer[hipExternalMemoryMipmappedArrayDesc, Read, Opaque]
   ): hipError_t = unsupported
   @CSignature("hipError_t (void *)")
-  def hipFree(ptr: Pointer[Unit, ReadWrite, Opaque]): hipError_t = unsupported
+  def hipFree(ptr: Pointer[CVoid, ReadWrite, Opaque]): hipError_t = unsupported
   @CSignature("hipError_t (hipArray_t)")
   def hipFreeArray(array: hipArray_t): hipError_t = unsupported
   @CSignature("hipError_t (void *, hipStream_t)")
-  def hipFreeAsync(dev_ptr: Pointer[Unit, ReadWrite, Opaque], stream: hipStream_t): hipError_t = unsupported
+  def hipFreeAsync(dev_ptr: Pointer[CVoid, ReadWrite, Opaque], stream: hipStream_t): hipError_t = unsupported
   @CSignature("hipError_t (void *)")
-  def hipFreeHost(ptr: Pointer[Unit, ReadWrite, Opaque]): hipError_t = unsupported
+  def hipFreeHost(ptr: Pointer[CVoid, ReadWrite, Opaque]): hipError_t = unsupported
   @CSignature("hipError_t (hipMipmappedArray_t)")
   def hipFreeMipmappedArray(mipmappedArray: hipMipmappedArray_t): hipError_t = unsupported
   @CSignature("hipError_t (int *, hipFunction_attribute, hipFunction_t)")
@@ -537,15 +538,16 @@ trait HIP {
   @CSignature("hipError_t (struct hipFuncAttributes *, const void *)")
   def hipFuncGetAttributes(
       attr: Pointer[hipFuncAttributes, ReadWrite, Opaque],
-      func: Pointer[Unit, Read, Opaque]
+      func: Pointer[CVoid, Read, Opaque]
   ): hipError_t = unsupported
   @CSignature("hipError_t (const void *, hipFuncAttribute, int)")
-  def hipFuncSetAttribute(func: Pointer[Unit, Read, Opaque], attr: hipFuncAttribute, value: Int): hipError_t =
+  def hipFuncSetAttribute(func: Pointer[CVoid, Read, Opaque], attr: hipFuncAttribute, value: Int): hipError_t =
     unsupported
   @CSignature("hipError_t (const void *, hipFuncCache_t)")
-  def hipFuncSetCacheConfig(func: Pointer[Unit, Read, Opaque], config: hipFuncCache_t): hipError_t = unsupported
+  def hipFuncSetCacheConfig(func: Pointer[CVoid, Read, Opaque], config: hipFuncCache_t): hipError_t = unsupported
   @CSignature("hipError_t (const void *, hipSharedMemConfig)")
-  def hipFuncSetSharedMemConfig(func: Pointer[Unit, Read, Opaque], config: hipSharedMemConfig): hipError_t = unsupported
+  def hipFuncSetSharedMemConfig(func: Pointer[CVoid, Read, Opaque], config: hipSharedMemConfig): hipError_t =
+    unsupported
   @CSignature("hipError_t (hipChannelFormatDesc *, hipArray_const_t)")
   def hipGetChannelDesc(desc: Pointer[hipChannelFormatDesc, ReadWrite, Opaque], array: hipArray_const_t): hipError_t =
     unsupported
@@ -561,14 +563,14 @@ trait HIP {
   @CSignature("hipError_t (const char *, void **, unsigned long long, hipDriverEntryPointQueryResult *)")
   def hipGetDriverEntryPoint(
       symbol: CString,
-      funcPtr: Pointer[Pointer[Unit, ReadWrite, Opaque], ReadWrite, Opaque],
+      funcPtr: Pointer[Pointer[CVoid, ReadWrite, Opaque], ReadWrite, Opaque],
       flags: unsigned_long_long,
       driverStatus: Pointer[hipDriverEntryPointQueryResult, ReadWrite, Opaque]
   ): hipError_t = unsupported
   @CSignature("hipError_t (const char *, void **, unsigned long long, hipDriverEntryPointQueryResult *)")
   def hipGetDriverEntryPoint_spt(
       symbol: CString,
-      funcPtr: Pointer[Pointer[Unit, ReadWrite, Opaque], ReadWrite, Opaque],
+      funcPtr: Pointer[Pointer[CVoid, ReadWrite, Opaque], ReadWrite, Opaque],
       flags: unsigned_long_long,
       status: Pointer[hipDriverEntryPointQueryResult, ReadWrite, Opaque]
   ): hipError_t = unsupported
@@ -579,7 +581,7 @@ trait HIP {
   @CSignature("hipError_t (hipFunction_t *, const void *)")
   def hipGetFuncBySymbol(
       functionPtr: Pointer[hipFunction_t, ReadWrite, Opaque],
-      symbolPtr: Pointer[Unit, Read, Opaque]
+      symbolPtr: Pointer[CVoid, Read, Opaque]
   ): hipError_t = unsupported
   @CSignature("hipError_t (void)")
   def hipGetLastError(): hipError_t = unsupported
@@ -592,7 +594,7 @@ trait HIP {
   @CSignature("hipError_t (const char *, void **, int, uint64_t, hipDriverProcAddressQueryResult *)")
   def hipGetProcAddress(
       symbol: CString,
-      pfn: Pointer[Pointer[Unit, ReadWrite, Opaque], ReadWrite, Opaque],
+      pfn: Pointer[Pointer[CVoid, ReadWrite, Opaque], ReadWrite, Opaque],
       hipVersion: Int,
       flags: uint64_t,
       symbolStatus: Pointer[hipDriverProcAddressQueryResult, ReadWrite, Opaque]
@@ -601,11 +603,11 @@ trait HIP {
   def hipGetStreamDeviceId(stream: hipStream_t): Int = unsupported
   @CSignature("hipError_t (void **, const void *)")
   def hipGetSymbolAddress(
-      devPtr: Pointer[Pointer[Unit, ReadWrite, Opaque], ReadWrite, Opaque],
-      symbol: Pointer[Unit, Read, Opaque]
+      devPtr: Pointer[Pointer[CVoid, ReadWrite, Opaque], ReadWrite, Opaque],
+      symbol: Pointer[CVoid, Read, Opaque]
   ): hipError_t = unsupported
   @CSignature("hipError_t (size_t *, const void *)")
-  def hipGetSymbolSize(size: Pointer[size_t, ReadWrite, Opaque], symbol: Pointer[Unit, Read, Opaque]): hipError_t =
+  def hipGetSymbolSize(size: Pointer[size_t, ReadWrite, Opaque], symbol: Pointer[CVoid, Read, Opaque]): hipError_t =
     unsupported
   @CSignature("hipError_t (size_t *, const textureReference *)")
   def hipGetTextureAlignmentOffset(
@@ -630,7 +632,7 @@ trait HIP {
   @CSignature("hipError_t (const textureReference **, const void *)")
   def hipGetTextureReference(
       texref: Pointer[Pointer[textureReference, ReadWrite, Opaque], Read, Opaque],
-      symbol: Pointer[Unit, Read, Opaque]
+      symbol: Pointer[CVoid, Read, Opaque]
   ): hipError_t = unsupported
   @CSignature(
     "hipError_t (hipGraphNode_t *, hipGraph_t, const hipGraphNode_t *, size_t, const hipBatchMemOpNodeParams *)"
@@ -730,7 +732,7 @@ trait HIP {
       graph: hipGraph_t,
       pDependencies: Pointer[hipGraphNode_t, Read, Opaque],
       numDependencies: size_t,
-      dev_ptr: Pointer[Unit, ReadWrite, Opaque]
+      dev_ptr: Pointer[CVoid, ReadWrite, Opaque]
   ): hipError_t = unsupported
   @CSignature("hipError_t (hipGraphNode_t *, hipGraph_t, const hipGraphNode_t *, size_t, const hipMemcpy3DParms *)")
   def hipGraphAddMemcpyNode(
@@ -748,8 +750,8 @@ trait HIP {
       graph: hipGraph_t,
       pDependencies: Pointer[hipGraphNode_t, Read, Opaque],
       numDependencies: size_t,
-      dst: Pointer[Unit, ReadWrite, Opaque],
-      src: Pointer[Unit, Read, Opaque],
+      dst: Pointer[CVoid, ReadWrite, Opaque],
+      src: Pointer[CVoid, Read, Opaque],
       count: size_t,
       kind: hipMemcpyKind
   ): hipError_t = unsupported
@@ -761,8 +763,8 @@ trait HIP {
       graph: hipGraph_t,
       pDependencies: Pointer[hipGraphNode_t, Read, Opaque],
       numDependencies: size_t,
-      dst: Pointer[Unit, ReadWrite, Opaque],
-      symbol: Pointer[Unit, Read, Opaque],
+      dst: Pointer[CVoid, ReadWrite, Opaque],
+      symbol: Pointer[CVoid, Read, Opaque],
       count: size_t,
       offset: size_t,
       kind: hipMemcpyKind
@@ -775,8 +777,8 @@ trait HIP {
       graph: hipGraph_t,
       pDependencies: Pointer[hipGraphNode_t, Read, Opaque],
       numDependencies: size_t,
-      symbol: Pointer[Unit, Read, Opaque],
-      src: Pointer[Unit, Read, Opaque],
+      symbol: Pointer[CVoid, Read, Opaque],
+      src: Pointer[CVoid, Read, Opaque],
       count: size_t,
       offset: size_t,
       kind: hipMemcpyKind
@@ -900,8 +902,8 @@ trait HIP {
   def hipGraphExecMemcpyNodeSetParams1D(
       hGraphExec: hipGraphExec_t,
       node: hipGraphNode_t,
-      dst: Pointer[Unit, ReadWrite, Opaque],
-      src: Pointer[Unit, Read, Opaque],
+      dst: Pointer[CVoid, ReadWrite, Opaque],
+      src: Pointer[CVoid, Read, Opaque],
       count: size_t,
       kind: hipMemcpyKind
   ): hipError_t = unsupported
@@ -909,8 +911,8 @@ trait HIP {
   def hipGraphExecMemcpyNodeSetParamsFromSymbol(
       hGraphExec: hipGraphExec_t,
       node: hipGraphNode_t,
-      dst: Pointer[Unit, ReadWrite, Opaque],
-      symbol: Pointer[Unit, Read, Opaque],
+      dst: Pointer[CVoid, ReadWrite, Opaque],
+      symbol: Pointer[CVoid, Read, Opaque],
       count: size_t,
       offset: size_t,
       kind: hipMemcpyKind
@@ -919,8 +921,8 @@ trait HIP {
   def hipGraphExecMemcpyNodeSetParamsToSymbol(
       hGraphExec: hipGraphExec_t,
       node: hipGraphNode_t,
-      symbol: Pointer[Unit, Read, Opaque],
-      src: Pointer[Unit, Read, Opaque],
+      symbol: Pointer[CVoid, Read, Opaque],
+      src: Pointer[CVoid, Read, Opaque],
       count: size_t,
       offset: size_t,
       kind: hipMemcpyKind
@@ -1047,7 +1049,7 @@ trait HIP {
       pNodeParams: Pointer[hipMemAllocNodeParams, ReadWrite, Opaque]
   ): hipError_t = unsupported
   @CSignature("hipError_t (hipGraphNode_t, void *)")
-  def hipGraphMemFreeNodeGetParams(node: hipGraphNode_t, dev_ptr: Pointer[Unit, ReadWrite, Opaque]): hipError_t =
+  def hipGraphMemFreeNodeGetParams(node: hipGraphNode_t, dev_ptr: Pointer[CVoid, ReadWrite, Opaque]): hipError_t =
     unsupported
   @CSignature("hipError_t (hipGraphNode_t, hipMemcpy3DParms *)")
   def hipGraphMemcpyNodeGetParams(
@@ -1062,16 +1064,16 @@ trait HIP {
   @CSignature("hipError_t (hipGraphNode_t, void *, const void *, size_t, hipMemcpyKind)")
   def hipGraphMemcpyNodeSetParams1D(
       node: hipGraphNode_t,
-      dst: Pointer[Unit, ReadWrite, Opaque],
-      src: Pointer[Unit, Read, Opaque],
+      dst: Pointer[CVoid, ReadWrite, Opaque],
+      src: Pointer[CVoid, Read, Opaque],
       count: size_t,
       kind: hipMemcpyKind
   ): hipError_t = unsupported
   @CSignature("hipError_t (hipGraphNode_t, void *, const void *, size_t, size_t, hipMemcpyKind)")
   def hipGraphMemcpyNodeSetParamsFromSymbol(
       node: hipGraphNode_t,
-      dst: Pointer[Unit, ReadWrite, Opaque],
-      symbol: Pointer[Unit, Read, Opaque],
+      dst: Pointer[CVoid, ReadWrite, Opaque],
+      symbol: Pointer[CVoid, Read, Opaque],
       count: size_t,
       offset: size_t,
       kind: hipMemcpyKind
@@ -1079,8 +1081,8 @@ trait HIP {
   @CSignature("hipError_t (hipGraphNode_t, const void *, const void *, size_t, size_t, hipMemcpyKind)")
   def hipGraphMemcpyNodeSetParamsToSymbol(
       node: hipGraphNode_t,
-      symbol: Pointer[Unit, Read, Opaque],
-      src: Pointer[Unit, Read, Opaque],
+      symbol: Pointer[CVoid, Read, Opaque],
+      src: Pointer[CVoid, Read, Opaque],
       count: size_t,
       offset: size_t,
       kind: hipMemcpyKind
@@ -1157,7 +1159,7 @@ trait HIP {
   ): hipError_t = unsupported
   @CSignature("hipError_t (void **, size_t *, hipGraphicsResource_t)")
   def hipGraphicsResourceGetMappedPointer(
-      devPtr: Pointer[Pointer[Unit, ReadWrite, Opaque], ReadWrite, Opaque],
+      devPtr: Pointer[Pointer[CVoid, ReadWrite, Opaque], ReadWrite, Opaque],
       size: Pointer[size_t, ReadWrite, Opaque],
       resource: hipGraphicsResource_t
   ): hipError_t = unsupported
@@ -1178,34 +1180,34 @@ trait HIP {
   def hipGraphicsUnregisterResource(resource: hipGraphicsResource_t): hipError_t = unsupported
   @CSignature("hipError_t (void **, size_t, unsigned int)")
   def hipHostAlloc(
-      ptr: Pointer[Pointer[Unit, ReadWrite, Opaque], ReadWrite, Opaque],
+      ptr: Pointer[Pointer[CVoid, ReadWrite, Opaque], ReadWrite, Opaque],
       size: size_t,
       flags: unsigned_int
   ): hipError_t = unsupported
   @CSignature("hipError_t (void *)")
-  def hipHostFree(ptr: Pointer[Unit, ReadWrite, Opaque]): hipError_t = unsupported
+  def hipHostFree(ptr: Pointer[CVoid, ReadWrite, Opaque]): hipError_t = unsupported
   @CSignature("hipError_t (void **, void *, unsigned int)")
   def hipHostGetDevicePointer(
-      devPtr: Pointer[Pointer[Unit, ReadWrite, Opaque], ReadWrite, Opaque],
-      hstPtr: Pointer[Unit, ReadWrite, Opaque],
+      devPtr: Pointer[Pointer[CVoid, ReadWrite, Opaque], ReadWrite, Opaque],
+      hstPtr: Pointer[CVoid, ReadWrite, Opaque],
       flags: unsigned_int
   ): hipError_t = unsupported
   @CSignature("hipError_t (unsigned int *, void *)")
   def hipHostGetFlags(
       flagsPtr: Pointer[unsigned_int, ReadWrite, Opaque],
-      hostPtr: Pointer[Unit, ReadWrite, Opaque]
+      hostPtr: Pointer[CVoid, ReadWrite, Opaque]
   ): hipError_t = unsupported
   @CSignature("hipError_t (void **, size_t, unsigned int)")
   def hipHostMalloc(
-      ptr: Pointer[Pointer[Unit, ReadWrite, Opaque], ReadWrite, Opaque],
+      ptr: Pointer[Pointer[CVoid, ReadWrite, Opaque], ReadWrite, Opaque],
       size: size_t,
       flags: unsigned_int
   ): hipError_t = unsupported
   @CSignature("hipError_t (void *, size_t, unsigned int)")
-  def hipHostRegister(hostPtr: Pointer[Unit, ReadWrite, Opaque], sizeBytes: size_t, flags: unsigned_int): hipError_t =
+  def hipHostRegister(hostPtr: Pointer[CVoid, ReadWrite, Opaque], sizeBytes: size_t, flags: unsigned_int): hipError_t =
     unsupported
   @CSignature("hipError_t (void *)")
-  def hipHostUnregister(hostPtr: Pointer[Unit, ReadWrite, Opaque]): hipError_t = unsupported
+  def hipHostUnregister(hostPtr: Pointer[CVoid, ReadWrite, Opaque]): hipError_t = unsupported
   @CSignature("hipError_t (hipExternalMemory_t *, const hipExternalMemoryHandleDesc *)")
   def hipImportExternalMemory(
       extMem_out: Pointer[hipExternalMemory_t, ReadWrite, Opaque],
@@ -1219,21 +1221,21 @@ trait HIP {
   @CSignature("hipError_t (unsigned int)")
   def hipInit(flags: unsigned_int): hipError_t = unsupported
   @CSignature("hipError_t (void *)")
-  def hipIpcCloseMemHandle(devPtr: Pointer[Unit, ReadWrite, Opaque]): hipError_t = unsupported
+  def hipIpcCloseMemHandle(devPtr: Pointer[CVoid, ReadWrite, Opaque]): hipError_t = unsupported
   @CSignature("hipError_t (hipIpcEventHandle_t *, hipEvent_t)")
   def hipIpcGetEventHandle(handle: Pointer[hipIpcEventHandle_t, ReadWrite, Opaque], event: hipEvent_t): hipError_t =
     unsupported
   @CSignature("hipError_t (hipIpcMemHandle_t *, void *)")
   def hipIpcGetMemHandle(
       handle: Pointer[hipIpcMemHandle_t, ReadWrite, Opaque],
-      devPtr: Pointer[Unit, ReadWrite, Opaque]
+      devPtr: Pointer[CVoid, ReadWrite, Opaque]
   ): hipError_t = unsupported
   @CSignature("hipError_t (hipEvent_t *, hipIpcEventHandle_t)")
   def hipIpcOpenEventHandle(event: Pointer[hipEvent_t, ReadWrite, Opaque], handle: hipIpcEventHandle_t): hipError_t =
     unsupported
   @CSignature("hipError_t (void **, hipIpcMemHandle_t, unsigned int)")
   def hipIpcOpenMemHandle(
-      devPtr: Pointer[Pointer[Unit, ReadWrite, Opaque], ReadWrite, Opaque],
+      devPtr: Pointer[Pointer[CVoid, ReadWrite, Opaque], ReadWrite, Opaque],
       handle: hipIpcMemHandle_t,
       flags: unsigned_int
   ): hipError_t = unsupported
@@ -1246,15 +1248,15 @@ trait HIP {
   @CSignature("const char *(const hipFunction_t)")
   def hipKernelNameRef(f: const_hipFunction_t): CString = unsupported
   @CSignature("const char *(const void *, hipStream_t)")
-  def hipKernelNameRefByPtr(hostFunction: Pointer[Unit, Read, Opaque], stream: hipStream_t): CString = unsupported
+  def hipKernelNameRefByPtr(hostFunction: Pointer[CVoid, Read, Opaque], stream: hipStream_t): CString = unsupported
   @CSignature("hipError_t (const void *)")
-  def hipLaunchByPtr(func: Pointer[Unit, Read, Opaque]): hipError_t = unsupported
+  def hipLaunchByPtr(func: Pointer[CVoid, Read, Opaque]): hipError_t = unsupported
   @CSignature("hipError_t (const void *, dim3, dim3, void **, unsigned int, hipStream_t)")
   def hipLaunchCooperativeKernel(
-      f: Pointer[Unit, Read, Opaque],
+      f: Pointer[CVoid, Read, Opaque],
       gridDim: dim3,
       blockDimX: dim3,
-      kernelParams: Pointer[Pointer[Unit, ReadWrite, Opaque], ReadWrite, Opaque],
+      kernelParams: Pointer[Pointer[CVoid, ReadWrite, Opaque], ReadWrite, Opaque],
       sharedMemBytes: unsigned_int,
       stream: hipStream_t
   ): hipError_t = unsupported
@@ -1266,43 +1268,43 @@ trait HIP {
   ): hipError_t = unsupported
   @CSignature("hipError_t (const void *, dim3, dim3, void **, uint32_t, hipStream_t)")
   def hipLaunchCooperativeKernel_spt(
-      f: Pointer[Unit, Read, Opaque],
+      f: Pointer[CVoid, Read, Opaque],
       gridDim: dim3,
       blockDim: dim3,
-      kernelParams: Pointer[Pointer[Unit, ReadWrite, Opaque], ReadWrite, Opaque],
+      kernelParams: Pointer[Pointer[CVoid, ReadWrite, Opaque], ReadWrite, Opaque],
       sharedMemBytes: uint32_t,
       hStream: hipStream_t
   ): hipError_t = unsupported
   @CSignature("hipError_t (hipStream_t, hipHostFn_t, void *)")
-  def hipLaunchHostFunc(stream: hipStream_t, fn: hipHostFn_t, userData: Pointer[Unit, ReadWrite, Opaque]): hipError_t =
+  def hipLaunchHostFunc(stream: hipStream_t, fn: hipHostFn_t, userData: Pointer[CVoid, ReadWrite, Opaque]): hipError_t =
     unsupported
   @CSignature("hipError_t (hipStream_t, hipHostFn_t, void *)")
   def hipLaunchHostFunc_spt(
       stream: hipStream_t,
       fn: hipHostFn_t,
-      userData: Pointer[Unit, ReadWrite, Opaque]
+      userData: Pointer[CVoid, ReadWrite, Opaque]
   ): hipError_t = unsupported
   @CSignature("hipError_t (const void *, dim3, dim3, void **, size_t, hipStream_t)")
   def hipLaunchKernel(
-      function_address: Pointer[Unit, Read, Opaque],
+      function_address: Pointer[CVoid, Read, Opaque],
       numBlocks: dim3,
       dimBlocks: dim3,
-      args: Pointer[Pointer[Unit, ReadWrite, Opaque], ReadWrite, Opaque],
+      args: Pointer[Pointer[CVoid, ReadWrite, Opaque], ReadWrite, Opaque],
       sharedMemBytes: size_t,
       stream: hipStream_t
   ): hipError_t = unsupported
   @CSignature("hipError_t (const hipLaunchConfig_t *, const void *, void **)")
   def hipLaunchKernelExC(
       config: Pointer[hipLaunchConfig_t, Read, Opaque],
-      fPtr: Pointer[Unit, Read, Opaque],
-      args: Pointer[Pointer[Unit, ReadWrite, Opaque], ReadWrite, Opaque]
+      fPtr: Pointer[CVoid, Read, Opaque],
+      args: Pointer[Pointer[CVoid, ReadWrite, Opaque], ReadWrite, Opaque]
   ): hipError_t = unsupported
   @CSignature("hipError_t (const void *, dim3, dim3, void **, size_t, hipStream_t)")
   def hipLaunchKernel_spt(
-      function_address: Pointer[Unit, Read, Opaque],
+      function_address: Pointer[CVoid, Read, Opaque],
       numBlocks: dim3,
       dimBlocks: dim3,
-      args: Pointer[Pointer[Unit, ReadWrite, Opaque], ReadWrite, Opaque],
+      args: Pointer[Pointer[CVoid, ReadWrite, Opaque], ReadWrite, Opaque],
       sharedMemBytes: size_t,
       stream: hipStream_t
   ): hipError_t = unsupported
@@ -1326,12 +1328,12 @@ trait HIP {
   )
   def hipLibraryLoadData(
       library: Pointer[hipLibrary_t, ReadWrite, Opaque],
-      code: Pointer[Unit, Read, Opaque],
+      code: Pointer[CVoid, Read, Opaque],
       jitOptions: Pointer[hipJitOption, ReadWrite, Opaque],
-      jitOptionsValues: Pointer[Pointer[Unit, ReadWrite, Opaque], ReadWrite, Opaque],
+      jitOptionsValues: Pointer[Pointer[CVoid, ReadWrite, Opaque], ReadWrite, Opaque],
       numJitOptions: unsigned_int,
       libraryOptions: Pointer[hipLibraryOption, ReadWrite, Opaque],
-      libraryOptionValues: Pointer[Pointer[Unit, ReadWrite, Opaque], ReadWrite, Opaque],
+      libraryOptionValues: Pointer[Pointer[CVoid, ReadWrite, Opaque], ReadWrite, Opaque],
       numLibraryOptions: unsigned_int
   ): hipError_t = unsupported
   @CSignature(
@@ -1341,10 +1343,10 @@ trait HIP {
       library: Pointer[hipLibrary_t, ReadWrite, Opaque],
       fileName: CString,
       jitOptions: Pointer[hipJitOption, ReadWrite, Opaque],
-      jitOptionsValues: Pointer[Pointer[Unit, ReadWrite, Opaque], ReadWrite, Opaque],
+      jitOptionsValues: Pointer[Pointer[CVoid, ReadWrite, Opaque], ReadWrite, Opaque],
       numJitOptions: unsigned_int,
       libraryOptions: Pointer[hipLibraryOption, ReadWrite, Opaque],
-      libraryOptionValues: Pointer[Pointer[Unit, ReadWrite, Opaque], ReadWrite, Opaque],
+      libraryOptionValues: Pointer[Pointer[CVoid, ReadWrite, Opaque], ReadWrite, Opaque],
       numLibraryOptions: unsigned_int
   ): hipError_t = unsupported
   @CSignature("hipError_t (hipLibrary_t)")
@@ -1355,12 +1357,12 @@ trait HIP {
   def hipLinkAddData(
       state: hipLinkState_t,
       `type`: hipJitInputType,
-      data: Pointer[Unit, ReadWrite, Opaque],
+      data: Pointer[CVoid, ReadWrite, Opaque],
       size: size_t,
       name: CString,
       numOptions: unsigned_int,
       options: Pointer[hipJitOption, ReadWrite, Opaque],
-      optionValues: Pointer[Pointer[Unit, ReadWrite, Opaque], ReadWrite, Opaque]
+      optionValues: Pointer[Pointer[CVoid, ReadWrite, Opaque], ReadWrite, Opaque]
   ): hipError_t = unsupported
   @CSignature("hipError_t (hipLinkState_t, hipJitInputType, const char *, unsigned int, hipJitOption *, void **)")
   def hipLinkAddFile(
@@ -1369,25 +1371,25 @@ trait HIP {
       path: CString,
       numOptions: unsigned_int,
       options: Pointer[hipJitOption, ReadWrite, Opaque],
-      optionValues: Pointer[Pointer[Unit, ReadWrite, Opaque], ReadWrite, Opaque]
+      optionValues: Pointer[Pointer[CVoid, ReadWrite, Opaque], ReadWrite, Opaque]
   ): hipError_t = unsupported
   @CSignature("hipError_t (hipLinkState_t, void **, size_t *)")
   def hipLinkComplete(
       state: hipLinkState_t,
-      hipBinOut: Pointer[Pointer[Unit, ReadWrite, Opaque], ReadWrite, Opaque],
+      hipBinOut: Pointer[Pointer[CVoid, ReadWrite, Opaque], ReadWrite, Opaque],
       sizeOut: Pointer[size_t, ReadWrite, Opaque]
   ): hipError_t = unsupported
   @CSignature("hipError_t (unsigned int, hipJitOption *, void **, hipLinkState_t *)")
   def hipLinkCreate(
       numOptions: unsigned_int,
       options: Pointer[hipJitOption, ReadWrite, Opaque],
-      optionValues: Pointer[Pointer[Unit, ReadWrite, Opaque], ReadWrite, Opaque],
+      optionValues: Pointer[Pointer[CVoid, ReadWrite, Opaque], ReadWrite, Opaque],
       stateOut: Pointer[hipLinkState_t, ReadWrite, Opaque]
   ): hipError_t = unsupported
   @CSignature("hipError_t (hipLinkState_t)")
   def hipLinkDestroy(state: hipLinkState_t): hipError_t = unsupported
   @CSignature("hipError_t (void **, size_t)")
-  def hipMalloc(ptr: Pointer[Pointer[Unit, ReadWrite, Opaque], ReadWrite, Opaque], size: size_t): hipError_t =
+  def hipMalloc(ptr: Pointer[Pointer[CVoid, ReadWrite, Opaque], ReadWrite, Opaque], size: size_t): hipError_t =
     unsupported
   @CSignature("hipError_t (hipPitchedPtr *, hipExtent)")
   def hipMalloc3D(pitchedDevPtr: Pointer[hipPitchedPtr, ReadWrite, Opaque], extent: hipExtent): hipError_t = unsupported
@@ -1408,23 +1410,23 @@ trait HIP {
   ): hipError_t = unsupported
   @CSignature("hipError_t (void **, size_t, hipStream_t)")
   def hipMallocAsync(
-      dev_ptr: Pointer[Pointer[Unit, ReadWrite, Opaque], ReadWrite, Opaque],
+      dev_ptr: Pointer[Pointer[CVoid, ReadWrite, Opaque], ReadWrite, Opaque],
       size: size_t,
       stream: hipStream_t
   ): hipError_t = unsupported
   @CSignature("hipError_t (void **, size_t, hipMemPool_t, hipStream_t)")
   def hipMallocFromPoolAsync(
-      dev_ptr: Pointer[Pointer[Unit, ReadWrite, Opaque], ReadWrite, Opaque],
+      dev_ptr: Pointer[Pointer[CVoid, ReadWrite, Opaque], ReadWrite, Opaque],
       size: size_t,
       mem_pool: hipMemPool_t,
       stream: hipStream_t
   ): hipError_t = unsupported
   @CSignature("hipError_t (void **, size_t)")
-  def hipMallocHost(ptr: Pointer[Pointer[Unit, ReadWrite, Opaque], ReadWrite, Opaque], size: size_t): hipError_t =
+  def hipMallocHost(ptr: Pointer[Pointer[CVoid, ReadWrite, Opaque], ReadWrite, Opaque], size: size_t): hipError_t =
     unsupported
   @CSignature("hipError_t (void **, size_t, unsigned int)")
   def hipMallocManaged(
-      dev_ptr: Pointer[Pointer[Unit, ReadWrite, Opaque], ReadWrite, Opaque],
+      dev_ptr: Pointer[Pointer[CVoid, ReadWrite, Opaque], ReadWrite, Opaque],
       size: size_t,
       flags: unsigned_int
   ): hipError_t = unsupported
@@ -1440,37 +1442,37 @@ trait HIP {
   ): hipError_t = unsupported
   @CSignature("hipError_t (void **, size_t *, size_t, size_t)")
   def hipMallocPitch(
-      ptr: Pointer[Pointer[Unit, ReadWrite, Opaque], ReadWrite, Opaque],
+      ptr: Pointer[Pointer[CVoid, ReadWrite, Opaque], ReadWrite, Opaque],
       pitch: Pointer[size_t, ReadWrite, Opaque],
       width: size_t,
       height: size_t
   ): hipError_t = unsupported
   @CSignature("hipError_t (void *, size_t)")
-  def hipMemAddressFree(devPtr: Pointer[Unit, ReadWrite, Opaque], size: size_t): hipError_t = unsupported
+  def hipMemAddressFree(devPtr: Pointer[CVoid, ReadWrite, Opaque], size: size_t): hipError_t = unsupported
   @CSignature("hipError_t (void **, size_t, size_t, void *, unsigned long long)")
   def hipMemAddressReserve(
-      ptr: Pointer[Pointer[Unit, ReadWrite, Opaque], ReadWrite, Opaque],
+      ptr: Pointer[Pointer[CVoid, ReadWrite, Opaque], ReadWrite, Opaque],
       size: size_t,
       alignment: size_t,
-      addr: Pointer[Unit, ReadWrite, Opaque],
+      addr: Pointer[CVoid, ReadWrite, Opaque],
       flags: unsigned_long_long
   ): hipError_t = unsupported
   @CSignature("hipError_t (const void *, size_t, hipMemoryAdvise, int)")
   def hipMemAdvise(
-      dev_ptr: Pointer[Unit, Read, Opaque],
+      dev_ptr: Pointer[CVoid, Read, Opaque],
       count: size_t,
       advice: hipMemoryAdvise,
       device: Int
   ): hipError_t = unsupported
   @CSignature("hipError_t (const void *, size_t, hipMemoryAdvise, hipMemLocation)")
   def hipMemAdvise_v2(
-      dev_ptr: Pointer[Unit, Read, Opaque],
+      dev_ptr: Pointer[CVoid, Read, Opaque],
       count: size_t,
       advice: hipMemoryAdvise,
       location: hipMemLocation
   ): hipError_t = unsupported
   @CSignature("hipError_t (void **, size_t)")
-  def hipMemAllocHost(ptr: Pointer[Pointer[Unit, ReadWrite, Opaque], ReadWrite, Opaque], size: size_t): hipError_t =
+  def hipMemAllocHost(ptr: Pointer[Pointer[CVoid, ReadWrite, Opaque], ReadWrite, Opaque], size: size_t): hipError_t =
     unsupported
   @CSignature("hipError_t (hipDeviceptr_t *, size_t *, size_t, size_t, unsigned int)")
   def hipMemAllocPitch(
@@ -1491,7 +1493,7 @@ trait HIP {
   ): hipError_t = unsupported
   @CSignature("hipError_t (void *, hipMemGenericAllocationHandle_t, hipMemAllocationHandleType, unsigned long long)")
   def hipMemExportToShareableHandle(
-      shareableHandle: Pointer[Unit, ReadWrite, Opaque],
+      shareableHandle: Pointer[CVoid, ReadWrite, Opaque],
       handle: hipMemGenericAllocationHandle_t,
       handleType: hipMemAllocationHandleType,
       flags: unsigned_long_long
@@ -1500,7 +1502,7 @@ trait HIP {
   def hipMemGetAccess(
       flags: Pointer[unsigned_long_long, ReadWrite, Opaque],
       location: Pointer[hipMemLocation, Read, Opaque],
-      ptr: Pointer[Unit, ReadWrite, Opaque]
+      ptr: Pointer[CVoid, ReadWrite, Opaque]
   ): hipError_t = unsupported
   @CSignature("hipError_t (hipDeviceptr_t *, size_t *, hipDeviceptr_t)")
   def hipMemGetAddressRange(
@@ -1521,7 +1523,7 @@ trait HIP {
   ): hipError_t = unsupported
   @CSignature("hipError_t (void *, hipDeviceptr_t, size_t, hipMemRangeHandleType, unsigned long long)")
   def hipMemGetHandleForAddressRange(
-      handle: Pointer[Unit, ReadWrite, Opaque],
+      handle: Pointer[CVoid, ReadWrite, Opaque],
       dptr: hipDeviceptr_t,
       size: size_t,
       handleType: hipMemRangeHandleType,
@@ -1533,12 +1535,12 @@ trait HIP {
   @CSignature("hipError_t (hipMemGenericAllocationHandle_t *, void *, hipMemAllocationHandleType)")
   def hipMemImportFromShareableHandle(
       handle: Pointer[hipMemGenericAllocationHandle_t, ReadWrite, Opaque],
-      osHandle: Pointer[Unit, ReadWrite, Opaque],
+      osHandle: Pointer[CVoid, ReadWrite, Opaque],
       shHandleType: hipMemAllocationHandleType
   ): hipError_t = unsupported
   @CSignature("hipError_t (void *, size_t, size_t, hipMemGenericAllocationHandle_t, unsigned long long)")
   def hipMemMap(
-      ptr: Pointer[Unit, ReadWrite, Opaque],
+      ptr: Pointer[CVoid, ReadWrite, Opaque],
       size: size_t,
       offset: size_t,
       handle: hipMemGenericAllocationHandle_t,
@@ -1560,11 +1562,11 @@ trait HIP {
   @CSignature("hipError_t (hipMemPoolPtrExportData *, void *)")
   def hipMemPoolExportPointer(
       export_data: Pointer[hipMemPoolPtrExportData, ReadWrite, Opaque],
-      dev_ptr: Pointer[Unit, ReadWrite, Opaque]
+      dev_ptr: Pointer[CVoid, ReadWrite, Opaque]
   ): hipError_t = unsupported
   @CSignature("hipError_t (void *, hipMemPool_t, hipMemAllocationHandleType, unsigned int)")
   def hipMemPoolExportToShareableHandle(
-      shared_handle: Pointer[Unit, ReadWrite, Opaque],
+      shared_handle: Pointer[CVoid, ReadWrite, Opaque],
       mem_pool: hipMemPool_t,
       handle_type: hipMemAllocationHandleType,
       flags: unsigned_int
@@ -1579,18 +1581,18 @@ trait HIP {
   def hipMemPoolGetAttribute(
       mem_pool: hipMemPool_t,
       attr: hipMemPoolAttr,
-      value: Pointer[Unit, ReadWrite, Opaque]
+      value: Pointer[CVoid, ReadWrite, Opaque]
   ): hipError_t = unsupported
   @CSignature("hipError_t (hipMemPool_t *, void *, hipMemAllocationHandleType, unsigned int)")
   def hipMemPoolImportFromShareableHandle(
       mem_pool: Pointer[hipMemPool_t, ReadWrite, Opaque],
-      shared_handle: Pointer[Unit, ReadWrite, Opaque],
+      shared_handle: Pointer[CVoid, ReadWrite, Opaque],
       handle_type: hipMemAllocationHandleType,
       flags: unsigned_int
   ): hipError_t = unsupported
   @CSignature("hipError_t (void **, hipMemPool_t, hipMemPoolPtrExportData *)")
   def hipMemPoolImportPointer(
-      dev_ptr: Pointer[Pointer[Unit, ReadWrite, Opaque], ReadWrite, Opaque],
+      dev_ptr: Pointer[Pointer[CVoid, ReadWrite, Opaque], ReadWrite, Opaque],
       mem_pool: hipMemPool_t,
       export_data: Pointer[hipMemPoolPtrExportData, ReadWrite, Opaque]
   ): hipError_t = unsupported
@@ -1604,43 +1606,43 @@ trait HIP {
   def hipMemPoolSetAttribute(
       mem_pool: hipMemPool_t,
       attr: hipMemPoolAttr,
-      value: Pointer[Unit, ReadWrite, Opaque]
+      value: Pointer[CVoid, ReadWrite, Opaque]
   ): hipError_t = unsupported
   @CSignature("hipError_t (hipMemPool_t, size_t)")
   def hipMemPoolTrimTo(mem_pool: hipMemPool_t, min_bytes_to_hold: size_t): hipError_t = unsupported
   @CSignature("hipError_t (const void *, size_t, int, hipStream_t)")
   def hipMemPrefetchAsync(
-      dev_ptr: Pointer[Unit, Read, Opaque],
+      dev_ptr: Pointer[CVoid, Read, Opaque],
       count: size_t,
       device: Int,
       stream: hipStream_t
   ): hipError_t = unsupported
   @CSignature("hipError_t (const void *, size_t, hipMemLocation, unsigned int, hipStream_t)")
   def hipMemPrefetchAsync_v2(
-      dev_ptr: Pointer[Unit, Read, Opaque],
+      dev_ptr: Pointer[CVoid, Read, Opaque],
       count: size_t,
       location: hipMemLocation,
       flags: unsigned_int,
       stream: hipStream_t
   ): hipError_t = unsupported
   @CSignature("hipError_t (void *, size_t *)")
-  def hipMemPtrGetInfo(ptr: Pointer[Unit, ReadWrite, Opaque], size: Pointer[size_t, ReadWrite, Opaque]): hipError_t =
+  def hipMemPtrGetInfo(ptr: Pointer[CVoid, ReadWrite, Opaque], size: Pointer[size_t, ReadWrite, Opaque]): hipError_t =
     unsupported
   @CSignature("hipError_t (void *, size_t, hipMemRangeAttribute, const void *, size_t)")
   def hipMemRangeGetAttribute(
-      data: Pointer[Unit, ReadWrite, Opaque],
+      data: Pointer[CVoid, ReadWrite, Opaque],
       data_size: size_t,
       attribute: hipMemRangeAttribute,
-      dev_ptr: Pointer[Unit, Read, Opaque],
+      dev_ptr: Pointer[CVoid, Read, Opaque],
       count: size_t
   ): hipError_t = unsupported
   @CSignature("hipError_t (void **, size_t *, hipMemRangeAttribute *, size_t, const void *, size_t)")
   def hipMemRangeGetAttributes(
-      data: Pointer[Pointer[Unit, ReadWrite, Opaque], ReadWrite, Opaque],
+      data: Pointer[Pointer[CVoid, ReadWrite, Opaque], ReadWrite, Opaque],
       data_sizes: Pointer[size_t, ReadWrite, Opaque],
       attributes: Pointer[hipMemRangeAttribute, ReadWrite, Opaque],
       num_attributes: size_t,
-      dev_ptr: Pointer[Unit, Read, Opaque],
+      dev_ptr: Pointer[CVoid, Read, Opaque],
       count: size_t
   ): hipError_t = unsupported
   @CSignature("hipError_t (hipMemGenericAllocationHandle_t)")
@@ -1648,29 +1650,29 @@ trait HIP {
   @CSignature("hipError_t (hipMemGenericAllocationHandle_t *, void *)")
   def hipMemRetainAllocationHandle(
       handle: Pointer[hipMemGenericAllocationHandle_t, ReadWrite, Opaque],
-      addr: Pointer[Unit, ReadWrite, Opaque]
+      addr: Pointer[CVoid, ReadWrite, Opaque]
   ): hipError_t = unsupported
   @CSignature("hipError_t (void *, size_t, const hipMemAccessDesc *, size_t)")
   def hipMemSetAccess(
-      ptr: Pointer[Unit, ReadWrite, Opaque],
+      ptr: Pointer[CVoid, ReadWrite, Opaque],
       size: size_t,
       desc: Pointer[hipMemAccessDesc, Read, Opaque],
       count: size_t
   ): hipError_t = unsupported
   @CSignature("hipError_t (void *, size_t)")
-  def hipMemUnmap(ptr: Pointer[Unit, ReadWrite, Opaque], size: size_t): hipError_t = unsupported
+  def hipMemUnmap(ptr: Pointer[CVoid, ReadWrite, Opaque], size: size_t): hipError_t = unsupported
   @CSignature("hipError_t (void *, const void *, size_t, hipMemcpyKind)")
   def hipMemcpy(
-      dst: Pointer[Unit, ReadWrite, Opaque],
-      src: Pointer[Unit, Read, Opaque],
+      dst: Pointer[CVoid, ReadWrite, Opaque],
+      src: Pointer[CVoid, Read, Opaque],
       sizeBytes: size_t,
       kind: hipMemcpyKind
   ): hipError_t = unsupported
   @CSignature("hipError_t (void *, size_t, const void *, size_t, size_t, size_t, hipMemcpyKind)")
   def hipMemcpy2D(
-      dst: Pointer[Unit, ReadWrite, Opaque],
+      dst: Pointer[CVoid, ReadWrite, Opaque],
       dpitch: size_t,
-      src: Pointer[Unit, Read, Opaque],
+      src: Pointer[CVoid, Read, Opaque],
       spitch: size_t,
       width: size_t,
       height: size_t,
@@ -1692,9 +1694,9 @@ trait HIP {
   ): hipError_t = unsupported
   @CSignature("hipError_t (void *, size_t, const void *, size_t, size_t, size_t, hipMemcpyKind, hipStream_t)")
   def hipMemcpy2DAsync(
-      dst: Pointer[Unit, ReadWrite, Opaque],
+      dst: Pointer[CVoid, ReadWrite, Opaque],
       dpitch: size_t,
-      src: Pointer[Unit, Read, Opaque],
+      src: Pointer[CVoid, Read, Opaque],
       spitch: size_t,
       width: size_t,
       height: size_t,
@@ -1703,9 +1705,9 @@ trait HIP {
   ): hipError_t = unsupported
   @CSignature("hipError_t (void *, size_t, const void *, size_t, size_t, size_t, hipMemcpyKind, hipStream_t)")
   def hipMemcpy2DAsync_spt(
-      dst: Pointer[Unit, ReadWrite, Opaque],
+      dst: Pointer[CVoid, ReadWrite, Opaque],
       dpitch: size_t,
-      src: Pointer[Unit, Read, Opaque],
+      src: Pointer[CVoid, Read, Opaque],
       spitch: size_t,
       width: size_t,
       height: size_t,
@@ -1714,7 +1716,7 @@ trait HIP {
   ): hipError_t = unsupported
   @CSignature("hipError_t (void *, size_t, hipArray_const_t, size_t, size_t, size_t, size_t, hipMemcpyKind)")
   def hipMemcpy2DFromArray(
-      dst: Pointer[Unit, ReadWrite, Opaque],
+      dst: Pointer[CVoid, ReadWrite, Opaque],
       dpitch: size_t,
       src: hipArray_const_t,
       wOffset: size_t,
@@ -1727,7 +1729,7 @@ trait HIP {
     "hipError_t (void *, size_t, hipArray_const_t, size_t, size_t, size_t, size_t, hipMemcpyKind, hipStream_t)"
   )
   def hipMemcpy2DFromArrayAsync(
-      dst: Pointer[Unit, ReadWrite, Opaque],
+      dst: Pointer[CVoid, ReadWrite, Opaque],
       dpitch: size_t,
       src: hipArray_const_t,
       wOffset: size_t,
@@ -1741,7 +1743,7 @@ trait HIP {
     "hipError_t (void *, size_t, hipArray_const_t, size_t, size_t, size_t, size_t, hipMemcpyKind, hipStream_t)"
   )
   def hipMemcpy2DFromArrayAsync_spt(
-      dst: Pointer[Unit, ReadWrite, Opaque],
+      dst: Pointer[CVoid, ReadWrite, Opaque],
       dpitch: size_t,
       src: hipArray_const_t,
       wOffsetSrc: size_t,
@@ -1753,7 +1755,7 @@ trait HIP {
   ): hipError_t = unsupported
   @CSignature("hipError_t (void *, size_t, hipArray_const_t, size_t, size_t, size_t, size_t, hipMemcpyKind)")
   def hipMemcpy2DFromArray_spt(
-      dst: Pointer[Unit, ReadWrite, Opaque],
+      dst: Pointer[CVoid, ReadWrite, Opaque],
       dpitch: size_t,
       src: hipArray_const_t,
       wOffset: size_t,
@@ -1767,7 +1769,7 @@ trait HIP {
       dst: hipArray_t,
       wOffset: size_t,
       hOffset: size_t,
-      src: Pointer[Unit, Read, Opaque],
+      src: Pointer[CVoid, Read, Opaque],
       spitch: size_t,
       width: size_t,
       height: size_t,
@@ -1780,7 +1782,7 @@ trait HIP {
       dst: hipArray_t,
       wOffset: size_t,
       hOffset: size_t,
-      src: Pointer[Unit, Read, Opaque],
+      src: Pointer[CVoid, Read, Opaque],
       spitch: size_t,
       width: size_t,
       height: size_t,
@@ -1794,7 +1796,7 @@ trait HIP {
       dst: hipArray_t,
       wOffset: size_t,
       hOffset: size_t,
-      src: Pointer[Unit, Read, Opaque],
+      src: Pointer[CVoid, Read, Opaque],
       spitch: size_t,
       width: size_t,
       height: size_t,
@@ -1806,7 +1808,7 @@ trait HIP {
       dst: hipArray_t,
       wOffset: size_t,
       hOffset: size_t,
-      src: Pointer[Unit, Read, Opaque],
+      src: Pointer[CVoid, Read, Opaque],
       spitch: size_t,
       width: size_t,
       height: size_t,
@@ -1814,9 +1816,9 @@ trait HIP {
   ): hipError_t = unsupported
   @CSignature("hipError_t (void *, size_t, const void *, size_t, size_t, size_t, hipMemcpyKind)")
   def hipMemcpy2D_spt(
-      dst: Pointer[Unit, ReadWrite, Opaque],
+      dst: Pointer[CVoid, ReadWrite, Opaque],
       dpitch: size_t,
-      src: Pointer[Unit, Read, Opaque],
+      src: Pointer[CVoid, Read, Opaque],
       spitch: size_t,
       width: size_t,
       height: size_t,
@@ -1845,16 +1847,16 @@ trait HIP {
   def hipMemcpy3D_spt(p: Pointer[hipMemcpy3DParms, Read, Opaque]): hipError_t = unsupported
   @CSignature("hipError_t (void *, const void *, size_t, hipMemcpyKind, hipStream_t)")
   def hipMemcpyAsync(
-      dst: Pointer[Unit, ReadWrite, Opaque],
-      src: Pointer[Unit, Read, Opaque],
+      dst: Pointer[CVoid, ReadWrite, Opaque],
+      src: Pointer[CVoid, Read, Opaque],
       sizeBytes: size_t,
       kind: hipMemcpyKind,
       stream: hipStream_t
   ): hipError_t = unsupported
   @CSignature("hipError_t (void *, const void *, size_t, hipMemcpyKind, hipStream_t)")
   def hipMemcpyAsync_spt(
-      dst: Pointer[Unit, ReadWrite, Opaque],
-      src: Pointer[Unit, Read, Opaque],
+      dst: Pointer[CVoid, ReadWrite, Opaque],
+      src: Pointer[CVoid, Read, Opaque],
       sizeBytes: size_t,
       kind: hipMemcpyKind,
       stream: hipStream_t
@@ -1872,14 +1874,14 @@ trait HIP {
     unsupported
   @CSignature("hipError_t (void *, hipArray_t, size_t, size_t)")
   def hipMemcpyAtoH(
-      dst: Pointer[Unit, ReadWrite, Opaque],
+      dst: Pointer[CVoid, ReadWrite, Opaque],
       srcArray: hipArray_t,
       srcOffset: size_t,
       count: size_t
   ): hipError_t = unsupported
   @CSignature("hipError_t (void *, hipArray_t, size_t, size_t, hipStream_t)")
   def hipMemcpyAtoHAsync(
-      dstHost: Pointer[Unit, ReadWrite, Opaque],
+      dstHost: Pointer[CVoid, ReadWrite, Opaque],
       srcArray: hipArray_t,
       srcOffset: size_t,
       ByteCount: size_t,
@@ -1889,8 +1891,8 @@ trait HIP {
     "hipError_t (void **, void **, size_t *, size_t, hipMemcpyAttributes *, size_t *, size_t, size_t *, hipStream_t)"
   )
   def hipMemcpyBatchAsync(
-      dsts: Pointer[Pointer[Unit, ReadWrite, Opaque], ReadWrite, Opaque],
-      srcs: Pointer[Pointer[Unit, ReadWrite, Opaque], ReadWrite, Opaque],
+      dsts: Pointer[Pointer[CVoid, ReadWrite, Opaque], ReadWrite, Opaque],
+      srcs: Pointer[Pointer[CVoid, ReadWrite, Opaque], ReadWrite, Opaque],
       sizes: Pointer[size_t, ReadWrite, Opaque],
       count: size_t,
       attrs: Pointer[hipMemcpyAttributes, ReadWrite, Opaque],
@@ -1908,18 +1910,18 @@ trait HIP {
   def hipMemcpyDtoDAsync(dst: hipDeviceptr_t, src: hipDeviceptr_t, sizeBytes: size_t, stream: hipStream_t): hipError_t =
     unsupported
   @CSignature("hipError_t (void *, hipDeviceptr_t, size_t)")
-  def hipMemcpyDtoH(dst: Pointer[Unit, ReadWrite, Opaque], src: hipDeviceptr_t, sizeBytes: size_t): hipError_t =
+  def hipMemcpyDtoH(dst: Pointer[CVoid, ReadWrite, Opaque], src: hipDeviceptr_t, sizeBytes: size_t): hipError_t =
     unsupported
   @CSignature("hipError_t (void *, hipDeviceptr_t, size_t, hipStream_t)")
   def hipMemcpyDtoHAsync(
-      dst: Pointer[Unit, ReadWrite, Opaque],
+      dst: Pointer[CVoid, ReadWrite, Opaque],
       src: hipDeviceptr_t,
       sizeBytes: size_t,
       stream: hipStream_t
   ): hipError_t = unsupported
   @CSignature("hipError_t (void *, hipArray_const_t, size_t, size_t, size_t, hipMemcpyKind)")
   def hipMemcpyFromArray(
-      dst: Pointer[Unit, ReadWrite, Opaque],
+      dst: Pointer[CVoid, ReadWrite, Opaque],
       srcArray: hipArray_const_t,
       wOffset: size_t,
       hOffset: size_t,
@@ -1928,7 +1930,7 @@ trait HIP {
   ): hipError_t = unsupported
   @CSignature("hipError_t (void *, hipArray_const_t, size_t, size_t, size_t, hipMemcpyKind)")
   def hipMemcpyFromArray_spt(
-      dst: Pointer[Unit, ReadWrite, Opaque],
+      dst: Pointer[CVoid, ReadWrite, Opaque],
       src: hipArray_const_t,
       wOffsetSrc: size_t,
       hOffset: size_t,
@@ -1937,16 +1939,16 @@ trait HIP {
   ): hipError_t = unsupported
   @CSignature("hipError_t (void *, const void *, size_t, size_t, hipMemcpyKind)")
   def hipMemcpyFromSymbol(
-      dst: Pointer[Unit, ReadWrite, Opaque],
-      symbol: Pointer[Unit, Read, Opaque],
+      dst: Pointer[CVoid, ReadWrite, Opaque],
+      symbol: Pointer[CVoid, Read, Opaque],
       sizeBytes: size_t,
       offset: size_t,
       kind: hipMemcpyKind
   ): hipError_t = unsupported
   @CSignature("hipError_t (void *, const void *, size_t, size_t, hipMemcpyKind, hipStream_t)")
   def hipMemcpyFromSymbolAsync(
-      dst: Pointer[Unit, ReadWrite, Opaque],
-      symbol: Pointer[Unit, Read, Opaque],
+      dst: Pointer[CVoid, ReadWrite, Opaque],
+      symbol: Pointer[CVoid, Read, Opaque],
       sizeBytes: size_t,
       offset: size_t,
       kind: hipMemcpyKind,
@@ -1954,8 +1956,8 @@ trait HIP {
   ): hipError_t = unsupported
   @CSignature("hipError_t (void *, const void *, size_t, size_t, hipMemcpyKind, hipStream_t)")
   def hipMemcpyFromSymbolAsync_spt(
-      dst: Pointer[Unit, ReadWrite, Opaque],
-      symbol: Pointer[Unit, Read, Opaque],
+      dst: Pointer[CVoid, ReadWrite, Opaque],
+      symbol: Pointer[CVoid, Read, Opaque],
       sizeBytes: size_t,
       offset: size_t,
       kind: hipMemcpyKind,
@@ -1963,8 +1965,8 @@ trait HIP {
   ): hipError_t = unsupported
   @CSignature("hipError_t (void *, const void *, size_t, size_t, hipMemcpyKind)")
   def hipMemcpyFromSymbol_spt(
-      dst: Pointer[Unit, ReadWrite, Opaque],
-      symbol: Pointer[Unit, Read, Opaque],
+      dst: Pointer[CVoid, ReadWrite, Opaque],
+      symbol: Pointer[CVoid, Read, Opaque],
       sizeBytes: size_t,
       offset: size_t,
       kind: hipMemcpyKind
@@ -1973,23 +1975,23 @@ trait HIP {
   def hipMemcpyHtoA(
       dstArray: hipArray_t,
       dstOffset: size_t,
-      srcHost: Pointer[Unit, Read, Opaque],
+      srcHost: Pointer[CVoid, Read, Opaque],
       count: size_t
   ): hipError_t = unsupported
   @CSignature("hipError_t (hipArray_t, size_t, const void *, size_t, hipStream_t)")
   def hipMemcpyHtoAAsync(
       dstArray: hipArray_t,
       dstOffset: size_t,
-      srcHost: Pointer[Unit, Read, Opaque],
+      srcHost: Pointer[CVoid, Read, Opaque],
       ByteCount: size_t,
       stream: hipStream_t
   ): hipError_t = unsupported
   @CSignature("hipError_t (hipDeviceptr_t, const void *, size_t)")
-  def hipMemcpyHtoD(dst: hipDeviceptr_t, src: Pointer[Unit, Read, Opaque], sizeBytes: size_t): hipError_t = unsupported
+  def hipMemcpyHtoD(dst: hipDeviceptr_t, src: Pointer[CVoid, Read, Opaque], sizeBytes: size_t): hipError_t = unsupported
   @CSignature("hipError_t (hipDeviceptr_t, const void *, size_t, hipStream_t)")
   def hipMemcpyHtoDAsync(
       dst: hipDeviceptr_t,
-      src: Pointer[Unit, Read, Opaque],
+      src: Pointer[CVoid, Read, Opaque],
       sizeBytes: size_t,
       stream: hipStream_t
   ): hipError_t = unsupported
@@ -1999,17 +2001,17 @@ trait HIP {
   def hipMemcpyParam2DAsync(pCopy: Pointer[hip_Memcpy2D, Read, Opaque], stream: hipStream_t): hipError_t = unsupported
   @CSignature("hipError_t (void *, int, const void *, int, size_t)")
   def hipMemcpyPeer(
-      dst: Pointer[Unit, ReadWrite, Opaque],
+      dst: Pointer[CVoid, ReadWrite, Opaque],
       dstDeviceId: Int,
-      src: Pointer[Unit, Read, Opaque],
+      src: Pointer[CVoid, Read, Opaque],
       srcDeviceId: Int,
       sizeBytes: size_t
   ): hipError_t = unsupported
   @CSignature("hipError_t (void *, int, const void *, int, size_t, hipStream_t)")
   def hipMemcpyPeerAsync(
-      dst: Pointer[Unit, ReadWrite, Opaque],
+      dst: Pointer[CVoid, ReadWrite, Opaque],
       dstDeviceId: Int,
-      src: Pointer[Unit, Read, Opaque],
+      src: Pointer[CVoid, Read, Opaque],
       srcDevice: Int,
       sizeBytes: size_t,
       stream: hipStream_t
@@ -2019,22 +2021,22 @@ trait HIP {
       dst: hipArray_t,
       wOffset: size_t,
       hOffset: size_t,
-      src: Pointer[Unit, Read, Opaque],
+      src: Pointer[CVoid, Read, Opaque],
       count: size_t,
       kind: hipMemcpyKind
   ): hipError_t = unsupported
   @CSignature("hipError_t (const void *, const void *, size_t, size_t, hipMemcpyKind)")
   def hipMemcpyToSymbol(
-      symbol: Pointer[Unit, Read, Opaque],
-      src: Pointer[Unit, Read, Opaque],
+      symbol: Pointer[CVoid, Read, Opaque],
+      src: Pointer[CVoid, Read, Opaque],
       sizeBytes: size_t,
       offset: size_t,
       kind: hipMemcpyKind
   ): hipError_t = unsupported
   @CSignature("hipError_t (const void *, const void *, size_t, size_t, hipMemcpyKind, hipStream_t)")
   def hipMemcpyToSymbolAsync(
-      symbol: Pointer[Unit, Read, Opaque],
-      src: Pointer[Unit, Read, Opaque],
+      symbol: Pointer[CVoid, Read, Opaque],
+      src: Pointer[CVoid, Read, Opaque],
       sizeBytes: size_t,
       offset: size_t,
       kind: hipMemcpyKind,
@@ -2042,8 +2044,8 @@ trait HIP {
   ): hipError_t = unsupported
   @CSignature("hipError_t (const void *, const void *, size_t, size_t, hipMemcpyKind, hipStream_t)")
   def hipMemcpyToSymbolAsync_spt(
-      symbol: Pointer[Unit, Read, Opaque],
-      src: Pointer[Unit, Read, Opaque],
+      symbol: Pointer[CVoid, Read, Opaque],
+      src: Pointer[CVoid, Read, Opaque],
       sizeBytes: size_t,
       offset: size_t,
       kind: hipMemcpyKind,
@@ -2051,32 +2053,32 @@ trait HIP {
   ): hipError_t = unsupported
   @CSignature("hipError_t (const void *, const void *, size_t, size_t, hipMemcpyKind)")
   def hipMemcpyToSymbol_spt(
-      symbol: Pointer[Unit, Read, Opaque],
-      src: Pointer[Unit, Read, Opaque],
+      symbol: Pointer[CVoid, Read, Opaque],
+      src: Pointer[CVoid, Read, Opaque],
       sizeBytes: size_t,
       offset: size_t,
       kind: hipMemcpyKind
   ): hipError_t = unsupported
   @CSignature("hipError_t (void *, const void *, size_t, hipMemcpyKind, hipStream_t)")
   def hipMemcpyWithStream(
-      dst: Pointer[Unit, ReadWrite, Opaque],
-      src: Pointer[Unit, Read, Opaque],
+      dst: Pointer[CVoid, ReadWrite, Opaque],
+      src: Pointer[CVoid, Read, Opaque],
       sizeBytes: size_t,
       kind: hipMemcpyKind,
       stream: hipStream_t
   ): hipError_t = unsupported
   @CSignature("hipError_t (void *, const void *, size_t, hipMemcpyKind)")
   def hipMemcpy_spt(
-      dst: Pointer[Unit, ReadWrite, Opaque],
-      src: Pointer[Unit, Read, Opaque],
+      dst: Pointer[CVoid, ReadWrite, Opaque],
+      src: Pointer[CVoid, Read, Opaque],
       sizeBytes: size_t,
       kind: hipMemcpyKind
   ): hipError_t = unsupported
   @CSignature("hipError_t (void *, int, size_t)")
-  def hipMemset(dst: Pointer[Unit, ReadWrite, Opaque], value: Int, sizeBytes: size_t): hipError_t = unsupported
+  def hipMemset(dst: Pointer[CVoid, ReadWrite, Opaque], value: Int, sizeBytes: size_t): hipError_t = unsupported
   @CSignature("hipError_t (void *, size_t, int, size_t, size_t)")
   def hipMemset2D(
-      dst: Pointer[Unit, ReadWrite, Opaque],
+      dst: Pointer[CVoid, ReadWrite, Opaque],
       pitch: size_t,
       value: Int,
       width: size_t,
@@ -2084,7 +2086,7 @@ trait HIP {
   ): hipError_t = unsupported
   @CSignature("hipError_t (void *, size_t, int, size_t, size_t, hipStream_t)")
   def hipMemset2DAsync(
-      dst: Pointer[Unit, ReadWrite, Opaque],
+      dst: Pointer[CVoid, ReadWrite, Opaque],
       pitch: size_t,
       value: Int,
       width: size_t,
@@ -2093,7 +2095,7 @@ trait HIP {
   ): hipError_t = unsupported
   @CSignature("hipError_t (void *, size_t, int, size_t, size_t, hipStream_t)")
   def hipMemset2DAsync_spt(
-      dst: Pointer[Unit, ReadWrite, Opaque],
+      dst: Pointer[CVoid, ReadWrite, Opaque],
       pitch: size_t,
       value: Int,
       width: size_t,
@@ -2102,7 +2104,7 @@ trait HIP {
   ): hipError_t = unsupported
   @CSignature("hipError_t (void *, size_t, int, size_t, size_t)")
   def hipMemset2D_spt(
-      dst: Pointer[Unit, ReadWrite, Opaque],
+      dst: Pointer[CVoid, ReadWrite, Opaque],
       pitch: size_t,
       value: Int,
       width: size_t,
@@ -2124,14 +2126,14 @@ trait HIP {
   def hipMemset3D_spt(pitchedDevPtr: hipPitchedPtr, value: Int, extent: hipExtent): hipError_t = unsupported
   @CSignature("hipError_t (void *, int, size_t, hipStream_t)")
   def hipMemsetAsync(
-      dst: Pointer[Unit, ReadWrite, Opaque],
+      dst: Pointer[CVoid, ReadWrite, Opaque],
       value: Int,
       sizeBytes: size_t,
       stream: hipStream_t
   ): hipError_t = unsupported
   @CSignature("hipError_t (void *, int, size_t, hipStream_t)")
   def hipMemsetAsync_spt(
-      dst: Pointer[Unit, ReadWrite, Opaque],
+      dst: Pointer[CVoid, ReadWrite, Opaque],
       value: Int,
       sizeBytes: size_t,
       stream: hipStream_t
@@ -2179,7 +2181,7 @@ trait HIP {
   def hipMemsetD2D8(
       dst: hipDeviceptr_t,
       dstPitch: size_t,
-      value: net.kurobako.gemstone.cuda.UInt8,
+      value: unsigned_char,
       width: size_t,
       height: size_t
   ): hipError_t = unsupported
@@ -2187,7 +2189,7 @@ trait HIP {
   def hipMemsetD2D8Async(
       dst: hipDeviceptr_t,
       dstPitch: size_t,
-      value: net.kurobako.gemstone.cuda.UInt8,
+      value: unsigned_char,
       width: size_t,
       height: size_t,
       stream: hipStream_t
@@ -2197,17 +2199,12 @@ trait HIP {
   @CSignature("hipError_t (hipDeviceptr_t, int, size_t, hipStream_t)")
   def hipMemsetD32Async(dst: hipDeviceptr_t, value: Int, count: size_t, stream: hipStream_t): hipError_t = unsupported
   @CSignature("hipError_t (hipDeviceptr_t, unsigned char, size_t)")
-  def hipMemsetD8(dest: hipDeviceptr_t, value: net.kurobako.gemstone.cuda.UInt8, count: size_t): hipError_t =
-    unsupported
+  def hipMemsetD8(dest: hipDeviceptr_t, value: unsigned_char, count: size_t): hipError_t = unsupported
   @CSignature("hipError_t (hipDeviceptr_t, unsigned char, size_t, hipStream_t)")
-  def hipMemsetD8Async(
-      dest: hipDeviceptr_t,
-      value: net.kurobako.gemstone.cuda.UInt8,
-      count: size_t,
-      stream: hipStream_t
-  ): hipError_t = unsupported
+  def hipMemsetD8Async(dest: hipDeviceptr_t, value: unsigned_char, count: size_t, stream: hipStream_t): hipError_t =
+    unsupported
   @CSignature("hipError_t (void *, int, size_t)")
-  def hipMemset_spt(dst: Pointer[Unit, ReadWrite, Opaque], value: Int, sizeBytes: size_t): hipError_t = unsupported
+  def hipMemset_spt(dst: Pointer[CVoid, ReadWrite, Opaque], value: Int, sizeBytes: size_t): hipError_t = unsupported
   @CSignature("hipError_t (hipMipmappedArray_t *, HIP_ARRAY3D_DESCRIPTOR *, unsigned int)")
   def hipMipmappedArrayCreate(
       pHandle: Pointer[hipMipmappedArray_t, ReadWrite, Opaque],
@@ -2257,7 +2254,7 @@ trait HIP {
       blockDimZ: unsigned_int,
       sharedMemBytes: unsigned_int,
       stream: hipStream_t,
-      kernelParams: Pointer[Pointer[Unit, ReadWrite, Opaque], ReadWrite, Opaque]
+      kernelParams: Pointer[Pointer[CVoid, ReadWrite, Opaque], ReadWrite, Opaque]
   ): hipError_t = unsupported
   @CSignature("hipError_t (hipFunctionLaunchParams *, unsigned int, unsigned int)")
   def hipModuleLaunchCooperativeKernelMultiDevice(
@@ -2278,28 +2275,28 @@ trait HIP {
       blockDimZ: unsigned_int,
       sharedMemBytes: unsigned_int,
       stream: hipStream_t,
-      kernelParams: Pointer[Pointer[Unit, ReadWrite, Opaque], ReadWrite, Opaque],
-      extra: Pointer[Pointer[Unit, ReadWrite, Opaque], ReadWrite, Opaque]
+      kernelParams: Pointer[Pointer[CVoid, ReadWrite, Opaque], ReadWrite, Opaque],
+      extra: Pointer[Pointer[CVoid, ReadWrite, Opaque], ReadWrite, Opaque]
   ): hipError_t = unsupported
   @CSignature("hipError_t (hipModule_t *, const char *)")
   def hipModuleLoad(module: Pointer[hipModule_t, ReadWrite, Opaque], fname: CString): hipError_t = unsupported
   @CSignature("hipError_t (hipModule_t *, const void *)")
   def hipModuleLoadData(
       module: Pointer[hipModule_t, ReadWrite, Opaque],
-      image: Pointer[Unit, Read, Opaque]
+      image: Pointer[CVoid, Read, Opaque]
   ): hipError_t = unsupported
   @CSignature("hipError_t (hipModule_t *, const void *, unsigned int, hipJitOption *, void **)")
   def hipModuleLoadDataEx(
       module: Pointer[hipModule_t, ReadWrite, Opaque],
-      image: Pointer[Unit, Read, Opaque],
+      image: Pointer[CVoid, Read, Opaque],
       numOptions: unsigned_int,
       options: Pointer[hipJitOption, ReadWrite, Opaque],
-      optionValues: Pointer[Pointer[Unit, ReadWrite, Opaque], ReadWrite, Opaque]
+      optionValues: Pointer[Pointer[CVoid, ReadWrite, Opaque], ReadWrite, Opaque]
   ): hipError_t = unsupported
   @CSignature("hipError_t (hipModule_t *, const void *)")
   def hipModuleLoadFatBinary(
       module: Pointer[hipModule_t, ReadWrite, Opaque],
-      fatbin: Pointer[Unit, Read, Opaque]
+      fatbin: Pointer[CVoid, Read, Opaque]
   ): hipError_t = unsupported
   @CSignature("hipError_t (int *, hipFunction_t, int, size_t)")
   def hipModuleOccupancyMaxActiveBlocksPerMultiprocessor(
@@ -2338,21 +2335,21 @@ trait HIP {
   @CSignature("hipError_t (size_t *, const void *, int, int)")
   def hipOccupancyAvailableDynamicSMemPerBlock(
       dynamicSmemSize: Pointer[size_t, ReadWrite, Opaque],
-      f: Pointer[Unit, Read, Opaque],
+      f: Pointer[CVoid, Read, Opaque],
       numBlocks: Int,
       blockSize: Int
   ): hipError_t = unsupported
   @CSignature("hipError_t (int *, const void *, int, size_t)")
   def hipOccupancyMaxActiveBlocksPerMultiprocessor(
       numBlocks: Pointer[Int, ReadWrite, Opaque],
-      f: Pointer[Unit, Read, Opaque],
+      f: Pointer[CVoid, Read, Opaque],
       blockSize: Int,
       dynSharedMemPerBlk: size_t
   ): hipError_t = unsupported
   @CSignature("hipError_t (int *, const void *, int, size_t, unsigned int)")
   def hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(
       numBlocks: Pointer[Int, ReadWrite, Opaque],
-      f: Pointer[Unit, Read, Opaque],
+      f: Pointer[CVoid, Read, Opaque],
       blockSize: Int,
       dynSharedMemPerBlk: size_t,
       flags: unsigned_int
@@ -2361,7 +2358,7 @@ trait HIP {
   def hipOccupancyMaxPotentialBlockSize(
       gridSize: Pointer[Int, ReadWrite, Opaque],
       blockSize: Pointer[Int, ReadWrite, Opaque],
-      f: Pointer[Unit, Read, Opaque],
+      f: Pointer[CVoid, Read, Opaque],
       dynSharedMemPerBlk: size_t,
       blockSizeLimit: Int
   ): hipError_t = unsupported
@@ -2369,18 +2366,18 @@ trait HIP {
   def hipPeekAtLastError(): hipError_t = unsupported
   @CSignature("hipError_t (void *, hipPointer_attribute, hipDeviceptr_t)")
   def hipPointerGetAttribute(
-      data: Pointer[Unit, ReadWrite, Opaque],
+      data: Pointer[CVoid, ReadWrite, Opaque],
       attribute: hipPointer_attribute,
       ptr: hipDeviceptr_t
   ): hipError_t = unsupported
   @CSignature("hipError_t (hipPointerAttribute_t *, const void *)")
   def hipPointerGetAttributes(
       attributes: Pointer[hipPointerAttribute_t, ReadWrite, Opaque],
-      ptr: Pointer[Unit, Read, Opaque]
+      ptr: Pointer[CVoid, Read, Opaque]
   ): hipError_t = unsupported
   @CSignature("hipError_t (const void *, hipPointer_attribute, hipDeviceptr_t)")
   def hipPointerSetAttribute(
-      value: Pointer[Unit, Read, Opaque],
+      value: Pointer[CVoid, Read, Opaque],
       attribute: hipPointer_attribute,
       ptr: hipDeviceptr_t
   ): hipError_t = unsupported
@@ -2397,7 +2394,7 @@ trait HIP {
   @CSignature("hipError_t (int *, int)")
   def hipSetValidDevices(device_arr: Pointer[Int, ReadWrite, Opaque], len: Int): hipError_t = unsupported
   @CSignature("hipError_t (const void *, size_t, size_t)")
-  def hipSetupArgument(arg: Pointer[Unit, Read, Opaque], size: size_t, offset: size_t): hipError_t = unsupported
+  def hipSetupArgument(arg: Pointer[CVoid, Read, Opaque], size: size_t, offset: size_t): hipError_t = unsupported
   @CSignature(
     "hipError_t (const hipExternalSemaphore_t *, const hipExternalSemaphoreSignalParams *, unsigned int, hipStream_t)"
   )
@@ -2411,20 +2408,20 @@ trait HIP {
   def hipStreamAddCallback(
       stream: hipStream_t,
       callback: hipStreamCallback_t,
-      userData: Pointer[Unit, ReadWrite, Opaque],
+      userData: Pointer[CVoid, ReadWrite, Opaque],
       flags: unsigned_int
   ): hipError_t = unsupported
   @CSignature("hipError_t (hipStream_t, hipStreamCallback_t, void *, unsigned int)")
   def hipStreamAddCallback_spt(
       stream: hipStream_t,
       callback: hipStreamCallback_t,
-      userData: Pointer[Unit, ReadWrite, Opaque],
+      userData: Pointer[CVoid, ReadWrite, Opaque],
       flags: unsigned_int
   ): hipError_t = unsupported
   @CSignature("hipError_t (hipStream_t, void *, size_t, unsigned int)")
   def hipStreamAttachMemAsync(
       stream: hipStream_t,
-      dev_ptr: Pointer[Unit, ReadWrite, Opaque],
+      dev_ptr: Pointer[CVoid, ReadWrite, Opaque],
       length: size_t,
       flags: unsigned_int
   ): hipError_t = unsupported
@@ -2562,7 +2559,7 @@ trait HIP {
   @CSignature("hipError_t (hipStream_t, void *, uint32_t, unsigned int, uint32_t)")
   def hipStreamWaitValue32(
       stream: hipStream_t,
-      ptr: Pointer[Unit, ReadWrite, Opaque],
+      ptr: Pointer[CVoid, ReadWrite, Opaque],
       value: uint32_t,
       flags: unsigned_int,
       mask: uint32_t
@@ -2570,7 +2567,7 @@ trait HIP {
   @CSignature("hipError_t (hipStream_t, void *, uint64_t, unsigned int, uint64_t)")
   def hipStreamWaitValue64(
       stream: hipStream_t,
-      ptr: Pointer[Unit, ReadWrite, Opaque],
+      ptr: Pointer[CVoid, ReadWrite, Opaque],
       value: uint64_t,
       flags: unsigned_int,
       mask: uint64_t
@@ -2578,14 +2575,14 @@ trait HIP {
   @CSignature("hipError_t (hipStream_t, void *, uint32_t, unsigned int)")
   def hipStreamWriteValue32(
       stream: hipStream_t,
-      ptr: Pointer[Unit, ReadWrite, Opaque],
+      ptr: Pointer[CVoid, ReadWrite, Opaque],
       value: uint32_t,
       flags: unsigned_int
   ): hipError_t = unsupported
   @CSignature("hipError_t (hipStream_t, void *, uint64_t, unsigned int)")
   def hipStreamWriteValue64(
       stream: hipStream_t,
-      ptr: Pointer[Unit, ReadWrite, Opaque],
+      ptr: Pointer[CVoid, ReadWrite, Opaque],
       value: uint64_t,
       flags: unsigned_int
   ): hipError_t = unsupported
@@ -2756,7 +2753,7 @@ trait HIP {
   @CSignature("hipError_t (hipUserObject_t *, void *, hipHostFn_t, unsigned int, unsigned int)")
   def hipUserObjectCreate(
       object_out: Pointer[hipUserObject_t, ReadWrite, Opaque],
-      ptr: Pointer[Unit, ReadWrite, Opaque],
+      ptr: Pointer[CVoid, ReadWrite, Opaque],
       destroy: hipHostFn_t,
       initialRefcount: unsigned_int,
       flags: unsigned_int

@@ -279,21 +279,21 @@ trait LevelZero {
   @CSignature("ze_result_t (ze_command_list_handle_t, ze_event_handle_t)")
   def zeCommandListAppendEventReset(hCommandList: ze_command_list_handle_t, hEvent: ze_event_handle_t): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_command_list_handle_t, ze_executable_graph_handle_t, const void *, ze_event_handle_t, uint32_t, ze_event_handle_t *)")
-  def zeCommandListAppendGraphExt(hCommandList: ze_command_list_handle_t, hGraph: ze_executable_graph_handle_t, pNext: Pointer[Unit, Read, Opaque], hSignalEvent: ze_event_handle_t, numWaitEvents: uint32_t, phWaitEvents: Pointer[ze_event_handle_t, ReadWrite, Opaque]): ze_result_t = unsupported
+  def zeCommandListAppendGraphExt(hCommandList: ze_command_list_handle_t, hGraph: ze_executable_graph_handle_t, pNext: Pointer[CVoid, Read, Opaque], hSignalEvent: ze_event_handle_t, numWaitEvents: uint32_t, phWaitEvents: Pointer[ze_event_handle_t, ReadWrite, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_command_list_handle_t, ze_host_function_callback_t, void *, const void *, ze_event_handle_t, uint32_t, ze_event_handle_t *)")
-  def zeCommandListAppendHostFunction(hCommandList: ze_command_list_handle_t, pfnHostFunction: ze_host_function_callback_t, pUserData: Pointer[Unit, ReadWrite, Opaque], pNext: Pointer[Unit, Read, Opaque], hSignalEvent: ze_event_handle_t, numWaitEvents: uint32_t, phWaitEvents: Pointer[ze_event_handle_t, ReadWrite, Opaque]): ze_result_t = unsupported
+  def zeCommandListAppendHostFunction(hCommandList: ze_command_list_handle_t, pfnHostFunction: ze_host_function_callback_t, pUserData: Pointer[CVoid, ReadWrite, Opaque], pNext: Pointer[CVoid, Read, Opaque], hSignalEvent: ze_event_handle_t, numWaitEvents: uint32_t, phWaitEvents: Pointer[ze_event_handle_t, ReadWrite, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_command_list_handle_t, ze_image_handle_t, ze_image_handle_t, ze_event_handle_t, uint32_t, ze_event_handle_t *)")
   def zeCommandListAppendImageCopy(hCommandList: ze_command_list_handle_t, hDstImage: ze_image_handle_t, hSrcImage: ze_image_handle_t, hSignalEvent: ze_event_handle_t, numWaitEvents: uint32_t, phWaitEvents: Pointer[ze_event_handle_t, ReadWrite, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_command_list_handle_t, ze_image_handle_t, const void *, const ze_image_region_t *, ze_event_handle_t, uint32_t, ze_event_handle_t *)")
-  def zeCommandListAppendImageCopyFromMemory(hCommandList: ze_command_list_handle_t, hDstImage: ze_image_handle_t, srcptr: Pointer[Unit, Read, Opaque], pDstRegion: Pointer[ze_image_region_t, Read, Opaque], hSignalEvent: ze_event_handle_t, numWaitEvents: uint32_t, phWaitEvents: Pointer[ze_event_handle_t, ReadWrite, Opaque]): ze_result_t = unsupported
+  def zeCommandListAppendImageCopyFromMemory(hCommandList: ze_command_list_handle_t, hDstImage: ze_image_handle_t, srcptr: Pointer[CVoid, Read, Opaque], pDstRegion: Pointer[ze_image_region_t, Read, Opaque], hSignalEvent: ze_event_handle_t, numWaitEvents: uint32_t, phWaitEvents: Pointer[ze_event_handle_t, ReadWrite, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_command_list_handle_t, ze_image_handle_t, const void *, const ze_image_region_t *, uint32_t, uint32_t, ze_event_handle_t, uint32_t, ze_event_handle_t *)")
-  def zeCommandListAppendImageCopyFromMemoryExt(hCommandList: ze_command_list_handle_t, hDstImage: ze_image_handle_t, srcptr: Pointer[Unit, Read, Opaque], pDstRegion: Pointer[ze_image_region_t, Read, Opaque], srcRowPitch: uint32_t, srcSlicePitch: uint32_t, hSignalEvent: ze_event_handle_t, numWaitEvents: uint32_t, phWaitEvents: Pointer[ze_event_handle_t, ReadWrite, Opaque]): ze_result_t = unsupported
+  def zeCommandListAppendImageCopyFromMemoryExt(hCommandList: ze_command_list_handle_t, hDstImage: ze_image_handle_t, srcptr: Pointer[CVoid, Read, Opaque], pDstRegion: Pointer[ze_image_region_t, Read, Opaque], srcRowPitch: uint32_t, srcSlicePitch: uint32_t, hSignalEvent: ze_event_handle_t, numWaitEvents: uint32_t, phWaitEvents: Pointer[ze_event_handle_t, ReadWrite, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_command_list_handle_t, ze_image_handle_t, ze_image_handle_t, const ze_image_region_t *, const ze_image_region_t *, ze_event_handle_t, uint32_t, ze_event_handle_t *)")
   def zeCommandListAppendImageCopyRegion(hCommandList: ze_command_list_handle_t, hDstImage: ze_image_handle_t, hSrcImage: ze_image_handle_t, pDstRegion: Pointer[ze_image_region_t, Read, Opaque], pSrcRegion: Pointer[ze_image_region_t, Read, Opaque], hSignalEvent: ze_event_handle_t, numWaitEvents: uint32_t, phWaitEvents: Pointer[ze_event_handle_t, ReadWrite, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_command_list_handle_t, void *, ze_image_handle_t, const ze_image_region_t *, ze_event_handle_t, uint32_t, ze_event_handle_t *)")
-  def zeCommandListAppendImageCopyToMemory(hCommandList: ze_command_list_handle_t, dstptr: Pointer[Unit, ReadWrite, Opaque], hSrcImage: ze_image_handle_t, pSrcRegion: Pointer[ze_image_region_t, Read, Opaque], hSignalEvent: ze_event_handle_t, numWaitEvents: uint32_t, phWaitEvents: Pointer[ze_event_handle_t, ReadWrite, Opaque]): ze_result_t = unsupported
+  def zeCommandListAppendImageCopyToMemory(hCommandList: ze_command_list_handle_t, dstptr: Pointer[CVoid, ReadWrite, Opaque], hSrcImage: ze_image_handle_t, pSrcRegion: Pointer[ze_image_region_t, Read, Opaque], hSignalEvent: ze_event_handle_t, numWaitEvents: uint32_t, phWaitEvents: Pointer[ze_event_handle_t, ReadWrite, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_command_list_handle_t, void *, ze_image_handle_t, const ze_image_region_t *, uint32_t, uint32_t, ze_event_handle_t, uint32_t, ze_event_handle_t *)")
-  def zeCommandListAppendImageCopyToMemoryExt(hCommandList: ze_command_list_handle_t, dstptr: Pointer[Unit, ReadWrite, Opaque], hSrcImage: ze_image_handle_t, pSrcRegion: Pointer[ze_image_region_t, Read, Opaque], destRowPitch: uint32_t, destSlicePitch: uint32_t, hSignalEvent: ze_event_handle_t, numWaitEvents: uint32_t, phWaitEvents: Pointer[ze_event_handle_t, ReadWrite, Opaque]): ze_result_t = unsupported
+  def zeCommandListAppendImageCopyToMemoryExt(hCommandList: ze_command_list_handle_t, dstptr: Pointer[CVoid, ReadWrite, Opaque], hSrcImage: ze_image_handle_t, pSrcRegion: Pointer[ze_image_region_t, Read, Opaque], destRowPitch: uint32_t, destSlicePitch: uint32_t, hSignalEvent: ze_event_handle_t, numWaitEvents: uint32_t, phWaitEvents: Pointer[ze_event_handle_t, ReadWrite, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_command_list_handle_t, ze_kernel_handle_t, const ze_group_count_t *, ze_event_handle_t, uint32_t, ze_event_handle_t *)")
   def zeCommandListAppendLaunchCooperativeKernel(hCommandList: ze_command_list_handle_t, hKernel: ze_kernel_handle_t, pLaunchFuncArgs: Pointer[ze_group_count_t, Read, Opaque], hSignalEvent: ze_event_handle_t, numWaitEvents: uint32_t, phWaitEvents: Pointer[ze_event_handle_t, ReadWrite, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_command_list_handle_t, ze_kernel_handle_t, const ze_group_count_t *, ze_event_handle_t, uint32_t, ze_event_handle_t *)")
@@ -301,35 +301,35 @@ trait LevelZero {
   @CSignature("ze_result_t (ze_command_list_handle_t, ze_kernel_handle_t, const ze_group_count_t *, ze_event_handle_t, uint32_t, ze_event_handle_t *)")
   def zeCommandListAppendLaunchKernelIndirect(hCommandList: ze_command_list_handle_t, hKernel: ze_kernel_handle_t, pLaunchArgumentsBuffer: Pointer[ze_group_count_t, Read, Opaque], hSignalEvent: ze_event_handle_t, numWaitEvents: uint32_t, phWaitEvents: Pointer[ze_event_handle_t, ReadWrite, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_command_list_handle_t, ze_kernel_handle_t, const ze_group_count_t, const ze_group_size_t, void **, const void *, ze_event_handle_t, uint32_t, ze_event_handle_t *)")
-  def zeCommandListAppendLaunchKernelWithArguments(hCommandList: ze_command_list_handle_t, hKernel: ze_kernel_handle_t, groupCounts: const_ze_group_count_t, groupSizes: const_ze_group_size_t, pArguments: Pointer[Pointer[Unit, ReadWrite, Opaque], ReadWrite, Opaque], pNext: Pointer[Unit, Read, Opaque], hSignalEvent: ze_event_handle_t, numWaitEvents: uint32_t, phWaitEvents: Pointer[ze_event_handle_t, ReadWrite, Opaque]): ze_result_t = unsupported
+  def zeCommandListAppendLaunchKernelWithArguments(hCommandList: ze_command_list_handle_t, hKernel: ze_kernel_handle_t, groupCounts: const_ze_group_count_t, groupSizes: const_ze_group_size_t, pArguments: Pointer[Pointer[CVoid, ReadWrite, Opaque], ReadWrite, Opaque], pNext: Pointer[CVoid, Read, Opaque], hSignalEvent: ze_event_handle_t, numWaitEvents: uint32_t, phWaitEvents: Pointer[ze_event_handle_t, ReadWrite, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_command_list_handle_t, ze_kernel_handle_t, const ze_group_count_t *, const void *, ze_event_handle_t, uint32_t, ze_event_handle_t *)")
-  def zeCommandListAppendLaunchKernelWithParameters(hCommandList: ze_command_list_handle_t, hKernel: ze_kernel_handle_t, pGroupCounts: Pointer[ze_group_count_t, Read, Opaque], pNext: Pointer[Unit, Read, Opaque], hSignalEvent: ze_event_handle_t, numWaitEvents: uint32_t, phWaitEvents: Pointer[ze_event_handle_t, ReadWrite, Opaque]): ze_result_t = unsupported
+  def zeCommandListAppendLaunchKernelWithParameters(hCommandList: ze_command_list_handle_t, hKernel: ze_kernel_handle_t, pGroupCounts: Pointer[ze_group_count_t, Read, Opaque], pNext: Pointer[CVoid, Read, Opaque], hSignalEvent: ze_event_handle_t, numWaitEvents: uint32_t, phWaitEvents: Pointer[ze_event_handle_t, ReadWrite, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_command_list_handle_t, uint32_t, ze_kernel_handle_t *, const uint32_t *, const ze_group_count_t *, ze_event_handle_t, uint32_t, ze_event_handle_t *)")
   def zeCommandListAppendLaunchMultipleKernelsIndirect(hCommandList: ze_command_list_handle_t, numKernels: uint32_t, phKernels: Pointer[ze_kernel_handle_t, ReadWrite, Opaque], pCountBuffer: Pointer[uint32_t, Read, Opaque], pLaunchArgumentsBuffer: Pointer[ze_group_count_t, Read, Opaque], hSignalEvent: ze_event_handle_t, numWaitEvents: uint32_t, phWaitEvents: Pointer[ze_event_handle_t, ReadWrite, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_command_list_handle_t, ze_device_handle_t, const void *, size_t, ze_memory_advice_t)")
-  def zeCommandListAppendMemAdvise(hCommandList: ze_command_list_handle_t, hDevice: ze_device_handle_t, ptr: Pointer[Unit, Read, Opaque], size: size_t, advice: ze_memory_advice_t): ze_result_t = unsupported
+  def zeCommandListAppendMemAdvise(hCommandList: ze_command_list_handle_t, hDevice: ze_device_handle_t, ptr: Pointer[CVoid, Read, Opaque], size: size_t, advice: ze_memory_advice_t): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_command_list_handle_t, void *, const void *, size_t, ze_event_handle_t, uint32_t, ze_event_handle_t *)")
-  def zeCommandListAppendMemoryCopy(hCommandList: ze_command_list_handle_t, dstptr: Pointer[Unit, ReadWrite, Opaque], srcptr: Pointer[Unit, Read, Opaque], size: size_t, hSignalEvent: ze_event_handle_t, numWaitEvents: uint32_t, phWaitEvents: Pointer[ze_event_handle_t, ReadWrite, Opaque]): ze_result_t = unsupported
+  def zeCommandListAppendMemoryCopy(hCommandList: ze_command_list_handle_t, dstptr: Pointer[CVoid, ReadWrite, Opaque], srcptr: Pointer[CVoid, Read, Opaque], size: size_t, hSignalEvent: ze_event_handle_t, numWaitEvents: uint32_t, phWaitEvents: Pointer[ze_event_handle_t, ReadWrite, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_command_list_handle_t, void *, ze_context_handle_t, const void *, size_t, ze_event_handle_t, uint32_t, ze_event_handle_t *)")
-  def zeCommandListAppendMemoryCopyFromContext(hCommandList: ze_command_list_handle_t, dstptr: Pointer[Unit, ReadWrite, Opaque], hContextSrc: ze_context_handle_t, srcptr: Pointer[Unit, Read, Opaque], size: size_t, hSignalEvent: ze_event_handle_t, numWaitEvents: uint32_t, phWaitEvents: Pointer[ze_event_handle_t, ReadWrite, Opaque]): ze_result_t = unsupported
+  def zeCommandListAppendMemoryCopyFromContext(hCommandList: ze_command_list_handle_t, dstptr: Pointer[CVoid, ReadWrite, Opaque], hContextSrc: ze_context_handle_t, srcptr: Pointer[CVoid, Read, Opaque], size: size_t, hSignalEvent: ze_event_handle_t, numWaitEvents: uint32_t, phWaitEvents: Pointer[ze_event_handle_t, ReadWrite, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_command_list_handle_t, void *, const ze_copy_region_t *, uint32_t, uint32_t, const void *, const ze_copy_region_t *, uint32_t, uint32_t, ze_event_handle_t, uint32_t, ze_event_handle_t *)")
-  def zeCommandListAppendMemoryCopyRegion(hCommandList: ze_command_list_handle_t, dstptr: Pointer[Unit, ReadWrite, Opaque], dstRegion: Pointer[ze_copy_region_t, Read, Opaque], dstPitch: uint32_t, dstSlicePitch: uint32_t, srcptr: Pointer[Unit, Read, Opaque], srcRegion: Pointer[ze_copy_region_t, Read, Opaque], srcPitch: uint32_t, srcSlicePitch: uint32_t, hSignalEvent: ze_event_handle_t, numWaitEvents: uint32_t, phWaitEvents: Pointer[ze_event_handle_t, ReadWrite, Opaque]): ze_result_t = unsupported
+  def zeCommandListAppendMemoryCopyRegion(hCommandList: ze_command_list_handle_t, dstptr: Pointer[CVoid, ReadWrite, Opaque], dstRegion: Pointer[ze_copy_region_t, Read, Opaque], dstPitch: uint32_t, dstSlicePitch: uint32_t, srcptr: Pointer[CVoid, Read, Opaque], srcRegion: Pointer[ze_copy_region_t, Read, Opaque], srcPitch: uint32_t, srcSlicePitch: uint32_t, hSignalEvent: ze_event_handle_t, numWaitEvents: uint32_t, phWaitEvents: Pointer[ze_event_handle_t, ReadWrite, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_command_list_handle_t, void *, const void *, size_t, const void *, ze_event_handle_t, uint32_t, ze_event_handle_t *)")
-  def zeCommandListAppendMemoryCopyWithParameters(hCommandList: ze_command_list_handle_t, dstptr: Pointer[Unit, ReadWrite, Opaque], srcptr: Pointer[Unit, Read, Opaque], size: size_t, pNext: Pointer[Unit, Read, Opaque], hSignalEvent: ze_event_handle_t, numWaitEvents: uint32_t, phWaitEvents: Pointer[ze_event_handle_t, ReadWrite, Opaque]): ze_result_t = unsupported
+  def zeCommandListAppendMemoryCopyWithParameters(hCommandList: ze_command_list_handle_t, dstptr: Pointer[CVoid, ReadWrite, Opaque], srcptr: Pointer[CVoid, Read, Opaque], size: size_t, pNext: Pointer[CVoid, Read, Opaque], hSignalEvent: ze_event_handle_t, numWaitEvents: uint32_t, phWaitEvents: Pointer[ze_event_handle_t, ReadWrite, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_command_list_handle_t, void *, const void *, size_t, size_t, ze_event_handle_t, uint32_t, ze_event_handle_t *)")
-  def zeCommandListAppendMemoryFill(hCommandList: ze_command_list_handle_t, ptr: Pointer[Unit, ReadWrite, Opaque], pattern: Pointer[Unit, Read, Opaque], pattern_size: size_t, size: size_t, hSignalEvent: ze_event_handle_t, numWaitEvents: uint32_t, phWaitEvents: Pointer[ze_event_handle_t, ReadWrite, Opaque]): ze_result_t = unsupported
+  def zeCommandListAppendMemoryFill(hCommandList: ze_command_list_handle_t, ptr: Pointer[CVoid, ReadWrite, Opaque], pattern: Pointer[CVoid, Read, Opaque], pattern_size: size_t, size: size_t, hSignalEvent: ze_event_handle_t, numWaitEvents: uint32_t, phWaitEvents: Pointer[ze_event_handle_t, ReadWrite, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_command_list_handle_t, void *, const void *, size_t, size_t, const void *, ze_event_handle_t, uint32_t, ze_event_handle_t *)")
-  def zeCommandListAppendMemoryFillWithParameters(hCommandList: ze_command_list_handle_t, ptr: Pointer[Unit, ReadWrite, Opaque], pattern: Pointer[Unit, Read, Opaque], pattern_size: size_t, size: size_t, pNext: Pointer[Unit, Read, Opaque], hSignalEvent: ze_event_handle_t, numWaitEvents: uint32_t, phWaitEvents: Pointer[ze_event_handle_t, ReadWrite, Opaque]): ze_result_t = unsupported
+  def zeCommandListAppendMemoryFillWithParameters(hCommandList: ze_command_list_handle_t, ptr: Pointer[CVoid, ReadWrite, Opaque], pattern: Pointer[CVoid, Read, Opaque], pattern_size: size_t, size: size_t, pNext: Pointer[CVoid, Read, Opaque], hSignalEvent: ze_event_handle_t, numWaitEvents: uint32_t, phWaitEvents: Pointer[ze_event_handle_t, ReadWrite, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_command_list_handle_t, const void *, size_t)")
-  def zeCommandListAppendMemoryPrefetch(hCommandList: ze_command_list_handle_t, ptr: Pointer[Unit, Read, Opaque], size: size_t): ze_result_t = unsupported
+  def zeCommandListAppendMemoryPrefetch(hCommandList: ze_command_list_handle_t, ptr: Pointer[CVoid, Read, Opaque], size: size_t): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_command_list_handle_t, uint32_t, const size_t *, const void **, ze_event_handle_t, uint32_t, ze_event_handle_t *)")
-  def zeCommandListAppendMemoryRangesBarrier(hCommandList: ze_command_list_handle_t, numRanges: uint32_t, pRangeSizes: Pointer[size_t, Read, Opaque], pRanges: Pointer[Pointer[Unit, ReadWrite, Opaque], Read, Opaque], hSignalEvent: ze_event_handle_t, numWaitEvents: uint32_t, phWaitEvents: Pointer[ze_event_handle_t, ReadWrite, Opaque]): ze_result_t = unsupported
+  def zeCommandListAppendMemoryRangesBarrier(hCommandList: ze_command_list_handle_t, numRanges: uint32_t, pRangeSizes: Pointer[size_t, Read, Opaque], pRanges: Pointer[Pointer[CVoid, ReadWrite, Opaque], Read, Opaque], hSignalEvent: ze_event_handle_t, numWaitEvents: uint32_t, phWaitEvents: Pointer[ze_event_handle_t, ReadWrite, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_command_list_handle_t, uint32_t, ze_event_handle_t *, void *, const size_t *, ze_event_handle_t, uint32_t, ze_event_handle_t *)")
-  def zeCommandListAppendQueryKernelTimestamps(hCommandList: ze_command_list_handle_t, numEvents: uint32_t, phEvents: Pointer[ze_event_handle_t, ReadWrite, Opaque], dstptr: Pointer[Unit, ReadWrite, Opaque], pOffsets: Pointer[size_t, Read, Opaque], hSignalEvent: ze_event_handle_t, numWaitEvents: uint32_t, phWaitEvents: Pointer[ze_event_handle_t, ReadWrite, Opaque]): ze_result_t = unsupported
+  def zeCommandListAppendQueryKernelTimestamps(hCommandList: ze_command_list_handle_t, numEvents: uint32_t, phEvents: Pointer[ze_event_handle_t, ReadWrite, Opaque], dstptr: Pointer[CVoid, ReadWrite, Opaque], pOffsets: Pointer[size_t, Read, Opaque], hSignalEvent: ze_event_handle_t, numWaitEvents: uint32_t, phWaitEvents: Pointer[ze_event_handle_t, ReadWrite, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_command_list_handle_t, ze_event_handle_t)")
   def zeCommandListAppendSignalEvent(hCommandList: ze_command_list_handle_t, hEvent: ze_event_handle_t): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_command_list_handle_t, const void *, ze_event_handle_t)")
-  def zeCommandListAppendSignalEventWithParameters(hCommandList: ze_command_list_handle_t, pNext: Pointer[Unit, Read, Opaque], hEvent: ze_event_handle_t): ze_result_t = unsupported
+  def zeCommandListAppendSignalEventWithParameters(hCommandList: ze_command_list_handle_t, pNext: Pointer[CVoid, Read, Opaque], hEvent: ze_event_handle_t): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_command_list_handle_t, uint32_t, ze_external_semaphore_ext_handle_t *, ze_external_semaphore_signal_params_ext_t *, ze_event_handle_t, uint32_t, ze_event_handle_t *)")
   def zeCommandListAppendSignalExternalSemaphoreExt(hCommandList: ze_command_list_handle_t, numSemaphores: uint32_t, phSemaphores: Pointer[ze_external_semaphore_ext_handle_t, ReadWrite, Opaque], signalParams: Pointer[ze_external_semaphore_signal_params_ext_t, ReadWrite, Opaque], hSignalEvent: ze_event_handle_t, numWaitEvents: uint32_t, phWaitEvents: Pointer[ze_event_handle_t, ReadWrite, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_command_list_handle_t, uint32_t, ze_external_semaphore_ext_handle_t *, ze_external_semaphore_wait_params_ext_t *, ze_event_handle_t, uint32_t, ze_event_handle_t *)")
@@ -337,13 +337,13 @@ trait LevelZero {
   @CSignature("ze_result_t (ze_command_list_handle_t, uint32_t, ze_event_handle_t *)")
   def zeCommandListAppendWaitOnEvents(hCommandList: ze_command_list_handle_t, numEvents: uint32_t, phEvents: Pointer[ze_event_handle_t, ReadWrite, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_command_list_handle_t, const void *, uint32_t, ze_event_handle_t *)")
-  def zeCommandListAppendWaitOnEventsWithParameters(hCommandList: ze_command_list_handle_t, pNext: Pointer[Unit, Read, Opaque], numEvents: uint32_t, phEvents: Pointer[ze_event_handle_t, ReadWrite, Opaque]): ze_result_t = unsupported
+  def zeCommandListAppendWaitOnEventsWithParameters(hCommandList: ze_command_list_handle_t, pNext: Pointer[CVoid, Read, Opaque], numEvents: uint32_t, phEvents: Pointer[ze_event_handle_t, ReadWrite, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_command_list_handle_t, uint64_t *, ze_event_handle_t, uint32_t, ze_event_handle_t *)")
   def zeCommandListAppendWriteGlobalTimestamp(hCommandList: ze_command_list_handle_t, dstptr: Pointer[uint64_t, ReadWrite, Opaque], hSignalEvent: ze_event_handle_t, numWaitEvents: uint32_t, phWaitEvents: Pointer[ze_event_handle_t, ReadWrite, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_command_list_handle_t, ze_graph_handle_t, const void *)")
-  def zeCommandListBeginCaptureIntoGraphExt(hCommandList: ze_command_list_handle_t, hGraph: ze_graph_handle_t, pNext: Pointer[Unit, Read, Opaque]): ze_result_t = unsupported
+  def zeCommandListBeginCaptureIntoGraphExt(hCommandList: ze_command_list_handle_t, hGraph: ze_graph_handle_t, pNext: Pointer[CVoid, Read, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_command_list_handle_t, const void *)")
-  def zeCommandListBeginGraphCaptureExt(hCommandList: ze_command_list_handle_t, pNext: Pointer[Unit, Read, Opaque]): ze_result_t = unsupported
+  def zeCommandListBeginGraphCaptureExt(hCommandList: ze_command_list_handle_t, pNext: Pointer[CVoid, Read, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_command_list_handle_t)")
   def zeCommandListClose(hCommandList: ze_command_list_handle_t): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_context_handle_t, ze_device_handle_t, const ze_command_list_desc_t *, ze_command_list_handle_t *)")
@@ -355,7 +355,7 @@ trait LevelZero {
   @CSignature("ze_result_t (ze_command_list_handle_t)")
   def zeCommandListDestroy(hCommandList: ze_command_list_handle_t): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_command_list_handle_t, const void *, ze_graph_handle_t *)")
-  def zeCommandListEndGraphCaptureExt(hCommandList: ze_command_list_handle_t, pNext: Pointer[Unit, Read, Opaque], phGraph: Pointer[ze_graph_handle_t, ReadWrite, Opaque]): ze_result_t = unsupported
+  def zeCommandListEndGraphCaptureExt(hCommandList: ze_command_list_handle_t, pNext: Pointer[CVoid, Read, Opaque], phGraph: Pointer[ze_graph_handle_t, ReadWrite, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_command_list_handle_t, ze_context_handle_t *)")
   def zeCommandListGetContextHandle(hCommandList: ze_command_list_handle_t, phContext: Pointer[ze_context_handle_t, ReadWrite, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_command_list_handle_t, ze_device_handle_t *)")
@@ -375,7 +375,7 @@ trait LevelZero {
   @CSignature("ze_result_t (ze_command_list_handle_t, uint32_t, ze_command_list_handle_t *, ze_event_handle_t, uint32_t, ze_event_handle_t *)")
   def zeCommandListImmediateAppendCommandListsExp(hCommandListImmediate: ze_command_list_handle_t, numCommandLists: uint32_t, phCommandLists: Pointer[ze_command_list_handle_t, ReadWrite, Opaque], hSignalEvent: ze_event_handle_t, numWaitEvents: uint32_t, phWaitEvents: Pointer[ze_event_handle_t, ReadWrite, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_command_list_handle_t, uint32_t, ze_command_list_handle_t *, const void *, ze_event_handle_t, uint32_t, ze_event_handle_t *)")
-  def zeCommandListImmediateAppendCommandListsWithParameters(hCommandListImmediate: ze_command_list_handle_t, numCommandLists: uint32_t, phCommandLists: Pointer[ze_command_list_handle_t, ReadWrite, Opaque], pNext: Pointer[Unit, Read, Opaque], hSignalEvent: ze_event_handle_t, numWaitEvents: uint32_t, phWaitEvents: Pointer[ze_event_handle_t, ReadWrite, Opaque]): ze_result_t = unsupported
+  def zeCommandListImmediateAppendCommandListsWithParameters(hCommandListImmediate: ze_command_list_handle_t, numCommandLists: uint32_t, phCommandLists: Pointer[ze_command_list_handle_t, ReadWrite, Opaque], pNext: Pointer[CVoid, Read, Opaque], hSignalEvent: ze_event_handle_t, numWaitEvents: uint32_t, phWaitEvents: Pointer[ze_event_handle_t, ReadWrite, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_command_list_handle_t, ze_command_queue_flags_t *)")
   def zeCommandListImmediateGetFlags(hCommandList: ze_command_list_handle_t, pFlags: Pointer[ze_command_queue_flags_t, ReadWrite, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_command_list_handle_t, uint32_t *)")
@@ -429,13 +429,13 @@ trait LevelZero {
   @CSignature("ze_result_t (ze_context_handle_t, ze_device_handle_t, ze_image_handle_t)")
   def zeContextEvictImage(hContext: ze_context_handle_t, hDevice: ze_device_handle_t, hImage: ze_image_handle_t): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_context_handle_t, ze_device_handle_t, void *, size_t)")
-  def zeContextEvictMemory(hContext: ze_context_handle_t, hDevice: ze_device_handle_t, ptr: Pointer[Unit, ReadWrite, Opaque], size: size_t): ze_result_t = unsupported
+  def zeContextEvictMemory(hContext: ze_context_handle_t, hDevice: ze_device_handle_t, ptr: Pointer[CVoid, ReadWrite, Opaque], size: size_t): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_context_handle_t)")
   def zeContextGetStatus(hContext: ze_context_handle_t): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_context_handle_t, ze_device_handle_t, ze_image_handle_t)")
   def zeContextMakeImageResident(hContext: ze_context_handle_t, hDevice: ze_device_handle_t, hImage: ze_image_handle_t): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_context_handle_t, ze_device_handle_t, void *, size_t)")
-  def zeContextMakeMemoryResident(hContext: ze_context_handle_t, hDevice: ze_device_handle_t, ptr: Pointer[Unit, ReadWrite, Opaque], size: size_t): ze_result_t = unsupported
+  def zeContextMakeMemoryResident(hContext: ze_context_handle_t, hDevice: ze_device_handle_t, ptr: Pointer[CVoid, ReadWrite, Opaque], size: size_t): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_context_handle_t, ze_device_handle_t)")
   def zeContextSystemBarrier(hContext: ze_context_handle_t, hDevice: ze_device_handle_t): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_device_handle_t, ze_device_handle_t, ze_bool_t *)")
@@ -449,7 +449,7 @@ trait LevelZero {
   @CSignature("ze_result_t (ze_device_handle_t, uint32_t *, ze_command_queue_group_properties_t *)")
   def zeDeviceGetCommandQueueGroupProperties(hDevice: ze_device_handle_t, pCount: Pointer[uint32_t, ReadWrite, Opaque], pCommandQueueGroupProperties: Pointer[ze_command_queue_group_properties_t, ReadWrite, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_device_handle_t, ze_device_compiler_info_t, const void *, size_t *, void *)")
-  def zeDeviceGetCompilerInfo(hDevice: ze_device_handle_t, paramName: ze_device_compiler_info_t, pNext: Pointer[Unit, Read, Opaque], pSize: Pointer[size_t, ReadWrite, Opaque], pData: Pointer[Unit, ReadWrite, Opaque]): ze_result_t = unsupported
+  def zeDeviceGetCompilerInfo(hDevice: ze_device_handle_t, paramName: ze_device_compiler_info_t, pNext: Pointer[CVoid, Read, Opaque], pSize: Pointer[size_t, ReadWrite, Opaque], pData: Pointer[CVoid, ReadWrite, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_device_handle_t, ze_device_compute_properties_t *)")
   def zeDeviceGetComputeProperties(hDevice: ze_device_handle_t, pComputeProperties: Pointer[ze_device_compute_properties_t, ReadWrite, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_device_handle_t, uint64_t *)")
@@ -475,7 +475,7 @@ trait LevelZero {
   @CSignature("ze_result_t (ze_device_handle_t, ze_device_handle_t *)")
   def zeDeviceGetRootDevice(hDevice: ze_device_handle_t, phRootDevice: Pointer[ze_device_handle_t, ReadWrite, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_device_handle_t, const void *, size_t *, char *)")
-  def zeDeviceGetRuntimeRequirements(hDevice: ze_device_handle_t, pObjDesc: Pointer[Unit, Read, Opaque], pSize: Pointer[size_t, ReadWrite, Opaque], pRequirements: Pointer[Byte, ReadWrite, Opaque]): ze_result_t = unsupported
+  def zeDeviceGetRuntimeRequirements(hDevice: ze_device_handle_t, pObjDesc: Pointer[CVoid, Read, Opaque], pSize: Pointer[size_t, ReadWrite, Opaque], pRequirements: Pointer[Byte, ReadWrite, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_device_handle_t, const char **)")
   def zeDeviceGetRuntimeRequirementsKey(hDevice: ze_device_handle_t, pKey: Pointer[Pointer[Byte, ReadWrite, Opaque], Read, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_device_handle_t)")
@@ -493,7 +493,7 @@ trait LevelZero {
   @CSignature("ze_result_t (ze_device_handle_t, size_t, size_t)")
   def zeDeviceReserveCacheExt(hDevice: ze_device_handle_t, cacheLevel: size_t, cacheReservationSize: size_t): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_device_handle_t, void *, size_t, ze_cache_ext_region_t)")
-  def zeDeviceSetCacheAdviceExt(hDevice: ze_device_handle_t, ptr: Pointer[Unit, ReadWrite, Opaque], regionSize: size_t, cacheRegion: ze_cache_ext_region_t): ze_result_t = unsupported
+  def zeDeviceSetCacheAdviceExt(hDevice: ze_device_handle_t, ptr: Pointer[CVoid, ReadWrite, Opaque], regionSize: size_t, cacheRegion: ze_cache_ext_region_t): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_device_handle_t)")
   def zeDeviceSynchronize(hDevice: ze_device_handle_t): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_device_handle_t, const char *, ze_validate_runtime_requirements_output_t *)")
@@ -505,7 +505,7 @@ trait LevelZero {
   @CSignature("ze_context_handle_t (ze_driver_handle_t)")
   def zeDriverGetDefaultContext(hDriver: ze_driver_handle_t): ze_context_handle_t = unsupported
   @CSignature("ze_result_t (ze_driver_handle_t, const char *, void **)")
-  def zeDriverGetExtensionFunctionAddress(hDriver: ze_driver_handle_t, name: CString, ppFunctionAddress: Pointer[Pointer[Unit, ReadWrite, Opaque], ReadWrite, Opaque]): ze_result_t = unsupported
+  def zeDriverGetExtensionFunctionAddress(hDriver: ze_driver_handle_t, name: CString, ppFunctionAddress: Pointer[Pointer[CVoid, ReadWrite, Opaque], ReadWrite, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_driver_handle_t, uint32_t *, ze_driver_extension_properties_t *)")
   def zeDriverGetExtensionProperties(hDriver: ze_driver_handle_t, pCount: Pointer[uint32_t, ReadWrite, Opaque], pExtensionProperties: Pointer[ze_driver_extension_properties_t, ReadWrite, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_driver_handle_t, ze_driver_ipc_properties_t *)")
@@ -599,17 +599,17 @@ trait LevelZero {
   @CSignature("ze_result_t (ze_fence_handle_t)")
   def zeFenceReset(hFence: ze_fence_handle_t): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_context_handle_t, const void *, ze_graph_handle_t *)")
-  def zeGraphCreateExt(hContext: ze_context_handle_t, pNext: Pointer[Unit, Read, Opaque], phGraph: Pointer[ze_graph_handle_t, ReadWrite, Opaque]): ze_result_t = unsupported
+  def zeGraphCreateExt(hContext: ze_context_handle_t, pNext: Pointer[CVoid, Read, Opaque], phGraph: Pointer[ze_graph_handle_t, ReadWrite, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_graph_handle_t)")
   def zeGraphDestroyExt(hGraph: ze_graph_handle_t): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_graph_handle_t, const char *, const void *)")
-  def zeGraphDumpContentsExt(hGraph: ze_graph_handle_t, filePath: CString, pNext: Pointer[Unit, Read, Opaque]): ze_result_t = unsupported
+  def zeGraphDumpContentsExt(hGraph: ze_graph_handle_t, filePath: CString, pNext: Pointer[CVoid, Read, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_graph_handle_t, uint64_t *)")
   def zeGraphGetIdExt(hGraph: ze_graph_handle_t, pGraphId: Pointer[uint64_t, ReadWrite, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_graph_handle_t, ze_command_list_handle_t *)")
   def zeGraphGetPrimaryCommandListExt(hGraph: ze_graph_handle_t, phCommandList: Pointer[ze_command_list_handle_t, ReadWrite, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_graph_handle_t, const void *, ze_executable_graph_handle_t *)")
-  def zeGraphInstantiateExt(hGraph: ze_graph_handle_t, pNext: Pointer[Unit, Read, Opaque], phExecutableGraph: Pointer[ze_executable_graph_handle_t, ReadWrite, Opaque]): ze_result_t = unsupported
+  def zeGraphInstantiateExt(hGraph: ze_graph_handle_t, pNext: Pointer[CVoid, Read, Opaque], phExecutableGraph: Pointer[ze_executable_graph_handle_t, ReadWrite, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_graph_handle_t)")
   def zeGraphIsEmptyExt(hGraph: ze_graph_handle_t): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_graph_handle_t)")
@@ -617,7 +617,7 @@ trait LevelZero {
   @CSignature("ze_result_t (ze_graph_handle_t)")
   def zeGraphResumeCaptureExt(hGraph: ze_graph_handle_t): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_graph_handle_t, zex_mem_graph_free_callback_fn_t, void *, const void *)")
-  def zeGraphSetDestructionCallbackExt(hGraph: ze_graph_handle_t, pfnCallback: zex_mem_graph_free_callback_fn_t, pUserData: Pointer[Unit, ReadWrite, Opaque], pNext: Pointer[Unit, Read, Opaque]): ze_result_t = unsupported
+  def zeGraphSetDestructionCallbackExt(hGraph: ze_graph_handle_t, pfnCallback: zex_mem_graph_free_callback_fn_t, pUserData: Pointer[CVoid, ReadWrite, Opaque], pNext: Pointer[CVoid, Read, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_context_handle_t, ze_device_handle_t, const ze_image_desc_t *, ze_image_handle_t *)")
   def zeImageCreate(hContext: ze_context_handle_t, hDevice: ze_device_handle_t, desc: Pointer[ze_image_desc_t, Read, Opaque], phImage: Pointer[ze_image_handle_t, ReadWrite, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_image_handle_t)")
@@ -659,7 +659,7 @@ trait LevelZero {
   @CSignature("ze_result_t (ze_kernel_handle_t, ze_scheduling_hint_exp_desc_t *)")
   def zeKernelSchedulingHintExp(hKernel: ze_kernel_handle_t, pHint: Pointer[ze_scheduling_hint_exp_desc_t, ReadWrite, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_kernel_handle_t, uint32_t, size_t, const void *)")
-  def zeKernelSetArgumentValue(hKernel: ze_kernel_handle_t, argIndex: uint32_t, argSize: size_t, pArgValue: Pointer[Unit, Read, Opaque]): ze_result_t = unsupported
+  def zeKernelSetArgumentValue(hKernel: ze_kernel_handle_t, argIndex: uint32_t, argSize: size_t, pArgValue: Pointer[CVoid, Read, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_kernel_handle_t, ze_cache_config_flags_t)")
   def zeKernelSetCacheConfig(hKernel: ze_kernel_handle_t, flags: ze_cache_config_flags_t): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_kernel_handle_t, uint32_t, uint32_t, uint32_t)")
@@ -673,39 +673,39 @@ trait LevelZero {
   @CSignature("ze_result_t (ze_kernel_handle_t, uint32_t *)")
   def zeKernelSuggestMaxCooperativeGroupCount(hKernel: ze_kernel_handle_t, totalGroupCount: Pointer[uint32_t, ReadWrite, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_context_handle_t, const ze_device_mem_alloc_desc_t *, size_t, size_t, ze_device_handle_t, void **)")
-  def zeMemAllocDevice(hContext: ze_context_handle_t, device_desc: Pointer[ze_device_mem_alloc_desc_t, Read, Opaque], size: size_t, alignment: size_t, hDevice: ze_device_handle_t, pptr: Pointer[Pointer[Unit, ReadWrite, Opaque], ReadWrite, Opaque]): ze_result_t = unsupported
+  def zeMemAllocDevice(hContext: ze_context_handle_t, device_desc: Pointer[ze_device_mem_alloc_desc_t, Read, Opaque], size: size_t, alignment: size_t, hDevice: ze_device_handle_t, pptr: Pointer[Pointer[CVoid, ReadWrite, Opaque], ReadWrite, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_context_handle_t, const ze_host_mem_alloc_desc_t *, size_t, size_t, void **)")
-  def zeMemAllocHost(hContext: ze_context_handle_t, host_desc: Pointer[ze_host_mem_alloc_desc_t, Read, Opaque], size: size_t, alignment: size_t, pptr: Pointer[Pointer[Unit, ReadWrite, Opaque], ReadWrite, Opaque]): ze_result_t = unsupported
+  def zeMemAllocHost(hContext: ze_context_handle_t, host_desc: Pointer[ze_host_mem_alloc_desc_t, Read, Opaque], size: size_t, alignment: size_t, pptr: Pointer[Pointer[CVoid, ReadWrite, Opaque], ReadWrite, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_context_handle_t, const ze_device_mem_alloc_desc_t *, const ze_host_mem_alloc_desc_t *, size_t, size_t, ze_device_handle_t, void **)")
-  def zeMemAllocShared(hContext: ze_context_handle_t, device_desc: Pointer[ze_device_mem_alloc_desc_t, Read, Opaque], host_desc: Pointer[ze_host_mem_alloc_desc_t, Read, Opaque], size: size_t, alignment: size_t, hDevice: ze_device_handle_t, pptr: Pointer[Pointer[Unit, ReadWrite, Opaque], ReadWrite, Opaque]): ze_result_t = unsupported
+  def zeMemAllocShared(hContext: ze_context_handle_t, device_desc: Pointer[ze_device_mem_alloc_desc_t, Read, Opaque], host_desc: Pointer[ze_host_mem_alloc_desc_t, Read, Opaque], size: size_t, alignment: size_t, hDevice: ze_device_handle_t, pptr: Pointer[Pointer[CVoid, ReadWrite, Opaque], ReadWrite, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_context_handle_t, const void *)")
-  def zeMemCloseIpcHandle(hContext: ze_context_handle_t, ptr: Pointer[Unit, Read, Opaque]): ze_result_t = unsupported
+  def zeMemCloseIpcHandle(hContext: ze_context_handle_t, ptr: Pointer[CVoid, Read, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_context_handle_t, void *)")
-  def zeMemFree(hContext: ze_context_handle_t, ptr: Pointer[Unit, ReadWrite, Opaque]): ze_result_t = unsupported
+  def zeMemFree(hContext: ze_context_handle_t, ptr: Pointer[CVoid, ReadWrite, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_context_handle_t, const ze_memory_free_ext_desc_t *, void *)")
-  def zeMemFreeExt(hContext: ze_context_handle_t, pMemFreeDesc: Pointer[ze_memory_free_ext_desc_t, Read, Opaque], ptr: Pointer[Unit, ReadWrite, Opaque]): ze_result_t = unsupported
+  def zeMemFreeExt(hContext: ze_context_handle_t, pMemFreeDesc: Pointer[ze_memory_free_ext_desc_t, Read, Opaque], ptr: Pointer[CVoid, ReadWrite, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_context_handle_t, const void *, void **, size_t *)")
-  def zeMemGetAddressRange(hContext: ze_context_handle_t, ptr: Pointer[Unit, Read, Opaque], pBase: Pointer[Pointer[Unit, ReadWrite, Opaque], ReadWrite, Opaque], pSize: Pointer[size_t, ReadWrite, Opaque]): ze_result_t = unsupported
+  def zeMemGetAddressRange(hContext: ze_context_handle_t, ptr: Pointer[CVoid, Read, Opaque], pBase: Pointer[Pointer[CVoid, ReadWrite, Opaque], ReadWrite, Opaque], pSize: Pointer[size_t, ReadWrite, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_context_handle_t, const void *, ze_memory_allocation_properties_t *, ze_device_handle_t *)")
-  def zeMemGetAllocProperties(hContext: ze_context_handle_t, ptr: Pointer[Unit, Read, Opaque], pMemAllocProperties: Pointer[ze_memory_allocation_properties_t, ReadWrite, Opaque], phDevice: Pointer[ze_device_handle_t, ReadWrite, Opaque]): ze_result_t = unsupported
+  def zeMemGetAllocProperties(hContext: ze_context_handle_t, ptr: Pointer[CVoid, Read, Opaque], pMemAllocProperties: Pointer[ze_memory_allocation_properties_t, ReadWrite, Opaque], phDevice: Pointer[ze_device_handle_t, ReadWrite, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_context_handle_t, ze_device_handle_t, const void *, size_t, ze_memory_atomic_attr_exp_flags_t *)")
-  def zeMemGetAtomicAccessAttributeExp(hContext: ze_context_handle_t, hDevice: ze_device_handle_t, ptr: Pointer[Unit, Read, Opaque], size: size_t, pAttr: Pointer[ze_memory_atomic_attr_exp_flags_t, ReadWrite, Opaque]): ze_result_t = unsupported
+  def zeMemGetAtomicAccessAttributeExp(hContext: ze_context_handle_t, hDevice: ze_device_handle_t, ptr: Pointer[CVoid, Read, Opaque], size: size_t, pAttr: Pointer[ze_memory_atomic_attr_exp_flags_t, ReadWrite, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_context_handle_t, ze_ipc_mem_handle_t, uint64_t *)")
   def zeMemGetFileDescriptorFromIpcHandleExp(hContext: ze_context_handle_t, ipcHandle: ze_ipc_mem_handle_t, pHandle: Pointer[uint64_t, ReadWrite, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_context_handle_t, const void *, ze_ipc_mem_handle_t *)")
-  def zeMemGetIpcHandle(hContext: ze_context_handle_t, ptr: Pointer[Unit, Read, Opaque], pIpcHandle: Pointer[ze_ipc_mem_handle_t, ReadWrite, Opaque]): ze_result_t = unsupported
+  def zeMemGetIpcHandle(hContext: ze_context_handle_t, ptr: Pointer[CVoid, Read, Opaque], pIpcHandle: Pointer[ze_ipc_mem_handle_t, ReadWrite, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_context_handle_t, uint64_t, ze_ipc_mem_handle_t *)")
   def zeMemGetIpcHandleFromFileDescriptorExp(hContext: ze_context_handle_t, handle: uint64_t, pIpcHandle: Pointer[ze_ipc_mem_handle_t, ReadWrite, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_context_handle_t, const void *, void *, ze_ipc_mem_handle_t *)")
-  def zeMemGetIpcHandleWithProperties(hContext: ze_context_handle_t, ptr: Pointer[Unit, Read, Opaque], pNext: Pointer[Unit, ReadWrite, Opaque], pIpcHandle: Pointer[ze_ipc_mem_handle_t, ReadWrite, Opaque]): ze_result_t = unsupported
+  def zeMemGetIpcHandleWithProperties(hContext: ze_context_handle_t, ptr: Pointer[CVoid, Read, Opaque], pNext: Pointer[CVoid, ReadWrite, Opaque], pIpcHandle: Pointer[ze_ipc_mem_handle_t, ReadWrite, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_context_handle_t, ze_device_handle_t, size_t, size_t, unsigned int, size_t *)")
   def zeMemGetPitchFor2dImage(hContext: ze_context_handle_t, hDevice: ze_device_handle_t, imageWidth: size_t, imageHeight: size_t, elementSizeInBytes: unsigned_int, rowPitch: Pointer[size_t, ReadWrite, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_context_handle_t, ze_device_handle_t, ze_ipc_mem_handle_t, ze_ipc_memory_flags_t, void **)")
-  def zeMemOpenIpcHandle(hContext: ze_context_handle_t, hDevice: ze_device_handle_t, handle: ze_ipc_mem_handle_t, flags: ze_ipc_memory_flags_t, pptr: Pointer[Pointer[Unit, ReadWrite, Opaque], ReadWrite, Opaque]): ze_result_t = unsupported
+  def zeMemOpenIpcHandle(hContext: ze_context_handle_t, hDevice: ze_device_handle_t, handle: ze_ipc_mem_handle_t, flags: ze_ipc_memory_flags_t, pptr: Pointer[Pointer[CVoid, ReadWrite, Opaque], ReadWrite, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_context_handle_t, ze_ipc_mem_handle_t)")
   def zeMemPutIpcHandle(hContext: ze_context_handle_t, handle: ze_ipc_mem_handle_t): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_context_handle_t, ze_device_handle_t, const void *, size_t, ze_memory_atomic_attr_exp_flags_t)")
-  def zeMemSetAtomicAccessAttributeExp(hContext: ze_context_handle_t, hDevice: ze_device_handle_t, ptr: Pointer[Unit, Read, Opaque], size: size_t, attr: ze_memory_atomic_attr_exp_flags_t): ze_result_t = unsupported
+  def zeMemSetAtomicAccessAttributeExp(hContext: ze_context_handle_t, hDevice: ze_device_handle_t, ptr: Pointer[CVoid, Read, Opaque], size: size_t, attr: ze_memory_atomic_attr_exp_flags_t): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_module_build_log_handle_t)")
   def zeModuleBuildLogDestroy(hModuleBuildLog: ze_module_build_log_handle_t): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_module_build_log_handle_t, size_t *, char *)")
@@ -719,9 +719,9 @@ trait LevelZero {
   @CSignature("ze_result_t (ze_module_handle_t, ze_device_handle_t *)")
   def zeModuleGetDeviceHandle(hModule: ze_module_handle_t, phDevice: Pointer[ze_device_handle_t, ReadWrite, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_module_handle_t, const char *, void **)")
-  def zeModuleGetFunctionPointer(hModule: ze_module_handle_t, pFunctionName: CString, pfnFunction: Pointer[Pointer[Unit, ReadWrite, Opaque], ReadWrite, Opaque]): ze_result_t = unsupported
+  def zeModuleGetFunctionPointer(hModule: ze_module_handle_t, pFunctionName: CString, pfnFunction: Pointer[Pointer[CVoid, ReadWrite, Opaque], ReadWrite, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_module_handle_t, const char *, size_t *, void **)")
-  def zeModuleGetGlobalPointer(hModule: ze_module_handle_t, pGlobalName: CString, pSize: Pointer[size_t, ReadWrite, Opaque], pptr: Pointer[Pointer[Unit, ReadWrite, Opaque], ReadWrite, Opaque]): ze_result_t = unsupported
+  def zeModuleGetGlobalPointer(hModule: ze_module_handle_t, pGlobalName: CString, pSize: Pointer[size_t, ReadWrite, Opaque], pptr: Pointer[Pointer[CVoid, ReadWrite, Opaque], ReadWrite, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_module_handle_t, uint32_t *, const char **)")
   def zeModuleGetKernelNames(hModule: ze_module_handle_t, pCount: Pointer[uint32_t, ReadWrite, Opaque], pNames: Pointer[Pointer[Byte, ReadWrite, Opaque], Read, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_module_handle_t, size_t *, uint8_t *)")
@@ -737,11 +737,11 @@ trait LevelZero {
   @CSignature("ze_result_t (ze_context_handle_t, ze_physical_mem_handle_t, ze_physical_mem_properties_t *)")
   def zePhysicalMemGetProperties(hContext: ze_context_handle_t, hPhysicalMem: ze_physical_mem_handle_t, pMemProperties: Pointer[ze_physical_mem_properties_t, ReadWrite, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_rtas_builder_exp_handle_t, const ze_rtas_builder_build_op_exp_desc_t *, void *, size_t, void *, size_t, ze_rtas_parallel_operation_exp_handle_t, void *, ze_rtas_aabb_exp_t *, size_t *)")
-  def zeRTASBuilderBuildExp(hBuilder: ze_rtas_builder_exp_handle_t, pBuildOpDescriptor: Pointer[ze_rtas_builder_build_op_exp_desc_t, Read, Opaque], pScratchBuffer: Pointer[Unit, ReadWrite, Opaque], scratchBufferSizeBytes: size_t, pRtasBuffer: Pointer[Unit, ReadWrite, Opaque], rtasBufferSizeBytes: size_t, hParallelOperation: ze_rtas_parallel_operation_exp_handle_t, pBuildUserPtr: Pointer[Unit, ReadWrite, Opaque], pBounds: Pointer[ze_rtas_aabb_exp_t, ReadWrite, Opaque], pRtasBufferSizeBytes: Pointer[size_t, ReadWrite, Opaque]): ze_result_t = unsupported
+  def zeRTASBuilderBuildExp(hBuilder: ze_rtas_builder_exp_handle_t, pBuildOpDescriptor: Pointer[ze_rtas_builder_build_op_exp_desc_t, Read, Opaque], pScratchBuffer: Pointer[CVoid, ReadWrite, Opaque], scratchBufferSizeBytes: size_t, pRtasBuffer: Pointer[CVoid, ReadWrite, Opaque], rtasBufferSizeBytes: size_t, hParallelOperation: ze_rtas_parallel_operation_exp_handle_t, pBuildUserPtr: Pointer[CVoid, ReadWrite, Opaque], pBounds: Pointer[ze_rtas_aabb_exp_t, ReadWrite, Opaque], pRtasBufferSizeBytes: Pointer[size_t, ReadWrite, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_rtas_builder_ext_handle_t, const ze_rtas_builder_build_op_ext_desc_t *, void *, size_t, void *, size_t, ze_rtas_parallel_operation_ext_handle_t, void *, ze_rtas_aabb_ext_t *, size_t *)")
-  def zeRTASBuilderBuildExt(hBuilder: ze_rtas_builder_ext_handle_t, pBuildOpDescriptor: Pointer[ze_rtas_builder_build_op_ext_desc_t, Read, Opaque], pScratchBuffer: Pointer[Unit, ReadWrite, Opaque], scratchBufferSizeBytes: size_t, pRtasBuffer: Pointer[Unit, ReadWrite, Opaque], rtasBufferSizeBytes: size_t, hParallelOperation: ze_rtas_parallel_operation_ext_handle_t, pBuildUserPtr: Pointer[Unit, ReadWrite, Opaque], pBounds: Pointer[ze_rtas_aabb_ext_t, ReadWrite, Opaque], pRtasBufferSizeBytes: Pointer[size_t, ReadWrite, Opaque]): ze_result_t = unsupported
+  def zeRTASBuilderBuildExt(hBuilder: ze_rtas_builder_ext_handle_t, pBuildOpDescriptor: Pointer[ze_rtas_builder_build_op_ext_desc_t, Read, Opaque], pScratchBuffer: Pointer[CVoid, ReadWrite, Opaque], scratchBufferSizeBytes: size_t, pRtasBuffer: Pointer[CVoid, ReadWrite, Opaque], rtasBufferSizeBytes: size_t, hParallelOperation: ze_rtas_parallel_operation_ext_handle_t, pBuildUserPtr: Pointer[CVoid, ReadWrite, Opaque], pBounds: Pointer[ze_rtas_aabb_ext_t, ReadWrite, Opaque], pRtasBufferSizeBytes: Pointer[size_t, ReadWrite, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_command_list_handle_t, void *, const void *, size_t, ze_event_handle_t, uint32_t, ze_event_handle_t *)")
-  def zeRTASBuilderCommandListAppendCopyExt(hCommandList: ze_command_list_handle_t, dstptr: Pointer[Unit, ReadWrite, Opaque], srcptr: Pointer[Unit, Read, Opaque], size: size_t, hSignalEvent: ze_event_handle_t, numWaitEvents: uint32_t, phWaitEvents: Pointer[ze_event_handle_t, ReadWrite, Opaque]): ze_result_t = unsupported
+  def zeRTASBuilderCommandListAppendCopyExt(hCommandList: ze_command_list_handle_t, dstptr: Pointer[CVoid, ReadWrite, Opaque], srcptr: Pointer[CVoid, Read, Opaque], size: size_t, hSignalEvent: ze_event_handle_t, numWaitEvents: uint32_t, phWaitEvents: Pointer[ze_event_handle_t, ReadWrite, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_driver_handle_t, const ze_rtas_builder_exp_desc_t *, ze_rtas_builder_exp_handle_t *)")
   def zeRTASBuilderCreateExp(hDriver: ze_driver_handle_t, pDescriptor: Pointer[ze_rtas_builder_exp_desc_t, Read, Opaque], phBuilder: Pointer[ze_rtas_builder_exp_handle_t, ReadWrite, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_driver_handle_t, const ze_rtas_builder_ext_desc_t *, ze_rtas_builder_ext_handle_t *)")
@@ -775,19 +775,19 @@ trait LevelZero {
   @CSignature("ze_result_t (ze_sampler_handle_t)")
   def zeSamplerDestroy(hSampler: ze_sampler_handle_t): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_context_handle_t, const void *, size_t)")
-  def zeVirtualMemFree(hContext: ze_context_handle_t, ptr: Pointer[Unit, Read, Opaque], size: size_t): ze_result_t = unsupported
+  def zeVirtualMemFree(hContext: ze_context_handle_t, ptr: Pointer[CVoid, Read, Opaque], size: size_t): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_context_handle_t, const void *, size_t, ze_memory_access_attribute_t *, size_t *)")
-  def zeVirtualMemGetAccessAttribute(hContext: ze_context_handle_t, ptr: Pointer[Unit, Read, Opaque], size: size_t, access: Pointer[ze_memory_access_attribute_t, ReadWrite, Opaque], outSize: Pointer[size_t, ReadWrite, Opaque]): ze_result_t = unsupported
+  def zeVirtualMemGetAccessAttribute(hContext: ze_context_handle_t, ptr: Pointer[CVoid, Read, Opaque], size: size_t, access: Pointer[ze_memory_access_attribute_t, ReadWrite, Opaque], outSize: Pointer[size_t, ReadWrite, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_context_handle_t, const void *, size_t, ze_physical_mem_handle_t, size_t, ze_memory_access_attribute_t)")
-  def zeVirtualMemMap(hContext: ze_context_handle_t, ptr: Pointer[Unit, Read, Opaque], size: size_t, hPhysicalMemory: ze_physical_mem_handle_t, offset: size_t, access: ze_memory_access_attribute_t): ze_result_t = unsupported
+  def zeVirtualMemMap(hContext: ze_context_handle_t, ptr: Pointer[CVoid, Read, Opaque], size: size_t, hPhysicalMemory: ze_physical_mem_handle_t, offset: size_t, access: ze_memory_access_attribute_t): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_context_handle_t, ze_device_handle_t, size_t, size_t *)")
   def zeVirtualMemQueryPageSize(hContext: ze_context_handle_t, hDevice: ze_device_handle_t, size: size_t, pagesize: Pointer[size_t, ReadWrite, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_context_handle_t, const void *, size_t, void **)")
-  def zeVirtualMemReserve(hContext: ze_context_handle_t, pStart: Pointer[Unit, Read, Opaque], size: size_t, pptr: Pointer[Pointer[Unit, ReadWrite, Opaque], ReadWrite, Opaque]): ze_result_t = unsupported
+  def zeVirtualMemReserve(hContext: ze_context_handle_t, pStart: Pointer[CVoid, Read, Opaque], size: size_t, pptr: Pointer[Pointer[CVoid, ReadWrite, Opaque], ReadWrite, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_context_handle_t, const void *, size_t, ze_memory_access_attribute_t)")
-  def zeVirtualMemSetAccessAttribute(hContext: ze_context_handle_t, ptr: Pointer[Unit, Read, Opaque], size: size_t, access: ze_memory_access_attribute_t): ze_result_t = unsupported
+  def zeVirtualMemSetAccessAttribute(hContext: ze_context_handle_t, ptr: Pointer[CVoid, Read, Opaque], size: size_t, access: ze_memory_access_attribute_t): ze_result_t = unsupported
   @CSignature("ze_result_t (ze_context_handle_t, const void *, size_t)")
-  def zeVirtualMemUnmap(hContext: ze_context_handle_t, ptr: Pointer[Unit, Read, Opaque], size: size_t): ze_result_t = unsupported
+  def zeVirtualMemUnmap(hContext: ze_context_handle_t, ptr: Pointer[CVoid, Read, Opaque], size: size_t): ze_result_t = unsupported
   @CSignature("ze_result_t (zes_device_handle_t, ze_bool_t *)")
   def zesDeviceEccAvailable(hDevice: zes_device_handle_t, pAvailable: Pointer[ze_bool_t, ReadWrite, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (zes_device_handle_t, ze_bool_t *)")
@@ -889,7 +889,7 @@ trait LevelZero {
   @CSignature("ze_result_t (zes_driver_handle_t, zes_uuid_t, zes_device_handle_t *, ze_bool_t *, uint32_t *)")
   def zesDriverGetDeviceByUuidExp(hDriver: zes_driver_handle_t, uuid: zes_uuid_t, phDevice: Pointer[zes_device_handle_t, ReadWrite, Opaque], onSubdevice: Pointer[ze_bool_t, ReadWrite, Opaque], subdeviceId: Pointer[uint32_t, ReadWrite, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (zes_driver_handle_t, const char *, void **)")
-  def zesDriverGetExtensionFunctionAddress(hDriver: zes_driver_handle_t, name: CString, ppFunctionAddress: Pointer[Pointer[Unit, ReadWrite, Opaque], ReadWrite, Opaque]): ze_result_t = unsupported
+  def zesDriverGetExtensionFunctionAddress(hDriver: zes_driver_handle_t, name: CString, ppFunctionAddress: Pointer[Pointer[CVoid, ReadWrite, Opaque], ReadWrite, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (zes_driver_handle_t, uint32_t *, zes_driver_extension_properties_t *)")
   def zesDriverGetExtensionProperties(hDriver: zes_driver_handle_t, pCount: Pointer[uint32_t, ReadWrite, Opaque], pExtensionProperties: Pointer[zes_driver_extension_properties_t, ReadWrite, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (zes_engine_handle_t, zes_engine_stats_t *)")
@@ -927,7 +927,7 @@ trait LevelZero {
   @CSignature("ze_result_t (zes_fan_handle_t, const zes_fan_speed_table_t *)")
   def zesFanSetSpeedTableMode(hFan: zes_fan_handle_t, speedTable: Pointer[zes_fan_speed_table_t, Read, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (zes_firmware_handle_t, void *, uint32_t)")
-  def zesFirmwareFlash(hFirmware: zes_firmware_handle_t, pImage: Pointer[Unit, ReadWrite, Opaque], size: uint32_t): ze_result_t = unsupported
+  def zesFirmwareFlash(hFirmware: zes_firmware_handle_t, pImage: Pointer[CVoid, ReadWrite, Opaque], size: uint32_t): ze_result_t = unsupported
   @CSignature("ze_result_t (zes_firmware_handle_t, size_t *, char *)")
   def zesFirmwareGetConsoleLogs(hFirmware: zes_firmware_handle_t, pSize: Pointer[size_t, ReadWrite, Opaque], pFirmwareLog: Pointer[Byte, ReadWrite, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (zes_firmware_handle_t, uint32_t *)")
@@ -1133,15 +1133,15 @@ trait LevelZero {
   @CSignature("ze_result_t (zet_debug_session_handle_t, uint64_t, zet_debug_event_t *)")
   def zetDebugReadEvent(hDebug: zet_debug_session_handle_t, timeout: uint64_t, event: Pointer[zet_debug_event_t, ReadWrite, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (zet_debug_session_handle_t, ze_device_thread_t, const zet_debug_memory_space_desc_t *, size_t, void *)")
-  def zetDebugReadMemory(hDebug: zet_debug_session_handle_t, thread: ze_device_thread_t, desc: Pointer[zet_debug_memory_space_desc_t, Read, Opaque], size: size_t, buffer: Pointer[Unit, ReadWrite, Opaque]): ze_result_t = unsupported
+  def zetDebugReadMemory(hDebug: zet_debug_session_handle_t, thread: ze_device_thread_t, desc: Pointer[zet_debug_memory_space_desc_t, Read, Opaque], size: size_t, buffer: Pointer[CVoid, ReadWrite, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (zet_debug_session_handle_t, ze_device_thread_t, uint32_t, uint32_t, uint32_t, void *)")
-  def zetDebugReadRegisters(hDebug: zet_debug_session_handle_t, thread: ze_device_thread_t, `type`: uint32_t, start: uint32_t, count: uint32_t, pRegisterValues: Pointer[Unit, ReadWrite, Opaque]): ze_result_t = unsupported
+  def zetDebugReadRegisters(hDebug: zet_debug_session_handle_t, thread: ze_device_thread_t, `type`: uint32_t, start: uint32_t, count: uint32_t, pRegisterValues: Pointer[CVoid, ReadWrite, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (zet_debug_session_handle_t, ze_device_thread_t)")
   def zetDebugResume(hDebug: zet_debug_session_handle_t, thread: ze_device_thread_t): ze_result_t = unsupported
   @CSignature("ze_result_t (zet_debug_session_handle_t, ze_device_thread_t, const zet_debug_memory_space_desc_t *, size_t, const void *)")
-  def zetDebugWriteMemory(hDebug: zet_debug_session_handle_t, thread: ze_device_thread_t, desc: Pointer[zet_debug_memory_space_desc_t, Read, Opaque], size: size_t, buffer: Pointer[Unit, Read, Opaque]): ze_result_t = unsupported
+  def zetDebugWriteMemory(hDebug: zet_debug_session_handle_t, thread: ze_device_thread_t, desc: Pointer[zet_debug_memory_space_desc_t, Read, Opaque], size: size_t, buffer: Pointer[CVoid, Read, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (zet_debug_session_handle_t, ze_device_thread_t, uint32_t, uint32_t, uint32_t, void *)")
-  def zetDebugWriteRegisters(hDebug: zet_debug_session_handle_t, thread: ze_device_thread_t, `type`: uint32_t, start: uint32_t, count: uint32_t, pRegisterValues: Pointer[Unit, ReadWrite, Opaque]): ze_result_t = unsupported
+  def zetDebugWriteRegisters(hDebug: zet_debug_session_handle_t, thread: ze_device_thread_t, `type`: uint32_t, start: uint32_t, count: uint32_t, pRegisterValues: Pointer[CVoid, ReadWrite, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (zet_device_handle_t, uint32_t, zet_metric_handle_t *, const char *, const char *, uint32_t *, zet_metric_group_handle_t *)")
   def zetDeviceCreateMetricGroupsFromMetricsExp(hDevice: zet_device_handle_t, metricCount: uint32_t, phMetrics: Pointer[zet_metric_handle_t, ReadWrite, Opaque], pMetricGroupNamePrefix: CString, pDescription: CString, pMetricGroupCount: Pointer[uint32_t, ReadWrite, Opaque], phMetricGroup: Pointer[zet_metric_group_handle_t, ReadWrite, Opaque]): ze_result_t = unsupported
   @CSignature("ze_result_t (zet_device_handle_t)")

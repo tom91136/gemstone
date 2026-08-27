@@ -93,7 +93,7 @@ object GenerateAPISurfaces {
 
   private def render(target: Target, functions: Vector[ValidateAPIs.Function]): String = {
     val aliases                          = mutable.LinkedHashMap.empty[String, String]
-    def scalaType(cType: String): String = mapType(cType.trim, aliases)
+    def scalaType(cType: String): String = mapType(cType.trim, aliases, target.traitName)
     val declarations                     = functions.map { function =>
       val used       = mutable.Set.empty[String]
       val parameters = function.parameters.zipWithIndex.map { case (parameter, index) =>
@@ -125,7 +125,7 @@ object GenerateAPISurfaces {
         |""".stripMargin
   }
 
-  private def mapType(raw: String, aliases: mutable.LinkedHashMap[String, String]): String = {
+  private def mapType(raw: String, aliases: mutable.LinkedHashMap[String, String], api: String): String = {
     val value = raw.replaceAll("\\s+", " ").trim
     functionPointer(value) match {
       case Some(_)                     => s"Callback[${literal(value)}]"
@@ -135,35 +135,45 @@ object GenerateAPISurfaces {
         val pointee  = pointee0.stripPrefix("const ").stripSuffix(" const").trim
         if (readOnly && pointee == "char") "CString"
         else {
-          val access = if (readOnly) "Read" else "ReadWrite"
-          s"Pointer[${mapType(pointee, aliases)}, $access, Opaque]"
+          val access  = if (readOnly) "Read" else "ReadWrite"
+          val element = if (pointee == "void") "CVoid" else mapType(pointee, aliases, api)
+          s"Pointer[$element, $access, Opaque]"
         }
       case None =>
         fixedArray(value) match {
-          case Some((element, count)) => s"CArray[${mapType(element, aliases)}, $count]"
-          case None                   => mapValue(value, aliases)
+          case Some((element, count)) => s"CArray[${mapType(element, aliases, api)}, $count]"
+          case None                   => mapValue(value, aliases, api)
         }
     }
   }
 
-  private def mapValue(raw: String, aliases: mutable.LinkedHashMap[String, String]): String = raw match {
-    case "void"                                                      => "Unit"
-    case "bool"                                                      => "Boolean"
-    case "char"                                                      => "Byte"
-    case "signed char"                                               => "Byte"
-    case "unsigned char"                                             => "net.kurobako.gemstone.cuda.UInt8"
-    case "short" | "short int" | "signed short" | "signed short int" => "Short"
-    case "int" | "signed" | "signed int"                             => "Int"
-    case "float"                                                     => "Float"
-    case "double"                                                    => "Double"
-    case other                                                       =>
-      val name = identifierName(other)
-      aliases.get(name) match {
-        case Some(_) => ()
-        case None    => aliases(name) = other
-      }
-      identifier(name)
-  }
+  private def mapValue(raw: String, aliases: mutable.LinkedHashMap[String, String], api: String): String =
+    (api, raw) match {
+      case ("CUDA", "CUresult" | "cudaError_t")                             => "CUDAStatus"
+      case ("CUDA", "CUdevice")                                             => "Device"
+      case ("CUDA", "CUdeviceptr")                                          => "DevicePtr"
+      case ("CUDA", "CUcontext")                                            => "Context"
+      case ("CUDA", "CUmodule")                                             => "CUDAModule"
+      case ("CUDA", "CUfunction")                                           => "CUDAFunction"
+      case ("CUDA", "size_t")                                               => "SizeT"
+      case ("CUDA", "unsigned int")                                         => "UInt32"
+      case ("CUDA", "unsigned char")                                        => "UInt8"
+      case (_, "void")                                                      => "Unit"
+      case (_, "bool")                                                      => "Boolean"
+      case (_, "char")                                                      => "Byte"
+      case (_, "signed char")                                               => "Byte"
+      case (_, "short" | "short int" | "signed short" | "signed short int") => "Short"
+      case (_, "int" | "signed" | "signed int")                             => "Int"
+      case (_, "float")                                                     => "Float"
+      case (_, "double")                                                    => "Double"
+      case (_, other)                                                       =>
+        val name = identifierName(other)
+        aliases.get(name) match {
+          case Some(_) => ()
+          case None    => aliases(name) = other
+        }
+        identifier(name)
+    }
 
   private def functionPointer(value: String): Option[String] =
     Option.when(value.matches(".*\\(\\s*\\*[^)]*\\)\\s*\\(.*"))(value)

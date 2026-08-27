@@ -502,6 +502,10 @@ lazy val server = projectMatrix
     ThrustTest / resourceDirectory := (LocalRootProject / baseDirectory).value / "server" / "src" / "thrust" / "resources",
     ThrustTest / parallelExecution         := false,
     ThrustTest / test / fork               := false,
+    Test / test := (Test / test).dependsOn(codegen.jvm(scala3Version) / prepareISAReferences).evaluated,
+    ThrustTest / test := (ThrustTest / test)
+      .dependsOn(codegen.jvm(scala3Version) / prepareISAReferences)
+      .evaluated,
     libraryDependencies += "org.scalameta" %% "munit" % munitVersion % ThrustTest
   )
   .jvmPlatform(scalaVersions = Seq(scala3Version))

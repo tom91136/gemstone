@@ -154,7 +154,9 @@ object CUDARPCServer {
   private def decodeArguments(method: RPCMethod, payload: Array[Byte]): Either[CUDAError, Vector[WireValue]] =
     try {
       val buffer    = ByteBuffer.wrap(payload).order(ByteOrder.BIG_ENDIAN)
-      val arguments = method.parameters.map(parameter => decodeValue(parameter.wireType, buffer))
+      val arguments = method.parameters
+        .filter(_.direction != WireDirection.Out)
+        .map(parameter => decodeValue(parameter.wireType, buffer))
       if (buffer.hasRemaining) Left(CUDAError(1, s"trailing payload bytes for ${method.name}: ${buffer.remaining}"))
       else Right(arguments)
     } catch {
@@ -195,10 +197,24 @@ object CUDARPCServer {
       WireValue.KernelLaunchValue(
         KernelLaunch(gridX, gridY, gridZ, blockX, blockY, blockZ, sharedBytes, arguments)
       )
+    case WireType.Stream           => WireValue.StreamValue(Stream(buffer.getLong()))
+    case WireType.ByteBuffer       => WireValue.ByteBufferValue(IArray.unsafeFromArray(readByteArray(buffer)))
+    case WireType.KernelParameters =>
+      val count = buffer.getInt()
+      if (count < 0 || count > 4096) throw new IllegalArgumentException(s"invalid kernel argument count: $count")
+      WireValue.KernelParametersValue(
+        KernelParameters(IArray.unsafeFromArray(Array.tabulate(count) { _ =>
+          KernelArgument(IArray.unsafeFromArray(readByteArray(buffer)))
+        }))
+      )
+    case WireType.NullableOpaquePointer => WireValue.NullableOpaquePointerValue(buffer.get() != 0)
+    case WireType.CUDAStatus            => WireValue.CUDAStatusValue(CUDAStatus(buffer.getInt()))
   }
 
   private def writeResponse(output: DataOutputStream, response: RPCResponse): Unit = {
     val (status, message, payload) = response match {
+      case RPCResponse.Success(WireValue.CallResult(status, outputs)) =>
+        (status.code, Array.emptyByteArray, outputs.flatMap(value => encodeValue(value)).toArray)
       case RPCResponse.Success(value) => (0, Array.emptyByteArray, encodeValue(value))
       case RPCResponse.Failure(error) =>
         val encoded = error.message.getBytes(StandardCharsets.UTF_8)
@@ -239,6 +255,14 @@ object CUDARPCServer {
         value.parameterWidths.iterator.foreach(width => output.writeByte(width.toInt))
       case WireValue.KernelLaunchValue(_) =>
         throw new IllegalArgumentException("KernelLaunch is a request-only wire type")
+      case WireValue.StreamValue(value)       => output.writeLong(value.handle)
+      case WireValue.ByteBufferValue(value)   => writeByteArray(output, value)
+      case WireValue.KernelParametersValue(_) =>
+        throw new IllegalArgumentException("KernelParameters is a request-only wire type")
+      case WireValue.NullableOpaquePointerValue(value) => output.writeBoolean(value)
+      case WireValue.CUDAStatusValue(value)            => output.writeInt(value.code)
+      case WireValue.CallResult(_, _)                  =>
+        throw new IllegalArgumentException("CallResult must be encoded as an RPC response")
     }
     output.flush()
     bytes.toByteArray

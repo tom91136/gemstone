@@ -197,6 +197,21 @@ int32_t cuCtxCreate_v2(void **context, uint32_t flags, int32_t device) {
   return status;
 }
 
+#if defined(_WIN32)
+#define GEMSTONE_CUDA_API __stdcall
+#else
+#define GEMSTONE_CUDA_API
+#endif
+
+int32_t GEMSTONE_CUDA_API gemstone_cuCtxCreate_v4(
+    void **context,
+    void *parameters,
+    uint32_t flags,
+    int32_t device) {
+  (void)parameters;
+  return cuCtxCreate_v2(context, flags, device);
+}
+
 int32_t cuCtxDestroy_v2(void *context) {
   uint8_t payload[8];
   gemstone_put_u64(payload, (uint64_t)(uintptr_t)context);
@@ -225,13 +240,14 @@ int32_t cuMemFree_v2(uint64_t pointer) {
 }
 
 int32_t cuMemcpyHtoD_v2(uint64_t destination, const void *source, size_t size) {
-  if ((source == NULL && size != 0) || size > GEMSTONE_RPC_MAXIMUM_PAYLOAD_SIZE - 12) return GEMSTONE_STATUS_INVALID_VALUE;
-  const uint32_t payload_size = (uint32_t)size + 12;
+  if ((source == NULL && size != 0) || size > GEMSTONE_RPC_MAXIMUM_PAYLOAD_SIZE - 20) return GEMSTONE_STATUS_INVALID_VALUE;
+  const uint32_t payload_size = (uint32_t)size + 20;
   uint8_t *payload = (uint8_t *)malloc(payload_size);
   if (payload == NULL) return GEMSTONE_STATUS_UNKNOWN;
   gemstone_put_u64(payload, destination);
   gemstone_put_u32(payload + 8, (uint32_t)size);
   if (size != 0) memcpy(payload + 12, source, size);
+  gemstone_put_u64(payload + 12 + size, (uint64_t)size);
   GemstoneRpcBuffer response = {0};
   const int32_t status = gemstone_expect_unit(gemstone_call(gemstone_cuMemcpyHtoD_v2_high, gemstone_cuMemcpyHtoD_v2_low, "cuMemcpyHtoD_v2", payload, payload_size, &response), &response);
   free(payload);
@@ -394,7 +410,7 @@ int32_t cuLaunchKernel(
     pthread_mutex_unlock(&gemstone_kernel_mutex);
     return GEMSTONE_STATUS_INVALID_VALUE;
   }
-  size_t payload_size = 40;
+  size_t payload_size = 49;
   for (uint32_t index = 0; index < signature->count; ++index) {
     const uint8_t width = signature->widths[index];
     if (width == 0 || kernel_params[index] == NULL ||
@@ -414,14 +430,16 @@ int32_t cuLaunchKernel(
   gemstone_put_u32(payload + 24, block_y);
   gemstone_put_u32(payload + 28, block_z);
   gemstone_put_u32(payload + 32, shared_memory_bytes);
-  gemstone_put_u32(payload + 36, signature->count);
-  size_t offset = 40;
+  gemstone_put_u64(payload + 36, (uint64_t)(uintptr_t)stream);
+  gemstone_put_u32(payload + 44, signature->count);
+  size_t offset = 48;
   for (uint32_t index = 0; index < signature->count; ++index) {
     const uint8_t width = signature->widths[index];
     gemstone_put_u32(payload + offset, width);
     memcpy(payload + offset + 4, kernel_params[index], width);
     offset += 4 + width;
   }
+  payload[offset] = 0;
   pthread_mutex_unlock(&gemstone_kernel_mutex);
   GemstoneRpcBuffer response = {0};
   const int32_t status = gemstone_expect_unit(
@@ -820,7 +838,7 @@ static const char *gemstone_find_uncompressed_ptx(const void *fat_binary) {
   return NULL;
 }
 
-void **__cudaRegisterFatBinary(void *fat_binary) {
+void **GEMSTONE_CUDA_API gemstone_cudaRegisterFatBinary(void *fat_binary) {
   GemstoneFatBinary *entry = (GemstoneFatBinary *)calloc(1, sizeof(*entry));
   if (entry == NULL) return NULL;
   entry->token = entry;
@@ -833,11 +851,11 @@ void **__cudaRegisterFatBinary(void *fat_binary) {
   return &entry->token;
 }
 
-void __cudaRegisterFatBinaryEnd(void **handle) {
+void GEMSTONE_CUDA_API gemstone_cudaRegisterFatBinaryEnd(void **handle) {
   (void)handle;
 }
 
-void __cudaRegisterFunction(
+void GEMSTONE_CUDA_API gemstone_cudaRegisterFunction(
     void **handle,
     const char *host_function,
     char *device_function,
@@ -874,7 +892,7 @@ void __cudaRegisterFunction(
   pthread_mutex_unlock(&gemstone_registration_mutex);
 }
 
-void __cudaRegisterVar(
+void GEMSTONE_CUDA_API gemstone_cudaRegisterVar(
     void **handle,
     char *host_variable,
     char *device_address,
@@ -893,7 +911,7 @@ void __cudaRegisterVar(
   (void)global;
 }
 
-void __cudaUnregisterFatBinary(void **handle) {
+void GEMSTONE_CUDA_API gemstone_cudaUnregisterFatBinary(void **handle) {
   if (handle == NULL || *handle == NULL) return;
   GemstoneFatBinary *fat = (GemstoneFatBinary *)*handle;
   pthread_mutex_lock(&gemstone_registration_mutex);
@@ -915,7 +933,7 @@ void __cudaUnregisterFatBinary(void **handle) {
   free(fat);
 }
 
-int32_t __cudaGetKernel(void **kernel, const void *host_function) {
+int32_t GEMSTONE_CUDA_API gemstone_cudaGetKernel(void **kernel, const void *host_function) {
   if (kernel == NULL || host_function == NULL) return GEMSTONE_STATUS_INVALID_VALUE;
   pthread_mutex_lock(&gemstone_registration_mutex);
   GemstoneRegisteredFunction *entry = gemstone_registered_functions;
@@ -931,7 +949,7 @@ int32_t __cudaGetKernel(void **kernel, const void *host_function) {
   return status;
 }
 
-unsigned __cudaPushCallConfiguration(
+unsigned GEMSTONE_CUDA_API gemstone_cudaPushCallConfiguration(
     GemstoneDim3 grid,
     GemstoneDim3 block,
     size_t shared_memory,
@@ -944,7 +962,7 @@ unsigned __cudaPushCallConfiguration(
   return GEMSTONE_STATUS_SUCCESS;
 }
 
-int32_t __cudaPopCallConfiguration(
+int32_t GEMSTONE_CUDA_API gemstone_cudaPopCallConfiguration(
     GemstoneDim3 *grid,
     GemstoneDim3 *block,
     size_t *shared_memory,
@@ -959,7 +977,7 @@ int32_t __cudaPopCallConfiguration(
   return GEMSTONE_STATUS_SUCCESS;
 }
 
-int32_t __cudaLaunchKernel(
+int32_t GEMSTONE_CUDA_API gemstone_cudaLaunchKernel(
     void *kernel,
     GemstoneDim3 grid,
     GemstoneDim3 block,

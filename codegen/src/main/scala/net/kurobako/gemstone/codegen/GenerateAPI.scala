@@ -5,9 +5,15 @@ import net.kurobako.gemstone.apispec.APIFunction
 import net.kurobako.gemstone.apispec.Direction
 import net.kurobako.gemstone.apispec.GemstoneAPIRegistry
 import net.kurobako.gemstone.apispec.ReturnConvention
+import net.kurobako.gemstone.abi.ABIDeclaration
+import net.kurobako.gemstone.abi.ABIDerivation
+import net.kurobako.gemstone.abi.MethodImplementation
 import net.kurobako.gemstone.cuda.CUDA
 import net.kurobako.gemstone.rpc.RPCDerivation
+import net.kurobako.gemstone.rpc.RPCParameter
 import net.kurobako.gemstone.rpc.RPCSchema
+import net.kurobako.gemstone.rpc.WireDirection
+import net.kurobako.gemstone.rpc.WireExtent
 import net.kurobako.gemstone.rpc.WireType
 
 import java.nio.charset.StandardCharsets
@@ -17,16 +23,15 @@ import java.nio.file.Paths
 
 object GenerateAPI {
   // C entry-point spelling is protocol identity and must never be acronym-normalized.
-  private val cudaRPC: RPCSchema = RPCDerivation.schema[CUDA]
-  private val cudaDriverSurface  = RPCDerivation.methodNames[CUDA].filter(name =>
+  private val cudaRPC: RPCSchema                          = RPCDerivation.schema[CUDA]
+  private val cudaNativeDelegates: Vector[ABIDeclaration] = ABIDerivation.nativeDelegates[CUDA]
+  private val cudaDriverSurface                           = RPCDerivation.methodNames[CUDA].filter(name =>
     name.startsWith("cu") && !name.startsWith("cuda")
   )
   private val cudaRuntimeSurface   = RPCDerivation.methodNames[CUDA].filter(_.startsWith("cuda"))
   private val cudaBootstrapSurface = RPCDerivation.methodNames[CUDA].filter(name =>
     name.startsWith("__cuda") && !name.startsWith("__cudaGemstone")
   )
-  require(cudaDriverSurface.size == 144, s"expected 144 CUDA Driver methods, found ${cudaDriverSurface.size}")
-
   def main(arguments: Array[String]): Unit = {
     val (check, output) = arguments.toVector match {
       case Vector(path)            => false -> Paths.get(path)
@@ -46,7 +51,7 @@ object GenerateAPI {
       output.resolve("c/gemstone_protocol.h")                                        -> renderProtocol(api),
       output.resolve("c/gemstone_cuda.h")                                            -> renderHeader(api),
       output.resolve("c/gemstone_cuda.c")                                            -> renderFacade(api),
-      output.resolve("c/gemstone_cuda_driver_stubs.c")                               -> renderCUDADriverStubs,
+      output.resolve("c/gemstone_cuda_driver_stubs.c")                               -> renderCUDADriverStubs(output),
       output.resolve("c/gemstone_cuda.map")                                          -> renderVersionMap(api),
       output.resolve("c/gemstone_cuda_driver_surface.inc")                           -> renderCUDASurfaceInclude,
       output.resolve("c/gemstone_cuda_rpc.inc")                                      -> renderCUDARPCInclude,
@@ -260,20 +265,110 @@ object GenerateAPI {
         |""".stripMargin
   }
 
-  private def renderCUDADriverStubs: String = {
+  private def renderCUDADriverStubs(output: Path): String = {
     val wired = GemstoneAPIRegistry.cuda.functions.map(_.name).toSet ++ cudaRPC.methods.map(
       _.name
     ).filterNot(_.startsWith("cuda"))
-    val stubs = cudaDriverSurface.filterNot(wired).map { name =>
-      s"int32_t $name() { return GEMSTONE_STATUS_NOT_SUPPORTED; }"
+    val driverDeclarations = officialCUDADeclarations(output)
+    val delegatedNames     = cudaNativeDelegates.map(_.name).toSet
+    val stubs              = driverDeclarations.collect {
+      case declaration
+          if !wired(declaration.name) && !delegatedNames(declaration.name) =>
+        val signature = renderCFunctionDeclaration(declaration, declaration.name)
+        val unused    = declaration.parameterNames.map(name => s"  (void)$name;").mkString("\n")
+        val body      = if (unused.isEmpty) "" else s"\n$unused"
+        s"$signature {$body\n  return CUDA_ERROR_NOT_SUPPORTED;\n}"
+    }
+    val delegates = cudaNativeDelegates.collect {
+      case declaration @ ABIDeclaration(_, _, _, MethodImplementation.NativeDelegate(target)) =>
+        val targetSignature = renderCFunctionDeclaration(declaration, target)
+        val publicSignature = renderCFunctionDeclaration(declaration, declaration.name)
+        val arguments       = declaration.parameterNames.mkString(", ")
+        val invocation      =
+          if (cReturnType(declaration) == "void") s"  $target($arguments);"
+          else s"  return $target($arguments);"
+        s"extern $targetSignature;\n\n$publicSignature {\n$invocation\n}"
     }
     s"""|#include <stdint.h>
+        |#include <cuda.h>
         |
         |#include "gemstone_protocol.h"
         |
-        |/* ABI-presence stubs. Exact typed marshallers replace these one function at a time. */
+        |typedef struct GemstoneDim3 { uint32_t x; uint32_t y; uint32_t z; } GemstoneDim3;
+        |
+        |/* Exact ABI-presence stubs. Trait methods opt into RPC or a native delegate. */
         |${stubs.mkString("\n\n")}
+        |
+        |/* Thin wrappers generated from @NativeDelegate declarations. */
+        |${delegates.mkString("\n\n")}
         |""".stripMargin
+  }
+
+  private def officialCUDADeclarations(output: Path): Vector[ABIDeclaration] = {
+    val manifest = output.resolve("manifest/official-api-headers.json")
+    require(Files.isRegularFile(manifest), s"official API header manifest is absent: $manifest")
+    val document = ujson.read(Files.readString(manifest, StandardCharsets.UTF_8))
+    document("surfaces").arr.iterator
+      .find(_("name").str == "cuda-driver")
+      .getOrElse(throw new IllegalStateException("cuda-driver is absent from the official API header manifest"))
+      .apply("functions")
+      .arr
+      .iterator
+      .map { function =>
+        ABIDeclaration(
+          function("name").str,
+          function("functionType").str,
+          function("parameters").arr.iterator.map(_("name").str).toVector,
+          MethodImplementation.Unsupported
+        )
+      }
+      .toVector
+  }
+
+  private def renderCFunctionDeclaration(declaration: ABIDeclaration, name: String): String = {
+    val open = declaration.functionType.indexOf('(')
+    require(open > 0 && declaration.functionType.endsWith(")"), s"invalid C function type: ${declaration.functionType}")
+    val returnType        = declaration.functionType.substring(0, open).trim
+    val encodedParameters = declaration.functionType.substring(open + 1, declaration.functionType.length - 1).trim
+    val parameterTypes    =
+      if (encodedParameters == "void" || encodedParameters.isEmpty) Vector.empty
+      else splitCParameters(encodedParameters)
+    require(
+      parameterTypes.size == declaration.parameterNames.size,
+      s"C/Scala parameter count mismatch for ${declaration.name}: ${declaration.functionType} / ${declaration.parameterNames.mkString(", ")}"
+    )
+    val parameters =
+      if (parameterTypes.isEmpty) "void"
+      else parameterTypes.zip(declaration.parameterNames).map { case (parameterType, parameterName) =>
+        s"$parameterType $parameterName"
+      }.mkString(", ")
+    s"$returnType CUDAAPI $name($parameters)"
+  }
+
+  private def cReturnType(declaration: ABIDeclaration): String = {
+    val open = declaration.functionType.indexOf('(')
+    require(open > 0, s"invalid C function type: ${declaration.functionType}")
+    declaration.functionType.substring(0, open).trim
+  }
+
+  private def splitCParameters(parameters: String): Vector[String] = {
+    val result   = Vector.newBuilder[String]
+    var start    = 0
+    var depth    = 0
+    var position = 0
+    while (position < parameters.length) {
+      parameters.charAt(position) match {
+        case '('               => depth += 1
+        case ')'               => depth -= 1
+        case ',' if depth == 0 =>
+          result += parameters.substring(start, position).trim
+          start = position + 1
+        case _ => ()
+      }
+      position += 1
+    }
+    result += parameters.substring(start).trim
+    result.result()
   }
 
   private def renderScala(api: API): String = {
@@ -361,7 +456,7 @@ object GenerateAPI {
       val state = if (wired(name)) "wired" else "stub"
       s"""|    {"name":"$name","transport":"$state"}""".stripMargin
     }
-    s"""|{"profile":"gpuocelot-cuda-driver-3.2","cudaVersion":${CUDA.CUDAVersion},"upstreamRevision":"${CUDA.UpstreamRevision}","driverCount":${cudaDriverSurface.size},"functions":[
+    s"""|{"profile":"cuda-${CUDA.HeaderVersion}","driverCount":${cudaDriverSurface.size},"functions":[
         |${functions.mkString(",\n")}
         |]}
         |""".stripMargin
@@ -555,6 +650,21 @@ object GenerateAPI {
         |  return status;
         |}
         |
+        |#if defined(_WIN32)
+        |#define GEMSTONE_CUDA_API __stdcall
+        |#else
+        |#define GEMSTONE_CUDA_API
+        |#endif
+        |
+        |int32_t GEMSTONE_CUDA_API gemstone_cuCtxCreate_v4(
+        |    void **context,
+        |    void *parameters,
+        |    uint32_t flags,
+        |    int32_t device) {
+        |  (void)parameters;
+        |  return cuCtxCreate_v2(context, flags, device);
+        |}
+        |
         |int32_t cuCtxDestroy_v2(void *context) {
         |  uint8_t payload[8];
         |  gemstone_put_u64(payload, (uint64_t)(uintptr_t)context);
@@ -583,13 +693,14 @@ object GenerateAPI {
         |}
         |
         |int32_t cuMemcpyHtoD_v2(uint64_t destination, const void *source, size_t size) {
-        |  if ((source == NULL && size != 0) || size > GEMSTONE_RPC_MAXIMUM_PAYLOAD_SIZE - 12) return GEMSTONE_STATUS_INVALID_VALUE;
-        |  const uint32_t payload_size = (uint32_t)size + 12;
+        |  if ((source == NULL && size != 0) || size > GEMSTONE_RPC_MAXIMUM_PAYLOAD_SIZE - 20) return GEMSTONE_STATUS_INVALID_VALUE;
+        |  const uint32_t payload_size = (uint32_t)size + 20;
         |  uint8_t *payload = (uint8_t *)malloc(payload_size);
         |  if (payload == NULL) return GEMSTONE_STATUS_UNKNOWN;
         |  gemstone_put_u64(payload, destination);
         |  gemstone_put_u32(payload + 8, (uint32_t)size);
         |  if (size != 0) memcpy(payload + 12, source, size);
+        |  gemstone_put_u64(payload + 12 + size, (uint64_t)size);
         |  GemstoneRpcBuffer response = {0};
         |  const int32_t status = gemstone_expect_unit(gemstone_call(gemstone_cuMemcpyHtoD_v2_high, gemstone_cuMemcpyHtoD_v2_low, "cuMemcpyHtoD_v2", payload, payload_size, &response), &response);
         |  free(payload);
@@ -752,7 +863,7 @@ object GenerateAPI {
         |    pthread_mutex_unlock(&gemstone_kernel_mutex);
         |    return GEMSTONE_STATUS_INVALID_VALUE;
         |  }
-        |  size_t payload_size = 40;
+        |  size_t payload_size = 49;
         |  for (uint32_t index = 0; index < signature->count; ++index) {
         |    const uint8_t width = signature->widths[index];
         |    if (width == 0 || kernel_params[index] == NULL ||
@@ -772,14 +883,16 @@ object GenerateAPI {
         |  gemstone_put_u32(payload + 24, block_y);
         |  gemstone_put_u32(payload + 28, block_z);
         |  gemstone_put_u32(payload + 32, shared_memory_bytes);
-        |  gemstone_put_u32(payload + 36, signature->count);
-        |  size_t offset = 40;
+        |  gemstone_put_u64(payload + 36, (uint64_t)(uintptr_t)stream);
+        |  gemstone_put_u32(payload + 44, signature->count);
+        |  size_t offset = 48;
         |  for (uint32_t index = 0; index < signature->count; ++index) {
         |    const uint8_t width = signature->widths[index];
         |    gemstone_put_u32(payload + offset, width);
         |    memcpy(payload + offset + 4, kernel_params[index], width);
         |    offset += 4 + width;
         |  }
+        |  payload[offset] = 0;
         |  pthread_mutex_unlock(&gemstone_kernel_mutex);
         |  GemstoneRpcBuffer response = {0};
         |  const int32_t status = gemstone_expect_unit(
@@ -1178,7 +1291,7 @@ object GenerateAPI {
         |  return NULL;
         |}
         |
-        |void **__cudaRegisterFatBinary(void *fat_binary) {
+        |void **GEMSTONE_CUDA_API gemstone_cudaRegisterFatBinary(void *fat_binary) {
         |  GemstoneFatBinary *entry = (GemstoneFatBinary *)calloc(1, sizeof(*entry));
         |  if (entry == NULL) return NULL;
         |  entry->token = entry;
@@ -1191,11 +1304,11 @@ object GenerateAPI {
         |  return &entry->token;
         |}
         |
-        |void __cudaRegisterFatBinaryEnd(void **handle) {
+        |void GEMSTONE_CUDA_API gemstone_cudaRegisterFatBinaryEnd(void **handle) {
         |  (void)handle;
         |}
         |
-        |void __cudaRegisterFunction(
+        |void GEMSTONE_CUDA_API gemstone_cudaRegisterFunction(
         |    void **handle,
         |    const char *host_function,
         |    char *device_function,
@@ -1232,7 +1345,7 @@ object GenerateAPI {
         |  pthread_mutex_unlock(&gemstone_registration_mutex);
         |}
         |
-        |void __cudaRegisterVar(
+        |void GEMSTONE_CUDA_API gemstone_cudaRegisterVar(
         |    void **handle,
         |    char *host_variable,
         |    char *device_address,
@@ -1251,7 +1364,7 @@ object GenerateAPI {
         |  (void)global;
         |}
         |
-        |void __cudaUnregisterFatBinary(void **handle) {
+        |void GEMSTONE_CUDA_API gemstone_cudaUnregisterFatBinary(void **handle) {
         |  if (handle == NULL || *handle == NULL) return;
         |  GemstoneFatBinary *fat = (GemstoneFatBinary *)*handle;
         |  pthread_mutex_lock(&gemstone_registration_mutex);
@@ -1273,7 +1386,7 @@ object GenerateAPI {
         |  free(fat);
         |}
         |
-        |int32_t __cudaGetKernel(void **kernel, const void *host_function) {
+        |int32_t GEMSTONE_CUDA_API gemstone_cudaGetKernel(void **kernel, const void *host_function) {
         |  if (kernel == NULL || host_function == NULL) return GEMSTONE_STATUS_INVALID_VALUE;
         |  pthread_mutex_lock(&gemstone_registration_mutex);
         |  GemstoneRegisteredFunction *entry = gemstone_registered_functions;
@@ -1289,7 +1402,7 @@ object GenerateAPI {
         |  return status;
         |}
         |
-        |unsigned __cudaPushCallConfiguration(
+        |unsigned GEMSTONE_CUDA_API gemstone_cudaPushCallConfiguration(
         |    GemstoneDim3 grid,
         |    GemstoneDim3 block,
         |    size_t shared_memory,
@@ -1302,7 +1415,7 @@ object GenerateAPI {
         |  return GEMSTONE_STATUS_SUCCESS;
         |}
         |
-        |int32_t __cudaPopCallConfiguration(
+        |int32_t GEMSTONE_CUDA_API gemstone_cudaPopCallConfiguration(
         |    GemstoneDim3 *grid,
         |    GemstoneDim3 *block,
         |    size_t *shared_memory,
@@ -1317,7 +1430,7 @@ object GenerateAPI {
         |  return GEMSTONE_STATUS_SUCCESS;
         |}
         |
-        |int32_t __cudaLaunchKernel(
+        |int32_t GEMSTONE_CUDA_API gemstone_cudaLaunchKernel(
         |    void *kernel,
         |    GemstoneDim3 grid,
         |    GemstoneDim3 block,
@@ -1367,46 +1480,67 @@ object GenerateAPI {
       s"  private val ${method.name}Id = MessageId($high, $low)"
     }
     val clients = cudaRPC.methods.map { method =>
-      val parameters = method.parameters.map(parameter => s"${parameter.name}: ${scalaType(parameter.wireType)}")
-      val arguments  = method.parameters.map(parameter => encodeWire(parameter.wireType, parameter.name))
-      s"""|  override def ${method.name}(${parameters.mkString(", ")}): CUDAResult[${scalaType(method.result)}] =
-          |    decode${method.result}(transport.call(RPCRequest(${method.name}Id, "${method.name}", Vector(${arguments.mkString(
-           ", "
-         )}))))""".stripMargin
+      val parameters = method.parameters.map(parameter => s"${parameter.name}: ${scalaParameterType(parameter)}")
+      val inputs     = method.parameters.collect {
+        case parameter if parameter.direction != WireDirection.Out => encodeClientInput(parameter)
+      }
+      val outputs       = method.parameters.filter(_.direction != WireDirection.In)
+      val outputPattern = outputs.indices.map(index => decodePattern(outputs(index).wireType, s"output$index"))
+      val assignments   = outputs.indices.map { index =>
+        val parameter = outputs(index)
+        if (parameter.wireType == WireType.ByteBuffer) s"writeBytes(${parameter.name}, output$index)"
+        else s"writeOne(${parameter.name}, output$index)"
+      }
+      val outputHandling =
+        if (outputs.isEmpty) "if (outputs.isEmpty) status else CUDAStatus.Unknown"
+        else
+          s"""|outputs match {
+              |          case Vector(${outputPattern.mkString(", ")}) =>
+              |            if (${assignments.mkString(" && ")}) status else CUDAStatus.InvalidValue
+              |          case _ => CUDAStatus.Unknown
+              |        }""".stripMargin
+      s"""|  override def ${method.name}(${parameters.mkString(", ")}): CUDAStatus =
+          |    transport.call(RPCRequest(${method.name}Id, "${method.name}", Vector(${inputs.mkString(", ")}))) match {
+          |      case RPCResponse.Success(WireValue.CallResult(status, outputs)) if status.isSuccess =>
+          |        ${outputHandling.linesIterator.mkString("\n        ")}
+          |      case RPCResponse.Success(WireValue.CallResult(status, _)) => status
+          |      case _ => CUDAStatus.Unknown
+          |    }""".stripMargin
     }
     val dispatchCases = cudaRPC.methods.map { method =>
-      val patterns  = method.parameters.map(parameter => decodePattern(parameter.wireType, parameter.name))
-      val arguments = method.parameters.map(_.name).mkString(", ")
+      val indexed         = method.parameters.zipWithIndex
+      val inputParameters = indexed.filter(_._1.direction != WireDirection.Out)
+      val patterns        = inputParameters.map { case (parameter, index) =>
+        decodePattern(parameter.wireType, s"value$index")
+      }
+      val declarations = indexed.map { case (parameter, index) =>
+        s"val argument$index = ${dispatcherArgument(parameter, index, indexed)}"
+      }
+      val arguments = indexed.indices.map(index => s"argument$index").mkString(", ")
+      val outputs   = indexed.collect {
+        case (parameter, index) if parameter.direction != WireDirection.In => encodeDispatcherOutput(parameter, index)
+      }
+      val declarationsBlock =
+        if (declarations.isEmpty) ""
+        else declarations.mkString("            ", "\n            ", "\n")
       s"""|      case `${method.name}Id` if request.functionName == "${method.name}" =>
           |        request.arguments match {
-          |          case Vector(${patterns.mkString(
-           ", "
-         )}) => encode${method.result}(implementation.${method.name}($arguments))
+          |          case Vector(${patterns.mkString(", ")}) =>
+          |$declarationsBlock            val status = implementation.${method.name}($arguments)
+          |            val outputs = if (status.isSuccess) Vector(${outputs.mkString(", ")}) else Vector.empty
+          |            RPCResponse.Success(WireValue.CallResult(status, outputs))
           |          case _ => invalid("invalid arguments for ${method.name}")
           |        }""".stripMargin
     }
-    val codecs = cudaRPC.methods.map(_.result).distinct.map { wireType =>
-      val scala        = scalaType(wireType)
-      val decodedValue = if (wireType == WireType.UnitValue) "()" else "value"
-      val encodedValue = if (wireType == WireType.UnitValue) "_" else "value"
-      s"""|  private def decode$wireType(response: RPCResponse): CUDAResult[$scala] = response match {
-          |    case RPCResponse.Success(${decodePattern(wireType, "value")}) => CUDAResult.Success($decodedValue)
-          |    case RPCResponse.Success(_) => CUDAResult.Failure(CUDAError(999, "invalid $wireType response payload"))
-          |    case RPCResponse.Failure(error) => CUDAResult.Failure(error)
-          |  }
-          |
-          |  private def encode$wireType(result: CUDAResult[$scala]): RPCResponse = result match {
-          |    case CUDAResult.Success($encodedValue) => RPCResponse.Success(${encodeWire(wireType, "value")})
-          |    case CUDAResult.Failure(error) => RPCResponse.Failure(error)
-          |  }""".stripMargin
-    }
     val schemaMethods = cudaRPC.methods.map { method =>
-      val parameters =
-        method.parameters.map(parameter => s"RPCParameter(\"${parameter.name}\", WireType.${parameter.wireType})")
+      val parameters = method.parameters.map { parameter =>
+        s"RPCParameter(\"${parameter.name}\", WireType.${parameter.wireType}, WireDirection.${parameter.direction}, ${renderWireExtent(parameter.extent)})"
+      }
       s"RPCMethod(\"${method.name}\", ${method.name}Id, Vector(${parameters.mkString(", ")}), WireType.${method.result})"
     }
     s"""|package net.kurobako.gemstone.generated
         |
+        |import net.kurobako.gemstone.abi.*
         |import net.kurobako.gemstone.cuda.*
         |import net.kurobako.gemstone.rpc.*
         |
@@ -1440,66 +1574,193 @@ object GenerateAPI {
         |
         |  private def invalid(message: String): RPCResponse = RPCResponse.Failure(CUDAError(999, message))
         |
-        |${codecs.mkString("\n\n")}
+        |  private def writeOne[A, Mode <: Access, Size <: Extent](pointer: Pointer[A, Mode, Size], value: A)(using CanWrite[Mode]): Boolean = {
+        |    pointer.write(value)
+        |    true
+        |  }
+        |
+        |  private def writeBytes[Mode <: Access, Size <: Extent](pointer: Pointer[Byte, Mode, Size], value: IArray[Byte])(using CanWrite[Mode]): Boolean = {
+        |    if (pointer.length != value.length) false
+        |    else {
+        |      var index = 0
+        |      while (index < value.length) {
+        |        pointer.write(value(index), index)
+        |        index += 1
+        |      }
+        |      true
+        |    }
+        |  }
         |}
         |""".stripMargin
   }
 
+  private def scalaParameterType(parameter: RPCParameter): String =
+    if (parameter.extent == WireExtent.Value) scalaType(parameter.wireType)
+    else {
+      val element = if (parameter.wireType == WireType.ByteBuffer) "Byte" else scalaType(parameter.wireType)
+      (parameter.direction, parameter.extent) match {
+        case (WireDirection.In, WireExtent.CountedBy(name))    => s"InputBuffer[$element, \"$name\"]"
+        case (WireDirection.Out, WireExtent.CountedBy(name))   => s"OutputBuffer[$element, \"$name\"]"
+        case (WireDirection.InOut, WireExtent.CountedBy(name)) => s"InOutBuffer[$element, \"$name\"]"
+        case (WireDirection.In, WireExtent.One)                => s"In[$element]"
+        case (WireDirection.Out, WireExtent.One)               => s"Out[$element]"
+        case (WireDirection.InOut, WireExtent.One)             => s"InOut[$element]"
+        case (direction, extent)                               =>
+          s"Pointer[$element, ${scalaAccess(direction)}, ${scalaExtent(extent)}]"
+      }
+    }
+
+  private def scalaAccess(direction: WireDirection): String = direction match {
+    case WireDirection.In    => "Read"
+    case WireDirection.Out   => "Write"
+    case WireDirection.InOut => "ReadWrite"
+  }
+
+  private def scalaExtent(extent: WireExtent): String = extent match {
+    case WireExtent.Value           => sys.error("a value is not a pointer extent")
+    case WireExtent.One             => "One"
+    case WireExtent.Opaque          => "Opaque"
+    case WireExtent.CountedBy(name) => s"CountedBy[\"$name\"]"
+    case WireExtent.Fixed(count)    => s"Fixed[$count]"
+  }
+
+  private def renderWireExtent(extent: WireExtent): String = extent match {
+    case WireExtent.Value           => "WireExtent.Value"
+    case WireExtent.One             => "WireExtent.One"
+    case WireExtent.Opaque          => "WireExtent.Opaque"
+    case WireExtent.CountedBy(name) => s"WireExtent.CountedBy(\"$name\")"
+    case WireExtent.Fixed(count)    => s"WireExtent.Fixed($count)"
+  }
+
+  private def encodeClientInput(parameter: RPCParameter): String =
+    if (parameter.extent == WireExtent.Value) encodeWire(parameter.wireType, parameter.name)
+    else if (parameter.wireType == WireType.ByteBuffer)
+      s"WireValue.ByteBufferValue(IArray.from(${parameter.name}.snapshot.getOrElse(Vector.empty)))"
+    else {
+      val value =
+        s"${parameter.name}.snapshot.flatMap(_.headOption).getOrElse(throw new IllegalArgumentException(\"${parameter.name} is uninitialized\"))"
+      encodeWire(parameter.wireType, value)
+    }
+
+  private def dispatcherArgument(
+      parameter: RPCParameter,
+      index: Int,
+      parameters: Vector[(RPCParameter, Int)]
+  ): String = parameter.direction match {
+    case WireDirection.In if parameter.extent == WireExtent.Value =>
+      decodeWireValue(parameter.wireType, s"value$index")
+    case WireDirection.In if parameter.wireType == WireType.ByteBuffer =>
+      s"Pointer.input[Byte, ${scalaExtent(parameter.extent)}](value$index)"
+    case WireDirection.Out =>
+      val element = if (parameter.wireType == WireType.ByteBuffer) "Byte" else scalaType(parameter.wireType)
+      s"Pointer.output[$element, ${scalaExtent(parameter.extent)}](${extentLength(parameter.extent, parameters)})"
+    case WireDirection.InOut if parameter.wireType == WireType.ByteBuffer =>
+      s"Pointer.inputOutput[Byte, ${scalaExtent(parameter.extent)}](value$index)"
+    case _ => sys.error(s"unsupported generated dispatcher parameter: $parameter")
+  }
+
+  private def extentLength(extent: WireExtent, parameters: Vector[(RPCParameter, Int)]): String = extent match {
+    case WireExtent.One             => "1"
+    case WireExtent.Fixed(count)    => count.toString
+    case WireExtent.CountedBy(name) =>
+      parameters.find(_._1.name == name) match {
+        case Some((parameter, index)) => parameter.wireType match {
+            case WireType.Int32  => s"value$index"
+            case WireType.UInt32 => s"value$index.toLong.toInt"
+            case WireType.SizeT  => s"value$index.toLong.toInt"
+            case other           => sys.error(s"unsupported count type $other for $name")
+          }
+        case None => sys.error(s"count parameter is absent: $name")
+      }
+    case WireExtent.Opaque => sys.error("cannot allocate an opaque output pointer")
+    case WireExtent.Value  => sys.error("a value has no pointer length")
+  }
+
+  private def encodeDispatcherOutput(parameter: RPCParameter, index: Int): String =
+    if (parameter.wireType == WireType.ByteBuffer)
+      s"WireValue.ByteBufferValue(IArray.from(argument$index.snapshot.getOrElse(throw new IllegalStateException(\"${parameter.name} was not initialized\"))))"
+    else {
+      val value =
+        s"argument$index.snapshot.flatMap(_.headOption).getOrElse(throw new IllegalStateException(\"${parameter.name} was not initialized\"))"
+      encodeWire(parameter.wireType, value)
+    }
+
+  private def decodeWireValue(wireType: WireType, value: String): String = wireType match {
+    case WireType.NullableOpaquePointer =>
+      s"if ($value) throw new IllegalArgumentException(\"non-null opaque RPC pointers are unsupported\") else None"
+    case _ => value
+  }
+
   private def scalaType(wireType: WireType): String = wireType match {
-    case WireType.UnitValue      => "Unit"
-    case WireType.Int32          => "Int"
-    case WireType.UInt8          => "UInt8"
-    case WireType.UInt32         => "UInt32"
-    case WireType.SizeT          => "SizeT"
-    case WireType.Device         => "Device"
-    case WireType.DevicePtr      => "DevicePtr"
-    case WireType.Context        => "Context"
-    case WireType.CUDAModule     => "CUDAModule"
-    case WireType.CUDAFunction   => "CUDAFunction"
-    case WireType.HostInput      => "HostInput"
-    case WireType.HostOutput     => "HostOutput"
-    case WireType.ModuleImage    => "ModuleImage"
-    case WireType.FunctionName   => "FunctionName"
-    case WireType.KernelFunction => "KernelFunction"
-    case WireType.KernelLaunch   => "KernelLaunch"
+    case WireType.UnitValue             => "Unit"
+    case WireType.Int32                 => "Int"
+    case WireType.UInt8                 => "UInt8"
+    case WireType.UInt32                => "UInt32"
+    case WireType.SizeT                 => "SizeT"
+    case WireType.Device                => "Device"
+    case WireType.DevicePtr             => "DevicePtr"
+    case WireType.Context               => "Context"
+    case WireType.CUDAModule            => "CUDAModule"
+    case WireType.CUDAFunction          => "CUDAFunction"
+    case WireType.HostInput             => "HostInput"
+    case WireType.HostOutput            => "HostOutput"
+    case WireType.ModuleImage           => "ModuleImage"
+    case WireType.FunctionName          => "FunctionName"
+    case WireType.KernelFunction        => "KernelFunction"
+    case WireType.KernelLaunch          => "KernelLaunch"
+    case WireType.Stream                => "Stream"
+    case WireType.ByteBuffer            => "IArray[Byte]"
+    case WireType.KernelParameters      => "KernelParameters"
+    case WireType.NullableOpaquePointer => "Option[net.kurobako.gemstone.abi.OpaquePointer]"
+    case WireType.CUDAStatus            => "CUDAStatus"
   }
 
   private def encodeWire(wireType: WireType, value: String): String = wireType match {
-    case WireType.UnitValue      => "WireValue.UnitValue"
-    case WireType.Int32          => s"WireValue.Int32Value($value)"
-    case WireType.UInt8          => s"WireValue.UInt8Value($value)"
-    case WireType.UInt32         => s"WireValue.UInt32Value($value)"
-    case WireType.SizeT          => s"WireValue.SizeTValue($value)"
-    case WireType.Device         => s"WireValue.DeviceValue($value)"
-    case WireType.DevicePtr      => s"WireValue.DevicePtrValue($value)"
-    case WireType.Context        => s"WireValue.ContextValue($value)"
-    case WireType.CUDAModule     => s"WireValue.CUDAModuleValue($value)"
-    case WireType.CUDAFunction   => s"WireValue.CUDAFunctionValue($value)"
-    case WireType.HostInput      => s"WireValue.HostInputValue($value)"
-    case WireType.HostOutput     => s"WireValue.HostOutputValue($value)"
-    case WireType.ModuleImage    => s"WireValue.ModuleImageValue($value)"
-    case WireType.FunctionName   => s"WireValue.FunctionNameValue($value)"
-    case WireType.KernelFunction => s"WireValue.KernelFunctionValue($value)"
-    case WireType.KernelLaunch   => s"WireValue.KernelLaunchValue($value)"
+    case WireType.UnitValue             => "WireValue.UnitValue"
+    case WireType.Int32                 => s"WireValue.Int32Value($value)"
+    case WireType.UInt8                 => s"WireValue.UInt8Value($value)"
+    case WireType.UInt32                => s"WireValue.UInt32Value($value)"
+    case WireType.SizeT                 => s"WireValue.SizeTValue($value)"
+    case WireType.Device                => s"WireValue.DeviceValue($value)"
+    case WireType.DevicePtr             => s"WireValue.DevicePtrValue($value)"
+    case WireType.Context               => s"WireValue.ContextValue($value)"
+    case WireType.CUDAModule            => s"WireValue.CUDAModuleValue($value)"
+    case WireType.CUDAFunction          => s"WireValue.CUDAFunctionValue($value)"
+    case WireType.HostInput             => s"WireValue.HostInputValue($value)"
+    case WireType.HostOutput            => s"WireValue.HostOutputValue($value)"
+    case WireType.ModuleImage           => s"WireValue.ModuleImageValue($value)"
+    case WireType.FunctionName          => s"WireValue.FunctionNameValue($value)"
+    case WireType.KernelFunction        => s"WireValue.KernelFunctionValue($value)"
+    case WireType.KernelLaunch          => s"WireValue.KernelLaunchValue($value)"
+    case WireType.Stream                => s"WireValue.StreamValue($value)"
+    case WireType.ByteBuffer            => s"WireValue.ByteBufferValue($value)"
+    case WireType.KernelParameters      => s"WireValue.KernelParametersValue($value)"
+    case WireType.NullableOpaquePointer => s"WireValue.NullableOpaquePointerValue($value.nonEmpty)"
+    case WireType.CUDAStatus            => s"WireValue.CUDAStatusValue($value)"
   }
 
   private def decodePattern(wireType: WireType, binding: String): String = wireType match {
-    case WireType.UnitValue      => "WireValue.UnitValue"
-    case WireType.Int32          => s"WireValue.Int32Value($binding)"
-    case WireType.UInt8          => s"WireValue.UInt8Value($binding)"
-    case WireType.UInt32         => s"WireValue.UInt32Value($binding)"
-    case WireType.SizeT          => s"WireValue.SizeTValue($binding)"
-    case WireType.Device         => s"WireValue.DeviceValue($binding)"
-    case WireType.DevicePtr      => s"WireValue.DevicePtrValue($binding)"
-    case WireType.Context        => s"WireValue.ContextValue($binding)"
-    case WireType.CUDAModule     => s"WireValue.CUDAModuleValue($binding)"
-    case WireType.CUDAFunction   => s"WireValue.CUDAFunctionValue($binding)"
-    case WireType.HostInput      => s"WireValue.HostInputValue($binding)"
-    case WireType.HostOutput     => s"WireValue.HostOutputValue($binding)"
-    case WireType.ModuleImage    => s"WireValue.ModuleImageValue($binding)"
-    case WireType.FunctionName   => s"WireValue.FunctionNameValue($binding)"
-    case WireType.KernelFunction => s"WireValue.KernelFunctionValue($binding)"
-    case WireType.KernelLaunch   => s"WireValue.KernelLaunchValue($binding)"
+    case WireType.UnitValue             => "WireValue.UnitValue"
+    case WireType.Int32                 => s"WireValue.Int32Value($binding)"
+    case WireType.UInt8                 => s"WireValue.UInt8Value($binding)"
+    case WireType.UInt32                => s"WireValue.UInt32Value($binding)"
+    case WireType.SizeT                 => s"WireValue.SizeTValue($binding)"
+    case WireType.Device                => s"WireValue.DeviceValue($binding)"
+    case WireType.DevicePtr             => s"WireValue.DevicePtrValue($binding)"
+    case WireType.Context               => s"WireValue.ContextValue($binding)"
+    case WireType.CUDAModule            => s"WireValue.CUDAModuleValue($binding)"
+    case WireType.CUDAFunction          => s"WireValue.CUDAFunctionValue($binding)"
+    case WireType.HostInput             => s"WireValue.HostInputValue($binding)"
+    case WireType.HostOutput            => s"WireValue.HostOutputValue($binding)"
+    case WireType.ModuleImage           => s"WireValue.ModuleImageValue($binding)"
+    case WireType.FunctionName          => s"WireValue.FunctionNameValue($binding)"
+    case WireType.KernelFunction        => s"WireValue.KernelFunctionValue($binding)"
+    case WireType.KernelLaunch          => s"WireValue.KernelLaunchValue($binding)"
+    case WireType.Stream                => s"WireValue.StreamValue($binding)"
+    case WireType.ByteBuffer            => s"WireValue.ByteBufferValue($binding)"
+    case WireType.KernelParameters      => s"WireValue.KernelParametersValue($binding)"
+    case WireType.NullableOpaquePointer => s"WireValue.NullableOpaquePointerValue($binding)"
+    case WireType.CUDAStatus            => s"WireValue.CUDAStatusValue($binding)"
   }
 
   private def upperSnake(value: String): String = value

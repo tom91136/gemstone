@@ -33,4 +33,18 @@ class ABIDerivationSuite extends munit.FunSuite {
       )
     )
   }
+
+  test("native delegates retain their exact C declaration") {
+    assertEquals(
+      ABIDerivation.nativeDelegates[DerivationFixture],
+      Vector(
+        ABIDeclaration(
+          "delegatedCall",
+          "int (int)",
+          Vector("value"),
+          MethodImplementation.NativeDelegate("gemstone_fixture_delegate")
+        )
+      )
+    )
+  }
 }
