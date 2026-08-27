@@ -1,6 +1,6 @@
-{"interface":"net.kurobako.gemstone.cuda.CUDA","identity":"exact-c-function-name","messageId":"sha256-128(function-name-utf8)","fingerprint":"43600c6dea6e9c839cf2881d8b7068e1d772d8df9052d9e6965db3b12abe869f","methods":[
-    {"name":"__cudaGemsiManagedRegister","messageId":"710ed6cabac43f0663e544ec115aef33","parameters":[{"name":"pointer","wireType":"DevicePtr"},{"name":"bytesize","wireType":"SizeT"}],"result":"UnitValue"},
-    {"name":"__cudaGemsiManagedUnregister","messageId":"293db04a48efebbbd342e867af7ded7e","parameters":[{"name":"pointer","wireType":"DevicePtr"}],"result":"UnitValue"},
+{"interface":"net.kurobako.gemstone.cuda.CUDA","identity":"exact-c-function-name","messageId":"sha256-128(function-name-utf8)","fingerprint":"1ae87a17c50a68a74c188e6e082f84ea151d7977ddc8201c323a240c64510069","methods":[
+    {"name":"__cudaGemstoneManagedRegister","messageId":"c6207aea8d73f5ba2db4cd6e3a364b1a","parameters":[{"name":"pointer","wireType":"DevicePtr"},{"name":"bytesize","wireType":"SizeT"}],"result":"UnitValue"},
+    {"name":"__cudaGemstoneManagedUnregister","messageId":"93e5439ad242c3c08e20904fec96004c","parameters":[{"name":"pointer","wireType":"DevicePtr"}],"result":"UnitValue"},
     {"name":"cuCtxCreate_v2","messageId":"e6eb5473c0a097e3a17c8d63cec75a44","parameters":[{"name":"flags","wireType":"UInt32"},{"name":"device","wireType":"Device"}],"result":"Context"},
     {"name":"cuCtxDestroy_v2","messageId":"b574aacc9b35ee6a8135b883071cc261","parameters":[{"name":"context","wireType":"Context"}],"result":"UnitValue"},
     {"name":"cuCtxSynchronize","messageId":"e21f80c194a589d44af681a7ef75bb10","parameters":[],"result":"UnitValue"},

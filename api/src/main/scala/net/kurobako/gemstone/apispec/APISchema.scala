@@ -48,7 +48,7 @@ object GemstoneAPIRegistry {
     name = "cuda",
     abiVersion = "phase-0",
     soname = "libcuda.so.1",
-    symbolVersion = "GEMSI_0.1",
+    symbolVersion = "GEMSTONE_0.1",
     functions = Vector(
       APIFunction(
         name = "cudaGetDeviceCount",
@@ -60,7 +60,7 @@ object GemstoneAPIRegistry {
         threadLocalError = true
       ),
       APIFunction(
-        name = "gemsiAddI32",
+        name = "gemstoneAddI32",
         opcode = 2,
         returnConvention = ReturnConvention.DirectInt32,
         parameters = Vector(

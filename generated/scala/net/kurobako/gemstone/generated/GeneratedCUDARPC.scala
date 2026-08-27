@@ -4,10 +4,10 @@ import net.kurobako.gemstone.cuda.*
 import net.kurobako.gemstone.rpc.*
 
 object GeneratedCUDARPC {
-  val SchemaFingerprint: String = "43600c6dea6e9c839cf2881d8b7068e1d772d8df9052d9e6965db3b12abe869f"
+  val SchemaFingerprint: String = "1ae87a17c50a68a74c188e6e082f84ea151d7977ddc8201c323a240c64510069"
 
-  private val __cudaGemsiManagedRegisterId = MessageId(0x710ed6cabac43f06L, 0x63e544ec115aef33L)
-  private val __cudaGemsiManagedUnregisterId = MessageId(0x293db04a48efebbbL, 0xd342e867af7ded7eL)
+  private val __cudaGemstoneManagedRegisterId = MessageId(0xc6207aea8d73f5baL, 0x2db4cd6e3a364b1aL)
+  private val __cudaGemstoneManagedUnregisterId = MessageId(0x93e5439ad242c3c0L, 0x8e20904fec96004cL)
   private val cuCtxCreate_v2Id = MessageId(0xe6eb5473c0a097e3L, 0xa17c8d63cec75a44L)
   private val cuCtxDestroy_v2Id = MessageId(0xb574aacc9b35ee6aL, 0x8135b883071cc261L)
   private val cuCtxSynchronizeId = MessageId(0xe21f80c194a589d4L, 0x4af681a7ef75bb10L)
@@ -30,8 +30,8 @@ object GeneratedCUDARPC {
   private val cudaMallocId = MessageId(0x36207ff276ba04dbL, 0x8ed2474e0fef125dL)
 
   val Schema: RPCSchema = RPCSchema("net.kurobako.gemstone.cuda.CUDA", SchemaFingerprint, Vector(
-    RPCMethod("__cudaGemsiManagedRegister", __cudaGemsiManagedRegisterId, Vector(RPCParameter("pointer", WireType.DevicePtr), RPCParameter("bytesize", WireType.SizeT)), WireType.UnitValue),
-    RPCMethod("__cudaGemsiManagedUnregister", __cudaGemsiManagedUnregisterId, Vector(RPCParameter("pointer", WireType.DevicePtr)), WireType.UnitValue),
+    RPCMethod("__cudaGemstoneManagedRegister", __cudaGemstoneManagedRegisterId, Vector(RPCParameter("pointer", WireType.DevicePtr), RPCParameter("bytesize", WireType.SizeT)), WireType.UnitValue),
+    RPCMethod("__cudaGemstoneManagedUnregister", __cudaGemstoneManagedUnregisterId, Vector(RPCParameter("pointer", WireType.DevicePtr)), WireType.UnitValue),
     RPCMethod("cuCtxCreate_v2", cuCtxCreate_v2Id, Vector(RPCParameter("flags", WireType.UInt32), RPCParameter("device", WireType.Device)), WireType.Context),
     RPCMethod("cuCtxDestroy_v2", cuCtxDestroy_v2Id, Vector(RPCParameter("context", WireType.Context)), WireType.UnitValue),
     RPCMethod("cuCtxSynchronize", cuCtxSynchronizeId, Vector(), WireType.UnitValue),
@@ -60,11 +60,11 @@ object GeneratedCUDARPC {
       s"CUDA RPC schema mismatch: client=$SchemaFingerprint server=${transport.schemaFingerprint}"
     )
 
-    override def __cudaGemsiManagedRegister(pointer: DevicePtr, bytesize: SizeT): CUDAResult[Unit] =
-      decodeUnitValue(transport.call(RPCRequest(__cudaGemsiManagedRegisterId, "__cudaGemsiManagedRegister", Vector(WireValue.DevicePtrValue(pointer), WireValue.SizeTValue(bytesize)))))
+    override def __cudaGemstoneManagedRegister(pointer: DevicePtr, bytesize: SizeT): CUDAResult[Unit] =
+      decodeUnitValue(transport.call(RPCRequest(__cudaGemstoneManagedRegisterId, "__cudaGemstoneManagedRegister", Vector(WireValue.DevicePtrValue(pointer), WireValue.SizeTValue(bytesize)))))
 
-    override def __cudaGemsiManagedUnregister(pointer: DevicePtr): CUDAResult[Unit] =
-      decodeUnitValue(transport.call(RPCRequest(__cudaGemsiManagedUnregisterId, "__cudaGemsiManagedUnregister", Vector(WireValue.DevicePtrValue(pointer)))))
+    override def __cudaGemstoneManagedUnregister(pointer: DevicePtr): CUDAResult[Unit] =
+      decodeUnitValue(transport.call(RPCRequest(__cudaGemstoneManagedUnregisterId, "__cudaGemstoneManagedUnregister", Vector(WireValue.DevicePtrValue(pointer)))))
 
     override def cuCtxCreate_v2(flags: UInt32, device: Device): CUDAResult[Context] =
       decodeContext(transport.call(RPCRequest(cuCtxCreate_v2Id, "cuCtxCreate_v2", Vector(WireValue.UInt32Value(flags), WireValue.DeviceValue(device)))))
@@ -132,15 +132,15 @@ object GeneratedCUDARPC {
 
     override def dispatch(request: RPCRequest, implementation: CUDA): RPCResponse =
       request.messageId match {
-      case `__cudaGemsiManagedRegisterId` if request.functionName == "__cudaGemsiManagedRegister" =>
+      case `__cudaGemstoneManagedRegisterId` if request.functionName == "__cudaGemstoneManagedRegister" =>
         request.arguments match {
-          case Vector(WireValue.DevicePtrValue(pointer), WireValue.SizeTValue(bytesize)) => encodeUnitValue(implementation.__cudaGemsiManagedRegister(pointer, bytesize))
-          case _ => invalid("invalid arguments for __cudaGemsiManagedRegister")
+          case Vector(WireValue.DevicePtrValue(pointer), WireValue.SizeTValue(bytesize)) => encodeUnitValue(implementation.__cudaGemstoneManagedRegister(pointer, bytesize))
+          case _ => invalid("invalid arguments for __cudaGemstoneManagedRegister")
         }
-      case `__cudaGemsiManagedUnregisterId` if request.functionName == "__cudaGemsiManagedUnregister" =>
+      case `__cudaGemstoneManagedUnregisterId` if request.functionName == "__cudaGemstoneManagedUnregister" =>
         request.arguments match {
-          case Vector(WireValue.DevicePtrValue(pointer)) => encodeUnitValue(implementation.__cudaGemsiManagedUnregister(pointer))
-          case _ => invalid("invalid arguments for __cudaGemsiManagedUnregister")
+          case Vector(WireValue.DevicePtrValue(pointer)) => encodeUnitValue(implementation.__cudaGemstoneManagedUnregister(pointer))
+          case _ => invalid("invalid arguments for __cudaGemstoneManagedUnregister")
         }
       case `cuCtxCreate_v2Id` if request.functionName == "cuCtxCreate_v2" =>
         request.arguments match {

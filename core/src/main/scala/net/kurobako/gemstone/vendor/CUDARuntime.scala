@@ -18,7 +18,7 @@ final class CUDARuntime(runtime: RuntimeState) extends GeneratedAPI.Handler {
   override def cudaGetDeviceCount(): GeneratedAPI.DispatchResult =
     GeneratedAPI.DispatchResult(CUDAError.Success.value, runtime.deviceCount.toLong)
 
-  override def gemsiAddI32(left: Int, right: Int): GeneratedAPI.DispatchResult =
+  override def gemstoneAddI32(left: Int, right: Int): GeneratedAPI.DispatchResult =
     GeneratedAPI.DispatchResult(CUDAError.Success.value, (left + right).toLong)
 }
 

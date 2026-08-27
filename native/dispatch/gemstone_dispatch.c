@@ -1,6 +1,6 @@
 #define _GNU_SOURCE
 
-#include "gemsi_dispatch.h"
+#include "gemstone_dispatch.h"
 
 #include <errno.h>
 #include <pthread.h>
@@ -10,19 +10,19 @@
 #include <stdlib.h>
 #include <string.h>
 
-typedef struct GemsiCall {
-  GemsiWireRequest request;
-  GemsiWireResponse response;
+typedef struct GemstoneCall {
+  GemstoneWireRequest request;
+  GemstoneWireResponse response;
   pthread_mutex_t mutex;
   pthread_cond_t changed;
   int complete;
-  struct GemsiCall *next;
-} GemsiCall;
+  struct GemstoneCall *next;
+} GemstoneCall;
 
-typedef GemsiWireRequest *(*GemsiTakeRequest)(void);
-typedef void (*GemsiCompleteRequest)(GemsiWireResponse *);
+typedef GemstoneWireRequest *(*GemstoneTakeRequest)(void);
+typedef void (*GemstoneCompleteRequest)(GemstoneWireResponse *);
 
-extern int32_t gemsiStartServer(GemsiTakeRequest take_request, GemsiCompleteRequest complete_request);
+extern int32_t gemstoneStartServer(GemstoneTakeRequest take_request, GemstoneCompleteRequest complete_request);
 
 static pthread_once_t start_once = PTHREAD_ONCE_INIT;
 static pthread_mutex_t state_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -30,9 +30,9 @@ static int server_state = 0;
 
 static pthread_mutex_t queue_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t queue_changed = PTHREAD_COND_INITIALIZER;
-static GemsiCall *queue_head = NULL;
-static GemsiCall *queue_tail = NULL;
-static GemsiCall *active_call = NULL;
+static GemstoneCall *queue_head = NULL;
+static GemstoneCall *queue_tail = NULL;
+static GemstoneCall *active_call = NULL;
 
 static _Atomic uint64_t next_request_id = 1;
 static pthread_mutex_t record_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -49,7 +49,7 @@ static uint64_t current_thread_id(void) {
   return hash;
 }
 
-static void record_request(const GemsiWireRequest *request) {
+static void record_request(const GemstoneWireRequest *request) {
   if (record_file == NULL) return;
   pthread_mutex_lock(&record_mutex);
   fprintf(
@@ -58,14 +58,14 @@ static void record_request(const GemsiWireRequest *request) {
       (unsigned long long)request->request_id,
       (unsigned long long)request->foreign_thread_id,
       request->opcode,
-      gemsi_operation_name(request->opcode),
+      gemstone_operation_name(request->opcode),
       (long long)request->argument0,
       (long long)request->argument1);
   fflush(record_file);
   pthread_mutex_unlock(&record_mutex);
 }
 
-static void record_response(const GemsiWireResponse *response) {
+static void record_response(const GemstoneWireResponse *response) {
   if (record_file == NULL) return;
   pthread_mutex_lock(&record_mutex);
   fprintf(
@@ -78,7 +78,7 @@ static void record_response(const GemsiWireResponse *response) {
   pthread_mutex_unlock(&record_mutex);
 }
 
-void gemsi_dispatch_record_boundary(uint32_t opcode, int32_t status) {
+void gemstone_dispatch_record_boundary(uint32_t opcode, int32_t status) {
   if (record_file == NULL) return;
   pthread_mutex_lock(&record_mutex);
   fprintf(
@@ -86,13 +86,13 @@ void gemsi_dispatch_record_boundary(uint32_t opcode, int32_t status) {
       "{\"phase\":\"boundary\",\"thread\":%llu,\"opcode\":%u,\"operation\":\"%s\",\"status\":%d}\n",
       (unsigned long long)current_thread_id(),
       opcode,
-      gemsi_operation_name(opcode),
+      gemstone_operation_name(opcode),
       status);
   fflush(record_file);
   pthread_mutex_unlock(&record_mutex);
 }
 
-static GemsiWireRequest *take_request(void) {
+static GemstoneWireRequest *take_request(void) {
   pthread_mutex_lock(&queue_mutex);
   while (queue_head == NULL) {
     pthread_cond_wait(&queue_changed, &queue_mutex);
@@ -106,8 +106,8 @@ static GemsiWireRequest *take_request(void) {
   return &active_call->request;
 }
 
-static void complete_request(GemsiWireResponse *response) {
-  GemsiCall *call = active_call;
+static void complete_request(GemstoneWireResponse *response) {
+  GemstoneCall *call = active_call;
   if (call == NULL) abort();
   record_response(response);
   pthread_mutex_lock(&call->mutex);
@@ -119,16 +119,16 @@ static void complete_request(GemsiWireResponse *response) {
 }
 
 static void start_server(void) {
-  const char *record_path = getenv("GEMSI_RECORD");
+  const char *record_path = getenv("GEMSTONE_RECORD");
   if (record_path != NULL && record_path[0] != '\0') {
     record_file = fopen(record_path, "a");
     if (record_file == NULL) {
-      fprintf(stderr, "gemsi: cannot open recorder output %s: %s\n", record_path, strerror(errno));
+      fprintf(stderr, "gemstone: cannot open recorder output %s: %s\n", record_path, strerror(errno));
     }
   }
 
   pthread_mutex_lock(&state_mutex);
-  server_state = gemsiStartServer(take_request, complete_request) == GEMSI_STATUS_SUCCESS ? 1 : -1;
+  server_state = gemstoneStartServer(take_request, complete_request) == GEMSTONE_STATUS_SUCCESS ? 1 : -1;
   pthread_mutex_unlock(&state_mutex);
 }
 
@@ -136,7 +136,7 @@ __attribute__((constructor)) static void initialize_dispatch(void) {
   pthread_once(&start_once, start_server);
 }
 
-int gemsi_dispatch_request(GemsiWireRequest *request, GemsiWireResponse *response) {
+int gemstone_dispatch_request(GemstoneWireRequest *request, GemstoneWireResponse *response) {
   if (request == NULL || response == NULL) return -1;
   pthread_once(&start_once, start_server);
 
@@ -145,7 +145,7 @@ int gemsi_dispatch_request(GemsiWireRequest *request, GemsiWireResponse *respons
   pthread_mutex_unlock(&state_mutex);
   if (!ready) return -1;
 
-  GemsiCall call;
+  GemstoneCall call;
   memset(&call, 0, sizeof(call));
   call.request = *request;
   call.request.request_id = atomic_fetch_add(&next_request_id, 1);

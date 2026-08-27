@@ -32,13 +32,13 @@ object CoreServer {
   type TakeRequest     = CFuncPtr0[Ptr[WireRequest]]
   type CompleteRequest = CFuncPtr1[Ptr[WireResponse], Unit]
 
-  @exported("gemsiStartServer")
-  def gemsiStartServer(takeRequest: TakeRequest, completeRequest: CompleteRequest): CInt = {
+  @exported("gemstoneStartServer")
+  def gemstoneStartServer(takeRequest: TakeRequest, completeRequest: CompleteRequest): CInt = {
     val status =
       try {
         val server = new Thread(
           () => serverLoop(takeRequest, completeRequest),
-          "gemsi-core-server"
+          "gemstone-core-server"
         )
         server.setDaemon(true)
         server.start()

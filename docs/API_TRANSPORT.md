@@ -7,13 +7,13 @@ See [CUDA_RPC.md](CUDA_RPC.md). The older registry remains only for the phase-0 
 
 `codegen` currently emits:
 
-- `gemsi_protocol.h`: pointer-free request and response structures, protocol version, status values, and opcodes;
-- `gemsi_cuda.h` and `gemsi_cuda.c`: the public ABI and pure-C validation/marshalling facade;
-- `gemsi_cuda.map`: the exact exported ELF symbol surface and version node;
+- `gemstone_protocol.h`: pointer-free request and response structures, protocol version, status values, and opcodes;
+- `gemstone_cuda.h` and `gemstone_cuda.c`: the public ABI and pure-C validation/marshalling facade;
+- `gemstone_cuda.map`: the exact exported ELF symbol surface and version node;
 - `GeneratedAPI.scala`: handler interface, allocation-free result representation, and opcode dispatch;
 - `api-manifest.json`: machine-readable ABI and protocol coverage metadata.
-- `cuda-rpc-schema.json` and `gemsi_cuda_rpc.inc`: trait-derived names, types, IDs, and schema fingerprint;
-- `gemsi_cuda_rpc_client.c`: generated CUDA Driver ABI projection and typed marshalling;
+- `cuda-rpc-schema.json` and `gemstone_cuda_rpc.inc`: trait-derived names, types, IDs, and schema fingerprint;
+- `gemstone_cuda_rpc_client.c`: generated CUDA Driver ABI projection and typed marshalling;
 - `GeneratedCUDARPC.scala`: typed client and receiving dispatcher for JVM and Scala Native;
 - `cuda-driver-surface.json`: the 144-method Driver inventory derived from the Scala `CUDA` trait and each method's implementation status.
 
@@ -35,14 +35,14 @@ generated vendor facade
   - preserves C TLS state
       |
       v
-libgemsi_dispatch.so
+libgemstone_dispatch.so
   - allocates request ID
   - records request
   - queues stack-owned call envelope
   - waits on per-call condition variable
       |
       v
-Scala Native-owned thread in libgemsi-core.so
+Scala Native-owned thread in libgemstone-core.so
   - decodes generated opcode
   - invokes logical vendor handler
   - catches every exception
@@ -84,7 +84,7 @@ backend is POSIX; the framing and TCP design are portable, while Windows still n
 
 ## Recording and blob evolution
 
-Setting `GEMSI_RECORD` to a path records ordered JSON-lines events. The JVM RPC record contains exact function name,
+Setting `GEMSTONE_RECORD` to a path records ordered JSON-lines events. The JVM RPC record contains exact function name,
 message ID, payload sizes, CUDA status, and response size. Validation failures that do not reach the legacy queue are
 recorded as boundary events there.
 

@@ -2,9 +2,9 @@
 
 ## Working
 
-- Scala Native 0.5.12 links `libgemsi-core.so` under sbt 2.0.6.
-- A generated `libcuda.so.1` contains only C facade code and links to one process-wide `libgemsi_dispatch.so`.
-- The core exports only `ScalaNativeInit` and `gemsiStartServer`; vendor symbols do not expose Scala implementation symbols.
+- Scala Native 0.5.12 links `libgemstone-core.so` under sbt 2.0.6.
+- A generated `libcuda.so.1` contains only C facade code and links to one process-wide `libgemstone_dispatch.so`.
+- The core exports only `ScalaNativeInit` and `gemstoneStartServer`; vendor symbols do not expose Scala implementation symbols.
 - The generated GNU ld scripts enforce explicit facade and core symbol versions.
 - Null pointer validation occurs in C before message dispatch.
 - Scala exceptions are contained in the core server loop and converted to protocol status values.
@@ -26,7 +26,7 @@ foreign thread -> generated C facade -> pure-C queue -> Scala Native-owned serve
 `conformance/smoke/concurrent-foreign-entry.cpp` now executes 16,000 calls from eight C++ threads. No foreign
 thread enters Scala, and the test passes under the default Immix collector.
 
-The Scala Native runtime is initialized by the normal DSO loader thread. `gemsiStartServer` creates the managed server
+The Scala Native runtime is initialized by the normal DSO loader thread. `gemstoneStartServer` creates the managed server
 thread and then marks the loader thread unmanaged before returning to ordinary application code. This currently uses
 the internal `scalanative_GC_set_mutator_thread_state` runtime symbol and therefore needs an explicit compatibility test
 whenever Scala Native is upgraded.

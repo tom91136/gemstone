@@ -424,7 +424,7 @@ lazy val native = projectMatrix
   .dependsOn(core, isa_ptx, isa_amdgpu, isa_spirv)
   .settings(
     commonSettings,
-    name         := "gemsi-core",
+    name         := "gemstone-native",
     nativeConfig := {
       val exportMap = (LocalRootProject / baseDirectory).value / "native" / "core-exports.map"
       nativeConfig.value

@@ -24,8 +24,8 @@ trait CUDA {
   def cuLaunchKernel(function: CUDAFunction, launch: KernelLaunch): CUDAResult[Unit]
 
   /** Internal transport operations backing host-dereferenceable managed and pinned allocations. */
-  def __cudaGemsiManagedRegister(pointer: DevicePtr, bytesize: SizeT): CUDAResult[Unit]
-  def __cudaGemsiManagedUnregister(pointer: DevicePtr): CUDAResult[Unit]
+  def __cudaGemstoneManagedRegister(pointer: DevicePtr, bytesize: SizeT): CUDAResult[Unit]
+  def __cudaGemstoneManagedUnregister(pointer: DevicePtr): CUDAResult[Unit]
 
   def cudaGetDeviceCount(): CUDAResult[Int]
   def cudaMalloc(bytesize: SizeT): CUDAResult[DevicePtr]

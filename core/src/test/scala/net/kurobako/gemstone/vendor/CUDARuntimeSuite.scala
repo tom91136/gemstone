@@ -13,7 +13,7 @@ class CUDARuntimeSuite extends munit.FunSuite {
       GeneratedAPI.DispatchResult(CUDAError.Success.value, 1L)
     )
     assertEquals(
-      GeneratedAPI.dispatch(GeneratedAPI.Opcode.GemsiAddI32, 20L, 22L, CUDARuntime.emulated),
+      GeneratedAPI.dispatch(GeneratedAPI.Opcode.GemstoneAddI32, 20L, 22L, CUDARuntime.emulated),
       GeneratedAPI.DispatchResult(CUDAError.Success.value, 42L)
     )
   }

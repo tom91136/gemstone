@@ -1,6 +1,6 @@
 #define _POSIX_C_SOURCE 200112L
 
-#include "gemsi_rpc_transport.h"
+#include "gemstone_rpc_transport.h"
 
 #include <errno.h>
 #include <netdb.h>
@@ -11,17 +11,17 @@
 #include <string.h>
 #include <unistd.h>
 
-#include "gemsi_cuda_rpc.inc"
+#include "gemstone_cuda_rpc.inc"
 #include <sys/socket.h>
 #include <sys/time.h>
 
 enum {
-  GEMSI_RPC_PROTOCOL_VERSION = 1,
-  GEMSI_RPC_REQUEST_HEADER_SIZE = 160,
-  GEMSI_RPC_RESPONSE_HEADER_SIZE = 20,
-  GEMSI_RPC_FINGERPRINT_SIZE = 64,
-  GEMSI_RPC_TOKEN_SIZE = 64,
-  GEMSI_RPC_MAXIMUM_NAME_SIZE = 128
+  GEMSTONE_RPC_PROTOCOL_VERSION = 1,
+  GEMSTONE_RPC_REQUEST_HEADER_SIZE = 160,
+  GEMSTONE_RPC_RESPONSE_HEADER_SIZE = 20,
+  GEMSTONE_RPC_FINGERPRINT_SIZE = 64,
+  GEMSTONE_RPC_TOKEN_SIZE = 64,
+  GEMSTONE_RPC_MAXIMUM_NAME_SIZE = 128
 };
 
 static const uint32_t request_magic = UINT32_C(0x474d5331);
@@ -31,7 +31,7 @@ static int connection_fd = -1;
 
 static void record_call(const char *function_name, uint64_t message_id_high, uint64_t message_id_low, uint32_t request_size, int32_t status,
                         uint32_t response_size) {
-  const char *path = getenv("GEMSI_RECORD");
+  const char *path = getenv("GEMSTONE_RECORD");
   if (path == NULL || path[0] == '\0') return;
   FILE *file = fopen(path, "a");
   if (file == NULL) return;
@@ -117,30 +117,30 @@ static int connect_to_server(void) {
   return 0;
 }
 
-void gemsi_rpc_buffer_release(GemsiRpcBuffer *buffer) {
+void gemstone_rpc_buffer_release(GemstoneRpcBuffer *buffer) {
   if (buffer == NULL) return;
   free(buffer->data);
   buffer->data = NULL;
   buffer->size = 0;
 }
 
-int gemsi_rpc_call(uint64_t message_id_high, uint64_t message_id_low, const char *function_name, const uint8_t *payload,
-                   uint32_t payload_size, int32_t *cuda_status, GemsiRpcBuffer *response) {
+int gemstone_rpc_call(uint64_t message_id_high, uint64_t message_id_low, const char *function_name, const uint8_t *payload,
+                   uint32_t payload_size, int32_t *cuda_status, GemstoneRpcBuffer *response) {
   if (function_name == NULL || cuda_status == NULL || response == NULL) return -1;
   const size_t name_size = strlen(function_name);
-  if (name_size == 0 || name_size > GEMSI_RPC_MAXIMUM_NAME_SIZE || payload_size > GEMSI_RPC_MAXIMUM_PAYLOAD_SIZE) return -1;
+  if (name_size == 0 || name_size > GEMSTONE_RPC_MAXIMUM_NAME_SIZE || payload_size > GEMSTONE_RPC_MAXIMUM_PAYLOAD_SIZE) return -1;
   if (payload_size != 0 && payload == NULL) return -1;
   const char *token = getenv("GEMSTONE_RPC_TOKEN");
-  if (token == NULL || strlen(token) != GEMSI_RPC_TOKEN_SIZE) return -1;
+  if (token == NULL || strlen(token) != GEMSTONE_RPC_TOKEN_SIZE) return -1;
 
   response->data = NULL;
   response->size = 0;
-  uint8_t header[GEMSI_RPC_REQUEST_HEADER_SIZE];
+  uint8_t header[GEMSTONE_RPC_REQUEST_HEADER_SIZE];
   memset(header, 0, sizeof(header));
   put_u32(header, request_magic);
-  put_u32(header + 4, GEMSI_RPC_PROTOCOL_VERSION);
-  memcpy(header + 8, GEMSI_CUDA_RPC_SCHEMA_FINGERPRINT, GEMSI_RPC_FINGERPRINT_SIZE);
-  memcpy(header + 72, token, GEMSI_RPC_TOKEN_SIZE);
+  put_u32(header + 4, GEMSTONE_RPC_PROTOCOL_VERSION);
+  memcpy(header + 8, GEMSTONE_CUDA_RPC_SCHEMA_FINGERPRINT, GEMSTONE_RPC_FINGERPRINT_SIZE);
+  memcpy(header + 72, token, GEMSTONE_RPC_TOKEN_SIZE);
   put_u64(header + 136, message_id_high);
   put_u64(header + 144, message_id_low);
   put_u32(header + 152, (uint32_t)name_size);
@@ -155,19 +155,19 @@ int gemsi_rpc_call(uint64_t message_id_high, uint64_t message_id_low, const char
     goto complete;
   }
 
-  uint8_t response_header[GEMSI_RPC_RESPONSE_HEADER_SIZE];
+  uint8_t response_header[GEMSTONE_RPC_RESPONSE_HEADER_SIZE];
   if (receive_all(connection_fd, response_header, sizeof(response_header)) != 0) {
     close_connection();
     goto complete;
   }
-  if (get_u32(response_header) != response_magic || get_u32(response_header + 4) != GEMSI_RPC_PROTOCOL_VERSION) {
+  if (get_u32(response_header) != response_magic || get_u32(response_header + 4) != GEMSTONE_RPC_PROTOCOL_VERSION) {
     close_connection();
     goto complete;
   }
   *cuda_status = (int32_t)get_u32(response_header + 8);
   const uint32_t message_size = get_u32(response_header + 12);
   const uint32_t response_size = get_u32(response_header + 16);
-  if (message_size > 1024 || response_size > GEMSI_RPC_MAXIMUM_PAYLOAD_SIZE) {
+  if (message_size > 1024 || response_size > GEMSTONE_RPC_MAXIMUM_PAYLOAD_SIZE) {
     close_connection();
     goto complete;
   }
@@ -184,7 +184,7 @@ int gemsi_rpc_call(uint64_t message_id_high, uint64_t message_id_low, const char
   if (response_size != 0) {
     response->data = (uint8_t *)malloc(response_size);
     if (response->data == NULL || receive_all(connection_fd, response->data, response_size) != 0) {
-      gemsi_rpc_buffer_release(response);
+      gemstone_rpc_buffer_release(response);
       close_connection();
       goto complete;
     }

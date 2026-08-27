@@ -128,7 +128,7 @@ final class CUDAEmulatorServer(kernelExecution: CUDAKernelExecution = CUDAKernel
   override def cuLaunchKernel(function: CUDAFunction, launch: KernelLaunch): CUDAResult[Unit] =
     kernelExecution.cuLaunchKernel(function, launch, deviceMemory)
 
-  override def __cudaGemsiManagedRegister(pointer: DevicePtr, bytesize: SizeT): CUDAResult[Unit] = synchronized {
+  override def __cudaGemstoneManagedRegister(pointer: DevicePtr, bytesize: SizeT): CUDAResult[Unit] = synchronized {
     checkedSize(bytesize).flatMap { size =>
       val overlaps = allocations.exists { case (base, allocation) =>
         val end        = Math.addExact(pointer.address, size.toLong)
@@ -144,7 +144,7 @@ final class CUDAEmulatorServer(kernelExecution: CUDAKernelExecution = CUDAKernel
     }
   }
 
-  override def __cudaGemsiManagedUnregister(pointer: DevicePtr): CUDAResult[Unit] = free(pointer)
+  override def __cudaGemstoneManagedUnregister(pointer: DevicePtr): CUDAResult[Unit] = free(pointer)
 
   override def cudaGetDeviceCount(): CUDAResult[Int] = cuDeviceGetCount()
 

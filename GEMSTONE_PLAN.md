@@ -13,7 +13,7 @@ The project will execute code compiled through the normal CUDA, HIP, and SYCL/on
 - Successful execution of representative CCCL Thrust, rocThrust, and oneDPL algorithms.
 - A rapid JVM development cycle while producing native vendor-compatible DSOs with Scala Native.
 
-The name expands to **GPU Execution Model for State-Tracked, Offload-Neutral Emulation**. The working technical namespace and command name are `gemsi`.
+The name expands to **GPU Execution Model for State-Tracked, Offload-Neutral Emulation**. The working technical namespace and command name are `gemstone`.
 
 ## 2. Decisions
 
@@ -154,7 +154,7 @@ This must be validated against:
 - Callbacks from GEMSTONE into host code.
 - `fork` behavior where relevant.
 
-If a union DSO cannot satisfy loader or SONAME behavior, use tiny vendor-specific C facade DSOs forwarding into one Scala Native `libgemsi_core.so`. This is the fallback, not the initial design. Facades must be generated from the API registry and contain no runtime policy.
+If a union DSO cannot satisfy loader or SONAME behavior, use tiny vendor-specific C facade DSOs forwarding into one Scala Native `libgemstone_core.so`. This is the fallback, not the initial design. Facades must be generated from the API registry and contain no runtime policy.
 
 Every exported function must:
 

@@ -1,4 +1,4 @@
-{"protocolVersion":1,"api":"cuda","abiVersion":"phase-0","soname":"libcuda.so.1","symbolVersion":"GEMSI_0.1","functions":[
+{"protocolVersion":1,"api":"cuda","abiVersion":"phase-0","soname":"libcuda.so.1","symbolVersion":"GEMSTONE_0.1","functions":[
     {"name":"cudaGetDeviceCount","opcode":1,"synchronous":true,"threadLocalError":true},
-    {"name":"gemsiAddI32","opcode":2,"synchronous":true,"threadLocalError":false}
+    {"name":"gemstoneAddI32","opcode":2,"synchronous":true,"threadLocalError":false}
 ]}

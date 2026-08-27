@@ -2,10 +2,10 @@
 
 #include <dlfcn.h>
 
-#include "gemsi_cuda_driver_surface.inc"
+#include "gemstone_cuda_driver_surface.inc"
 
 #define COUNT_DRIVER_SYMBOL(symbol) +1
-enum { DriverApiCount = 0 GEMSI_CUDA_DRIVER_API(COUNT_DRIVER_SYMBOL) };
+enum { DriverApiCount = 0 GEMSTONE_CUDA_DRIVER_API(COUNT_DRIVER_SYMBOL) };
 #undef COUNT_DRIVER_SYMBOL
 static_assert(DriverApiCount == 144);
 
@@ -24,7 +24,7 @@ int main() {
       ++missing;                                                                                                                           \
     }                                                                                                                                      \
   } while (false);
-  GEMSI_CUDA_DRIVER_API(CHECK_DRIVER_SYMBOL)
+  GEMSTONE_CUDA_DRIVER_API(CHECK_DRIVER_SYMBOL)
 #undef CHECK_DRIVER_SYMBOL
 
   dlclose(library);

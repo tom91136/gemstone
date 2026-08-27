@@ -1,7 +1,7 @@
-GEMSI_0.1 {
+GEMSTONE_0.1 {
   global:
     cudaGetDeviceCount;
-    gemsiAddI32;
+    gemstoneAddI32;
     cuArray3DCreate_v2;
     cuArray3DGetDescriptor_v2;
     cuArrayCreate_v2;

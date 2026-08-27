@@ -3,7 +3,7 @@
 #include <thread>
 #include <vector>
 
-#include "gemsi_cuda.h"
+#include "gemstone_cuda.h"
 
 int main() {
   std::atomic<bool> calls_ok = true;
@@ -12,7 +12,7 @@ int main() {
     threads.emplace_back([thread, &calls_ok]() {
       for (int iteration = 0; iteration < 1000; ++iteration) {
         int count = 0;
-        if (cudaGetDeviceCount(&count) != 0 || count != 1 || gemsiAddI32(thread, iteration) != thread + iteration) {
+        if (cudaGetDeviceCount(&count) != 0 || count != 1 || gemstoneAddI32(thread, iteration) != thread + iteration) {
           calls_ok = false;
         }
       }

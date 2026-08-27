@@ -2,7 +2,7 @@
 set -euo pipefail
 
 root_dir="$(cd "$(dirname "$0")/../.." && pwd)"
-core_library="$root_dir/target/out/native0.5/scala-3.8.3/gemsi-core/libgemsi-core.so"
+core_library="$root_dir/target/out/native0.5/scala-3.8.3/gemstone-core/libgemstone-core.so"
 output_dir="$root_dir/target/conformance/smoke"
 library_dir="$output_dir/lib"
 recording="$output_dir/api-recording.jsonl"
@@ -13,7 +13,7 @@ if [[ ! -f "$core_library" ]]; then
 fi
 
 mkdir -p "$library_dir"
-install -m 755 "$core_library" "$library_dir/libgemsi-core.so"
+install -m 755 "$core_library" "$library_dir/libgemstone-core.so"
 
 cc \
   -std=c17 \
@@ -22,16 +22,16 @@ cc \
   -Wextra \
   -Werror \
   -shared \
-  "$root_dir/native/dispatch/gemsi_dispatch.c" \
+  "$root_dir/native/dispatch/gemstone_dispatch.c" \
   -I"$root_dir/generated/c" \
   -I"$root_dir/native/dispatch" \
   -L"$library_dir" \
-  -Wl,-soname,libgemsi_dispatch.so \
+  -Wl,-soname,libgemstone_dispatch.so \
   -Wl,-rpath,'$ORIGIN' \
   -Wl,--no-as-needed \
-  -l:libgemsi-core.so \
+  -l:libgemstone-core.so \
   -pthread \
-  -o "$library_dir/libgemsi_dispatch.so"
+  -o "$library_dir/libgemstone_dispatch.so"
 
 cc \
   -std=c17 \
@@ -40,17 +40,17 @@ cc \
   -Wextra \
   -Werror \
   -shared \
-  "$root_dir/generated/c/gemsi_cuda.c" \
-  "$root_dir/generated/c/gemsi_cuda_rpc_client.c" \
-  "$root_dir/generated/c/gemsi_cuda_driver_stubs.c" \
-  "$root_dir/native/dispatch/gemsi_rpc_transport.c" \
+  "$root_dir/generated/c/gemstone_cuda.c" \
+  "$root_dir/generated/c/gemstone_cuda_rpc_client.c" \
+  "$root_dir/generated/c/gemstone_cuda_driver_stubs.c" \
+  "$root_dir/native/dispatch/gemstone_rpc_transport.c" \
   -I"$root_dir/generated/c" \
   -I"$root_dir/native/dispatch" \
   -L"$library_dir" \
   -Wl,-rpath,'$ORIGIN' \
   -Wl,-soname,libcuda.so.1 \
-  -Wl,--version-script="$root_dir/generated/c/gemsi_cuda.map" \
-  -lgemsi_dispatch \
+  -Wl,--version-script="$root_dir/generated/c/gemstone_cuda.map" \
+  -lgemstone_dispatch \
   -o "$library_dir/libcuda.so.1"
 ln -sfn libcuda.so.1 "$library_dir/libcuda.so"
 
@@ -70,8 +70,8 @@ for source in smoke concurrent-foreign-entry surface-smoke; do
 done
 
 : > "$recording"
-GEMSI_RECORD="$recording" "$output_dir/smoke"
-GEMSI_RECORD="$recording" "$output_dir/concurrent-foreign-entry"
+GEMSTONE_RECORD="$recording" "$output_dir/smoke"
+GEMSTONE_RECORD="$recording" "$output_dir/concurrent-foreign-entry"
 "$output_dir/surface-smoke"
 
 request_count="$(grep -c '"phase":"request"' "$recording")"
@@ -85,11 +85,11 @@ fi
 
 {
   printf 'GEMSTONE generated facade report\n\n'
-  file "$library_dir/libcuda.so.1" "$library_dir/libgemsi_dispatch.so" "$library_dir/libgemsi-core.so"
+  file "$library_dir/libcuda.so.1" "$library_dir/libgemstone_dispatch.so" "$library_dir/libgemstone-core.so"
   printf '\nFacade exports:\n'
   nm -D --defined-only "$library_dir/libcuda.so.1"
   printf '\nCore exports:\n'
-  nm -D --defined-only "$library_dir/libgemsi-core.so"
+  nm -D --defined-only "$library_dir/libgemstone-core.so"
   printf '\nFacade dynamic metadata:\n'
   readelf -d "$library_dir/libcuda.so.1" | grep -E 'SONAME|NEEDED|RUNPATH'
   printf '\nFacade symbol versions:\n'

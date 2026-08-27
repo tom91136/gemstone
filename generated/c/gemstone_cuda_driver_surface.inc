@@ -1,8 +1,8 @@
-#ifndef GEMSI_CUDA_DRIVER_SURFACE_INC
-#define GEMSI_CUDA_DRIVER_SURFACE_INC
+#ifndef GEMSTONE_CUDA_DRIVER_SURFACE_INC
+#define GEMSTONE_CUDA_DRIVER_SURFACE_INC
 
 /* Generated from the concrete and abstract methods of net.kurobako.gemstone.cuda.CUDA. */
-#define GEMSI_CUDA_DRIVER_API(X) \
+#define GEMSTONE_CUDA_DRIVER_API(X) \
   X(cuArray3DCreate_v2) \
   X(cuArray3DGetDescriptor_v2) \
   X(cuArrayCreate_v2) \

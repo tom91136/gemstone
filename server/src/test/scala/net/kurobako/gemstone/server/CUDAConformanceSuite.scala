@@ -164,7 +164,7 @@ class CUDAConformanceSuite extends munit.FunSuite {
       "LD_LIBRARY_PATH"    -> s"$libraryDir$currentLibraryPath",
       "GEMSTONE_RPC_PORT"  -> server.fold(throw new IllegalStateException("server not started"))(_.port.toString),
       "GEMSTONE_RPC_TOKEN" -> token
-    ) ++ recording.map(path => "GEMSI_RECORD" -> path.toString)
+    ) ++ recording.map(path => "GEMSTONE_RECORD" -> path.toString)
   }
 }
 
@@ -345,14 +345,14 @@ object CUDAConformanceSuite {
         "-Wextra",
         "-Werror",
         "-shared",
-        generated.resolve("gemsi_cuda_rpc_client.c").toString,
-        generated.resolve("gemsi_cuda_driver_stubs.c").toString,
-        dispatch.resolve("gemsi_rpc_transport.c").toString,
-        dispatch.resolve("gemsi_rpc_boundary.c").toString,
+        generated.resolve("gemstone_cuda_rpc_client.c").toString,
+        generated.resolve("gemstone_cuda_driver_stubs.c").toString,
+        dispatch.resolve("gemstone_rpc_transport.c").toString,
+        dispatch.resolve("gemstone_rpc_boundary.c").toString,
         s"-I$generated",
         s"-I$dispatch",
         "-Wl,-soname,libcuda.so.1",
-        s"-Wl,--version-script=${generated.resolve("gemsi_cuda.map")}",
+        s"-Wl,--version-script=${generated.resolve("gemstone_cuda.map")}",
         "-pthread",
         "-o",
         library.toString

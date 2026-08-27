@@ -20,8 +20,8 @@ allowing a hash collision, stale client, or corrupt mapping to silently invoke a
 The generator emits:
 
 - `generated/manifest/cuda-rpc-schema.json`: reviewed names, types, IDs, and fingerprint;
-- `generated/c/gemsi_cuda_rpc.inc`: C constants for the same methods and IDs;
-- `generated/c/gemsi_cuda_rpc_client.c`: exact Driver ABI entry points and typed binary marshalling;
+- `generated/c/gemstone_cuda_rpc.inc`: C constants for the same methods and IDs;
+- `generated/c/gemstone_cuda_rpc_client.c`: exact Driver ABI entry points and typed binary marshalling;
 - `generated/scala/.../GeneratedCUDARPC.scala`: a typed `CUDA` client and receiving dispatcher.
 
 `CUDAEmulatorServer` is a normal implementation of `CUDA`. The JVM and Scala Native tests run the generated client

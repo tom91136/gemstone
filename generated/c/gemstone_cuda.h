@@ -1,5 +1,5 @@
-#ifndef GEMSI_CUDA_H
-#define GEMSI_CUDA_H
+#ifndef GEMSTONE_CUDA_H
+#define GEMSTONE_CUDA_H
 
 #include <stdint.h>
 
@@ -8,7 +8,7 @@ extern "C" {
 #endif
 
 int32_t cudaGetDeviceCount(int32_t *count);
-int32_t gemsiAddI32(int32_t left, int32_t right);
+int32_t gemstoneAddI32(int32_t left, int32_t right);
 
 #ifdef __cplusplus
 }

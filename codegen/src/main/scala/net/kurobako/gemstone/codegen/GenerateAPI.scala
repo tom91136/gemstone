@@ -23,7 +23,7 @@ object GenerateAPI {
   )
   private val cudaRuntimeSurface   = RPCDerivation.methodNames[CUDA].filter(_.startsWith("cuda"))
   private val cudaBootstrapSurface = RPCDerivation.methodNames[CUDA].filter(name =>
-    name.startsWith("__cuda") && !name.startsWith("__cudaGemsi")
+    name.startsWith("__cuda") && !name.startsWith("__cudaGemstone")
   )
   require(cudaDriverSurface.size == 144, s"expected 144 CUDA Driver methods, found ${cudaDriverSurface.size}")
 
@@ -43,14 +43,14 @@ object GenerateAPI {
   private def files(output: Path): Vector[(Path, String)] = {
     val api = GemstoneAPIRegistry.cuda
     Vector(
-      output.resolve("c/gemsi_protocol.h")                                           -> renderProtocol(api),
-      output.resolve("c/gemsi_cuda.h")                                               -> renderHeader(api),
-      output.resolve("c/gemsi_cuda.c")                                               -> renderFacade(api),
-      output.resolve("c/gemsi_cuda_driver_stubs.c")                                  -> renderCUDADriverStubs,
-      output.resolve("c/gemsi_cuda.map")                                             -> renderVersionMap(api),
-      output.resolve("c/gemsi_cuda_driver_surface.inc")                              -> renderCUDASurfaceInclude,
-      output.resolve("c/gemsi_cuda_rpc.inc")                                         -> renderCUDARPCInclude,
-      output.resolve("c/gemsi_cuda_rpc_client.c")                                    -> renderCUDARPCClient,
+      output.resolve("c/gemstone_protocol.h")                                        -> renderProtocol(api),
+      output.resolve("c/gemstone_cuda.h")                                            -> renderHeader(api),
+      output.resolve("c/gemstone_cuda.c")                                            -> renderFacade(api),
+      output.resolve("c/gemstone_cuda_driver_stubs.c")                               -> renderCUDADriverStubs,
+      output.resolve("c/gemstone_cuda.map")                                          -> renderVersionMap(api),
+      output.resolve("c/gemstone_cuda_driver_surface.inc")                           -> renderCUDASurfaceInclude,
+      output.resolve("c/gemstone_cuda_rpc.inc")                                      -> renderCUDARPCInclude,
+      output.resolve("c/gemstone_cuda_rpc_client.c")                                 -> renderCUDARPCClient,
       output.resolve("scala/net/kurobako/gemstone/generated/GeneratedAPI.scala")     -> renderScala(api),
       output.resolve("scala/net/kurobako/gemstone/generated/GeneratedCUDARPC.scala") -> renderCUDARPCScala,
       output.resolve("manifest/api-manifest.json")                                   -> renderManifest(api),
@@ -76,12 +76,12 @@ object GenerateAPI {
   }
 
   private def renderProtocol(api: API): String = {
-    val opcodes = api.functions.map(function => s"  GEMSI_OPCODE_${upperSnake(function.name)} = ${function.opcode}")
+    val opcodes = api.functions.map(function => s"  GEMSTONE_OPCODE_${upperSnake(function.name)} = ${function.opcode}")
     val names   = api.functions.map { function =>
-      s"    case GEMSI_OPCODE_${upperSnake(function.name)}: return \"${function.name}\";"
+      s"    case GEMSTONE_OPCODE_${upperSnake(function.name)}: return \"${function.name}\";"
     }
-    s"""|#ifndef GEMSI_PROTOCOL_H
-        |#define GEMSI_PROTOCOL_H
+    s"""|#ifndef GEMSTONE_PROTOCOL_H
+        |#define GEMSTONE_PROTOCOL_H
         |
         |#include <stddef.h>
         |#include <stdint.h>
@@ -91,59 +91,59 @@ object GenerateAPI {
         |#endif
         |
         |enum {
-        |  GEMSI_PROTOCOL_VERSION = ${GemstoneAPIRegistry.protocolVersion},
-        |  GEMSI_OPCODE_SHUTDOWN = 0,
+        |  GEMSTONE_PROTOCOL_VERSION = ${GemstoneAPIRegistry.protocolVersion},
+        |  GEMSTONE_OPCODE_SHUTDOWN = 0,
         |${opcodes.mkString(",\n")}
         |};
         |
         |enum {
-        |  GEMSI_STATUS_SUCCESS = 0,
-        |  GEMSI_STATUS_INVALID_VALUE = 1,
-        |  GEMSI_STATUS_INITIALIZATION_ERROR = 3,
-        |  GEMSI_STATUS_NOT_SUPPORTED = 801,
-        |  GEMSI_STATUS_UNKNOWN = 999
+        |  GEMSTONE_STATUS_SUCCESS = 0,
+        |  GEMSTONE_STATUS_INVALID_VALUE = 1,
+        |  GEMSTONE_STATUS_INITIALIZATION_ERROR = 3,
+        |  GEMSTONE_STATUS_NOT_SUPPORTED = 801,
+        |  GEMSTONE_STATUS_UNKNOWN = 999
         |};
         |
-        |typedef struct GemsiWireRequest {
+        |typedef struct GemstoneWireRequest {
         |  uint32_t protocol_version;
         |  uint32_t opcode;
         |  uint64_t request_id;
         |  uint64_t foreign_thread_id;
         |  int64_t argument0;
         |  int64_t argument1;
-        |} GemsiWireRequest;
+        |} GemstoneWireRequest;
         |
-        |typedef struct GemsiWireResponse {
+        |typedef struct GemstoneWireResponse {
         |  uint32_t protocol_version;
         |  int32_t status;
         |  uint64_t request_id;
         |  int64_t result0;
-        |} GemsiWireResponse;
+        |} GemstoneWireResponse;
         |
         |#if defined(__cplusplus)
-        |#define GEMSI_STATIC_ASSERT(condition, message) static_assert(condition, message)
+        |#define GEMSTONE_STATIC_ASSERT(condition, message) static_assert(condition, message)
         |#else
-        |#define GEMSI_STATIC_ASSERT(condition, message) _Static_assert(condition, message)
+        |#define GEMSTONE_STATIC_ASSERT(condition, message) _Static_assert(condition, message)
         |#endif
         |
-        |GEMSI_STATIC_ASSERT(sizeof(GemsiWireRequest) == 40, "GemsiWireRequest ABI size changed");
-        |GEMSI_STATIC_ASSERT(offsetof(GemsiWireRequest, protocol_version) == 0, "request protocol_version offset changed");
-        |GEMSI_STATIC_ASSERT(offsetof(GemsiWireRequest, opcode) == 4, "request opcode offset changed");
-        |GEMSI_STATIC_ASSERT(offsetof(GemsiWireRequest, request_id) == 8, "request request_id offset changed");
-        |GEMSI_STATIC_ASSERT(offsetof(GemsiWireRequest, foreign_thread_id) == 16, "request foreign_thread_id offset changed");
-        |GEMSI_STATIC_ASSERT(offsetof(GemsiWireRequest, argument0) == 24, "request argument0 offset changed");
-        |GEMSI_STATIC_ASSERT(offsetof(GemsiWireRequest, argument1) == 32, "request argument1 offset changed");
-        |GEMSI_STATIC_ASSERT(sizeof(GemsiWireResponse) == 24, "GemsiWireResponse ABI size changed");
-        |GEMSI_STATIC_ASSERT(offsetof(GemsiWireResponse, protocol_version) == 0, "response protocol_version offset changed");
-        |GEMSI_STATIC_ASSERT(offsetof(GemsiWireResponse, status) == 4, "response status offset changed");
-        |GEMSI_STATIC_ASSERT(offsetof(GemsiWireResponse, request_id) == 8, "response request_id offset changed");
-        |GEMSI_STATIC_ASSERT(offsetof(GemsiWireResponse, result0) == 16, "response result0 offset changed");
+        |GEMSTONE_STATIC_ASSERT(sizeof(GemstoneWireRequest) == 40, "GemstoneWireRequest ABI size changed");
+        |GEMSTONE_STATIC_ASSERT(offsetof(GemstoneWireRequest, protocol_version) == 0, "request protocol_version offset changed");
+        |GEMSTONE_STATIC_ASSERT(offsetof(GemstoneWireRequest, opcode) == 4, "request opcode offset changed");
+        |GEMSTONE_STATIC_ASSERT(offsetof(GemstoneWireRequest, request_id) == 8, "request request_id offset changed");
+        |GEMSTONE_STATIC_ASSERT(offsetof(GemstoneWireRequest, foreign_thread_id) == 16, "request foreign_thread_id offset changed");
+        |GEMSTONE_STATIC_ASSERT(offsetof(GemstoneWireRequest, argument0) == 24, "request argument0 offset changed");
+        |GEMSTONE_STATIC_ASSERT(offsetof(GemstoneWireRequest, argument1) == 32, "request argument1 offset changed");
+        |GEMSTONE_STATIC_ASSERT(sizeof(GemstoneWireResponse) == 24, "GemstoneWireResponse ABI size changed");
+        |GEMSTONE_STATIC_ASSERT(offsetof(GemstoneWireResponse, protocol_version) == 0, "response protocol_version offset changed");
+        |GEMSTONE_STATIC_ASSERT(offsetof(GemstoneWireResponse, status) == 4, "response status offset changed");
+        |GEMSTONE_STATIC_ASSERT(offsetof(GemstoneWireResponse, request_id) == 8, "response request_id offset changed");
+        |GEMSTONE_STATIC_ASSERT(offsetof(GemstoneWireResponse, result0) == 16, "response result0 offset changed");
         |
-        |#undef GEMSI_STATIC_ASSERT
+        |#undef GEMSTONE_STATIC_ASSERT
         |
-        |static inline const char *gemsi_operation_name(uint32_t opcode) {
+        |static inline const char *gemstone_operation_name(uint32_t opcode) {
         |  switch (opcode) {
-        |    case GEMSI_OPCODE_SHUTDOWN: return "shutdown";
+        |    case GEMSTONE_OPCODE_SHUTDOWN: return "shutdown";
         |${names.mkString("\n")}
         |    default: return "unknown";
         |  }
@@ -162,8 +162,8 @@ object GenerateAPI {
       val parameters = function.parameters.map(renderCParameter).mkString(", ")
       s"int32_t ${function.name}($parameters);"
     }
-    s"""|#ifndef GEMSI_CUDA_H
-        |#define GEMSI_CUDA_H
+    s"""|#ifndef GEMSTONE_CUDA_H
+        |#define GEMSTONE_CUDA_H
         |
         |#include <stdint.h>
         |
@@ -183,13 +183,13 @@ object GenerateAPI {
 
   private def renderFacade(api: API): String = {
     val functions = api.functions.map(renderFunction)
-    s"""|#include "gemsi_cuda.h"
-        |#include "gemsi_dispatch.h"
-        |#include "gemsi_protocol.h"
+    s"""|#include "gemstone_cuda.h"
+        |#include "gemstone_dispatch.h"
+        |#include "gemstone_protocol.h"
         |
         |#include <stddef.h>
         |
-        |static _Thread_local int32_t gemsi_cuda_last_error = GEMSI_STATUS_SUCCESS;
+        |static _Thread_local int32_t gemstone_cuda_last_error = GEMSTONE_STATUS_SUCCESS;
         |
         |${functions.mkString("\n\n")}
         |""".stripMargin
@@ -198,11 +198,13 @@ object GenerateAPI {
   private def renderFunction(function: APIFunction): String = {
     val parameters    = function.parameters.map(renderCParameter).mkString(", ")
     val invalidReturn =
-      if (function.returnConvention == ReturnConvention.StatusCode) "GEMSI_STATUS_INVALID_VALUE" else "0"
+      if (function.returnConvention == ReturnConvention.StatusCode) "GEMSTONE_STATUS_INVALID_VALUE" else "0"
     val invalidChecks = function.parameters.collect {
       case parameter if parameter.direction != Direction.In && !parameter.nullable =>
         s"""|  if (${parameter.name} == NULL) {
-            |    gemsi_dispatch_record_boundary(GEMSI_OPCODE_${upperSnake(function.name)}, GEMSI_STATUS_INVALID_VALUE);
+            |    gemstone_dispatch_record_boundary(GEMSTONE_OPCODE_${upperSnake(
+             function.name
+           )}, GEMSTONE_STATUS_INVALID_VALUE);
             |    return $invalidReturn;
             |  }""".stripMargin
     }
@@ -215,29 +217,29 @@ object GenerateAPI {
       case parameter if parameter.direction != Direction.In =>
         s"    *${parameter.name} = (int32_t)response.result0;"
     }
-    val statusUpdate = if (function.threadLocalError) "  gemsi_cuda_last_error = response.status;\n" else ""
+    val statusUpdate = if (function.threadLocalError) "  gemstone_cuda_last_error = response.status;\n" else ""
     val result       = function.returnConvention match {
       case ReturnConvention.StatusCode =>
-        s"""|$statusUpdate  if (response.status == GEMSI_STATUS_SUCCESS) {
+        s"""|$statusUpdate  if (response.status == GEMSTONE_STATUS_SUCCESS) {
             |${outputAssignments.mkString("\n")}
             |  }
             |  return response.status;""".stripMargin
       case ReturnConvention.DirectInt32 =>
-        "  if (response.status != GEMSI_STATUS_SUCCESS) return 0;\n  return (int32_t)response.result0;"
+        "  if (response.status != GEMSTONE_STATUS_SUCCESS) return 0;\n  return (int32_t)response.result0;"
     }
     val checkedBoundary = if (invalidChecks.isEmpty) "" else s"${invalidChecks.mkString("\n")}\n"
     s"""|int32_t ${function.name}($parameters) {
-        |$checkedBoundary  GemsiWireRequest request = {
-        |    .protocol_version = GEMSI_PROTOCOL_VERSION,
-        |    .opcode = GEMSI_OPCODE_${upperSnake(function.name)},
+        |$checkedBoundary  GemstoneWireRequest request = {
+        |    .protocol_version = GEMSTONE_PROTOCOL_VERSION,
+        |    .opcode = GEMSTONE_OPCODE_${upperSnake(function.name)},
         |    .argument0 = ${arguments(0)},
         |    .argument1 = ${arguments(1)}
         |  };
-        |  GemsiWireResponse response = {0};
-        |  if (gemsi_dispatch_request(&request, &response) != 0) {
-        |    gemsi_cuda_last_error = GEMSI_STATUS_INITIALIZATION_ERROR;
+        |  GemstoneWireResponse response = {0};
+        |  if (gemstone_dispatch_request(&request, &response) != 0) {
+        |    gemstone_cuda_last_error = GEMSTONE_STATUS_INITIALIZATION_ERROR;
         |    return ${
-         if (function.returnConvention == ReturnConvention.StatusCode) "GEMSI_STATUS_INITIALIZATION_ERROR" else "0"
+         if (function.returnConvention == ReturnConvention.StatusCode) "GEMSTONE_STATUS_INITIALIZATION_ERROR" else "0"
        };
         |  }
         |$result
@@ -263,11 +265,11 @@ object GenerateAPI {
       _.name
     ).filterNot(_.startsWith("cuda"))
     val stubs = cudaDriverSurface.filterNot(wired).map { name =>
-      s"int32_t $name() { return GEMSI_STATUS_NOT_SUPPORTED; }"
+      s"int32_t $name() { return GEMSTONE_STATUS_NOT_SUPPORTED; }"
     }
     s"""|#include <stdint.h>
         |
-        |#include "gemsi_protocol.h"
+        |#include "gemstone_protocol.h"
         |
         |/* ABI-presence stubs. Exact typed marshallers replace these one function at a time. */
         |${stubs.mkString("\n\n")}
@@ -343,11 +345,11 @@ object GenerateAPI {
       s"#define $name(X) ${'\\'}\n${body.mkString("\n")}"
     }
 
-    s"""|#ifndef GEMSI_CUDA_DRIVER_SURFACE_INC
-        |#define GEMSI_CUDA_DRIVER_SURFACE_INC
+    s"""|#ifndef GEMSTONE_CUDA_DRIVER_SURFACE_INC
+        |#define GEMSTONE_CUDA_DRIVER_SURFACE_INC
         |
         |/* Generated from the concrete and abstract methods of net.kurobako.gemstone.cuda.CUDA. */
-        |${renderMacro("GEMSI_CUDA_DRIVER_API", cudaDriverSurface)}
+        |${renderMacro("GEMSTONE_CUDA_DRIVER_API", cudaDriverSurface)}
         |
         |#endif
         |""".stripMargin
@@ -372,13 +374,13 @@ object GenerateAPI {
       val low          = f"${method.messageId.low}%016x"
       s"  X(${method.name}, UINT64_C(0x$high), UINT64_C(0x$low))$continuation"
     }
-    s"""|#ifndef GEMSI_CUDA_RPC_INC
-        |#define GEMSI_CUDA_RPC_INC
+    s"""|#ifndef GEMSTONE_CUDA_RPC_INC
+        |#define GEMSTONE_CUDA_RPC_INC
         |
         |#include <stdint.h>
         |
-        |#define GEMSI_CUDA_RPC_SCHEMA_FINGERPRINT "${cudaRPC.fingerprint}"
-        |#define GEMSI_CUDA_RPC_METHODS(X) ${'\\'}
+        |#define GEMSTONE_CUDA_RPC_SCHEMA_FINGERPRINT "${cudaRPC.fingerprint}"
+        |#define GEMSTONE_CUDA_RPC_METHODS(X) ${'\\'}
         |${methods.mkString("\n")}
         |
         |#endif
@@ -389,11 +391,11 @@ object GenerateAPI {
     val ids = cudaRPC.methods.filterNot(_.name.startsWith("cuda")).map { method =>
       val high = f"${method.messageId.high}%016x"
       val low  = f"${method.messageId.low}%016x"
-      s"static const uint64_t gemsi_${method.name}_high = UINT64_C(0x$high);\nstatic const uint64_t gemsi_${method.name}_low = UINT64_C(0x$low);"
+      s"static const uint64_t gemstone_${method.name}_high = UINT64_C(0x$high);\nstatic const uint64_t gemstone_${method.name}_low = UINT64_C(0x$low);"
     }
-    s"""|#include "gemsi_cuda_rpc.inc"
-        |#include "gemsi_protocol.h"
-        |#include "gemsi_rpc_transport.h"
+    s"""|#include "gemstone_cuda_rpc.inc"
+        |#include "gemstone_protocol.h"
+        |#include "gemstone_rpc_transport.h"
         |
         |#include <limits.h>
         |#include <pthread.h>
@@ -404,49 +406,49 @@ object GenerateAPI {
         |
         |${ids.mkString("\n")}
         |
-        |static void gemsi_put_u32(uint8_t *destination, uint32_t value) {
+        |static void gemstone_put_u32(uint8_t *destination, uint32_t value) {
         |  destination[0] = (uint8_t)(value >> 24);
         |  destination[1] = (uint8_t)(value >> 16);
         |  destination[2] = (uint8_t)(value >> 8);
         |  destination[3] = (uint8_t)value;
         |}
         |
-        |static void gemsi_put_u64(uint8_t *destination, uint64_t value) {
-        |  gemsi_put_u32(destination, (uint32_t)(value >> 32));
-        |  gemsi_put_u32(destination + 4, (uint32_t)value);
+        |static void gemstone_put_u64(uint8_t *destination, uint64_t value) {
+        |  gemstone_put_u32(destination, (uint32_t)(value >> 32));
+        |  gemstone_put_u32(destination + 4, (uint32_t)value);
         |}
         |
-        |static uint32_t gemsi_get_u32(const uint8_t *source) {
+        |static uint32_t gemstone_get_u32(const uint8_t *source) {
         |  return ((uint32_t)source[0] << 24) | ((uint32_t)source[1] << 16) | ((uint32_t)source[2] << 8) | (uint32_t)source[3];
         |}
         |
-        |static uint64_t gemsi_get_u64(const uint8_t *source) {
-        |  return ((uint64_t)gemsi_get_u32(source) << 32) | gemsi_get_u32(source + 4);
+        |static uint64_t gemstone_get_u64(const uint8_t *source) {
+        |  return ((uint64_t)gemstone_get_u32(source) << 32) | gemstone_get_u32(source + 4);
         |}
         |
-        |static size_t gemsi_bounded_string_length(const char *value, size_t limit) {
+        |static size_t gemstone_bounded_string_length(const char *value, size_t limit) {
         |  size_t size = 0;
         |  while (size < limit && value[size] != '\\0') ++size;
         |  return size;
         |}
         |
-        |typedef struct GemsiKernelSignature {
+        |typedef struct GemstoneKernelSignature {
         |  uint64_t function;
         |  uint64_t module;
         |  uint32_t count;
         |  uint8_t *widths;
-        |  struct GemsiKernelSignature *next;
-        |} GemsiKernelSignature;
+        |  struct GemstoneKernelSignature *next;
+        |} GemstoneKernelSignature;
         |
-        |static pthread_mutex_t gemsi_kernel_mutex = PTHREAD_MUTEX_INITIALIZER;
-        |static GemsiKernelSignature *gemsi_kernel_signatures = NULL;
+        |static pthread_mutex_t gemstone_kernel_mutex = PTHREAD_MUTEX_INITIALIZER;
+        |static GemstoneKernelSignature *gemstone_kernel_signatures = NULL;
         |
-        |static int gemsi_store_kernel_signature(
+        |static int gemstone_store_kernel_signature(
         |    uint64_t function,
         |    uint64_t module,
         |    const uint8_t *widths,
         |    uint32_t count) {
-        |  GemsiKernelSignature *entry = (GemsiKernelSignature *)calloc(1, sizeof(*entry));
+        |  GemstoneKernelSignature *entry = (GemstoneKernelSignature *)calloc(1, sizeof(*entry));
         |  if (entry == NULL) return -1;
         |  if (count != 0) {
         |    entry->widths = (uint8_t *)malloc(count);
@@ -456,202 +458,202 @@ object GenerateAPI {
         |  entry->function = function;
         |  entry->module = module;
         |  entry->count = count;
-        |  pthread_mutex_lock(&gemsi_kernel_mutex);
-        |  entry->next = gemsi_kernel_signatures;
-        |  gemsi_kernel_signatures = entry;
-        |  pthread_mutex_unlock(&gemsi_kernel_mutex);
+        |  pthread_mutex_lock(&gemstone_kernel_mutex);
+        |  entry->next = gemstone_kernel_signatures;
+        |  gemstone_kernel_signatures = entry;
+        |  pthread_mutex_unlock(&gemstone_kernel_mutex);
         |  return 0;
         |}
         |
-        |static void gemsi_forget_module(uint64_t module) {
-        |  pthread_mutex_lock(&gemsi_kernel_mutex);
-        |  GemsiKernelSignature **cursor = &gemsi_kernel_signatures;
+        |static void gemstone_forget_module(uint64_t module) {
+        |  pthread_mutex_lock(&gemstone_kernel_mutex);
+        |  GemstoneKernelSignature **cursor = &gemstone_kernel_signatures;
         |  while (*cursor != NULL) {
-        |    GemsiKernelSignature *entry = *cursor;
+        |    GemstoneKernelSignature *entry = *cursor;
         |    if (entry->module == module) {
         |      *cursor = entry->next;
         |      free(entry->widths);
         |      free(entry);
         |    } else cursor = &entry->next;
         |  }
-        |  pthread_mutex_unlock(&gemsi_kernel_mutex);
+        |  pthread_mutex_unlock(&gemstone_kernel_mutex);
         |}
         |
-        |static int32_t gemsi_call(
+        |static int32_t gemstone_call(
         |    uint64_t high,
         |    uint64_t low,
         |    const char *name,
         |    const uint8_t *payload,
         |    uint32_t payload_size,
-        |    GemsiRpcBuffer *response) {
-        |  int32_t status = GEMSI_STATUS_INITIALIZATION_ERROR;
-        |  if (gemsi_rpc_call(high, low, name, payload, payload_size, &status, response) != 0) return GEMSI_STATUS_INITIALIZATION_ERROR;
-        |  if (status != GEMSI_STATUS_SUCCESS) gemsi_rpc_buffer_release(response);
+        |    GemstoneRpcBuffer *response) {
+        |  int32_t status = GEMSTONE_STATUS_INITIALIZATION_ERROR;
+        |  if (gemstone_rpc_call(high, low, name, payload, payload_size, &status, response) != 0) return GEMSTONE_STATUS_INITIALIZATION_ERROR;
+        |  if (status != GEMSTONE_STATUS_SUCCESS) gemstone_rpc_buffer_release(response);
         |  return status;
         |}
         |
-        |static int32_t gemsi_expect_unit(int32_t status, GemsiRpcBuffer *response) {
-        |  if (status == GEMSI_STATUS_SUCCESS && response->size != 0) status = GEMSI_STATUS_UNKNOWN;
-        |  gemsi_rpc_buffer_release(response);
+        |static int32_t gemstone_expect_unit(int32_t status, GemstoneRpcBuffer *response) {
+        |  if (status == GEMSTONE_STATUS_SUCCESS && response->size != 0) status = GEMSTONE_STATUS_UNKNOWN;
+        |  gemstone_rpc_buffer_release(response);
         |  return status;
         |}
         |
-        |static int32_t gemsi_expect_u32(int32_t status, GemsiRpcBuffer *response, uint32_t *value) {
-        |  if (status == GEMSI_STATUS_SUCCESS) {
-        |    if (response->size != 4 || value == NULL) status = GEMSI_STATUS_UNKNOWN;
-        |    else *value = gemsi_get_u32(response->data);
+        |static int32_t gemstone_expect_u32(int32_t status, GemstoneRpcBuffer *response, uint32_t *value) {
+        |  if (status == GEMSTONE_STATUS_SUCCESS) {
+        |    if (response->size != 4 || value == NULL) status = GEMSTONE_STATUS_UNKNOWN;
+        |    else *value = gemstone_get_u32(response->data);
         |  }
-        |  gemsi_rpc_buffer_release(response);
+        |  gemstone_rpc_buffer_release(response);
         |  return status;
         |}
         |
-        |static int32_t gemsi_expect_u64(int32_t status, GemsiRpcBuffer *response, uint64_t *value) {
-        |  if (status == GEMSI_STATUS_SUCCESS) {
-        |    if (response->size != 8 || value == NULL) status = GEMSI_STATUS_UNKNOWN;
-        |    else *value = gemsi_get_u64(response->data);
+        |static int32_t gemstone_expect_u64(int32_t status, GemstoneRpcBuffer *response, uint64_t *value) {
+        |  if (status == GEMSTONE_STATUS_SUCCESS) {
+        |    if (response->size != 8 || value == NULL) status = GEMSTONE_STATUS_UNKNOWN;
+        |    else *value = gemstone_get_u64(response->data);
         |  }
-        |  gemsi_rpc_buffer_release(response);
+        |  gemstone_rpc_buffer_release(response);
         |  return status;
         |}
         |
         |int32_t cuInit(uint32_t flags) {
         |  uint8_t payload[4];
-        |  gemsi_put_u32(payload, flags);
-        |  GemsiRpcBuffer response = {0};
-        |  return gemsi_expect_unit(gemsi_call(gemsi_cuInit_high, gemsi_cuInit_low, "cuInit", payload, sizeof(payload), &response), &response);
+        |  gemstone_put_u32(payload, flags);
+        |  GemstoneRpcBuffer response = {0};
+        |  return gemstone_expect_unit(gemstone_call(gemstone_cuInit_high, gemstone_cuInit_low, "cuInit", payload, sizeof(payload), &response), &response);
         |}
         |
         |int32_t cuDriverGetVersion(int32_t *version) {
-        |  if (version == NULL) return GEMSI_STATUS_INVALID_VALUE;
-        |  GemsiRpcBuffer response = {0};
-        |  return gemsi_expect_u32(gemsi_call(gemsi_cuDriverGetVersion_high, gemsi_cuDriverGetVersion_low, "cuDriverGetVersion", NULL, 0, &response), &response, (uint32_t *)version);
+        |  if (version == NULL) return GEMSTONE_STATUS_INVALID_VALUE;
+        |  GemstoneRpcBuffer response = {0};
+        |  return gemstone_expect_u32(gemstone_call(gemstone_cuDriverGetVersion_high, gemstone_cuDriverGetVersion_low, "cuDriverGetVersion", NULL, 0, &response), &response, (uint32_t *)version);
         |}
         |
         |int32_t cuDeviceGetCount(int32_t *count) {
-        |  if (count == NULL) return GEMSI_STATUS_INVALID_VALUE;
-        |  GemsiRpcBuffer response = {0};
-        |  return gemsi_expect_u32(gemsi_call(gemsi_cuDeviceGetCount_high, gemsi_cuDeviceGetCount_low, "cuDeviceGetCount", NULL, 0, &response), &response, (uint32_t *)count);
+        |  if (count == NULL) return GEMSTONE_STATUS_INVALID_VALUE;
+        |  GemstoneRpcBuffer response = {0};
+        |  return gemstone_expect_u32(gemstone_call(gemstone_cuDeviceGetCount_high, gemstone_cuDeviceGetCount_low, "cuDeviceGetCount", NULL, 0, &response), &response, (uint32_t *)count);
         |}
         |
         |int32_t cuDeviceGet(int32_t *device, int32_t ordinal) {
-        |  if (device == NULL) return GEMSI_STATUS_INVALID_VALUE;
+        |  if (device == NULL) return GEMSTONE_STATUS_INVALID_VALUE;
         |  uint8_t payload[4];
-        |  gemsi_put_u32(payload, (uint32_t)ordinal);
-        |  GemsiRpcBuffer response = {0};
-        |  return gemsi_expect_u32(gemsi_call(gemsi_cuDeviceGet_high, gemsi_cuDeviceGet_low, "cuDeviceGet", payload, sizeof(payload), &response), &response, (uint32_t *)device);
+        |  gemstone_put_u32(payload, (uint32_t)ordinal);
+        |  GemstoneRpcBuffer response = {0};
+        |  return gemstone_expect_u32(gemstone_call(gemstone_cuDeviceGet_high, gemstone_cuDeviceGet_low, "cuDeviceGet", payload, sizeof(payload), &response), &response, (uint32_t *)device);
         |}
         |
         |int32_t cuCtxCreate_v2(void **context, uint32_t flags, int32_t device) {
-        |  if (context == NULL) return GEMSI_STATUS_INVALID_VALUE;
+        |  if (context == NULL) return GEMSTONE_STATUS_INVALID_VALUE;
         |  uint8_t payload[8];
-        |  gemsi_put_u32(payload, flags);
-        |  gemsi_put_u32(payload + 4, (uint32_t)device);
+        |  gemstone_put_u32(payload, flags);
+        |  gemstone_put_u32(payload + 4, (uint32_t)device);
         |  uint64_t handle = 0;
-        |  GemsiRpcBuffer response = {0};
-        |  const int32_t status = gemsi_expect_u64(gemsi_call(gemsi_cuCtxCreate_v2_high, gemsi_cuCtxCreate_v2_low, "cuCtxCreate_v2", payload, sizeof(payload), &response), &response, &handle);
-        |  if (status == GEMSI_STATUS_SUCCESS) *context = (void *)(uintptr_t)handle;
+        |  GemstoneRpcBuffer response = {0};
+        |  const int32_t status = gemstone_expect_u64(gemstone_call(gemstone_cuCtxCreate_v2_high, gemstone_cuCtxCreate_v2_low, "cuCtxCreate_v2", payload, sizeof(payload), &response), &response, &handle);
+        |  if (status == GEMSTONE_STATUS_SUCCESS) *context = (void *)(uintptr_t)handle;
         |  return status;
         |}
         |
         |int32_t cuCtxDestroy_v2(void *context) {
         |  uint8_t payload[8];
-        |  gemsi_put_u64(payload, (uint64_t)(uintptr_t)context);
-        |  GemsiRpcBuffer response = {0};
-        |  return gemsi_expect_unit(gemsi_call(gemsi_cuCtxDestroy_v2_high, gemsi_cuCtxDestroy_v2_low, "cuCtxDestroy_v2", payload, sizeof(payload), &response), &response);
+        |  gemstone_put_u64(payload, (uint64_t)(uintptr_t)context);
+        |  GemstoneRpcBuffer response = {0};
+        |  return gemstone_expect_unit(gemstone_call(gemstone_cuCtxDestroy_v2_high, gemstone_cuCtxDestroy_v2_low, "cuCtxDestroy_v2", payload, sizeof(payload), &response), &response);
         |}
         |
         |int32_t cuCtxSynchronize(void) {
-        |  GemsiRpcBuffer response = {0};
-        |  return gemsi_expect_unit(gemsi_call(gemsi_cuCtxSynchronize_high, gemsi_cuCtxSynchronize_low, "cuCtxSynchronize", NULL, 0, &response), &response);
+        |  GemstoneRpcBuffer response = {0};
+        |  return gemstone_expect_unit(gemstone_call(gemstone_cuCtxSynchronize_high, gemstone_cuCtxSynchronize_low, "cuCtxSynchronize", NULL, 0, &response), &response);
         |}
         |
         |int32_t cuMemAlloc_v2(uint64_t *pointer, size_t size) {
-        |  if (pointer == NULL) return GEMSI_STATUS_INVALID_VALUE;
+        |  if (pointer == NULL) return GEMSTONE_STATUS_INVALID_VALUE;
         |  uint8_t payload[8];
-        |  gemsi_put_u64(payload, (uint64_t)size);
-        |  GemsiRpcBuffer response = {0};
-        |  return gemsi_expect_u64(gemsi_call(gemsi_cuMemAlloc_v2_high, gemsi_cuMemAlloc_v2_low, "cuMemAlloc_v2", payload, sizeof(payload), &response), &response, pointer);
+        |  gemstone_put_u64(payload, (uint64_t)size);
+        |  GemstoneRpcBuffer response = {0};
+        |  return gemstone_expect_u64(gemstone_call(gemstone_cuMemAlloc_v2_high, gemstone_cuMemAlloc_v2_low, "cuMemAlloc_v2", payload, sizeof(payload), &response), &response, pointer);
         |}
         |
         |int32_t cuMemFree_v2(uint64_t pointer) {
         |  uint8_t payload[8];
-        |  gemsi_put_u64(payload, pointer);
-        |  GemsiRpcBuffer response = {0};
-        |  return gemsi_expect_unit(gemsi_call(gemsi_cuMemFree_v2_high, gemsi_cuMemFree_v2_low, "cuMemFree_v2", payload, sizeof(payload), &response), &response);
+        |  gemstone_put_u64(payload, pointer);
+        |  GemstoneRpcBuffer response = {0};
+        |  return gemstone_expect_unit(gemstone_call(gemstone_cuMemFree_v2_high, gemstone_cuMemFree_v2_low, "cuMemFree_v2", payload, sizeof(payload), &response), &response);
         |}
         |
         |int32_t cuMemcpyHtoD_v2(uint64_t destination, const void *source, size_t size) {
-        |  if ((source == NULL && size != 0) || size > GEMSI_RPC_MAXIMUM_PAYLOAD_SIZE - 12) return GEMSI_STATUS_INVALID_VALUE;
+        |  if ((source == NULL && size != 0) || size > GEMSTONE_RPC_MAXIMUM_PAYLOAD_SIZE - 12) return GEMSTONE_STATUS_INVALID_VALUE;
         |  const uint32_t payload_size = (uint32_t)size + 12;
         |  uint8_t *payload = (uint8_t *)malloc(payload_size);
-        |  if (payload == NULL) return GEMSI_STATUS_UNKNOWN;
-        |  gemsi_put_u64(payload, destination);
-        |  gemsi_put_u32(payload + 8, (uint32_t)size);
+        |  if (payload == NULL) return GEMSTONE_STATUS_UNKNOWN;
+        |  gemstone_put_u64(payload, destination);
+        |  gemstone_put_u32(payload + 8, (uint32_t)size);
         |  if (size != 0) memcpy(payload + 12, source, size);
-        |  GemsiRpcBuffer response = {0};
-        |  const int32_t status = gemsi_expect_unit(gemsi_call(gemsi_cuMemcpyHtoD_v2_high, gemsi_cuMemcpyHtoD_v2_low, "cuMemcpyHtoD_v2", payload, payload_size, &response), &response);
+        |  GemstoneRpcBuffer response = {0};
+        |  const int32_t status = gemstone_expect_unit(gemstone_call(gemstone_cuMemcpyHtoD_v2_high, gemstone_cuMemcpyHtoD_v2_low, "cuMemcpyHtoD_v2", payload, payload_size, &response), &response);
         |  free(payload);
         |  return status;
         |}
         |
         |int32_t cuMemcpyDtoH_v2(void *destination, uint64_t source, size_t size) {
-        |  if ((destination == NULL && size != 0) || size > GEMSI_RPC_MAXIMUM_PAYLOAD_SIZE - 4) return GEMSI_STATUS_INVALID_VALUE;
+        |  if ((destination == NULL && size != 0) || size > GEMSTONE_RPC_MAXIMUM_PAYLOAD_SIZE - 4) return GEMSTONE_STATUS_INVALID_VALUE;
         |  uint8_t payload[16];
-        |  gemsi_put_u64(payload, source);
-        |  gemsi_put_u64(payload + 8, (uint64_t)size);
-        |  GemsiRpcBuffer response = {0};
-        |  int32_t status = gemsi_call(gemsi_cuMemcpyDtoH_v2_high, gemsi_cuMemcpyDtoH_v2_low, "cuMemcpyDtoH_v2", payload, sizeof(payload), &response);
-        |  if (status == GEMSI_STATUS_SUCCESS) {
-        |    if (response.size < 4 || gemsi_get_u32(response.data) != size || response.size != size + 4) status = GEMSI_STATUS_UNKNOWN;
+        |  gemstone_put_u64(payload, source);
+        |  gemstone_put_u64(payload + 8, (uint64_t)size);
+        |  GemstoneRpcBuffer response = {0};
+        |  int32_t status = gemstone_call(gemstone_cuMemcpyDtoH_v2_high, gemstone_cuMemcpyDtoH_v2_low, "cuMemcpyDtoH_v2", payload, sizeof(payload), &response);
+        |  if (status == GEMSTONE_STATUS_SUCCESS) {
+        |    if (response.size < 4 || gemstone_get_u32(response.data) != size || response.size != size + 4) status = GEMSTONE_STATUS_UNKNOWN;
         |    else if (size != 0) memcpy(destination, response.data + 4, size);
         |  }
-        |  gemsi_rpc_buffer_release(&response);
+        |  gemstone_rpc_buffer_release(&response);
         |  return status;
         |}
         |
         |int32_t cuMemcpyDtoD_v2(uint64_t destination, uint64_t source, size_t size) {
         |  uint8_t payload[24];
-        |  gemsi_put_u64(payload, destination);
-        |  gemsi_put_u64(payload + 8, source);
-        |  gemsi_put_u64(payload + 16, (uint64_t)size);
-        |  GemsiRpcBuffer response = {0};
-        |  return gemsi_expect_unit(gemsi_call(gemsi_cuMemcpyDtoD_v2_high, gemsi_cuMemcpyDtoD_v2_low, "cuMemcpyDtoD_v2", payload, sizeof(payload), &response), &response);
+        |  gemstone_put_u64(payload, destination);
+        |  gemstone_put_u64(payload + 8, source);
+        |  gemstone_put_u64(payload + 16, (uint64_t)size);
+        |  GemstoneRpcBuffer response = {0};
+        |  return gemstone_expect_unit(gemstone_call(gemstone_cuMemcpyDtoD_v2_high, gemstone_cuMemcpyDtoD_v2_low, "cuMemcpyDtoD_v2", payload, sizeof(payload), &response), &response);
         |}
         |
         |int32_t cuMemsetD8_v2(uint64_t destination, uint8_t value, size_t count) {
         |  uint8_t payload[17];
-        |  gemsi_put_u64(payload, destination);
+        |  gemstone_put_u64(payload, destination);
         |  payload[8] = value;
-        |  gemsi_put_u64(payload + 9, (uint64_t)count);
-        |  GemsiRpcBuffer response = {0};
-        |  return gemsi_expect_unit(gemsi_call(gemsi_cuMemsetD8_v2_high, gemsi_cuMemsetD8_v2_low, "cuMemsetD8_v2", payload, sizeof(payload), &response), &response);
+        |  gemstone_put_u64(payload + 9, (uint64_t)count);
+        |  GemstoneRpcBuffer response = {0};
+        |  return gemstone_expect_unit(gemstone_call(gemstone_cuMemsetD8_v2_high, gemstone_cuMemsetD8_v2_low, "cuMemsetD8_v2", payload, sizeof(payload), &response), &response);
         |}
         |
-        |static int32_t gemsi_managed_register_remote(uint64_t pointer, size_t size) {
+        |static int32_t gemstone_managed_register_remote(uint64_t pointer, size_t size) {
         |  uint8_t payload[16];
-        |  gemsi_put_u64(payload, pointer);
-        |  gemsi_put_u64(payload + 8, (uint64_t)size);
-        |  GemsiRpcBuffer response = {0};
-        |  return gemsi_expect_unit(
-        |      gemsi_call(
-        |          gemsi___cudaGemsiManagedRegister_high,
-        |          gemsi___cudaGemsiManagedRegister_low,
-        |          "__cudaGemsiManagedRegister",
+        |  gemstone_put_u64(payload, pointer);
+        |  gemstone_put_u64(payload + 8, (uint64_t)size);
+        |  GemstoneRpcBuffer response = {0};
+        |  return gemstone_expect_unit(
+        |      gemstone_call(
+        |          gemstone___cudaGemstoneManagedRegister_high,
+        |          gemstone___cudaGemstoneManagedRegister_low,
+        |          "__cudaGemstoneManagedRegister",
         |          payload,
         |          sizeof(payload),
         |          &response),
         |      &response);
         |}
         |
-        |static int32_t gemsi_managed_unregister_remote(uint64_t pointer) {
+        |static int32_t gemstone_managed_unregister_remote(uint64_t pointer) {
         |  uint8_t payload[8];
-        |  gemsi_put_u64(payload, pointer);
-        |  GemsiRpcBuffer response = {0};
-        |  return gemsi_expect_unit(
-        |      gemsi_call(
-        |          gemsi___cudaGemsiManagedUnregister_high,
-        |          gemsi___cudaGemsiManagedUnregister_low,
-        |          "__cudaGemsiManagedUnregister",
+        |  gemstone_put_u64(payload, pointer);
+        |  GemstoneRpcBuffer response = {0};
+        |  return gemstone_expect_unit(
+        |      gemstone_call(
+        |          gemstone___cudaGemstoneManagedUnregister_high,
+        |          gemstone___cudaGemstoneManagedUnregister_low,
+        |          "__cudaGemstoneManagedUnregister",
         |          payload,
         |          sizeof(payload),
         |          &response),
@@ -659,70 +661,70 @@ object GenerateAPI {
         |}
         |
         |int32_t cuModuleLoadData(void **module, const void *image) {
-        |  if (module == NULL || image == NULL) return GEMSI_STATUS_INVALID_VALUE;
-        |  const size_t size = gemsi_bounded_string_length((const char *)image, GEMSI_RPC_MAXIMUM_PAYLOAD_SIZE);
-        |  if (size == GEMSI_RPC_MAXIMUM_PAYLOAD_SIZE || size > GEMSI_RPC_MAXIMUM_PAYLOAD_SIZE - 4) {
-        |    return GEMSI_STATUS_INVALID_VALUE;
+        |  if (module == NULL || image == NULL) return GEMSTONE_STATUS_INVALID_VALUE;
+        |  const size_t size = gemstone_bounded_string_length((const char *)image, GEMSTONE_RPC_MAXIMUM_PAYLOAD_SIZE);
+        |  if (size == GEMSTONE_RPC_MAXIMUM_PAYLOAD_SIZE || size > GEMSTONE_RPC_MAXIMUM_PAYLOAD_SIZE - 4) {
+        |    return GEMSTONE_STATUS_INVALID_VALUE;
         |  }
         |  const uint32_t payload_size = (uint32_t)size + 4;
         |  uint8_t *payload = (uint8_t *)malloc(payload_size);
-        |  if (payload == NULL) return GEMSI_STATUS_UNKNOWN;
-        |  gemsi_put_u32(payload, (uint32_t)size);
+        |  if (payload == NULL) return GEMSTONE_STATUS_UNKNOWN;
+        |  gemstone_put_u32(payload, (uint32_t)size);
         |  memcpy(payload + 4, image, size);
         |  uint64_t handle = 0;
-        |  GemsiRpcBuffer response = {0};
-        |  const int32_t status = gemsi_expect_u64(
-        |      gemsi_call(gemsi_cuModuleLoadData_high, gemsi_cuModuleLoadData_low, "cuModuleLoadData", payload, payload_size, &response),
+        |  GemstoneRpcBuffer response = {0};
+        |  const int32_t status = gemstone_expect_u64(
+        |      gemstone_call(gemstone_cuModuleLoadData_high, gemstone_cuModuleLoadData_low, "cuModuleLoadData", payload, payload_size, &response),
         |      &response,
         |      &handle);
         |  free(payload);
-        |  if (status == GEMSI_STATUS_SUCCESS) *module = (void *)(uintptr_t)handle;
+        |  if (status == GEMSTONE_STATUS_SUCCESS) *module = (void *)(uintptr_t)handle;
         |  return status;
         |}
         |
         |int32_t cuModuleGetFunction(void **function, void *module, const char *name) {
-        |  if (function == NULL || module == NULL || name == NULL) return GEMSI_STATUS_INVALID_VALUE;
-        |  const size_t name_size = gemsi_bounded_string_length(name, 4096);
-        |  if (name_size == 0 || name_size == 4096) return GEMSI_STATUS_INVALID_VALUE;
+        |  if (function == NULL || module == NULL || name == NULL) return GEMSTONE_STATUS_INVALID_VALUE;
+        |  const size_t name_size = gemstone_bounded_string_length(name, 4096);
+        |  if (name_size == 0 || name_size == 4096) return GEMSTONE_STATUS_INVALID_VALUE;
         |  const uint32_t payload_size = (uint32_t)name_size + 12;
         |  uint8_t *payload = (uint8_t *)malloc(payload_size);
-        |  if (payload == NULL) return GEMSI_STATUS_UNKNOWN;
-        |  gemsi_put_u64(payload, (uint64_t)(uintptr_t)module);
-        |  gemsi_put_u32(payload + 8, (uint32_t)name_size);
+        |  if (payload == NULL) return GEMSTONE_STATUS_UNKNOWN;
+        |  gemstone_put_u64(payload, (uint64_t)(uintptr_t)module);
+        |  gemstone_put_u32(payload + 8, (uint32_t)name_size);
         |  memcpy(payload + 12, name, name_size);
-        |  GemsiRpcBuffer response = {0};
-        |  int32_t status = gemsi_call(
-        |      gemsi_cuModuleGetFunction_high,
-        |      gemsi_cuModuleGetFunction_low,
+        |  GemstoneRpcBuffer response = {0};
+        |  int32_t status = gemstone_call(
+        |      gemstone_cuModuleGetFunction_high,
+        |      gemstone_cuModuleGetFunction_low,
         |      "cuModuleGetFunction",
         |      payload,
         |      payload_size,
         |      &response);
         |  free(payload);
-        |  if (status == GEMSI_STATUS_SUCCESS) {
-        |    if (response.size < 12) status = GEMSI_STATUS_UNKNOWN;
+        |  if (status == GEMSTONE_STATUS_SUCCESS) {
+        |    if (response.size < 12) status = GEMSTONE_STATUS_UNKNOWN;
         |    else {
-        |      const uint64_t handle = gemsi_get_u64(response.data);
-        |      const uint32_t count = gemsi_get_u32(response.data + 8);
+        |      const uint64_t handle = gemstone_get_u64(response.data);
+        |      const uint32_t count = gemstone_get_u32(response.data + 8);
         |      if (count > 4096 || response.size != 12 + count ||
-        |          gemsi_store_kernel_signature(handle, (uint64_t)(uintptr_t)module, response.data + 12, count) != 0) {
-        |        status = GEMSI_STATUS_UNKNOWN;
+        |          gemstone_store_kernel_signature(handle, (uint64_t)(uintptr_t)module, response.data + 12, count) != 0) {
+        |        status = GEMSTONE_STATUS_UNKNOWN;
         |      } else *function = (void *)(uintptr_t)handle;
         |    }
         |  }
-        |  gemsi_rpc_buffer_release(&response);
+        |  gemstone_rpc_buffer_release(&response);
         |  return status;
         |}
         |
         |int32_t cuModuleUnload(void *module) {
-        |  if (module == NULL) return GEMSI_STATUS_INVALID_VALUE;
+        |  if (module == NULL) return GEMSTONE_STATUS_INVALID_VALUE;
         |  uint8_t payload[8];
-        |  gemsi_put_u64(payload, (uint64_t)(uintptr_t)module);
-        |  GemsiRpcBuffer response = {0};
-        |  const int32_t status = gemsi_expect_unit(
-        |      gemsi_call(gemsi_cuModuleUnload_high, gemsi_cuModuleUnload_low, "cuModuleUnload", payload, sizeof(payload), &response),
+        |  gemstone_put_u64(payload, (uint64_t)(uintptr_t)module);
+        |  GemstoneRpcBuffer response = {0};
+        |  const int32_t status = gemstone_expect_unit(
+        |      gemstone_call(gemstone_cuModuleUnload_high, gemstone_cuModuleUnload_low, "cuModuleUnload", payload, sizeof(payload), &response),
         |      &response);
-        |  if (status == GEMSI_STATUS_SUCCESS) gemsi_forget_module((uint64_t)(uintptr_t)module);
+        |  if (status == GEMSTONE_STATUS_SUCCESS) gemstone_forget_module((uint64_t)(uintptr_t)module);
         |  return status;
         |}
         |
@@ -740,127 +742,127 @@ object GenerateAPI {
         |    void **extra) {
         |  if (function == NULL || grid_x == 0 || grid_y == 0 || grid_z == 0 ||
         |      block_x == 0 || block_y == 0 || block_z == 0 || extra != NULL) {
-        |    return GEMSI_STATUS_INVALID_VALUE;
+        |    return GEMSTONE_STATUS_INVALID_VALUE;
         |  }
         |  (void)stream;
-        |  pthread_mutex_lock(&gemsi_kernel_mutex);
-        |  GemsiKernelSignature *signature = gemsi_kernel_signatures;
+        |  pthread_mutex_lock(&gemstone_kernel_mutex);
+        |  GemstoneKernelSignature *signature = gemstone_kernel_signatures;
         |  while (signature != NULL && signature->function != (uint64_t)(uintptr_t)function) signature = signature->next;
         |  if (signature == NULL || (signature->count != 0 && kernel_params == NULL)) {
-        |    pthread_mutex_unlock(&gemsi_kernel_mutex);
-        |    return GEMSI_STATUS_INVALID_VALUE;
+        |    pthread_mutex_unlock(&gemstone_kernel_mutex);
+        |    return GEMSTONE_STATUS_INVALID_VALUE;
         |  }
         |  size_t payload_size = 40;
         |  for (uint32_t index = 0; index < signature->count; ++index) {
         |    const uint8_t width = signature->widths[index];
         |    if (width == 0 || kernel_params[index] == NULL ||
-        |        payload_size > GEMSI_RPC_MAXIMUM_PAYLOAD_SIZE - 4 - width) {
-        |      pthread_mutex_unlock(&gemsi_kernel_mutex);
-        |      return GEMSI_STATUS_INVALID_VALUE;
+        |        payload_size > GEMSTONE_RPC_MAXIMUM_PAYLOAD_SIZE - 4 - width) {
+        |      pthread_mutex_unlock(&gemstone_kernel_mutex);
+        |      return GEMSTONE_STATUS_INVALID_VALUE;
         |    }
         |    payload_size += 4 + width;
         |  }
         |  uint8_t *payload = (uint8_t *)malloc(payload_size);
-        |  if (payload == NULL) { pthread_mutex_unlock(&gemsi_kernel_mutex); return GEMSI_STATUS_UNKNOWN; }
-        |  gemsi_put_u64(payload, (uint64_t)(uintptr_t)function);
-        |  gemsi_put_u32(payload + 8, grid_x);
-        |  gemsi_put_u32(payload + 12, grid_y);
-        |  gemsi_put_u32(payload + 16, grid_z);
-        |  gemsi_put_u32(payload + 20, block_x);
-        |  gemsi_put_u32(payload + 24, block_y);
-        |  gemsi_put_u32(payload + 28, block_z);
-        |  gemsi_put_u32(payload + 32, shared_memory_bytes);
-        |  gemsi_put_u32(payload + 36, signature->count);
+        |  if (payload == NULL) { pthread_mutex_unlock(&gemstone_kernel_mutex); return GEMSTONE_STATUS_UNKNOWN; }
+        |  gemstone_put_u64(payload, (uint64_t)(uintptr_t)function);
+        |  gemstone_put_u32(payload + 8, grid_x);
+        |  gemstone_put_u32(payload + 12, grid_y);
+        |  gemstone_put_u32(payload + 16, grid_z);
+        |  gemstone_put_u32(payload + 20, block_x);
+        |  gemstone_put_u32(payload + 24, block_y);
+        |  gemstone_put_u32(payload + 28, block_z);
+        |  gemstone_put_u32(payload + 32, shared_memory_bytes);
+        |  gemstone_put_u32(payload + 36, signature->count);
         |  size_t offset = 40;
         |  for (uint32_t index = 0; index < signature->count; ++index) {
         |    const uint8_t width = signature->widths[index];
-        |    gemsi_put_u32(payload + offset, width);
+        |    gemstone_put_u32(payload + offset, width);
         |    memcpy(payload + offset + 4, kernel_params[index], width);
         |    offset += 4 + width;
         |  }
-        |  pthread_mutex_unlock(&gemsi_kernel_mutex);
-        |  GemsiRpcBuffer response = {0};
-        |  const int32_t status = gemsi_expect_unit(
-        |      gemsi_call(gemsi_cuLaunchKernel_high, gemsi_cuLaunchKernel_low, "cuLaunchKernel", payload, (uint32_t)payload_size, &response),
+        |  pthread_mutex_unlock(&gemstone_kernel_mutex);
+        |  GemstoneRpcBuffer response = {0};
+        |  const int32_t status = gemstone_expect_unit(
+        |      gemstone_call(gemstone_cuLaunchKernel_high, gemstone_cuLaunchKernel_low, "cuLaunchKernel", payload, (uint32_t)payload_size, &response),
         |      &response);
         |  free(payload);
         |  return status;
         |}
         |
-        |typedef struct GemsiMirroredAllocation {
+        |typedef struct GemstoneMirroredAllocation {
         |  void *host;
         |  size_t size;
-        |  struct GemsiMirroredAllocation *next;
-        |} GemsiMirroredAllocation;
+        |  struct GemstoneMirroredAllocation *next;
+        |} GemstoneMirroredAllocation;
         |
-        |static pthread_mutex_t gemsi_mirrored_mutex = PTHREAD_MUTEX_INITIALIZER;
-        |static GemsiMirroredAllocation *gemsi_mirrored_allocations = NULL;
+        |static pthread_mutex_t gemstone_mirrored_mutex = PTHREAD_MUTEX_INITIALIZER;
+        |static GemstoneMirroredAllocation *gemstone_mirrored_allocations = NULL;
         |
-        |static int32_t gemsi_mirrored_allocate(void **pointer, size_t size) {
-        |  if (pointer == NULL) return GEMSI_STATUS_INVALID_VALUE;
+        |static int32_t gemstone_mirrored_allocate(void **pointer, size_t size) {
+        |  if (pointer == NULL) return GEMSTONE_STATUS_INVALID_VALUE;
         |  void *host = malloc(size == 0 ? 1 : size);
-        |  if (host == NULL) return GEMSI_STATUS_UNKNOWN;
-        |  const int32_t status = gemsi_managed_register_remote((uint64_t)(uintptr_t)host, size == 0 ? 1 : size);
-        |  if (status != GEMSI_STATUS_SUCCESS) {
+        |  if (host == NULL) return GEMSTONE_STATUS_UNKNOWN;
+        |  const int32_t status = gemstone_managed_register_remote((uint64_t)(uintptr_t)host, size == 0 ? 1 : size);
+        |  if (status != GEMSTONE_STATUS_SUCCESS) {
         |    free(host);
         |    return status;
         |  }
-        |  GemsiMirroredAllocation *entry = (GemsiMirroredAllocation *)calloc(1, sizeof(*entry));
+        |  GemstoneMirroredAllocation *entry = (GemstoneMirroredAllocation *)calloc(1, sizeof(*entry));
         |  if (entry == NULL) {
-        |    (void)gemsi_managed_unregister_remote((uint64_t)(uintptr_t)host);
+        |    (void)gemstone_managed_unregister_remote((uint64_t)(uintptr_t)host);
         |    free(host);
-        |    return GEMSI_STATUS_UNKNOWN;
+        |    return GEMSTONE_STATUS_UNKNOWN;
         |  }
         |  entry->host = host;
         |  entry->size = size == 0 ? 1 : size;
-        |  pthread_mutex_lock(&gemsi_mirrored_mutex);
-        |  entry->next = gemsi_mirrored_allocations;
-        |  gemsi_mirrored_allocations = entry;
-        |  pthread_mutex_unlock(&gemsi_mirrored_mutex);
+        |  pthread_mutex_lock(&gemstone_mirrored_mutex);
+        |  entry->next = gemstone_mirrored_allocations;
+        |  gemstone_mirrored_allocations = entry;
+        |  pthread_mutex_unlock(&gemstone_mirrored_mutex);
         |  *pointer = host;
-        |  return GEMSI_STATUS_SUCCESS;
+        |  return GEMSTONE_STATUS_SUCCESS;
         |}
         |
-        |static int32_t gemsi_mirrored_free(void *pointer, int *found) {
+        |static int32_t gemstone_mirrored_free(void *pointer, int *found) {
         |  *found = 0;
-        |  pthread_mutex_lock(&gemsi_mirrored_mutex);
-        |  GemsiMirroredAllocation **cursor = &gemsi_mirrored_allocations;
+        |  pthread_mutex_lock(&gemstone_mirrored_mutex);
+        |  GemstoneMirroredAllocation **cursor = &gemstone_mirrored_allocations;
         |  while (*cursor != NULL && (*cursor)->host != pointer) cursor = &(*cursor)->next;
         |  if (*cursor == NULL) {
-        |    pthread_mutex_unlock(&gemsi_mirrored_mutex);
-        |    return GEMSI_STATUS_INVALID_VALUE;
+        |    pthread_mutex_unlock(&gemstone_mirrored_mutex);
+        |    return GEMSTONE_STATUS_INVALID_VALUE;
         |  }
-        |  GemsiMirroredAllocation *entry = *cursor;
+        |  GemstoneMirroredAllocation *entry = *cursor;
         |  *cursor = entry->next;
         |  *found = 1;
-        |  pthread_mutex_unlock(&gemsi_mirrored_mutex);
-        |  const int32_t status = gemsi_managed_unregister_remote((uint64_t)(uintptr_t)entry->host);
+        |  pthread_mutex_unlock(&gemstone_mirrored_mutex);
+        |  const int32_t status = gemstone_managed_unregister_remote((uint64_t)(uintptr_t)entry->host);
         |  free(entry->host);
         |  free(entry);
         |  return status;
         |}
         |
-        |static int32_t gemsi_mirrored_synchronize_to_device(void) {
-        |  int32_t status = GEMSI_STATUS_SUCCESS;
-        |  pthread_mutex_lock(&gemsi_mirrored_mutex);
-        |  for (GemsiMirroredAllocation *entry = gemsi_mirrored_allocations;
-        |       entry != NULL && status == GEMSI_STATUS_SUCCESS;
+        |static int32_t gemstone_mirrored_synchronize_to_device(void) {
+        |  int32_t status = GEMSTONE_STATUS_SUCCESS;
+        |  pthread_mutex_lock(&gemstone_mirrored_mutex);
+        |  for (GemstoneMirroredAllocation *entry = gemstone_mirrored_allocations;
+        |       entry != NULL && status == GEMSTONE_STATUS_SUCCESS;
         |       entry = entry->next) {
         |    status = cuMemcpyHtoD_v2((uint64_t)(uintptr_t)entry->host, entry->host, entry->size);
         |  }
-        |  pthread_mutex_unlock(&gemsi_mirrored_mutex);
+        |  pthread_mutex_unlock(&gemstone_mirrored_mutex);
         |  return status;
         |}
         |
-        |static int32_t gemsi_mirrored_synchronize_from_device(void) {
-        |  int32_t status = GEMSI_STATUS_SUCCESS;
-        |  pthread_mutex_lock(&gemsi_mirrored_mutex);
-        |  for (GemsiMirroredAllocation *entry = gemsi_mirrored_allocations;
-        |       entry != NULL && status == GEMSI_STATUS_SUCCESS;
+        |static int32_t gemstone_mirrored_synchronize_from_device(void) {
+        |  int32_t status = GEMSTONE_STATUS_SUCCESS;
+        |  pthread_mutex_lock(&gemstone_mirrored_mutex);
+        |  for (GemstoneMirroredAllocation *entry = gemstone_mirrored_allocations;
+        |       entry != NULL && status == GEMSTONE_STATUS_SUCCESS;
         |       entry = entry->next) {
         |    status = cuMemcpyDtoH_v2(entry->host, (uint64_t)(uintptr_t)entry->host, entry->size);
         |  }
-        |  pthread_mutex_unlock(&gemsi_mirrored_mutex);
+        |  pthread_mutex_unlock(&gemstone_mirrored_mutex);
         |  return status;
         |}
         |
@@ -872,16 +874,16 @@ object GenerateAPI {
         |}
         |
         |int32_t cudaMalloc(void **pointer, size_t size) {
-        |  if (pointer == NULL) return GEMSI_STATUS_INVALID_VALUE;
+        |  if (pointer == NULL) return GEMSTONE_STATUS_INVALID_VALUE;
         |  uint64_t device_pointer = 0;
         |  const int32_t status = cuMemAlloc_v2(&device_pointer, size);
-        |  if (status == GEMSI_STATUS_SUCCESS) *pointer = (void *)(uintptr_t)device_pointer;
+        |  if (status == GEMSTONE_STATUS_SUCCESS) *pointer = (void *)(uintptr_t)device_pointer;
         |  return status;
         |}
         |
         |int32_t cudaFree(void *pointer) {
         |  int found = 0;
-        |  const int32_t mirrored_status = gemsi_mirrored_free(pointer, &found);
+        |  const int32_t mirrored_status = gemstone_mirrored_free(pointer, &found);
         |  return found ? mirrored_status : cuMemFree_v2((uint64_t)(uintptr_t)pointer);
         |}
         |
@@ -894,50 +896,50 @@ object GenerateAPI {
         |    case 3:
         |      return cuMemcpyDtoD_v2((uint64_t)(uintptr_t)destination, (uint64_t)(uintptr_t)source, size);
         |    default:
-        |      return GEMSI_STATUS_INVALID_VALUE;
+        |      return GEMSTONE_STATUS_INVALID_VALUE;
         |  }
         |}
         |
         |const char *cudaGetErrorString(int32_t status) {
         |  switch (status) {
-        |    case GEMSI_STATUS_SUCCESS: return "success";
-        |    case GEMSI_STATUS_INVALID_VALUE: return "invalid value";
-        |    case GEMSI_STATUS_NOT_SUPPORTED: return "not supported";
-        |    case GEMSI_STATUS_INITIALIZATION_ERROR: return "initialization error";
+        |    case GEMSTONE_STATUS_SUCCESS: return "success";
+        |    case GEMSTONE_STATUS_INVALID_VALUE: return "invalid value";
+        |    case GEMSTONE_STATUS_NOT_SUPPORTED: return "not supported";
+        |    case GEMSTONE_STATUS_INITIALIZATION_ERROR: return "initialization error";
         |    default: return "Gemstone CUDA error";
         |  }
         |}
         |
         |const char *cudaGetErrorName(int32_t status) {
         |  switch (status) {
-        |    case GEMSI_STATUS_SUCCESS: return "cudaSuccess";
-        |    case GEMSI_STATUS_INVALID_VALUE: return "cudaErrorInvalidValue";
-        |    case GEMSI_STATUS_NOT_SUPPORTED: return "cudaErrorNotSupported";
-        |    case GEMSI_STATUS_INITIALIZATION_ERROR: return "cudaErrorInitializationError";
+        |    case GEMSTONE_STATUS_SUCCESS: return "cudaSuccess";
+        |    case GEMSTONE_STATUS_INVALID_VALUE: return "cudaErrorInvalidValue";
+        |    case GEMSTONE_STATUS_NOT_SUPPORTED: return "cudaErrorNotSupported";
+        |    case GEMSTONE_STATUS_INITIALIZATION_ERROR: return "cudaErrorInitializationError";
         |    default: return "cudaErrorUnknown";
         |  }
         |}
         |
-        |static _Thread_local int32_t gemsi_last_error = GEMSI_STATUS_SUCCESS;
+        |static _Thread_local int32_t gemstone_last_error = GEMSTONE_STATUS_SUCCESS;
         |
         |int32_t cudaPeekAtLastError(void) {
-        |  return gemsi_last_error;
+        |  return gemstone_last_error;
         |}
         |
         |int32_t cudaGetLastError(void) {
-        |  const int32_t status = gemsi_last_error;
-        |  gemsi_last_error = GEMSI_STATUS_SUCCESS;
+        |  const int32_t status = gemstone_last_error;
+        |  gemstone_last_error = GEMSTONE_STATUS_SUCCESS;
         |  return status;
         |}
         |
         |int32_t cudaGetDevice(int32_t *device) {
-        |  if (device == NULL) return GEMSI_STATUS_INVALID_VALUE;
+        |  if (device == NULL) return GEMSTONE_STATUS_INVALID_VALUE;
         |  *device = 0;
-        |  return GEMSI_STATUS_SUCCESS;
+        |  return GEMSTONE_STATUS_SUCCESS;
         |}
         |
         |int32_t cudaSetDevice(int32_t device) {
-        |  return device == 0 ? GEMSI_STATUS_SUCCESS : GEMSI_STATUS_INVALID_VALUE;
+        |  return device == 0 ? GEMSTONE_STATUS_SUCCESS : GEMSTONE_STATUS_INVALID_VALUE;
         |}
         |
         |int32_t cudaDeviceSynchronize(void) {
@@ -950,7 +952,7 @@ object GenerateAPI {
         |}
         |
         |int32_t cudaDeviceGetAttribute(int32_t *value, int32_t attribute, int32_t device) {
-        |  if (value == NULL || device != 0) return GEMSI_STATUS_INVALID_VALUE;
+        |  if (value == NULL || device != 0) return GEMSTONE_STATUS_INVALID_VALUE;
         |  switch (attribute) {
         |    case 1: *value = 1024; break;
         |    case 2: *value = 1024; break;
@@ -973,10 +975,10 @@ object GenerateAPI {
         |    case 106: *value = 32; break;
         |    default: *value = 0; break;
         |  }
-        |  return GEMSI_STATUS_SUCCESS;
+        |  return GEMSTONE_STATUS_SUCCESS;
         |}
         |
-        |typedef struct GemsiDevicePropertiesPrefix {
+        |typedef struct GemstoneDevicePropertiesPrefix {
         |  char name[256];
         |  uint8_t uuid[16];
         |  char luid[8];
@@ -995,11 +997,11 @@ object GenerateAPI {
         |  size_t texture_alignment;
         |  size_t texture_pitch_alignment;
         |  int32_t multiprocessor_count;
-        |} GemsiDevicePropertiesPrefix;
+        |} GemstoneDevicePropertiesPrefix;
         |
         |int32_t cudaGetDeviceProperties(void *properties, int32_t device) {
-        |  if (properties == NULL || device != 0) return GEMSI_STATUS_INVALID_VALUE;
-        |  GemsiDevicePropertiesPrefix *value = (GemsiDevicePropertiesPrefix *)properties;
+        |  if (properties == NULL || device != 0) return GEMSTONE_STATUS_INVALID_VALUE;
+        |  GemstoneDevicePropertiesPrefix *value = (GemstoneDevicePropertiesPrefix *)properties;
         |  memset(value, 0, sizeof(*value));
         |  memcpy(value->name, "Gemstone PTX emulator", sizeof("Gemstone PTX emulator"));
         |  value->total_global_memory = UINT64_C(8) * 1024 * 1024 * 1024;
@@ -1020,10 +1022,10 @@ object GenerateAPI {
         |  value->texture_alignment = 256;
         |  value->texture_pitch_alignment = 32;
         |  value->multiprocessor_count = 1;
-        |  return GEMSI_STATUS_SUCCESS;
+        |  return GEMSTONE_STATUS_SUCCESS;
         |}
         |
-        |typedef struct GemsiFunctionAttributesPrefix {
+        |typedef struct GemstoneFunctionAttributesPrefix {
         |  size_t shared_size_bytes;
         |  size_t constant_size_bytes;
         |  size_t local_size_bytes;
@@ -1034,17 +1036,17 @@ object GenerateAPI {
         |  int32_t cache_mode_ca;
         |  int32_t max_dynamic_shared_size_bytes;
         |  int32_t preferred_shared_memory_carveout;
-        |} GemsiFunctionAttributesPrefix;
+        |} GemstoneFunctionAttributesPrefix;
         |
         |int32_t cudaFuncGetAttributes(void *attributes, const void *function) {
-        |  if (attributes == NULL || function == NULL) return GEMSI_STATUS_INVALID_VALUE;
-        |  GemsiFunctionAttributesPrefix *value = (GemsiFunctionAttributesPrefix *)attributes;
+        |  if (attributes == NULL || function == NULL) return GEMSTONE_STATUS_INVALID_VALUE;
+        |  GemstoneFunctionAttributesPrefix *value = (GemstoneFunctionAttributesPrefix *)attributes;
         |  memset(value, 0, sizeof(*value));
         |  value->max_threads_per_block = 1024;
         |  value->ptx_version = 92;
         |  value->binary_version = 75;
         |  value->max_dynamic_shared_size_bytes = 49152;
-        |  return GEMSI_STATUS_SUCCESS;
+        |  return GEMSTONE_STATUS_SUCCESS;
         |}
         |
         |int32_t cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(
@@ -1056,25 +1058,25 @@ object GenerateAPI {
         |  (void)function;
         |  (void)dynamic_shared_memory;
         |  (void)flags;
-        |  if (blocks == NULL || block_size <= 0 || block_size > 1024) return GEMSI_STATUS_INVALID_VALUE;
+        |  if (blocks == NULL || block_size <= 0 || block_size > 1024) return GEMSTONE_STATUS_INVALID_VALUE;
         |  *blocks = 1024 / block_size;
         |  if (*blocks == 0) *blocks = 1;
-        |  return GEMSI_STATUS_SUCCESS;
+        |  return GEMSTONE_STATUS_SUCCESS;
         |}
         |
         |int32_t cudaMallocHost(void **pointer, size_t size) {
-        |  return gemsi_mirrored_allocate(pointer, size);
+        |  return gemstone_mirrored_allocate(pointer, size);
         |}
         |
         |int32_t cudaFreeHost(void *pointer) {
         |  int found = 0;
-        |  const int32_t status = gemsi_mirrored_free(pointer, &found);
-        |  return found ? status : GEMSI_STATUS_INVALID_VALUE;
+        |  const int32_t status = gemstone_mirrored_free(pointer, &found);
+        |  return found ? status : GEMSTONE_STATUS_INVALID_VALUE;
         |}
         |
         |int32_t cudaMallocManaged(void **pointer, size_t size, uint32_t flags) {
         |  (void)flags;
-        |  return gemsi_mirrored_allocate(pointer, size);
+        |  return gemstone_mirrored_allocate(pointer, size);
         |}
         |
         |int32_t cudaMemcpyAsync(
@@ -1087,80 +1089,80 @@ object GenerateAPI {
         |  return cudaMemcpy(destination, source, size, kind);
         |}
         |
-        |typedef struct GemsiFatBinaryWrapper {
+        |typedef struct GemstoneFatBinaryWrapper {
         |  int32_t magic;
         |  int32_t version;
         |  const void *data;
         |  void *filename;
-        |} GemsiFatBinaryWrapper;
+        |} GemstoneFatBinaryWrapper;
         |
-        |typedef struct GemsiFatBinary {
+        |typedef struct GemstoneFatBinary {
         |  void *token;
         |  void *module;
-        |  struct GemsiFatBinary *next;
-        |} GemsiFatBinary;
+        |  struct GemstoneFatBinary *next;
+        |} GemstoneFatBinary;
         |
-        |typedef struct GemsiRegisteredFunction {
+        |typedef struct GemstoneRegisteredFunction {
         |  const void *host_function;
         |  void *device_function;
         |  char *device_name;
-        |  GemsiFatBinary *fat_binary;
-        |  struct GemsiRegisteredFunction *next;
-        |} GemsiRegisteredFunction;
+        |  GemstoneFatBinary *fat_binary;
+        |  struct GemstoneRegisteredFunction *next;
+        |} GemstoneRegisteredFunction;
         |
-        |typedef struct GemsiDim3 {
+        |typedef struct GemstoneDim3 {
         |  uint32_t x;
         |  uint32_t y;
         |  uint32_t z;
-        |} GemsiDim3;
+        |} GemstoneDim3;
         |
-        |typedef struct GemsiLaunchConfiguration {
-        |  GemsiDim3 grid;
-        |  GemsiDim3 block;
+        |typedef struct GemstoneLaunchConfiguration {
+        |  GemstoneDim3 grid;
+        |  GemstoneDim3 block;
         |  size_t shared_memory;
         |  void *stream;
         |  int valid;
-        |} GemsiLaunchConfiguration;
+        |} GemstoneLaunchConfiguration;
         |
-        |static pthread_mutex_t gemsi_registration_mutex = PTHREAD_MUTEX_INITIALIZER;
-        |static GemsiFatBinary *gemsi_fat_binaries = NULL;
-        |static GemsiRegisteredFunction *gemsi_registered_functions = NULL;
-        |static _Thread_local GemsiLaunchConfiguration gemsi_launch_configuration = {0};
+        |static pthread_mutex_t gemstone_registration_mutex = PTHREAD_MUTEX_INITIALIZER;
+        |static GemstoneFatBinary *gemstone_fat_binaries = NULL;
+        |static GemstoneRegisteredFunction *gemstone_registered_functions = NULL;
+        |static _Thread_local GemstoneLaunchConfiguration gemstone_launch_configuration = {0};
         |
-        |static uint16_t gemsi_read_native_u16(const uint8_t *source) {
+        |static uint16_t gemstone_read_native_u16(const uint8_t *source) {
         |  uint16_t value;
         |  memcpy(&value, source, sizeof(value));
         |  return value;
         |}
         |
-        |static uint32_t gemsi_read_native_u32(const uint8_t *source) {
+        |static uint32_t gemstone_read_native_u32(const uint8_t *source) {
         |  uint32_t value;
         |  memcpy(&value, source, sizeof(value));
         |  return value;
         |}
         |
-        |static uint64_t gemsi_read_native_u64(const uint8_t *source) {
+        |static uint64_t gemstone_read_native_u64(const uint8_t *source) {
         |  uint64_t value;
         |  memcpy(&value, source, sizeof(value));
         |  return value;
         |}
         |
-        |static const char *gemsi_find_uncompressed_ptx(const void *fat_binary) {
+        |static const char *gemstone_find_uncompressed_ptx(const void *fat_binary) {
         |  if (fat_binary == NULL) return NULL;
-        |  const GemsiFatBinaryWrapper *wrapper = (const GemsiFatBinaryWrapper *)fat_binary;
+        |  const GemstoneFatBinaryWrapper *wrapper = (const GemstoneFatBinaryWrapper *)fat_binary;
         |  if (wrapper->magic != INT32_C(0x466243b1) || wrapper->data == NULL) return NULL;
         |  const uint8_t *data = (const uint8_t *)wrapper->data;
-        |  if (gemsi_read_native_u32(data) != UINT32_C(0xba55ed50)) return NULL;
-        |  const uint16_t outer_header_size = gemsi_read_native_u16(data + 6);
-        |  const uint64_t content_size = gemsi_read_native_u64(data + 8);
-        |  if (outer_header_size < 16 || content_size > GEMSI_RPC_MAXIMUM_PAYLOAD_SIZE) return NULL;
+        |  if (gemstone_read_native_u32(data) != UINT32_C(0xba55ed50)) return NULL;
+        |  const uint16_t outer_header_size = gemstone_read_native_u16(data + 6);
+        |  const uint64_t content_size = gemstone_read_native_u64(data + 8);
+        |  if (outer_header_size < 16 || content_size > GEMSTONE_RPC_MAXIMUM_PAYLOAD_SIZE) return NULL;
         |  const uint64_t total_size = (uint64_t)outer_header_size + content_size;
         |  uint64_t offset = outer_header_size;
         |  while (offset <= total_size && total_size - offset >= 16) {
         |    const uint8_t *entry = data + offset;
-        |    const uint16_t kind = gemsi_read_native_u16(entry);
-        |    const uint32_t header_size = gemsi_read_native_u32(entry + 4);
-        |    const uint64_t payload_size = gemsi_read_native_u64(entry + 8);
+        |    const uint16_t kind = gemstone_read_native_u16(entry);
+        |    const uint32_t header_size = gemstone_read_native_u32(entry + 4);
+        |    const uint64_t payload_size = gemstone_read_native_u64(entry + 8);
         |    if (header_size < 16 || (uint64_t)header_size > total_size - offset ||
         |        payload_size > total_size - offset - header_size) return NULL;
         |    const char *payload = (const char *)(entry + header_size);
@@ -1177,15 +1179,15 @@ object GenerateAPI {
         |}
         |
         |void **__cudaRegisterFatBinary(void *fat_binary) {
-        |  GemsiFatBinary *entry = (GemsiFatBinary *)calloc(1, sizeof(*entry));
+        |  GemstoneFatBinary *entry = (GemstoneFatBinary *)calloc(1, sizeof(*entry));
         |  if (entry == NULL) return NULL;
         |  entry->token = entry;
-        |  const char *ptx = gemsi_find_uncompressed_ptx(fat_binary);
-        |  if (ptx != NULL && cuModuleLoadData(&entry->module, ptx) != GEMSI_STATUS_SUCCESS) entry->module = NULL;
-        |  pthread_mutex_lock(&gemsi_registration_mutex);
-        |  entry->next = gemsi_fat_binaries;
-        |  gemsi_fat_binaries = entry;
-        |  pthread_mutex_unlock(&gemsi_registration_mutex);
+        |  const char *ptx = gemstone_find_uncompressed_ptx(fat_binary);
+        |  if (ptx != NULL && cuModuleLoadData(&entry->module, ptx) != GEMSTONE_STATUS_SUCCESS) entry->module = NULL;
+        |  pthread_mutex_lock(&gemstone_registration_mutex);
+        |  entry->next = gemstone_fat_binaries;
+        |  gemstone_fat_binaries = entry;
+        |  pthread_mutex_unlock(&gemstone_registration_mutex);
         |  return &entry->token;
         |}
         |
@@ -1212,8 +1214,8 @@ object GenerateAPI {
         |  (void)grid_dimension;
         |  (void)warp_size;
         |  if (handle == NULL || *handle == NULL || host_function == NULL || device_name == NULL) return;
-        |  GemsiFatBinary *fat = (GemsiFatBinary *)*handle;
-        |  GemsiRegisteredFunction *entry = (GemsiRegisteredFunction *)calloc(1, sizeof(*entry));
+        |  GemstoneFatBinary *fat = (GemstoneFatBinary *)*handle;
+        |  GemstoneRegisteredFunction *entry = (GemstoneRegisteredFunction *)calloc(1, sizeof(*entry));
         |  if (entry == NULL) return;
         |  const size_t name_size = strlen(device_name);
         |  entry->device_name = (char *)malloc(name_size + 1);
@@ -1224,10 +1226,10 @@ object GenerateAPI {
         |  memcpy(entry->device_name, device_name, name_size + 1);
         |  entry->host_function = host_function;
         |  entry->fat_binary = fat;
-        |  pthread_mutex_lock(&gemsi_registration_mutex);
-        |  entry->next = gemsi_registered_functions;
-        |  gemsi_registered_functions = entry;
-        |  pthread_mutex_unlock(&gemsi_registration_mutex);
+        |  pthread_mutex_lock(&gemstone_registration_mutex);
+        |  entry->next = gemstone_registered_functions;
+        |  gemstone_registered_functions = entry;
+        |  pthread_mutex_unlock(&gemstone_registration_mutex);
         |}
         |
         |void __cudaRegisterVar(
@@ -1251,79 +1253,79 @@ object GenerateAPI {
         |
         |void __cudaUnregisterFatBinary(void **handle) {
         |  if (handle == NULL || *handle == NULL) return;
-        |  GemsiFatBinary *fat = (GemsiFatBinary *)*handle;
-        |  pthread_mutex_lock(&gemsi_registration_mutex);
-        |  GemsiRegisteredFunction **function_cursor = &gemsi_registered_functions;
+        |  GemstoneFatBinary *fat = (GemstoneFatBinary *)*handle;
+        |  pthread_mutex_lock(&gemstone_registration_mutex);
+        |  GemstoneRegisteredFunction **function_cursor = &gemstone_registered_functions;
         |  while (*function_cursor != NULL) {
-        |    GemsiRegisteredFunction *entry = *function_cursor;
+        |    GemstoneRegisteredFunction *entry = *function_cursor;
         |    if (entry->fat_binary == fat) {
         |      *function_cursor = entry->next;
         |      free(entry->device_name);
         |      free(entry);
         |    } else function_cursor = &entry->next;
         |  }
-        |  GemsiFatBinary **fat_cursor = &gemsi_fat_binaries;
+        |  GemstoneFatBinary **fat_cursor = &gemstone_fat_binaries;
         |  while (*fat_cursor != NULL && *fat_cursor != fat) fat_cursor = &(*fat_cursor)->next;
         |  if (*fat_cursor == fat) *fat_cursor = fat->next;
-        |  pthread_mutex_unlock(&gemsi_registration_mutex);
+        |  pthread_mutex_unlock(&gemstone_registration_mutex);
         |  if (fat->module != NULL) (void)cuModuleUnload(fat->module);
         |  fat->token = NULL;
         |  free(fat);
         |}
         |
         |int32_t __cudaGetKernel(void **kernel, const void *host_function) {
-        |  if (kernel == NULL || host_function == NULL) return GEMSI_STATUS_INVALID_VALUE;
-        |  pthread_mutex_lock(&gemsi_registration_mutex);
-        |  GemsiRegisteredFunction *entry = gemsi_registered_functions;
+        |  if (kernel == NULL || host_function == NULL) return GEMSTONE_STATUS_INVALID_VALUE;
+        |  pthread_mutex_lock(&gemstone_registration_mutex);
+        |  GemstoneRegisteredFunction *entry = gemstone_registered_functions;
         |  while (entry != NULL && entry->host_function != host_function) entry = entry->next;
-        |  int32_t status = GEMSI_STATUS_INVALID_VALUE;
+        |  int32_t status = GEMSTONE_STATUS_INVALID_VALUE;
         |  if (entry != NULL && entry->fat_binary->module != NULL) {
         |    if (entry->device_function == NULL) {
         |      status = cuModuleGetFunction(&entry->device_function, entry->fat_binary->module, entry->device_name);
-        |    } else status = GEMSI_STATUS_SUCCESS;
-        |    if (status == GEMSI_STATUS_SUCCESS) *kernel = entry->device_function;
+        |    } else status = GEMSTONE_STATUS_SUCCESS;
+        |    if (status == GEMSTONE_STATUS_SUCCESS) *kernel = entry->device_function;
         |  }
-        |  pthread_mutex_unlock(&gemsi_registration_mutex);
+        |  pthread_mutex_unlock(&gemstone_registration_mutex);
         |  return status;
         |}
         |
         |unsigned __cudaPushCallConfiguration(
-        |    GemsiDim3 grid,
-        |    GemsiDim3 block,
+        |    GemstoneDim3 grid,
+        |    GemstoneDim3 block,
         |    size_t shared_memory,
         |    void *stream) {
-        |  gemsi_launch_configuration.grid = grid;
-        |  gemsi_launch_configuration.block = block;
-        |  gemsi_launch_configuration.shared_memory = shared_memory;
-        |  gemsi_launch_configuration.stream = stream;
-        |  gemsi_launch_configuration.valid = 1;
-        |  return GEMSI_STATUS_SUCCESS;
+        |  gemstone_launch_configuration.grid = grid;
+        |  gemstone_launch_configuration.block = block;
+        |  gemstone_launch_configuration.shared_memory = shared_memory;
+        |  gemstone_launch_configuration.stream = stream;
+        |  gemstone_launch_configuration.valid = 1;
+        |  return GEMSTONE_STATUS_SUCCESS;
         |}
         |
         |int32_t __cudaPopCallConfiguration(
-        |    GemsiDim3 *grid,
-        |    GemsiDim3 *block,
+        |    GemstoneDim3 *grid,
+        |    GemstoneDim3 *block,
         |    size_t *shared_memory,
         |    void *stream) {
-        |  if (!gemsi_launch_configuration.valid || grid == NULL || block == NULL ||
-        |      shared_memory == NULL || stream == NULL) return GEMSI_STATUS_INVALID_VALUE;
-        |  *grid = gemsi_launch_configuration.grid;
-        |  *block = gemsi_launch_configuration.block;
-        |  *shared_memory = gemsi_launch_configuration.shared_memory;
-        |  *(void **)stream = gemsi_launch_configuration.stream;
-        |  gemsi_launch_configuration.valid = 0;
-        |  return GEMSI_STATUS_SUCCESS;
+        |  if (!gemstone_launch_configuration.valid || grid == NULL || block == NULL ||
+        |      shared_memory == NULL || stream == NULL) return GEMSTONE_STATUS_INVALID_VALUE;
+        |  *grid = gemstone_launch_configuration.grid;
+        |  *block = gemstone_launch_configuration.block;
+        |  *shared_memory = gemstone_launch_configuration.shared_memory;
+        |  *(void **)stream = gemstone_launch_configuration.stream;
+        |  gemstone_launch_configuration.valid = 0;
+        |  return GEMSTONE_STATUS_SUCCESS;
         |}
         |
         |int32_t __cudaLaunchKernel(
         |    void *kernel,
-        |    GemsiDim3 grid,
-        |    GemsiDim3 block,
+        |    GemstoneDim3 grid,
+        |    GemstoneDim3 block,
         |    void **arguments,
         |    size_t shared_memory,
         |    void *stream) {
-        |  int32_t status = gemsi_mirrored_synchronize_to_device();
-        |  if (status == GEMSI_STATUS_SUCCESS) status = cuLaunchKernel(
+        |  int32_t status = gemstone_mirrored_synchronize_to_device();
+        |  if (status == GEMSTONE_STATUS_SUCCESS) status = cuLaunchKernel(
         |      kernel,
         |      grid.x,
         |      grid.y,
@@ -1335,8 +1337,8 @@ object GenerateAPI {
         |      stream,
         |      arguments,
         |      NULL);
-        |  if (status == GEMSI_STATUS_SUCCESS) status = gemsi_mirrored_synchronize_from_device();
-        |  gemsi_last_error = status;
+        |  if (status == GEMSTONE_STATUS_SUCCESS) status = gemstone_mirrored_synchronize_from_device();
+        |  gemstone_last_error = status;
         |  return status;
         |}
         |

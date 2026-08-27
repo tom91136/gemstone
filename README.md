@@ -1,7 +1,7 @@
 # GEMSTONE
 
 GEMSTONE (GPU Execution Model for State-Tracked, Offload-Neutral Emulation) is a deterministic, vendor-neutral GPU
-execution sandbox. The command and native-library name are `gemsi`; Scala packages live under
+execution sandbox. The command and native-library name are `gemstone`; Scala packages live under
 `net.kurobako.gemstone`.
 
 This repository currently contains the first vertical scaffold:
