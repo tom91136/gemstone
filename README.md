@@ -37,7 +37,7 @@ sbt scalafmtCheckAll
 sbt 'codegen/run --check generated'
 sbt 'isa_ptx / generatePTXSources; isa_ptx / generatePTXReferenceTests'
 sbt 'isa_amdgpu / generateAMDGPUSources; isa_amdgpu / generateAMDGPUGoldenTests'
-sbt 'codegen / generateComputeAPISources; isa_spirv / generateSPIRVSources; isa_spirv / generateSPIRVReferenceTests'
+sbt 'codegen / generateAPISources; isa_spirv / generateSPIRVSources; isa_spirv / generateSPIRVReferenceTests'
 sbt test
 sbt testFull
 sbt nativeNative/nativeLink

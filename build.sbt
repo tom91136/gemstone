@@ -7,9 +7,15 @@ lazy val scala3Version        = "3.8.3"
 lazy val munitVersion         = "1.3.4"
 lazy val catsParseVersion     = "1.1.0"
 lazy val jsoupVersion         = "1.23.2"
+lazy val upickleVersion       = "4.4.3"
 lazy val llvmVersion          = "23.1.0"
 lazy val mesaVersion          = "26.2.1"
 lazy val cudaPTXVersion       = "13.3.0"
+lazy val cudaAPIVersion       = "13.3"
+lazy val cudaAPIPackage       = "13.3.29-1"
+lazy val cudaCRTPackage       = "13.3.33-1"
+lazy val hipVersion           = "7.2.3"
+lazy val hsaVersion           = "7.2.3"
 lazy val ptxISAVersion        = "9.3"
 lazy val ptxISAPackage        = "v" + ptxISAVersion.replace('.', '_')
 lazy val amdISAXMLVersion     = "2026_08_06"
@@ -27,6 +33,11 @@ lazy val ThrustTest = config("thrust").extend(Test)
 lazy val llvmSourceSha256    = "ab1f0e3ec52448c33e8782eaf0422504b87c7b016b22514653ee0d8fcee479ff"
 lazy val mesaSourceSha256    = "c47e81bddc4760360a41ac3c5acec38acb81f9d750ecef47e7f3adc7021a4442"
 lazy val cudaPTXHtmlSha256   = "40026f79b65fee3f8c8b3e717c6f80c6385e8d97215318d6e4b7f6106f58d5a4"
+lazy val cudaDriverDevSha256 = "8bf25d2a822c107afea871c3f521014b55af095d7ac80d56dda27a7599f0fc70"
+lazy val cudaRuntimeDevSha256 = "0c137b804e1b68879b873ce996f23f6ca9bc644872be15cb870bdbc43319a717"
+lazy val cudaCRTDevSha256 = "945852c041126c913c0b1ed9fa8d231550fcaf5a3e05962ecd4669807a890f66"
+lazy val hipSourceSha256 = "e6ab65cb2a236eee0e1f2738457367dffc3ce1e8dfb050ac22b7712e35aa896e"
+lazy val hsaSourceSha256 = "fa673a8449be0853acaceb139b6b87abbc66c050b6e92745c26445722725cb05"
 lazy val amdISAXMLSha256     = "82404f1126761b7877595b622afa7e1f311f2f41e89a3abe9aaf8ad045c082e2"
 lazy val openCLHeadersSha256 = "0bdef6f653c577827a75fac3e3f18b0bf000171e39fa65c2eb84ec804c822cab"
 lazy val levelZeroSha256     = "d697c61a2f4897ec9c676c6056dba5368c9c266bb173ff7249f71ef63bf445e0"
@@ -34,9 +45,15 @@ lazy val spirvHeadersSha256  = "7d40c8c1983c1aba6f6f2fcbcf7be345d33a5693aeee0cc5
 lazy val spirvToolsSha256    = "09f70a9197d9cd28e1e10a2fca5ffde8c5e269f363eed9afa838ad88ed2649c9"
 
 lazy val isaReferenceManifestMarkers = Vector(
+  "format\t2\n",
   s"llvm-version\t$llvmVersion\n",
   s"mesa-version\t$mesaVersion\n",
   s"cuda-ptx-version\t$cudaPTXVersion\n",
+  s"cuda-api-version\t$cudaAPIVersion\n",
+  s"cuda-api-package\t$cudaAPIPackage\n",
+  s"cuda-crt-package\t$cudaCRTPackage\n",
+  s"hip-version\t$hipVersion\n",
+  s"hsa-version\t$hsaVersion\n",
   s"amd-xml-version\t$amdISAXMLVersion\n",
   s"opencl-headers-version\t$openCLHeadersVersion\n",
   s"level-zero-version\t$levelZeroVersion\n",
@@ -46,14 +63,16 @@ lazy val isaReferenceManifestMarkers = Vector(
 
 lazy val isaReferenceCacheDirectory = settingKey[File]("Persistent cache for pinned ISA reference artifacts.")
 lazy val prepareISAReferences       = taskKey[Unit]("Download, verify, and selectively extract pinned ISA references.")
+lazy val generateAPIValidationManifest = taskKey[File]("Record normalized declarations from pinned official API headers.")
+lazy val validateAPISurfaces = taskKey[Unit]("Validate checked-in API declarations against pinned official headers.")
 @transient lazy val generatePTXSources        = taskKey[Seq[File]]("Update checked-in PTX instruction metadata.")
 @transient lazy val generatePTXReferenceTests =
   taskKey[Seq[File]]("Update checked-in PTX documentation conformance tests.")
 @transient lazy val generateAMDGPUSources     = taskKey[Seq[File]]("Update checked-in normalized AMDGPU metadata.")
 @transient lazy val generateAMDGPUGoldenTests =
   taskKey[Seq[File]]("Update the checked-in LLVM AMDGPU golden-test corpus.")
-@transient lazy val generateComputeAPISources =
-  taskKey[Seq[File]]("Update checked-in OpenCL and Level Zero API surfaces.")
+@transient lazy val generateAPISources =
+  taskKey[Seq[File]]("Bootstrap checked-in CUDA, HIP, HSA, Level Zero, and OpenCL API surfaces.")
 @transient lazy val generateSPIRVSources        = taskKey[Seq[File]]("Update checked-in SPIR-V grammar metadata.")
 @transient lazy val generateSPIRVReferenceTests =
   taskKey[Seq[File]]("Update checked-in SPIRV-Tools-derived tests.")
@@ -100,6 +119,7 @@ lazy val codegen = projectMatrix
     Compile / mainClass               := Some("net.kurobako.gemstone.codegen.GenerateAPI"),
     Compile / run / fork              := false,
     libraryDependencies += "org.jsoup" % "jsoup" % jsoupVersion,
+    libraryDependencies += "com.lihaoyi" %% "upickle" % upickleVersion,
     prepareISAReferences              := Def.uncached {
       val _ = ISAReferences.prepare(
         cacheDirectory = (Global / isaReferenceCacheDirectory).value,
@@ -111,6 +131,16 @@ lazy val codegen = projectMatrix
           mesaSha256 = mesaSourceSha256,
           cudaPTXVersion = cudaPTXVersion,
           cudaPTXSha256 = cudaPTXHtmlSha256,
+          cudaAPIVersion = cudaAPIVersion,
+          cudaAPIPackage = cudaAPIPackage,
+          cudaCRTPackage = cudaCRTPackage,
+          cudaDriverDevSha256 = cudaDriverDevSha256,
+          cudaRuntimeDevSha256 = cudaRuntimeDevSha256,
+          cudaCRTDevSha256 = cudaCRTDevSha256,
+          hipVersion = hipVersion,
+          hipSha256 = hipSourceSha256,
+          hsaVersion = hsaVersion,
+          hsaSha256 = hsaSourceSha256,
           amdXMLVersion = amdISAXMLVersion,
           amdXMLSha256 = amdISAXMLSha256,
           openCLHeadersVersion = openCLHeadersVersion,
@@ -126,7 +156,37 @@ lazy val codegen = projectMatrix
         log = streams.value.log
       )
     },
-    generateComputeAPISources := Def.uncached {
+    generateAPISources := Def.uncached {
+      val root     = (LocalRootProject / baseDirectory).value
+      val manifest = generateAPIValidationManifest.value
+      val outputs = Vector(
+        root / "api" / "src" / "main" / "scala" / "net" / "kurobako" / "gemstone" / "cuda" / "CUDA.scala",
+        root / "api" / "src" / "main" / "scala" / "net" / "kurobako" / "gemstone" / "hip" / "HIP.scala",
+        root / "api" / "src" / "main" / "scala" / "net" / "kurobako" / "gemstone" / "hsa" / "HSA.scala",
+        root / "api" / "src" / "main" / "scala" / "net" / "kurobako" / "gemstone" / "opencl" / "OpenCL.scala",
+        root / "api" / "src" / "main" / "scala" / "net" / "kurobako" / "gemstone" / "levelzero" / "LevelZero.scala"
+      )
+      val sourceRoot = root / "api" / "src" / "main" / "scala"
+      val converter = fileConverter.value
+      val classpath = (Compile / fullClasspath).value.map(entry => converter.toPath(entry.data).toString)
+      val java      = file(sys.props("java.home")) / "bin" / "java"
+      val exit      = Process(Seq(
+        java.getAbsolutePath,
+        "-cp",
+        classpath.mkString(sys.props("path.separator")),
+        "net.kurobako.gemstone.codegen.GenerateAPISurfaces",
+        manifest.getAbsolutePath,
+        sourceRoot.getAbsolutePath,
+        cudaAPIVersion,
+        hipVersion,
+        hsaVersion,
+        levelZeroVersion,
+        openCLHeadersVersion
+      )).!
+      require(exit == 0, s"API surface bootstrap exited with $exit")
+      outputs
+    },
+    generateAPIValidationManifest := Def.uncached {
       val root          = (LocalRootProject / baseDirectory).value
       val _             = prepareISAReferences.value
       val referenceRoot = target.value / "isa-references"
@@ -135,28 +195,56 @@ lazy val codegen = projectMatrix
         manifest.isFile && isaReferenceManifestMarkers.forall(IO.read(manifest).contains)
       }.toVector match {
         case Vector(directory) => directory
-        case found             => sys.error(s"expected one prepared compute API reference view, found ${found.size}")
+        case found             => sys.error(s"expected one prepared API reference view, found ${found.size}")
       }
-      val outputs = Vector(
-        root / "api" / "src" / "main" / "scala" / "net" / "kurobako" / "gemstone" / "opencl" / "OpenCL.scala",
-        root / "api" / "src" / "main" / "scala" / "net" / "kurobako" / "gemstone" / "levelzero" / "LevelZero.scala"
-      )
+      val output    = root / "generated" / "manifest" / "official-api-headers.json"
       val converter = fileConverter.value
       val classpath = (Compile / fullClasspath).value.map(entry => converter.toPath(entry.data).toString)
       val java      = file(sys.props("java.home")) / "bin" / "java"
-      val exit      = Process(Seq(
+      val exit = Process(Seq(
         java.getAbsolutePath,
         "-cp",
         classpath.mkString(sys.props("path.separator")),
-        "net.kurobako.gemstone.codegen.GenerateComputeAPIs",
+        "net.kurobako.gemstone.codegen.ValidateAPIs",
         references.getAbsolutePath,
-        outputs(0).getAbsolutePath,
-        outputs(1).getAbsolutePath,
-        openCLHeadersVersion,
-        levelZeroVersion
+        output.getAbsolutePath
       )).!
-      require(exit == 0, s"compute API generator exited with $exit")
-      outputs
+      require(exit == 0, s"API header probe exited with $exit")
+      output
+    },
+    validateAPISurfaces := Def.uncached {
+      val root          = (LocalRootProject / baseDirectory).value
+      val _             = prepareISAReferences.value
+      val referenceRoot = target.value / "isa-references"
+      val references    = (referenceRoot * DirectoryFilter).get().filter { directory =>
+        val manifest = directory / "MANIFEST.tsv"
+        manifest.isFile && isaReferenceManifestMarkers.forall(IO.read(manifest).contains)
+      }.toVector match {
+        case Vector(directory) => directory
+        case found             => sys.error(s"expected one prepared API reference view, found ${found.size}")
+      }
+      val output    = root / "generated" / "manifest" / "official-api-headers.json"
+      val converter = fileConverter.value
+      val classpath = (Compile / fullClasspath).value.map(entry => converter.toPath(entry.data).toString)
+      val java      = file(sys.props("java.home")) / "bin" / "java"
+      val exit = Process(Seq(
+        java.getAbsolutePath,
+        "-cp",
+        classpath.mkString(sys.props("path.separator")),
+        "net.kurobako.gemstone.codegen.ValidateAPIs",
+        "--check",
+        references.getAbsolutePath,
+        output.getAbsolutePath
+      )).!
+      require(exit == 0, s"API header validation exited with $exit")
+      val scalaExit = Process(Seq(
+        java.getAbsolutePath,
+        "-cp",
+        classpath.mkString(sys.props("path.separator")),
+        "net.kurobako.gemstone.codegen.ValidateScalaAPIs",
+        output.getAbsolutePath
+      )).!
+      require(scalaExit == 0, s"Scala API validation exited with $scalaExit")
     }
   )
   .jvmPlatform(scalaVersions = Seq(scala3Version))

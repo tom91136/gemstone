@@ -20,8 +20,11 @@ import java.time.Duration
 import java.util.HexFormat
 import java.util.zip.ZipInputStream
 import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
+import org.apache.commons.compress.archivers.ar.ArArchiveInputStream
+import org.apache.commons.compress.compressors.gzip.GzipCompressorInputStream
 import org.apache.commons.compress.compressors.xz.XZCompressorInputStream
 import scala.util.control.NonFatal
+import scala.jdk.CollectionConverters.*
 
 object ISAReferences {
   final case class Pins(
@@ -31,6 +34,16 @@ object ISAReferences {
       mesaSha256: String,
       cudaPTXVersion: String,
       cudaPTXSha256: String,
+      cudaAPIVersion: String,
+      cudaAPIPackage: String,
+      cudaCRTPackage: String,
+      cudaDriverDevSha256: String,
+      cudaRuntimeDevSha256: String,
+      cudaCRTDevSha256: String,
+      hipVersion: String,
+      hipSha256: String,
+      hsaVersion: String,
+      hsaSha256: String,
       amdXMLVersion: String,
       amdXMLSha256: String,
       openCLHeadersVersion: String,
@@ -77,6 +90,42 @@ object ISAReferences {
           s"https://docs.nvidia.com/cuda/archive/${pins.cudaPTXVersion}/parallel-thread-execution/index.html"
         ),
         pins.cudaPTXSha256
+      ),
+      Artifact(
+        "nvidia-cuda-driver-dev",
+        s"cuda-driver-dev-${pins.cudaAPIVersion.replace('.', '-')}_${pins.cudaAPIPackage}_amd64.deb",
+        URI.create(
+          s"https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2604/x86_64/cuda-driver-dev-${pins.cudaAPIVersion.replace('.', '-')}_${pins.cudaAPIPackage}_amd64.deb"
+        ),
+        pins.cudaDriverDevSha256
+      ),
+      Artifact(
+        "nvidia-cuda-runtime-dev",
+        s"cuda-cudart-dev-${pins.cudaAPIVersion.replace('.', '-')}_${pins.cudaAPIPackage}_amd64.deb",
+        URI.create(
+          s"https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2604/x86_64/cuda-cudart-dev-${pins.cudaAPIVersion.replace('.', '-')}_${pins.cudaAPIPackage}_amd64.deb"
+        ),
+        pins.cudaRuntimeDevSha256
+      ),
+      Artifact(
+        "nvidia-cuda-crt",
+        s"cuda-crt-${pins.cudaAPIVersion.replace('.', '-')}_${pins.cudaCRTPackage}_amd64.deb",
+        URI.create(
+          s"https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2604/x86_64/cuda-crt-${pins.cudaAPIVersion.replace('.', '-')}_${pins.cudaCRTPackage}_amd64.deb"
+        ),
+        pins.cudaCRTDevSha256
+      ),
+      Artifact(
+        "amd-hip",
+        s"HIP-rocm-${pins.hipVersion}.tar.gz",
+        URI.create(s"https://github.com/ROCm/HIP/archive/refs/tags/rocm-${pins.hipVersion}.tar.gz"),
+        pins.hipSha256
+      ),
+      Artifact(
+        "amd-hsa",
+        s"ROCR-Runtime-rocm-${pins.hsaVersion}.tar.gz",
+        URI.create(s"https://github.com/ROCm/ROCR-Runtime/archive/refs/tags/rocm-${pins.hsaVersion}.tar.gz"),
+        pins.hsaSha256
       ),
       Artifact(
         "amd-xml",
@@ -151,6 +200,36 @@ object ISAReferences {
         relative => relative.getNameCount == 1 && relative.getFileName.toString.matches("amdgpu_isa_[a-z0-9_]+\\.xml")
       )
       copyFile(cached("nvidia-ptx"), stage.resolve("nvidia/ptx/index.html"))
+      extractDebXz(
+        cached("nvidia-cuda-driver-dev"),
+        stage.resolve("nvidia/cuda"),
+        relative => relative.toString.endsWith("/include/cuda.h") || relative.toString.contains("/share/doc/")
+      )
+      extractDebXz(
+        cached("nvidia-cuda-runtime-dev"),
+        stage.resolve("nvidia/cuda"),
+        relative => relative.toString.contains("/include/") || relative.toString.contains("/share/doc/")
+      )
+      extractDebXz(
+        cached("nvidia-cuda-crt"),
+        stage.resolve("nvidia/cuda"),
+        relative => relative.toString.contains("/include/crt/") || relative.toString.contains("/share/doc/")
+      )
+      extractTarGz(
+        cached("amd-hip"),
+        stage.resolve("amd/hip"),
+        s"hip-rocm-${pins.hipVersion}",
+        relative => relative == Path.of("LICENSE.md") || relative.startsWith("include/hip")
+      )
+      extractTarGz(
+        cached("amd-hsa"),
+        stage.resolve("amd/hsa"),
+        s"ROCR-Runtime-rocm-${pins.hsaVersion}",
+        relative =>
+          relative == Path.of("LICENSE.txt") || relative == Path.of("runtime/hsa-runtime/LICENSE.md") ||
+            (Option(relative.getParent).contains(Path.of("runtime/hsa-runtime/inc")) &&
+              relative.getFileName.toString.startsWith("hsa") && relative.getFileName.toString.endsWith(".h"))
+      )
       extractZipRoot(
         cached("opencl-headers"),
         stage.resolve("khronos/opencl"),
@@ -274,6 +353,71 @@ object ISAReferences {
     } finally tarInput.close()
   }
 
+  private def extractTarGz(
+      archive: Path,
+      destination: Path,
+      archiveRoot: String,
+      select: Path => Boolean
+  ): Unit = {
+    val _         = Files.createDirectories(destination)
+    val fileInput = new BufferedInputStream(Files.newInputStream(archive))
+    val gzipInput = new GzipCompressorInputStream(fileInput)
+    val tarInput  = new TarArchiveInputStream(gzipInput)
+    var total     = 0L
+    try {
+      var entry = tarInput.getNextEntry
+      while (entry != null) {
+        val relative = archiveRelative(entry.getName, archiveRoot)
+        if (relative.exists(select) && !entry.isDirectory) {
+          require(entry.isFile, s"selected archive entry is not a regular file: ${entry.getName}")
+          require(!entry.isSymbolicLink && !entry.isLink, s"archive links are not permitted: ${entry.getName}")
+          val target = safeTarget(destination, relative.get)
+          total += copyEntry(tarInput, target, entry.getSize)
+          require(total <= MaximumTotalBytes, s"archive expands beyond $MaximumTotalBytes bytes: $archive")
+        }
+        entry = tarInput.getNextEntry
+      }
+    } finally tarInput.close()
+  }
+
+  private def extractDebXz(archive: Path, destination: Path, select: Path => Boolean): Unit = {
+    val _       = Files.createDirectories(destination)
+    val arInput = new ArArchiveInputStream(new BufferedInputStream(Files.newInputStream(archive)))
+    var found   = false
+    try {
+      var entry = arInput.getNextEntry
+      while (entry != null && !found) {
+        if (entry.getName == "data.tar.xz") {
+          val xzInput = XZCompressorInputStream.builder()
+            .setInputStream(arInput)
+            .setDecompressConcatenated(true)
+            .get()
+          val tarInput = new TarArchiveInputStream(xzInput)
+          var total    = 0L
+          try {
+            var tarEntry = tarInput.getNextEntry
+            while (tarEntry != null) {
+              val relative = Option.when(!tarEntry.isDirectory)(safeRelative(tarEntry.getName.stripPrefix("./")))
+              if (relative.exists(select)) {
+                require(tarEntry.isFile, s"selected archive entry is not a regular file: ${tarEntry.getName}")
+                require(
+                  !tarEntry.isSymbolicLink && !tarEntry.isLink,
+                  s"archive links are not permitted: ${tarEntry.getName}"
+                )
+                val target = safeTarget(destination, relative.get)
+                total += copyEntry(tarInput, target, tarEntry.getSize)
+                require(total <= MaximumTotalBytes, s"archive expands beyond $MaximumTotalBytes bytes: $archive")
+              }
+              tarEntry = tarInput.getNextEntry
+            }
+          } finally tarInput.close()
+          found = true
+        } else entry = arInput.getNextEntry
+      }
+    } finally arInput.close()
+    require(found, s"Debian archive has no data.tar.xz payload: $archive")
+  }
+
   private def extractZip(archive: Path, destination: Path, select: Path => Boolean): Unit = {
     val _        = Files.createDirectories(destination)
     val zipInput = new ZipInputStream(new BufferedInputStream(Files.newInputStream(archive)))
@@ -374,10 +518,15 @@ object ISAReferences {
 
   private def renderManifest(artifacts: Vector[Artifact], pins: Pins): String = {
     val header = Vector(
-      "format\t1",
+      "format\t2",
       s"llvm-version\t${pins.llvmVersion}",
       s"mesa-version\t${pins.mesaVersion}",
       s"cuda-ptx-version\t${pins.cudaPTXVersion}",
+      s"cuda-api-version\t${pins.cudaAPIVersion}",
+      s"cuda-api-package\t${pins.cudaAPIPackage}",
+      s"cuda-crt-package\t${pins.cudaCRTPackage}",
+      s"hip-version\t${pins.hipVersion}",
+      s"hsa-version\t${pins.hsaVersion}",
       s"amd-xml-version\t${pins.amdXMLVersion}",
       s"opencl-headers-version\t${pins.openCLHeadersVersion}",
       s"level-zero-version\t${pins.levelZeroVersion}",
@@ -405,6 +554,19 @@ object ISAReferences {
     require(Files.isRegularFile(output.resolve("mesa/licenses/MIT")), "Mesa MIT licence is absent")
     require(Files.isRegularFile(output.resolve("amd/xml/amdgpu_isa_rdna2.xml")), "AMD RDNA2 XML is absent")
     require(Files.isRegularFile(output.resolve("nvidia/ptx/index.html")), "NVIDIA PTX specification is absent")
+    require(hasFile(output.resolve("nvidia/cuda"), "cuda.h"), "NVIDIA CUDA Driver header is absent")
+    require(hasFile(output.resolve("nvidia/cuda"), "cuda_runtime_api.h"), "NVIDIA CUDA Runtime header is absent")
+    require(Files.isRegularFile(output.resolve("amd/hip/include/hip/hip_runtime_api.h")), "HIP header is absent")
+    require(Files.isRegularFile(output.resolve("amd/hip/LICENSE.md")), "HIP licence is absent")
+    require(
+      Files.isRegularFile(output.resolve("amd/hsa/runtime/hsa-runtime/inc/hsa.h")),
+      "HSA core header is absent"
+    )
+    require(
+      Files.isRegularFile(output.resolve("amd/hsa/runtime/hsa-runtime/inc/hsa_ext_amd.h")),
+      "HSA AMD extension header is absent"
+    )
+    require(Files.isRegularFile(output.resolve("amd/hsa/LICENSE.txt")), "HSA licence is absent")
     require(Files.isRegularFile(output.resolve("khronos/opencl/CL/cl.h")), "OpenCL headers are absent")
     require(Files.isRegularFile(output.resolve("khronos/opencl/LICENSE")), "OpenCL headers licence is absent")
     require(Files.isRegularFile(output.resolve("oneapi/level-zero/include/ze_api.h")), "Level Zero header is absent")
@@ -423,6 +585,15 @@ object ISAReferences {
 
   private def requireSha256(id: String, value: String): Unit =
     require(value.matches("[0-9a-f]{64}"), s"$id: invalid SHA-256 pin: $value")
+
+  private def hasFile(root: Path, name: String): Boolean = {
+    if (!Files.isDirectory(root)) false
+    else {
+      val stream = Files.walk(root)
+      try stream.iterator().asScala.exists(path => Files.isRegularFile(path) && path.getFileName.toString == name)
+      finally stream.close()
+    }
+  }
 
   private def sha256(path: Path): String = {
     val digest = MessageDigest.getInstance("SHA-256")
