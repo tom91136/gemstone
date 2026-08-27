@@ -31,6 +31,15 @@ object GenerateAmdGpuIsa {
   )
   private final case class SoppRule(prefix: Long, opcodeShift: Int, immediateBits: Int)
   private final case class Extracted(records: Vector[Instruction], acoCount: Int, xmlCount: Int, sopp: SoppRule)
+  private final case class Field(name: String)
+  private final case class InstructionForm(
+      opcode: String,
+      definitionName: String,
+      caseName: String,
+      fields: Vector[Field],
+      operandCount: Int,
+      metadataIndex: Int
+  )
 
   def main(arguments: Array[String]): Unit = arguments.toVector match {
     case Vector(references, exporter, output) =>
@@ -39,20 +48,9 @@ object GenerateAmdGpuIsa {
       write(catalog, render(result.records, result.acoCount, result.xmlCount, result.sopp))
       write(
         catalog.resolveSibling("Instructions.scala"),
-        GenerateInstructionAdt.render(
-          result.records.map(_.name),
-          GenerateInstructionAdt.Shape(
-            packageName = "net.kurobako.gemstone.isa.amdgpu.common",
-            sourceDescription = "the pinned Mesa ACO and AMD machine-readable ISA inputs",
-            syntaxType = "Instruction",
-            argumentsType = "InstructionArguments",
-            opcodeType = "Opcode",
-            keyExpression = "normalizeOpcode(value.opcode.value)",
-            argumentsExpression = "InstructionArguments(value.operands, value.modifiers)",
-            opcodeExpression = opcode => s"Opcode.unsafe(\"$opcode\")"
-          )
-        )
+        renderInstructions(result.records)
       )
+      write(catalog.getParent.getParent.getParent.resolve("Architectures.scala"), renderArchitectures())
     case _ =>
       throw new IllegalArgumentException(
         "usage: GenerateAmdGpuIsa <prepared-references> <aco-exporter.py> <output.scala>"
@@ -192,47 +190,363 @@ object GenerateAmdGpuIsa {
     SoppRule(java.lang.Long.parseLong(prefixBits, 2) << prefixShift, opcodeShift, immediateBits)
   }
 
-  private def render(records: Vector[Instruction], acoCount: Int, xmlCount: Int, sopp: SoppRule): String = {
-    val chunks = records.grouped(200).toVector.map { group =>
-      val data = group.map(encode).mkString("\n")
-      s"\"\"\"$data\"\"\""
-    }
+  private def render(records: Vector[Instruction], acoCount: Int, xmlCount: Int, sopp: SoppRule): String =
     s"""|package net.kurobako.gemstone.isa.amdgpu.common.generated
         |
-        |import net.kurobako.gemstone.isa.amdgpu.common.*
+        |// Generated encoding constants from pinned Mesa ACO inputs. Instruction metadata is attached
+        |// directly to generated InstructionDef cases in Instructions.scala. Do not edit.
+        |private[amdgpu] val MesaAcoRecordCount: Int = $acoCount
+        |private[amdgpu] val AmdXmlRecordCount: Int = $xmlCount
+        |private[amdgpu] val MetadataRecordCount: Int = ${records.size}
+        |private[amdgpu] val SoppEncodingPrefix: Long = ${sopp.prefix}L
+        |private[amdgpu] val SoppOpcodeShift: Int = ${sopp.opcodeShift}
+        |private[amdgpu] val SoppImmediateBits: Int = ${sopp.immediateBits}
+        |""".stripMargin
+
+  private def renderInstructions(records: Vector[Instruction]): String = {
+    val grouped      = records.groupBy(_.name).toVector.sortBy(_._1)
+    val metadataRows = grouped.map { case (_, definitions) =>
+      s"\"\"\"${definitions.map(encodeMetadata).mkString("\n")}\"\"\""
+    }
+    val forms            = instructionForms(records)
+    val definitionGroups = forms
+      .groupBy(_.opcode)
+      .toVector
+      .sortBy(_._1)
+      .map { case (_, opcodeForms) => opcodeForms.sortBy(_.operandCount) }
+    val definitionReferences = definitionGroups.grouped(100).zipWithIndex.flatMap { case (groups, chunkIndex) =>
+      groups.map(forms => forms.head.opcode -> s"InstructionDefs$chunkIndex.${forms.head.definitionName}")
+    }.toMap
+    val definitionChunks = definitionGroups.grouped(100).zipWithIndex.map { case (groups, chunkIndex) =>
+      renderDefinitionChunk(chunkIndex, groups)
+    }.toVector
+    val definitionChunkNames =
+      definitionChunks.indices.map(index => s"InstructionDefs$index.definitions").mkString(", ")
+    val instructionCases = forms.map(form => renderInstructionCase(form, definitionReferences(form.opcode)))
+    val metadataChunks   = metadataRows.grouped(100).zipWithIndex.map { case (rows, index) =>
+      s"private val MetadataRows$index: Vector[String] = Vector(\n  ${rows.mkString(",\n  ")}\n)"
+    }.toVector
+    val metadataChunkNames = metadataChunks.indices.map(index => s"MetadataRows$index").mkString(", ")
+    s"""|// Generated from the pinned Mesa ACO and AMD machine-readable ISA inputs. Do not edit by hand.
+        |package net.kurobako.gemstone.isa.amdgpu.common
         |
-        |// Generated from pinned Mesa ACO and AMD machine-readable ISA inputs. Do not edit.
-        |object Database extends InstructionDatabase {
-        |  val mesaAcoRecordCount: Int = $acoCount
-        |  val amdXmlRecordCount: Int = $xmlCount
-        |  override val soppEncodingPrefix: Long = ${sopp.prefix}L
-        |  override val soppOpcodeShift: Int = ${sopp.opcodeShift}
-        |  override val soppImmediateBits: Int = ${sopp.immediateBits}
+        |enum InstructionDecodeError {
+        |  case UnknownOpcode(opcode: String)
+        |  case InvalidOperandCount(opcode: String, expected: Vector[Int], actual: Int)
+        |  case AmbiguousForms(opcode: String, definitions: Vector[InstructionDef])
+        |}
         |
-        |  private val chunks: Vector[String] = Vector(
-        |    ${chunks.mkString(",\n    ")}
-        |  )
+        |private final case class InstructionFormDecoder(
+        |    val operandCount: Int,
+        |    construct: (Vector[Operand], Vector[Modifier]) => Instruction
+        |) {
+        |  def decode(operands: Vector[Operand], mods: Vector[Modifier]): Option[Instruction] =
+        |    Option.when(operands.size == operandCount)(construct(operands, mods))
+        |}
         |
-        |  override lazy val instructions: Vector[InstructionInfo] = chunks.flatMap(_.linesIterator.map(decode).toVector)
+        |final class Decoder private[common] (forms: Vector[InstructionFormDecoder]) {
+        |  val operandCounts: Vector[Int] = forms.map(_.operandCount).distinct.sorted
         |
-        |  private def decode(row: String): InstructionInfo = {
-        |    val columns = row.split("\\t", -1)
-        |    val operands = if (columns(6).isEmpty) Vector.empty else columns(6).split(';').toVector.map { value =>
-        |      val fields = value.split(",", -1)
-        |      OperandInfo(option(fields(0)), fields(1), fields(2).toInt, fields(3) == "1", fields(4) == "1", fields(5) == "1")
-        |    }
-        |    InstructionInfo(
-        |      columns(0), Generation.valueOf(columns(1)), columns(2), columns(3), columns(4).toInt, operands,
-        |      option(columns(5)), MetadataSource.valueOf(columns(7))
-        |    )
+        |  def apply(operands: Vector[Operand], mods: Vector[Modifier]): Vector[Instruction] =
+        |    forms.flatMap(_.decode(operands, mods))
+        |}
+        |
+        |${metadataChunks.mkString("\n\n")}
+        |
+        |private lazy val DefinitionMetadata: Vector[Metadata] =
+        |  Vector($metadataChunkNames).flatten.map(Metadata.apply)
+        |private def metadata(index: Int): Metadata = DefinitionMetadata(index)
+        |private def form(
+        |    operandCount: Int
+        |)(construct: (Vector[Operand], Vector[Modifier]) => Instruction): InstructionFormDecoder =
+        |  InstructionFormDecoder(operandCount, construct)
+        |private def decoder(forms: InstructionFormDecoder*): Decoder = new Decoder(forms.toVector)
+        |
+        |sealed abstract class InstructionDef private[common] (
+        |    val opcode: String,
+        |    val decoder: Decoder,
+        |    val meta: Metadata
+        |)
+        |
+        |${definitionChunks.mkString("\n\n")}
+        |
+        |val Instructions: Vector[InstructionDef] =
+        |  Vector($definitionChunkNames).flatten
+        |
+        |object InstructionDef {
+        |  private lazy val ByOpcode: Map[String, Vector[InstructionDef]] = Instructions.groupBy(_.opcode)
+        |
+        |  def forOpcode(opcode: String): Vector[InstructionDef] =
+        |    ByOpcode.getOrElse(normalizeOpcode(opcode), Vector.empty)
+        |}
+        |
+        |enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
+        |${instructionCases.mkString("\n")}
+        |
+        |  def mods: Vector[Modifier]
+        |  final val opcode: String = definition.opcode
+        |  final val decoder: Decoder = definition.decoder
+        |  final val meta: Metadata = definition.meta
+        |  final val operands: Vector[Operand] = operandValues.toVector
+        |}
+        |
+        |object Instruction {
+        |  def decode(
+        |      opcode: String,
+        |      operands: Vector[Operand],
+        |      mods: Vector[Modifier] = Vector.empty
+        |  ): Either[InstructionDecodeError, Instruction] = {
+        |    val name = normalizeOpcode(opcode)
+        |    decodeCompatible(name, operands, mods, name)
         |  }
         |
-        |  private def option(value: String): Option[String] = if (value.isEmpty) None else Some(value)
+        |  private val EncodingSuffixes: Vector[String] = Vector("_dpp8", "_sdwa", "_dpp", "_e64", "_e32")
+        |
+        |  private def decodeCompatible(
+        |      name: String,
+        |      operands: Vector[Operand],
+        |      mods: Vector[Modifier],
+        |      original: String
+        |  ): Either[InstructionDecodeError, Instruction] =
+        |    decodeCanonical(name, operands, mods) match {
+        |      case Left(InstructionDecodeError.UnknownOpcode(_)) =>
+        |        EncodingSuffixes.collectFirst {
+        |          case suffix if name.endsWith(suffix) => name.dropRight(suffix.length) -> Modifier(suffix.drop(1))
+        |        } match {
+        |          case Some((canonical, modifier)) => decodeCompatible(canonical, operands, modifier +: mods, original)
+        |          case None => compatibilityAlias(name) match {
+        |            case Some(canonical) => decodeCanonical(canonical, operands, mods)
+        |            case None            => Left(InstructionDecodeError.UnknownOpcode(original))
+        |          }
+        |        }
+        |      case result => result
+        |    }
+        |
+        |  // Reviewed aliases accepted by older AMD assemblers; the enum retains current canonical names.
+        |  private def compatibilityAlias(name: String): Option[String] = name match {
+        |    case value if value.startsWith("v_cmpsx_") => Some("v_cmpx_" + value.drop(8))
+        |    case value if value.startsWith("v_cmps_")  => Some("v_cmp_" + value.drop(7))
+        |    case "buffer_wbinvl1_sc"                    => Some("buffer_wbinvl1")
+        |    case "export"                               => Some("exp")
+        |    case "v_accvgpr_read_b32"                   => Some("v_accvgpr_read")
+        |    case "v_accvgpr_write_b32"                  => Some("v_accvgpr_write")
+        |    case "v_addc_u32"                           => Some("v_add_co_ci_u32")
+        |    case "v_subb_u32"                           => Some("v_sub_co_ci_u32")
+        |    case "v_subbrev_u32"                        => Some("v_subrev_co_ci_u32")
+        |    case "v_subrev_i32"                         => Some("v_subrev_u32")
+        |    case _                                        => None
+        |  }
+        |
+        |  private def decodeCanonical(
+        |      name: String,
+        |      operands: Vector[Operand],
+        |      mods: Vector[Modifier]
+        |  ): Either[InstructionDecodeError, Instruction] =
+        |    InstructionDef.forOpcode(name) match {
+        |      case Vector() => Left(InstructionDecodeError.UnknownOpcode(name))
+        |      case candidates =>
+        |        val matches = candidates.flatMap(definition => definition.decoder(operands, mods))
+        |        matches match {
+        |          case Vector(instruction) => Right(instruction)
+        |          case Vector() => Left(
+        |            InstructionDecodeError.InvalidOperandCount(
+        |              name, candidates.flatMap(_.decoder.operandCounts).distinct.sorted, operands.size
+        |            )
+        |          )
+        |          case _ => Left(InstructionDecodeError.AmbiguousForms(name, matches.map(_.definition)))
+        |        }
+        |    }
         |}
         |""".stripMargin
   }
 
-  private def encode(record: Instruction): String = {
+  private def instructionForms(records: Vector[Instruction]): Vector[InstructionForm] = {
+    val grouped = records.groupBy(_.name).toVector.sortBy(_._1)
+    val names   = uniqueCaseNames(grouped.map(_._1))
+    grouped.zipWithIndex.flatMap { case ((opcode, definitions), metadataIndex) =>
+      val rawSignatures = definitions.map(_.operands.filter(!_.implicitOperand)).distinct
+      val nonEmpty      = rawSignatures.filter(_.nonEmpty)
+      val counts        = (nonEmpty.map(_.size) ++ compatibilityOperandCounts(opcode)).distinct.sorted match {
+        case Vector() => Vector(0)
+        case values   => values
+      }
+      counts.map { operandCount =>
+        val signatures = nonEmpty.filter(_.size == operandCount)
+        val fields     = Vector.tabulate(operandCount) { index =>
+          val operands = signatures.flatMap(_.lift(index))
+          Field(preferredFieldName(opcode, index, operands, operandCount))
+        }
+        val caseName = if (counts.size == 1) names(opcode) else s"${names(opcode)}_$operandCount"
+        InstructionForm(opcode, names(opcode), caseName, uniqueFields(fields), operandCount, metadataIndex)
+      }
+    }
+  }
+
+  /** Reviewed assembly-syntax overlay for information absent from ACO's physical opcode model or conditional operands
+    * that AMD XML marks as present in every encoding. LLVM remains an independent oracle and is deliberately not read
+    * by this production generator.
+    */
+  private def compatibilityOperandCounts(opcode: String): Vector[Int] = opcode match {
+    case value if value.startsWith("ds_") && value.contains("_src2_")           => Vector(1)
+    case "s_endpgm"                                                             => Vector(0, 1)
+    case "image_atomic_rsub"                                                    => Vector(3)
+    case value if value.startsWith("buffer_load_")                              => Vector(3, 4)
+    case value if value.startsWith("flat_atomic_")                              => Vector(2, 3, 4)
+    case value if value.startsWith("global_atomic_")                            => Vector(3, 4)
+    case value if value.startsWith("global_load_lds_")                          => Vector(2)
+    case value if value.startsWith("global_load_")                              => Vector(2, 3)
+    case value if value.startsWith("scratch_load_lds_")                         => Vector(2)
+    case value if value.startsWith("scratch_load_")                             => Vector(2, 3)
+    case "flat_load_monitor_b128"                                               => Vector(2)
+    case "flat_load_monitor_b32" | "flat_load_monitor_b64"                      => Vector(2, 3)
+    case "flat_prefetch_b8"                                                     => Vector(1, 2)
+    case "v_add_i32" | "v_add_u32" | "v_sub_i32" | "v_sub_u32" | "v_subrev_u32" => Vector(3, 4)
+    case value if value.startsWith("v_cmpx_ne_")                                => Vector(2, 3)
+    case value if value.startsWith("v_cmpx_t_")                                 => Vector(2, 3)
+    case "v_dual_cndmask_b32"                                                   => Vector(3, 4)
+    case _                                                                      => Vector.empty
+  }
+
+  private def renderDefinitionChunk(index: Int, groups: Vector[Vector[InstructionForm]]): String = {
+    val cases      = groups.map(renderDefinitionCase)
+    val references = groups.map(_.head.definitionName).mkString(", ")
+    s"""|private object InstructionDefs$index {
+        |${cases.mkString("\n")}
+        |
+        |  val definitions: Vector[InstructionDef] = Vector($references)
+        |}""".stripMargin
+  }
+
+  private def renderDefinitionCase(forms: Vector[InstructionForm]): String = {
+    val first    = forms.head
+    val decoders = forms.map { form =>
+      val arguments        = form.fields.indices.map(index => s"operands($index)") :+ "mods"
+      val operandParameter = if (form.operandCount == 0) "_" else "operands"
+      s"form(${form.operandCount})(($operandParameter, mods) => Instruction.${form.caseName}(${arguments.mkString(", ")}))"
+    }
+    s"""|  case object ${first.definitionName} extends InstructionDef(
+        |    ${literal(first.opcode)},
+        |    decoder(${decoders.mkString(", ")}),
+        |    metadata(${first.metadataIndex})
+        |  )""".stripMargin
+  }
+
+  private def renderInstructionCase(form: InstructionForm, definitionReference: String): String = {
+    val fields          = form.fields.map(field => s"${field.name}: Operand") :+ "mods: Vector[Modifier]"
+    val parentArguments = form.fields.map(_.name)
+    val parent          =
+      if (parentArguments.isEmpty) s"Instruction($definitionReference)"
+      else s"Instruction($definitionReference, ${parentArguments.mkString(", ")})"
+    s"  case ${form.caseName}(${fields.mkString(", ")}) extends $parent"
+  }
+
+  private def preferredFieldName(
+      opcode: String,
+      index: Int,
+      operands: Vector[Operand],
+      arity: Int
+  ): String = {
+    val fields                            = operands.map(_.field.toUpperCase).filter(_.nonEmpty)
+    val output                            = operands.exists(_.output)
+    val input                             = operands.exists(_.input)
+    def sourceName(position: Int): String =
+      if (arity == 1) "src"
+      else Vector("srcA", "srcB", "srcC", "srcD", "srcE").lift(position).getOrElse(s"src${position + 1}")
+
+    fields.collectFirst {
+      case "VDST" | "SDST" | "DST"                                                             => "dest"
+      case "VDSTX"                                                                             => "destX"
+      case "VDSTY"                                                                             => "destY"
+      case "SRC0" | "SSRC0" | "VSRC0" | "SRCX0" | "SRCY0" | "SCALE_SRC0"                       => "srcA"
+      case "SRC1" | "SSRC1" | "VSRC1" | "VSRCX1" | "VSRCY1" | "SCALE_SRC1"                     => "srcB"
+      case "SRC2" | "VSRC2" | "VSRCX2" | "VSRCY2"                                              => "srcC"
+      case "SRC3" | "VSRC3"                                                                    => "srcD"
+      case "VADDR" | "SADDR" | "ADDR" if opcode.contains("store") || opcode.contains("atomic") => "destAddr"
+      case "VADDR" | "SADDR" | "ADDR"                                                          => "srcAddr"
+      case "SRSRC" | "RSRC"                                                                    => "resource"
+      case "SOFFSET" | "IOFFSET"                                                               => "offset"
+      case "SSAMP" | "SAMP"                                                                    => "sampler"
+      case "SIMM16" | "LITERAL" | "LITERAL64"             => if (opcode.contains("branch")) "target" else "imm"
+      case "TGT"                                          => "target"
+      case "SBASE"                                        => "base"
+      case "ATTR"                                         => "attr"
+      case "VDATA" | "SDATA" | "DATA" if output && !input => "dest"
+      case "VDATA" | "SDATA" | "DATA" if input && !output => "src"
+      case "VDATA" | "SDATA" | "DATA"                     => "data"
+      case "DATA0"                                        => "srcA"
+      case "DATA1"                                        => "srcB"
+    }.getOrElse {
+      if (output && !input) "dest"
+      else if (input) sourceName(index)
+      else if (arity == 1) "value"
+      else s"value${index + 1}"
+    }
+  }
+
+  private def uniqueFields(fields: Vector[Field]): Vector[Field] = {
+    val seen = scala.collection.mutable.Map.empty[String, Int]
+    fields.map { field =>
+      val count = seen.getOrElse(field.name, 0) + 1
+      seen(field.name) = count
+      field.copy(name = if (count == 1) field.name else s"${field.name}$count")
+    }
+  }
+
+  private def uniqueCaseNames(opcodes: Vector[String]): Map[String, String] = {
+    val bases      = opcodes.map(opcode => opcode -> scalaCaseName(opcode))
+    val collisions = bases.groupMap { case (_, name) => name.toLowerCase(java.util.Locale.ROOT) }(_._1)
+    bases.map { case (opcode, base) =>
+      val alternatives = collisions(base.toLowerCase(java.util.Locale.ROOT)).sorted
+      opcode -> (if (alternatives.size == 1) base else s"${base}_${alternatives.indexOf(opcode) + 1}")
+    }.toMap
+  }
+
+  private def scalaCaseName(opcode: String): String = {
+    val words = opcode.split("[^A-Za-z0-9]+").toVector.filter(_.nonEmpty)
+    val value = words.map(word => s"${word.head.toUpper}${word.tail}").mkString
+    if (value.isEmpty) "Opcode" else if (value.head.isDigit) s"Opcode$value" else value
+  }
+
+  private def renderArchitectures(): String = {
+    val families = Vector(
+      "gfx6"  -> "Gfx6",
+      "gfx7"  -> "Gfx7",
+      "gfx8"  -> "Gfx8",
+      "gfx9"  -> "Gfx9",
+      "gfx10" -> "Gfx10",
+      "gfx11" -> "Gfx11",
+      "gfx12" -> "Gfx12",
+      "cdna1" -> "Cdna1",
+      "cdna2" -> "Cdna2",
+      "cdna3" -> "Cdna3",
+      "cdna4" -> "Cdna4",
+      "cdna5" -> "Cdna5"
+    )
+    families.map { case (packageName, generation) =>
+      s"""|package net.kurobako.gemstone.isa.amdgpu.$packageName {
+          |  export net.kurobako.gemstone.isa.amdgpu.common.Api.*
+          |  val Version: net.kurobako.gemstone.isa.amdgpu.common.Generation =
+          |    net.kurobako.gemstone.isa.amdgpu.common.Generation.$generation
+          |  val Instructions: Vector[net.kurobako.gemstone.isa.amdgpu.common.InstructionDef] =
+          |    net.kurobako.gemstone.isa.amdgpu.common.instructionsFor(Version)
+          |  object Isa extends net.kurobako.gemstone.isa.amdgpu.common.Architecture(Version)
+          |}""".stripMargin
+    }.mkString("// Generated from the normalized AMDGPU generation set. Do not edit by hand.\n", "\n\n", "\n")
+  }
+
+  private def literal(value: String): String = {
+    val escaped = value.flatMap {
+      case '"'  => "\\\""
+      case '\\' => "\\\\"
+      case '\n' => "\\n"
+      case '\r' => "\\r"
+      case '\t' => "\\t"
+      case char => char.toString
+    }
+    s"\"$escaped\""
+  }
+
+  private def encodeMetadata(record: Instruction): String = {
     val operands = record.operands.map { operand =>
       Vector(
         operand.field,
@@ -244,7 +558,6 @@ object GenerateAmdGpuIsa {
       ).mkString(",")
     }.mkString(";")
     Vector(
-      safeField(record.name),
       safeField(record.generation),
       safeField(record.target),
       safeField(record.format),

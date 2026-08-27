@@ -279,7 +279,7 @@ object PtxLowerer {
     }
     for {
       operation <- lowered
-      predicate <- lowerPredicate(instruction.predication)
+      predicate <- lowerPredicate(instruction.pred)
     } yield PtxExecutable(operation, predicate)
   }
 

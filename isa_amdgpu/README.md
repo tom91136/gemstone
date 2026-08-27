@@ -6,23 +6,27 @@ tests are checked in so normal compilation is offline and upstream changes produ
 - `net.kurobako.gemstone.isa.amdgpu.gfx6` through `gfx12`; and
 - `net.kurobako.gemstone.isa.amdgpu.cdna1` through `cdna5`.
 
-Each package exports the same `Isa`, `Parser`, `Printer`, `Program`, `Statement`, `Instruction`, `Opcode`, `Operand`,
-`Modifier`, and catalog vocabulary as the PTX side. `Isa.catalog` is filtered to the package's family, and SOPP
-encoding/decoding is bound to that family. Reusable machinery and the complete generated metadata database live in
-the implementation package `amdgpu.common`; clients should import a versioned package.
+Each package exports the same `Isa`, `Parser`, `Printer`, `Program`, `Statement`, generated `Instruction`, `Operand`,
+and `Modifier` vocabulary as the PTX side. Its top-level `Version` identifies the generation and top-level
+`Instructions` contains only metadata for that family. SOPP encoding/decoding remains bound to the package family.
+Reusable machinery and private aggregate metadata live in `amdgpu.common`; clients should import a versioned package.
 
 ## Generated inputs
 
-`generateAmdGpuSources` normalizes two independently pinned sources into one internal `InstructionDatabase`, from
-which the version packages expose family-scoped `InstructionCatalog` views:
+`generateAmdGpuSources` normalizes two independently pinned sources into checked-in instruction enum, metadata, and
+per-family package sources:
 
 - Mesa ACO contributes 3,821 GFX6–GFX9 opcode/format records. `codegen/amdgpu/export_aco.py` loads the pinned
   `aco_opcodes.py` model and exports only primitive data; the Scala generator owns normalization.
 - AMD's machine-readable XML contributes 40,059 GFX10+, RDNA, and CDNA instruction-encoding records, including
   typed operand direction, width, implicitness, format, opcode, and functional group.
 
-The public AST deliberately has one `Instruction` node with an `Opcode`, typed `Operand` values, and orthogonal
-`Modifier` values. It does not generate a class for every opcode/operand combination.
+The public AST has one generated Scala 3 `Instruction` enum with one parameterized case per normalized operand form.
+Each case exposes meaningful positional fields such as `dest`, `srcA`, `srcB`, `srcAddr`, `destAddr`, and `mods`.
+A closed `InstructionDef` descriptor set has one singleton per canonical opcode and owns that opcode's decoder and
+metadata; `Instructions` is its sole ordered enumeration. Each decoded instruction exposes its descriptor, opcode,
+decoder, metadata, and operand vector directly. Text and binary decoding construct these cases or return a typed
+error. There is no raw unknown-instruction node, detached metadata catalog, or second “known instruction” layer.
 
 ## Version granularity
 
@@ -35,9 +39,11 @@ CDNA remains a separate family sequence because the official XML identifies it i
 retain their exact XML subfamily (`rdna1`, `rdna2`, `rdna3_5`, and so on), and the codec rejects a family-level
 operation if those records disagree instead of choosing one silently.
 
-`generateAmdGpuGoldenTests` scans the pinned LLVM `llvm/test/MC/AMDGPU` tree. It deduplicates checks, samples evenly
-across GFX6–GFX12, preserves extra SOPP coverage, and currently generates 1,605 assembly/exact-byte oracle cases.
-The same generated suite compiles and runs on JVM and Scala Native.
+`generateAmdGpuGoldenTests` scans the pinned LLVM `llvm/test/MC/AMDGPU` tree as an independent oracle. It currently
+retains 308,161 architecture-tagged assembly entries. The JVM suite checks every entry; Scala Native runs the focused
+parser, descriptor, codec, and semantics suites. A checked, bounded inventory records the 170 oracle entries whose 15
+opcodes are genuinely absent from the pinned Mesa/AMD production metadata, so unsupported input is never silently
+skipped or admitted into the AST.
 
 ## Current binary boundary
 

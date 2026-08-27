@@ -433,192 +433,221 @@ object GeneratePtxIsa {
           )
         )
       case shape => Vector(shape)
+    }.map(shape => shape.copy(fields = shape.fields.map(field => field.copy(name = abbreviateFieldName(field.name)))))
+    def operandValues(shape: InstructionShape): String = {
+      val segments           = ListBuffer.empty[String]
+      val fixed              = ListBuffer.empty[String]
+      def flushFixed(): Unit =
+        if (fixed.nonEmpty) {
+          segments += fixed.mkString("Vector(", ", ", ")")
+          fixed.clear()
+        }
+      shape.fields.foreach { field =>
+        if (field.optional) {
+          flushFixed()
+          segments += s"${field.name}.toVector"
+        } else fixed += field.name
+      }
+      flushFixed()
+      val defaultBody = if (segments.isEmpty) "Vector.empty" else segments.mkString(" ++ ")
+      shape.caseName match {
+        case "CpAsyncBulkMBarrier" =>
+          "Vector(destAddr, srcAddr, size) ++ ignoredBytesLeft.toVector ++ ignoredBytesRight.toVector ++ Vector(barrierAddr) ++ ctaMask.toVector ++ cachePolicy.toVector"
+        case "CpAsyncBulkGroup" =>
+          "Vector(destAddr, srcAddr, size) ++ cachePolicy.toVector ++ byteMask.toVector"
+        case "CpAsyncBulkTensorMBarrier" =>
+          "Vector(destAddr, tensorMapAndCoordinates, barrierAddr) ++ im2colInfo.toVector ++ ctaMask.toVector ++ cachePolicy.toVector"
+        case "CpAsyncBulkTensorGroup" =>
+          "Vector(tensorMapAndCoordinates, srcAddr) ++ cachePolicy.toVector"
+        case "MbarrierTestWait" =>
+          "Vector(completion) ++ reportValue.toVector ++ Vector(barrierAddr, stateOrPhase)"
+        case "MbarrierTryWait" =>
+          "Vector(completion) ++ reportValue.toVector ++ Vector(barrierAddr, stateOrPhase) ++ timeHint.toVector"
+        case "Tcgen05Mma" =>
+          "Vector(destAddr, srcA, srcBDesc, instDesc) ++ scaleAAddr.toVector ++ scaleBAddr.toVector ++ disabledOutputLanes.toVector ++ Vector(enableInputD) ++ scaleInputD.toVector"
+        case "Tcgen05MmaSp" =>
+          "Vector(destAddr, srcA, srcBDesc, sparseMetadataAddr, instDesc) ++ scaleAAddr.toVector ++ scaleBAddr.toVector ++ disabledOutputLanes.toVector ++ Vector(enableInputD) ++ scaleInputD.toVector"
+        case _ => defaultBody
+      }
     }
     val cases = shapes.map { shape =>
       val fields = shape.fields.map { field =>
         s"${field.name}: ${if (field.optional) "Option[Operand]" else "Operand"}"
       }
-      s"  case ${shape.caseName}(${(fields ++ Vector("modifiers: Vector[Modifier]", "predication: Option[Predication]")).mkString(", ")})"
+      val parameters      = (fields ++ Vector("mods: Vector[Modifier]", "pred: Option[Predication]")).mkString(", ")
+      val constructorArgs =
+        if (shape.fields.isEmpty) ""
+        else if (shape.fields.forall(!_.optional)) s", ${shape.fields.map(_.name).mkString(", ")}"
+        else s", (${operandValues(shape)})*"
+      s"  case ${shape.caseName}($parameters) extends Instruction(InstructionDef.${shape.caseName}$constructorArgs)"
     }
-    def pattern(shape: InstructionShape, tail: Vector[String]): String = {
-      val ignored = shape.fields.map(_ => "_")
-      s"${shape.caseName}(${(ignored ++ tail).mkString(", ")})"
-    }
-    val opcodes  = shapes.map(shape => s"    case ${pattern(shape, Vector("_", "_"))} => ${literal(shape.opcode)}")
-    val operands = shapes.map { shape =>
-      val values =
-        shape.fields.map(field => if (field.optional) s"${field.name}.toVector" else s"Vector(${field.name})")
-      val defaultBody = if (values.isEmpty) "Vector.empty" else values.mkString(" ++ ")
-      val body        = shape.caseName match {
+    def renderDecoder(shape: InstructionShape): String = {
+      val allowed            = allowedOperandCounts(shape)
+      val defaultOperandTest = allowed.map(count => s"operands.size == $count").mkString(" || ")
+      val operandTest        = shape.caseName match {
         case "CpAsyncBulkMBarrier" =>
-          "Vector(destinationAddress, sourceAddress, size) ++ ignoredBytesLeft.toVector ++ ignoredBytesRight.toVector ++ Vector(barrierAddress) ++ ctaMask.toVector ++ cachePolicy.toVector"
-        case "CpAsyncBulkGroup" =>
-          "Vector(destinationAddress, sourceAddress, size) ++ cachePolicy.toVector ++ byteMask.toVector"
+          "if (modifierNames.contains(\"ignore_oob\")) operands.size == 6 || operands.size == 7 else if (modifierNames.contains(\"multicast::cluster\")) operands.size >= 4 && operands.size <= 6 else operands.size == 4 || operands.size == 5"
         case "CpAsyncBulkTensorMBarrier" =>
-          "Vector(destinationAddress, tensorMapAndCoordinates, barrierAddress) ++ im2colInfo.toVector ++ ctaMask.toVector ++ cachePolicy.toVector"
+          "if (modifierNames.exists(_.startsWith(\"im2col\")) && modifierNames.contains(\"multicast::cluster\")) operands.size >= 5 && operands.size <= 6 else if (modifierNames.exists(_.startsWith(\"im2col\")) || modifierNames.contains(\"multicast::cluster\")) operands.size >= 4 && operands.size <= 5 else operands.size == 3 || operands.size == 4"
+        case _ => defaultOperandTest
+      }
+      val operationTest     = shape.decodeGuard.getOrElse("true")
+      val constructorFields = shape.fields.zipWithIndex.map { case (field, position) =>
+        if (field.optional) s"operands.lift($position)" else s"operands($position)"
+      }
+      val remainingModifiers = "mods"
+      val defaultConstructor =
+        s"Instruction.${shape.caseName}(${(constructorFields ++ Vector(remainingModifiers, "pred")).mkString(", ")})"
+      val constructor = shape.caseName match {
+        case "CpAsyncBulkMBarrier" =>
+          s"if (modifierNames.contains(\"ignore_oob\")) Instruction.CpAsyncBulkMBarrier(operands(0), operands(1), operands(2), operands(5), Some(operands(3)), Some(operands(4)), None, operands.lift(6), $remainingModifiers, pred) else if (modifierNames.contains(\"multicast::cluster\")) Instruction.CpAsyncBulkMBarrier(operands(0), operands(1), operands(2), operands(3), None, None, operands.lift(4), operands.lift(5), $remainingModifiers, pred) else Instruction.CpAsyncBulkMBarrier(operands(0), operands(1), operands(2), operands(3), None, None, None, operands.lift(4), $remainingModifiers, pred)"
+        case "CpAsyncBulkGroup" =>
+          s"if (operands.size == 3) Instruction.CpAsyncBulkGroup(operands(0), operands(1), operands(2), None, None, $remainingModifiers, pred) else if (operands.size == 4 && modifierNames.contains(\"cp_mask\")) Instruction.CpAsyncBulkGroup(operands(0), operands(1), operands(2), None, Some(operands(3)), $remainingModifiers, pred) else Instruction.CpAsyncBulkGroup(operands(0), operands(1), operands(2), Some(operands(3)), operands.lift(4), $remainingModifiers, pred)"
+        case "CpAsyncBulkTensorMBarrier" =>
+          s"if (modifierNames.exists(_.startsWith(\"im2col\")) && modifierNames.contains(\"multicast::cluster\")) Instruction.CpAsyncBulkTensorMBarrier(operands(0), operands(1), operands(2), Some(operands(3)), operands.lift(4), operands.lift(5), $remainingModifiers, pred) else if (modifierNames.exists(_.startsWith(\"im2col\"))) Instruction.CpAsyncBulkTensorMBarrier(operands(0), operands(1), operands(2), Some(operands(3)), None, operands.lift(4), $remainingModifiers, pred) else if (modifierNames.contains(\"multicast::cluster\")) Instruction.CpAsyncBulkTensorMBarrier(operands(0), operands(1), operands(2), None, operands.lift(3), operands.lift(4), $remainingModifiers, pred) else Instruction.CpAsyncBulkTensorMBarrier(operands(0), operands(1), operands(2), None, None, operands.lift(3), $remainingModifiers, pred)"
         case "CpAsyncBulkTensorGroup" =>
-          "Vector(tensorMapAndCoordinates, sourceAddress) ++ cachePolicy.toVector"
+          s"Instruction.CpAsyncBulkTensorGroup(operands(0), operands(1), operands.lift(2), $remainingModifiers, pred)"
         case "MbarrierTestWait" =>
-          "Vector(completion) ++ reportValue.toVector ++ Vector(barrierAddress, stateOrPhase)"
+          s"if (operands.size == 3) Instruction.MbarrierTestWait(operands(0), None, operands(1), operands(2), $remainingModifiers, pred) else Instruction.MbarrierTestWait(operands(0), Some(operands(1)), operands(2), operands(3), $remainingModifiers, pred)"
         case "MbarrierTryWait" =>
-          "Vector(completion) ++ reportValue.toVector ++ Vector(barrierAddress, stateOrPhase) ++ timeHint.toVector"
+          s"if (operands.size == 3) Instruction.MbarrierTryWait(operands(0), None, operands(1), operands(2), None, $remainingModifiers, pred) else if (operands.size == 4 && !operands(0).isInstanceOf[Operand.WithPredicate]) Instruction.MbarrierTryWait(operands(0), None, operands(1), operands(2), Some(operands(3)), $remainingModifiers, pred) else Instruction.MbarrierTryWait(operands(0), Some(operands(1)), operands(2), operands(3), operands.lift(4), $remainingModifiers, pred)"
         case "Tcgen05Mma" =>
-          "Vector(destinationAddress, sourceA, sourceBDescriptor, instructionDescriptor) ++ scaleAAddress.toVector ++ scaleBAddress.toVector ++ disabledOutputLanes.toVector ++ Vector(enableInputD) ++ scaleInputD.toVector"
+          s"if (operands.size == 5) Instruction.Tcgen05Mma(operands(0), operands(1), operands(2), operands(3), None, None, None, operands(4), None, $remainingModifiers, pred) else if (operands(4).isInstanceOf[Operand.Address]) Instruction.Tcgen05Mma(operands(0), operands(1), operands(2), operands(3), Some(operands(4)), Some(operands(5)), None, operands(6), None, $remainingModifiers, pred) else Instruction.Tcgen05Mma(operands(0), operands(1), operands(2), operands(3), None, None, Some(operands(4)), operands(5), operands.lift(6), $remainingModifiers, pred)"
         case "Tcgen05MmaSp" =>
-          "Vector(destinationAddress, sourceA, sourceBDescriptor, sparseMetadataAddress, instructionDescriptor) ++ scaleAAddress.toVector ++ scaleBAddress.toVector ++ disabledOutputLanes.toVector ++ Vector(enableInputD) ++ scaleInputD.toVector"
-        case _ => defaultBody
+          s"if (operands.size == 6) Instruction.Tcgen05MmaSp(operands(0), operands(1), operands(2), operands(3), operands(4), None, None, None, operands(5), None, $remainingModifiers, pred) else if (operands(5).isInstanceOf[Operand.Address]) Instruction.Tcgen05MmaSp(operands(0), operands(1), operands(2), operands(3), operands(4), Some(operands(5)), Some(operands(6)), None, operands(7), None, $remainingModifiers, pred) else Instruction.Tcgen05MmaSp(operands(0), operands(1), operands(2), operands(3), operands(4), None, None, Some(operands(5)), operands(6), operands.lift(7), $remainingModifiers, pred)"
+        case _ => defaultConstructor
       }
-      val names = shape.fields.map(_.name)
-      s"    case ${shape.caseName}(${(names ++ Vector("_", "_")).mkString(", ")}) => $body"
-    }
-    val chunkCount    = Math.max(1, (shapes.size + 31) / 32)
-    val decoderChunks = shapes.groupBy(shape => Math.floorMod(shape.mnemonic.hashCode, chunkCount))
-    val decoders      = Vector.tabulate(chunkCount) { index =>
-      val alternatives = decoderChunks.getOrElse(index, Vector.empty).groupBy(_.mnemonic).toVector.sortBy(_._1).map {
-        case (mnemonic, mnemonicShapes) =>
-          val branches = mnemonicShapes.sortBy(shape => -shape.operationModifiers.size).flatMap { shape =>
-            val allowed            = allowedOperandCounts(shape)
-            val defaultOperandTest = allowed.map(count => s"operands.size == $count").mkString(" || ")
-            val operandTest        = shape.caseName match {
-              case "CpAsyncBulkMBarrier" =>
-                "if (modifierNames.contains(\"ignore_oob\")) operands.size == 6 || operands.size == 7 else if (modifierNames.contains(\"multicast::cluster\")) operands.size >= 4 && operands.size <= 6 else operands.size == 4 || operands.size == 5"
-              case "CpAsyncBulkTensorMBarrier" =>
-                "if (modifierNames.exists(_.startsWith(\"im2col\")) && modifierNames.contains(\"multicast::cluster\")) operands.size >= 5 && operands.size <= 6 else if (modifierNames.exists(_.startsWith(\"im2col\")) || modifierNames.contains(\"multicast::cluster\")) operands.size >= 4 && operands.size <= 5 else operands.size == 3 || operands.size == 4"
-              case _ => defaultOperandTest
-            }
-            val operationPrefix = if (shape.operationModifiers.isEmpty) "true"
-            else s"modifierNames.startsWith(${vector(shape.operationModifiers)})"
-            val operationTest     = shape.decodeGuard.fold(operationPrefix)(guard => s"($operationPrefix) && ($guard)")
-            val constructorFields = shape.fields.zipWithIndex.map { case (field, position) =>
-              if (field.optional) s"operands.lift($position)" else s"operands($position)"
-            }
-            val remainingModifiers = s"modifiers.drop(${shape.operationModifiers.size})"
-            val defaultConstructor =
-              s"${shape.caseName}(${(constructorFields ++ Vector(remainingModifiers, "predication")).mkString(", ")})"
-            val constructor = shape.caseName match {
-              case "CpAsyncBulkMBarrier" =>
-                s"if (modifierNames.contains(\"ignore_oob\")) CpAsyncBulkMBarrier(operands(0), operands(1), operands(2), operands(5), Some(operands(3)), Some(operands(4)), None, operands.lift(6), $remainingModifiers, predication) else if (modifierNames.contains(\"multicast::cluster\")) CpAsyncBulkMBarrier(operands(0), operands(1), operands(2), operands(3), None, None, operands.lift(4), operands.lift(5), $remainingModifiers, predication) else CpAsyncBulkMBarrier(operands(0), operands(1), operands(2), operands(3), None, None, None, operands.lift(4), $remainingModifiers, predication)"
-              case "CpAsyncBulkGroup" =>
-                s"if (operands.size == 3) CpAsyncBulkGroup(operands(0), operands(1), operands(2), None, None, $remainingModifiers, predication) else if (operands.size == 4 && modifierNames.contains(\"cp_mask\")) CpAsyncBulkGroup(operands(0), operands(1), operands(2), None, Some(operands(3)), $remainingModifiers, predication) else CpAsyncBulkGroup(operands(0), operands(1), operands(2), Some(operands(3)), operands.lift(4), $remainingModifiers, predication)"
-              case "CpAsyncBulkTensorMBarrier" =>
-                s"if (modifierNames.exists(_.startsWith(\"im2col\")) && modifierNames.contains(\"multicast::cluster\")) CpAsyncBulkTensorMBarrier(operands(0), operands(1), operands(2), Some(operands(3)), operands.lift(4), operands.lift(5), $remainingModifiers, predication) else if (modifierNames.exists(_.startsWith(\"im2col\"))) CpAsyncBulkTensorMBarrier(operands(0), operands(1), operands(2), Some(operands(3)), None, operands.lift(4), $remainingModifiers, predication) else if (modifierNames.contains(\"multicast::cluster\")) CpAsyncBulkTensorMBarrier(operands(0), operands(1), operands(2), None, operands.lift(3), operands.lift(4), $remainingModifiers, predication) else CpAsyncBulkTensorMBarrier(operands(0), operands(1), operands(2), None, None, operands.lift(3), $remainingModifiers, predication)"
-              case "CpAsyncBulkTensorGroup" =>
-                s"CpAsyncBulkTensorGroup(operands(0), operands(1), operands.lift(2), $remainingModifiers, predication)"
-              case "MbarrierTestWait" =>
-                s"if (operands.size == 3) MbarrierTestWait(operands(0), None, operands(1), operands(2), $remainingModifiers, predication) else MbarrierTestWait(operands(0), Some(operands(1)), operands(2), operands(3), $remainingModifiers, predication)"
-              case "MbarrierTryWait" =>
-                s"if (operands.size == 3) MbarrierTryWait(operands(0), None, operands(1), operands(2), None, $remainingModifiers, predication) else if (operands.size == 4 && !operands(0).isInstanceOf[Operand.WithPredicate]) MbarrierTryWait(operands(0), None, operands(1), operands(2), Some(operands(3)), $remainingModifiers, predication) else MbarrierTryWait(operands(0), Some(operands(1)), operands(2), operands(3), operands.lift(4), $remainingModifiers, predication)"
-              case "Tcgen05Mma" =>
-                s"if (operands.size == 5) Tcgen05Mma(operands(0), operands(1), operands(2), operands(3), None, None, None, operands(4), None, $remainingModifiers, predication) else if (operands(4).isInstanceOf[Operand.Address]) Tcgen05Mma(operands(0), operands(1), operands(2), operands(3), Some(operands(4)), Some(operands(5)), None, operands(6), None, $remainingModifiers, predication) else Tcgen05Mma(operands(0), operands(1), operands(2), operands(3), None, None, Some(operands(4)), operands(5), operands.lift(6), $remainingModifiers, predication)"
-              case "Tcgen05MmaSp" =>
-                s"if (operands.size == 6) Tcgen05MmaSp(operands(0), operands(1), operands(2), operands(3), operands(4), None, None, None, operands(5), None, $remainingModifiers, predication) else if (operands(5).isInstanceOf[Operand.Address]) Tcgen05MmaSp(operands(0), operands(1), operands(2), operands(3), operands(4), Some(operands(5)), Some(operands(6)), None, operands(7), None, $remainingModifiers, predication) else Tcgen05MmaSp(operands(0), operands(1), operands(2), operands(3), operands(4), None, None, Some(operands(5)), operands(6), operands.lift(7), $remainingModifiers, predication)"
-              case _ => defaultConstructor
-            }
-            Vector(
-              s"$operationTest && ($operandTest)" -> s"Right($constructor)",
-              operationTest -> s"Left(InstructionDecodeError.InvalidOperandCount(${literal(shape.opcode)}, Vector(${allowed.mkString(", ")}), operands.size))"
-            )
-          }
-          val attempts = branches.zipWithIndex.map { case ((condition, result), branchIndex) =>
-            val keyword = if (branchIndex == 0) "if" else "else if"
-            s"        $keyword ($condition) $result"
-          }
-          s"""|      case ${literal(mnemonic)} =>
-              |        val modifierNames = modifiers.map(_.name)
-              |${attempts.mkString("\n")}
-              |        else Left(InstructionDecodeError.UnknownOpcode((name +: modifierNames).mkString(".")))""".stripMargin
-      }
-      s"""|  private def decode$index(
-          |      name: String,
+      val invalidOperands =
+        s"Left(InstructionDecodeError.InvalidOperandCount(${literal(shape.opcode)}, Vector(${allowed.mkString(", ")}), operands.size))"
+      val decodeBody =
+        if (operationTest == "true")
+          s"if ($operandTest) Right($constructor) else $invalidOperands"
+        else
+          s"if ($operationTest && ($operandTest)) Right($constructor) else if ($operationTest) $invalidOperands else Left(InstructionDecodeError.UnknownOpcode(((${literal(shape.opcode)}) +: modifierNames).mkString(\".\")))"
+      val modifierNames =
+        Option.when(s"$operationTest $operandTest $constructor".contains("modifierNames"))(
+          "      val modifierNames = mods.map(_.name)\n"
+        ).getOrElse("")
+      s"""|(
           |      operands: Vector[Operand],
-          |      modifiers: Vector[Modifier],
-          |      predication: Option[Predication]
-          |  ): Either[InstructionDecodeError, Instruction] =
-          |    name match {
-          |${alternatives.mkString("\n")}
-          |      case _ => Left(InstructionDecodeError.UnknownOpcode(name))
+          |      mods: Vector[Modifier],
+          |      pred: Option[Predication]
+          |    ) => {
+          |$modifierNames      $decodeBody
           |    }""".stripMargin
     }
-    val dispatch = Vector.tabulate(chunkCount) { index =>
-      s"      case $index => decode$index(name, operands, allModifiers, predication)"
+    def renderMetadata(shape: InstructionShape): String = {
+      val entries = sections.flatMap { section =>
+        val forms = section.forms.flatMap(form => operationsFor(section, form)).collect {
+          case (opcode, form) if opcode == shape.opcode => renderForm(form, opcode)
+        }
+        Option.when(forms.nonEmpty) {
+          s"""|Metadata.Entry(
+              |          ${literal(section.id)},
+              |          ${literal(section.heading)},
+              |          ${literal(section.title)},
+              |          ${literal(section.category)},
+              |          ${vector(section.syntax)},
+              |          PtxVersion(${section.introduced._1}, ${section.introduced._2}),
+              |          SmTarget(${section.minimumTarget}),
+              |          Vector(${forms.mkString(", ")})
+              |        )""".stripMargin
+        }
+      }
+      require(entries.nonEmpty, s"missing PTX metadata for ${shape.opcode}")
+      s"""|() => Metadata(Vector(
+          |        ${entries.mkString(",\n")}
+          |      ))""".stripMargin
     }
-    val specifications = sections.map { section =>
-      val operationForms = section.forms.flatMap(form => operationsFor(section, form))
-      val operations     = operationForms.map(_._1).distinct
-      s"""|    InstructionSpec(
-          |      ${literal(section.id)},
-          |      ${literal(section.heading)},
-          |      ${literal(section.title)},
-          |      ${literal(section.category)},
-          |      ${vector(operations)},
-          |      ${vector(section.syntax)},
-          |      PtxVersion(${section.introduced._1}, ${section.introduced._2}),
-          |      SmTarget(${section.minimumTarget}),
-          |      Vector(${operationForms.map { case (opcode, form) => renderForm(form, opcode) }.mkString(", ")})
-          |    )""".stripMargin
+    val definitions = shapes.map { shape =>
+      s"""|  case ${shape.caseName} extends InstructionDef(
+          |    ${literal(shape.opcode)},
+          |    ${renderDecoder(shape)},
+          |    ${renderMetadata(shape)}
+          |  )""".stripMargin
     }
-    val specificationChunks = specifications.grouped(12).zipWithIndex.map { case (values, index) =>
-      s"""|private def instructionSpecChunk$index: Vector[InstructionSpec] = Vector(
-          |${values.mkString(",\n")}
-          |)""".stripMargin
-    }.toVector
-    val chunkNames = specificationChunks.indices.map(index => s"instructionSpecChunk$index")
-      .mkString("Vector(", ", ", ").flatten")
     s"""|// Generated from the pinned NVIDIA PTX ISA $version specification. Do not edit by hand.
         |package net.kurobako.gemstone.isa.ptx.$packageVersion
         |
         |enum InstructionDecodeError {
         |  case UnknownOpcode(opcode: String)
         |  case InvalidOperandCount(opcode: String, expected: Vector[Int], actual: Int)
+        |  case AmbiguousInstruction(opcode: String, definitions: Vector[String])
         |}
         |
-        |enum Instruction {
+        |type Decoder = (
+        |    operands: Vector[Operand],
+        |    mods: Vector[Modifier],
+        |    pred: Option[Predication]
+        |) => Either[InstructionDecodeError, Instruction]
+        |
+        |enum InstructionDef(val opcode: String, val decoder: Decoder, metadata: () => Metadata) {
+        |${definitions.mkString("\n")}
+        |
+        |  final lazy val meta: Metadata = metadata()
+        |
+        |  private[$packageVersion] final val fixedMods: Vector[String] = opcode.split('.').toVector.drop(1)
+        |}
+        |
+        |enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
         |${cases.mkString("\n")}
         |
-        |  final def opcode: String = this match {
-        |${opcodes.mkString("\n")}
-        |  }
+        |  final val operands: Vector[Operand] = operandValues.toVector
         |
-        |  final def operands: Vector[Operand] = this match {
-        |${operands.mkString("\n")}
-        |  }
+        |  final def opcode: String = definition.opcode
         |
-        |  def modifiers: Vector[Modifier]
+        |  final def decoder: Decoder = definition.decoder
         |
-        |  def predication: Option[Predication]
+        |  final def meta: Metadata = definition.meta
         |
-        |  final def qualifiedOpcode: String = (opcode +: modifiers.map(_.name)).mkString(".")
+        |  def mods: Vector[Modifier]
+        |
+        |  def pred: Option[Predication]
+        |
+        |  final def qualifiedOpcode: String = (opcode +: mods.map(_.name)).mkString(".")
         |
         |}
         |
         |object Instruction {
-        |  private val ChunkCount: Int = $chunkCount
+        |  private lazy val DefinitionsByMnemonic: Map[String, Vector[InstructionDef]] =
+        |    Instructions.groupMap(_.opcode.takeWhile(_ != '.'))(identity)
         |
         |  def decode(
         |      opcode: String,
         |      operands: Vector[Operand],
-        |      modifiers: Vector[Modifier] = Vector.empty,
-        |      predication: Option[Predication] = None
+        |      mods: Vector[Modifier] = Vector.empty,
+        |      pred: Option[Predication] = None
         |  ): Either[InstructionDecodeError, Instruction] = {
         |    val opcodeParts = normalizeOpcode(opcode).split('.').toVector.filter(_.nonEmpty)
         |    val name = opcodeParts.headOption.getOrElse("")
-        |    val allModifiers = opcodeParts.drop(1).map(Modifier.apply) ++ modifiers
-        |    Math.floorMod(name.hashCode, ChunkCount) match {
-        |${dispatch.mkString("\n")}
+        |    val allModifiers = opcodeParts.drop(1).map(Modifier.apply) ++ mods
+        |    val qualified = (name +: allModifiers.map(_.name)).mkString(".")
+        |    val modifierNames = allModifiers.map(_.name)
+        |    val candidates = DefinitionsByMnemonic.getOrElse(name, Vector.empty)
+        |      .filter(definition => modifierNames.startsWith(definition.fixedMods))
+        |    val specificity = candidates.map(_.fixedMods.size).maxOption.getOrElse(0)
+        |    val attempts = candidates.filter(_.fixedMods.size == specificity).map { definition =>
+        |      definition -> definition.decoder(operands, allModifiers.drop(definition.fixedMods.size), pred)
         |    }
-        |}
-        |
-        |${decoders.mkString("\n\n")}
+        |    val successes = attempts.collect { case (definition, Right(instruction)) => definition -> instruction }
+        |    successes match {
+        |      case Vector((_, instruction)) => Right(instruction)
+        |      case values if values.nonEmpty =>
+        |        Left(InstructionDecodeError.AmbiguousInstruction(qualified, values.map(_._1.toString)))
+        |      case _ =>
+        |        val expected = attempts.collect {
+        |          case (_, Left(InstructionDecodeError.InvalidOperandCount(_, counts, _))) => counts
+        |        }.flatten.distinct.sorted
+        |        if (expected.nonEmpty)
+        |          Left(InstructionDecodeError.InvalidOperandCount(qualified, expected, operands.size))
+        |        else Left(InstructionDecodeError.UnknownOpcode(qualified))
+        |    }
+        |  }
         |}
         |
         |val Version: PtxVersion = PtxVersion(${versionParts(0)}, ${versionParts(1)})
         |
-        |${specificationChunks.mkString("\n\n")}
-        |
-        |val Instructions: Vector[InstructionSpec] = $chunkNames
-        |
-        |private[v9_3] val InstructionsByOpcode: Map[String, Vector[InstructionSpec]] =
-        |  Instructions.flatMap(specification => specification.opcodes.map(_ -> specification)).groupMap(_._1)(_._2)
+        |val Instructions: Vector[InstructionDef] = InstructionDef.values.toVector
         |""".stripMargin
   }
 
@@ -923,6 +952,34 @@ object GeneratePtxIsa {
     words.headOption.fold("") { head =>
       head.head.toLower.toString + head.tail + words.tail.map(word => s"${word.head.toUpper}${word.tail}").mkString
     }
+  }
+
+  private def abbreviateFieldName(value: String): String = {
+    val exact = Map(
+      "destination"        -> "dest",
+      "source"             -> "src",
+      "sourceA"            -> "srcA",
+      "sourceB"            -> "srcB",
+      "sourceC"            -> "srcC",
+      "secondarySource"    -> "secondarySrc",
+      "returnParameters"   -> "returnParams",
+      "parameters"         -> "params",
+      "sourceOrOrdinal"    -> "srcOrOrdinal",
+      "sourceSizeOrIgnore" -> "srcSizeOrIgnore"
+    )
+    exact.getOrElse(
+      value,
+      value
+        .replace("destination", "dest")
+        .replace("Destination", "Dest")
+        .replace("source", "src")
+        .replace("Source", "Src")
+        .replace("Address", "Addr")
+        .replace("Descriptor", "Desc")
+        .replace("Registers", "Regs")
+        .replace("instruction", "inst")
+        .replace("Instruction", "Inst")
+    )
   }
 
   private val CaseNameOverrides: Map[String, String] = Map(

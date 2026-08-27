@@ -66,15 +66,22 @@ final case class ParseError(offset: Int, line: Int, column: Int, expected: Vecto
   }
 }
 
-/** Specification metadata generated alongside [[Instruction]] from the pinned NVIDIA PTX document. */
-final case class InstructionSpec(
-    id: String,
-    heading: String,
-    title: String,
-    category: String,
-    opcodes: Vector[String],
-    syntax: Vector[String],
-    introduced: PtxVersion = PtxVersion(1, 0),
-    minimumTarget: SmTarget = SmTarget(10),
-    forms: Vector[InstructionForm] = Vector.empty
-)
+/** Specification metadata attached to one generated instruction definition. */
+final case class Metadata(entries: Vector[Metadata.Entry]) {
+  require(entries.nonEmpty, "instruction metadata must contain at least one specification entry")
+}
+
+object Metadata {
+
+  /** One PTX documentation section that defines the owning instruction. */
+  final case class Entry(
+      id: String,
+      heading: String,
+      title: String,
+      category: String,
+      syntax: Vector[String],
+      introduced: PtxVersion,
+      minimumTarget: SmTarget,
+      forms: Vector[InstructionForm]
+  )
+}

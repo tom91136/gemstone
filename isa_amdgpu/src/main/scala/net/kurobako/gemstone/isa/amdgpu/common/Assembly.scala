@@ -29,16 +29,16 @@ object Assembly {
 
   def print(instruction: Instruction): String = {
     val operands  = instruction.operands.map(printOperand)
-    val modifiers = instruction.modifiers.map { modifier =>
+    val modifiers = instruction.mods.map { modifier =>
       modifier.value.fold(modifier.name)(value => s"${modifier.name}:$value")
     }
     val tail = operands ++ modifiers
-    if (tail.isEmpty) instruction.opcode.value
+    if (tail.isEmpty) instruction.opcode
     else {
       val operandText  = operands.mkString(", ")
       val modifierText = modifiers.mkString(" ")
       val separator    = if (operands.nonEmpty && modifiers.nonEmpty) " " else ""
-      s"${instruction.opcode.value} $operandText$separator$modifierText"
+      s"${instruction.opcode} $operandText$separator$modifierText"
     }
   }
 
@@ -72,8 +72,10 @@ object Assembly {
   private def parseInstructionLine(text: String, line: Int): Either[ParseError, Instruction] = {
     val opcodeEnd  = text.indexWhere(_.isWhitespace)
     val opcodeText = if (opcodeEnd < 0) text else text.take(opcodeEnd)
-    Opcode.fromString(opcodeText).left.map(message => ParseError(line, 1, message)).flatMap { opcode =>
-      val tail = if (opcodeEnd < 0) "" else text.drop(opcodeEnd).trim
+    if (!opcodeText.matches("[A-Za-z][A-Za-z0-9_.]*")) Left(ParseError(line, 1, s"invalid AMDGPU opcode '$opcodeText'"))
+    else {
+      val opcode = normalizeOpcode(opcodeText)
+      val tail   = if (opcodeEnd < 0) "" else text.drop(opcodeEnd).trim
       splitTopLevel(tail, ',', line).flatMap { commaParts =>
         val operands                   = Vector.newBuilder[Operand]
         val modifiers                  = Vector.newBuilder[Modifier]
@@ -97,7 +99,17 @@ object Assembly {
             }
           }
         }
-        failed.toLeft(Instruction(opcode, operands.result(), modifiers.result()))
+        failed match {
+          case Some(error) => Left(error)
+          case None        =>
+            Instruction.decode(opcode, operands.result(), modifiers.result()).left.map {
+              case InstructionDecodeError.UnknownOpcode(value) => ParseError(line, 1, s"unknown AMDGPU opcode '$value'")
+              case InstructionDecodeError.InvalidOperandCount(value, expected, actual) =>
+                ParseError(line, 1, s"$value expects ${expected.mkString(" or ")} operands, found $actual")
+              case InstructionDecodeError.AmbiguousForms(value, definitions) =>
+                ParseError(line, 1, s"$value ambiguously matched ${definitions.mkString(", ")}")
+            }
+        }
       }
     }
   }
@@ -290,6 +302,10 @@ object Assembly {
     "da",
     "dlc",
     "done",
+    "dpp",
+    "dpp8",
+    "e32",
+    "e64",
     "gds",
     "glc",
     "idxen",
@@ -300,6 +316,7 @@ object Assembly {
     "sc0",
     "sc1",
     "slc",
+    "sdwa",
     "tfe",
     "unorm",
     "vm"

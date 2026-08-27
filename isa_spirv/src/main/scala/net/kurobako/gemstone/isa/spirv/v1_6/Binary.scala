@@ -6,7 +6,7 @@ enum BinaryError {
   case InvalidMagic(found: Long)
   case ZeroInstructionWordCount(wordOffset: Int)
   case TruncatedInstruction(wordOffset: Int, declaredWords: Int, remainingWords: Int)
-  case InstructionTooLong(opcode: Opcode, wordCount: Int)
+  case InstructionTooLong(opcodeNumber: Int, wordCount: Int)
 
   def message: String = this match {
     case MisalignedByteLength(length)                      => s"SPIR-V binary length $length is not a multiple of four"
@@ -15,14 +15,14 @@ enum BinaryError {
     case ZeroInstructionWordCount(offset)                  => s"instruction at word $offset has zero word count"
     case TruncatedInstruction(offset, declared, remaining) =>
       s"instruction at word $offset declares $declared words with only $remaining remaining"
-    case InstructionTooLong(opcode, count) => s"opcode ${opcode.number} has unencodable word count $count"
+    case InstructionTooLong(opcode, count) => s"opcode $opcode has unencodable word count $count"
   }
 }
 
 object Binary {
   val Magic: Int = 0x07230203
 
-  def parse(bytes: IArray[Byte]): Either[BinaryError, Module] = {
+  def parse(bytes: IArray[Byte]): Either[BinaryError, RawModule] = {
     if (bytes.length % 4 != 0) return Left(BinaryError.MisalignedByteLength(bytes.length))
     val wordCount = bytes.length / 4
     if (wordCount < 5) return Left(BinaryError.TruncatedHeader(wordCount))
@@ -32,8 +32,8 @@ object Binary {
       else if (java.lang.Integer.reverseBytes(rawMagic) == Magic) Endianness.Big
       else return Left(BinaryError.InvalidMagic(rawMagic.toLong & 0xffffffffL))
     val words        = Vector.tabulate(wordCount)(index => Word(readInt(bytes, index * 4, endianness)))
-    val header       = Header(Version.fromWord(words(1)), words(2), words(3), words(4))
-    val instructions = Vector.newBuilder[Instruction]
+    val header       = Header(SpirvVersion.fromWord(words(1)), words(2), words(3), words(4))
+    val instructions = Vector.newBuilder[RawInstruction]
     var offset       = 5
     while (offset < words.size) {
       val first       = words(offset).bits
@@ -43,17 +43,17 @@ object Binary {
       val remaining = words.size - offset
       if (declared > remaining)
         return Left(BinaryError.TruncatedInstruction(offset, declared, remaining))
-      val opcode = Opcode.unsafe(opcodeValue)
-      instructions += Instruction(opcode, words.slice(offset + 1, offset + declared))
+      instructions += RawInstruction(opcodeValue, words.slice(offset + 1, offset + declared))
       offset += declared
     }
-    Right(Module(header, instructions.result(), endianness))
+    Right(RawModule(header, instructions.result(), endianness))
   }
 
-  def serialize(module: Module): Either[BinaryError, IArray[Byte]] = {
+  def serialize(module: RawModule): Either[BinaryError, IArray[Byte]] = {
     module.instructions.find(_.wordCount > 0xffff) match {
-      case Some(instruction) => return Left(BinaryError.InstructionTooLong(instruction.opcode, instruction.wordCount))
-      case None              => ()
+      case Some(instruction) =>
+        return Left(BinaryError.InstructionTooLong(instruction.opcodeNumber, instruction.wordCount))
+      case None => ()
     }
     val words = Vector.newBuilder[Word]
     words += Word(Magic)
@@ -63,8 +63,8 @@ object Binary {
     words += module.header.schema
     module.instructions.foreach { instruction =>
       val count = instruction.wordCount
-      words += Word((count << 16) | instruction.opcode.number)
-      words ++= instruction.operands
+      words += Word((count << 16) | instruction.opcodeNumber)
+      words ++= instruction.operandWords
     }
     val encoded = words.result()
     val bytes   = new Array[Byte](encoded.size * 4)

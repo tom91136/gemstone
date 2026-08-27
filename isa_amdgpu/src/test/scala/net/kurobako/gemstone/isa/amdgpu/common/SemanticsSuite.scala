@@ -10,7 +10,6 @@ import net.kurobako.gemstone.execution.Step
 import net.kurobako.gemstone.execution.WaitKey
 import net.kurobako.gemstone.execution.WaitScope
 import net.kurobako.gemstone.isa.amdgpu.common.AmdSemantics.*
-import net.kurobako.gemstone.isa.amdgpu.common.generated.Database
 
 class SemanticsSuite extends munit.FunSuite {
   private val target = Target.unsafe("gfx1010")
@@ -114,14 +113,14 @@ class SemanticsSuite extends munit.FunSuite {
 
     var selected = 0
     targets.foreach { architecture =>
-      val opcodes = Database.instructions.iterator
-        .filter(info => info.target == architecture.metadataTarget && info.format.toUpperCase == "SOPP")
-        .map(_.name)
+      val opcodes = Instructions.iterator
+        .filter(definition => encodingsFor(definition, architecture).exists(_.format.toUpperCase == "SOPP"))
+        .map(_.opcode)
         .toSet
       opcodes.foreach { opcode =>
         selected += 1
         val instruction = semanticInput(opcode)
-        AmdLowering.lower(instruction, architecture, Database) match {
+        AmdLowering.lower(instruction, architecture) match {
           case Left(error) => fail(s"$opcode on ${architecture.name} was not classified: $error")
           case Right(AmdExecutable.Unsupported(_, _, _, _)) =>
             assert(!SemanticsCoverage.implemented.contains(opcode), s"implemented $opcode lowered as Unsupported")
@@ -134,16 +133,16 @@ class SemanticsSuite extends munit.FunSuite {
   }
 
   private def semanticInput(opcode: String): Instruction = {
-    val operands = opcode match {
-      case "s_barrier" | "s_endpgm" => Vector.empty
-      case _                        => Vector(Operand.IntegerLiteral(BigInt(0), 10))
-    }
-    Instruction(Opcode.unsafe(opcode), operands)
+    val count = InstructionDef.forOpcode(opcode).flatMap(_.decoder.operandCounts).minOption.getOrElse(
+      fail(s"missing generated descriptor for $opcode")
+    )
+    val operands = Vector.tabulate(count)(_ => Operand.IntegerLiteral(BigInt(0), 10))
+    Instruction.decode(opcode, operands).fold(error => fail(error.toString), identity)
   }
 
   private def lower(source: String): AmdExecutable = {
     val instruction = Assembly.parseInstruction(source).fold(error => fail(error.toString), identity)
-    AmdLowering.lower(instruction, target, Database).fold(error => fail(error.toString), identity)
+    AmdLowering.lower(instruction, target).fold(error => fail(error.toString), identity)
   }
 
   private def wave(pc: Int = 0): WaveState =

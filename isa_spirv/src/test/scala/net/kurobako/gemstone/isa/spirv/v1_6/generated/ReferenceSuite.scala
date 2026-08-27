@@ -10,26 +10,26 @@ final class ReferenceSuite extends munit.FunSuite {
     "val/val_opencl_test.cpp" -> 17
   )
 
-  test("grammar opcode corpus is complete and round-trips little endian") {
-    assertEquals(InstructionCatalog.instructions.size, 875)
-    InstructionCatalog.instructions.foreach { info =>
-      val operands = Vector.fill(info.minimumOperandCount)(Word(0))
-      val syntax = Instruction(info.opcode, operands)
-      val known = KnownInstruction.fromSyntax(syntax).fold(error => fail(s"${info.name}: $error"), identity)
-      assertEquals(known.syntax, syntax, info.name)
-      val module = Module(
-        Header(Version.V1_6, Word(0), Word(1), Word(0)),
-        Vector(syntax),
+  test("every grammar opcode decodes to a typed case and round-trips little endian") {
+    assertEquals(Instructions.size, 875)
+    Instructions.foreach { definition =>
+      val rawInstruction = RawInstruction(definition.opcodeNumber, Instruction.minimumOperandWords(definition))
+      val instruction = Instruction.decode(rawInstruction).fold(error => fail(s"${definition.opcode}: ${error.message}"), identity)
+      assertEquals(instruction.definition, definition, definition.opcode)
+      assertEquals(Instruction.encode(instruction), rawInstruction, definition.opcode)
+      val rawModule = RawModule(
+        Header(Version, Word(0), Word(1), Word(0)),
+        Vector(rawInstruction),
         Endianness.Little
       )
-      val bytes = Binary.serialize(module).fold(error => fail(error.message), identity)
-      assertEquals(Binary.parse(bytes), Right(module), info.name)
+      val bytes = Binary.serialize(rawModule).fold(error => fail(error.message), identity)
+      assertEquals(Binary.parse(bytes), Right(rawModule), definition.opcode)
     }
   }
 
   test("SPIRV-Tools endian oracle is represented") {
     assert(upstreamTestCounts("binary_endianness_test.cpp") > 0)
-    val module = Module(Header(Version.V1_6, Word(7), Word(2), Word(0)), Vector.empty, Endianness.Big)
+    val module = RawModule(Header(Version, Word(7), Word(2), Word(0)), Vector.empty, Endianness.Big)
     val bytes = Binary.serialize(module).fold(error => fail(error.message), identity)
     assertEquals(Binary.parse(bytes), Right(module))
   }
@@ -44,6 +44,29 @@ final class ReferenceSuite extends munit.FunSuite {
       words(0x07230203, 0x00010600, 0, 1, 0, (3 << 16) | 17, 6)
     )
     malformed.foreach(bytes => assert(Binary.parse(bytes).isLeft))
+  }
+
+  test("unknown binary opcodes round-trip raw but fail typed decode") {
+    val raw = RawInstruction(65535, Vector(Word(7)))
+    assertEquals(Instruction.decode(raw), Left(InstructionDecodeError.UnknownOpcode(65535)))
+    val module = RawModule(Header(Version, Word(0), Word(1), Word(0)), Vector(raw), Endianness.Little)
+    val bytes = Binary.serialize(module).fold(error => fail(error.message), identity)
+    assertEquals(Binary.parse(bytes), Right(module))
+  }
+
+  test("known opcodes with malformed grammar operands fail typed decode") {
+    Instruction.decode(RawInstruction(17, Vector.empty)) match {
+      case Left(InstructionDecodeError.InvalidOperandCount("OpCapability", _)) => ()
+      case other => fail(s"expected missing-operand failure, found $other")
+    }
+    Instruction.decode(RawInstruction(17, Vector(Word(-1)))) match {
+      case Left(InstructionDecodeError.InvalidEnumerant("Capability", 0xffffffffL)) => ()
+      case other => fail(s"expected invalid-enumerant failure, found $other")
+    }
+    Instruction.decode(RawInstruction(5, Vector(Word(1), Word(-1)))) match {
+      case Left(InstructionDecodeError.UnterminatedString("OpName")) => ()
+      case other => fail(s"expected unterminated-string failure, found $other")
+    }
   }
 
   test("SPIRV-Tools OpenCL validation corpus is tracked") {

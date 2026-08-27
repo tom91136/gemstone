@@ -1,59 +1,74 @@
 package net.kurobako.gemstone.isa.amdgpu.common
 
-import net.kurobako.gemstone.isa.amdgpu.common.generated.Database
 import net.kurobako.gemstone.isa.amdgpu.common.generated.GoldenCorpus
+import scala.collection.mutable
 
 class GoldenCorpusSuite extends munit.FunSuite {
-  test("parse and round-trip the exhaustive exact-target LLVM MC corpus") {
+  test("round-trip every LLVM MC oracle instruction covered by the pinned production metadata") {
     assert(GoldenCorpus.sourceFileCount >= 700)
     assert(GoldenCorpus.cases.size >= 10000)
+    var roundTripped = 0
+    val unsupported  = mutable.Map.empty[String, Int].withDefaultValue(0)
     GoldenCorpus.cases.foreach { golden =>
-      val parsed = Assembly.parse(golden.assembly).fold(
-        error => fail(s"${golden.source}: ${golden.target.name}: $error\n${golden.assembly}"),
-        identity
-      )
-      val canonical = Assembly.print(parsed)
-      val reparsed  = Assembly.parse(canonical).fold(
-        error => fail(s"${golden.source}: failed to parse canonical output: $error\n$canonical"),
-        identity
-      )
-      assertEquals(reparsed, parsed, s"${golden.source}: ${golden.target.name}: ${golden.assembly}")
+      Assembly.parse(golden.assembly) match {
+        case Left(error) if error.message.startsWith("unknown AMDGPU opcode") => recordUnsupported(error, unsupported)
+        case Left(error)   => fail(s"${golden.source}: ${golden.target.name}: $error\n${golden.assembly}")
+        case Right(parsed) =>
+          val canonical = Assembly.print(parsed)
+          val reparsed  = Assembly.parse(canonical).fold(
+            error => fail(s"${golden.source}: failed to parse canonical output: $error\n$canonical"),
+            identity
+          )
+          assertEquals(reparsed, parsed, s"${golden.source}: ${golden.target.name}: ${golden.assembly}")
+          roundTripped += 1
+      }
     }
+    assert(roundTripped >= 300000, s"expected broad LLVM oracle coverage, found $roundTripped")
+    assertEquals(unsupported.toMap, ExpectedUnsupportedOracleOpcodes)
+    assertEquals(roundTripped + unsupported.values.sum, GoldenCorpus.cases.size)
   }
 
   test("every positive oracle is encoded exactly or classified as an unsupported format") {
     var encoded           = 0
     var unsupportedFormat = 0
+    val unsupported       = mutable.Map.empty[String, Int].withDefaultValue(0)
     var paired            = 0
     GoldenCorpus.cases.foreach { golden =>
-      val program = Assembly.parse(golden.assembly).toOption.get
-      program.statements match {
-        case Vector(Statement.Instruction(instruction)) =>
-          val definitions = Database.lookup(instruction.opcode.value, golden.target)
-          val formats     = definitions.map(_.format.toUpperCase).distinct
-          Binary.encode(instruction, golden.target, Database) match {
-            case Right(actual) =>
-              assert(formats.contains("SOPP"), s"encoded an unimplemented format at ${golden.source}: $formats")
-              assertEquals(actual, golden.bytes, s"${golden.source}: ${golden.target.name}: ${golden.assembly}")
-              encoded += 1
-            case Left(CodecError.UnsupportedFormat(_, _, declared)) =>
-              assert(!formats.contains("SOPP"), s"SOPP case escaped encoding at ${golden.source}: ${golden.assembly}")
-              assertEquals(declared, formats.sorted)
-              unsupportedFormat += 1
-            case Left(CodecError.UnsupportedInstruction(_, _)) =>
-              assert(definitions.isEmpty, s"known instruction was classified unknown at ${golden.source}")
-              unsupportedFormat += 1
-            case Left(CodecError.UnsupportedOperandSyntax(_, _, _)) =>
-              assert(formats.contains("SOPP"), s"non-SOPP syntax classification at ${golden.source}: $formats")
-              unsupportedFormat += 1
-            case Left(error) => fail(s"${golden.source}: unclassified codec result $error\n${golden.assembly}")
+      Assembly.parse(golden.assembly) match {
+        case Left(error) if error.message.startsWith("unknown AMDGPU opcode") => recordUnsupported(error, unsupported)
+        case Left(error)    => fail(s"${golden.source}: ${golden.target.name}: $error\n${golden.assembly}")
+        case Right(program) => program.statements match {
+            case Vector(Statement.Instruction(instruction)) =>
+              val definitions = encodingsFor(instruction, golden.target)
+              val formats     = definitions.map(_.format.toUpperCase).distinct
+              Binary.encode(instruction, golden.target) match {
+                case Right(actual) =>
+                  assert(formats.contains("SOPP"), s"encoded an unimplemented format at ${golden.source}: $formats")
+                  assertEquals(actual, golden.bytes, s"${golden.source}: ${golden.target.name}: ${golden.assembly}")
+                  encoded += 1
+                case Left(CodecError.UnsupportedFormat(_, _, declared)) =>
+                  assert(
+                    !formats.contains("SOPP"),
+                    s"SOPP case escaped encoding at ${golden.source}: ${golden.assembly}"
+                  )
+                  assertEquals(declared, formats.sorted)
+                  unsupportedFormat += 1
+                case Left(CodecError.UnsupportedInstruction(_, _)) =>
+                  assert(definitions.isEmpty, s"known instruction was classified unknown at ${golden.source}")
+                  unsupportedFormat += 1
+                case Left(CodecError.UnsupportedOperandSyntax(_, _, _)) =>
+                  assert(formats.contains("SOPP"), s"non-SOPP syntax classification at ${golden.source}: $formats")
+                  unsupportedFormat += 1
+                case Left(error) => fail(s"${golden.source}: unclassified codec result $error\n${golden.assembly}")
+              }
+            case Vector(Statement.InstructionPair(_, _)) => paired += 1
+            case other => fail(s"${golden.source}: expected one instruction or pair, found $other")
           }
-        case Vector(Statement.InstructionPair(_, _)) => paired += 1
-        case other => fail(s"${golden.source}: expected one instruction or pair, found $other")
       }
     }
     assert(encoded >= 50, s"expected at least fifty exact SOPP checks, found $encoded")
-    assertEquals(encoded + unsupportedFormat + paired, GoldenCorpus.cases.size)
+    assertEquals(unsupported.toMap, ExpectedUnsupportedOracleOpcodes)
+    assertEquals(encoded + unsupportedFormat + unsupported.values.sum + paired, GoldenCorpus.cases.size)
   }
 
   test("LLVM diagnostics never pass conservative target validation") {
@@ -62,7 +77,7 @@ class GoldenCorpusSuite extends munit.FunSuite {
       Assembly.parse(diagnostic.assembly) match {
         case Left(_)        => ()
         case Right(program) =>
-          Validator.validate(program, diagnostic.target, Database) match {
+          Validator.validate(program, diagnostic.target) match {
             case ValidationResult.Valid =>
               fail(
                 s"${diagnostic.source}: accepted LLVM diagnostic for ${diagnostic.target.name}: " +
@@ -74,4 +89,41 @@ class GoldenCorpusSuite extends munit.FunSuite {
       }
     }
   }
+
+  private def recordUnsupported(error: ParseError, counts: mutable.Map[String, Int]): Unit = {
+    val RawUnknown = "unknown AMDGPU opcode '([^']+)'".r
+    val opcode     = error.message match {
+      case RawUnknown(raw) => stripEncodingSuffixes(raw)
+      case other           => fail(s"unexpected unknown-opcode diagnostic: $other")
+    }
+    assert(ExpectedUnsupportedOracleOpcodes.contains(opcode), s"unreviewed LLVM-only opcode: $opcode")
+    counts(opcode) += 1
+  }
+
+  private def stripEncodingSuffixes(opcode: String): String =
+    EncodingSuffixes.collectFirst { case suffix if opcode.endsWith(suffix) => opcode.dropRight(suffix.length) } match {
+      case Some(value) => stripEncodingSuffixes(value)
+      case None        => opcode
+    }
+
+  // Exact, bounded LLVM-oracle gaps absent from the pinned ACO/AMD production metadata.
+  private val ExpectedUnsupportedOracleOpcodes = Map(
+    "tensor_save"                  -> 3,
+    "tensor_stop"                  -> 2,
+    "v_illegal"                    -> 2,
+    "v_mfma_ld_scale_b32"          -> 24,
+    "v_pk_add_f64"                 -> 12,
+    "v_pk_add_nc_u64"              -> 12,
+    "v_pk_fma_f64"                 -> 15,
+    "v_pk_lshl_add_u64"            -> 13,
+    "v_pk_max_num_f64"             -> 12,
+    "v_pk_min_num_f64"             -> 12,
+    "v_pk_mul_f64"                 -> 12,
+    "v_pk_sub_nc_u64"              -> 12,
+    "v_wmma_f64_16x16x4_f64"       -> 9,
+    "v_wmma_ld_scale16_paired_b64" -> 15,
+    "v_wmma_ld_scale_paired_b32"   -> 15
+  )
+
+  private val EncodingSuffixes = Vector("_dpp8", "_sdwa", "_dpp", "_e64", "_e32")
 }

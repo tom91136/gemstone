@@ -8,7 +8,6 @@ import net.kurobako.gemstone.execution.Pc
 import net.kurobako.gemstone.execution.Step
 import net.kurobako.gemstone.execution.WaitKey
 import net.kurobako.gemstone.execution.WaitScope
-import net.kurobako.gemstone.isa.amdgpu.common.generated.Database
 
 enum BranchCondition {
   case Scc(expected: Boolean)
@@ -75,88 +74,79 @@ object SemanticsCoverage {
 object AmdLowering {
   def lower(
       instruction: Instruction,
-      target: Target,
-      database: InstructionDatabase = Database
-  ): Either[LoweringError, AmdExecutable] =
-    KnownInstruction.fromSyntax(instruction) match {
-      case Left(_) =>
-        Right(
-          AmdExecutable.Unsupported(
-            target,
-            instruction.opcode.value,
-            Vector.empty,
-            "no instruction metadata for the exact target"
-          )
-        )
-      case Right(known) => lowerKnown(known, target, database)
-    }
-
-  private def lowerKnown(
-      instruction: KnownInstruction,
-      target: Target,
-      database: InstructionDatabase
+      target: Target
   ): Either[LoweringError, AmdExecutable] = {
-    val opcode      = instruction.name
-    val definitions = database.lookup(opcode, target)
+    val opcode      = instruction.opcode
+    val definitions = encodingsFor(instruction, target)
     val formats     = definitions.map(_.format.toUpperCase).distinct.sorted
     if (definitions.isEmpty)
       Right(AmdExecutable.Unsupported(target, opcode, Vector.empty, "no instruction metadata for the exact target"))
     else if (!formats.contains("SOPP"))
       Right(AmdExecutable.Unsupported(target, opcode, formats, "semantic lowering is implemented only for SOPP"))
     else instruction match {
-      case KnownInstruction.SNop(arguments) =>
-        unsignedImmediate(opcode, arguments).map(AmdExecutable.Nop(target, _))
-      case KnownInstruction.SBranch(arguments) =>
-        branchImmediate(opcode, arguments).map(AmdExecutable.Branch(target, _))
-      case KnownInstruction.SCbranchScc0(arguments) =>
-        conditional(opcode, arguments, target, BranchCondition.Scc(false))
-      case KnownInstruction.SCbranchScc1(arguments) =>
-        conditional(opcode, arguments, target, BranchCondition.Scc(true))
-      case KnownInstruction.SCbranchVccz(arguments) =>
-        conditional(opcode, arguments, target, BranchCondition.VccZero(true))
-      case KnownInstruction.SCbranchVccnz(arguments) =>
-        conditional(opcode, arguments, target, BranchCondition.VccZero(false))
-      case KnownInstruction.SCbranchExecz(arguments) =>
-        conditional(opcode, arguments, target, BranchCondition.ExecZero(true))
-      case KnownInstruction.SCbranchExecnz(arguments) =>
-        conditional(opcode, arguments, target, BranchCondition.ExecZero(false))
-      case KnownInstruction.SWaitcnt(arguments) =>
-        unsignedImmediate(opcode, arguments).map(value => AmdExecutable.Wait(target, WaitOperation.Counters(value)))
-      case KnownInstruction.SSleep(arguments) =>
-        unsignedImmediate(opcode, arguments).map(value => AmdExecutable.Wait(target, WaitOperation.Sleep(value)))
-      case KnownInstruction.SBarrier(arguments) =>
-        noOperands(opcode, arguments).map(_ => AmdExecutable.Barrier(target, 0))
-      case KnownInstruction.SEndpgm(arguments) =>
-        noOperands(opcode, arguments).map(_ => AmdExecutable.EndProgram(target))
-      case KnownInstruction.STrap(arguments) =>
-        unsignedImmediate(opcode, arguments).map(AmdExecutable.Trap(target, _))
+      case Instruction.SNop(imm, mods) =>
+        unsignedImmediate(opcode, imm, mods).map(AmdExecutable.Nop(target, _))
+      case Instruction.SBranch(branchTarget, mods) =>
+        branchImmediate(opcode, branchTarget, mods).map(AmdExecutable.Branch(target, _))
+      case Instruction.SCbranchScc0(branchTarget, mods) =>
+        conditional(opcode, branchTarget, mods, target, BranchCondition.Scc(false))
+      case Instruction.SCbranchScc1(branchTarget, mods) =>
+        conditional(opcode, branchTarget, mods, target, BranchCondition.Scc(true))
+      case Instruction.SCbranchVccz(branchTarget, mods) =>
+        conditional(opcode, branchTarget, mods, target, BranchCondition.VccZero(true))
+      case Instruction.SCbranchVccnz(branchTarget, mods) =>
+        conditional(opcode, branchTarget, mods, target, BranchCondition.VccZero(false))
+      case Instruction.SCbranchExecz(branchTarget, mods) =>
+        conditional(opcode, branchTarget, mods, target, BranchCondition.ExecZero(true))
+      case Instruction.SCbranchExecnz(branchTarget, mods) =>
+        conditional(opcode, branchTarget, mods, target, BranchCondition.ExecZero(false))
+      case Instruction.SWaitcnt(imm, mods) =>
+        unsignedImmediate(opcode, imm, mods).map(value => AmdExecutable.Wait(target, WaitOperation.Counters(value)))
+      case Instruction.SSleep(imm, mods) =>
+        unsignedImmediate(opcode, imm, mods).map(value => AmdExecutable.Wait(target, WaitOperation.Sleep(value)))
+      case Instruction.SBarrier(mods) =>
+        noOperands(opcode, mods).map(_ => AmdExecutable.Barrier(target, 0))
+      case Instruction.SEndpgm_0(mods) =>
+        noOperands(opcode, mods).map(_ => AmdExecutable.EndProgram(target))
+      case Instruction.SEndpgm_1(imm, mods) =>
+        unsignedImmediate(opcode, imm, mods).map(_ => AmdExecutable.EndProgram(target))
+      case Instruction.STrap(imm, mods) =>
+        unsignedImmediate(opcode, imm, mods).map(AmdExecutable.Trap(target, _))
       case _ => Right(AmdExecutable.Unsupported(target, opcode, formats, "SOPP behavior is not implemented"))
     }
   }
 
   private def conditional(
       opcode: String,
-      arguments: InstructionArguments,
+      operand: Operand,
+      mods: Vector[Modifier],
       target: Target,
       condition: BranchCondition
   ): Either[LoweringError, AmdExecutable] =
-    branchImmediate(opcode, arguments).map(AmdExecutable.ConditionalBranch(target, condition, _))
+    branchImmediate(opcode, operand, mods).map(AmdExecutable.ConditionalBranch(target, condition, _))
 
-  private def noOperands(opcode: String, arguments: InstructionArguments): Either[LoweringError, Unit] =
-    if (arguments.operands.isEmpty && arguments.modifiers.isEmpty) Right(())
+  private def noOperands(opcode: String, mods: Vector[Modifier]): Either[LoweringError, Unit] =
+    if (mods.isEmpty) Right(())
     else invalid(opcode, "instruction takes no operands or modifiers")
 
-  private def unsignedImmediate(opcode: String, arguments: InstructionArguments): Either[LoweringError, Int] =
-    arguments match {
-      case InstructionArguments(Vector(Operand.IntegerLiteral(value, _)), Vector()) if value >= 0 && value <= 65535 =>
+  private def unsignedImmediate(
+      opcode: String,
+      operand: Operand,
+      mods: Vector[Modifier]
+  ): Either[LoweringError, Int] =
+    (operand, mods) match {
+      case (Operand.IntegerLiteral(value, _), Vector()) if value >= 0 && value <= 65535 =>
         Right(value.toInt)
       case _ => invalid(opcode, "instruction requires one unsigned 16-bit immediate and no modifiers")
     }
 
-  private def branchImmediate(opcode: String, arguments: InstructionArguments): Either[LoweringError, Int] =
-    arguments match {
-      case InstructionArguments(Vector(Operand.IntegerLiteral(value, _)), Vector())
-          if value >= -32768 && value <= 65535 =>
+  private def branchImmediate(
+      opcode: String,
+      operand: Operand,
+      mods: Vector[Modifier]
+  ): Either[LoweringError, Int] =
+    (operand, mods) match {
+      case (Operand.IntegerLiteral(value, _), Vector()) if value >= -32768 && value <= 65535 =>
         val bits = value.toInt & 0xffff
         Right(if ((bits & 0x8000) == 0) bits else bits - 0x10000)
       case _ => invalid(opcode, "branch requires one signed 16-bit displacement and no modifiers")

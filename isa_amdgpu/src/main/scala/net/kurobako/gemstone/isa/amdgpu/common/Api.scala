@@ -1,7 +1,5 @@
 package net.kurobako.gemstone.isa.amdgpu.common
 
-import net.kurobako.gemstone.isa.amdgpu.common.generated.Database
-
 /** Text parser vocabulary shared by every AMD architectural family package. */
 object Parser {
   def parse(source: String): Either[ParseError, Program]                = Assembly.parse(source)
@@ -16,20 +14,17 @@ object Printer {
 
 /** A package-level AMD ISA family. Syntax is shared; validity, metadata, and binary encoding are family-bound. */
 abstract class Architecture private[amdgpu] (private[amdgpu] val generation: Generation) {
-  final val version: String             = generation.number
-  final val catalog: InstructionCatalog = new GenerationCatalog(generation, Database)
-
   final def encodeSopp(instruction: Instruction, target: Target): Either[CodecError, Vector[Byte]] =
     if (target.generation != generation) Left(CodecError.WrongGeneration(target, generation))
-    else Binary.encodeSopp(instruction, target, Database)
+    else Binary.encodeSopp(instruction, target)
 
   final def decodeSopp(bytes: Seq[Byte], target: Target): Either[CodecError, Instruction] =
     if (target.generation != generation) Left(CodecError.WrongGeneration(target, generation))
-    else Binary.decodeSopp(bytes, target, Database)
+    else Binary.decodeSopp(bytes, target)
 
   final def lower(instruction: Instruction, target: Target): Either[LoweringError, AmdExecutable] =
     if (target.generation != generation) Left(LoweringError.WrongGeneration(target, generation))
-    else AmdLowering.lower(instruction, target, Database)
+    else AmdLowering.lower(instruction, target)
 }
 
 /** Names exported by each versioned package. */
@@ -45,9 +40,14 @@ object Api {
   type Instruction = _root_.net.kurobako.gemstone.isa.amdgpu.common.Instruction
   val Instruction: _root_.net.kurobako.gemstone.isa.amdgpu.common.Instruction.type =
     _root_.net.kurobako.gemstone.isa.amdgpu.common.Instruction
-  type Opcode = _root_.net.kurobako.gemstone.isa.amdgpu.common.Opcode
-  val Opcode: _root_.net.kurobako.gemstone.isa.amdgpu.common.Opcode.type =
-    _root_.net.kurobako.gemstone.isa.amdgpu.common.Opcode
+  type InstructionDef = _root_.net.kurobako.gemstone.isa.amdgpu.common.InstructionDef
+  val InstructionDef: _root_.net.kurobako.gemstone.isa.amdgpu.common.InstructionDef.type =
+    _root_.net.kurobako.gemstone.isa.amdgpu.common.InstructionDef
+  type Decoder                = _root_.net.kurobako.gemstone.isa.amdgpu.common.Decoder
+  type Metadata               = _root_.net.kurobako.gemstone.isa.amdgpu.common.Metadata
+  type InstructionDecodeError = _root_.net.kurobako.gemstone.isa.amdgpu.common.InstructionDecodeError
+  val InstructionDecodeError: _root_.net.kurobako.gemstone.isa.amdgpu.common.InstructionDecodeError.type =
+    _root_.net.kurobako.gemstone.isa.amdgpu.common.InstructionDecodeError
   type Operand = _root_.net.kurobako.gemstone.isa.amdgpu.common.Operand
   val Operand: _root_.net.kurobako.gemstone.isa.amdgpu.common.Operand.type =
     _root_.net.kurobako.gemstone.isa.amdgpu.common.Operand
@@ -60,11 +60,10 @@ object Api {
   type Target = _root_.net.kurobako.gemstone.isa.amdgpu.common.Target
   val Target: _root_.net.kurobako.gemstone.isa.amdgpu.common.Target.type =
     _root_.net.kurobako.gemstone.isa.amdgpu.common.Target
-  type ParseError         = _root_.net.kurobako.gemstone.isa.amdgpu.common.ParseError
-  type InstructionInfo    = _root_.net.kurobako.gemstone.isa.amdgpu.common.InstructionInfo
-  type OperandInfo        = _root_.net.kurobako.gemstone.isa.amdgpu.common.OperandInfo
-  type InstructionCatalog = _root_.net.kurobako.gemstone.isa.amdgpu.common.InstructionCatalog
-  type CodecError         = _root_.net.kurobako.gemstone.isa.amdgpu.common.CodecError
+  type ParseError  = _root_.net.kurobako.gemstone.isa.amdgpu.common.ParseError
+  type Encoding    = _root_.net.kurobako.gemstone.isa.amdgpu.common.Encoding
+  type OperandInfo = _root_.net.kurobako.gemstone.isa.amdgpu.common.OperandInfo
+  type CodecError  = _root_.net.kurobako.gemstone.isa.amdgpu.common.CodecError
   val CodecError: _root_.net.kurobako.gemstone.isa.amdgpu.common.CodecError.type =
     _root_.net.kurobako.gemstone.isa.amdgpu.common.CodecError
   type ValidationError = _root_.net.kurobako.gemstone.isa.amdgpu.common.ValidationError

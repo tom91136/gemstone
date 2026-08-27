@@ -1,7 +1,5 @@
 package net.kurobako.gemstone.isa.amdgpu.common
 
-import net.kurobako.gemstone.isa.amdgpu.common.generated.Database
-
 enum ValidationError {
   case UnsupportedInstruction(opcode: String, target: Target)
   case InvalidInstruction(opcode: String, message: String)
@@ -19,11 +17,10 @@ enum ValidationResult {
 object Validator {
   def validate(
       program: Program,
-      target: Target,
-      database: InstructionDatabase = Database
+      target: Target
   ): ValidationResult = {
     val results = program.statements.collect {
-      case Statement.Instruction(instruction) => validate(instruction, target, database)
+      case Statement.Instruction(instruction) => validate(instruction, target)
       case Statement.InstructionPair(_, _) => ValidationResult.Unsupported("paired VOPD validation is not implemented")
     }
     val errors = results.collect { case ValidationResult.Invalid(values) => values }.flatten
@@ -37,12 +34,11 @@ object Validator {
 
   def validate(
       instruction: Instruction,
-      target: Target,
-      database: InstructionDatabase
+      target: Target
   ): ValidationResult = {
-    val definitions = database.lookup(instruction.opcode.value, target)
+    val definitions = encodingsFor(instruction, target)
     if (definitions.isEmpty)
-      ValidationResult.Invalid(Vector(ValidationError.UnsupportedInstruction(instruction.opcode.value, target)))
+      ValidationResult.Invalid(Vector(ValidationError.UnsupportedInstruction(instruction.opcode, target)))
     else {
       val formats = definitions.map(_.format.toUpperCase).distinct
       if (formats.contains("SOPP")) validateSopp(instruction, target, definitions)
@@ -53,18 +49,18 @@ object Validator {
   private def validateSopp(
       instruction: Instruction,
       target: Target,
-      definitions: Vector[InstructionInfo]
+      definitions: Vector[Encoding]
   ): ValidationResult = {
     val explicitSignatures = definitions.map(_.operands.filter(!_.implicitOperand)).filter(_.nonEmpty).distinct
-    if (instruction.modifiers.nonEmpty)
+    if (instruction.mods.nonEmpty)
       invalid(instruction, "SOPP does not accept modifiers")
     else if (explicitSignatures.isEmpty)
       if (instruction.operands.isEmpty) availabilityUnknown(instruction, target)
       else ValidationResult.Unsupported(
-        s"operand metadata is unavailable for ${instruction.opcode.value} on ${target.name}"
+        s"operand metadata is unavailable for ${instruction.opcode} on ${target.name}"
       )
     else if (explicitSignatures.size != 1)
-      ValidationResult.Unsupported(s"multiple SOPP signatures exist for ${instruction.opcode.value} on ${target.name}")
+      ValidationResult.Unsupported(s"multiple SOPP signatures exist for ${instruction.opcode} on ${target.name}")
     else {
       val signature = explicitSignatures.head
       if (instruction.operands.size != signature.size)
@@ -93,10 +89,10 @@ object Validator {
       }
 
   private def invalid(instruction: Instruction, message: String): ValidationResult =
-    ValidationResult.Invalid(Vector(ValidationError.InvalidInstruction(instruction.opcode.value, message)))
+    ValidationResult.Invalid(Vector(ValidationError.InvalidInstruction(instruction.opcode, message)))
 
   private def availabilityUnknown(instruction: Instruction, target: Target): ValidationResult =
     ValidationResult.Unsupported(
-      s"exact processor availability is not normalized for ${instruction.opcode.value} on ${target.name}"
+      s"exact processor availability is not normalized for ${instruction.opcode} on ${target.name}"
     )
 }

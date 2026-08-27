@@ -67,7 +67,7 @@ object Validator {
       version: PtxVersion,
       target: SmTarget
   ): ValidationResult = {
-    val candidates = InstructionsByOpcode(instruction.opcode)
+    val candidates = instruction.meta.entries
     val available  = candidates.filter(info => version >= info.introduced && target >= info.minimumTarget)
     if (available.isEmpty) {
       val versionErrors = candidates.filter(_.introduced > version).map(info =>
@@ -77,7 +77,7 @@ object Validator {
         ValidationError.TargetTooOld(instruction.opcode, info.minimumTarget, target)
       )
       ValidationResult.Invalid((versionErrors ++ targetErrors).distinct)
-    } else validateForms(instruction, available.flatMap(_.forms).filter(_.opcode == instruction.opcode))
+    } else validateForms(instruction, available.flatMap(_.forms))
   }
 
   def validate(
@@ -106,7 +106,7 @@ object Validator {
         )
       )
 
-    val modifiers    = instruction.modifiers.map(_.name).toSet
+    val modifiers    = instruction.mods.map(_.name).toSet
     val matchingMods = sameCount.filter(form => modifiersMatch(modifiers, form))
     if (matchingMods.isEmpty)
       return ValidationResult.Invalid(

@@ -64,8 +64,7 @@ final case class OperandInfo(
     implicitOperand: Boolean
 )
 
-final case class InstructionInfo(
-    name: String,
+final case class Encoding(
     generation: Generation,
     target: String,
     format: String,
@@ -75,36 +74,58 @@ final case class InstructionInfo(
     source: MetadataSource
 )
 
-/** Complete normalized metadata across every supported AMD architectural family. */
-trait InstructionDatabase {
-  def instructions: Vector[InstructionInfo]
-  def soppEncodingPrefix: Long
-  def soppOpcodeShift: Int
-  def soppImmediateBits: Int
+final case class Metadata private[amdgpu] (private val encoded: String) {
+  lazy val encodings: Vector[Encoding] =
+    if (encoded.isEmpty) Vector.empty
+    else encoded.linesIterator.map(Metadata.decode).toVector
 
-  lazy val byName: Map[String, Vector[InstructionInfo]] = instructions.groupBy(_.name)
+  def supports(generation: Generation): Boolean = encodings.exists(_.generation == generation)
+  def supports(target: Target): Boolean         =
+    encodings.exists(encoding => encoding.generation == target.generation && encoding.target == target.metadataTarget)
+}
 
-  def lookup(name: String, generation: Generation): Vector[InstructionInfo] =
-    byName.getOrElse(name.toLowerCase, Vector.empty).filter(_.generation == generation)
-
-  def lookup(name: String, target: Target): Vector[InstructionInfo] =
-    byName.getOrElse(name.toLowerCase, Vector.empty).filter { instruction =>
-      instruction.generation == target.generation && instruction.target == target.metadataTarget
+object Metadata {
+  private def decode(row: String): Encoding = {
+    val columns  = row.split("\\t", -1)
+    val operands = if (columns(5).isEmpty) Vector.empty
+    else columns(5).split(';').toVector.map { value =>
+      val fields = value.split(",", -1)
+      OperandInfo(
+        option(fields(0)),
+        fields(1),
+        fields(2).toInt,
+        fields(3) == "1",
+        fields(4) == "1",
+        fields(5) == "1"
+      )
     }
+    Encoding(
+      Generation.valueOf(columns(0)),
+      columns(1),
+      columns(2),
+      columns(3).toInt,
+      operands,
+      option(columns(4)),
+      MetadataSource.valueOf(columns(6))
+    )
+  }
+
+  private def option(value: String): Option[String] = if (value.isEmpty) None else Some(value)
 }
 
-/** A catalog bound to the architectural family named by its package. */
-trait InstructionCatalog {
-  def version: String
-  def instructions: Vector[InstructionInfo]
+private[amdgpu] def instructionsFor(generation: Generation): Vector[InstructionDef] =
+  Instructions.iterator.filter(_.meta.supports(generation)).toVector
 
-  lazy val byName: Map[String, Vector[InstructionInfo]] = instructions.groupBy(_.name)
+private[amdgpu] def encodingsFor(definition: InstructionDef, generation: Generation): Vector[Encoding] =
+  definition.meta.encodings.filter(_.generation == generation)
 
-  final def lookup(name: String): Vector[InstructionInfo] = byName.getOrElse(name.toLowerCase, Vector.empty)
-}
+private[amdgpu] def encodingsFor(definition: InstructionDef, target: Target): Vector[Encoding] =
+  definition.meta.encodings.filter(encoding =>
+    encoding.generation == target.generation && encoding.target == target.metadataTarget
+  )
 
-private[amdgpu] final class GenerationCatalog(generation: Generation, database: InstructionDatabase)
-    extends InstructionCatalog {
-  override val version: String                            = generation.number
-  override lazy val instructions: Vector[InstructionInfo] = database.instructions.filter(_.generation == generation)
-}
+private[amdgpu] def encodingsFor(instruction: Instruction, target: Target): Vector[Encoding] =
+  encodingsFor(instruction.definition, target)
+
+private[amdgpu] lazy val allEncodings: Vector[Encoding] =
+  Instructions.iterator.map(_.meta).toVector.distinct.flatMap(_.encodings)

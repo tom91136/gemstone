@@ -345,10 +345,9 @@ lazy val isa_spirv = projectMatrix
         case found             => sys.error(s"expected one prepared SPIR-V reference view, found ${found.size}")
       }
       val output = root / "isa_spirv" / "src" / "main" / "scala" / "net" / "kurobako" / "gemstone" / "isa" /
-        "spirv" / spirvPackage / "generated" / "Catalog.scala"
-      val instructions = output.getParentFile / "Instructions.scala"
-      val converter    = fileConverter.value
-      val classpath    = (codegen.jvm(scala3Version) / Compile / fullClasspath).value
+        "spirv" / spirvPackage / "generated" / "Instructions.scala"
+      val converter = fileConverter.value
+      val classpath = (codegen.jvm(scala3Version) / Compile / fullClasspath).value
         .map(entry => converter.toPath(entry.data).toString)
       val java    = file(sys.props("java.home")) / "bin" / "java"
       val grammar = references / "khronos" / "spirv-headers" / "include" / "spirv" / "unified1" /
@@ -358,13 +357,13 @@ lazy val isa_spirv = projectMatrix
         "-cp",
         classpath.mkString(sys.props("path.separator")),
         "net.kurobako.gemstone.codegen.GenerateSpirvIsa",
-        "catalog",
+        "instructions",
         grammar.getAbsolutePath,
         output.getAbsolutePath,
         spirvPackage
       )).!
       require(exit == 0, s"SPIR-V metadata generator exited with $exit")
-      Seq(output, instructions)
+      Seq(output)
     },
     generateSpirvReferenceTests := Def.uncached {
       val root          = (LocalRootProject / baseDirectory).value

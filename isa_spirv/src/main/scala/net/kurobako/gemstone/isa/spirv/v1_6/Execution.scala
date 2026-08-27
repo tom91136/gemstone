@@ -1,16 +1,6 @@
 package net.kurobako.gemstone.isa.spirv.v1_6
 
-import net.kurobako.gemstone.execution.CancellationToken
-import net.kurobako.gemstone.execution.Effects
-import net.kurobako.gemstone.execution.ExecutableProgram
-import net.kurobako.gemstone.execution.ExecutionBudget
-import net.kurobako.gemstone.execution.ExecutionFault
-import net.kurobako.gemstone.execution.ExecutionLimits
-import net.kurobako.gemstone.execution.LaneMask
-import net.kurobako.gemstone.execution.Pc
-import net.kurobako.gemstone.execution.Step
-import net.kurobako.gemstone.execution.Write
-
+import net.kurobako.gemstone.execution.*
 import scala.collection.mutable
 
 enum ExecutableInstruction {
@@ -97,152 +87,164 @@ enum LoweringError {
 object Lowering {
   def lower(module: Module): Either[LoweringError, SpirvExecutable] = {
     val labels = module.instructions.zipWithIndex.collect {
-      case (instruction, index) if instruction.name == "OpLabel" && instruction.operands.nonEmpty =>
-        instruction.operands.head.bits -> Pc.unsafe(index)
+      case (Instruction.Label(dest), index) => dest.bits -> Pc.unsafe(index)
     }.toMap
-    module.instructions.foldLeft[Either[LoweringError, Vector[ExecutableInstruction]]](Right(Vector.empty)) {
-      case (result, instruction) =>
-        for {
-          values <- result
-          value  <- lowerInstruction(instruction, labels)
-        } yield values :+ value
-    }.map(values => SpirvExecutable(ExecutableProgram(values)))
+    val lowered = Vector.newBuilder[ExecutableInstruction]
+    var index   = 0
+    while (index < module.instructions.size) {
+      val instruction = module.instructions(index)
+      lowerInstruction(instruction, labels) match {
+        case Left(error)  => return Left(error)
+        case Right(value) =>
+          lowered += value
+          index += 1
+      }
+    }
+    Right(SpirvExecutable(ExecutableProgram(lowered.result())))
   }
 
   private def lowerInstruction(
       instruction: Instruction,
       labels: Map[Int, Pc]
-  ): Either[LoweringError, ExecutableInstruction] =
-    KnownInstruction.fromSyntax(instruction) match {
-      case Left(_)      => Right(ExecutableInstruction.Unsupported(instruction.name, "unknown SPIR-V opcode"))
-      case Right(known) => lowerKnownInstruction(known, labels)
-    }
+  ): Either[LoweringError, ExecutableInstruction] = instruction match {
+    case Instruction.Constant(_, dest, value)     => constant(instruction.opcode, dest, value)
+    case Instruction.SpecConstant(_, dest, value) => constant(instruction.opcode, dest, value)
+    case Instruction.ConstantTrue(_, dest) => id(instruction.opcode, dest).map(ExecutableInstruction.Constant(_, 1L))
+    case Instruction.SpecConstantTrue(_, dest) =>
+      id(instruction.opcode, dest).map(ExecutableInstruction.Constant(_, 1L))
+    case Instruction.ConstantFalse(_, dest) => id(instruction.opcode, dest).map(ExecutableInstruction.Constant(_, 0L))
+    case Instruction.SpecConstantFalse(_, dest) =>
+      id(instruction.opcode, dest).map(ExecutableInstruction.Constant(_, 0L))
+    case Instruction.Variable(_, dest, _, initializer) =>
+      for {
+        result  <- id(instruction.opcode, dest)
+        initial <- optionalId(instruction.opcode, initializer)
+      } yield ExecutableInstruction.Variable(result, initial)
+    case Instruction.Load(_, dest, pointer, _) =>
+      for {
+        result    <- id(instruction.opcode, dest)
+        pointerId <- id(instruction.opcode, pointer)
+      } yield ExecutableInstruction.Load(result, pointerId)
+    case Instruction.Store(pointer, src, _) =>
+      for {
+        pointerId <- id(instruction.opcode, pointer)
+        sourceId  <- id(instruction.opcode, src)
+      } yield ExecutableInstruction.Store(pointerId, sourceId)
+    case Instruction.CopyObject(_, dest, src) =>
+      for {
+        result   <- id(instruction.opcode, dest)
+        sourceId <- id(instruction.opcode, src)
+      } yield ExecutableInstruction.Copy(result, sourceId)
+    case Instruction.IAdd(_, dest, srcA, srcB) => binary(instruction.opcode, dest, srcA, srcB, BinaryOperation.Add)
+    case Instruction.ISub(_, dest, srcA, srcB) => binary(instruction.opcode, dest, srcA, srcB, BinaryOperation.Subtract)
+    case Instruction.IMul(_, dest, srcA, srcB) => binary(instruction.opcode, dest, srcA, srcB, BinaryOperation.Multiply)
+    case Instruction.BitwiseAnd(_, dest, srcA, srcB) =>
+      binary(instruction.opcode, dest, srcA, srcB, BinaryOperation.BitAnd)
+    case Instruction.BitwiseOr(_, dest, srcA, srcB) =>
+      binary(instruction.opcode, dest, srcA, srcB, BinaryOperation.BitOr)
+    case Instruction.BitwiseXor(_, dest, srcA, srcB) =>
+      binary(instruction.opcode, dest, srcA, srcB, BinaryOperation.BitXor)
+    case Instruction.ShiftLeftLogical(_, dest, srcA, srcB) =>
+      binary(instruction.opcode, dest, srcA, srcB, BinaryOperation.ShiftLeft)
+    case Instruction.ShiftRightLogical(_, dest, srcA, srcB) =>
+      binary(instruction.opcode, dest, srcA, srcB, BinaryOperation.LogicalShiftRight)
+    case Instruction.IEqual(_, dest, srcA, srcB) => binary(instruction.opcode, dest, srcA, srcB, BinaryOperation.Equal)
+    case Instruction.INotEqual(_, dest, srcA, srcB) =>
+      binary(instruction.opcode, dest, srcA, srcB, BinaryOperation.NotEqual)
+    case Instruction.ULessThan(_, dest, srcA, srcB) =>
+      binary(instruction.opcode, dest, srcA, srcB, BinaryOperation.UnsignedLessThan)
+    case Instruction.ULessThanEqual(_, dest, srcA, srcB) =>
+      binary(instruction.opcode, dest, srcA, srcB, BinaryOperation.UnsignedLessThanEqual)
+    case Instruction.UGreaterThan(_, dest, srcA, srcB) =>
+      binary(instruction.opcode, dest, srcA, srcB, BinaryOperation.UnsignedGreaterThan)
+    case Instruction.UGreaterThanEqual(_, dest, srcA, srcB) =>
+      binary(instruction.opcode, dest, srcA, srcB, BinaryOperation.UnsignedGreaterThanEqual)
+    case Instruction.Select(_, dest, pred, trueValue, falseValue) =>
+      for {
+        result    <- id(instruction.opcode, dest)
+        condition <- id(instruction.opcode, pred)
+        whenTrue  <- id(instruction.opcode, trueValue)
+        whenFalse <- id(instruction.opcode, falseValue)
+      } yield ExecutableInstruction.Select(result, condition, whenTrue, whenFalse)
+    case Instruction.Branch(targetLabel) =>
+      id(instruction.opcode, targetLabel).flatMap(target =>
+        labels.get(target).toRight(LoweringError.Malformed(instruction.opcode, s"unknown label %$target"))
+      ).map(ExecutableInstruction.Jump.apply)
+    case Instruction.BranchConditional(pred, trueLabel, falseLabel, _) =>
+      for {
+        condition <- id(instruction.opcode, pred)
+        trueId    <- id(instruction.opcode, trueLabel)
+        falseId   <- id(instruction.opcode, falseLabel)
+        whenTrue  <- labels.get(trueId).toRight(LoweringError.Malformed(instruction.opcode, s"unknown label %$trueId"))
+        whenFalse <-
+          labels.get(falseId).toRight(LoweringError.Malformed(instruction.opcode, s"unknown label %$falseId"))
+      } yield ExecutableInstruction.JumpIf(condition, whenTrue, whenFalse)
+    case Instruction.Return             => Right(ExecutableInstruction.Return(None))
+    case Instruction.ReturnValue(value) =>
+      id(instruction.opcode, value).map(id => ExecutableInstruction.Return(Some(id)))
+    case Instruction.Nop | Instruction.FunctionEnd => Right(ExecutableInstruction.Ignore(instruction.opcode))
+    case _: Instruction.Capability | _: Instruction.Extension | _: Instruction.ExtInstImport |
+        _: Instruction.MemoryModel | _: Instruction.EntryPoint | _: Instruction.ExecutionMode |
+        _: Instruction.Source | _: Instruction.SourceExtension | _: Instruction.String | _: Instruction.Name |
+        _: Instruction.MemberName | _: Instruction.Decorate | _: Instruction.MemberDecorate |
+        _: Instruction.DecorateId | _: Instruction.MemberDecorateIdEXT | _: Instruction.DecorateString |
+        _: Instruction.MemberDecorateString | _: Instruction.TypeVoid | _: Instruction.TypeBool |
+        _: Instruction.TypeInt | _: Instruction.TypeFloat | _: Instruction.TypeVector | _: Instruction.TypeMatrix |
+        _: Instruction.TypeImage | _: Instruction.TypeSampler | _: Instruction.TypeSampledImage |
+        _: Instruction.TypeArray | _: Instruction.TypeRuntimeArray | _: Instruction.TypeStruct |
+        _: Instruction.TypeOpaque | _: Instruction.TypePointer | _: Instruction.TypeFunction |
+        _: Instruction.TypeEvent | _: Instruction.TypeDeviceEvent | _: Instruction.TypeReserveId |
+        _: Instruction.TypeQueue | _: Instruction.TypePipe | _: Instruction.TypeForwardPointer |
+        _: Instruction.TypePipeStorage | _: Instruction.TypeNamedBarrier | _: Instruction.TypeTensorARM |
+        _: Instruction.TypeGraphARM | _: Instruction.TypeUntypedPointerKHR | _: Instruction.TypeCooperativeMatrixKHR |
+        _: Instruction.TypeRayQueryKHR | _: Instruction.TypeNodePayloadArrayAMDX | _: Instruction.TypeBufferEXT |
+        _: Instruction.TypeHitObjectNV | _: Instruction.TypeVectorIdEXT | _: Instruction.TypeHitObjectEXT |
+        _: Instruction.TypeAccelerationStructureKHR | _: Instruction.TypeCooperativeMatrixNV |
+        _: Instruction.TypeTensorLayoutNV | _: Instruction.TypeTensorViewNV | _: Instruction.TypeVmeImageINTEL |
+        _: Instruction.TypeAvcImePayloadINTEL | _: Instruction.TypeAvcRefPayloadINTEL |
+        _: Instruction.TypeAvcSicPayloadINTEL | _: Instruction.TypeAvcMcePayloadINTEL |
+        _: Instruction.TypeAvcMceResultINTEL | _: Instruction.TypeAvcImeResultINTEL |
+        _: Instruction.TypeAvcImeResultSingleReferenceStreamoutINTEL |
+        _: Instruction.TypeAvcImeResultDualReferenceStreamoutINTEL |
+        _: Instruction.TypeAvcImeSingleReferenceStreaminINTEL |
+        _: Instruction.TypeAvcImeDualReferenceStreaminINTEL | _: Instruction.TypeAvcRefResultINTEL |
+        _: Instruction.TypeAvcSicResultINTEL | _: Instruction.TypeBufferSurfaceINTEL |
+        _: Instruction.TypeStructContinuedINTEL | _: Instruction.TypeTaskSequenceALTERA |
+        _: Instruction.Function | _: Instruction.FunctionParameter | _: Instruction.Label =>
+      Right(ExecutableInstruction.Ignore(instruction.opcode))
+    case value => Right(ExecutableInstruction.Unsupported(value.opcode, "semantic lowering is not implemented"))
+  }
 
-  private def lowerKnownInstruction(
-      instruction: KnownInstruction,
-      labels: Map[Int, Pc]
-  ): Either[LoweringError, ExecutableInstruction] =
-    instruction match {
-      case KnownInstruction.OpConstant(arguments) =>
-        val operands = operandBits(arguments)
-        requireOperands(instruction.name, operands, 3)
-          .map(_ => ExecutableInstruction.Constant(operands(1), operands(2).toLong & 0xffffffffL))
-      case KnownInstruction.OpSpecConstant(arguments) =>
-        val operands = operandBits(arguments)
-        requireOperands(instruction.name, operands, 3)
-          .map(_ => ExecutableInstruction.Constant(operands(1), operands(2).toLong & 0xffffffffL))
-      case KnownInstruction.OpConstantTrue(arguments) =>
-        val operands = operandBits(arguments)
-        requireOperands(instruction.name, operands, 2).map(_ => ExecutableInstruction.Constant(operands(1), 1L))
-      case KnownInstruction.OpSpecConstantTrue(arguments) =>
-        val operands = operandBits(arguments)
-        requireOperands(instruction.name, operands, 2).map(_ => ExecutableInstruction.Constant(operands(1), 1L))
-      case KnownInstruction.OpConstantFalse(arguments) =>
-        val operands = operandBits(arguments)
-        requireOperands(instruction.name, operands, 2).map(_ => ExecutableInstruction.Constant(operands(1), 0L))
-      case KnownInstruction.OpSpecConstantFalse(arguments) =>
-        val operands = operandBits(arguments)
-        requireOperands(instruction.name, operands, 2).map(_ => ExecutableInstruction.Constant(operands(1), 0L))
-      case KnownInstruction.OpVariable(arguments) =>
-        val operands = operandBits(arguments)
-        requireOperands(instruction.name, operands, 3)
-          .map(_ => ExecutableInstruction.Variable(operands(1), operands.lift(3)))
-      case KnownInstruction.OpLoad(arguments) =>
-        val operands = operandBits(arguments)
-        requireOperands(instruction.name, operands, 3)
-          .map(_ => ExecutableInstruction.Load(operands(1), operands(2)))
-      case KnownInstruction.OpStore(arguments) =>
-        val operands = operandBits(arguments)
-        requireOperands(instruction.name, operands, 2)
-          .map(_ => ExecutableInstruction.Store(operands(0), operands(1)))
-      case KnownInstruction.OpCopyObject(arguments) =>
-        val operands = operandBits(arguments)
-        requireOperands(instruction.name, operands, 3)
-          .map(_ => ExecutableInstruction.Copy(operands(1), operands(2)))
-      case KnownInstruction.OpIAdd(arguments) =>
-        binary(instruction.name, arguments, BinaryOperation.Add)
-      case KnownInstruction.OpISub(arguments) =>
-        binary(instruction.name, arguments, BinaryOperation.Subtract)
-      case KnownInstruction.OpIMul(arguments) =>
-        binary(instruction.name, arguments, BinaryOperation.Multiply)
-      case KnownInstruction.OpBitwiseAnd(arguments) =>
-        binary(instruction.name, arguments, BinaryOperation.BitAnd)
-      case KnownInstruction.OpBitwiseOr(arguments) =>
-        binary(instruction.name, arguments, BinaryOperation.BitOr)
-      case KnownInstruction.OpBitwiseXor(arguments) =>
-        binary(instruction.name, arguments, BinaryOperation.BitXor)
-      case KnownInstruction.OpShiftLeftLogical(arguments) =>
-        binary(instruction.name, arguments, BinaryOperation.ShiftLeft)
-      case KnownInstruction.OpShiftRightLogical(arguments) =>
-        binary(instruction.name, arguments, BinaryOperation.LogicalShiftRight)
-      case KnownInstruction.OpIEqual(arguments) =>
-        binary(instruction.name, arguments, BinaryOperation.Equal)
-      case KnownInstruction.OpINotEqual(arguments) =>
-        binary(instruction.name, arguments, BinaryOperation.NotEqual)
-      case KnownInstruction.OpULessThan(arguments) =>
-        binary(instruction.name, arguments, BinaryOperation.UnsignedLessThan)
-      case KnownInstruction.OpULessThanEqual(arguments) =>
-        binary(instruction.name, arguments, BinaryOperation.UnsignedLessThanEqual)
-      case KnownInstruction.OpUGreaterThan(arguments) =>
-        binary(instruction.name, arguments, BinaryOperation.UnsignedGreaterThan)
-      case KnownInstruction.OpUGreaterThanEqual(arguments) =>
-        binary(instruction.name, arguments, BinaryOperation.UnsignedGreaterThanEqual)
-      case KnownInstruction.OpSelect(arguments) =>
-        val operands = operandBits(arguments)
-        requireOperands(instruction.name, operands, 5)
-          .map(_ => ExecutableInstruction.Select(operands(1), operands(2), operands(3), operands(4)))
-      case KnownInstruction.OpBranch(arguments) =>
-        val operands = operandBits(arguments)
-        requireOperands(instruction.name, operands, 1).flatMap(_ =>
-          labels.get(operands(0)).toRight(LoweringError.Malformed(instruction.name, s"unknown label %${operands(0)}"))
-        ).map(ExecutableInstruction.Jump.apply)
-      case KnownInstruction.OpBranchConditional(arguments) =>
-        val operands = operandBits(arguments)
-        requireOperands(instruction.name, operands, 3).flatMap { _ =>
-          for {
-            whenTrue <- labels.get(operands(1)).toRight(
-              LoweringError.Malformed(instruction.name, s"unknown label %${operands(1)}")
-            )
-            whenFalse <- labels.get(operands(2)).toRight(
-              LoweringError.Malformed(instruction.name, s"unknown label %${operands(2)}")
-            )
-          } yield ExecutableInstruction.JumpIf(operands(0), whenTrue, whenFalse)
-        }
-      case KnownInstruction.OpReturn(_)              => Right(ExecutableInstruction.Return(None))
-      case KnownInstruction.OpReturnValue(arguments) =>
-        val operands = operandBits(arguments)
-        requireOperands(instruction.name, operands, 1)
-          .map(_ => ExecutableInstruction.Return(Some(operands(0))))
-      case value if isIgnored(value.name) => Right(ExecutableInstruction.Ignore(value.name))
-      case value => Right(ExecutableInstruction.Unsupported(value.name, "semantic lowering is not implemented"))
-    }
-
-  private def operandBits(arguments: InstructionArguments): Vector[Int] = arguments.operands.map(_.bits)
-
-  private def requireOperands(
-      name: String,
-      operands: Vector[Int],
-      count: Int
-  ): Either[LoweringError, Unit] =
-    if (operands.size >= count) Right(())
-    else Left(LoweringError.Malformed(name, s"expected $count operands, found ${operands.size}"))
+  private def constant(name: String, dest: Operand, value: Operand): Either[LoweringError, ExecutableInstruction] =
+    for {
+      result <- id(name, dest)
+      bits   <- word(name, value)
+    } yield ExecutableInstruction.Constant(result, bits.toLong & 0xffffffffL)
 
   private def binary(
       name: String,
-      arguments: InstructionArguments,
+      dest: Operand,
+      srcA: Operand,
+      srcB: Operand,
       operation: BinaryOperation
-  ): Either[LoweringError, ExecutableInstruction] = {
-    val operands = operandBits(arguments)
-    requireOperands(name, operands, 4)
-      .map(_ => ExecutableInstruction.Binary(name, operands(1), operands(2), operands(3), operation))
-  }
+  ): Either[LoweringError, ExecutableInstruction] =
+    for {
+      result <- id(name, dest)
+      left   <- id(name, srcA)
+      right  <- id(name, srcB)
+    } yield ExecutableInstruction.Binary(name, result, left, right, operation)
 
-  private def isIgnored(name: String): Boolean =
-    name == "OpNop" || name == "OpCapability" || name == "OpExtension" || name == "OpExtInstImport" ||
-      name == "OpMemoryModel" || name == "OpEntryPoint" || name == "OpExecutionMode" || name == "OpSource" ||
-      name == "OpSourceExtension" || name == "OpString" || name == "OpName" || name == "OpMemberName" ||
-      name.startsWith("OpDecorate") || name.startsWith("OpMemberDecorate") || name.startsWith("OpType") ||
-      name == "OpFunction" || name == "OpFunctionParameter" || name == "OpFunctionEnd" || name == "OpLabel"
+  private def id(name: String, operand: Operand): Either[LoweringError, Int] = word(name, operand)
+  private def optionalId(name: String, operand: Option[Operand]): Either[LoweringError, Option[Int]] = operand match {
+    case None        => Right(None)
+    case Some(value) => id(name, value).map(Some.apply)
+  }
+  private def word(name: String, operand: Operand): Either[LoweringError, Int] =
+    operand.words match {
+      case Vector(value) => Right(value.bits)
+      case values        => Left(LoweringError.Malformed(name, s"${operand.kind} has ${values.size} words"))
+    }
+
 }
 
 extension (instruction: ExecutableInstruction) {
@@ -343,10 +345,9 @@ object Interpreter {
       if (cancellation.isCancelled) fault = Some(ExecutionFault.Cancelled)
       else budget.consume() match {
         case Left(value) => fault = Some(value)
-        case Right(())   =>
-          executable.program.at(pc) match {
-            case Left(value)        => fault = Some(value)
-            case Right(instruction) => instruction.execute(context, pc) match {
+        case Right(())   => executable.program.at(pc) match {
+            case Left(value)  => fault = Some(value)
+            case Right(value) => value.execute(context, pc) match {
                 case Step.Advance => pc.next match {
                     case Left(value) => fault = Some(value)
                     case Right(next) => pc = next
