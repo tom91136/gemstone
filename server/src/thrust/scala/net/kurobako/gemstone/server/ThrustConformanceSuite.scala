@@ -380,7 +380,6 @@ object ThrustConformanceSuite {
         generated.resolve("gemstone_cuda_rpc_client.c").toString,
         generated.resolve("gemstone_cuda_driver_stubs.c").toString,
         dispatch.resolve("gemstone_rpc_transport.c").toString,
-        dispatch.resolve("gemstone_rpc_boundary.c").toString,
         s"-I$generated",
         s"-I$dispatch",
         s"-I${cudaHeaderInclude(root)}",
