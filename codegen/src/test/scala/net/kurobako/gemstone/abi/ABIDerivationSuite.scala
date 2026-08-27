@@ -8,6 +8,13 @@ trait DerivationFixture {
   def unsupportedCall(value: Int): Int = unsupported
 }
 
+trait CallbackDerivationFixture {
+  def register(
+      callback: Callback[(Int, CString, Pointer[CVoid, ReadWrite, Opaque]), Boolean]
+  ): Unit
+  def registerNamed(callback: CallbackTypedef["fixture_callback_t", Tuple1[Int], Unit]): Unit
+}
+
 class ABIDerivationSuite extends munit.FunSuite {
   test("method implementation modes survive TASTy boundaries") {
     assertEquals(
@@ -52,6 +59,19 @@ class ABIDerivationSuite extends munit.FunSuite {
           Vector("value"),
           MethodImplementation.NativeDelegate("gemstone_fixture_delegate")
         )
+      )
+    )
+  }
+
+  test("callback C signatures derive from typed argument tuples and results") {
+    assertEquals(
+      ABIDerivation.cFunctions[CallbackDerivationFixture],
+      Vector(
+        CFunction(
+          "register",
+          "void (bool (*)(int, const char *, void *))"
+        ),
+        CFunction("registerNamed", "void (fixture_callback_t)")
       )
     )
   }

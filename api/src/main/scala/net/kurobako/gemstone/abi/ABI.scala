@@ -88,10 +88,24 @@ type OpaquePointer = Pointer[CVoid, ReadWrite, Opaque]
   */
 sealed trait CValue[Name <: String & Singleton]
 
-/** A C callback pointer. Callback invocation is an explicit transport concern; its complete C spelling remains in the
-  * type so code generation cannot silently confuse incompatible callbacks.
+/** Why an invocation of a native callback could not complete. Exceptions and transport details never cross the API
+  * boundary directly.
   */
-sealed trait Callback[Signature <: String & Singleton]
+enum CallbackFailure {
+  case Unavailable(message: String)
+  case Protocol(message: String)
+  case Failed(message: String)
+}
+
+/** A typed, process-neutral C callback capability. The native endpoint owns the actual function pointer and any user
+  * data; a JVM implementation invokes it like an ordinary tupled Scala function and receives failures explicitly.
+  */
+trait Callback[-Args <: Tuple, +Result] extends (Args => Either[CallbackFailure, Result])
+
+/** A named C callback typedef. Scala retains the callable argument/result types while C declarations retain the
+  * vendor's exact typedef name.
+  */
+trait CallbackTypedef[Name <: String & Singleton, -Args <: Tuple, +Result] extends Callback[Args, Result]
 
 /** A fixed-size C array embedded in an ABI declaration. */
 sealed trait CArray[Element, Count <: Int & Singleton]

@@ -19,4 +19,13 @@ class ABISuite extends munit.FunSuite {
     assertEquals(values.read(1), 2)
     intercept[IllegalArgumentException](values.write(3, 2))
   }
+
+  test("callbacks are typed functions with explicit failure") {
+    val callback = new Callback[(Int, String), String] {
+      override def apply(arguments: (Int, String)): Either[CallbackFailure, String] =
+        Right(arguments._2 * arguments._1)
+    }
+
+    assertEquals(callback((3, "go")), Right("gogogo"))
+  }
 }

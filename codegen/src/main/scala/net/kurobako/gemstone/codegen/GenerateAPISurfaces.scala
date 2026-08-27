@@ -103,8 +103,8 @@ object GenerateAPISurfaces {
       }
       s"  def ${identifier(function.name)}(${parameters.mkString(", ")}): ${scalaType(function.returnType)} = unsupported"
     }
-    val aliasLines = aliases.toVector.sortBy(_._1).map { case (name, spelling) =>
-      s"type ${identifier(name)} = CValue[${literal(spelling)}]"
+    val aliasLines = aliases.toVector.sortBy(_._1).map { case (name, definition) =>
+      s"type ${identifier(name)} = $definition"
     }
     val versionLines = target.versions.map { case (name, value) => s"  val $name: String = ${literal(value)}" }
     s"""|// Generated from pinned official headers by GenerateAPISurfaces. Do not edit mechanically.
@@ -128,7 +128,9 @@ object GenerateAPISurfaces {
   private def mapType(raw: String, aliases: mutable.LinkedHashMap[String, String], api: String): String = {
     val value = raw.replaceAll("\\s+", " ").trim
     functionPointer(value) match {
-      case Some(_)                     => s"Callback[${literal(value)}]"
+      case Some((result, parameters)) =>
+        val arguments = callbackArguments(parameters.map(mapType(_, aliases, api)))
+        s"Callback[$arguments, ${mapType(result, aliases, api)}]"
       case None if value.endsWith("*") =>
         val pointee0 = value.dropRight(1).trim
         val readOnly = pointee0.startsWith("const ") || pointee0.endsWith(" const")
@@ -140,11 +142,26 @@ object GenerateAPISurfaces {
           s"Pointer[$element, $access, Opaque]"
         }
       case None =>
-        fixedArray(value) match {
-          case Some((element, count)) => s"CArray[${mapType(element, aliases, api)}, $count]"
-          case None                   => mapValue(value, aliases, api)
+        CallbackTypedefCatalog.find(api, value) match {
+          case Some(signature) =>
+            val (result, parameters) = functionPointer(signature)
+              .getOrElse(throw new IllegalStateException(s"invalid callback typedef signature: $value = $signature"))
+            val arguments = callbackArguments(parameters.map(mapType(_, aliases, api)))
+            aliases(value) = s"CallbackTypedef[${literal(value)}, $arguments, ${mapType(result, aliases, api)}]"
+            identifier(value)
+          case None =>
+            fixedArray(value) match {
+              case Some((element, count)) => s"CArray[${mapType(element, aliases, api)}, $count]"
+              case None                   => mapValue(value, aliases, api)
+            }
         }
     }
+  }
+
+  private def callbackArguments(parameters: Vector[String]): String = parameters match {
+    case Vector()      => "EmptyTuple"
+    case Vector(value) => s"Tuple1[$value]"
+    case values        => values.mkString("(", ", ", ")")
   }
 
   private def mapValue(raw: String, aliases: mutable.LinkedHashMap[String, String], api: String): String =
@@ -170,13 +187,39 @@ object GenerateAPISurfaces {
         val name = identifierName(other)
         aliases.get(name) match {
           case Some(_) => ()
-          case None    => aliases(name) = other
+          case None    => aliases(name) = s"CValue[${literal(other)}]"
         }
         identifier(name)
     }
 
-  private def functionPointer(value: String): Option[String] =
-    Option.when(value.matches(".*\\(\\s*\\*[^)]*\\)\\s*\\(.*"))(value)
+  private def functionPointer(value: String): Option[(String, Vector[String])] = {
+    val pattern = raw"(?s)^(.+?)\(\s*\*[^)]*\)\s*\((.*)\)$$".r
+    value match {
+      case pattern(result, rawParameters) =>
+        val parameters = splitParameters(rawParameters.trim).filterNot(_ == "void")
+        Some(result.trim -> parameters)
+      case _ => None
+    }
+  }
+
+  private def splitParameters(value: String): Vector[String] = {
+    val result = Vector.newBuilder[String]
+    var depth  = 0
+    var start  = 0
+    value.indices.foreach { index =>
+      value(index) match {
+        case '(' | '['         => depth += 1
+        case ')' | ']'         => depth -= 1
+        case ',' if depth == 0 =>
+          result += value.substring(start, index).trim
+          start = index + 1
+        case _ => ()
+      }
+    }
+    val finalValue = value.substring(start).trim
+    if (finalValue.nonEmpty) result += finalValue
+    result.result()
+  }
 
   private def fixedArray(value: String): Option[(String, Int)] = {
     val pattern = raw"(.+)\[([0-9]+)\]".r

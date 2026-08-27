@@ -68,7 +68,7 @@ type ze_fence_desc_t = CValue["ze_fence_desc_t"]
 type ze_fence_handle_t = CValue["ze_fence_handle_t"]
 type ze_graph_handle_t = CValue["ze_graph_handle_t"]
 type ze_group_count_t = CValue["ze_group_count_t"]
-type ze_host_function_callback_t = CValue["ze_host_function_callback_t"]
+type ze_host_function_callback_t = CallbackTypedef["ze_host_function_callback_t", Tuple1[OpaquePointer], Unit]
 type ze_host_mem_alloc_desc_t = CValue["ze_host_mem_alloc_desc_t"]
 type ze_image_allocation_ext_properties_t = CValue["ze_image_allocation_ext_properties_t"]
 type ze_image_desc_t = CValue["ze_image_desc_t"]
@@ -271,7 +271,11 @@ type zet_profile_properties_t = CValue["zet_profile_properties_t"]
 type zet_tracer_exp_desc_t = CValue["zet_tracer_exp_desc_t"]
 type zet_tracer_exp_handle_t = CValue["zet_tracer_exp_handle_t"]
 type zet_typed_value_t = CValue["zet_typed_value_t"]
-type zex_mem_graph_free_callback_fn_t = CValue["zex_mem_graph_free_callback_fn_t"]
+type zex_mem_graph_free_callback_fn_t = CallbackTypedef[
+  "zex_mem_graph_free_callback_fn_t",
+  Tuple1[OpaquePointer],
+  Unit
+]
 
 trait LevelZero {
   def zeCommandListAppendBarrier(hCommandList: ze_command_list_handle_t, hSignalEvent: ze_event_handle_t, numWaitEvents: uint32_t, phWaitEvents: Pointer[ze_event_handle_t, ReadWrite, Opaque]): ze_result_t = unsupported

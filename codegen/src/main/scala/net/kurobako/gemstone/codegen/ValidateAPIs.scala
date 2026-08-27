@@ -134,7 +134,8 @@ object ValidateAPIs {
       line => { val _ = errors.append(line).append('\n') }
     )
     require(exit == 0, s"${config.name}: clang failed ($exit):\n$errors")
-    val root      = read[Node](output.result())
+    val root = read[Node](output.result())
+    validateCallbackTypedefs(config.name, root)
     val functions = collect(root).filter(function => config.acceptedName(function.name))
     val conflicts = functions.groupBy(_.name).collect {
       case (name, entries) if entries.map(_.functionType).distinct.size > 1 =>
@@ -142,6 +143,33 @@ object ValidateAPIs {
     }.toVector
     require(conflicts.isEmpty, s"${config.name}: conflicting declarations: ${conflicts.mkString("; ")}")
     Surface(config.name, functions.distinctBy(_.name).sortBy(_.name))
+  }
+
+  private def validateCallbackTypedefs(surface: String, root: Node): Unit = {
+    val expected = CallbackTypedefCatalog.forSurface(surface)
+    val names    = expected.map(_.name).toSet
+    val actual   = collectTypedefs(root)
+      .filter(value => names(value._1))
+      .groupMap(_._1)(_._2)
+      .view
+      .mapValues(_.distinct)
+      .toMap
+    expected.foreach { definition =>
+      val signatures = actual.getOrElse(definition.name, Vector.empty)
+      require(
+        signatures == Vector(definition.signature),
+        s"$surface: callback typedef ${definition.name} differs: expected ${definition.signature}, found ${signatures.mkString(" or ")}"
+      )
+    }
+  }
+
+  private def collectTypedefs(root: Node): Vector[(String, String)] = {
+    val here = root match {
+      case Node(Some("TypedefDecl"), Some(name), Some(TypeInfo(underlying)), isImplicit, _)
+          if !isImplicit.getOrElse(false) => Vector(name -> underlying)
+      case _ => Vector.empty
+    }
+    here ++ root.inner.getOrElse(Vector.empty).flatMap(collectTypedefs)
   }
 
   private def collect(root: Node): Vector[Function] = {

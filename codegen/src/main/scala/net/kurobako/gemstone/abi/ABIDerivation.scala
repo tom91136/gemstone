@@ -87,11 +87,18 @@ object ABIDerivation {
             case AppliedType(constructor, List(name))
                 if constructor.typeSymbol.fullName == "net.kurobako.gemstone.abi.CValue" =>
               literalArgument(name).getOrElse(report.errorAndAbort(s"CValue in $methodName has no literal C name"))
-            case AppliedType(constructor, List(signature))
+            case AppliedType(constructor, List(arguments, callbackResult))
                 if constructor.typeSymbol.fullName == "net.kurobako.gemstone.abi.Callback" =>
-              literalArgument(
-                signature
-              ).getOrElse(report.errorAndAbort(s"Callback in $methodName has no literal C signature"))
+              val parameterTypes     = tupleElements(arguments).map(loop)
+              val callbackResultType = loop(callbackResult)
+              val separator          = if (callbackResultType.endsWith("*")) "" else " "
+              s"$callbackResultType$separator(*)(${
+                  if (parameterTypes.isEmpty) "void" else parameterTypes.mkString(", ")
+                })"
+            case AppliedType(constructor, List(name, _, _))
+                if constructor.typeSymbol.fullName == "net.kurobako.gemstone.abi.CallbackTypedef" =>
+              literalArgument(name)
+                .getOrElse(report.errorAndAbort(s"CallbackTypedef in $methodName has no literal C name"))
             case AppliedType(constructor, List(element, count))
                 if constructor.typeSymbol.fullName == "net.kurobako.gemstone.abi.CArray" =>
               val size = count.dealias match {
@@ -121,6 +128,23 @@ object ABIDerivation {
                 s"cannot derive C type for $methodName/$parameterName${if (result) " result" else ""}: ${tpe0.show} (${tpe.show})"
               )
           }
+      }
+    }
+
+    def tupleElements(tpe0: TypeRepr): List[TypeRepr] = {
+      val tpe = tpe0.dealias.simplified
+      tpe match {
+        case value if value =:= TypeRepr.of[EmptyTuple] => Nil
+        case AppliedType(constructor, List(head, tail))
+            if constructor.typeSymbol.fullName == "scala.*:" =>
+          head :: tupleElements(tail)
+        case AppliedType(constructor, elements)
+            if constructor.typeSymbol.fullName.matches("scala\\.Tuple[1-9][0-9]*") =>
+          elements
+        case _ =>
+          report.errorAndAbort(
+            s"Callback arguments in $methodName/$parameterName must be a concrete Tuple, found ${tpe0.show}"
+          )
       }
     }
 
