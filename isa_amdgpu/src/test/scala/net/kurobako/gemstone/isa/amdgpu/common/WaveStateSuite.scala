@@ -8,12 +8,12 @@ class WaveStateSuite extends munit.FunSuite {
 
   test("stage register and special-register writes until an atomic commit") {
     val state   = WaveState.create(target, laneCount = 32, sgprCount = 8, vgprCount = 4, agprCount = 2).toOption.get
-    val effects = new Effects[AmdWrite]
-    effects.stage(AmdWrite.Sgpr(1, 11))
-    effects.stage(AmdWrite.Vgpr(2, 7, 22))
-    effects.stage(AmdWrite.Agpr(1, 31, 33))
-    effects.stage(AmdWrite.Scc(true))
-    effects.stage(AmdWrite.M0(44))
+    val effects = new Effects[AMDWrite]
+    effects.stage(AMDWrite.Sgpr(1, 11))
+    effects.stage(AMDWrite.Vgpr(2, 7, 22))
+    effects.stage(AMDWrite.Agpr(1, 31, 33))
+    effects.stage(AMDWrite.Scc(true))
+    effects.stage(AMDWrite.M0(44))
 
     assertEquals(state.readSgpr(1), Right(0))
     assertEquals(state.commit(effects), Right(()))
@@ -27,16 +27,16 @@ class WaveStateSuite extends munit.FunSuite {
 
   test("reads-before-writes permit a staged register swap") {
     val state = WaveState.create(target, laneCount = 64, sgprCount = 2, vgprCount = 0).toOption.get
-    val seed  = new Effects[AmdWrite]
-    seed.stage(AmdWrite.Sgpr(0, 10))
-    seed.stage(AmdWrite.Sgpr(1, 20))
+    val seed  = new Effects[AMDWrite]
+    seed.stage(AMDWrite.Sgpr(0, 10))
+    seed.stage(AMDWrite.Sgpr(1, 20))
     assertEquals(state.commit(seed), Right(()))
 
     val left    = state.readSgpr(0).toOption.get
     val right   = state.readSgpr(1).toOption.get
-    val effects = new Effects[AmdWrite]
-    effects.stage(AmdWrite.Sgpr(0, right))
-    effects.stage(AmdWrite.Sgpr(1, left))
+    val effects = new Effects[AMDWrite]
+    effects.stage(AMDWrite.Sgpr(0, right))
+    effects.stage(AMDWrite.Sgpr(1, left))
     assertEquals(state.commit(effects), Right(()))
     assertEquals(state.readSgpr(0), Right(20))
     assertEquals(state.readSgpr(1), Right(10))
@@ -44,9 +44,9 @@ class WaveStateSuite extends munit.FunSuite {
 
   test("an invalid destination prevents every staged write") {
     val state   = WaveState.create(target, laneCount = 32, sgprCount = 1, vgprCount = 0).toOption.get
-    val effects = new Effects[AmdWrite]
-    effects.stage(AmdWrite.Sgpr(0, 99))
-    effects.stage(AmdWrite.Sgpr(1, 100))
+    val effects = new Effects[AMDWrite]
+    effects.stage(AMDWrite.Sgpr(0, 99))
+    effects.stage(AMDWrite.Sgpr(1, 100))
 
     assert(state.commit(effects).isLeft)
     assertEquals(state.readSgpr(0), Right(0))
@@ -55,15 +55,15 @@ class WaveStateSuite extends munit.FunSuite {
 
   test("duplicate destinations and masks outside the wave fail closed") {
     val state      = WaveState.create(target, laneCount = 32, sgprCount = 1, vgprCount = 0).toOption.get
-    val duplicates = new Effects[AmdWrite]
-    duplicates.stage(AmdWrite.Sgpr(0, 1))
-    duplicates.stage(AmdWrite.Sgpr(0, 2))
+    val duplicates = new Effects[AMDWrite]
+    duplicates.stage(AMDWrite.Sgpr(0, 1))
+    duplicates.stage(AMDWrite.Sgpr(0, 2))
     assert(duplicates.snapshot.nonEmpty)
     assert(state.commit(duplicates).isLeft)
     assertEquals(state.readSgpr(0), Right(0))
 
-    val invalidMask = new Effects[AmdWrite]
-    invalidMask.stage(AmdWrite.Vcc(LaneMask.unsafe(1L << 40)))
+    val invalidMask = new Effects[AMDWrite]
+    invalidMask.stage(AMDWrite.Vcc(LaneMask.unsafe(1L << 40)))
     assert(state.commit(invalidMask).isLeft)
     assert(state.vcc.isEmpty)
   }

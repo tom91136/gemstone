@@ -12,7 +12,7 @@ The commands and expected output are source metadata using the same durable form
 #pragma region requires: pass
 ```
 
-`CudaConformanceSuite` discovers every `check_*.cu` recursively and registers one MUnit test for each enabled backend.
+`CUDAConformanceSuite` discovers every `check_*.cu` recursively and registers one MUnit test for each enabled backend.
 Run it directly, or as part of `testFull`, with:
 
 ```console
@@ -86,12 +86,12 @@ These are compact adaptations of tests in GPUOcelot revision `b16039dc940dc6bc4e
 | --- | --- |
 | `driver/check_memory.cu` | `driver/sequence.cpp` (Driver API setup and memory flow) |
 | `driver/check_module_launch.cu` | `driver/sequence.cpp` and `driver/sequence.ptx` |
-| `runtime/check_malloc_copy.cu` | `TestCudaMalloc.cu` |
-| `runtime/check_pointer_offsets.cu` | `TestCudaMalloc.cu` |
-| `runtime/check_pitched_copy.cu` | `TestCudaMalloc.cu` |
-| `runtime/check_sequence.cu` | `TestCudaSequence.cu` |
-| `runtime/check_shared_barrier.cu` | `TestCudaSequence.cu` |
-| `runtime/check_globals.cu` | `TestCudaGlobals.cu` |
+| `runtime/check_malloc_copy.cu` | `TestCUDAMalloc.cu` |
+| `runtime/check_pointer_offsets.cu` | `TestCUDAMalloc.cu` |
+| `runtime/check_pitched_copy.cu` | `TestCUDAMalloc.cu` |
+| `runtime/check_sequence.cu` | `TestCUDASequence.cu` |
+| `runtime/check_shared_barrier.cu` | `TestCUDASequence.cu` |
+| `runtime/check_globals.cu` | `TestCUDAGlobals.cu` |
 | `runtime/check_device_function.cu` | `TestFunctionCall.cu` |
 | `runtime/check_indirect_function.cu` | `TestIndirectFunctionCall.cu` |
 | `runtime/check_array_copy.cu` | `memory/arrays.cu` |

@@ -6,10 +6,10 @@ import java.nio.file.Path
 import java.nio.file.Paths
 import scala.collection.mutable
 
-object GenerateSpirvIsa {
-  private enum Json {
-    case Object(fields: Map[Predef.String, Json])
-    case Array(values: Vector[Json])
+object GenerateSPIRVISA {
+  private enum JSON {
+    case Object(fields: Map[Predef.String, JSON])
+    case Array(values: Vector[JSON])
     case String(value: Predef.String)
     case Number(value: BigDecimal)
     case Bool(value: Boolean)
@@ -53,17 +53,17 @@ object GenerateSpirvIsa {
       )
     case _ =>
       throw new IllegalArgumentException(
-        "usage: GenerateSpirvIsa instructions <grammar> <output> <package> | tests <grammar> <tests> <output> <package>"
+        "usage: GenerateSPIRVISA instructions <grammar> <output> <package> | tests <grammar> <tests> <output> <package>"
       )
   }
 
   private def readGrammar(path: Path): Grammar = {
-    val root = new JsonParser(Files.readString(path, StandardCharsets.UTF_8)).parse() match {
-      case value: Json.Object => value
+    val root = new JSONParser(Files.readString(path, StandardCharsets.UTF_8)).parse() match {
+      case value: JSON.Object => value
       case _                  => throw new IllegalArgumentException("SPIR-V grammar root is not an object")
     }
     val entries = arrayField(root, "instructions").map {
-      case obj: Json.Object =>
+      case obj: JSON.Object =>
         Entry(
           opcode = numberField(obj, "opcode"),
           name = stringField(obj, "opname"),
@@ -81,7 +81,7 @@ object GenerateSpirvIsa {
       case _ => throw new IllegalArgumentException("instruction entry is not an object")
     }.sortBy(_.opcode)
     val kinds = arrayField(root, "operand_kinds").map {
-      case obj: Json.Object =>
+      case obj: JSON.Object =>
         OperandKind(
           kind = stringField(obj, "kind"),
           category = stringField(obj, "category"),
@@ -145,7 +145,7 @@ object GenerateSpirvIsa {
         |  final def meta: Metadata = definition.meta
         |}
         |
-        |val Version: SpirvVersion = SpirvVersion(${grammar.major}, ${grammar.minor})
+        |val Version: SPIRVVersion = SPIRVVersion(${grammar.major}, ${grammar.minor})
         |val GrammarRevision: Int = ${grammar.revision}
         |val Instructions: Vector[InstructionDef] = InstructionDef.values.toVector
         |
@@ -463,45 +463,45 @@ object GenerateSpirvIsa {
         |""".stripMargin
   }
 
-  private def field(obj: Json.Object, name: String): Json =
+  private def field(obj: JSON.Object, name: String): JSON =
     obj.fields.getOrElse(name, throw new IllegalArgumentException(s"missing JSON field $name"))
-  private def valueField(obj: Json.Object, name: String): Json         = field(obj, name)
-  private def arrayField(obj: Json.Object, name: String): Vector[Json] = field(obj, name) match {
-    case Json.Array(values) => values
+  private def valueField(obj: JSON.Object, name: String): JSON         = field(obj, name)
+  private def arrayField(obj: JSON.Object, name: String): Vector[JSON] = field(obj, name) match {
+    case JSON.Array(values) => values
     case _                  => throw new IllegalArgumentException(s"JSON field $name is not an array")
   }
-  private def optionalObjectArray(obj: Json.Object, name: String): Vector[Json.Object] = obj.fields.get(name).toVector
+  private def optionalObjectArray(obj: JSON.Object, name: String): Vector[JSON.Object] = obj.fields.get(name).toVector
     .flatMap {
-      case Json.Array(values) => values.map {
-          case value: Json.Object => value
+      case JSON.Array(values) => values.map {
+          case value: JSON.Object => value
           case _                  => throw new IllegalArgumentException(s"JSON field $name contains a non-object")
         }
       case _ => throw new IllegalArgumentException(s"JSON field $name is not an array")
     }
-  private def optionalStringArray(obj: Json.Object, name: String): Vector[String] = obj.fields.get(name).toVector
+  private def optionalStringArray(obj: JSON.Object, name: String): Vector[String] = obj.fields.get(name).toVector
     .flatMap {
-      case Json.Array(values) => values.map {
-          case Json.String(value) => value
+      case JSON.Array(values) => values.map {
+          case JSON.String(value) => value
           case _                  => throw new IllegalArgumentException(s"JSON field $name contains a non-string")
         }
       case _ => throw new IllegalArgumentException(s"JSON field $name is not an array")
     }
-  private def stringField(obj: Json.Object, name: String): String = field(obj, name) match {
-    case Json.String(value) => value
+  private def stringField(obj: JSON.Object, name: String): String = field(obj, name) match {
+    case JSON.String(value) => value
     case _                  => throw new IllegalArgumentException(s"JSON field $name is not a string")
   }
-  private def optionalString(obj: Json.Object, name: String): Option[String] = obj.fields.get(name).map {
-    case Json.String(value) => value
+  private def optionalString(obj: JSON.Object, name: String): Option[String] = obj.fields.get(name).map {
+    case JSON.String(value) => value
     case _                  => throw new IllegalArgumentException(s"JSON field $name is not a string")
   }
-  private def numberField(obj: Json.Object, name: String): Int = field(obj, name) match {
-    case Json.Number(value) if value.isValidInt => value.toInt
+  private def numberField(obj: JSON.Object, name: String): Int = field(obj, name) match {
+    case JSON.Number(value) if value.isValidInt => value.toInt
     case _                                      => throw new IllegalArgumentException(s"JSON field $name is not an int")
   }
-  private def parseUnsigned(value: Json): Long = value match {
-    case Json.String(text) if text.startsWith("0x") => java.lang.Long.parseUnsignedLong(text.drop(2), 16)
-    case Json.String(text)                          => java.lang.Long.parseLong(text)
-    case Json.Number(number) if number.isValidLong  => number.toLong
+  private def parseUnsigned(value: JSON): Long = value match {
+    case JSON.String(text) if text.startsWith("0x") => java.lang.Long.parseUnsignedLong(text.drop(2), 16)
+    case JSON.String(text)                          => java.lang.Long.parseLong(text)
+    case JSON.Number(number) if number.isValidLong  => number.toLong
     case _ => throw new IllegalArgumentException("enumerant value is not an integer")
   }
   private def escape(value: String): String = value.flatMap {
@@ -518,33 +518,33 @@ object GenerateSpirvIsa {
     val _ = Files.writeString(path, content, StandardCharsets.UTF_8)
   }
 
-  private final class JsonParser(source: String) {
+  private final class JSONParser(source: String) {
     private var index = 0
-    def parse(): Json = {
+    def parse(): JSON = {
       val value = parseValue()
       whitespace()
       require(index == source.length, s"trailing JSON at offset $index")
       value
     }
-    private def parseValue(): Json = {
+    private def parseValue(): JSON = {
       whitespace()
       if (index >= source.length) fail("unexpected end of JSON")
       source.charAt(index) match {
         case '{'                                 => parseObject()
         case '['                                 => parseArray()
-        case '"'                                 => Json.String(parseString())
-        case 't'                                 => literal("true", Json.Bool(true))
-        case 'f'                                 => literal("false", Json.Bool(false))
-        case 'n'                                 => literal("null", Json.Null)
+        case '"'                                 => JSON.String(parseString())
+        case 't'                                 => literal("true", JSON.Bool(true))
+        case 'f'                                 => literal("false", JSON.Bool(false))
+        case 'n'                                 => literal("null", JSON.Null)
         case char if char == '-' || char.isDigit => parseNumber()
         case char                                => fail(s"unexpected JSON character '$char'")
       }
     }
-    private def parseObject(): Json.Object = {
+    private def parseObject(): JSON.Object = {
       index += 1
       whitespace()
-      val fields = Map.newBuilder[String, Json]
-      if (consume('}')) return Json.Object(fields.result())
+      val fields = Map.newBuilder[String, JSON]
+      if (consume('}')) return JSON.Object(fields.result())
       var done = false
       while (!done) {
         whitespace()
@@ -556,20 +556,20 @@ object GenerateSpirvIsa {
         whitespace()
         if (consume('}')) done = true else expect(',')
       }
-      Json.Object(fields.result())
+      JSON.Object(fields.result())
     }
-    private def parseArray(): Json.Array = {
+    private def parseArray(): JSON.Array = {
       index += 1
       whitespace()
-      val values = Vector.newBuilder[Json]
-      if (consume(']')) return Json.Array(values.result())
+      val values = Vector.newBuilder[JSON]
+      if (consume(']')) return JSON.Array(values.result())
       var done = false
       while (!done) {
         values += parseValue()
         whitespace()
         if (consume(']')) done = true else expect(',')
       }
-      Json.Array(values.result())
+      JSON.Array(values.result())
     }
     private def parseString(): String = {
       expect('"')
@@ -605,12 +605,12 @@ object GenerateSpirvIsa {
       if (!done) fail("unterminated string")
       result.result()
     }
-    private def parseNumber(): Json.Number = {
+    private def parseNumber(): JSON.Number = {
       val start = index
       while (index < source.length && "-+0123456789.eE".contains(source.charAt(index))) index += 1
-      Json.Number(BigDecimal(source.substring(start, index)))
+      JSON.Number(BigDecimal(source.substring(start, index)))
     }
-    private def literal(value: String, result: Json): Json = {
+    private def literal(value: String, result: JSON): JSON = {
       if (!source.startsWith(value, index)) fail(s"expected $value")
       index += value.length
       result

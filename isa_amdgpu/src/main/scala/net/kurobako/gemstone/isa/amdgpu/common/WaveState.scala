@@ -9,7 +9,7 @@ import net.kurobako.gemstone.execution.Write
 /** A write to AMD architectural state. Values are captured while evaluating an instruction and committed only after
   * every destination has been validated, so every source read observes the pre-instruction wave state.
   */
-enum AmdWrite extends Write {
+enum AMDWrite extends Write {
   case Sgpr(index: Int, value: Int)
   case Vgpr(index: Int, lane: Int, value: Int)
   case Agpr(index: Int, lane: Int, value: Int)
@@ -52,7 +52,7 @@ final class WaveState private (
     flatIndex(index, lane, agprCount, "AGPR").map(flat => accumulatorRegisters(flat))
 
   /** Commit is all-or-nothing. Duplicate destinations are rejected instead of making write order observable. */
-  def commit(effects: Effects[AmdWrite]): Either[ExecutionFault, Unit] = {
+  def commit(effects: Effects[AMDWrite]): Either[ExecutionFault, Unit] = {
     val writes    = effects.snapshot
     val duplicate = writes.groupBy(destination).collectFirst { case (name, values) if values.size > 1 => name }
     duplicate match {
@@ -66,33 +66,33 @@ final class WaveState private (
   /** PC control is applied by the scheduler after a successful effects commit. */
   private[amdgpu] def setPc(value: Pc): Unit = pcValue = value
 
-  private def validate(write: AmdWrite): Either[ExecutionFault, Unit] = write match {
-    case AmdWrite.Sgpr(index, _)          => validRegister(index, sgprCount, "SGPR")
-    case AmdWrite.Vgpr(index, lane, _)    => validLaneRegister(index, lane, vgprCount, "VGPR")
-    case AmdWrite.Agpr(index, lane, _)    => validLaneRegister(index, lane, agprCount, "AGPR")
-    case AmdWrite.Exec(value)             => validMask(value, "EXEC")
-    case AmdWrite.Vcc(value)              => validMask(value, "VCC")
-    case AmdWrite.Scc(_) | AmdWrite.M0(_) => Right(())
+  private def validate(write: AMDWrite): Either[ExecutionFault, Unit] = write match {
+    case AMDWrite.Sgpr(index, _)          => validRegister(index, sgprCount, "SGPR")
+    case AMDWrite.Vgpr(index, lane, _)    => validLaneRegister(index, lane, vgprCount, "VGPR")
+    case AMDWrite.Agpr(index, lane, _)    => validLaneRegister(index, lane, agprCount, "AGPR")
+    case AMDWrite.Exec(value)             => validMask(value, "EXEC")
+    case AMDWrite.Vcc(value)              => validMask(value, "VCC")
+    case AMDWrite.Scc(_) | AMDWrite.M0(_) => Right(())
   }
 
-  private def applyWrite(write: AmdWrite): Unit = write match {
-    case AmdWrite.Sgpr(index, value)       => scalarRegisters(index) = value
-    case AmdWrite.Vgpr(index, lane, value) => vectorRegisters(index * laneCount + lane) = value
-    case AmdWrite.Agpr(index, lane, value) => accumulatorRegisters(index * laneCount + lane) = value
-    case AmdWrite.Exec(value)              => execValue = value
-    case AmdWrite.Vcc(value)               => vccValue = value
-    case AmdWrite.Scc(value)               => sccValue = value
-    case AmdWrite.M0(value)                => m0Value = value
+  private def applyWrite(write: AMDWrite): Unit = write match {
+    case AMDWrite.Sgpr(index, value)       => scalarRegisters(index) = value
+    case AMDWrite.Vgpr(index, lane, value) => vectorRegisters(index * laneCount + lane) = value
+    case AMDWrite.Agpr(index, lane, value) => accumulatorRegisters(index * laneCount + lane) = value
+    case AMDWrite.Exec(value)              => execValue = value
+    case AMDWrite.Vcc(value)               => vccValue = value
+    case AMDWrite.Scc(value)               => sccValue = value
+    case AMDWrite.M0(value)                => m0Value = value
   }
 
-  private def destination(write: AmdWrite): String = write match {
-    case AmdWrite.Sgpr(index, _)       => s"s$index"
-    case AmdWrite.Vgpr(index, lane, _) => s"v$index:$lane"
-    case AmdWrite.Agpr(index, lane, _) => s"a$index:$lane"
-    case AmdWrite.Exec(_)              => "exec"
-    case AmdWrite.Vcc(_)               => "vcc"
-    case AmdWrite.Scc(_)               => "scc"
-    case AmdWrite.M0(_)                => "m0"
+  private def destination(write: AMDWrite): String = write match {
+    case AMDWrite.Sgpr(index, _)       => s"s$index"
+    case AMDWrite.Vgpr(index, lane, _) => s"v$index:$lane"
+    case AMDWrite.Agpr(index, lane, _) => s"a$index:$lane"
+    case AMDWrite.Exec(_)              => "exec"
+    case AMDWrite.Vcc(_)               => "vcc"
+    case AMDWrite.Scc(_)               => "scc"
+    case AMDWrite.M0(_)                => "m0"
   }
 
   private def flatIndex(index: Int, lane: Int, count: Int, kind: String): Either[ExecutionFault, Int] =

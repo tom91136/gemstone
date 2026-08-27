@@ -87,7 +87,7 @@ PTX parsing and execution live in `isa_ptx`; AMDGPU code-object parsing, generat
 live in `isa_amdgpu`. Shared engine contracts remain in `core`, rather than creating an `isa_common` project. RPC and
 ISA source generators live in the JVM-only `codegen` project.
 
-Pinned external ISA inputs are acquired explicitly with `codegen / prepareIsaReferences`; normal builds remain
+Pinned external ISA inputs are acquired explicitly with `codegen / prepareISAReferences`; normal builds remain
 offline. The task verifies hashes, caches archives outside the repository, and selectively prepares LLVM AMDGPU MC
 tests, Mesa ACO sources, AMD's official machine-readable ISA XML, and NVIDIA's archived PTX documentation beneath the
 codegen target directory. Generated decoders and tests will consume this prepared view rather than system toolchain
@@ -320,7 +320,7 @@ The default debug scheduler must remain deterministic. Parallel execution is an 
 
 - PTX parser acceptance against `ptxas` for the pinned toolchain.
 - PTX execution against NVIDIA hardware.
-- AMD decoding against AMD IsaDecoder and LLVM disassembly.
+- AMD decoding against AMD ISADecoder and LLVM disassembly.
 - AMD execution against local RDNA2/CDNA hardware where available.
 - SPIR-V validation against Khronos tools and execution against Intel hardware.
 - Ocelot differential tests for its supported PTX subset.
@@ -493,7 +493,7 @@ This slice deliberately crosses every high-risk boundary before broad API or ISA
 - GPU Ocelot: PTX semantics, functional emulator behavior, tracing, race checking, and tests.
 - ZLUDA: modern PTX parser corpus and CUDA compatibility experience.
 - chipStar: HIP registration, offload-bundle handling, and backend organization.
-- AMD machine-readable ISA XML and IsaDecoder: AMDGPU decoding and oracle.
+- AMD machine-readable ISA XML and ISADecoder: AMDGPU decoding and oracle.
 - LLVM AMDGPU backend and documentation: code-object and architecture reference.
 - NVIDIA PTX ISA: PTX syntax and semantics.
 - Khronos SPIR-V grammar and specification: SPIR-V decoding and semantics.

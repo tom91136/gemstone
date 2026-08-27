@@ -14,22 +14,22 @@ object Printer {
 
 /** A package-level AMD ISA family. Syntax is shared; validity, metadata, and binary encoding are family-bound. */
 abstract class Architecture private[amdgpu] (private[amdgpu] val generation: Generation) {
-  final def encodeSopp(instruction: Instruction, target: Target): Either[CodecError, Vector[Byte]] =
+  final def encodeSOPP(instruction: Instruction, target: Target): Either[CodecError, Vector[Byte]] =
     if (target.generation != generation) Left(CodecError.WrongGeneration(target, generation))
-    else Binary.encodeSopp(instruction, target)
+    else Binary.encodeSOPP(instruction, target)
 
-  final def decodeSopp(bytes: Seq[Byte], target: Target): Either[CodecError, Instruction] =
+  final def decodeSOPP(bytes: Seq[Byte], target: Target): Either[CodecError, Instruction] =
     if (target.generation != generation) Left(CodecError.WrongGeneration(target, generation))
-    else Binary.decodeSopp(bytes, target)
+    else Binary.decodeSOPP(bytes, target)
 
-  final def lower(instruction: Instruction, target: Target): Either[LoweringError, AmdExecutable] =
+  final def lower(instruction: Instruction, target: Target): Either[LoweringError, AMDExecutable] =
     if (target.generation != generation) Left(LoweringError.WrongGeneration(target, generation))
-    else AmdLowering.lower(instruction, target)
+    else AMDLowering.lower(instruction, target)
 }
 
 /** Names exported by each versioned package. */
-object Api {
-  export _root_.net.kurobako.gemstone.isa.amdgpu.common.AmdSemantics.*
+object API {
+  export _root_.net.kurobako.gemstone.isa.amdgpu.common.AMDSemantics.*
 
   type Program = _root_.net.kurobako.gemstone.isa.amdgpu.common.Program
   val Program: _root_.net.kurobako.gemstone.isa.amdgpu.common.Program.type =
@@ -72,12 +72,12 @@ object Api {
   type ValidationResult = _root_.net.kurobako.gemstone.isa.amdgpu.common.ValidationResult
   val ValidationResult: _root_.net.kurobako.gemstone.isa.amdgpu.common.ValidationResult.type =
     _root_.net.kurobako.gemstone.isa.amdgpu.common.ValidationResult
-  type AmdExecutable = _root_.net.kurobako.gemstone.isa.amdgpu.common.AmdExecutable
-  val AmdExecutable: _root_.net.kurobako.gemstone.isa.amdgpu.common.AmdExecutable.type =
-    _root_.net.kurobako.gemstone.isa.amdgpu.common.AmdExecutable
-  type AmdWrite = _root_.net.kurobako.gemstone.isa.amdgpu.common.AmdWrite
-  val AmdWrite: _root_.net.kurobako.gemstone.isa.amdgpu.common.AmdWrite.type =
-    _root_.net.kurobako.gemstone.isa.amdgpu.common.AmdWrite
+  type AMDExecutable = _root_.net.kurobako.gemstone.isa.amdgpu.common.AMDExecutable
+  val AMDExecutable: _root_.net.kurobako.gemstone.isa.amdgpu.common.AMDExecutable.type =
+    _root_.net.kurobako.gemstone.isa.amdgpu.common.AMDExecutable
+  type AMDWrite = _root_.net.kurobako.gemstone.isa.amdgpu.common.AMDWrite
+  val AMDWrite: _root_.net.kurobako.gemstone.isa.amdgpu.common.AMDWrite.type =
+    _root_.net.kurobako.gemstone.isa.amdgpu.common.AMDWrite
   type BranchCondition = _root_.net.kurobako.gemstone.isa.amdgpu.common.BranchCondition
   val BranchCondition: _root_.net.kurobako.gemstone.isa.amdgpu.common.BranchCondition.type =
     _root_.net.kurobako.gemstone.isa.amdgpu.common.BranchCondition
@@ -93,8 +93,8 @@ object Api {
   type WaveState = _root_.net.kurobako.gemstone.isa.amdgpu.common.WaveState
   val WaveState: _root_.net.kurobako.gemstone.isa.amdgpu.common.WaveState.type =
     _root_.net.kurobako.gemstone.isa.amdgpu.common.WaveState
-  val AmdLowering: _root_.net.kurobako.gemstone.isa.amdgpu.common.AmdLowering.type =
-    _root_.net.kurobako.gemstone.isa.amdgpu.common.AmdLowering
+  val AMDLowering: _root_.net.kurobako.gemstone.isa.amdgpu.common.AMDLowering.type =
+    _root_.net.kurobako.gemstone.isa.amdgpu.common.AMDLowering
   val SemanticsCoverage: _root_.net.kurobako.gemstone.isa.amdgpu.common.SemanticsCoverage.type =
     _root_.net.kurobako.gemstone.isa.amdgpu.common.SemanticsCoverage
   val Validator: _root_.net.kurobako.gemstone.isa.amdgpu.common.Validator.type =

@@ -9,11 +9,11 @@ lazy val catsParseVersion     = "1.1.0"
 lazy val jsoupVersion         = "1.23.2"
 lazy val llvmVersion          = "23.1.0"
 lazy val mesaVersion          = "26.2.1"
-lazy val cudaPtxVersion       = "13.3.0"
-lazy val ptxIsaVersion        = "9.3"
-lazy val ptxIsaPackage        = "v" + ptxIsaVersion.replace('.', '_')
-lazy val amdIsaXmlVersion     = "2026_08_06"
-lazy val openClHeadersVersion = "2026.05.29"
+lazy val cudaPTXVersion       = "13.3.0"
+lazy val ptxISAVersion        = "9.3"
+lazy val ptxISAPackage        = "v" + ptxISAVersion.replace('.', '_')
+lazy val amdISAXMLVersion     = "2026_08_06"
+lazy val openCLHeadersVersion = "2026.05.29"
 lazy val levelZeroVersion     = "1.33.0"
 lazy val spirvHeadersVersion  = "vulkan-sdk-1.4.357.0"
 lazy val spirvToolsVersion    = "vulkan-sdk-1.4.357.0"
@@ -26,9 +26,9 @@ lazy val ThrustTest = config("thrust").extend(Test)
 
 lazy val llvmSourceSha256    = "ab1f0e3ec52448c33e8782eaf0422504b87c7b016b22514653ee0d8fcee479ff"
 lazy val mesaSourceSha256    = "c47e81bddc4760360a41ac3c5acec38acb81f9d750ecef47e7f3adc7021a4442"
-lazy val cudaPtxHtmlSha256   = "40026f79b65fee3f8c8b3e717c6f80c6385e8d97215318d6e4b7f6106f58d5a4"
-lazy val amdIsaXmlSha256     = "82404f1126761b7877595b622afa7e1f311f2f41e89a3abe9aaf8ad045c082e2"
-lazy val openClHeadersSha256 = "0bdef6f653c577827a75fac3e3f18b0bf000171e39fa65c2eb84ec804c822cab"
+lazy val cudaPTXHtmlSha256   = "40026f79b65fee3f8c8b3e717c6f80c6385e8d97215318d6e4b7f6106f58d5a4"
+lazy val amdISAXMLSha256     = "82404f1126761b7877595b622afa7e1f311f2f41e89a3abe9aaf8ad045c082e2"
+lazy val openCLHeadersSha256 = "0bdef6f653c577827a75fac3e3f18b0bf000171e39fa65c2eb84ec804c822cab"
 lazy val levelZeroSha256     = "d697c61a2f4897ec9c676c6056dba5368c9c266bb173ff7249f71ef63bf445e0"
 lazy val spirvHeadersSha256  = "7d40c8c1983c1aba6f6f2fcbcf7be345d33a5693aeee0cc5b8c579fb8e3f2fea"
 lazy val spirvToolsSha256    = "09f70a9197d9cd28e1e10a2fca5ffde8c5e269f363eed9afa838ad88ed2649c9"
@@ -36,26 +36,26 @@ lazy val spirvToolsSha256    = "09f70a9197d9cd28e1e10a2fca5ffde8c5e269f363eed9af
 lazy val isaReferenceManifestMarkers = Vector(
   s"llvm-version\t$llvmVersion\n",
   s"mesa-version\t$mesaVersion\n",
-  s"cuda-ptx-version\t$cudaPtxVersion\n",
-  s"amd-xml-version\t$amdIsaXmlVersion\n",
-  s"opencl-headers-version\t$openClHeadersVersion\n",
+  s"cuda-ptx-version\t$cudaPTXVersion\n",
+  s"amd-xml-version\t$amdISAXMLVersion\n",
+  s"opencl-headers-version\t$openCLHeadersVersion\n",
   s"level-zero-version\t$levelZeroVersion\n",
   s"spirv-headers-version\t$spirvHeadersVersion\n",
   s"spirv-tools-version\t$spirvToolsVersion\n"
 )
 
 lazy val isaReferenceCacheDirectory = settingKey[File]("Persistent cache for pinned ISA reference artifacts.")
-lazy val prepareIsaReferences       = taskKey[Unit]("Download, verify, and selectively extract pinned ISA references.")
-@transient lazy val generatePtxSources        = taskKey[Seq[File]]("Update checked-in PTX instruction metadata.")
-@transient lazy val generatePtxReferenceTests =
+lazy val prepareISAReferences       = taskKey[Unit]("Download, verify, and selectively extract pinned ISA references.")
+@transient lazy val generatePTXSources        = taskKey[Seq[File]]("Update checked-in PTX instruction metadata.")
+@transient lazy val generatePTXReferenceTests =
   taskKey[Seq[File]]("Update checked-in PTX documentation conformance tests.")
-@transient lazy val generateAmdGpuSources     = taskKey[Seq[File]]("Update checked-in normalized AMDGPU metadata.")
-@transient lazy val generateAmdGpuGoldenTests =
+@transient lazy val generateAMDGPUSources     = taskKey[Seq[File]]("Update checked-in normalized AMDGPU metadata.")
+@transient lazy val generateAMDGPUGoldenTests =
   taskKey[Seq[File]]("Update the checked-in LLVM AMDGPU golden-test corpus.")
-@transient lazy val generateComputeApiSources =
+@transient lazy val generateComputeAPISources =
   taskKey[Seq[File]]("Update checked-in OpenCL and Level Zero API surfaces.")
-@transient lazy val generateSpirvSources        = taskKey[Seq[File]]("Update checked-in SPIR-V grammar metadata.")
-@transient lazy val generateSpirvReferenceTests =
+@transient lazy val generateSPIRVSources        = taskKey[Seq[File]]("Update checked-in SPIR-V grammar metadata.")
+@transient lazy val generateSPIRVReferenceTests =
   taskKey[Seq[File]]("Update checked-in SPIRV-Tools-derived tests.")
 
 Global / isaReferenceCacheDirectory := {
@@ -97,24 +97,24 @@ lazy val codegen = projectMatrix
   .settings(
     commonSettings,
     name                              := "gemstone-codegen",
-    Compile / mainClass               := Some("net.kurobako.gemstone.codegen.GenerateApi"),
+    Compile / mainClass               := Some("net.kurobako.gemstone.codegen.GenerateAPI"),
     Compile / run / fork              := false,
     libraryDependencies += "org.jsoup" % "jsoup" % jsoupVersion,
-    prepareIsaReferences              := Def.uncached {
-      val _ = IsaReferences.prepare(
+    prepareISAReferences              := Def.uncached {
+      val _ = ISAReferences.prepare(
         cacheDirectory = (Global / isaReferenceCacheDirectory).value,
         outputRoot = target.value / "isa-references",
-        pins = IsaReferences.Pins(
+        pins = ISAReferences.Pins(
           llvmVersion = llvmVersion,
           llvmSha256 = llvmSourceSha256,
           mesaVersion = mesaVersion,
           mesaSha256 = mesaSourceSha256,
-          cudaPtxVersion = cudaPtxVersion,
-          cudaPtxSha256 = cudaPtxHtmlSha256,
-          amdXmlVersion = amdIsaXmlVersion,
-          amdXmlSha256 = amdIsaXmlSha256,
-          openClHeadersVersion = openClHeadersVersion,
-          openClHeadersSha256 = openClHeadersSha256,
+          cudaPTXVersion = cudaPTXVersion,
+          cudaPTXSha256 = cudaPTXHtmlSha256,
+          amdXMLVersion = amdISAXMLVersion,
+          amdXMLSha256 = amdISAXMLSha256,
+          openCLHeadersVersion = openCLHeadersVersion,
+          openCLHeadersSha256 = openCLHeadersSha256,
           levelZeroVersion = levelZeroVersion,
           levelZeroSha256 = levelZeroSha256,
           spirvHeadersVersion = spirvHeadersVersion,
@@ -126,9 +126,9 @@ lazy val codegen = projectMatrix
         log = streams.value.log
       )
     },
-    generateComputeApiSources := Def.uncached {
+    generateComputeAPISources := Def.uncached {
       val root          = (LocalRootProject / baseDirectory).value
-      val _             = prepareIsaReferences.value
+      val _             = prepareISAReferences.value
       val referenceRoot = target.value / "isa-references"
       val references    = (referenceRoot * DirectoryFilter).get().filter { directory =>
         val manifest = directory / "MANIFEST.tsv"
@@ -148,11 +148,11 @@ lazy val codegen = projectMatrix
         java.getAbsolutePath,
         "-cp",
         classpath.mkString(sys.props("path.separator")),
-        "net.kurobako.gemstone.codegen.GenerateComputeApis",
+        "net.kurobako.gemstone.codegen.GenerateComputeAPIs",
         references.getAbsolutePath,
         outputs(0).getAbsolutePath,
         outputs(1).getAbsolutePath,
-        openClHeadersVersion,
+        openCLHeadersVersion,
         levelZeroVersion
       )).!
       require(exit == 0, s"compute API generator exited with $exit")
@@ -176,9 +176,9 @@ lazy val isa_ptx = projectMatrix
   .settings(
     commonSettings,
     name               := "gemstone-isa-ptx",
-    generatePtxSources := Def.uncached {
+    generatePTXSources := Def.uncached {
       val root          = (LocalRootProject / baseDirectory).value
-      val _             = (codegen.jvm(scala3Version) / prepareIsaReferences).value
+      val _             = (codegen.jvm(scala3Version) / prepareISAReferences).value
       val referenceRoot = (codegen.jvm(scala3Version) / target).value / "isa-references"
       val references    = (referenceRoot * DirectoryFilter).get().filter { directory =>
         val manifest = directory / "MANIFEST.tsv"
@@ -189,7 +189,7 @@ lazy val isa_ptx = projectMatrix
       }
       val input  = references / "nvidia" / "ptx" / "index.html"
       val output = root / "isa_ptx" / "src" / "main" / "scala" / "net" / "kurobako" / "gemstone" / "isa" / "ptx" /
-        ptxIsaPackage / "generated" / "Instructions.scala"
+        ptxISAPackage / "generated" / "Instructions.scala"
       val converter = fileConverter.value
       val classpath = (codegen.jvm(scala3Version) / Compile / fullClasspath).value
         .map(entry => converter.toPath(entry.data).toString)
@@ -198,19 +198,19 @@ lazy val isa_ptx = projectMatrix
         java.getAbsolutePath,
         "-cp",
         classpath.mkString(sys.props("path.separator")),
-        "net.kurobako.gemstone.codegen.GeneratePtxIsa",
+        "net.kurobako.gemstone.codegen.GeneratePTXISA",
         "instructions",
         input.getAbsolutePath,
         output.getAbsolutePath,
-        ptxIsaVersion,
-        ptxIsaPackage
+        ptxISAVersion,
+        ptxISAPackage
       )).!
       require(exit == 0, s"PTX metadata generator exited with $exit")
       Seq(output)
     },
-    generatePtxReferenceTests := Def.uncached {
+    generatePTXReferenceTests := Def.uncached {
       val root          = (LocalRootProject / baseDirectory).value
-      val _             = (codegen.jvm(scala3Version) / prepareIsaReferences).value
+      val _             = (codegen.jvm(scala3Version) / prepareISAReferences).value
       val referenceRoot = (codegen.jvm(scala3Version) / target).value / "isa-references"
       val references    = (referenceRoot * DirectoryFilter).get().filter { directory =>
         val manifest = directory / "MANIFEST.tsv"
@@ -221,7 +221,7 @@ lazy val isa_ptx = projectMatrix
       }
       val input  = references / "nvidia" / "ptx" / "index.html"
       val output = root / "isa_ptx" / "src" / "test" / "scala" / "net" / "kurobako" / "gemstone" / "isa" / "ptx" /
-        ptxIsaPackage / "generated" / "DocumentationSuite.scala"
+        ptxISAPackage / "generated" / "DocumentationSuite.scala"
       val converter = fileConverter.value
       val classpath = (codegen.jvm(scala3Version) / Compile / fullClasspath).value
         .map(entry => converter.toPath(entry.data).toString)
@@ -230,12 +230,12 @@ lazy val isa_ptx = projectMatrix
         java.getAbsolutePath,
         "-cp",
         classpath.mkString(sys.props("path.separator")),
-        "net.kurobako.gemstone.codegen.GeneratePtxIsa",
+        "net.kurobako.gemstone.codegen.GeneratePTXISA",
         "tests",
         input.getAbsolutePath,
         output.getAbsolutePath,
-        ptxIsaVersion,
-        ptxIsaPackage
+        ptxISAVersion,
+        ptxISAPackage
       )).!
       require(exit == 0, s"PTX reference-test generator exited with $exit")
       Seq(output)
@@ -255,9 +255,9 @@ lazy val isa_amdgpu = projectMatrix
   .settings(
     commonSettings,
     name                  := "gemstone-isa-amdgpu",
-    generateAmdGpuSources := Def.uncached {
+    generateAMDGPUSources := Def.uncached {
       val root          = (LocalRootProject / baseDirectory).value
-      val _             = (codegen.jvm(scala3Version) / prepareIsaReferences).value
+      val _             = (codegen.jvm(scala3Version) / prepareISAReferences).value
       val referenceRoot = (codegen.jvm(scala3Version) / target).value / "isa-references"
       val references    = (referenceRoot * DirectoryFilter).get().filter { directory =>
         val manifest = directory / "MANIFEST.tsv"
@@ -278,7 +278,7 @@ lazy val isa_amdgpu = projectMatrix
         java.getAbsolutePath,
         "-cp",
         classpath.mkString(sys.props("path.separator")),
-        "net.kurobako.gemstone.codegen.GenerateAmdGpuIsa",
+        "net.kurobako.gemstone.codegen.GenerateAMDGPUISA",
         references.getAbsolutePath,
         exporter.getAbsolutePath,
         output.getAbsolutePath
@@ -286,9 +286,9 @@ lazy val isa_amdgpu = projectMatrix
       require(exit == 0, s"AMDGPU metadata generator exited with $exit")
       Seq(output, instructions)
     },
-    generateAmdGpuGoldenTests := Def.uncached {
+    generateAMDGPUGoldenTests := Def.uncached {
       val root          = (LocalRootProject / baseDirectory).value
-      val _             = (codegen.jvm(scala3Version) / prepareIsaReferences).value
+      val _             = (codegen.jvm(scala3Version) / prepareISAReferences).value
       val referenceRoot = (codegen.jvm(scala3Version) / target).value / "isa-references"
       val references    = (referenceRoot * DirectoryFilter).get().filter { directory =>
         val manifest = directory / "MANIFEST.tsv"
@@ -309,7 +309,7 @@ lazy val isa_amdgpu = projectMatrix
         java.getAbsolutePath,
         "-cp",
         classpath.mkString(sys.props("path.separator")),
-        "net.kurobako.gemstone.codegen.GenerateAmdGpuGolden",
+        "net.kurobako.gemstone.codegen.GenerateAMDGPUGolden",
         references.getAbsolutePath,
         output.getAbsolutePath,
         dataRoot.getAbsolutePath
@@ -333,9 +333,9 @@ lazy val isa_spirv = projectMatrix
   .settings(
     commonSettings,
     name                 := "gemstone-isa-spirv",
-    generateSpirvSources := Def.uncached {
+    generateSPIRVSources := Def.uncached {
       val root          = (LocalRootProject / baseDirectory).value
-      val _             = (codegen.jvm(scala3Version) / prepareIsaReferences).value
+      val _             = (codegen.jvm(scala3Version) / prepareISAReferences).value
       val referenceRoot = (codegen.jvm(scala3Version) / target).value / "isa-references"
       val references    = (referenceRoot * DirectoryFilter).get().filter { directory =>
         val manifest = directory / "MANIFEST.tsv"
@@ -356,7 +356,7 @@ lazy val isa_spirv = projectMatrix
         java.getAbsolutePath,
         "-cp",
         classpath.mkString(sys.props("path.separator")),
-        "net.kurobako.gemstone.codegen.GenerateSpirvIsa",
+        "net.kurobako.gemstone.codegen.GenerateSPIRVISA",
         "instructions",
         grammar.getAbsolutePath,
         output.getAbsolutePath,
@@ -365,9 +365,9 @@ lazy val isa_spirv = projectMatrix
       require(exit == 0, s"SPIR-V metadata generator exited with $exit")
       Seq(output)
     },
-    generateSpirvReferenceTests := Def.uncached {
+    generateSPIRVReferenceTests := Def.uncached {
       val root          = (LocalRootProject / baseDirectory).value
-      val _             = (codegen.jvm(scala3Version) / prepareIsaReferences).value
+      val _             = (codegen.jvm(scala3Version) / prepareISAReferences).value
       val referenceRoot = (codegen.jvm(scala3Version) / target).value / "isa-references"
       val references    = (referenceRoot * DirectoryFilter).get().filter { directory =>
         val manifest = directory / "MANIFEST.tsv"
@@ -389,7 +389,7 @@ lazy val isa_spirv = projectMatrix
         java.getAbsolutePath,
         "-cp",
         classpath.mkString(sys.props("path.separator")),
-        "net.kurobako.gemstone.codegen.GenerateSpirvIsa",
+        "net.kurobako.gemstone.codegen.GenerateSPIRVISA",
         "tests",
         grammar.getAbsolutePath,
         tests.getAbsolutePath,

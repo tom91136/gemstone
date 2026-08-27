@@ -35,7 +35,7 @@ enum BinaryOperation {
   case UnsignedGreaterThanEqual
 }
 
-enum SpirvWrite extends Write {
+enum SPIRVWrite extends Write {
   case Value(id: Int, value: Long)
   case Memory(address: Long, value: Long)
 }
@@ -43,7 +43,7 @@ enum SpirvWrite extends Write {
 final class ExecutionContext private[v1_6] (initialValues: Map[Int, Long], initialMemory: Map[Long, Long]) {
   private val values  = mutable.HashMap.from(initialValues)
   private val memory  = mutable.HashMap.from(initialMemory)
-  private val effects = new Effects[SpirvWrite]
+  private val effects = new Effects[SPIRVWrite]
 
   def value(id: Int, pc: Pc): Either[ExecutionFault, Long] =
     values.get(id).toRight(ExecutionFault.UndefinedRegister(s"%$id", pc, 0))
@@ -52,12 +52,12 @@ final class ExecutionContext private[v1_6] (initialValues: Map[Int, Long], initi
   def memorySnapshot: Map[Long, Long] = memory.toMap
 
   private[v1_6] def write(id: Int, value: Long): Either[ExecutionFault, Unit] = {
-    effects.stage(SpirvWrite.Value(id, value & 0xffffffffL))
+    effects.stage(SPIRVWrite.Value(id, value & 0xffffffffL))
     commitEffects()
   }
 
   private[v1_6] def writeMemory(address: Long, value: Long): Either[ExecutionFault, Unit] = {
-    effects.stage(SpirvWrite.Memory(address, value & 0xffffffffL))
+    effects.stage(SPIRVWrite.Memory(address, value & 0xffffffffL))
     commitEffects()
   }
 
@@ -68,13 +68,13 @@ final class ExecutionContext private[v1_6] (initialValues: Map[Int, Long], initi
     effects.commit(
       _ => Right(()),
       {
-        case SpirvWrite.Value(resultId, result) => values.update(resultId, result)
-        case SpirvWrite.Memory(address, result) => memory.update(address, result)
+        case SPIRVWrite.Value(resultId, result) => values.update(resultId, result)
+        case SPIRVWrite.Memory(address, result) => memory.update(address, result)
       }
     )
 }
 
-final case class SpirvExecutable(program: ExecutableProgram[ExecutableInstruction])
+final case class SPIRVExecutable(program: ExecutableProgram[ExecutableInstruction])
 
 enum LoweringError {
   case Malformed(instruction: String, detail: String)
@@ -85,7 +85,7 @@ enum LoweringError {
 }
 
 object Lowering {
-  def lower(module: Module): Either[LoweringError, SpirvExecutable] = {
+  def lower(module: Module): Either[LoweringError, SPIRVExecutable] = {
     val labels = module.instructions.zipWithIndex.collect {
       case (Instruction.Label(dest), index) => dest.bits -> Pc.unsafe(index)
     }.toMap
@@ -100,7 +100,7 @@ object Lowering {
           index += 1
       }
     }
-    Right(SpirvExecutable(ExecutableProgram(lowered.result())))
+    Right(SPIRVExecutable(ExecutableProgram(lowered.result())))
   }
 
   private def lowerInstruction(
@@ -326,7 +326,7 @@ enum ExecutionResult {
 
 object Interpreter {
   def run(
-      executable: SpirvExecutable,
+      executable: SPIRVExecutable,
       initialValues: Map[Int, Long] = Map.empty,
       initialMemory: Map[Long, Long] = Map.empty,
       limits: ExecutionLimits = ExecutionLimits.Default,

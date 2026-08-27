@@ -24,7 +24,7 @@ final case class Parameter(
     elements: Int = 1
 )
 
-final case class ApiFunction(
+final case class APIFunction(
     name: String,
     opcode: Int,
     returnConvention: ReturnConvention,
@@ -33,24 +33,24 @@ final case class ApiFunction(
     synchronous: Boolean = true
 )
 
-final case class Api(
+final case class API(
     name: String,
     abiVersion: String,
     soname: String,
     symbolVersion: String,
-    functions: Vector[ApiFunction]
+    functions: Vector[APIFunction]
 )
 
-object GemstoneApiRegistry {
+object GemstoneAPIRegistry {
   val protocolVersion: Int = 1
 
-  val cuda: Api = Api(
+  val cuda: API = API(
     name = "cuda",
     abiVersion = "phase-0",
     soname = "libcuda.so.1",
     symbolVersion = "GEMSI_0.1",
     functions = Vector(
-      ApiFunction(
+      APIFunction(
         name = "cudaGetDeviceCount",
         opcode = 1,
         returnConvention = ReturnConvention.StatusCode,
@@ -59,7 +59,7 @@ object GemstoneApiRegistry {
         ),
         threadLocalError = true
       ),
-      ApiFunction(
+      APIFunction(
         name = "gemsiAddI32",
         opcode = 2,
         returnConvention = ReturnConvention.DirectInt32,
@@ -71,5 +71,5 @@ object GemstoneApiRegistry {
     )
   )
 
-  val apis: Vector[Api] = Vector(cuda)
+  val apis: Vector[API] = Vector(cuda)
 }

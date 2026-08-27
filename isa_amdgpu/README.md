@@ -6,14 +6,14 @@ tests are checked in so normal compilation is offline and upstream changes produ
 - `net.kurobako.gemstone.isa.amdgpu.gfx6` through `gfx12`; and
 - `net.kurobako.gemstone.isa.amdgpu.cdna1` through `cdna5`.
 
-Each package exports the same `Isa`, `Parser`, `Printer`, `Program`, `Statement`, generated `Instruction`, `Operand`,
+Each package exports the same `ISA`, `Parser`, `Printer`, `Program`, `Statement`, generated `Instruction`, `Operand`,
 and `Modifier` vocabulary as the PTX side. Its top-level `Version` identifies the generation and top-level
 `Instructions` contains only metadata for that family. SOPP encoding/decoding remains bound to the package family.
 Reusable machinery and private aggregate metadata live in `amdgpu.common`; clients should import a versioned package.
 
 ## Generated inputs
 
-`generateAmdGpuSources` normalizes two independently pinned sources into checked-in instruction enum, metadata, and
+`generateAMDGPUSources` normalizes two independently pinned sources into checked-in instruction enum, metadata, and
 per-family package sources:
 
 - Mesa ACO contributes 3,821 GFX6–GFX9 opcode/format records. `codegen/amdgpu/export_aco.py` loads the pinned
@@ -40,7 +40,7 @@ CDNA remains a separate family sequence because the official XML identifies it i
 retain their exact XML subfamily (`rdna1`, `rdna2`, `rdna3_5`, and so on), and the codec rejects a family-level
 operation if those records disagree instead of choosing one silently.
 
-`generateAmdGpuGoldenTests` scans the pinned LLVM `llvm/test/MC/AMDGPU` tree as an independent oracle. It currently
+`generateAMDGPUGoldenTests` scans the pinned LLVM `llvm/test/MC/AMDGPU` tree as an independent oracle. It currently
 retains 308,161 architecture-tagged assembly entries. The JVM suite checks every entry; Scala Native runs the focused
 parser, descriptor, codec, and semantics suites. A checked, bounded inventory records the 170 oracle entries whose 15
 opcodes are genuinely absent from the pinned Mesa/AMD production metadata, so unsupported input is never silently

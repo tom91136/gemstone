@@ -10,11 +10,11 @@ See [CUDA_RPC.md](CUDA_RPC.md). The older registry remains only for the phase-0 
 - `gemsi_protocol.h`: pointer-free request and response structures, protocol version, status values, and opcodes;
 - `gemsi_cuda.h` and `gemsi_cuda.c`: the public ABI and pure-C validation/marshalling facade;
 - `gemsi_cuda.map`: the exact exported ELF symbol surface and version node;
-- `GeneratedApi.scala`: handler interface, allocation-free result representation, and opcode dispatch;
+- `GeneratedAPI.scala`: handler interface, allocation-free result representation, and opcode dispatch;
 - `api-manifest.json`: machine-readable ABI and protocol coverage metadata.
 - `cuda-rpc-schema.json` and `gemsi_cuda_rpc.inc`: trait-derived names, types, IDs, and schema fingerprint;
 - `gemsi_cuda_rpc_client.c`: generated CUDA Driver ABI projection and typed marshalling;
-- `GeneratedCudaRpc.scala`: typed client and receiving dispatcher for JVM and Scala Native;
+- `GeneratedCUDARPC.scala`: typed client and receiving dispatcher for JVM and Scala Native;
 - `cuda-driver-surface.json`: the 144-method Driver inventory derived from the Scala `CUDA` trait and each method's implementation status.
 
 Generated outputs are checked into `generated/` so native C consumers and Scala builds use the same reviewed protocol.
@@ -71,7 +71,7 @@ authenticated loopback TCP connection
       v
 server
   - validates framing, token, schema, ID, name, and typed payload
-  - invokes GeneratedCudaRpc.Dispatcher
+  - invokes GeneratedCUDARPC.Dispatcher
       |
       v
 CUDAEmulatorServer

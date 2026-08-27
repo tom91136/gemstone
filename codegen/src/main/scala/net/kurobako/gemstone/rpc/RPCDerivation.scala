@@ -5,11 +5,11 @@ import scala.quoted.Quotes
 import scala.quoted.Type
 import scala.quoted.Varargs
 
-object RpcDerivation {
-  inline def schema[T]: RpcSchema           = ${ schemaImpl[T] }
+object RPCDerivation {
+  inline def schema[T]: RPCSchema           = ${ schemaImpl[T] }
   inline def methodNames[T]: Vector[String] = ${ methodNamesImpl[T] }
 
-  private def schemaImpl[T: Type](using quotes: Quotes): Expr[RpcSchema] = {
+  private def schemaImpl[T: Type](using quotes: Quotes): Expr[RPCSchema] = {
     import quotes.reflect.*
 
     val interfaceType   = TypeRepr.of[T]
@@ -50,7 +50,7 @@ object RpcDerivation {
     }
 
     val canonical = derived.map { case (method, parameters, result, id) =>
-      s"${method.name}|${hex(id)}|${parameters.map { case (name, wire) => s"$name:${wire.toString}" }.mkString(",")}|$result"
+      s"${method.name}|${hex(id)}|${parameters.map { case (name, wire) => s"$name:${wire.protocolName}" }.mkString(",")}|${result.protocolName}"
     }
     val fingerprint = sha256(canonical.mkString("\n").getBytes(java.nio.charset.StandardCharsets.UTF_8))
       .map(byte => f"${byte & 0xff}%02x")
@@ -58,10 +58,10 @@ object RpcDerivation {
 
     val methodExpressions = derived.map { case (method, parameters, result, (high, low)) =>
       val parameterExpressions = parameters.map { case (name, wireType) =>
-        '{ RpcParameter(${ Expr(name) }, ${ wireTypeExpression(wireType) }) }
+        '{ RPCParameter(${ Expr(name) }, ${ wireTypeExpression(wireType) }) }
       }
       '{
-        RpcMethod(
+        RPCMethod(
           ${ Expr(method.name) },
           MessageId(${ Expr(high) }, ${ Expr(low) }),
           Vector(${ Varargs(parameterExpressions) }*),
@@ -71,7 +71,7 @@ object RpcDerivation {
     }
 
     '{
-      RpcSchema(
+      RPCSchema(
         ${ Expr(interfaceSymbol.fullName) },
         ${ Expr(fingerprint) },
         Vector(${ Varargs(methodExpressions) }*)
@@ -126,9 +126,9 @@ object RpcDerivation {
     import quotes.reflect.*
     resultType match {
       case AppliedType(constructor, List(value))
-          if constructor.typeSymbol.fullName == "net.kurobako.gemstone.cuda.CudaResult" => wireType(value, method)
+          if constructor.typeSymbol.fullName == "net.kurobako.gemstone.cuda.CUDAResult" => wireType(value, method)
       case _ =>
-        abortAt(method, s"RPC method must return CudaResult[T]: ${method.name}")
+        abortAt(method, s"RPC method must return CUDAResult[T]: ${method.name}")
     }
   }
 
@@ -149,8 +149,8 @@ object RpcDerivation {
     else if (value =:= TypeRepr.of[cuda.Device]) WireType.Device
     else if (value =:= TypeRepr.of[cuda.DevicePtr]) WireType.DevicePtr
     else if (value =:= TypeRepr.of[cuda.Context]) WireType.Context
-    else if (value =:= TypeRepr.of[cuda.CudaModule]) WireType.CudaModule
-    else if (value =:= TypeRepr.of[cuda.CudaFunction]) WireType.CudaFunction
+    else if (value =:= TypeRepr.of[cuda.CUDAModule]) WireType.CUDAModule
+    else if (value =:= TypeRepr.of[cuda.CUDAFunction]) WireType.CUDAFunction
     else if (value =:= TypeRepr.of[cuda.HostInput]) WireType.HostInput
     else if (value =:= TypeRepr.of[cuda.HostOutput]) WireType.HostOutput
     else if (value =:= TypeRepr.of[cuda.ModuleImage]) WireType.ModuleImage
@@ -169,8 +169,8 @@ object RpcDerivation {
     case WireType.Device         => '{ WireType.Device }
     case WireType.DevicePtr      => '{ WireType.DevicePtr }
     case WireType.Context        => '{ WireType.Context }
-    case WireType.CudaModule     => '{ WireType.CudaModule }
-    case WireType.CudaFunction   => '{ WireType.CudaFunction }
+    case WireType.CUDAModule     => '{ WireType.CUDAModule }
+    case WireType.CUDAFunction   => '{ WireType.CUDAFunction }
     case WireType.HostInput      => '{ WireType.HostInput }
     case WireType.HostOutput     => '{ WireType.HostOutput }
     case WireType.ModuleImage    => '{ WireType.ModuleImage }

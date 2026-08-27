@@ -5,7 +5,7 @@ sealed trait TraceEvent extends Product with Serializable {
   def eventType: String
   protected def fields: Vector[(String, String)]
 
-  final def toJson: String = {
+  final def toJSON: String = {
     val payload = Vector("event" -> eventType, "step" -> step.toString) ++ fields
     payload.map { case (key, value) => s"\"${TraceEvent.escape(key)}\":\"${TraceEvent.escape(value)}\"" }.mkString(
       "{",
@@ -70,7 +70,7 @@ object TraceEvent {
 
 final case class Trace(events: Vector[TraceEvent]) {
   def append(event: TraceEvent): Trace = copy(events = events :+ event)
-  def jsonLines: String                = events.map(_.toJson).mkString("\n")
+  def jsonLines: String                = events.map(_.toJSON).mkString("\n")
 }
 
 object Trace {

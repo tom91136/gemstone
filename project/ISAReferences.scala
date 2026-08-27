@@ -23,18 +23,18 @@ import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
 import org.apache.commons.compress.compressors.xz.XZCompressorInputStream
 import scala.util.control.NonFatal
 
-object IsaReferences {
+object ISAReferences {
   final case class Pins(
       llvmVersion: String,
       llvmSha256: String,
       mesaVersion: String,
       mesaSha256: String,
-      cudaPtxVersion: String,
-      cudaPtxSha256: String,
-      amdXmlVersion: String,
-      amdXmlSha256: String,
-      openClHeadersVersion: String,
-      openClHeadersSha256: String,
+      cudaPTXVersion: String,
+      cudaPTXSha256: String,
+      amdXMLVersion: String,
+      amdXMLSha256: String,
+      openCLHeadersVersion: String,
+      openCLHeadersSha256: String,
       levelZeroVersion: String,
       levelZeroSha256: String,
       spirvHeadersVersion: String,
@@ -72,25 +72,25 @@ object IsaReferences {
       ),
       Artifact(
         "nvidia-ptx",
-        s"nvidia-ptx-${pins.cudaPtxVersion}.html",
+        s"nvidia-ptx-${pins.cudaPTXVersion}.html",
         URI.create(
-          s"https://docs.nvidia.com/cuda/archive/${pins.cudaPtxVersion}/parallel-thread-execution/index.html"
+          s"https://docs.nvidia.com/cuda/archive/${pins.cudaPTXVersion}/parallel-thread-execution/index.html"
         ),
-        pins.cudaPtxSha256
+        pins.cudaPTXSha256
       ),
       Artifact(
         "amd-xml",
-        s"AMD_GPU_MR_ISA_XML_${pins.amdXmlVersion}.zip",
-        URI.create(s"https://gpuopen.com/download/AMD_GPU_MR_ISA_XML_${pins.amdXmlVersion}.zip"),
-        pins.amdXmlSha256
+        s"AMD_GPU_MR_ISA_XML_${pins.amdXMLVersion}.zip",
+        URI.create(s"https://gpuopen.com/download/AMD_GPU_MR_ISA_XML_${pins.amdXMLVersion}.zip"),
+        pins.amdXMLSha256
       ),
       Artifact(
         "opencl-headers",
-        s"OpenCL-Headers-${pins.openClHeadersVersion}.zip",
+        s"OpenCL-Headers-${pins.openCLHeadersVersion}.zip",
         URI.create(
-          s"https://github.com/KhronosGroup/OpenCL-Headers/archive/refs/tags/v${pins.openClHeadersVersion}.zip"
+          s"https://github.com/KhronosGroup/OpenCL-Headers/archive/refs/tags/v${pins.openCLHeadersVersion}.zip"
         ),
-        pins.openClHeadersSha256
+        pins.openCLHeadersSha256
       ),
       Artifact(
         "level-zero",
@@ -154,7 +154,7 @@ object IsaReferences {
       extractZipRoot(
         cached("opencl-headers"),
         stage.resolve("khronos/opencl"),
-        s"OpenCL-Headers-${pins.openClHeadersVersion}",
+        s"OpenCL-Headers-${pins.openCLHeadersVersion}",
         relative => relative == Path.of("LICENSE") || relative.startsWith("CL")
       )
       extractZipRoot(
@@ -377,9 +377,9 @@ object IsaReferences {
       "format\t1",
       s"llvm-version\t${pins.llvmVersion}",
       s"mesa-version\t${pins.mesaVersion}",
-      s"cuda-ptx-version\t${pins.cudaPtxVersion}",
-      s"amd-xml-version\t${pins.amdXmlVersion}",
-      s"opencl-headers-version\t${pins.openClHeadersVersion}",
+      s"cuda-ptx-version\t${pins.cudaPTXVersion}",
+      s"amd-xml-version\t${pins.amdXMLVersion}",
+      s"opencl-headers-version\t${pins.openCLHeadersVersion}",
       s"level-zero-version\t${pins.levelZeroVersion}",
       s"spirv-headers-version\t${pins.spirvHeadersVersion}",
       s"spirv-tools-version\t${pins.spirvToolsVersion}"

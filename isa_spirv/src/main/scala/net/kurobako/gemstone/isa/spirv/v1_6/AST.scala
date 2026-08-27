@@ -20,18 +20,18 @@ enum Endianness {
   case Big
 }
 
-final case class SpirvVersion(major: Int, minor: Int) {
+final case class SPIRVVersion(major: Int, minor: Int) {
   require(major >= 0 && major <= 0xff)
   require(minor >= 0 && minor <= 0xff)
 
   def word: Word = Word((major << 16) | (minor << 8))
 }
 
-object SpirvVersion {
-  def fromWord(word: Word): SpirvVersion = SpirvVersion((word.bits >>> 16) & 0xff, (word.bits >>> 8) & 0xff)
+object SPIRVVersion {
+  def fromWord(word: Word): SPIRVVersion = SPIRVVersion((word.bits >>> 16) & 0xff, (word.bits >>> 8) & 0xff)
 }
 
-final case class Header(version: SpirvVersion, generator: Word, bound: Word, schema: Word)
+final case class Header(version: SPIRVVersion, generator: Word, bound: Word, schema: Word)
 
 /** Lossless binary-layer instruction. Opcode numbers unknown to this grammar deliberately live only here. */
 final case class RawInstruction(opcodeNumber: Int, operandWords: Vector[Word]) {

@@ -1,13 +1,13 @@
 package net.kurobako.gemstone.codegen
 
-import net.kurobako.gemstone.apispec.Api
-import net.kurobako.gemstone.apispec.ApiFunction
+import net.kurobako.gemstone.apispec.API
+import net.kurobako.gemstone.apispec.APIFunction
 import net.kurobako.gemstone.apispec.Direction
-import net.kurobako.gemstone.apispec.GemstoneApiRegistry
+import net.kurobako.gemstone.apispec.GemstoneAPIRegistry
 import net.kurobako.gemstone.apispec.ReturnConvention
 import net.kurobako.gemstone.cuda.CUDA
-import net.kurobako.gemstone.rpc.RpcDerivation
-import net.kurobako.gemstone.rpc.RpcSchema
+import net.kurobako.gemstone.rpc.RPCDerivation
+import net.kurobako.gemstone.rpc.RPCSchema
 import net.kurobako.gemstone.rpc.WireType
 
 import java.nio.charset.StandardCharsets
@@ -15,13 +15,14 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
 
-object GenerateApi {
-  private val cudaRpc: RpcSchema = RpcDerivation.schema[CUDA]
-  private val cudaDriverSurface  = RpcDerivation.methodNames[CUDA].filter(name =>
+object GenerateAPI {
+  // C entry-point spelling is protocol identity and must never be acronym-normalized.
+  private val cudaRPC: RPCSchema = RPCDerivation.schema[CUDA]
+  private val cudaDriverSurface  = RPCDerivation.methodNames[CUDA].filter(name =>
     name.startsWith("cu") && !name.startsWith("cuda")
   )
-  private val cudaRuntimeSurface   = RpcDerivation.methodNames[CUDA].filter(_.startsWith("cuda"))
-  private val cudaBootstrapSurface = RpcDerivation.methodNames[CUDA].filter(_.startsWith("__cuda"))
+  private val cudaRuntimeSurface   = RPCDerivation.methodNames[CUDA].filter(_.startsWith("cuda"))
+  private val cudaBootstrapSurface = RPCDerivation.methodNames[CUDA].filter(_.startsWith("__cuda"))
   require(cudaDriverSurface.size == 144, s"expected 144 CUDA Driver methods, found ${cudaDriverSurface.size}")
 
   def main(arguments: Array[String]): Unit = {
@@ -29,7 +30,7 @@ object GenerateApi {
       case Vector(path)            => false -> Paths.get(path)
       case Vector("--check", path) => true  -> Paths.get(path)
       case _                       =>
-        throw new IllegalArgumentException("usage: GenerateApi [--check] <output-directory>")
+        throw new IllegalArgumentException("usage: GenerateAPI [--check] <output-directory>")
     }
 
     val generated = files(output)
@@ -38,21 +39,21 @@ object GenerateApi {
   }
 
   private def files(output: Path): Vector[(Path, String)] = {
-    val api = GemstoneApiRegistry.cuda
+    val api = GemstoneAPIRegistry.cuda
     Vector(
       output.resolve("c/gemsi_protocol.h")                                           -> renderProtocol(api),
       output.resolve("c/gemsi_cuda.h")                                               -> renderHeader(api),
       output.resolve("c/gemsi_cuda.c")                                               -> renderFacade(api),
-      output.resolve("c/gemsi_cuda_driver_stubs.c")                                  -> renderCudaDriverStubs,
+      output.resolve("c/gemsi_cuda_driver_stubs.c")                                  -> renderCUDADriverStubs,
       output.resolve("c/gemsi_cuda.map")                                             -> renderVersionMap(api),
-      output.resolve("c/gemsi_cuda_driver_surface.inc")                              -> renderCudaSurfaceInclude,
-      output.resolve("c/gemsi_cuda_rpc.inc")                                         -> renderCudaRpcInclude,
-      output.resolve("c/gemsi_cuda_rpc_client.c")                                    -> renderCudaRpcClient,
-      output.resolve("scala/net/kurobako/gemstone/generated/GeneratedApi.scala")     -> renderScala(api),
-      output.resolve("scala/net/kurobako/gemstone/generated/GeneratedCudaRpc.scala") -> renderCudaRpcScala,
+      output.resolve("c/gemsi_cuda_driver_surface.inc")                              -> renderCUDASurfaceInclude,
+      output.resolve("c/gemsi_cuda_rpc.inc")                                         -> renderCUDARPCInclude,
+      output.resolve("c/gemsi_cuda_rpc_client.c")                                    -> renderCUDARPCClient,
+      output.resolve("scala/net/kurobako/gemstone/generated/GeneratedAPI.scala")     -> renderScala(api),
+      output.resolve("scala/net/kurobako/gemstone/generated/GeneratedCUDARPC.scala") -> renderCUDARPCScala,
       output.resolve("manifest/api-manifest.json")                                   -> renderManifest(api),
-      output.resolve("manifest/cuda-rpc-schema.json")                                -> renderCudaRpcManifest,
-      output.resolve("manifest/cuda-driver-surface.json")                            -> renderCudaSurfaceManifest(api)
+      output.resolve("manifest/cuda-rpc-schema.json")                                -> renderCUDARPCManifest,
+      output.resolve("manifest/cuda-driver-surface.json")                            -> renderCUDASurfaceManifest(api)
     )
   }
 
@@ -72,7 +73,7 @@ object GenerateApi {
     println(s"verified ${files.size} generated API files")
   }
 
-  private def renderProtocol(api: Api): String = {
+  private def renderProtocol(api: API): String = {
     val opcodes = api.functions.map(function => s"  GEMSI_OPCODE_${upperSnake(function.name)} = ${function.opcode}")
     val names   = api.functions.map { function =>
       s"    case GEMSI_OPCODE_${upperSnake(function.name)}: return \"${function.name}\";"
@@ -88,7 +89,7 @@ object GenerateApi {
         |#endif
         |
         |enum {
-        |  GEMSI_PROTOCOL_VERSION = ${GemstoneApiRegistry.protocolVersion},
+        |  GEMSI_PROTOCOL_VERSION = ${GemstoneAPIRegistry.protocolVersion},
         |  GEMSI_OPCODE_SHUTDOWN = 0,
         |${opcodes.mkString(",\n")}
         |};
@@ -154,7 +155,7 @@ object GenerateApi {
         |""".stripMargin
   }
 
-  private def renderHeader(api: Api): String = {
+  private def renderHeader(api: API): String = {
     val declarations = api.functions.map { function =>
       val parameters = function.parameters.map(renderCParameter).mkString(", ")
       s"int32_t ${function.name}($parameters);"
@@ -178,7 +179,7 @@ object GenerateApi {
         |""".stripMargin
   }
 
-  private def renderFacade(api: Api): String = {
+  private def renderFacade(api: API): String = {
     val functions = api.functions.map(renderFunction)
     s"""|#include "gemsi_cuda.h"
         |#include "gemsi_dispatch.h"
@@ -192,7 +193,7 @@ object GenerateApi {
         |""".stripMargin
   }
 
-  private def renderFunction(function: ApiFunction): String = {
+  private def renderFunction(function: APIFunction): String = {
     val parameters    = function.parameters.map(renderCParameter).mkString(", ")
     val invalidReturn =
       if (function.returnConvention == ReturnConvention.StatusCode) "GEMSI_STATUS_INVALID_VALUE" else "0"
@@ -241,7 +242,7 @@ object GenerateApi {
         |}""".stripMargin
   }
 
-  private def renderVersionMap(api: Api): String = {
+  private def renderVersionMap(api: API): String = {
     val symbols =
       (api.functions.map(_.name) ++ cudaDriverSurface ++ cudaRuntimeSurface ++ cudaBootstrapSurface).distinct
         .map(symbol => s"    $symbol;")
@@ -255,8 +256,8 @@ object GenerateApi {
         |""".stripMargin
   }
 
-  private def renderCudaDriverStubs: String = {
-    val wired = GemstoneApiRegistry.cuda.functions.map(_.name).toSet ++ cudaRpc.methods.map(
+  private def renderCUDADriverStubs: String = {
+    val wired = GemstoneAPIRegistry.cuda.functions.map(_.name).toSet ++ cudaRPC.methods.map(
       _.name
     ).filterNot(_.startsWith("cuda"))
     val stubs = cudaDriverSurface.filterNot(wired).map { name =>
@@ -271,7 +272,7 @@ object GenerateApi {
         |""".stripMargin
   }
 
-  private def renderScala(api: Api): String = {
+  private def renderScala(api: API): String = {
     val opcodes = api.functions.map { function =>
       s"    final val ${scalaName(function.name)}: Int = ${function.opcode}"
     }
@@ -287,8 +288,8 @@ object GenerateApi {
     }
     s"""|package net.kurobako.gemstone.generated
         |
-        |object GeneratedApi {
-        |  final val ProtocolVersion: Int = ${GemstoneApiRegistry.protocolVersion}
+        |object GeneratedAPI {
+        |  final val ProtocolVersion: Int = ${GemstoneAPIRegistry.protocolVersion}
         |
         |  object Opcode {
         |    final val Shutdown: Int = 0
@@ -321,17 +322,17 @@ object GenerateApi {
         |""".stripMargin
   }
 
-  private def renderManifest(api: Api): String = {
+  private def renderManifest(api: API): String = {
     val functions = api.functions.map { function =>
       s"""|    {"name":"${function.name}","opcode":${function.opcode},"synchronous":${function.synchronous},"threadLocalError":${function.threadLocalError}}""".stripMargin
     }
-    s"""|{"protocolVersion":${GemstoneApiRegistry.protocolVersion},"api":"${api.name}","abiVersion":"${api.abiVersion}","soname":"${api.soname}","symbolVersion":"${api.symbolVersion}","functions":[
+    s"""|{"protocolVersion":${GemstoneAPIRegistry.protocolVersion},"api":"${api.name}","abiVersion":"${api.abiVersion}","soname":"${api.soname}","symbolVersion":"${api.symbolVersion}","functions":[
         |${functions.mkString(",\n")}
         |]}
         |""".stripMargin
   }
 
-  private def renderCudaSurfaceInclude: String = {
+  private def renderCUDASurfaceInclude: String = {
     def renderMacro(name: String, entries: Vector[String]): String = {
       val body = entries.zipWithIndex.map { case (entry, index) =>
         val continuation = if (index == entries.size - 1) "" else s" ${'\\'}"
@@ -350,21 +351,21 @@ object GenerateApi {
         |""".stripMargin
   }
 
-  private def renderCudaSurfaceManifest(wiredApi: Api): String = {
-    val wired     = wiredApi.functions.map(_.name).toSet ++ cudaRpc.methods.map(_.name).filterNot(_.startsWith("cuda"))
+  private def renderCUDASurfaceManifest(wiredAPI: API): String = {
+    val wired     = wiredAPI.functions.map(_.name).toSet ++ cudaRPC.methods.map(_.name).filterNot(_.startsWith("cuda"))
     val functions = cudaDriverSurface.map { name =>
       val state = if (wired(name)) "wired" else "stub"
       s"""|    {"name":"$name","transport":"$state"}""".stripMargin
     }
-    s"""|{"profile":"gpuocelot-cuda-driver-3.2","cudaVersion":${CUDA.CudaVersion},"upstreamRevision":"${CUDA.UpstreamRevision}","driverCount":${cudaDriverSurface.size},"functions":[
+    s"""|{"profile":"gpuocelot-cuda-driver-3.2","cudaVersion":${CUDA.CUDAVersion},"upstreamRevision":"${CUDA.UpstreamRevision}","driverCount":${cudaDriverSurface.size},"functions":[
         |${functions.mkString(",\n")}
         |]}
         |""".stripMargin
   }
 
-  private def renderCudaRpcInclude: String = {
-    val methods = cudaRpc.methods.zipWithIndex.map { case (method, index) =>
-      val continuation = if (index == cudaRpc.methods.size - 1) "" else s" ${'\\'}"
+  private def renderCUDARPCInclude: String = {
+    val methods = cudaRPC.methods.zipWithIndex.map { case (method, index) =>
+      val continuation = if (index == cudaRPC.methods.size - 1) "" else s" ${'\\'}"
       val high         = f"${method.messageId.high}%016x"
       val low          = f"${method.messageId.low}%016x"
       s"  X(${method.name}, UINT64_C(0x$high), UINT64_C(0x$low))$continuation"
@@ -374,7 +375,7 @@ object GenerateApi {
         |
         |#include <stdint.h>
         |
-        |#define GEMSI_CUDA_RPC_SCHEMA_FINGERPRINT "${cudaRpc.fingerprint}"
+        |#define GEMSI_CUDA_RPC_SCHEMA_FINGERPRINT "${cudaRPC.fingerprint}"
         |#define GEMSI_CUDA_RPC_METHODS(X) ${'\\'}
         |${methods.mkString("\n")}
         |
@@ -382,8 +383,8 @@ object GenerateApi {
         |""".stripMargin
   }
 
-  private def renderCudaRpcClient: String = {
-    val ids = cudaRpc.methods.filterNot(_.name.startsWith("cuda")).map { method =>
+  private def renderCUDARPCClient: String = {
+    val ids = cudaRPC.methods.filterNot(_.name.startsWith("cuda")).map { method =>
       val high = f"${method.messageId.high}%016x"
       val low  = f"${method.messageId.low}%016x"
       s"static const uint64_t gemsi_${method.name}_high = UINT64_C(0x$high);\nstatic const uint64_t gemsi_${method.name}_low = UINT64_C(0x$low);"
@@ -812,36 +813,36 @@ object GenerateApi {
         |""".stripMargin
   }
 
-  private def renderCudaRpcManifest: String = {
-    val methods = cudaRpc.methods.map { method =>
+  private def renderCUDARPCManifest: String = {
+    val methods = cudaRPC.methods.map { method =>
       val parameters = method.parameters.map(parameter =>
-        s"{\"name\":\"${parameter.name}\",\"wireType\":\"${parameter.wireType}\"}"
+        s"{\"name\":\"${parameter.name}\",\"wireType\":\"${parameter.wireType.protocolName}\"}"
       )
       s"""|    {"name":"${method.name}","messageId":"${method.messageId.hex}","parameters":[${parameters.mkString(
            ","
-         )}],"result":"${method.result}"}""".stripMargin
+         )}],"result":"${method.result.protocolName}"}""".stripMargin
     }
-    s"""|{"interface":"${cudaRpc.interfaceName}","identity":"exact-c-function-name","messageId":"sha256-128(function-name-utf8)","fingerprint":"${cudaRpc.fingerprint}","methods":[
+    s"""|{"interface":"${cudaRPC.interfaceName}","identity":"exact-c-function-name","messageId":"sha256-128(function-name-utf8)","fingerprint":"${cudaRPC.fingerprint}","methods":[
         |${methods.mkString(",\n")}
         |]}
         |""".stripMargin
   }
 
-  private def renderCudaRpcScala: String = {
-    val ids = cudaRpc.methods.map { method =>
+  private def renderCUDARPCScala: String = {
+    val ids = cudaRPC.methods.map { method =>
       val high = s"0x${f"${method.messageId.high}%016x"}L"
       val low  = s"0x${f"${method.messageId.low}%016x"}L"
       s"  private val ${method.name}Id = MessageId($high, $low)"
     }
-    val clients = cudaRpc.methods.map { method =>
+    val clients = cudaRPC.methods.map { method =>
       val parameters = method.parameters.map(parameter => s"${parameter.name}: ${scalaType(parameter.wireType)}")
       val arguments  = method.parameters.map(parameter => encodeWire(parameter.wireType, parameter.name))
-      s"""|  override def ${method.name}(${parameters.mkString(", ")}): CudaResult[${scalaType(method.result)}] =
-          |    decode${method.result}(transport.call(RpcRequest(${method.name}Id, "${method.name}", Vector(${arguments.mkString(
+      s"""|  override def ${method.name}(${parameters.mkString(", ")}): CUDAResult[${scalaType(method.result)}] =
+          |    decode${method.result}(transport.call(RPCRequest(${method.name}Id, "${method.name}", Vector(${arguments.mkString(
            ", "
          )}))))""".stripMargin
     }
-    val dispatchCases = cudaRpc.methods.map { method =>
+    val dispatchCases = cudaRPC.methods.map { method =>
       val patterns  = method.parameters.map(parameter => decodePattern(parameter.wireType, parameter.name))
       val arguments = method.parameters.map(_.name).mkString(", ")
       s"""|      case `${method.name}Id` if request.functionName == "${method.name}" =>
@@ -852,41 +853,41 @@ object GenerateApi {
           |          case _ => invalid("invalid arguments for ${method.name}")
           |        }""".stripMargin
     }
-    val codecs = cudaRpc.methods.map(_.result).distinct.map { wireType =>
+    val codecs = cudaRPC.methods.map(_.result).distinct.map { wireType =>
       val scala        = scalaType(wireType)
       val decodedValue = if (wireType == WireType.UnitValue) "()" else "value"
       val encodedValue = if (wireType == WireType.UnitValue) "_" else "value"
-      s"""|  private def decode$wireType(response: RpcResponse): CudaResult[$scala] = response match {
-          |    case RpcResponse.Success(${decodePattern(wireType, "value")}) => CudaResult.Success($decodedValue)
-          |    case RpcResponse.Success(_) => CudaResult.Failure(CudaError(999, "invalid $wireType response payload"))
-          |    case RpcResponse.Failure(error) => CudaResult.Failure(error)
+      s"""|  private def decode$wireType(response: RPCResponse): CUDAResult[$scala] = response match {
+          |    case RPCResponse.Success(${decodePattern(wireType, "value")}) => CUDAResult.Success($decodedValue)
+          |    case RPCResponse.Success(_) => CUDAResult.Failure(CUDAError(999, "invalid $wireType response payload"))
+          |    case RPCResponse.Failure(error) => CUDAResult.Failure(error)
           |  }
           |
-          |  private def encode$wireType(result: CudaResult[$scala]): RpcResponse = result match {
-          |    case CudaResult.Success($encodedValue) => RpcResponse.Success(${encodeWire(wireType, "value")})
-          |    case CudaResult.Failure(error) => RpcResponse.Failure(error)
+          |  private def encode$wireType(result: CUDAResult[$scala]): RPCResponse = result match {
+          |    case CUDAResult.Success($encodedValue) => RPCResponse.Success(${encodeWire(wireType, "value")})
+          |    case CUDAResult.Failure(error) => RPCResponse.Failure(error)
           |  }""".stripMargin
     }
-    val schemaMethods = cudaRpc.methods.map { method =>
+    val schemaMethods = cudaRPC.methods.map { method =>
       val parameters =
-        method.parameters.map(parameter => s"RpcParameter(\"${parameter.name}\", WireType.${parameter.wireType})")
-      s"RpcMethod(\"${method.name}\", ${method.name}Id, Vector(${parameters.mkString(", ")}), WireType.${method.result})"
+        method.parameters.map(parameter => s"RPCParameter(\"${parameter.name}\", WireType.${parameter.wireType})")
+      s"RPCMethod(\"${method.name}\", ${method.name}Id, Vector(${parameters.mkString(", ")}), WireType.${method.result})"
     }
     s"""|package net.kurobako.gemstone.generated
         |
         |import net.kurobako.gemstone.cuda.*
         |import net.kurobako.gemstone.rpc.*
         |
-        |object GeneratedCudaRpc {
-        |  val SchemaFingerprint: String = "${cudaRpc.fingerprint}"
+        |object GeneratedCUDARPC {
+        |  val SchemaFingerprint: String = "${cudaRPC.fingerprint}"
         |
         |${ids.mkString("\n")}
         |
-        |  val Schema: RpcSchema = RpcSchema("${cudaRpc.interfaceName}", SchemaFingerprint, Vector(
+        |  val Schema: RPCSchema = RPCSchema("${cudaRPC.interfaceName}", SchemaFingerprint, Vector(
         |    ${schemaMethods.mkString(",\n    ")}
         |  ))
         |
-        |  final class Client(transport: RpcTransport) extends CUDA {
+        |  final class Client(transport: RPCTransport) extends CUDA {
         |    require(
         |      transport.schemaFingerprint == SchemaFingerprint,
         |      s"CUDA RPC schema mismatch: client=$$SchemaFingerprint server=$${transport.schemaFingerprint}"
@@ -895,17 +896,17 @@ object GenerateApi {
         |${clients.map(_.linesIterator.map(line => s"  $line").mkString("\n")).mkString("\n\n")}
         |  }
         |
-        |  object Dispatcher extends RpcDispatcher[CUDA] {
+        |  object Dispatcher extends RPCDispatcher[CUDA] {
         |    override val schemaFingerprint: String = SchemaFingerprint
         |
-        |    override def dispatch(request: RpcRequest, implementation: CUDA): RpcResponse =
+        |    override def dispatch(request: RPCRequest, implementation: CUDA): RPCResponse =
         |      request.messageId match {
         |${dispatchCases.mkString("\n")}
         |        case _ => invalid(s"unknown or mismatched CUDA RPC function $${request.functionName}")
         |      }
         |  }
         |
-        |  private def invalid(message: String): RpcResponse = RpcResponse.Failure(CudaError(999, message))
+        |  private def invalid(message: String): RPCResponse = RPCResponse.Failure(CUDAError(999, message))
         |
         |${codecs.mkString("\n\n")}
         |}
@@ -921,8 +922,8 @@ object GenerateApi {
     case WireType.Device         => "Device"
     case WireType.DevicePtr      => "DevicePtr"
     case WireType.Context        => "Context"
-    case WireType.CudaModule     => "CudaModule"
-    case WireType.CudaFunction   => "CudaFunction"
+    case WireType.CUDAModule     => "CUDAModule"
+    case WireType.CUDAFunction   => "CUDAFunction"
     case WireType.HostInput      => "HostInput"
     case WireType.HostOutput     => "HostOutput"
     case WireType.ModuleImage    => "ModuleImage"
@@ -940,8 +941,8 @@ object GenerateApi {
     case WireType.Device         => s"WireValue.DeviceValue($value)"
     case WireType.DevicePtr      => s"WireValue.DevicePtrValue($value)"
     case WireType.Context        => s"WireValue.ContextValue($value)"
-    case WireType.CudaModule     => s"WireValue.CudaModuleValue($value)"
-    case WireType.CudaFunction   => s"WireValue.CudaFunctionValue($value)"
+    case WireType.CUDAModule     => s"WireValue.CUDAModuleValue($value)"
+    case WireType.CUDAFunction   => s"WireValue.CUDAFunctionValue($value)"
     case WireType.HostInput      => s"WireValue.HostInputValue($value)"
     case WireType.HostOutput     => s"WireValue.HostOutputValue($value)"
     case WireType.ModuleImage    => s"WireValue.ModuleImageValue($value)"
@@ -959,8 +960,8 @@ object GenerateApi {
     case WireType.Device         => s"WireValue.DeviceValue($binding)"
     case WireType.DevicePtr      => s"WireValue.DevicePtrValue($binding)"
     case WireType.Context        => s"WireValue.ContextValue($binding)"
-    case WireType.CudaModule     => s"WireValue.CudaModuleValue($binding)"
-    case WireType.CudaFunction   => s"WireValue.CudaFunctionValue($binding)"
+    case WireType.CUDAModule     => s"WireValue.CUDAModuleValue($binding)"
+    case WireType.CUDAFunction   => s"WireValue.CUDAFunctionValue($binding)"
     case WireType.HostInput      => s"WireValue.HostInputValue($binding)"
     case WireType.HostOutput     => s"WireValue.HostOutputValue($binding)"
     case WireType.ModuleImage    => s"WireValue.ModuleImageValue($binding)"
@@ -974,7 +975,9 @@ object GenerateApi {
     .stripPrefix("_")
     .toUpperCase
 
-  private def scalaName(value: String): String = s"${value.head.toUpper}${value.tail}"
+  private def scalaName(value: String): String =
+    if (value.startsWith("cuda")) s"CUDA${value.drop(4)}"
+    else s"${value.head.toUpper}${value.tail}"
 
   private def renderCParameter(parameter: net.kurobako.gemstone.apispec.Parameter): String = {
     val separator = if (parameter.cType.cName.endsWith("*")) "" else " "

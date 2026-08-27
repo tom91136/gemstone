@@ -4,15 +4,15 @@ import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
 import java.security.SecureRandom
-import net.kurobako.gemstone.isa.ptx.v9_3.PtxInterpreter
-import net.kurobako.gemstone.isa.ptx.v9_3.PtxArgument
-import net.kurobako.gemstone.isa.ptx.v9_3.PtxParser
+import net.kurobako.gemstone.isa.ptx.v9_3.PTXInterpreter
+import net.kurobako.gemstone.isa.ptx.v9_3.PTXArgument
+import net.kurobako.gemstone.isa.ptx.v9_3.PTXParser
 import net.kurobako.gemstone.memory.ArrayCheckedMemory
 import net.kurobako.gemstone.scheduler.LaunchShape
 import scala.jdk.CollectionConverters.*
 
-class CudaConformanceSuite extends munit.FunSuite {
-  import CudaConformanceSuite.*
+class CUDAConformanceSuite extends munit.FunSuite {
+  import CUDAConformanceSuite.*
 
   private val root       = findRoot(Path.of(sys.props("user.dir")))
   private val cases      = discoverCases(root.resolve("conformance/cuda"))
@@ -20,12 +20,12 @@ class CudaConformanceSuite extends munit.FunSuite {
   private val runRoot    = Files.createTempDirectory(targetRoot, "cuda-scala.")
   private val libraryDir = runRoot.resolve("lib")
   private val token      = randomToken()
-  private var server     = Option.empty[CudaRpcServer.RunningServer]
+  private var server     = Option.empty[CUDARPCServer.RunningServer]
 
   override def beforeAll(): Unit = {
     Files.createDirectories(libraryDir)
     buildGemstoneFacade(root, libraryDir)
-    server = Some(CudaRpcServer.start(token))
+    server = Some(CUDARPCServer.start(token))
   }
 
   override def afterAll(): Unit = server.foreach(_.close())
@@ -66,17 +66,17 @@ class CudaConformanceSuite extends munit.FunSuite {
     runChecked(Vector(executable.toString), root, gemstoneEnvironment(token = "0" * 64, recording = None))
   }
 
-  private def runCase(cudaCase: CudaCase, backend: Backend): Unit = {
+  private def runCase(cudaCase: CUDACase, backend: Backend): Unit = {
     val nvcc      = findNvcc().getOrElse(fail("nvcc not found; set NVCC or CUDA_HOME"))
     val caseRoot  = Files.createDirectories(runRoot.resolve(backend.id).resolve(cudaCase.name))
     val output    = caseRoot.resolve("test")
     val recording = backend match {
-      case Backend.Cuda     => None
+      case Backend.CUDA     => None
       case Backend.Gemstone => Some(caseRoot.resolve("api-recording.jsonl"))
     }
     recording.foreach(path => Files.writeString(path, "", StandardCharsets.UTF_8))
     val environment = backend match {
-      case Backend.Cuda     => Map.empty[String, String]
+      case Backend.CUDA     => Map.empty[String, String]
       case Backend.Gemstone => gemstoneEnvironment(token, recording)
     }
     val variables = Map(
@@ -119,14 +119,14 @@ class CudaConformanceSuite extends munit.FunSuite {
     }
   }
 
-  private def runSemanticCase(cudaCase: CudaCase): Unit = {
+  private def runSemanticCase(cudaCase: CUDACase): Unit = {
     val semantic = cudaCase.semantic.getOrElse(fail(s"${cudaCase.source} has no PTX semantic metadata"))
     val source   = Files.readString(cudaCase.source, StandardCharsets.UTF_8)
     val ptxStart = source.indexOf("R\"ptx(")
     val ptxEnd   = source.indexOf(")ptx\"", ptxStart + 6)
     assert(ptxStart >= 0 && ptxEnd > ptxStart, s"${cudaCase.source} has no embedded R\"ptx(...)ptx\" module")
     val ptx    = source.substring(ptxStart + 6, ptxEnd)
-    val kernel = PtxParser.parse(ptx).fold(error => fail(s"${cudaCase.source}: $error"), identity)
+    val kernel = PTXParser.parse(ptx).fold(error => fail(s"${cudaCase.source}: $error"), identity)
     assertEquals(kernel.name, semantic.kernel)
 
     val names     = semantic.inputs.map(_._1) :+ semantic.output._1
@@ -143,10 +143,10 @@ class CudaConformanceSuite extends munit.FunSuite {
         )
       }
     }
-    val _ = PtxInterpreter.execute(
+    val _ = PTXInterpreter.execute(
       kernel,
       LaunchShape.create(semantic.blocks, semantic.threads).fold(error => fail(error), identity),
-      addresses.view.mapValues(address => PtxArgument(address.value)).toMap,
+      addresses.view.mapValues(address => PTXArgument(address.value)).toMap,
       memory
     ).fold(error => fail(error.message), identity)
     val actual = semantic.output._2.indices.map { index =>
@@ -168,9 +168,9 @@ class CudaConformanceSuite extends munit.FunSuite {
   }
 }
 
-object CudaConformanceSuite {
+object CUDAConformanceSuite {
   private final case class Command(text: String, expected: Option[String])
-  private final case class CudaCase(
+  private final case class CUDACase(
       name: String,
       source: Path,
       targets: Set[String],
@@ -187,21 +187,21 @@ object CudaConformanceSuite {
   )
 
   private enum Backend(val id: String, val driverDefines: String) {
-    case Cuda     extends Backend("cuda", "")
+    case CUDA     extends Backend("cuda", "")
     case Gemstone extends Backend("gemstone", "-DGEMSTONE_CUDA_ABI=1")
 
     def driverLink(libraryDir: Path): String = this match {
-      case Cuda     => "-lcuda"
+      case CUDA     => "-lcuda"
       case Gemstone => s"-L$libraryDir -Xlinker=-rpath -Xlinker=$libraryDir -lcuda"
     }
 
     def runtimeLink(libraryDir: Path): String = this match {
-      case Cuda     => ""
+      case CUDA     => ""
       case Gemstone => s"--cudart=none -L$libraryDir -Xlinker=-rpath -Xlinker=$libraryDir -lcuda"
     }
   }
 
-  private def discoverCases(suiteRoot: Path): Vector[CudaCase] = {
+  private def discoverCases(suiteRoot: Path): Vector[CUDACase] = {
     val stream  = Files.walk(suiteRoot)
     val sources =
       try
@@ -221,7 +221,7 @@ object CudaConformanceSuite {
     cases
   }
 
-  private def parseCase(source: Path): CudaCase = {
+  private def parseCase(source: Path): CUDACase = {
     val CasePrefix     = "#pragma region case: "
     val TargetsPrefix  = "#pragma region targets: "
     val VendoredPrefix = "#pragma region vendored: "
@@ -277,7 +277,7 @@ object CudaConformanceSuite {
       semanticFields.forall(identity) || semanticFields.forall(!_),
       s"$source has incomplete PTX semantic metadata"
     )
-    CudaCase(
+    CUDACase(
       name.getOrElse(throw new IllegalArgumentException(s"$source has no case pragma")),
       source,
       targets,
@@ -305,7 +305,7 @@ object CudaConformanceSuite {
     Vector(vendor.resolve("thrust"), vendor.resolve("cub")).map(path => s"-I$path").mkString(" ")
   }
 
-  private def auditVendoredDependencies(cudaCase: CudaCase, dependencyFile: Path, root: Path): Unit =
+  private def auditVendoredDependencies(cudaCase: CUDACase, dependencyFile: Path, root: Path): Unit =
     if (cudaCase.vendored.nonEmpty) {
       val dependencyText = Files.readString(dependencyFile, StandardCharsets.UTF_8).replace("\\\n", " ")
       val dependencies   = dependencyText.split("\\s+").iterator

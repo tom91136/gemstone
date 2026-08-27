@@ -1,11 +1,11 @@
 package net.kurobako.gemstone.generated
 
-object GeneratedApi {
+object GeneratedAPI {
   final val ProtocolVersion: Int = 1
 
   object Opcode {
     final val Shutdown: Int = 0
-    final val CudaGetDeviceCount: Int = 1
+    final val CUDAGetDeviceCount: Int = 1
     final val GemsiAddI32: Int = 2
   }
 
@@ -28,7 +28,7 @@ object GeneratedApi {
 
   def dispatch(opcode: Int, argument0: Long, argument1: Long, handler: Handler): DispatchResult = {
     opcode match {
-      case Opcode.CudaGetDeviceCount => handler.cudaGetDeviceCount()
+      case Opcode.CUDAGetDeviceCount => handler.cudaGetDeviceCount()
       case Opcode.GemsiAddI32 => handler.gemsiAddI32(argument0.toInt, argument1.toInt)
       case _ => DispatchResult(status = 999, result0 = 0L)
     }

@@ -6,28 +6,28 @@ import java.nio.file.Path
 import java.nio.file.Paths
 import scala.jdk.CollectionConverters.*
 
-object GenerateComputeApis {
-  private val OpenClFunction    = raw"(?s)CL_API_ENTRY\s+.*?\s+CL_API_CALL\s+(cl[A-Z][A-Za-z0-9_]*)\s*\(".r
+object GenerateComputeAPIs {
+  private val OpenCLFunction    = raw"(?s)CL_API_ENTRY\s+.*?\s+CL_API_CALL\s+(cl[A-Z][A-Za-z0-9_]*)\s*\(".r
   private val LevelZeroFunction = raw"(?s)ZE_APIEXPORT\s+.*?\s+ZE_APICALL\s+(ze[A-Z][A-Za-z0-9_]*)\s*\(".r
 
   def main(arguments: Array[String]): Unit = arguments.toVector match {
-    case Vector(references, openClOutput, levelZeroOutput, openClVersion, levelZeroVersion) =>
+    case Vector(references, openCLOutput, levelZeroOutput, openCLVersion, levelZeroVersion) =>
       val root            = Paths.get(references)
-      val openClHeaders   = headerText(root.resolve("khronos/opencl/CL"))
+      val openCLHeaders   = headerText(root.resolve("khronos/opencl/CL"))
       val levelZeroHeader = Files.readString(
         root.resolve("oneapi/level-zero/include/ze_api.h"),
         StandardCharsets.UTF_8
       )
-      val openClNames    = OpenClFunction.findAllMatchIn(openClHeaders).map(_.group(1)).toVector.distinct.sorted
+      val openCLNames    = OpenCLFunction.findAllMatchIn(openCLHeaders).map(_.group(1)).toVector.distinct.sorted
       val levelZeroNames = LevelZeroFunction.findAllMatchIn(levelZeroHeader).map(_.group(1)).toVector.distinct.sorted
-      require(openClNames.size >= 100, s"unexpectedly small OpenCL surface: ${openClNames.size}")
+      require(openCLNames.size >= 100, s"unexpectedly small OpenCL surface: ${openCLNames.size}")
       require(levelZeroNames.size >= 100, s"unexpectedly small Level Zero surface: ${levelZeroNames.size}")
-      write(Paths.get(openClOutput), renderOpenCl(openClNames, openClVersion))
+      write(Paths.get(openCLOutput), renderOpenCL(openCLNames, openCLVersion))
       write(Paths.get(levelZeroOutput), renderLevelZero(levelZeroNames, levelZeroVersion))
-      println(s"generated ${openClNames.size} OpenCL and ${levelZeroNames.size} Level Zero methods")
+      println(s"generated ${openCLNames.size} OpenCL and ${levelZeroNames.size} Level Zero methods")
     case _ =>
       throw new IllegalArgumentException(
-        "usage: GenerateComputeApis <references> <opencl-output> <level-zero-output> <opencl-version> <level-zero-version>"
+        "usage: GenerateComputeAPIs <references> <opencl-output> <level-zero-output> <opencl-version> <level-zero-version>"
       )
   }
 
@@ -41,7 +41,7 @@ object GenerateComputeApis {
     finally stream.close()
   }
 
-  private def renderOpenCl(names: Vector[String], version: String): String =
+  private def renderOpenCL(names: Vector[String], version: String): String =
     render(
       packageName = "net.kurobako.gemstone.opencl",
       traitName = "OpenCL",

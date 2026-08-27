@@ -2,10 +2,10 @@ package net.kurobako.gemstone.vendor
 
 import net.kurobako.gemstone.cuda.CUDA
 import net.kurobako.gemstone.cuda.Context
-import net.kurobako.gemstone.cuda.CudaFunction
-import net.kurobako.gemstone.cuda.CudaModule
-import net.kurobako.gemstone.cuda.CudaError as RpcCudaError
-import net.kurobako.gemstone.cuda.CudaResult
+import net.kurobako.gemstone.cuda.CUDAFunction
+import net.kurobako.gemstone.cuda.CUDAModule
+import net.kurobako.gemstone.cuda.CUDAError as RPCCUDAError
+import net.kurobako.gemstone.cuda.CUDAResult
 import net.kurobako.gemstone.cuda.Device
 import net.kurobako.gemstone.cuda.DevicePtr
 import net.kurobako.gemstone.cuda.HostInput
@@ -26,45 +26,45 @@ import net.kurobako.gemstone.memory.MemoryError
 import scala.collection.mutable
 
 /** JVM/Native logical CUDA server used by both in-process tests and the future isolated transport. */
-trait CudaKernelExecution {
-  def cuModuleLoadData(image: ModuleImage): CudaResult[CudaModule]
-  def cuModuleGetFunction(module: CudaModule, name: FunctionName): CudaResult[KernelFunction]
-  def cuModuleUnload(module: CudaModule): CudaResult[Unit]
-  def cuLaunchKernel(function: CudaFunction, launch: KernelLaunch, memory: CheckedMemory): CudaResult[Unit]
+trait CUDAKernelExecution {
+  def cuModuleLoadData(image: ModuleImage): CUDAResult[CUDAModule]
+  def cuModuleGetFunction(module: CUDAModule, name: FunctionName): CUDAResult[KernelFunction]
+  def cuModuleUnload(module: CUDAModule): CUDAResult[Unit]
+  def cuLaunchKernel(function: CUDAFunction, launch: KernelLaunch, memory: CheckedMemory): CUDAResult[Unit]
 }
 
-object CudaKernelExecution {
-  val Unsupported: CudaKernelExecution = new CudaKernelExecution {
-    override def cuModuleLoadData(image: ModuleImage): CudaResult[CudaModule] = failure("cuModuleLoadData")
-    override def cuModuleGetFunction(module: CudaModule, name: FunctionName): CudaResult[KernelFunction] =
+object CUDAKernelExecution {
+  val Unsupported: CUDAKernelExecution = new CUDAKernelExecution {
+    override def cuModuleLoadData(image: ModuleImage): CUDAResult[CUDAModule] = failure("cuModuleLoadData")
+    override def cuModuleGetFunction(module: CUDAModule, name: FunctionName): CUDAResult[KernelFunction] =
       failure("cuModuleGetFunction")
-    override def cuModuleUnload(module: CudaModule): CudaResult[Unit] = failure("cuModuleUnload")
+    override def cuModuleUnload(module: CUDAModule): CUDAResult[Unit] = failure("cuModuleUnload")
     override def cuLaunchKernel(
-        function: CudaFunction,
+        function: CUDAFunction,
         launch: KernelLaunch,
         memory: CheckedMemory
-    ): CudaResult[Unit] = failure("cuLaunchKernel")
+    ): CUDAResult[Unit] = failure("cuLaunchKernel")
 
-    private def failure[A](name: String): CudaResult[A] =
-      CudaResult.Failure(RpcCudaError(801, s"$name is not implemented"))
+    private def failure[A](name: String): CUDAResult[A] =
+      CUDAResult.Failure(RPCCUDAError(801, s"$name is not implemented"))
   }
 }
 
-final class CUDAEmulatorServer(kernelExecution: CudaKernelExecution = CudaKernelExecution.Unsupported) extends CUDA {
+final class CUDAEmulatorServer(kernelExecution: CUDAKernelExecution = CUDAKernelExecution.Unsupported) extends CUDA {
   private val allocations = mutable.Map.empty[Long, Array[Byte]]
   private var nextAddress = 0x100000000L
   private var contextLive = false
 
-  override def cuInit(flags: UInt32): CudaResult[Unit] = success(())
+  override def cuInit(flags: UInt32): CUDAResult[Unit] = success(())
 
-  override def cuDriverGetVersion(): CudaResult[Int] = success(3020)
+  override def cuDriverGetVersion(): CUDAResult[Int] = success(3020)
 
-  override def cuDeviceGetCount(): CudaResult[Int] = success(1)
+  override def cuDeviceGetCount(): CUDAResult[Int] = success(1)
 
-  override def cuDeviceGet(ordinal: Int): CudaResult[Device] =
+  override def cuDeviceGet(ordinal: Int): CUDAResult[Device] =
     if (ordinal == 0) success(Device(0)) else failure(101, s"invalid device ordinal: $ordinal")
 
-  override def cuCtxCreate_v2(flags: UInt32, device: Device): CudaResult[Context] = synchronized {
+  override def cuCtxCreate_v2(flags: UInt32, device: Device): CUDAResult[Context] = synchronized {
     if (device.ordinal != 0) failure(101, s"invalid device ordinal: ${device.ordinal}")
     else {
       contextLive = true
@@ -72,7 +72,7 @@ final class CUDAEmulatorServer(kernelExecution: CudaKernelExecution = CudaKernel
     }
   }
 
-  override def cuCtxDestroy_v2(context: Context): CudaResult[Unit] = synchronized {
+  override def cuCtxDestroy_v2(context: Context): CUDAResult[Unit] = synchronized {
     if (!contextLive || context.handle != 1L) failure(201, "invalid CUDA context")
     else {
       contextLive = false
@@ -80,19 +80,19 @@ final class CUDAEmulatorServer(kernelExecution: CudaKernelExecution = CudaKernel
     }
   }
 
-  override def cuCtxSynchronize(): CudaResult[Unit] = success(())
+  override def cuCtxSynchronize(): CUDAResult[Unit] = success(())
 
-  override def cuMemAlloc_v2(bytesize: SizeT): CudaResult[DevicePtr] = allocate(bytesize)
+  override def cuMemAlloc_v2(bytesize: SizeT): CUDAResult[DevicePtr] = allocate(bytesize)
 
-  override def cuMemFree_v2(pointer: DevicePtr): CudaResult[Unit] = free(pointer)
+  override def cuMemFree_v2(pointer: DevicePtr): CUDAResult[Unit] = free(pointer)
 
-  override def cuMemcpyHtoD_v2(destination: DevicePtr, source: HostInput): CudaResult[Unit] = synchronized {
+  override def cuMemcpyHtoD_v2(destination: DevicePtr, source: HostInput): CUDAResult[Unit] = synchronized {
     resolve(destination, source.bytes.length).map { case (allocation, offset) =>
       source.bytes.iterator.zipWithIndex.foreach { case (byte, index) => allocation(offset + index) = byte }
     }
   }
 
-  override def cuMemcpyDtoH_v2(source: DevicePtr, byteCount: SizeT): CudaResult[HostOutput] = synchronized {
+  override def cuMemcpyDtoH_v2(source: DevicePtr, byteCount: SizeT): CUDAResult[HostOutput] = synchronized {
     checkedSize(byteCount).flatMap(size => resolve(source, size)).map { case (allocation, offset) =>
       HostOutput(IArray.unsafeFromArray(allocation.slice(offset, offset + byteCount.toLong.toInt)))
     }
@@ -102,7 +102,7 @@ final class CUDAEmulatorServer(kernelExecution: CudaKernelExecution = CudaKernel
       destination: DevicePtr,
       source: DevicePtr,
       byteCount: SizeT
-  ): CudaResult[Unit] = synchronized {
+  ): CUDAResult[Unit] = synchronized {
     checkedSize(byteCount).flatMap { size =>
       resolve(source, size).flatMap { case (sourceAllocation, sourceOffset) =>
         resolve(destination, size).map { case (destinationAllocation, destinationOffset) =>
@@ -112,29 +112,29 @@ final class CUDAEmulatorServer(kernelExecution: CudaKernelExecution = CudaKernel
     }
   }
 
-  override def cuMemsetD8_v2(destination: DevicePtr, value: UInt8, count: SizeT): CudaResult[Unit] = synchronized {
+  override def cuMemsetD8_v2(destination: DevicePtr, value: UInt8, count: SizeT): CUDAResult[Unit] = synchronized {
     checkedSize(count).flatMap(size => resolve(destination, size)).map { case (allocation, offset) =>
       java.util.Arrays.fill(allocation, offset, offset + count.toLong.toInt, value.toInt.toByte)
     }
   }
 
-  override def cuModuleLoadData(image: ModuleImage): CudaResult[CudaModule] = kernelExecution.cuModuleLoadData(image)
+  override def cuModuleLoadData(image: ModuleImage): CUDAResult[CUDAModule] = kernelExecution.cuModuleLoadData(image)
 
-  override def cuModuleGetFunction(module: CudaModule, name: FunctionName): CudaResult[KernelFunction] =
+  override def cuModuleGetFunction(module: CUDAModule, name: FunctionName): CUDAResult[KernelFunction] =
     kernelExecution.cuModuleGetFunction(module, name)
 
-  override def cuModuleUnload(module: CudaModule): CudaResult[Unit] = kernelExecution.cuModuleUnload(module)
+  override def cuModuleUnload(module: CUDAModule): CUDAResult[Unit] = kernelExecution.cuModuleUnload(module)
 
-  override def cuLaunchKernel(function: CudaFunction, launch: KernelLaunch): CudaResult[Unit] =
+  override def cuLaunchKernel(function: CUDAFunction, launch: KernelLaunch): CUDAResult[Unit] =
     kernelExecution.cuLaunchKernel(function, launch, deviceMemory)
 
-  override def cudaGetDeviceCount(): CudaResult[Int] = cuDeviceGetCount()
+  override def cudaGetDeviceCount(): CUDAResult[Int] = cuDeviceGetCount()
 
-  override def cudaMalloc(bytesize: SizeT): CudaResult[DevicePtr] = allocate(bytesize)
+  override def cudaMalloc(bytesize: SizeT): CUDAResult[DevicePtr] = allocate(bytesize)
 
-  override def cudaFree(pointer: DevicePtr): CudaResult[Unit] = free(pointer)
+  override def cudaFree(pointer: DevicePtr): CUDAResult[Unit] = free(pointer)
 
-  private def allocate(bytesize: SizeT): CudaResult[DevicePtr] = synchronized {
+  private def allocate(bytesize: SizeT): CUDAResult[DevicePtr] = synchronized {
     checkedSize(bytesize).flatMap { size =>
       if (size == 0) failure(1, "zero-byte allocation")
       else {
@@ -147,16 +147,16 @@ final class CUDAEmulatorServer(kernelExecution: CudaKernelExecution = CudaKernel
     }
   }
 
-  private def free(pointer: DevicePtr): CudaResult[Unit] = synchronized {
+  private def free(pointer: DevicePtr): CUDAResult[Unit] = synchronized {
     if (allocations.remove(pointer.address).isDefined) success(())
     else failure(1, s"invalid device pointer: 0x${java.lang.Long.toUnsignedString(pointer.address, 16)}")
   }
 
-  private def checkedSize(size: SizeT): CudaResult[Int] =
+  private def checkedSize(size: SizeT): CUDAResult[Int] =
     if (size.toLong > Int.MaxValue.toLong) failure(2, s"allocation exceeds emulator limit: ${size.toLong}")
     else success(size.toLong.toInt)
 
-  private def resolve(pointer: DevicePtr, size: Int): CudaResult[(Array[Byte], Int)] = {
+  private def resolve(pointer: DevicePtr, size: Int): CUDAResult[(Array[Byte], Int)] = {
     val address = pointer.address
     allocations.iterator.collectFirst {
       case (base, allocation)
@@ -179,8 +179,8 @@ final class CUDAEmulatorServer(kernelExecution: CudaKernelExecution = CudaKernel
           ((bytes(offset + 2) & 0xff) << 16) |
           ((bytes(offset + 3) & 0xff) << 24)
       } match {
-        case CudaResult.Success(value) => Right(value)
-        case CudaResult.Failure(error) => Left(MemoryError.InvalidAddress(address, 4, error.message))
+        case CUDAResult.Success(value) => Right(value)
+        case CUDAResult.Failure(error) => Left(MemoryError.InvalidAddress(address, 4, error.message))
       }
     }
 
@@ -192,13 +192,13 @@ final class CUDAEmulatorServer(kernelExecution: CudaKernelExecution = CudaKernel
           bytes(offset + 2) = (value >>> 16).toByte
           bytes(offset + 3) = (value >>> 24).toByte
         } match {
-          case CudaResult.Success(())    => Right(())
-          case CudaResult.Failure(error) => Left(MemoryError.InvalidAddress(address, 4, error.message))
+          case CUDAResult.Success(())    => Right(())
+          case CUDAResult.Failure(error) => Left(MemoryError.InvalidAddress(address, 4, error.message))
         }
       }
 
     override def free(): Unit = ()
   }
-  private def success[A](value: A): CudaResult[A]                   = CudaResult.Success(value)
-  private def failure[A](code: Int, message: String): CudaResult[A] = CudaResult.Failure(RpcCudaError(code, message))
+  private def success[A](value: A): CUDAResult[A]                   = CUDAResult.Success(value)
+  private def failure[A](code: Int, message: String): CUDAResult[A] = CUDAResult.Failure(RPCCUDAError(code, message))
 }

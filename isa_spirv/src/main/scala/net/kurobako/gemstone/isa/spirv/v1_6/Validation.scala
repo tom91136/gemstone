@@ -4,14 +4,14 @@ enum ValidationIssue {
   case InvalidHeader(detail: String)
   case MissingKernelCapability
   case MissingKernelEntryPoint
-  case MissingOpenClMemoryModel
-  case UnsupportedVersion(version: SpirvVersion)
+  case MissingOpenCLMemoryModel
+  case UnsupportedVersion(version: SPIRVVersion)
 
   def message: String = this match {
     case InvalidHeader(detail)       => detail
     case MissingKernelCapability     => "OpCapability Kernel is required"
     case MissingKernelEntryPoint     => "an OpEntryPoint Kernel is required"
-    case MissingOpenClMemoryModel    => "an OpenCL physical-addressing OpMemoryModel is required"
+    case MissingOpenCLMemoryModel    => "an OpenCL physical-addressing OpMemoryModel is required"
     case UnsupportedVersion(version) =>
       s"SPIR-V ${version.major}.${version.minor} is newer than ${Version.major}.${Version.minor}"
   }
@@ -40,19 +40,19 @@ object ComputeValidator {
 
     var kernelCapability = false
     var kernelEntry      = false
-    var openClMemory     = false
+    var openCLMemory     = false
     module.instructions.foreach {
       case Instruction.Capability(capability) if capability.toUnsigned == Kernel => kernelCapability = true
       case Instruction.EntryPoint(executionModel, _, _, _) if executionModel.toUnsigned == Kernel => kernelEntry = true
       case Instruction.MemoryModel(addressingModel, memoryModel)                                  =>
         val addressing = addressingModel.toUnsigned
         val memory     = memoryModel.toUnsigned
-        if ((addressing == 1L || addressing == 2L) && memory >= 2L && memory <= 4L) openClMemory = true
+        if ((addressing == 1L || addressing == 2L) && memory >= 2L && memory <= 4L) openCLMemory = true
       case _ => ()
     }
     if (!kernelCapability) invalid += ValidationIssue.MissingKernelCapability
     if (!kernelEntry) invalid += ValidationIssue.MissingKernelEntryPoint
-    if (!openClMemory) invalid += ValidationIssue.MissingOpenClMemoryModel
+    if (!openCLMemory) invalid += ValidationIssue.MissingOpenCLMemoryModel
     val invalidIssues     = invalid.result()
     val unsupportedIssues = unsupported.result()
     if (invalidIssues.nonEmpty) ValidationResult.Invalid(invalidIssues)

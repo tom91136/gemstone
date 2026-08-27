@@ -9,7 +9,7 @@ import net.kurobako.gemstone.execution.Pc
 import net.kurobako.gemstone.execution.Step
 import net.kurobako.gemstone.execution.WaitKey
 import net.kurobako.gemstone.execution.WaitScope
-import net.kurobako.gemstone.isa.amdgpu.common.AmdSemantics.*
+import net.kurobako.gemstone.isa.amdgpu.common.AMDSemantics.*
 
 class SemanticsSuite extends munit.FunSuite {
   private val target = Target.unsafe("gfx1010")
@@ -26,9 +26,9 @@ class SemanticsSuite extends munit.FunSuite {
 
   test("conditional branches read SCC, VCC, and EXEC from the pre-instruction state") {
     val state   = wave(pc = 3)
-    val effects = new Effects[AmdWrite]
-    effects.stage(AmdWrite.Scc(true))
-    effects.stage(AmdWrite.Vcc(LaneMask.one(2).toOption.get))
+    val effects = new Effects[AMDWrite]
+    effects.stage(AMDWrite.Scc(true))
+    effects.stage(AMDWrite.Vcc(LaneMask.one(2).toOption.get))
     assertEquals(state.commit(effects), Right(()))
 
     assertEquals(run(lower("s_cbranch_scc1 4"), state), Step.Jump(Pc.unsafe(8)))
@@ -37,8 +37,8 @@ class SemanticsSuite extends munit.FunSuite {
     assertEquals(run(lower("s_cbranch_vccz 4"), state), Step.Advance)
     assertEquals(run(lower("s_cbranch_execnz 4"), state), Step.Jump(Pc.unsafe(8)))
 
-    val deactivate = new Effects[AmdWrite]
-    deactivate.stage(AmdWrite.Exec(LaneMask.Empty))
+    val deactivate = new Effects[AMDWrite]
+    deactivate.stage(AMDWrite.Exec(LaneMask.Empty))
     assertEquals(state.commit(deactivate), Right(()))
     assertEquals(run(lower("s_cbranch_execz 4"), state), Step.Jump(Pc.unsafe(8)))
     assertEquals(run(lower("s_cbranch_execnz 4"), state), Step.Advance)
@@ -78,9 +78,9 @@ class SemanticsSuite extends munit.FunSuite {
     val state  = wave()
     val nop    = lower("s_nop 0")
     val budget = ExecutionBudget(1).toOption.get
-    assertEquals(nop.execute(state, new Effects[AmdWrite], budget), Step.Advance)
+    assertEquals(nop.execute(state, new Effects[AMDWrite], budget), Step.Advance)
     assertEquals(
-      nop.execute(state, new Effects[AmdWrite], budget),
+      nop.execute(state, new Effects[AMDWrite], budget),
       Step.Trap(ExecutionFault.BudgetExceeded(1L))
     )
 
@@ -88,7 +88,7 @@ class SemanticsSuite extends munit.FunSuite {
     cancellation.cancel()
     val untouched = ExecutionBudget(1).toOption.get
     assertEquals(
-      nop.execute(state, new Effects[AmdWrite], untouched, cancellation),
+      nop.execute(state, new Effects[AMDWrite], untouched, cancellation),
       Step.Trap(ExecutionFault.Cancelled)
     )
     assertEquals(untouched.used, 0L)
@@ -120,9 +120,9 @@ class SemanticsSuite extends munit.FunSuite {
       opcodes.foreach { opcode =>
         selected += 1
         val instruction = semanticInput(opcode)
-        AmdLowering.lower(instruction, architecture) match {
+        AMDLowering.lower(instruction, architecture) match {
           case Left(error) => fail(s"$opcode on ${architecture.name} was not classified: $error")
-          case Right(AmdExecutable.Unsupported(_, _, _, _)) =>
+          case Right(AMDExecutable.Unsupported(_, _, _, _)) =>
             assert(!SemanticsCoverage.implemented.contains(opcode), s"implemented $opcode lowered as Unsupported")
           case Right(_) =>
             assert(SemanticsCoverage.implemented.contains(opcode), s"undeclared $opcode acquired executable semantics")
@@ -140,9 +140,9 @@ class SemanticsSuite extends munit.FunSuite {
     Instruction.decode(opcode, operands).fold(error => fail(error.toString), identity)
   }
 
-  private def lower(source: String): AmdExecutable = {
+  private def lower(source: String): AMDExecutable = {
     val instruction = Assembly.parseInstruction(source).fold(error => fail(error.toString), identity)
-    AmdLowering.lower(instruction, target).fold(error => fail(error.toString), identity)
+    AMDLowering.lower(instruction, target).fold(error => fail(error.toString), identity)
   }
 
   private def wave(pc: Int = 0): WaveState =
@@ -151,8 +151,8 @@ class SemanticsSuite extends munit.FunSuite {
       .toOption
       .get
 
-  private def run(instruction: AmdExecutable, state: WaveState): Step = {
+  private def run(instruction: AMDExecutable, state: WaveState): Step = {
     val budget = ExecutionBudget(100).toOption.get
-    instruction.execute(state, new Effects[AmdWrite], budget)
+    instruction.execute(state, new Effects[AMDWrite], budget)
   }
 }

@@ -12,8 +12,8 @@ import scala.collection.mutable.ArrayBuffer
 import net.kurobako.gemstone.isa.amdgpu.common.Target
 
 // Generated exhaustively from pinned LLVM MC/AMDGPU checks. Do not edit.
-final case class AmdGpuGoldenCase(target: Target, assembly: String, bytes: Vector[Byte], source: String)
-final case class AmdGpuDiagnosticCase(target: Target, assembly: String, message: String, source: String)
+final case class AMDGPUGoldenCase(target: Target, assembly: String, bytes: Vector[Byte], source: String)
+final case class AMDGPUDiagnosticCase(target: Target, assembly: String, message: String, source: String)
 
 object GoldenCorpus {
   val sourceFileCount: Int = 770
@@ -22,16 +22,16 @@ object GoldenCorpus {
   val caseCount: Int = 308161
   val diagnosticCount: Int = 98730
 
-  lazy val cases: Vector[AmdGpuGoldenCase] = load("positive.tsv.gz").map { row =>
+  lazy val cases: Vector[AMDGPUGoldenCase] = load("positive.tsv.gz").map { row =>
     val fields = row.split("\t", -1)
-    AmdGpuGoldenCase(
+    AMDGPUGoldenCase(
       Target.unsafe(fields(0)), fields(1), fields(2).split(',').toVector.map(_.toInt.toByte), fields(3)
     )
   }
 
-  lazy val diagnostics: Vector[AmdGpuDiagnosticCase] = load("diagnostics.tsv.gz").map { row =>
+  lazy val diagnostics: Vector[AMDGPUDiagnosticCase] = load("diagnostics.tsv.gz").map { row =>
     val fields = row.split("\t", -1)
-    AmdGpuDiagnosticCase(Target.unsafe(fields(0)), fields(1), fields(2), fields(3))
+    AMDGPUDiagnosticCase(Target.unsafe(fields(0)), fields(1), fields(2), fields(3))
   }
 
   private def load(name: String): Vector[String] = {

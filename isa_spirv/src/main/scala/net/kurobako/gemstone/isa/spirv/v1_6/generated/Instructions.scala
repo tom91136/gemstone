@@ -1771,7 +1771,7 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
   final def meta: Metadata = definition.meta
 }
 
-val Version: SpirvVersion = SpirvVersion(1, 6)
+val Version: SPIRVVersion = SPIRVVersion(1, 6)
 val GrammarRevision: Int = 7
 val Instructions: Vector[InstructionDef] = InstructionDef.values.toVector
 

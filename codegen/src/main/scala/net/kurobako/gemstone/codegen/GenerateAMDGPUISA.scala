@@ -10,7 +10,7 @@ import org.w3c.dom.Element
 import scala.jdk.CollectionConverters.*
 
 /** Builds the normalized AMDGPU instruction catalog from pinned AMD XML and Mesa ACO sources. */
-object GenerateAmdGpuIsa {
+object GenerateAMDGPUISA {
   private final case class Operand(
       field: String,
       kind: String,
@@ -29,8 +29,8 @@ object GenerateAmdGpuIsa {
       group: String,
       source: String
   )
-  private final case class SoppRule(prefix: Long, opcodeShift: Int, immediateBits: Int)
-  private final case class Extracted(records: Vector[Instruction], acoCount: Int, xmlCount: Int, sopp: SoppRule)
+  private final case class SOPPRule(prefix: Long, opcodeShift: Int, immediateBits: Int)
+  private final case class Extracted(records: Vector[Instruction], acoCount: Int, xmlCount: Int, sopp: SOPPRule)
   private final case class Field(name: String)
   private final case class InstructionForm(
       opcode: String,
@@ -52,7 +52,7 @@ object GenerateAmdGpuIsa {
       write(catalog.getParent.getParent.getParent.resolve("Architectures.scala"), renderArchitectures())
     case _ =>
       throw new IllegalArgumentException(
-        "usage: GenerateAmdGpuIsa <prepared-references> <aco-exporter.py> <output.scala>"
+        "usage: GenerateAMDGPUISA <prepared-references> <aco-exporter.py> <output.scala>"
       )
   }
 
@@ -74,15 +74,15 @@ object GenerateAmdGpuIsa {
       finally stream.close()
     require(xmlFiles.size == 10, s"expected ten AMD ISA XML files, found ${xmlFiles.size}")
 
-    val official = xmlFiles.flatMap(parseOfficialXml)
-    val aco      = parseAco(references.resolve("mesa/src/amd/compiler/aco_opcodes.py"), exporter)
-    val sopp     = parseAcoSoppRule(references.resolve("mesa/src/amd/compiler"))
+    val official = xmlFiles.flatMap(parseOfficialXML)
+    val aco      = parseACO(references.resolve("mesa/src/amd/compiler/aco_opcodes.py"), exporter)
+    val sopp     = parseACOSOPPRule(references.resolve("mesa/src/amd/compiler"))
     val records  = (aco ++ official)
       .sortBy(record => (record.name, record.generation, record.target, record.format, record.opcode))
     Extracted(records, aco.size, official.size, sopp)
   }
 
-  private def parseOfficialXml(input: Path): Vector[Instruction] = {
+  private def parseOfficialXML(input: Path): Vector[Instruction] = {
     val fileName   = input.getFileName.toString
     val generation = generationFor(fileName)
     val target     = fileName.stripPrefix("amdgpu_isa_").stripSuffix(".xml")
@@ -117,12 +117,12 @@ object GenerateAmdGpuIsa {
               implicitOperand = booleanAttribute(operand, "IsImplicit")
             )
           }
-        Instruction(name, generation, target, format, opcode, operands, group, "AmdXml")
+        Instruction(name, generation, target, format, opcode, operands, group, "AMDXML")
       }
     }.flatten
   }
 
-  private def parseAco(source: Path, exporter: Path): Vector[Instruction] = {
+  private def parseACO(source: Path, exporter: Path): Vector[Instruction] = {
     require(Files.isRegularFile(source), s"missing Mesa ACO opcode source: $source")
     require(Files.isRegularFile(exporter), s"missing ACO exporter: $exporter")
     val process = new ProcessBuilder("python3", exporter.toString, source.toString)
@@ -160,19 +160,19 @@ object GenerateAmdGpuIsa {
         columns(3).toInt,
         operands,
         columns(4),
-        "MesaAco"
+        "MesaACO"
       )
     }
   }
 
-  private def parseAcoSoppRule(root: Path): SoppRule = {
+  private def parseACOSOPPRule(root: Path): SOPPRule = {
     val assembler = Files.readString(root.resolve("aco_assembler.cpp"), StandardCharsets.UTF_8)
     val ir        = Files.readString(root.resolve("aco_ir.h"), StandardCharsets.UTF_8)
-    val SoppBody  = raw"(?s)emit_sopp_instruction\(.*?\n\}".r
+    val SOPPBody  = raw"(?s)emit_sopp_instruction\(.*?\n\}".r
     val Prefix    = raw"encoding\s*=\s*\(0b([01]+)\s*<<\s*([0-9]+)\)".r
     val Opcode    = raw"encoding\s*\|=\s*opcode\s*<<\s*([0-9]+)".r
     val Immediate = raw"encoding\s*\|=\s*\(uint([0-9]+)_t\)sopp\.imm".r
-    val body      = SoppBody.findFirstIn(assembler).getOrElse {
+    val body      = SOPPBody.findFirstIn(assembler).getOrElse {
       throw new IllegalArgumentException("Mesa ACO assembler no longer contains emit_sopp_instruction")
     }
     val (prefixBits, prefixShift) = Prefix.findFirstMatchIn(body)
@@ -186,20 +186,20 @@ object GenerateAmdGpuIsa {
       ir.matches("(?s).*struct SALU_instruction.*?uint32_t imm;.*"),
       "Mesa ACO IR no longer has the SALU immediate field"
     )
-    SoppRule(java.lang.Long.parseLong(prefixBits, 2) << prefixShift, opcodeShift, immediateBits)
+    SOPPRule(java.lang.Long.parseLong(prefixBits, 2) << prefixShift, opcodeShift, immediateBits)
   }
 
-  private def render(records: Vector[Instruction], acoCount: Int, xmlCount: Int, sopp: SoppRule): String =
+  private def render(records: Vector[Instruction], acoCount: Int, xmlCount: Int, sopp: SOPPRule): String =
     s"""|package net.kurobako.gemstone.isa.amdgpu.common.generated
         |
         |// Generated encoding constants from pinned Mesa ACO inputs. Instruction metadata is attached
         |// directly to generated InstructionDef cases in Instructions.scala. Do not edit.
-        |private[amdgpu] val MesaAcoRecordCount: Int = $acoCount
-        |private[amdgpu] val AmdXmlRecordCount: Int = $xmlCount
+        |private[amdgpu] val MesaACORecordCount: Int = $acoCount
+        |private[amdgpu] val AMDXMLRecordCount: Int = $xmlCount
         |private[amdgpu] val MetadataRecordCount: Int = ${records.size}
-        |private[amdgpu] val SoppEncodingPrefix: Long = ${sopp.prefix}L
-        |private[amdgpu] val SoppOpcodeShift: Int = ${sopp.opcodeShift}
-        |private[amdgpu] val SoppImmediateBits: Int = ${sopp.immediateBits}
+        |private[amdgpu] val SOPPEncodingPrefix: Long = ${sopp.prefix}L
+        |private[amdgpu] val SOPPOpcodeShift: Int = ${sopp.opcodeShift}
+        |private[amdgpu] val SOPPImmediateBits: Int = ${sopp.immediateBits}
         |""".stripMargin
 
   private def renderInstructions(records: Vector[Instruction]): String = {
@@ -525,27 +525,27 @@ object GenerateAmdGpuIsa {
 
   private def renderArchitectures(): String = {
     val families = Vector(
-      "gfx6"  -> "Gfx6",
-      "gfx7"  -> "Gfx7",
-      "gfx8"  -> "Gfx8",
-      "gfx9"  -> "Gfx9",
-      "gfx10" -> "Gfx10",
-      "gfx11" -> "Gfx11",
-      "gfx12" -> "Gfx12",
-      "cdna1" -> "Cdna1",
-      "cdna2" -> "Cdna2",
-      "cdna3" -> "Cdna3",
-      "cdna4" -> "Cdna4",
-      "cdna5" -> "Cdna5"
+      "gfx6"  -> "GFX6",
+      "gfx7"  -> "GFX7",
+      "gfx8"  -> "GFX8",
+      "gfx9"  -> "GFX9",
+      "gfx10" -> "GFX10",
+      "gfx11" -> "GFX11",
+      "gfx12" -> "GFX12",
+      "cdna1" -> "CDNA1",
+      "cdna2" -> "CDNA2",
+      "cdna3" -> "CDNA3",
+      "cdna4" -> "CDNA4",
+      "cdna5" -> "CDNA5"
     )
     families.map { case (packageName, generation) =>
       s"""|package net.kurobako.gemstone.isa.amdgpu.$packageName {
-          |  export net.kurobako.gemstone.isa.amdgpu.common.Api.*
+          |  export net.kurobako.gemstone.isa.amdgpu.common.API.*
           |  val Version: net.kurobako.gemstone.isa.amdgpu.common.Generation =
           |    net.kurobako.gemstone.isa.amdgpu.common.Generation.$generation
           |  val Instructions: Vector[net.kurobako.gemstone.isa.amdgpu.common.InstructionDef] =
           |    net.kurobako.gemstone.isa.amdgpu.common.instructionsFor(Version)
-          |  object Isa extends net.kurobako.gemstone.isa.amdgpu.common.Architecture(Version)
+          |  object ISA extends net.kurobako.gemstone.isa.amdgpu.common.Architecture(Version)
           |}""".stripMargin
     }.mkString("// Generated from the normalized AMDGPU generation set. Do not edit by hand.\n", "\n\n", "\n")
   }
@@ -563,16 +563,16 @@ object GenerateAmdGpuIsa {
   }
 
   private def generationFor(fileName: String): String = fileName match {
-    case "amdgpu_isa_rdna1.xml"   => "Gfx10"
-    case "amdgpu_isa_rdna2.xml"   => "Gfx10"
-    case "amdgpu_isa_rdna3.xml"   => "Gfx11"
-    case "amdgpu_isa_rdna3_5.xml" => "Gfx11"
-    case "amdgpu_isa_rdna4.xml"   => "Gfx12"
-    case "amdgpu_isa_cdna1.xml"   => "Cdna1"
-    case "amdgpu_isa_cdna2.xml"   => "Cdna2"
-    case "amdgpu_isa_cdna3.xml"   => "Cdna3"
-    case "amdgpu_isa_cdna4.xml"   => "Cdna4"
-    case "amdgpu_isa_cdna5.xml"   => "Cdna5"
+    case "amdgpu_isa_rdna1.xml"   => "GFX10"
+    case "amdgpu_isa_rdna2.xml"   => "GFX10"
+    case "amdgpu_isa_rdna3.xml"   => "GFX11"
+    case "amdgpu_isa_rdna3_5.xml" => "GFX11"
+    case "amdgpu_isa_rdna4.xml"   => "GFX12"
+    case "amdgpu_isa_cdna1.xml"   => "CDNA1"
+    case "amdgpu_isa_cdna2.xml"   => "CDNA2"
+    case "amdgpu_isa_cdna3.xml"   => "CDNA3"
+    case "amdgpu_isa_cdna4.xml"   => "CDNA4"
+    case "amdgpu_isa_cdna5.xml"   => "CDNA5"
     case other                    => throw new IllegalArgumentException(s"unknown AMD ISA XML: $other")
   }
 

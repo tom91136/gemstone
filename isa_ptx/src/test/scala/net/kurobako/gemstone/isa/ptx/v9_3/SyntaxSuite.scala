@@ -8,7 +8,7 @@ final class SyntaxSuite extends munit.FunSuite {
     }
 
   test("version and instruction specifications are generated at package level") {
-    assertEquals(Version, PtxVersion(9, 3))
+    assertEquals(Version, PTXVersion(9, 3))
     assert(Instructions.size >= 170)
   }
 

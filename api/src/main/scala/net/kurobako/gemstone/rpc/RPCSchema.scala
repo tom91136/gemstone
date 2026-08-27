@@ -13,29 +13,49 @@ enum WireType {
   case Device
   case DevicePtr
   case Context
-  case CudaModule
-  case CudaFunction
+  case CUDAModule
+  case CUDAFunction
   case HostInput
   case HostOutput
   case ModuleImage
   case FunctionName
   case KernelFunction
   case KernelLaunch
+
+  /** Stable protocol spelling. Scala identifier casing may evolve without silently changing the RPC schema. */
+  def protocolName: String = this match {
+    case UnitValue      => "UnitValue"
+    case Int32          => "Int32"
+    case UInt8          => "UInt8"
+    case UInt32         => "UInt32"
+    case SizeT          => "SizeT"
+    case Device         => "Device"
+    case DevicePtr      => "DevicePtr"
+    case Context        => "Context"
+    case CUDAModule     => "CudaModule"
+    case CUDAFunction   => "CudaFunction"
+    case HostInput      => "HostInput"
+    case HostOutput     => "HostOutput"
+    case ModuleImage    => "ModuleImage"
+    case FunctionName   => "FunctionName"
+    case KernelFunction => "KernelFunction"
+    case KernelLaunch   => "KernelLaunch"
+  }
 }
 
-final case class RpcParameter(name: String, wireType: WireType)
+final case class RPCParameter(name: String, wireType: WireType)
 
-final case class RpcMethod(
+final case class RPCMethod(
     name: String,
     messageId: MessageId,
-    parameters: Vector[RpcParameter],
+    parameters: Vector[RPCParameter],
     result: WireType
 )
 
-final case class RpcSchema(
+final case class RPCSchema(
     interfaceName: String,
     fingerprint: String,
-    methods: Vector[RpcMethod]
+    methods: Vector[RPCMethod]
 )
 
 enum WireValue {
@@ -47,8 +67,8 @@ enum WireValue {
   case DeviceValue(value: net.kurobako.gemstone.cuda.Device)
   case DevicePtrValue(value: net.kurobako.gemstone.cuda.DevicePtr)
   case ContextValue(value: net.kurobako.gemstone.cuda.Context)
-  case CudaModuleValue(value: net.kurobako.gemstone.cuda.CudaModule)
-  case CudaFunctionValue(value: net.kurobako.gemstone.cuda.CudaFunction)
+  case CUDAModuleValue(value: net.kurobako.gemstone.cuda.CUDAModule)
+  case CUDAFunctionValue(value: net.kurobako.gemstone.cuda.CUDAFunction)
   case HostInputValue(value: net.kurobako.gemstone.cuda.HostInput)
   case HostOutputValue(value: net.kurobako.gemstone.cuda.HostOutput)
   case ModuleImageValue(value: net.kurobako.gemstone.cuda.ModuleImage)
@@ -57,23 +77,23 @@ enum WireValue {
   case KernelLaunchValue(value: net.kurobako.gemstone.cuda.KernelLaunch)
 }
 
-final case class RpcRequest(
+final case class RPCRequest(
     messageId: MessageId,
     functionName: String,
     arguments: Vector[WireValue]
 )
 
-enum RpcResponse {
+enum RPCResponse {
   case Success(value: WireValue)
-  case Failure(error: net.kurobako.gemstone.cuda.CudaError)
+  case Failure(error: net.kurobako.gemstone.cuda.CUDAError)
 }
 
-trait RpcTransport {
+trait RPCTransport {
   def schemaFingerprint: String
-  def call(request: RpcRequest): RpcResponse
+  def call(request: RPCRequest): RPCResponse
 }
 
-trait RpcDispatcher[-T] {
+trait RPCDispatcher[-T] {
   def schemaFingerprint: String
-  def dispatch(request: RpcRequest, implementation: T): RpcResponse
+  def dispatch(request: RPCRequest, implementation: T): RPCResponse
 }

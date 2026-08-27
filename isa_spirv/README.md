@@ -21,5 +21,5 @@ unsupported traps.
 Regenerate checked-in sources explicitly:
 
 ```console
-sbt 'isa_spirv / generateSpirvSources; isa_spirv / generateSpirvReferenceTests'
+sbt 'isa_spirv / generateSPIRVSources; isa_spirv / generateSPIRVReferenceTests'
 ```

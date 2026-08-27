@@ -4,11 +4,11 @@ import net.kurobako.gemstone.cuda.CUDA
 
 import scala.compiletime.testing.typeCheckErrors
 
-class RpcDerivationSuite extends munit.FunSuite {
-  private val schema = RpcDerivation.schema[CUDA]
+class RPCDerivationSuite extends munit.FunSuite {
+  private val schema = RPCDerivation.schema[CUDA]
 
   test("CUDA trait owns the complete GPUOcelot Driver surface") {
-    val driver = RpcDerivation.methodNames[CUDA].filter(name => name.startsWith("cu") && !name.startsWith("cuda"))
+    val driver = RPCDerivation.methodNames[CUDA].filter(name => name.startsWith("cu") && !name.startsWith("cuda"))
     assertEquals(driver.size, 144)
     assertEquals(driver.distinct.size, 144)
     assert(driver.contains("cuMemAlloc_v2"))
@@ -21,42 +21,42 @@ class RpcDerivationSuite extends munit.FunSuite {
     assertEquals(schema.methods.map(_.name).distinct.size, schema.methods.size)
     assertEquals(schema.methods.map(_.messageId).distinct.size, schema.methods.size)
     assertEquals(schema.fingerprint.length, 64)
-    assertEquals(schema, RpcDerivation.schema[CUDA])
+    assertEquals(schema, RPCDerivation.schema[CUDA])
   }
 
   test("rejects a Scala name that is not a CUDA C symbol") {
     val errors = typeCheckErrors("""
-      import net.kurobako.gemstone.cuda.CudaResult
-      import net.kurobako.gemstone.rpc.RpcDerivation
+      import net.kurobako.gemstone.cuda.CUDAResult
+      import net.kurobako.gemstone.rpc.RPCDerivation
       trait InvalidName {
-        def free(pointer: Long): CudaResult[Unit]
+        def free(pointer: Long): CUDAResult[Unit]
       }
-      RpcDerivation.schema[InvalidName]
+      RPCDerivation.schema[InvalidName]
     """)
     assert(errors.exists(_.message.contains("exact C symbol")))
   }
 
   test("rejects overloaded endpoints") {
     val errors = typeCheckErrors("""
-      import net.kurobako.gemstone.cuda.CudaResult
-      import net.kurobako.gemstone.rpc.RpcDerivation
+      import net.kurobako.gemstone.cuda.CUDAResult
+      import net.kurobako.gemstone.rpc.RPCDerivation
       trait Overloaded {
-        def cuThing(value: Int): CudaResult[Unit]
-        def cuThing(value: Int, other: Int): CudaResult[Unit]
+        def cuThing(value: Int): CUDAResult[Unit]
+        def cuThing(value: Int, other: Int): CUDAResult[Unit]
       }
-      RpcDerivation.schema[Overloaded]
+      RPCDerivation.schema[Overloaded]
     """)
     assert(errors.exists(_.message.contains("may not be overloaded")))
   }
 
   test("rejects a parameter without an explicit wire type") {
     val errors = typeCheckErrors("""
-      import net.kurobako.gemstone.cuda.CudaResult
-      import net.kurobako.gemstone.rpc.RpcDerivation
+      import net.kurobako.gemstone.cuda.CUDAResult
+      import net.kurobako.gemstone.rpc.RPCDerivation
       trait UnsafePointer {
-        def cuUnsafe(pointer: Long): CudaResult[Unit]
+        def cuUnsafe(pointer: Long): CUDAResult[Unit]
       }
-      RpcDerivation.schema[UnsafePointer]
+      RPCDerivation.schema[UnsafePointer]
     """)
     assert(errors.exists(_.message.contains("unsupported RPC wire type")))
   }

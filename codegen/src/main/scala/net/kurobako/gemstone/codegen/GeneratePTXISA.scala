@@ -11,7 +11,7 @@ import scala.jdk.CollectionConverters.*
 import scala.util.matching.Regex
 
 /** Generates the typed instruction model and parser corpus from the pinned NVIDIA PTX HTML document. */
-object GeneratePtxIsa {
+object GeneratePTXISA {
   private final case class Section(
       id: String,
       heading: String,
@@ -78,7 +78,7 @@ object GeneratePtxIsa {
       write(Paths.get(output), renderTests(version, packageVersion, examples))
     case _ =>
       throw new IllegalArgumentException(
-        "usage: GeneratePtxIsa (instructions|tests) <ptx.html> <output.scala> <ptx-version> <package-version>"
+        "usage: GeneratePTXISA (instructions|tests) <ptx.html> <output.scala> <ptx-version> <package-version>"
       )
   }
 
@@ -548,8 +548,8 @@ object GeneratePtxIsa {
               |          ${literal(section.title)},
               |          ${literal(section.category)},
               |          ${vector(section.syntax)},
-              |          PtxVersion(${section.introduced._1}, ${section.introduced._2}),
-              |          SmTarget(${section.minimumTarget}),
+              |          PTXVersion(${section.introduced._1}, ${section.introduced._2}),
+              |          SMTarget(${section.minimumTarget}),
               |          Vector(${forms.mkString(", ")})
               |        )""".stripMargin
         }
@@ -566,7 +566,7 @@ object GeneratePtxIsa {
           |    ${renderMetadata(shape)}
           |  )""".stripMargin
     }
-    s"""|// Generated from the pinned NVIDIA PTX ISA $version specification. Do not edit by hand.
+    s"""|// Generated PTX instruction model from the pinned NVIDIA ISA $version specification. Do not edit by hand.
         |package net.kurobako.gemstone.isa.ptx.$packageVersion
         |
         |enum InstructionDecodeError {
@@ -645,7 +645,7 @@ object GeneratePtxIsa {
         |  }
         |}
         |
-        |val Version: PtxVersion = PtxVersion(${versionParts(0)}, ${versionParts(1)})
+        |val Version: PTXVersion = PTXVersion(${versionParts(0)}, ${versionParts(1)})
         |
         |val Instructions: Vector[InstructionDef] = InstructionDef.values.toVector
         |""".stripMargin

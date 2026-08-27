@@ -40,7 +40,7 @@ class ThrustConformanceSuite extends munit.FunSuite {
     _.toInt
   )
   private val compileFailures = new ConcurrentHashMap[String, Throwable]()
-  private var server          = Option.empty[CudaRpcServer.RunningServer]
+  private var server          = Option.empty[CUDARPCServer.RunningServer]
 
   require(selectedBackends.nonEmpty, "GEMSTONE_THRUST_BACKENDS selected no backends")
   require(selectedCases.nonEmpty, "GEMSTONE_THRUST_FILTER selected no tests")
@@ -51,7 +51,7 @@ class ThrustConformanceSuite extends munit.FunSuite {
     require(compileJobs >= 1 && compileJobs <= 32, s"GEMSTONE_THRUST_JOBS must be between 1 and 32, found $compileJobs")
     if (selectedBackends.contains(Backend.Gemstone)) {
       buildGemstoneFacade(root, libraryDir)
-      server = Some(CudaRpcServer.start(token))
+      server = Some(CUDARPCServer.start(token))
     }
     buildFramework()
     compileCases()
@@ -75,7 +75,7 @@ class ThrustConformanceSuite extends munit.FunSuite {
     )
     sources.foreach { case (source, outputName) =>
       val output    = frameworkRoot.resolve(outputName)
-      val signature = compileSignature(source, Backend.Cuda, rdc = false, Vector.empty)
+      val signature = compileSignature(source, Backend.CUDA, rdc = false, Vector.empty)
       compileIfNeeded(output, signature) {
         runChecked(
           nvccCommand ++ includeFlags ++ Vector("-c", source.toString, "-o", output.toString),
@@ -231,11 +231,11 @@ object ThrustConformanceSuite {
   private final case class ThrustCase(name: String, source: Path, rdc: Boolean, perThreadStream: Boolean)
 
   private enum Backend(val id: String) {
-    case Cuda     extends Backend("cuda")
+    case CUDA     extends Backend("cuda")
     case Gemstone extends Backend("gemstone")
 
     def linkFlags(libraryDir: Path): Vector[String] = this match {
-      case Cuda     => Vector.empty
+      case CUDA     => Vector.empty
       case Gemstone => Vector(
           "--cudart=none",
           s"-L$libraryDir",
@@ -247,10 +247,10 @@ object ThrustConformanceSuite {
 
     def environment(
         libraryDir: Path,
-        server: Option[CudaRpcServer.RunningServer],
+        server: Option[CUDARPCServer.RunningServer],
         token: String
     ): Map[String, String] = this match {
-      case Cuda => Map.empty
+      case CUDA => Map.empty
       case Gemstone =>
         val current = sys.env.get("LD_LIBRARY_PATH").filter(_.nonEmpty).map(value => s":$value").getOrElse("")
         Map(

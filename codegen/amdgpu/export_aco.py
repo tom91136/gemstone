@@ -46,7 +46,7 @@ def main(argv):
                 print(
                     "\t".join(
                         (
-                            generation[0].upper() + generation[1:],
+                            generation.upper(),
                             name,
                             instruction.format.name,
                             str(opcode),

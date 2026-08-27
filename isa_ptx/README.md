@@ -13,7 +13,7 @@ second generated mnemonic match. Unknown operations are not representable as ins
 the PTX ISA version: the 9.3 document describes many targets through `sm_121*`. Target-specific validity will
 therefore remain a validation concern rather than another copy of the parser package.
 
-The `isa_ptx` source generators read the pinned CUDA PTX HTML prepared by `codegen / prepareIsaReferences`. They emit:
+The `isa_ptx` source generators read the pinned CUDA PTX HTML prepared by `codegen / prepareISAReferences`. They emit:
 
 - `generated/Instructions.scala`, containing the enums, `Version`, and the top-level `Instructions` definition
   vector for 195 concrete operations; and
@@ -21,5 +21,5 @@ The `isa_ptx` source generators read the pinned CUDA PTX HTML prepared by `codeg
   and AST-preserving canonical round-trips.
 
 Generated files are checked in so ISA changes are reviewable and normal compilation is offline. The explicit
-`generatePtxSources` and `generatePtxReferenceTests` tasks update them from the pinned source. The small execution
-engine in `Ptx.scala` lowers its supported subset directly from the generated enum cases.
+`generatePTXSources` and `generatePTXReferenceTests` tasks update them from the pinned source. The small execution
+engine in `PTX.scala` lowers its supported subset directly from the generated enum cases.

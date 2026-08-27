@@ -38,7 +38,7 @@ budget, so a malformed kernel cannot create an uninterruptible `while (true)` lo
 
 ## PTX
 
-PTX lowering produces a `PtxExecutable` with dense register slots and resolved labels. State is initially per lane,
+PTX lowering produces a `PTXExecutable` with dense register slots and resolved labels. State is initially per lane,
 then grouped into cohorts sharing a PC and active mask. Branches split cohorts and reconverge them explicitly. Calls,
 predicates, barriers, warp operations, and memory scopes therefore remain visible to the scheduler rather than being
 hidden inside instruction methods.

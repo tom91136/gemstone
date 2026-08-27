@@ -21,7 +21,7 @@ enum WaitOperation {
 }
 
 /** Target-bound operations which the interpreter may execute. Unsupported is a first-class result, never a no-op. */
-enum AmdExecutable {
+enum AMDExecutable {
   case Nop(target: Target, delay: Int)
   case Branch(target: Target, displacement: Int)
   case ConditionalBranch(target: Target, condition: BranchCondition, displacement: Int)
@@ -71,23 +71,23 @@ object SemanticsCoverage {
   )
 }
 
-object AmdLowering {
+object AMDLowering {
   def lower(
       instruction: Instruction,
       target: Target
-  ): Either[LoweringError, AmdExecutable] = {
+  ): Either[LoweringError, AMDExecutable] = {
     val opcode      = instruction.opcode
     val definitions = encodingsFor(instruction, target)
     val formats     = definitions.map(_.format.toUpperCase).distinct.sorted
     if (definitions.isEmpty)
-      Right(AmdExecutable.Unsupported(target, opcode, Vector.empty, "no instruction metadata for the exact target"))
+      Right(AMDExecutable.Unsupported(target, opcode, Vector.empty, "no instruction metadata for the exact target"))
     else if (!formats.contains("SOPP"))
-      Right(AmdExecutable.Unsupported(target, opcode, formats, "semantic lowering is implemented only for SOPP"))
+      Right(AMDExecutable.Unsupported(target, opcode, formats, "semantic lowering is implemented only for SOPP"))
     else instruction match {
       case Instruction.SNop(imm, mods) =>
-        unsignedImmediate(opcode, imm, mods).map(AmdExecutable.Nop(target, _))
+        unsignedImmediate(opcode, imm, mods).map(AMDExecutable.Nop(target, _))
       case Instruction.SBranch(branchTarget, mods) =>
-        branchImmediate(opcode, branchTarget, mods).map(AmdExecutable.Branch(target, _))
+        branchImmediate(opcode, branchTarget, mods).map(AMDExecutable.Branch(target, _))
       case Instruction.SCbranchScc0(branchTarget, mods) =>
         conditional(opcode, branchTarget, mods, target, BranchCondition.Scc(false))
       case Instruction.SCbranchScc1(branchTarget, mods) =>
@@ -101,18 +101,18 @@ object AmdLowering {
       case Instruction.SCbranchExecnz(branchTarget, mods) =>
         conditional(opcode, branchTarget, mods, target, BranchCondition.ExecZero(false))
       case Instruction.SWaitcnt(imm, mods) =>
-        unsignedImmediate(opcode, imm, mods).map(value => AmdExecutable.Wait(target, WaitOperation.Counters(value)))
+        unsignedImmediate(opcode, imm, mods).map(value => AMDExecutable.Wait(target, WaitOperation.Counters(value)))
       case Instruction.SSleep(imm, mods) =>
-        unsignedImmediate(opcode, imm, mods).map(value => AmdExecutable.Wait(target, WaitOperation.Sleep(value)))
+        unsignedImmediate(opcode, imm, mods).map(value => AMDExecutable.Wait(target, WaitOperation.Sleep(value)))
       case Instruction.SBarrier(mods) =>
-        noOperands(opcode, mods).map(_ => AmdExecutable.Barrier(target, 0))
+        noOperands(opcode, mods).map(_ => AMDExecutable.Barrier(target, 0))
       case Instruction.SEndpgm_0(mods) =>
-        noOperands(opcode, mods).map(_ => AmdExecutable.EndProgram(target))
+        noOperands(opcode, mods).map(_ => AMDExecutable.EndProgram(target))
       case Instruction.SEndpgm_1(imm, mods) =>
-        unsignedImmediate(opcode, imm, mods).map(_ => AmdExecutable.EndProgram(target))
+        unsignedImmediate(opcode, imm, mods).map(_ => AMDExecutable.EndProgram(target))
       case Instruction.STrap(imm, mods) =>
-        unsignedImmediate(opcode, imm, mods).map(AmdExecutable.Trap(target, _))
-      case _ => Right(AmdExecutable.Unsupported(target, opcode, formats, "SOPP behavior is not implemented"))
+        unsignedImmediate(opcode, imm, mods).map(AMDExecutable.Trap(target, _))
+      case _ => Right(AMDExecutable.Unsupported(target, opcode, formats, "SOPP behavior is not implemented"))
     }
   }
 
@@ -122,8 +122,8 @@ object AmdLowering {
       mods: Vector[Modifier],
       target: Target,
       condition: BranchCondition
-  ): Either[LoweringError, AmdExecutable] =
-    branchImmediate(opcode, operand, mods).map(AmdExecutable.ConditionalBranch(target, condition, _))
+  ): Either[LoweringError, AMDExecutable] =
+    branchImmediate(opcode, operand, mods).map(AMDExecutable.ConditionalBranch(target, condition, _))
 
   private def noOperands(opcode: String, mods: Vector[Modifier]): Either[LoweringError, Unit] =
     if (mods.isEmpty) Right(())
@@ -156,13 +156,13 @@ object AmdLowering {
     Left(LoweringError.InvalidOperands(opcode, detail))
 }
 
-object AmdSemantics {
-  extension (instruction: AmdExecutable) {
+object AMDSemantics {
+  extension (instruction: AMDExecutable) {
 
     /** Evaluate against a pre-instruction snapshot. PC and staged effects are applied later by the scheduler. */
     def execute(
         state: WaveState,
-        effects: Effects[AmdWrite],
+        effects: Effects[AMDWrite],
         budget: ExecutionBudget,
         cancellation: CancellationToken = CancellationToken.Never
     ): Step = {
@@ -176,7 +176,7 @@ object AmdSemantics {
     }
   }
 
-  private def executeChecked(instruction: AmdExecutable, state: WaveState): Step =
+  private def executeChecked(instruction: AMDExecutable, state: WaveState): Step =
     if (instruction.architecture != state.target)
       Step.Trap(
         ExecutionFault.InvalidState(
@@ -184,20 +184,20 @@ object AmdSemantics {
         )
       )
     else instruction match {
-      case AmdExecutable.Nop(_, _)                                     => Step.Advance
-      case AmdExecutable.Branch(_, displacement)                       => branch(state.pc, displacement)
-      case AmdExecutable.ConditionalBranch(_, condition, displacement) =>
+      case AMDExecutable.Nop(_, _)                                     => Step.Advance
+      case AMDExecutable.Branch(_, displacement)                       => branch(state.pc, displacement)
+      case AMDExecutable.ConditionalBranch(_, condition, displacement) =>
         if (test(condition, state)) branch(state.pc, displacement) else Step.Advance
-      case AmdExecutable.Wait(_, WaitOperation.Counters(mask)) =>
+      case AMDExecutable.Wait(_, WaitOperation.Counters(mask)) =>
         Step.Suspend(WaitKey(WaitScope.Warp, mask.toLong, 0L))
-      case AmdExecutable.Wait(_, WaitOperation.Sleep(cycles)) =>
+      case AMDExecutable.Wait(_, WaitOperation.Sleep(cycles)) =>
         Step.Suspend(WaitKey(WaitScope.Warp, 0L, cycles.toLong))
-      case AmdExecutable.Barrier(_, barrierId) =>
+      case AMDExecutable.Barrier(_, barrierId) =>
         Step.Suspend(WaitKey(WaitScope.Workgroup, barrierId.toLong, 0L))
-      case AmdExecutable.EndProgram(_)   => Step.Exit(state.exec)
-      case AmdExecutable.Trap(_, trapId) =>
+      case AMDExecutable.EndProgram(_)   => Step.Exit(state.exec)
+      case AMDExecutable.Trap(_, trapId) =>
         Step.Trap(ExecutionFault.ArchitecturalTrap("AMDGPU", trapId.toLong, state.pc))
-      case AmdExecutable.Unsupported(_, opcode, _, reason) => Step.Trap(ExecutionFault.Unsupported(opcode, reason))
+      case AMDExecutable.Unsupported(_, opcode, _, reason) => Step.Trap(ExecutionFault.Unsupported(opcode, reason))
     }
 
   private def test(condition: BranchCondition, state: WaveState): Boolean = condition match {

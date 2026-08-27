@@ -1,8 +1,8 @@
 package net.kurobako.gemstone.vendor.native
 
-import net.kurobako.gemstone.generated.GeneratedApi
-import net.kurobako.gemstone.vendor.CudaError
-import net.kurobako.gemstone.vendor.CudaRuntime
+import net.kurobako.gemstone.generated.GeneratedAPI
+import net.kurobako.gemstone.vendor.CUDAError
+import net.kurobako.gemstone.vendor.CUDARuntime
 
 import scala.scalanative.unsafe.CFuncPtr0
 import scala.scalanative.unsafe.CFuncPtr1
@@ -42,9 +42,9 @@ object CoreServer {
         )
         server.setDaemon(true)
         server.start()
-        CudaError.Success.value
+        CUDAError.Success.value
       } catch {
-        case _: Throwable => CudaError.InitializationError.value
+        case _: Throwable => CUDAError.InitializationError.value
       }
     NativeGc.setMutatorThreadState(1)
     status
@@ -57,19 +57,19 @@ object CoreServer {
       val request = takeRequest()
       val opcode  = request._2.toInt
       val result  =
-        if (request._1.toInt != GeneratedApi.ProtocolVersion) {
-          GeneratedApi.DispatchResult(CudaError.InvalidValue.value, 0L)
-        } else if (opcode == GeneratedApi.Opcode.Shutdown) {
+        if (request._1.toInt != GeneratedAPI.ProtocolVersion) {
+          GeneratedAPI.DispatchResult(CUDAError.InvalidValue.value, 0L)
+        } else if (opcode == GeneratedAPI.Opcode.Shutdown) {
           running = false
-          GeneratedApi.DispatchResult(CudaError.Success.value, 0L)
+          GeneratedAPI.DispatchResult(CUDAError.Success.value, 0L)
         } else {
-          try GeneratedApi.dispatch(opcode, request._5, request._6, CudaRuntime.emulated)
+          try GeneratedAPI.dispatch(opcode, request._5, request._6, CUDARuntime.emulated)
           catch {
-            case _: Throwable => GeneratedApi.DispatchResult(CudaError.Unknown.value, 0L)
+            case _: Throwable => GeneratedAPI.DispatchResult(CUDAError.Unknown.value, 0L)
           }
         }
 
-      response._1 = GeneratedApi.ProtocolVersion.toUInt
+      response._1 = GeneratedAPI.ProtocolVersion.toUInt
       response._2 = result.status
       response._3 = request._3
       response._4 = result.result0

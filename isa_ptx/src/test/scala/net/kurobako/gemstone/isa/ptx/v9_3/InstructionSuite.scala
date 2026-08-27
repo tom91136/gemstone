@@ -1,5 +1,6 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
+/** Verifies the generated PTX instruction sum type and its colocated decoders. */
 final class InstructionSuite extends munit.FunSuite {
   test("case fields and enum constructor expose one instruction model") {
     val dest        = Operand.Register("%d", None)

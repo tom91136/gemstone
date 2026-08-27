@@ -32,7 +32,7 @@ object Binary {
       else if (java.lang.Integer.reverseBytes(rawMagic) == Magic) Endianness.Big
       else return Left(BinaryError.InvalidMagic(rawMagic.toLong & 0xffffffffL))
     val words        = Vector.tabulate(wordCount)(index => Word(readInt(bytes, index * 4, endianness)))
-    val header       = Header(SpirvVersion.fromWord(words(1)), words(2), words(3), words(4))
+    val header       = Header(SPIRVVersion.fromWord(words(1)), words(2), words(3), words(4))
     val instructions = Vector.newBuilder[RawInstruction]
     var offset       = 5
     while (offset < words.size) {

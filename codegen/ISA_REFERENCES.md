@@ -1,6 +1,6 @@
 # ISA reference preparation
 
-`codegen / prepareIsaReferences` prepares the external inputs for the PTX, AMDGPU, and SPIR-V/compute API generators. It can be run
+`codegen / prepareISAReferences` prepares the external inputs for the PTX, AMDGPU, and SPIR-V/compute API generators. It can be run
 explicitly to prewarm the cache; ISA compilation also invokes it and downloads only artifacts absent from that cache.
 
 Versions and SHA-256 digests are pinned at the top of `build.sbt`. Downloads use HTTPS and are stored in

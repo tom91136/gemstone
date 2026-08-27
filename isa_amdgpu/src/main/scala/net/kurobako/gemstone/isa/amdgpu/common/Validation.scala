@@ -41,12 +41,12 @@ object Validator {
       ValidationResult.Invalid(Vector(ValidationError.UnsupportedInstruction(instruction.opcode, target)))
     else {
       val formats = definitions.map(_.format.toUpperCase).distinct
-      if (formats.contains("SOPP")) validateSopp(instruction, target, definitions)
+      if (formats.contains("SOPP")) validateSOPP(instruction, target, definitions)
       else ValidationResult.Unsupported(s"operand constraints are not normalized for ${formats.sorted.mkString(",")}")
     }
   }
 
-  private def validateSopp(
+  private def validateSOPP(
       instruction: Instruction,
       target: Target,
       definitions: Vector[Encoding]
@@ -67,7 +67,7 @@ object Validator {
         invalid(instruction, s"expected ${signature.size} operands, found ${instruction.operands.size}")
       else {
         val errors = instruction.operands.zip(signature).flatMap { case (operand, info) =>
-          validateSoppOperand(operand, info).toVector
+          validateSOPPOperand(operand, info).toVector
         }
         if (errors.isEmpty) availabilityUnknown(instruction, target)
         else invalid(instruction, errors.mkString("; "))
@@ -75,7 +75,7 @@ object Validator {
     }
   }
 
-  private def validateSoppOperand(operand: Operand, info: OperandInfo): Option[String] =
+  private def validateSOPPOperand(operand: Operand, info: OperandInfo): Option[String] =
     if (info.kind == "LABEL")
       operand match {
         case Operand.IntegerLiteral(value, _) if value >= -32768 && value <= 32767 => None

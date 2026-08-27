@@ -1,8 +1,8 @@
 package net.kurobako.gemstone.isa.amdgpu.common
 
-import net.kurobako.gemstone.isa.amdgpu.common.generated.SoppEncodingPrefix
-import net.kurobako.gemstone.isa.amdgpu.common.generated.SoppImmediateBits
-import net.kurobako.gemstone.isa.amdgpu.common.generated.SoppOpcodeShift
+import net.kurobako.gemstone.isa.amdgpu.common.generated.SOPPEncodingPrefix
+import net.kurobako.gemstone.isa.amdgpu.common.generated.SOPPImmediateBits
+import net.kurobako.gemstone.isa.amdgpu.common.generated.SOPPOpcodeShift
 
 enum CodecError {
   case WrongGeneration(target: Target, expected: Generation)
@@ -18,7 +18,7 @@ enum CodecError {
   * rejected explicitly until their conditional layouts are normalized from the vendor XML/ACO rules.
   */
 object Binary {
-  private val SoppMask = 0xff800000L
+  private val SOPPMask = 0xff800000L
 
   /** Encode every currently implemented format and classify every other known format explicitly. */
   def encode(
@@ -30,7 +30,7 @@ object Binary {
     else {
       val formats = definitions.map(_.format.toUpperCase).distinct.sorted
       if (formats.contains("SOPP"))
-        encodeSopp(instruction, target).left.map {
+        encodeSOPP(instruction, target).left.map {
           case CodecError.InvalidOperand(_)
               if instruction.mods.nonEmpty ||
                 instruction.operands.exists(!_.isInstanceOf[Operand.IntegerLiteral]) =>
@@ -41,7 +41,7 @@ object Binary {
     }
   }
 
-  def encodeSopp(
+  def encodeSOPP(
       instruction: Instruction,
       target: Target
   ): Either[CodecError, Vector[Byte]] = {
@@ -53,16 +53,16 @@ object Binary {
       definitions.headOption.toRight(CodecError.UnsupportedInstruction(instruction.opcode, target)).flatMap {
         definition =>
           immediate(instruction).map { value =>
-            val immediateMask = (1L << SoppImmediateBits) - 1L
-            val word          = SoppEncodingPrefix |
-              ((definition.opcode.toLong & 0x7fL) << SoppOpcodeShift) |
+            val immediateMask = (1L << SOPPImmediateBits) - 1L
+            val word          = SOPPEncodingPrefix |
+              ((definition.opcode.toLong & 0x7fL) << SOPPOpcodeShift) |
               (value & immediateMask)
             littleEndian(word)
           }
       }
   }
 
-  def decodeSopp(
+  def decodeSOPP(
       bytes: Seq[Byte],
       target: Target
   ): Either[CodecError, Instruction] =
@@ -71,10 +71,10 @@ object Binary {
       val word = bytes.zipWithIndex.foldLeft(0L) { case (result, (byte, index)) =>
         result | ((byte.toLong & 0xffL) << (index * 8))
       }
-      if ((word & SoppMask) != SoppEncodingPrefix)
+      if ((word & SOPPMask) != SOPPEncodingPrefix)
         Left(CodecError.InvalidEncoding(f"not a SOPP word: 0x$word%08x"))
       else {
-        val opcode  = ((word >>> SoppOpcodeShift) & 0x7fL).toInt
+        val opcode  = ((word >>> SOPPOpcodeShift) & 0x7fL).toInt
         val matches = Instructions.filter(definition =>
           encodingsFor(definition, target).exists(info => info.format == "SOPP" && info.opcode == opcode)
         )

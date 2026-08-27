@@ -12,7 +12,7 @@ import scala.jdk.CollectionConverters.*
 import scala.util.matching.Regex
 
 /** Extracts exhaustive, exact-target positive and diagnostic corpora from LLVM MC checks. */
-object GenerateAmdGpuGolden {
+object GenerateAMDGPUGolden {
   private final case class Golden(target: String, assembly: String, bytes: Vector[Int], source: String)
   private final case class Diagnostic(target: String, assembly: String, message: String, source: String)
 
@@ -31,7 +31,7 @@ object GenerateAmdGpuGolden {
       write(Paths.get(output), generate(Paths.get(references), Paths.get(dataRoot)))
     case _ =>
       throw new IllegalArgumentException(
-        "usage: GenerateAmdGpuGolden <prepared-references> <output.scala> <data-root>"
+        "usage: GenerateAMDGPUGolden <prepared-references> <output.scala> <data-root>"
       )
   }
 
@@ -120,18 +120,18 @@ object GenerateAmdGpuGolden {
   }
 
   private def generationForTarget(target: String): Option[String] = target match {
-    case "tahiti" | "verde" | "gfx600" | "gfx601"                         => Some("Gfx6")
-    case "bonaire" | "hawaii" | "kabini" | "kaveri" | "gfx700" | "gfx701" => Some("Gfx7")
+    case "tahiti" | "verde" | "gfx600" | "gfx601"                         => Some("GFX6")
+    case "bonaire" | "hawaii" | "kabini" | "kaveri" | "gfx700" | "gfx701" => Some("GFX7")
     case "carrizo" | "fiji" | "iceland" | "stoney" | "tonga" | "gfx800" | "gfx801" | "gfx802" | "gfx803" |
-        "gfx810" => Some("Gfx8")
-    case "gfx908"                                    => Some("Cdna1")
-    case "gfx90a"                                    => Some("Cdna2")
-    case "gfx940" | "gfx941" | "gfx942"              => Some("Cdna3")
-    case "gfx950"                                    => Some("Cdna4")
-    case "gfx9" | "gfx900" | "gfx904" | "gfx906"     => Some("Gfx9")
-    case value if value.startsWith("gfx10")          => Some("Gfx10")
-    case value if value.startsWith("gfx11")          => Some("Gfx11")
-    case "gfx12" | "gfx1200" | "gfx1250" | "gfx1251" => Some("Gfx12")
+        "gfx810" => Some("GFX8")
+    case "gfx908"                                    => Some("CDNA1")
+    case "gfx90a"                                    => Some("CDNA2")
+    case "gfx940" | "gfx941" | "gfx942"              => Some("CDNA3")
+    case "gfx950"                                    => Some("CDNA4")
+    case "gfx9" | "gfx900" | "gfx904" | "gfx906"     => Some("GFX9")
+    case value if value.startsWith("gfx10")          => Some("GFX10")
+    case value if value.startsWith("gfx11")          => Some("GFX11")
+    case "gfx12" | "gfx1200" | "gfx1250" | "gfx1251" => Some("GFX12")
     case _                                           => None
   }
 
@@ -186,8 +186,8 @@ object GenerateAmdGpuGolden {
         |import net.kurobako.gemstone.isa.amdgpu.common.Target
         |
         |// Generated exhaustively from pinned LLVM MC/AMDGPU checks. Do not edit.
-        |final case class AmdGpuGoldenCase(target: Target, assembly: String, bytes: Vector[Byte], source: String)
-        |final case class AmdGpuDiagnosticCase(target: Target, assembly: String, message: String, source: String)
+        |final case class AMDGPUGoldenCase(target: Target, assembly: String, bytes: Vector[Byte], source: String)
+        |final case class AMDGPUDiagnosticCase(target: Target, assembly: String, message: String, source: String)
         |
         |object GoldenCorpus {
         |  val sourceFileCount: Int = $fileCount
@@ -196,16 +196,16 @@ object GenerateAmdGpuGolden {
         |  val caseCount: Int = $positiveCount
         |  val diagnosticCount: Int = $diagnosticCount
         |
-        |  lazy val cases: Vector[AmdGpuGoldenCase] = load("positive.tsv.gz").map { row =>
+        |  lazy val cases: Vector[AMDGPUGoldenCase] = load("positive.tsv.gz").map { row =>
         |    val fields = row.split("\\t", -1)
-        |    AmdGpuGoldenCase(
+        |    AMDGPUGoldenCase(
         |      Target.unsafe(fields(0)), fields(1), fields(2).split(',').toVector.map(_.toInt.toByte), fields(3)
         |    )
         |  }
         |
-        |  lazy val diagnostics: Vector[AmdGpuDiagnosticCase] = load("diagnostics.tsv.gz").map { row =>
+        |  lazy val diagnostics: Vector[AMDGPUDiagnosticCase] = load("diagnostics.tsv.gz").map { row =>
         |    val fields = row.split("\\t", -1)
-        |    AmdGpuDiagnosticCase(Target.unsafe(fields(0)), fields(1), fields(2), fields(3))
+        |    AMDGPUDiagnosticCase(Target.unsafe(fields(0)), fields(1), fields(2), fields(3))
         |  }
         |
         |  private def load(name: String): Vector[String] = {

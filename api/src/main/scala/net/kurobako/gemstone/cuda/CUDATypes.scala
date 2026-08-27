@@ -56,20 +56,20 @@ object Context {
   extension (context: Context) def handle: Long = context
 }
 
-opaque type CudaModule = Long
+opaque type CUDAModule = Long
 
-object CudaModule {
-  val Null: CudaModule                            = 0L
-  def apply(handle: Long): CudaModule             = handle
-  extension (module: CudaModule) def handle: Long = module
+object CUDAModule {
+  val Null: CUDAModule                            = 0L
+  def apply(handle: Long): CUDAModule             = handle
+  extension (module: CUDAModule) def handle: Long = module
 }
 
-opaque type CudaFunction = Long
+opaque type CUDAFunction = Long
 
-object CudaFunction {
-  val Null: CudaFunction                              = 0L
-  def apply(handle: Long): CudaFunction               = handle
-  extension (function: CudaFunction) def handle: Long = function
+object CUDAFunction {
+  val Null: CUDAFunction                              = 0L
+  def apply(handle: Long): CUDAFunction               = handle
+  extension (function: CUDAFunction) def handle: Long = function
 }
 
 final case class HostInput(bytes: IArray[Byte])
@@ -88,7 +88,7 @@ final case class FunctionName(value: String) {
 /** The logical result of `cuModuleGetFunction`. Parameter widths are returned to the C facade so it can safely copy the
   * otherwise untyped `void **kernelParams` array at launch time.
   */
-final case class KernelFunction(handle: CudaFunction, parameterWidths: IArray[Byte])
+final case class KernelFunction(handle: CUDAFunction, parameterWidths: IArray[Byte])
 
 final case class KernelArgument(bytes: IArray[Byte])
 
@@ -104,21 +104,21 @@ final case class KernelLaunch(
     arguments: IArray[KernelArgument]
 )
 
-final case class CudaError(code: Int, message: String)
+final case class CUDAError(code: Int, message: String)
 
-enum CudaResult[+A] {
+enum CUDAResult[+A] {
   case Success(value: A)
-  case Failure(error: CudaError)
+  case Failure(error: CUDAError)
 }
 
-object CudaResult {
-  extension [A](result: CudaResult[A]) {
-    def map[B](function: A => B): CudaResult[B] = result match {
+object CUDAResult {
+  extension [A](result: CUDAResult[A]) {
+    def map[B](function: A => B): CUDAResult[B] = result match {
       case Success(value) => Success(function(value))
       case Failure(error) => Failure(error)
     }
 
-    def flatMap[B](function: A => CudaResult[B]): CudaResult[B] = result match {
+    def flatMap[B](function: A => CUDAResult[B]): CUDAResult[B] = result match {
       case Success(value) => function(value)
       case Failure(error) => Failure(error)
     }

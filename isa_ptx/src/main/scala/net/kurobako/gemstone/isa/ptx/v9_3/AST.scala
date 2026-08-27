@@ -80,8 +80,8 @@ object Metadata {
       title: String,
       category: String,
       syntax: Vector[String],
-      introduced: PtxVersion,
-      minimumTarget: SmTarget,
+      introduced: PTXVersion,
+      minimumTarget: SMTarget,
       forms: Vector[InstructionForm]
   )
 }

@@ -35,9 +35,9 @@ redundant `.in(file(...))` declarations.
 ```console
 sbt scalafmtCheckAll
 sbt 'codegen/run --check generated'
-sbt 'isa_ptx / generatePtxSources; isa_ptx / generatePtxReferenceTests'
-sbt 'isa_amdgpu / generateAmdGpuSources; isa_amdgpu / generateAmdGpuGoldenTests'
-sbt 'codegen / generateComputeApiSources; isa_spirv / generateSpirvSources; isa_spirv / generateSpirvReferenceTests'
+sbt 'isa_ptx / generatePTXSources; isa_ptx / generatePTXReferenceTests'
+sbt 'isa_amdgpu / generateAMDGPUSources; isa_amdgpu / generateAMDGPUGoldenTests'
+sbt 'codegen / generateComputeAPISources; isa_spirv / generateSPIRVSources; isa_spirv / generateSPIRVReferenceTests'
 sbt test
 sbt testFull
 sbt nativeNative/nativeLink
@@ -51,7 +51,7 @@ ISA generation is explicit and updates checked-in Scala sources. Ordinary compil
 references or rewrite the worktree.
 
 The [CUDA conformance corpus](conformance/cuda/README.md) contains self-checking, one-file tests adapted from the
-BSD-licensed GPUOcelot suite. `CudaConformanceSuite` discovers them during `server` tests and runs their
+BSD-licensed GPUOcelot suite. `CUDAConformanceSuite` discovers them during `server` tests and runs their
 `#pragma region` commands against NVIDIA CUDA and the enabled Gemstone implementation. The active Gemstone set now
 includes Driver memory and PTX launch flows plus host-only Runtime allocation/copy cases.
 

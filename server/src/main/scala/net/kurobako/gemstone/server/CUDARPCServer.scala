@@ -1,7 +1,7 @@
 package net.kurobako.gemstone.server
 
 import net.kurobako.gemstone.cuda.*
-import net.kurobako.gemstone.generated.GeneratedCudaRpc
+import net.kurobako.gemstone.generated.GeneratedCUDARPC
 import net.kurobako.gemstone.rpc.*
 import net.kurobako.gemstone.vendor.CUDAEmulatorServer
 
@@ -22,7 +22,7 @@ import java.nio.file.Path
 import java.nio.file.StandardOpenOption
 import java.security.MessageDigest
 
-object CudaRpcServer {
+object CUDARPCServer {
   private val RequestMagic     = 0x474d5331
   private val ResponseMagic    = 0x474d5231
   private val ProtocolVersion  = 1
@@ -31,7 +31,7 @@ object CudaRpcServer {
   private val MaximumNameBytes = 128
   private val MaximumPayload   = 64 * 1024 * 1024
 
-  final class RunningServer private[CudaRpcServer] (
+  final class RunningServer private[CUDARPCServer] (
       val port: Int,
       server: ServerSocket,
       acceptThread: Thread
@@ -99,7 +99,7 @@ object CudaRpcServer {
     try {
       socket.setTcpNoDelay(true)
       socket.setSoTimeout(30000)
-      val implementation = new CUDAEmulatorServer(new PtxCudaKernelExecution)
+      val implementation = new CUDAEmulatorServer(new PTXCUDAKernelExecution)
       val input          = new DataInputStream(socket.getInputStream)
       val output         = new DataOutputStream(socket.getOutputStream)
       var open           = true
@@ -107,22 +107,22 @@ object CudaRpcServer {
         try {
           val response = readRequest(input, expectedToken) match {
             case Right(request) =>
-              try GeneratedCudaRpc.Dispatcher.dispatch(request, implementation)
+              try GeneratedCUDARPC.Dispatcher.dispatch(request, implementation)
               catch {
-                case error: Throwable => RpcResponse.Failure(CudaError(999, s"server failure: ${error.getMessage}"))
+                case error: Throwable => RPCResponse.Failure(CUDAError(999, s"server failure: ${error.getMessage}"))
               }
-            case Left(error) => RpcResponse.Failure(error)
+            case Left(error) => RPCResponse.Failure(error)
           }
           writeResponse(output, response)
         } catch {
           case _: EOFException  => open = false
           case error: Throwable =>
-            writeResponse(output, RpcResponse.Failure(CudaError(1, s"malformed request: ${error.getMessage}")))
+            writeResponse(output, RPCResponse.Failure(CUDAError(1, s"malformed request: ${error.getMessage}")))
             open = false
         }
     } finally socket.close()
 
-  private def readRequest(input: DataInputStream, expectedToken: Array[Byte]): Either[CudaError, RpcRequest] = {
+  private def readRequest(input: DataInputStream, expectedToken: Array[Byte]): Either[CUDAError, RPCRequest] = {
     if (input.readInt() != RequestMagic) throw new IllegalArgumentException("invalid request magic")
     if (input.readInt() != ProtocolVersion) throw new IllegalArgumentException("unsupported protocol version")
     val fingerprint = new String(readExactly(input, FingerprintBytes), StandardCharsets.US_ASCII)
@@ -137,28 +137,28 @@ object CudaRpcServer {
     val functionName = new String(readExactly(input, nameSize), StandardCharsets.US_ASCII)
     val payload      = readExactly(input, payloadSize)
 
-    if (!MessageDigest.isEqual(token, expectedToken)) Left(CudaError(1, "RPC authentication failed"))
-    else if (fingerprint != GeneratedCudaRpc.SchemaFingerprint) {
-      Left(CudaError(1, "CUDA RPC schema fingerprint mismatch"))
+    if (!MessageDigest.isEqual(token, expectedToken)) Left(CUDAError(1, "RPC authentication failed"))
+    else if (fingerprint != GeneratedCUDARPC.SchemaFingerprint) {
+      Left(CUDAError(1, "CUDA RPC schema fingerprint mismatch"))
     } else {
-      GeneratedCudaRpc.Schema.methods.find(method =>
+      GeneratedCUDARPC.Schema.methods.find(method =>
         method.messageId == messageId && method.name == functionName
       ) match {
-        case None         => Left(CudaError(1, s"unknown or mismatched CUDA RPC function: $functionName"))
+        case None         => Left(CUDAError(1, s"unknown or mismatched CUDA RPC function: $functionName"))
         case Some(method) =>
-          decodeArguments(method, payload).map(arguments => RpcRequest(messageId, functionName, arguments))
+          decodeArguments(method, payload).map(arguments => RPCRequest(messageId, functionName, arguments))
       }
     }
   }
 
-  private def decodeArguments(method: RpcMethod, payload: Array[Byte]): Either[CudaError, Vector[WireValue]] =
+  private def decodeArguments(method: RPCMethod, payload: Array[Byte]): Either[CUDAError, Vector[WireValue]] =
     try {
       val buffer    = ByteBuffer.wrap(payload).order(ByteOrder.BIG_ENDIAN)
       val arguments = method.parameters.map(parameter => decodeValue(parameter.wireType, buffer))
-      if (buffer.hasRemaining) Left(CudaError(1, s"trailing payload bytes for ${method.name}: ${buffer.remaining}"))
+      if (buffer.hasRemaining) Left(CUDAError(1, s"trailing payload bytes for ${method.name}: ${buffer.remaining}"))
       else Right(arguments)
     } catch {
-      case error: Throwable => Left(CudaError(1, s"invalid arguments for ${method.name}: ${error.getMessage}"))
+      case error: Throwable => Left(CUDAError(1, s"invalid arguments for ${method.name}: ${error.getMessage}"))
     }
 
   private def decodeValue(wireType: WireType, buffer: ByteBuffer): WireValue = wireType match {
@@ -170,8 +170,8 @@ object CudaRpcServer {
     case WireType.Device       => WireValue.DeviceValue(Device(buffer.getInt()))
     case WireType.DevicePtr    => WireValue.DevicePtrValue(DevicePtr(buffer.getLong()))
     case WireType.Context      => WireValue.ContextValue(Context(buffer.getLong()))
-    case WireType.CudaModule   => WireValue.CudaModuleValue(CudaModule(buffer.getLong()))
-    case WireType.CudaFunction => WireValue.CudaFunctionValue(CudaFunction(buffer.getLong()))
+    case WireType.CUDAModule   => WireValue.CUDAModuleValue(CUDAModule(buffer.getLong()))
+    case WireType.CUDAFunction => WireValue.CUDAFunctionValue(CUDAFunction(buffer.getLong()))
     case WireType.HostInput    => WireValue.HostInputValue(HostInput(IArray.unsafeFromArray(readByteArray(buffer))))
     case WireType.HostOutput   => WireValue.HostOutputValue(HostOutput(IArray.unsafeFromArray(readByteArray(buffer))))
     case WireType.ModuleImage  => WireValue.ModuleImageValue(ModuleImage(IArray.unsafeFromArray(readByteArray(buffer))))
@@ -197,10 +197,10 @@ object CudaRpcServer {
       )
   }
 
-  private def writeResponse(output: DataOutputStream, response: RpcResponse): Unit = {
+  private def writeResponse(output: DataOutputStream, response: RPCResponse): Unit = {
     val (status, message, payload) = response match {
-      case RpcResponse.Success(value) => (0, Array.emptyByteArray, encodeValue(value))
-      case RpcResponse.Failure(error) =>
+      case RPCResponse.Success(value) => (0, Array.emptyByteArray, encodeValue(value))
+      case RPCResponse.Failure(error) =>
         val encoded = error.message.getBytes(StandardCharsets.UTF_8)
         (error.code, encoded.take(MaximumNameBytes * 8), Array.emptyByteArray)
     }
@@ -226,8 +226,8 @@ object CudaRpcServer {
       case WireValue.DeviceValue(value)       => output.writeInt(value.ordinal)
       case WireValue.DevicePtrValue(value)    => output.writeLong(value.address)
       case WireValue.ContextValue(value)      => output.writeLong(value.handle)
-      case WireValue.CudaModuleValue(value)   => output.writeLong(value.handle)
-      case WireValue.CudaFunctionValue(value) => output.writeLong(value.handle)
+      case WireValue.CUDAModuleValue(value)   => output.writeLong(value.handle)
+      case WireValue.CUDAFunctionValue(value) => output.writeLong(value.handle)
       case WireValue.HostInputValue(value)    => writeByteArray(output, value.bytes)
       case WireValue.HostOutputValue(value)   => writeByteArray(output, value.bytes)
       case WireValue.ModuleImageValue(value)  => writeByteArray(output, value.bytes)
@@ -274,7 +274,7 @@ object CudaRpcServer {
   private def parseArguments(arguments: Vector[String]): Map[String, String] = arguments match {
     case Vector()                                            => Map.empty
     case Vector(name, value, rest*) if name.startsWith("--") => parseArguments(rest.toVector) + (name.drop(2) -> value)
-    case _ => throw new IllegalArgumentException("usage: CudaRpcServer --port-file <path> --token <64-hex>")
+    case _ => throw new IllegalArgumentException("usage: CUDARPCServer --port-file <path> --token <64-hex>")
   }
 
   private def required(options: Map[String, String], name: String): String =

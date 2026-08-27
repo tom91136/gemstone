@@ -2,14 +2,14 @@ package net.kurobako.gemstone.server
 
 import net.kurobako.gemstone.cuda.*
 import net.kurobako.gemstone.isa.ptx.v9_3.Parser
-import net.kurobako.gemstone.isa.ptx.v9_3.PtxArgument
-import net.kurobako.gemstone.isa.ptx.v9_3.PtxInterpreter
-import net.kurobako.gemstone.isa.ptx.v9_3.PtxKernel
-import net.kurobako.gemstone.isa.ptx.v9_3.PtxLowerer
+import net.kurobako.gemstone.isa.ptx.v9_3.PTXArgument
+import net.kurobako.gemstone.isa.ptx.v9_3.PTXInterpreter
+import net.kurobako.gemstone.isa.ptx.v9_3.PTXKernel
+import net.kurobako.gemstone.isa.ptx.v9_3.PTXLowerer
 import net.kurobako.gemstone.isa.ptx.v9_3.Statement
 import net.kurobako.gemstone.memory.CheckedMemory
 import net.kurobako.gemstone.scheduler.LaunchShape
-import net.kurobako.gemstone.vendor.CudaKernelExecution
+import net.kurobako.gemstone.vendor.CUDAKernelExecution
 
 import java.nio.ByteBuffer
 import java.nio.charset.CodingErrorAction
@@ -19,16 +19,16 @@ import scala.collection.mutable
 /** Textual-PTX CUDA module backend. Images and launch arguments have already been copied out of the native process when
   * they reach this class.
   */
-final class PtxCudaKernelExecution extends CudaKernelExecution {
+final class PTXCUDAKernelExecution extends CUDAKernelExecution {
   private final case class LoadedModule(entries: Map[String, Statement.Entry])
-  private final case class LoadedFunction(module: CudaModule, kernel: PtxKernel)
+  private final case class LoadedFunction(module: CUDAModule, kernel: PTXKernel)
 
   private val modules            = mutable.Map.empty[Long, LoadedModule]
   private val functions          = mutable.Map.empty[Long, LoadedFunction]
   private var nextModuleHandle   = 1L
   private var nextFunctionHandle = 1L
 
-  override def cuModuleLoadData(image: ModuleImage): CudaResult[CudaModule] = synchronized {
+  override def cuModuleLoadData(image: ModuleImage): CUDAResult[CUDAModule] = synchronized {
     decodeUtf8(image.bytes).flatMap { source =>
       Parser.parse(source) match {
         case Left(error)    => failure(200, s"invalid PTX module: $error")
@@ -39,33 +39,33 @@ final class PtxCudaKernelExecution extends CudaKernelExecution {
             val handle = nextModuleHandle
             nextModuleHandle = Math.addExact(nextModuleHandle, 1L)
             modules(handle) = LoadedModule(entries)
-            success(CudaModule(handle))
+            success(CUDAModule(handle))
           }
       }
     }
   }
 
-  override def cuModuleGetFunction(module: CudaModule, name: FunctionName): CudaResult[KernelFunction] = synchronized {
+  override def cuModuleGetFunction(module: CUDAModule, name: FunctionName): CUDAResult[KernelFunction] = synchronized {
     modules.get(module.handle) match {
       case None         => failure(201, s"invalid CUDA module handle: ${module.handle}")
       case Some(loaded) =>
         loaded.entries.get(name.value) match {
           case None        => failure(500, s"PTX entry point not found: ${name.value}")
           case Some(entry) =>
-            PtxLowerer.lower(entry) match {
+            PTXLowerer.lower(entry) match {
               case Left(error)   => failure(801, error.message)
               case Right(kernel) =>
                 val handle = nextFunctionHandle
                 nextFunctionHandle = Math.addExact(nextFunctionHandle, 1L)
                 functions(handle) = LoadedFunction(module, kernel)
                 val widths = IArray.unsafeFromArray(kernel.parameters.map(_.widthBytes.toByte).toArray)
-                success(KernelFunction(CudaFunction(handle), widths))
+                success(KernelFunction(CUDAFunction(handle), widths))
             }
         }
     }
   }
 
-  override def cuModuleUnload(module: CudaModule): CudaResult[Unit] = synchronized {
+  override def cuModuleUnload(module: CUDAModule): CUDAResult[Unit] = synchronized {
     if (modules.remove(module.handle).isEmpty) failure(201, s"invalid CUDA module handle: ${module.handle}")
     else {
       functions.filterInPlace((_, loaded) => loaded.module != module)
@@ -74,10 +74,10 @@ final class PtxCudaKernelExecution extends CudaKernelExecution {
   }
 
   override def cuLaunchKernel(
-      function: CudaFunction,
+      function: CUDAFunction,
       launch: KernelLaunch,
       memory: CheckedMemory
-  ): CudaResult[Unit] = synchronized {
+  ): CUDAResult[Unit] = synchronized {
     functions.get(function.handle) match {
       case None         => failure(400, s"invalid CUDA function handle: ${function.handle}")
       case Some(loaded) =>
@@ -101,7 +101,7 @@ final class PtxCudaKernelExecution extends CudaKernelExecution {
               Left(
                 s"kernel argument ${parameter.name} expects ${parameter.widthBytes} bytes, found ${argument.bytes.length}"
               )
-            else Right(parameter.name -> PtxArgument(decodeLittleEndian(argument.bytes)))
+            else Right(parameter.name -> PTXArgument(decodeLittleEndian(argument.bytes)))
           }
           decoded.collectFirst { case Left(error) => error } match {
             case Some(error) => failure(1, error)
@@ -111,7 +111,7 @@ final class PtxCudaKernelExecution extends CudaKernelExecution {
               shape match {
                 case Left(error)  => failure(1, error)
                 case Right(value) =>
-                  PtxInterpreter.execute(loaded.kernel, value, arguments, memory) match {
+                  PTXInterpreter.execute(loaded.kernel, value, arguments, memory) match {
                     case Left(error) => failure(700, error.message)
                     case Right(_)    => success(())
                   }
@@ -121,7 +121,7 @@ final class PtxCudaKernelExecution extends CudaKernelExecution {
     }
   }
 
-  private def decodeUtf8(bytes: IArray[Byte]): CudaResult[String] =
+  private def decodeUtf8(bytes: IArray[Byte]): CUDAResult[String] =
     try {
       val decoder = StandardCharsets.UTF_8.newDecoder()
         .onMalformedInput(CodingErrorAction.REPORT)
@@ -141,6 +141,6 @@ final class PtxCudaKernelExecution extends CudaKernelExecution {
     value
   }
 
-  private def success[A](value: A): CudaResult[A]                   = CudaResult.Success(value)
-  private def failure[A](code: Int, message: String): CudaResult[A] = CudaResult.Failure(CudaError(code, message))
+  private def success[A](value: A): CUDAResult[A]                   = CUDAResult.Success(value)
+  private def failure[A](code: Int, message: String): CUDAResult[A] = CUDAResult.Failure(CUDAError(code, message))
 }

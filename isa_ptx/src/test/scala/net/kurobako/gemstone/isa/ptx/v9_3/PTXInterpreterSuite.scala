@@ -7,7 +7,7 @@ import net.kurobako.gemstone.memory.GuestAddress
 import net.kurobako.gemstone.scheduler.LaunchShape
 import net.kurobako.gemstone.trace.TraceEvent
 
-final class PtxInterpreterSuite extends munit.FunSuite {
+final class PTXInterpreterSuite extends munit.FunSuite {
   private val vectorAdd = """
     |.version 8.0
     |.target sm_80
@@ -37,11 +37,11 @@ final class PtxInterpreterSuite extends munit.FunSuite {
     |""".stripMargin
 
   test("parse and deterministically execute integer vector addition") {
-    val kernel = PtxParser.parse(vectorAdd).toOption.get
+    val kernel = PTXParser.parse(vectorAdd).toOption.get
     assertEquals(kernel.name, "vector_add")
     assertEquals(
       kernel.parameters,
-      Vector(PtxParameter("input_a", 8), PtxParameter("input_b", 8), PtxParameter("output", 8))
+      Vector(PTXParameter("input_a", 8), PTXParameter("input_b", 8), PTXParameter("output", 8))
     )
 
     val memory = ArrayCheckedMemory.allocate(192, provenance = "vector-add arena")
@@ -56,14 +56,14 @@ final class PtxInterpreterSuite extends munit.FunSuite {
       memory.writeInt32(b.offset(index.toLong * 4L), values(index) * 10).toOption.get
     }
 
-    val result = PtxInterpreter
+    val result = PTXInterpreter
       .execute(
         kernel,
         LaunchShape.create(1, values.size).toOption.get,
         Map(
-          "input_a" -> PtxArgument(a.value),
-          "input_b" -> PtxArgument(b.value),
-          "output"  -> PtxArgument(output.value)
+          "input_a" -> PTXArgument(a.value),
+          "input_b" -> PTXArgument(b.value),
+          "output"  -> PTXArgument(output.value)
         ),
         memory
       )
@@ -81,7 +81,7 @@ final class PtxInterpreterSuite extends munit.FunSuite {
   }
 
   test("reject unsupported instructions with a source line") {
-    val error = PtxParser.parse(vectorAdd.replace("add.u32", "xor.b32")).left.toOption.get
+    val error = PTXParser.parse(vectorAdd.replace("add.u32", "xor.b32")).left.toOption.get
     assert(error.line > 0)
     assert(error.message.contains("unsupported instruction"))
   }
@@ -111,12 +111,12 @@ final class PtxInterpreterSuite extends munit.FunSuite {
       |  ret;
       |}
       |""".stripMargin
-    val kernel = PtxParser.parse(source).fold(error => fail(error.message), identity)
+    val kernel = PTXParser.parse(source).fold(error => fail(error.message), identity)
     val memory = ArrayCheckedMemory.allocate(16, provenance = "divergent-barrier")
-    val result = PtxInterpreter.execute(
+    val result = PTXInterpreter.execute(
       kernel,
       LaunchShape.create(1, 4).toOption.get,
-      Map("output" -> PtxArgument(memory.allocation.start.value)),
+      Map("output" -> PTXArgument(memory.allocation.start.value)),
       memory
     )
     assert(result.isRight, result.left.toOption.map(_.message).getOrElse(""))
@@ -135,8 +135,8 @@ final class PtxInterpreterSuite extends munit.FunSuite {
       |  bra again;
       |}
       |""".stripMargin
-    val kernel = PtxParser.parse(source).fold(error => fail(error.message), identity)
-    val result = PtxInterpreter.execute(
+    val kernel = PTXParser.parse(source).fold(error => fail(error.message), identity)
+    val result = PTXInterpreter.execute(
       kernel,
       LaunchShape.create(1, 1).toOption.get,
       Map.empty,
@@ -147,16 +147,16 @@ final class PtxInterpreterSuite extends munit.FunSuite {
   }
 
   test("execution observes cancellation before fetching an instruction") {
-    val kernel       = PtxParser.parse(vectorAdd).fold(error => fail(error.message), identity)
+    val kernel       = PTXParser.parse(vectorAdd).fold(error => fail(error.message), identity)
     val cancellation = new CancellationToken.Source
     cancellation.cancel()
-    val result = PtxInterpreter.execute(
+    val result = PTXInterpreter.execute(
       kernel,
       LaunchShape.create(1, 1).toOption.get,
       Map.empty,
       ArrayCheckedMemory.allocate(4),
       cancellation = cancellation
     )
-    assertEquals(result, Left(PtxExecutionError("execution was cancelled")))
+    assertEquals(result, Left(PTXExecutionError("execution was cancelled")))
   }
 }

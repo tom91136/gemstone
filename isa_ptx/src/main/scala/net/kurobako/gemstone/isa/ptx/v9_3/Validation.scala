@@ -1,30 +1,30 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
-final case class PtxVersion(major: Int, minor: Int) extends Ordered[PtxVersion] {
-  override def compare(that: PtxVersion): Int = Ordering[(Int, Int)].compare((major, minor), (that.major, that.minor))
+final case class PTXVersion(major: Int, minor: Int) extends Ordered[PTXVersion] {
+  override def compare(that: PTXVersion): Int = Ordering[(Int, Int)].compare((major, minor), (that.major, that.minor))
   override def toString: String               = s"$major.$minor"
 }
 
-object PtxVersion {
-  def parse(value: String): Either[String, PtxVersion] = value.split('.').toVector match {
+object PTXVersion {
+  def parse(value: String): Either[String, PTXVersion] = value.split('.').toVector match {
     case Vector(major, minor) =>
       for {
         majorValue <- major.toIntOption.toRight(s"invalid PTX version '$value'")
         minorValue <- minor.toIntOption.toRight(s"invalid PTX version '$value'")
-      } yield PtxVersion(majorValue, minorValue)
+      } yield PTXVersion(majorValue, minorValue)
     case _ => Left(s"invalid PTX version '$value'")
   }
 }
 
-final case class SmTarget(computeCapability: Int) extends Ordered[SmTarget] {
-  override def compare(that: SmTarget): Int = computeCapability.compare(that.computeCapability)
+final case class SMTarget(computeCapability: Int) extends Ordered[SMTarget] {
+  override def compare(that: SMTarget): Int = computeCapability.compare(that.computeCapability)
   override def toString: String             = s"sm_$computeCapability"
 }
 
-object SmTarget {
-  def parse(value: String): Either[String, SmTarget] = {
+object SMTarget {
+  def parse(value: String): Either[String, SMTarget] = {
     val normalized = value.toLowerCase.stripPrefix("sm_").stripSuffix("a").stripSuffix("f")
-    normalized.toIntOption.filter(_ >= 10).map(SmTarget.apply).toRight(s"invalid SM target '$value'")
+    normalized.toIntOption.filter(_ >= 10).map(SMTarget.apply).toRight(s"invalid SM target '$value'")
   }
 }
 
@@ -49,8 +49,8 @@ final case class InstructionForm(
 )
 
 enum ValidationError {
-  case VersionTooOld(opcode: String, required: PtxVersion, selected: PtxVersion)
-  case TargetTooOld(opcode: String, required: SmTarget, selected: SmTarget)
+  case VersionTooOld(opcode: String, required: PTXVersion, selected: PTXVersion)
+  case TargetTooOld(opcode: String, required: SMTarget, selected: SMTarget)
   case InvalidOperands(opcode: String, message: String)
   case InvalidModifiers(opcode: String, message: String)
 }
@@ -64,8 +64,8 @@ enum ValidationResult {
 object Validator {
   def validate(
       instruction: Instruction,
-      version: PtxVersion,
-      target: SmTarget
+      version: PTXVersion,
+      target: SMTarget
   ): ValidationResult = {
     val candidates = instruction.meta.entries
     val available  = candidates.filter(info => version >= info.introduced && target >= info.minimumTarget)
@@ -82,8 +82,8 @@ object Validator {
 
   def validate(
       program: Program,
-      version: PtxVersion,
-      target: SmTarget
+      version: PTXVersion,
+      target: SMTarget
   ): ValidationResult = {
     val instructions = collectInstructions(program.statements)
     val results      = instructions.map(validate(_, version, target))

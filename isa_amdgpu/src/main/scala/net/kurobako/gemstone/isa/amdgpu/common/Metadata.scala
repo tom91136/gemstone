@@ -1,22 +1,22 @@
 package net.kurobako.gemstone.isa.amdgpu.common
 
 enum MetadataSource {
-  case MesaAco, AmdXml
+  case MesaACO, AMDXML
 }
 
 enum Generation(val number: String) {
-  case Gfx6  extends Generation("gfx6")
-  case Gfx7  extends Generation("gfx7")
-  case Gfx8  extends Generation("gfx8")
-  case Gfx9  extends Generation("gfx9")
-  case Gfx10 extends Generation("gfx10")
-  case Gfx11 extends Generation("gfx11")
-  case Gfx12 extends Generation("gfx12")
-  case Cdna1 extends Generation("cdna1")
-  case Cdna2 extends Generation("cdna2")
-  case Cdna3 extends Generation("cdna3")
-  case Cdna4 extends Generation("cdna4")
-  case Cdna5 extends Generation("cdna5")
+  case GFX6  extends Generation("gfx6")
+  case GFX7  extends Generation("gfx7")
+  case GFX8  extends Generation("gfx8")
+  case GFX9  extends Generation("gfx9")
+  case GFX10 extends Generation("gfx10")
+  case GFX11 extends Generation("gfx11")
+  case GFX12 extends Generation("gfx12")
+  case CDNA1 extends Generation("cdna1")
+  case CDNA2 extends Generation("cdna2")
+  case CDNA3 extends Generation("cdna3")
+  case CDNA4 extends Generation("cdna4")
+  case CDNA5 extends Generation("cdna5")
 }
 
 /** Exact processor target used by LLVM MC. It selects the corresponding vendor metadata subfamily without cloning the
@@ -36,21 +36,21 @@ object Target {
     fromString(value).fold(message => throw new IllegalArgumentException(message), identity)
 
   private def classify(name: String): Option[(Generation, String)] = name match {
-    case "tahiti" | "verde" | "gfx600" | "gfx601"                         => Some(Generation.Gfx6 -> "gfx6")
+    case "tahiti" | "verde" | "gfx600" | "gfx601"                         => Some(Generation.GFX6 -> "gfx6")
     case "bonaire" | "hawaii" | "kabini" | "kaveri" | "gfx700" | "gfx701" =>
-      Some(Generation.Gfx7 -> "gfx7")
+      Some(Generation.GFX7 -> "gfx7")
     case "carrizo" | "fiji" | "iceland" | "stoney" | "tonga" | "gfx800" | "gfx801" | "gfx802" | "gfx803" |
-        "gfx810" => Some(Generation.Gfx8 -> "gfx8")
-    case "gfx908"                                       => Some(Generation.Cdna1 -> "cdna1")
-    case "gfx90a"                                       => Some(Generation.Cdna2 -> "cdna2")
-    case "gfx940" | "gfx941" | "gfx942"                 => Some(Generation.Cdna3 -> "cdna3")
-    case "gfx950"                                       => Some(Generation.Cdna4 -> "cdna4")
-    case "gfx9" | "gfx900" | "gfx904" | "gfx906"        => Some(Generation.Gfx9 -> "gfx9")
-    case value if value.matches("gfx10(0[0-9]|1[0-9])") => Some(Generation.Gfx10 -> "rdna1")
-    case value if value.matches("gfx10[3-9][0-9]")      => Some(Generation.Gfx10 -> "rdna2")
-    case value if value.matches("gfx110[0-9]")          => Some(Generation.Gfx11 -> "rdna3")
-    case value if value.matches("gfx11(5[0-9]|7[0-9])") => Some(Generation.Gfx11 -> "rdna3_5")
-    case "gfx12" | "gfx1200" | "gfx1250" | "gfx1251"    => Some(Generation.Gfx12 -> "rdna4")
+        "gfx810" => Some(Generation.GFX8 -> "gfx8")
+    case "gfx908"                                       => Some(Generation.CDNA1 -> "cdna1")
+    case "gfx90a"                                       => Some(Generation.CDNA2 -> "cdna2")
+    case "gfx940" | "gfx941" | "gfx942"                 => Some(Generation.CDNA3 -> "cdna3")
+    case "gfx950"                                       => Some(Generation.CDNA4 -> "cdna4")
+    case "gfx9" | "gfx900" | "gfx904" | "gfx906"        => Some(Generation.GFX9 -> "gfx9")
+    case value if value.matches("gfx10(0[0-9]|1[0-9])") => Some(Generation.GFX10 -> "rdna1")
+    case value if value.matches("gfx10[3-9][0-9]")      => Some(Generation.GFX10 -> "rdna2")
+    case value if value.matches("gfx110[0-9]")          => Some(Generation.GFX11 -> "rdna3")
+    case value if value.matches("gfx11(5[0-9]|7[0-9])") => Some(Generation.GFX11 -> "rdna3_5")
+    case "gfx12" | "gfx1200" | "gfx1250" | "gfx1251"    => Some(Generation.GFX12 -> "rdna4")
     case _                                              => None
   }
 }

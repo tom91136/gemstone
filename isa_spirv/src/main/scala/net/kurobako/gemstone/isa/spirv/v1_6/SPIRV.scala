@@ -44,12 +44,12 @@ object Serializer {
   def serializeRaw(module: RawModule): Either[BinaryError, IArray[Byte]] = Binary.serialize(module)
 }
 
-object Isa {
-  val version: SpirvVersion                = Version
+object ISA {
+  val version: SPIRVVersion                = Version
   val instructions: Vector[InstructionDef] = Instructions
 
   def parse(bytes: IArray[Byte]): Either[ParseError, Module]        = Parser.parse(bytes)
   def serialize(module: Module): Either[BinaryError, IArray[Byte]]  = Serializer.serialize(module)
   def validateCompute(module: Module): ValidationResult             = ComputeValidator.validate(module)
-  def lower(module: Module): Either[LoweringError, SpirvExecutable] = Lowering.lower(module)
+  def lower(module: Module): Either[LoweringError, SPIRVExecutable] = Lowering.lower(module)
 }
