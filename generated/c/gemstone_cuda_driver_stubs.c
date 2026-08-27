@@ -3268,7 +3268,7 @@ CUresult CUDAAPI cuWaitExternalSemaphoresAsync(const CUexternalSemaphore * extSe
   return CUDA_ERROR_NOT_SUPPORTED;
 }
 
-/* Thin wrappers generated from @NativeDelegate declarations. */
+/* Thin wrappers generated from retained delegate[...] method bodies. */
 extern int32_t CUDAAPI gemstone_cudaGetKernel(void ** kernel, const void * hostFunction);
 
 int32_t CUDAAPI __cudaGetKernel(void ** kernel, const void * hostFunction) {

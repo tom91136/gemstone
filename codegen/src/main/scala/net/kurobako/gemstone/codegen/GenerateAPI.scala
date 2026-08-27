@@ -299,7 +299,7 @@ object GenerateAPI {
         |/* Exact ABI-presence stubs. Trait methods opt into RPC or a native delegate. */
         |${stubs.mkString("\n\n")}
         |
-        |/* Thin wrappers generated from @NativeDelegate declarations. */
+        |/* Thin wrappers generated from retained delegate[...] method bodies. */
         |${delegates.mkString("\n\n")}
         |""".stripMargin
   }
@@ -1711,8 +1711,9 @@ object GenerateAPI {
     case WireType.Stream                => "Stream"
     case WireType.ByteBuffer            => "IArray[Byte]"
     case WireType.KernelParameters      => "KernelParameters"
-    case WireType.NullableOpaquePointer => "Option[net.kurobako.gemstone.abi.OpaquePointer]"
-    case WireType.CUDAStatus            => "CUDAStatus"
+    case WireType.NullableOpaquePointer =>
+      "Option[Pointer[net.kurobako.gemstone.abi.OpaquePointer, ReadWrite, Opaque]]"
+    case WireType.CUDAStatus => "CUDAStatus"
   }
 
   private def encodeWire(wireType: WireType, value: String): String = wireType match {

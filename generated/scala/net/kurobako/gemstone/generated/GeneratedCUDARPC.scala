@@ -149,7 +149,7 @@ object GeneratedCUDARPC {
         case _ => CUDAStatus.Unknown
       }
 
-    override def cuLaunchKernel(f: CUDAFunction, gridDimX: UInt32, gridDimY: UInt32, gridDimZ: UInt32, blockDimX: UInt32, blockDimY: UInt32, blockDimZ: UInt32, sharedMemBytes: UInt32, hStream: Stream, kernelParams: KernelParameters, extra: Option[net.kurobako.gemstone.abi.OpaquePointer]): CUDAStatus =
+    override def cuLaunchKernel(f: CUDAFunction, gridDimX: UInt32, gridDimY: UInt32, gridDimZ: UInt32, blockDimX: UInt32, blockDimY: UInt32, blockDimZ: UInt32, sharedMemBytes: UInt32, hStream: Stream, kernelParams: KernelParameters, extra: Option[Pointer[net.kurobako.gemstone.abi.OpaquePointer, ReadWrite, Opaque]]): CUDAStatus =
       transport.call(RPCRequest(cuLaunchKernelId, "cuLaunchKernel", Vector(WireValue.CUDAFunctionValue(f), WireValue.UInt32Value(gridDimX), WireValue.UInt32Value(gridDimY), WireValue.UInt32Value(gridDimZ), WireValue.UInt32Value(blockDimX), WireValue.UInt32Value(blockDimY), WireValue.UInt32Value(blockDimZ), WireValue.UInt32Value(sharedMemBytes), WireValue.StreamValue(hStream), WireValue.KernelParametersValue(kernelParams), WireValue.NullableOpaquePointerValue(extra.nonEmpty)))) match {
         case RPCResponse.Success(WireValue.CallResult(status, outputs)) if status.isSuccess =>
           if (outputs.isEmpty) status else CUDAStatus.Unknown

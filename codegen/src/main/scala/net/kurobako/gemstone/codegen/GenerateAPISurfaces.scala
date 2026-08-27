@@ -9,8 +9,8 @@ import upickle.default.read
 
 /** Materializes the pinned Clang declarations as checked-in Scala API contracts. The generated source is deliberately
   * boring: exact C names, nominal C types, and fail-closed method bodies. Hand-written API work consists of changing a
-  * selected method to abstract (RPC) or giving it a `NativeDelegate`; validation continues to compare its declaration
-  * with the same normalized header manifest.
+  * selected method to abstract (RPC) or giving it a `delegate[...]` body; validation derives its declaration from the
+  * Scala ABI types and compares it with the normalized header manifest.
   */
 object GenerateAPISurfaces {
   private final case class Target(
@@ -101,7 +101,7 @@ object GenerateAPISurfaces {
         val name = Iterator.from(1).map(i => if (i == 1) base else s"${base}_$i").find(used.add).get
         s"$name: ${scalaType(parameter.cType)}"
       }
-      s"  @CSignature(${literal(function.functionType)})\n  def ${identifier(function.name)}(${parameters.mkString(", ")}): ${scalaType(function.returnType)} = unsupported"
+      s"  def ${identifier(function.name)}(${parameters.mkString(", ")}): ${scalaType(function.returnType)} = unsupported"
     }
     val aliasLines = aliases.toVector.sortBy(_._1).map { case (name, spelling) =>
       s"type ${identifier(name)} = CValue[${literal(spelling)}]"
@@ -187,8 +187,7 @@ object GenerateAPISurfaces {
   }
 
   private def identifierName(cType: String): String = {
-    val withoutTag = cType.stripPrefix("struct ").stripPrefix("enum ").stripPrefix("union ")
-    val cleaned    = withoutTag.replaceAll("[^A-Za-z0-9_]", "_").replaceAll("_+", "_").stripSuffix("_")
+    val cleaned = cType.replaceAll("[^A-Za-z0-9_]", "_").replaceAll("_+", "_").stripSuffix("_")
     if (cleaned.headOption.exists(_.isDigit)) s"C_$cleaned" else cleaned
   }
 

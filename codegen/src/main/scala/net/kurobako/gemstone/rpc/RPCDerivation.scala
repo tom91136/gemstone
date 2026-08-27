@@ -209,7 +209,14 @@ object RPCDerivation {
     else
       value match {
         case AppliedType(option, List(element))
-            if option.typeSymbol.fullName == "scala.Option" && element.dealias =:= TypeRepr.of[OpaquePointer] =>
+            if option.typeSymbol.fullName == "scala.Option" && (
+              element.dealias =:= TypeRepr.of[OpaquePointer] || (element.dealias match {
+                case AppliedType(pointer, List(nested, _, _)) =>
+                  pointer.typeSymbol.fullName == "net.kurobako.gemstone.abi.Pointer" &&
+                  nested.dealias =:= TypeRepr.of[OpaquePointer]
+                case _ => false
+              })
+            ) =>
           WireType.NullableOpaquePointer
         case _ => abortAt(method, s"unsupported RPC wire type ${value.show} in ${method.name}")
       }

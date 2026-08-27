@@ -65,6 +65,7 @@ lazy val isaReferenceCacheDirectory = settingKey[File]("Persistent cache for pin
 lazy val prepareISAReferences       = taskKey[Unit]("Download, verify, and selectively extract pinned ISA references.")
 lazy val generateAPIValidationManifest = taskKey[File]("Record normalized declarations from pinned official API headers.")
 lazy val validateAPISurfaces = taskKey[Unit]("Validate checked-in API declarations against pinned official headers.")
+lazy val checkGeneratedAPISources = taskKey[Unit]("Verify checked-in generated ABI and RPC files are current.")
 @transient lazy val generatePTXSources        = taskKey[Seq[File]]("Update checked-in PTX instruction metadata.")
 @transient lazy val generatePTXReferenceTests =
   taskKey[Seq[File]]("Update checked-in PTX documentation conformance tests.")
@@ -95,6 +96,7 @@ lazy val commonSettings = Seq(
     "-Wconf:name=PatternMatchExhaustivity:error",
     "-Wnonunit-statement",
     "-Wvalue-discard",
+    "-Yretain-trees",
     "-language:noAutoTupling",
     "-source",
     "3.7"
@@ -107,7 +109,16 @@ lazy val commonSettings = Seq(
 )
 
 lazy val api = projectMatrix
-  .settings(commonSettings, name := "gemstone-api")
+  .settings(
+    commonSettings,
+    name := "gemstone-api",
+    Test / test := (Test / test)
+      .dependsOn(
+        LocalProject("codegen") / validateAPISurfaces,
+        LocalProject("codegen") / checkGeneratedAPISources
+      )
+      .evaluated
+  )
   .jvmPlatform(scalaVersions = Seq(scala3Version))
   .nativePlatform(scalaVersions = Seq(scala3Version))
 
@@ -245,6 +256,21 @@ lazy val codegen = projectMatrix
         output.getAbsolutePath
       )).!
       require(scalaExit == 0, s"Scala API validation exited with $scalaExit")
+    },
+    checkGeneratedAPISources := Def.uncached {
+      val root      = (LocalRootProject / baseDirectory).value
+      val converter = fileConverter.value
+      val classpath = (Compile / fullClasspath).value.map(entry => converter.toPath(entry.data).toString)
+      val java      = file(sys.props("java.home")) / "bin" / "java"
+      val exit      = Process(Seq(
+        java.getAbsolutePath,
+        "-cp",
+        classpath.mkString(sys.props("path.separator")),
+        "net.kurobako.gemstone.codegen.GenerateAPI",
+        "--check",
+        (root / "generated").getAbsolutePath
+      )).!
+      require(exit == 0, s"generated API validation exited with $exit")
     }
   )
   .jvmPlatform(scalaVersions = Seq(scala3Version))
@@ -511,6 +537,10 @@ lazy val server = projectMatrix
   .jvmPlatform(scalaVersions = Seq(scala3Version))
 
 addCommandAlias("testThrust", "server / Thrust / testOnly net.kurobako.gemstone.server.ThrustConformanceSuite")
+addCommandAlias(
+  "check",
+  ";api / test;codegen / test;core / test;apiNative / compile;coreNative / compile;nativeNative / compile;server / test"
+)
 
 lazy val native = projectMatrix
   .dependsOn(core, isa_ptx, isa_amdgpu, isa_spirv)

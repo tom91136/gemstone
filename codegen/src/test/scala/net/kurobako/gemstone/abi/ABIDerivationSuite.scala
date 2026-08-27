@@ -1,13 +1,10 @@
 package net.kurobako.gemstone.abi
 
-trait DerivationFixture {
-  @CSignature("int (int)")
-  def abstractCall(value: Int): Int
+import scala.compiletime.testing.typeCheckErrors
 
-  @CSignature("int (int)")
-  @NativeDelegate("gemstone_fixture_delegate")
-  def delegatedCall(value: Int): Int = delegate["gemstone_fixture_delegate"](value)
-  @CSignature("int (int)")
+trait DerivationFixture {
+  def abstractCall(value: Int): Int
+  def delegatedCall(value: Int): Int   = delegate["gemstone_fixture_delegate"](value)
   def unsupportedCall(value: Int): Int = unsupported
 }
 
@@ -34,6 +31,17 @@ class ABIDerivationSuite extends munit.FunSuite {
     )
   }
 
+  test("normalized C signatures derive from retained Scala ABI types") {
+    assertEquals(
+      ABIDerivation.cFunctions[DerivationFixture],
+      Vector(
+        CFunction("abstractCall", "int (int)"),
+        CFunction("delegatedCall", "int (int)"),
+        CFunction("unsupportedCall", "int (int)")
+      )
+    )
+  }
+
   test("native delegates retain their exact C declaration") {
     assertEquals(
       ABIDerivation.nativeDelegates[DerivationFixture],
@@ -46,5 +54,17 @@ class ABIDerivationSuite extends munit.FunSuite {
         )
       )
     )
+  }
+
+  test("native delegates must forward parameters exactly") {
+    val errors = typeCheckErrors("""
+      import net.kurobako.gemstone.abi.*
+      trait InvalidDelegate {
+        def invalidDelegate(first: Int, second: Int): Int =
+          delegate["gemstone_invalid_delegate"](second, first)
+      }
+      ABIDerivation.methods[InvalidDelegate]
+    """)
+    assert(errors.exists(_.message.contains("must forward every parameter exactly once")))
   }
 }

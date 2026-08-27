@@ -3,7 +3,10 @@ package net.kurobako.gemstone.vendor
 import net.kurobako.gemstone.abi.InOut
 import net.kurobako.gemstone.abi.Nullable
 import net.kurobako.gemstone.abi.OpaquePointer
+import net.kurobako.gemstone.abi.Opaque
 import net.kurobako.gemstone.abi.Out
+import net.kurobako.gemstone.abi.Pointer
+import net.kurobako.gemstone.abi.ReadWrite
 import net.kurobako.gemstone.abi.InputBuffer
 import net.kurobako.gemstone.abi.OutputBuffer
 import net.kurobako.gemstone.cuda.CUDA
@@ -185,7 +188,7 @@ final class CUDAEmulatorServer(kernelExecution: CUDAKernelExecution = CUDAKernel
       sharedMemoryBytes: UInt32,
       stream: Stream,
       parameters: KernelParameters,
-      extra: Nullable[OpaquePointer]
+      extra: Nullable[Pointer[OpaquePointer, ReadWrite, Opaque]]
   ): CUDAStatus = status(
     kernelExecution.cuLaunchKernel(
       function,

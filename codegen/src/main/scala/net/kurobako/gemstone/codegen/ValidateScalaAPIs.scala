@@ -45,7 +45,7 @@ object ValidateScalaAPIs {
       val official = manifest.surfaces.map(surface => surface.name -> surface).toMap
       scalaSurfaces.foreach { case (names, actual, additions) =>
         val expected = (names.flatMap(name =>
-          official(name).functions.map(function => CFunction(function.name, function.functionType))
+          official(name).functions.map(function => CFunction(function.name, canonical(function.functionType)))
         ) ++ additions)
           .sortBy(_.name)
         require(actual == expected, mismatch(names.mkString("+"), expected, actual))
@@ -53,6 +53,9 @@ object ValidateScalaAPIs {
       }
     case _ => throw new IllegalArgumentException("usage: ValidateScalaAPIs <official-api-manifest>")
   }
+
+  private def canonical(functionType: String): String =
+    if (functionType.endsWith("()")) functionType.dropRight(2) + "(void)" else functionType
 
   private def mismatch(name: String, expected: Vector[CFunction], actual: Vector[CFunction]): String = {
     val expectedMap = expected.map(function => function.name -> function.functionType).toMap

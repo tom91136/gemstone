@@ -1,7 +1,5 @@
 package net.kurobako.gemstone.abi
 
-import scala.annotation.StaticAnnotation
-
 /** C pointer access is part of the API contract rather than an unchecked convention in the generated marshaller. */
 sealed trait Access
 sealed trait Read      extends Access
@@ -98,17 +96,10 @@ sealed trait Callback[Signature <: String & Singleton]
 /** A fixed-size C array embedded in an ABI declaration. */
 sealed trait CArray[Element, Count <: Int & Singleton]
 
-/** Marks the exceptional methods implemented inside the native facade rather than through RPC. */
-final class NativeDelegate(val target: String) extends StaticAnnotation
-
-/** Normalized Clang function type used to validate a checked-in Scala declaration against its pinned official header.
-  */
-final class CSignature(val functionType: String) extends StaticAnnotation
-
 /** Declarative native-only method body. API derivation validates the target as a C identifier and emits a forwarding
   * wrapper. Reaching it as ordinary JVM code is always a programming error.
   */
-def delegate[Name <: String & Singleton](arguments: Any*): Nothing =
+inline def delegate[Name <: String & Singleton](arguments: Any*): Nothing =
   throw new UnsupportedOperationException("a native delegate cannot execute on the JVM")
 
 /** Declarative, correctly typed native stub body. */
