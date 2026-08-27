@@ -1,8 +1,9 @@
 # Trait-derived CUDA RPC
 
-`net.kurobako.gemstone.cuda.CUDA` owns the complete 144-method GPUOcelot Driver surface. Every method name is the
-exact exported C symbol. Implemented operations are abstract and typed; the remaining concrete methods return
-`CUDA_ERROR_NOT_SUPPORTED` without entering IPC. The interface has no C-name or message-ID annotations.
+`net.kurobako.gemstone.cuda.CUDASurface` owns the 820 declarations from the pinned CUDA 13.3 Driver and Runtime
+headers. `CUDA` is the handwritten overlay that refines the implemented RPC and native-delegate subset and adds the
+compatibility/compiler entry points. Every method name is the exact exported C symbol; the interface has no C-name or
+message-ID annotations.
 
 `RPCDerivation.schema[CUDA]` is a Scala 3 quoted macro. At compile time it:
 
@@ -22,7 +23,7 @@ The generator emits:
 - `generated/manifest/cuda-rpc-schema.json`: reviewed names, types, IDs, and fingerprint;
 - `generated/c/gemstone_cuda_rpc.inc`: C constants for the same methods and IDs;
 - `generated/c/gemstone_cuda_rpc_client.c`: exact Driver ABI entry points and typed binary marshalling;
-- `generated/scala/.../GeneratedCUDARPC.scala`: a typed `CUDA` client and receiving dispatcher.
+- `core/src/generated/main/scala/.../GeneratedCUDARPC.scala`: a typed `CUDA` client and receiving dispatcher.
 
 `CUDAEmulatorServer` is a normal implementation of `CUDA`. The JVM and Scala Native tests run the generated client
 through the generated dispatcher and exercise device allocation, pointer-offset validation, byte transfer, and free.
@@ -46,6 +47,7 @@ For Runtime tests that contain no device code, the generated facade also provide
 `cudaMemcpy` compatibility wrappers composed from the typed Driver RPC methods. Minimal fat-binary registration hooks
 allow current `nvcc --cudart=none` host objects to link, but do not claim Runtime kernel-registration support.
 
-The GPUOcelot CUDA 3.2 Driver inventory is now expressed directly by the trait and checked to contain 144 unique
-symbols. A call moves from a concrete not-supported method to the abstract RPC subset only after its pointer direction,
-byte ownership, lifetime, and C ABI projection have been reviewed.
+The pinned CUDA 13.3 Driver inventory is expressed directly by the generated base trait and checked to contain 484
+unique symbols, including the retained compatibility entry point. A call moves from a concrete not-supported method
+to the abstract RPC subset only after its pointer direction, byte ownership, lifetime, and C ABI projection have been
+reviewed.

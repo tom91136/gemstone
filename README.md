@@ -34,7 +34,7 @@ redundant `.in(file(...))` declarations.
 
 ```console
 sbt scalafmtCheckAll
-sbt 'codegen/run --check generated'
+sbt 'codegen/run --check generated core/src/generated/main/scala'
 sbt 'isa_ptx / generatePTXSources; isa_ptx / generatePTXReferenceTests'
 sbt 'isa_amdgpu / generateAMDGPUSources; isa_amdgpu / generateAMDGPUGoldenTests'
 sbt 'codegen / generateAPISources; isa_spirv / generateSPIRVSources; isa_spirv / generateSPIRVReferenceTests'
@@ -49,6 +49,11 @@ incremental test cache.
 
 ISA generation is explicit and updates checked-in Scala sources. Ordinary compilation and tests do not download ISA
 references or rewrite the worktree.
+
+Checked-in generated Scala and resources live in each owning module's `src/generated/{main,test}` tree; handwritten
+sources remain under `src/{main,test}`. Generators format Scala before comparing or writing it, and `scalafmtAll`
+formats these generated roots as well, so regenerated diffs are canonical. The repository-level `generated/` tree is
+reserved for generated C artifacts and language-neutral manifests.
 
 The [CUDA conformance corpus](conformance/cuda/README.md) contains self-checking, one-file tests adapted from the
 BSD-licensed GPUOcelot suite. `CUDAConformanceSuite` discovers them during `server` tests and runs their

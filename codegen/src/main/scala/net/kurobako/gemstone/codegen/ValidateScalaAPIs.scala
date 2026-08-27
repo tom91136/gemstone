@@ -41,6 +41,7 @@ object ValidateScalaAPIs {
 
   def main(arguments: Array[String]): Unit = arguments.toVector match {
     case Vector(manifestPath) =>
+      require(APISourceFingerprint.Value.nonEmpty, "API source fingerprint must be available")
       val manifest = read[ValidateAPIs.Manifest](Files.readString(Paths.get(manifestPath), StandardCharsets.UTF_8))
       val official = manifest.surfaces.map(surface => surface.name -> surface).toMap
       scalaSurfaces.foreach { case (names, actual, additions) =>

@@ -24,7 +24,7 @@ object RPCDerivation {
     if (!interfaceSymbol.flags.is(Flags.Trait))
       report.errorAndAbort(s"RPC interface must be a trait: ${interfaceSymbol.fullName}")
 
-    val methods        = interfaceSymbol.declaredMethods.filter(_.flags.is(Flags.Deferred)).sortBy(_.name)
+    val methods        = publicMethods(interfaceSymbol).filter(_.flags.is(Flags.Deferred)).sortBy(_.name)
     val duplicateNames =
       methods.groupBy(_.name).collect { case (name, overloads) if overloads.size > 1 => name }.toVector
     if (duplicateNames.nonEmpty)
@@ -91,14 +91,27 @@ object RPCDerivation {
     val interfaceSymbol = TypeRepr.of[T].typeSymbol
     if (!interfaceSymbol.flags.is(Flags.Trait))
       report.errorAndAbort(s"API surface must be a trait: ${interfaceSymbol.fullName}")
-    val names = interfaceSymbol.declaredMethods
-      .filterNot(method => method.flags.is(Flags.Synthetic) || method.flags.is(Flags.Private))
+    val names = publicMethods(interfaceSymbol)
       .map(_.name)
       .filter(_.matches("(?:cu|cuda|__cuda)[A-Za-z0-9_]*"))
       .distinct
       .sorted
       .map(Expr(_))
     '{ Vector(${ Varargs(names) }*) }
+  }
+
+  private def publicMethods(using quotes: Quotes)(interface: quotes.reflect.Symbol): Vector[quotes.reflect.Symbol] = {
+    import quotes.reflect.*
+    val seen = scala.collection.mutable.Set.empty[String]
+    interface.typeRef.baseClasses.iterator.filter(_.flags.is(Flags.Trait)).foldLeft(Vector.empty[Symbol]) {
+      case (methods, owner) =>
+        val declared = owner.declaredMethods
+          .filterNot(method => method.flags.is(Flags.Synthetic) || method.flags.is(Flags.Private))
+          .filterNot(_.name == "<init>")
+        val visible = declared.filterNot(method => seen(method.name))
+        seen ++= declared.map(_.name)
+        methods ++ visible
+    }
   }
 
   private def methodShape(using

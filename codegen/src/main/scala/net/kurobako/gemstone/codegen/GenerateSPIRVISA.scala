@@ -514,8 +514,9 @@ object GenerateSPIRVISA {
   }
 
   private def write(path: Path, content: String): Unit = {
-    val _ = Files.createDirectories(path.getParent)
-    val _ = Files.writeString(path, content, StandardCharsets.UTF_8)
+    val formatted = GeneratedScalaFormatter(path, content)
+    val _         = Files.createDirectories(path.getParent)
+    val _         = Files.writeString(path, formatted, StandardCharsets.UTF_8)
   }
 
   private final class JSONParser(source: String) {

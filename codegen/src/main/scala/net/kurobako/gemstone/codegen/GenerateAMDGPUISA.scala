@@ -39,16 +39,19 @@ object GenerateAMDGPUISA {
       fields: Vector[Field],
       operandCount: Int
   )
+  private final case class InstructionSources(main: String, definitions: Vector[(String, String)])
 
   def main(arguments: Array[String]): Unit = arguments.toVector match {
     case Vector(references, exporter, output) =>
       val result  = extract(Paths.get(references), Paths.get(exporter))
       val catalog = Paths.get(output)
       write(catalog, render(result.records, result.acoCount, result.xmlCount, result.sopp))
-      write(
-        catalog.resolveSibling("Instructions.scala"),
-        renderInstructions(result.records)
-      )
+      val instructions    = renderInstructions(result.records)
+      val instructionRoot = catalog.getParent.getParent
+      write(instructionRoot.resolve("Instructions.scala"), instructions.main)
+      val definitionsRoot = instructionRoot.resolve("definitions")
+      deleteScalaFiles(definitionsRoot)
+      instructions.definitions.foreach { case (name, content) => write(definitionsRoot.resolve(name), content) }
       write(catalog.getParent.getParent.getParent.resolve("Architectures.scala"), renderArchitectures())
     case _ =>
       throw new IllegalArgumentException(
@@ -202,7 +205,7 @@ object GenerateAMDGPUISA {
         |private[amdgpu] val SOPPImmediateBits: Int = ${sopp.immediateBits}
         |""".stripMargin
 
-  private def renderInstructions(records: Vector[Instruction]): String = {
+  private def renderInstructions(records: Vector[Instruction]): InstructionSources = {
     val metadataByOpcode = records.groupBy(_.name)
     val forms            = instructionForms(records)
     val definitionGroups = forms
@@ -214,12 +217,12 @@ object GenerateAMDGPUISA {
       groups.map(forms => forms.head.opcode -> s"InstructionDefs$chunkIndex.${forms.head.definitionName}")
     }.toMap
     val definitionChunks = definitionGroups.grouped(100).zipWithIndex.map { case (groups, chunkIndex) =>
-      renderDefinitionChunk(chunkIndex, groups, metadataByOpcode)
+      f"InstructionDefs$chunkIndex%02d.scala" -> renderDefinitionChunkFile(chunkIndex, groups, metadataByOpcode)
     }.toVector
     val definitionChunkNames =
       definitionChunks.indices.map(index => s"InstructionDefs$index.definitions").mkString(", ")
     val instructionCases = forms.map(form => renderInstructionCase(form, definitionReferences(form.opcode)))
-    s"""|// Generated from the pinned Mesa ACO and AMD machine-readable ISA inputs. Do not edit by hand.
+    val main             = s"""|// Generated from the pinned Mesa ACO and AMD machine-readable ISA inputs. Do not edit by hand.
         |package net.kurobako.gemstone.isa.amdgpu.common
         |
         |enum InstructionDecodeError {
@@ -228,7 +231,7 @@ object GenerateAMDGPUISA {
         |  case AmbiguousForms(opcode: String, definitions: Vector[InstructionDef])
         |}
         |
-        |private final case class InstructionFormDecoder(
+        |private[common] final case class InstructionFormDecoder(
         |    val operandCount: Int,
         |    construct: (Vector[Operand], Vector[Modifier]) => Instruction
         |) {
@@ -243,19 +246,17 @@ object GenerateAMDGPUISA {
         |    forms.flatMap(_.decode(operands, mods))
         |}
         |
-        |private def form(
+        |private[common] def form(
         |    operandCount: Int
         |)(construct: (Vector[Operand], Vector[Modifier]) => Instruction): InstructionFormDecoder =
         |  InstructionFormDecoder(operandCount, construct)
-        |private def decoder(forms: InstructionFormDecoder*): Decoder = new Decoder(forms.toVector)
+        |private[common] def decoder(forms: InstructionFormDecoder*): Decoder = new Decoder(forms.toVector)
         |
-        |sealed abstract class InstructionDef private[common] (
+        |abstract class InstructionDef private[common] (
         |    val opcode: String,
         |    val decoder: Decoder,
         |    val meta: Metadata
         |)
-        |
-        |${definitionChunks.mkString("\n\n")}
         |
         |val Instructions: Vector[InstructionDef] =
         |  Vector($definitionChunkNames).flatten
@@ -345,7 +346,19 @@ object GenerateAMDGPUISA {
         |    }
         |}
         |""".stripMargin
+    InstructionSources(main, definitionChunks)
   }
+
+  private def renderDefinitionChunkFile(
+      index: Int,
+      groups: Vector[Vector[InstructionForm]],
+      metadataByOpcode: Map[String, Vector[Instruction]]
+  ): String =
+    s"""|// Generated from the pinned Mesa ACO and AMD machine-readable ISA inputs. Do not edit by hand.
+        |package net.kurobako.gemstone.isa.amdgpu.common
+        |
+        |${renderDefinitionChunk(index, groups, metadataByOpcode)}
+        |""".stripMargin
 
   private def instructionForms(records: Vector[Instruction]): Vector[InstructionForm] = {
     val grouped = records.groupBy(_.name).toVector.sortBy(_._1)
@@ -401,7 +414,7 @@ object GenerateAMDGPUISA {
   ): String = {
     val cases      = groups.map(forms => renderDefinitionCase(forms, metadataByOpcode(forms.head.opcode)))
     val references = groups.map(_.head.definitionName).mkString(", ")
-    s"""|private object InstructionDefs$index {
+    s"""|private[common] object InstructionDefs$index {
         |${cases.mkString("\n")}
         |
         |  val definitions: Vector[InstructionDef] = Vector($references)
@@ -611,10 +624,18 @@ object GenerateAMDGPUISA {
   }
 
   private def write(output: Path, content: String): Unit = {
-    val current = if (Files.isRegularFile(output)) Some(Files.readString(output, StandardCharsets.UTF_8)) else None
-    if (!current.contains(content)) {
+    val formatted = GeneratedScalaFormatter(output, content)
+    val current   = if (Files.isRegularFile(output)) Some(Files.readString(output, StandardCharsets.UTF_8)) else None
+    if (!current.contains(formatted)) {
       val _ = Files.createDirectories(output.getParent)
-      val _ = Files.writeString(output, content, StandardCharsets.UTF_8)
+      val _ = Files.writeString(output, formatted, StandardCharsets.UTF_8)
     }
   }
+
+  private def deleteScalaFiles(directory: Path): Unit =
+    if (Files.isDirectory(directory)) {
+      val files = Files.list(directory)
+      try files.iterator().asScala.filter(path => path.getFileName.toString.endsWith(".scala")).foreach(Files.delete)
+      finally files.close()
+    }
 }

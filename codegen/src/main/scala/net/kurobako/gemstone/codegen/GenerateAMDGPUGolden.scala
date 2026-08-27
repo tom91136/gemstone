@@ -211,7 +211,7 @@ object GenerateAMDGPUGolden {
         |  private def load(name: String): Vector[String] = {
         |    val root = repositoryRoot(Paths.get(sys.props("user.dir")))
         |    val path = root.resolve(
-        |      "isa_amdgpu/src/test/resources/net/kurobako/gemstone/isa/amdgpu/common/generated"
+        |      "isa_amdgpu/src/generated/test/resources/net/kurobako/gemstone/isa/amdgpu/common/generated"
         |    ).resolve(name)
         |    val input  = new GZIPInputStream(Files.newInputStream(path))
         |    val reader = new BufferedReader(new InputStreamReader(input, StandardCharsets.UTF_8))
@@ -263,10 +263,11 @@ object GenerateAMDGPUGolden {
   }
 
   private def write(output: Path, content: String): Unit = {
-    val current = if (Files.isRegularFile(output)) Some(Files.readString(output, StandardCharsets.UTF_8)) else None
-    if (!current.contains(content)) {
+    val formatted = GeneratedScalaFormatter(output, content)
+    val current   = if (Files.isRegularFile(output)) Some(Files.readString(output, StandardCharsets.UTF_8)) else None
+    if (!current.contains(formatted)) {
       val _ = Files.createDirectories(output.getParent)
-      val _ = Files.writeString(output, content, StandardCharsets.UTF_8)
+      val _ = Files.writeString(output, formatted, StandardCharsets.UTF_8)
     }
   }
 }

@@ -1,9 +1,10 @@
 # Generated API transport
 
-The Scala `CUDA` trait owns the complete 144-method GPUOcelot Driver surface. Its abstract, typed methods are the
-implemented RPC subset; concrete defaults return `CUDA_ERROR_NOT_SUPPORTED`. Exact C function names identify methods,
-and a Scala 3 quoted macro derives the export inventory plus typed schemas, IDs, proxies, dispatch, and fingerprints.
-See [CUDA_RPC.md](CUDA_RPC.md). The older registry remains only for the phase-0 two-call transport.
+The generated `CUDASurface` owns the 820 declarations from the pinned CUDA 13.3 Driver and Runtime headers. The
+handwritten `CUDA` overlay refines the implemented RPC and native-delegate subset and adds the compatibility/compiler
+entry points; concrete defaults fail as unsupported. Exact C function names identify methods, and a Scala 3 quoted
+macro derives the export inventory plus typed schemas, IDs, proxies, dispatch, and fingerprints. See
+[CUDA_RPC.md](CUDA_RPC.md). The older registry remains only for the phase-0 two-call transport.
 
 `codegen` currently emits:
 
@@ -15,11 +16,12 @@ See [CUDA_RPC.md](CUDA_RPC.md). The older registry remains only for the phase-0 
 - `cuda-rpc-schema.json` and `gemstone_cuda_rpc.inc`: trait-derived names, types, IDs, and schema fingerprint;
 - `gemstone_cuda_rpc_client.c`: generated CUDA Driver ABI projection and typed marshalling;
 - `GeneratedCUDARPC.scala`: typed client and receiving dispatcher for JVM and Scala Native;
-- `cuda-driver-surface.json`: the 144-method Driver inventory derived from the Scala `CUDA` trait and each method's implementation status.
+- `cuda-driver-surface.json`: the 484-method Driver inventory derived from the Scala `CUDA` trait and each method's implementation status.
 
-Generated outputs are checked into `generated/` so native C consumers and Scala builds use the same reviewed protocol.
-Run the generator with `sbt 'codegen/run generated'` and verify it with
-`sbt 'codegen/run --check generated'`.
+Generated C outputs and manifests are checked into `generated/`; generated Scala is owned by
+`core/src/generated/main/scala` so native C consumers and Scala builds use the same reviewed protocol.
+Run the generator with `sbt 'codegen/run generated core/src/generated/main/scala'` and verify it with
+`sbt 'codegen/run --check generated core/src/generated/main/scala'`.
 
 ## In-process transport
 

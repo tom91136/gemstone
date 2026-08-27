@@ -1097,10 +1097,11 @@ object GeneratePTXISA {
   private def cleanHeading(value: String): String = value.replace("\uf0c1", "").replaceAll("\\s+", " ").trim
 
   private def write(output: Path, content: String): Unit = {
-    val current = if (Files.isRegularFile(output)) Some(Files.readString(output, StandardCharsets.UTF_8)) else None
-    if (!current.contains(content)) {
+    val formatted = GeneratedScalaFormatter(output, content)
+    val current   = if (Files.isRegularFile(output)) Some(Files.readString(output, StandardCharsets.UTF_8)) else None
+    if (!current.contains(formatted)) {
       val _ = Files.createDirectories(output.getParent)
-      val _ = Files.writeString(output, content, StandardCharsets.UTF_8)
+      val _ = Files.writeString(output, formatted, StandardCharsets.UTF_8)
     }
   }
 }

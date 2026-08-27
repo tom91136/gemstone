@@ -206,11 +206,16 @@ object ABIDerivation {
 
   private def publicMethods(using quotes: Quotes)(interface: quotes.reflect.Symbol): Vector[quotes.reflect.Symbol] = {
     import quotes.reflect.*
-    interface.declaredMethods
-      .filterNot(method => method.flags.is(Flags.Synthetic) || method.flags.is(Flags.Private))
-      .filterNot(_.name == "<init>")
-      .sortBy(_.name)
-      .toVector
+    val seen = scala.collection.mutable.Set.empty[String]
+    interface.typeRef.baseClasses.iterator.filter(_.flags.is(Flags.Trait)).foldLeft(Vector.empty[Symbol]) {
+      case (methods, owner) =>
+        val declared = owner.declaredMethods
+          .filterNot(method => method.flags.is(Flags.Synthetic) || method.flags.is(Flags.Private))
+          .filterNot(_.name == "<init>")
+        val visible = declared.filterNot(method => seen(method.name))
+        seen ++= declared.map(_.name)
+        methods ++ visible
+    }.sortBy(_.name)
   }
 
   private def rejectOverloads(using quotes: Quotes)(methods: Vector[quotes.reflect.Symbol]): Unit = {

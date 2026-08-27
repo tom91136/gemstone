@@ -33,34 +33,39 @@ object GenerateAPI {
     name.startsWith("__cuda") && !name.startsWith("__cudaGemstone")
   )
   def main(arguments: Array[String]): Unit = {
-    val (check, output) = arguments.toVector match {
-      case Vector(path)            => false -> Paths.get(path)
-      case Vector("--check", path) => true  -> Paths.get(path)
-      case _                       =>
-        throw new IllegalArgumentException("usage: GenerateAPI [--check] <output-directory>")
+    require(APISourceFingerprint.Value.nonEmpty, "API source fingerprint must be available")
+    val (check, output, scalaOutput) = arguments.toVector match {
+      case Vector(path, scalaPath)            => (false, Paths.get(path), Paths.get(scalaPath))
+      case Vector("--check", path, scalaPath) => (true, Paths.get(path), Paths.get(scalaPath))
+      case _                                  =>
+        throw new IllegalArgumentException(
+          "usage: GenerateAPI [--check] <output-directory> <scala-output-directory>"
+        )
     }
 
-    val generated = files(output)
+    val generated = files(output, scalaOutput).map { case (path, content) =>
+      path -> (if (path.getFileName.toString.endsWith(".scala")) GeneratedScalaFormatter(path, content) else content)
+    }
     if (check) verify(generated)
     else write(generated)
   }
 
-  private def files(output: Path): Vector[(Path, String)] = {
+  private def files(output: Path, scalaOutput: Path): Vector[(Path, String)] = {
     val api = GemstoneAPIRegistry.cuda
     Vector(
-      output.resolve("c/gemstone_protocol.h")                                        -> renderProtocol(api),
-      output.resolve("c/gemstone_cuda.h")                                            -> renderHeader(api),
-      output.resolve("c/gemstone_cuda.c")                                            -> renderFacade(api),
-      output.resolve("c/gemstone_cuda_driver_stubs.c")                               -> renderCUDADriverStubs(output),
-      output.resolve("c/gemstone_cuda.map")                                          -> renderVersionMap(api),
-      output.resolve("c/gemstone_cuda_driver_surface.inc")                           -> renderCUDASurfaceInclude,
-      output.resolve("c/gemstone_cuda_rpc.inc")                                      -> renderCUDARPCInclude,
-      output.resolve("c/gemstone_cuda_rpc_client.c")                                 -> renderCUDARPCClient,
-      output.resolve("scala/net/kurobako/gemstone/generated/GeneratedAPI.scala")     -> renderScala(api),
-      output.resolve("scala/net/kurobako/gemstone/generated/GeneratedCUDARPC.scala") -> renderCUDARPCScala,
-      output.resolve("manifest/api-manifest.json")                                   -> renderManifest(api),
-      output.resolve("manifest/cuda-rpc-schema.json")                                -> renderCUDARPCManifest,
-      output.resolve("manifest/cuda-driver-surface.json")                            -> renderCUDASurfaceManifest(api)
+      output.resolve("c/gemstone_protocol.h")                                       -> renderProtocol(api),
+      output.resolve("c/gemstone_cuda.h")                                           -> renderHeader(api),
+      output.resolve("c/gemstone_cuda.c")                                           -> renderFacade(api),
+      output.resolve("c/gemstone_cuda_driver_stubs.c")                              -> renderCUDADriverStubs(output),
+      output.resolve("c/gemstone_cuda.map")                                         -> renderVersionMap(api),
+      output.resolve("c/gemstone_cuda_driver_surface.inc")                          -> renderCUDASurfaceInclude,
+      output.resolve("c/gemstone_cuda_rpc.inc")                                     -> renderCUDARPCInclude,
+      output.resolve("c/gemstone_cuda_rpc_client.c")                                -> renderCUDARPCClient,
+      scalaOutput.resolve("net/kurobako/gemstone/generated/GeneratedAPI.scala")     -> renderScala(api),
+      scalaOutput.resolve("net/kurobako/gemstone/generated/GeneratedCUDARPC.scala") -> renderCUDARPCScala,
+      output.resolve("manifest/api-manifest.json")                                  -> renderManifest(api),
+      output.resolve("manifest/cuda-rpc-schema.json")                               -> renderCUDARPCManifest,
+      output.resolve("manifest/cuda-driver-surface.json")                           -> renderCUDASurfaceManifest(api)
     )
   }
 

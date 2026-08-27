@@ -8,6 +8,7 @@ lazy val munitVersion         = "1.3.4"
 lazy val catsParseVersion     = "1.1.0"
 lazy val jsoupVersion         = "1.23.2"
 lazy val upickleVersion       = "4.4.3"
+lazy val scalafmtVersion      = "3.9.8"
 lazy val llvmVersion          = "23.1.0"
 lazy val mesaVersion          = "26.2.1"
 lazy val cudaPTXVersion       = "13.3.0"
@@ -108,9 +109,24 @@ lazy val commonSettings = Seq(
   libraryDependencies += "org.scalameta" %% "munit" % munitVersion % Test
 )
 
+def checkedInGeneratedSources(module: String) = Seq(
+  Compile / unmanagedSourceDirectories +=
+    (LocalRootProject / baseDirectory).value / module / "src" / "generated" / "main" / "scala",
+  Test / unmanagedSourceDirectories +=
+    (LocalRootProject / baseDirectory).value / module / "src" / "generated" / "test" / "scala",
+  Test / unmanagedResourceDirectories +=
+    (LocalRootProject / baseDirectory).value / module / "src" / "generated" / "test" / "resources"
+)
+
+lazy val skipSharedSourceFormatting = Seq(
+  Compile / scalafmt / unmanagedSources := Seq.empty,
+  Test / scalafmt / unmanagedSources    := Seq.empty
+)
+
 lazy val api = projectMatrix
   .settings(
     commonSettings,
+    checkedInGeneratedSources("api"),
     name := "gemstone-api",
     Test / test := (Test / test)
       .dependsOn(
@@ -120,7 +136,7 @@ lazy val api = projectMatrix
       .evaluated
   )
   .jvmPlatform(scalaVersions = Seq(scala3Version))
-  .nativePlatform(scalaVersions = Seq(scala3Version))
+  .nativePlatform(scalaVersions = Seq(scala3Version), settings = skipSharedSourceFormatting)
 
 lazy val codegen = projectMatrix
   .dependsOn(api)
@@ -131,6 +147,31 @@ lazy val codegen = projectMatrix
     Compile / run / fork              := false,
     libraryDependencies += "org.jsoup" % "jsoup" % jsoupVersion,
     libraryDependencies += "com.lihaoyi" %% "upickle" % upickleVersion,
+    libraryDependencies += "org.scalameta" % "scalafmt-dynamic_2.13" % scalafmtVersion,
+    Compile / sourceGenerators += Def.task {
+      val root = (LocalRootProject / baseDirectory).value
+      val apiSources = Vector(root / "api" / "src" / "main" / "scala", root / "api" / "src" / "generated" / "main" / "scala")
+        .flatMap(directory => (directory ** "*.scala").get())
+        .sortBy(_.getAbsolutePath)
+      val digest = java.security.MessageDigest.getInstance("SHA-256")
+      apiSources.foreach { source =>
+        digest.update(source.getAbsolutePath.getBytes(java.nio.charset.StandardCharsets.UTF_8))
+        digest.update(IO.readBytes(source))
+      }
+      val fingerprint = digest.digest().iterator.map(byte => f"${byte & 0xff}%02x").mkString
+      val output = (Compile / sourceManaged).value / "net" / "kurobako" / "gemstone" / "codegen" /
+        "APISourceFingerprint.scala"
+      IO.write(
+        output,
+        s"""|package net.kurobako.gemstone.codegen
+            |
+            |private[gemstone] object APISourceFingerprint {
+            |  inline val Value = "$fingerprint"
+            |}
+            |""".stripMargin
+      )
+      Seq(output)
+    }.taskValue,
     prepareISAReferences              := Def.uncached {
       val _ = ISAReferences.prepare(
         cacheDirectory = (Global / isaReferenceCacheDirectory).value,
@@ -171,13 +212,13 @@ lazy val codegen = projectMatrix
       val root     = (LocalRootProject / baseDirectory).value
       val manifest = generateAPIValidationManifest.value
       val outputs = Vector(
-        root / "api" / "src" / "main" / "scala" / "net" / "kurobako" / "gemstone" / "cuda" / "CUDA.scala",
-        root / "api" / "src" / "main" / "scala" / "net" / "kurobako" / "gemstone" / "hip" / "HIP.scala",
-        root / "api" / "src" / "main" / "scala" / "net" / "kurobako" / "gemstone" / "hsa" / "HSA.scala",
-        root / "api" / "src" / "main" / "scala" / "net" / "kurobako" / "gemstone" / "opencl" / "OpenCL.scala",
-        root / "api" / "src" / "main" / "scala" / "net" / "kurobako" / "gemstone" / "levelzero" / "LevelZero.scala"
+        root / "api" / "src" / "generated" / "main" / "scala" / "net" / "kurobako" / "gemstone" / "cuda" / "CUDASurface.scala",
+        root / "api" / "src" / "generated" / "main" / "scala" / "net" / "kurobako" / "gemstone" / "hip" / "HIPSurface.scala",
+        root / "api" / "src" / "generated" / "main" / "scala" / "net" / "kurobako" / "gemstone" / "hsa" / "HSASurface.scala",
+        root / "api" / "src" / "generated" / "main" / "scala" / "net" / "kurobako" / "gemstone" / "opencl" / "OpenCLSurface.scala",
+        root / "api" / "src" / "generated" / "main" / "scala" / "net" / "kurobako" / "gemstone" / "levelzero" / "LevelZeroSurface.scala"
       )
-      val sourceRoot = root / "api" / "src" / "main" / "scala"
+      val sourceRoot = root / "api" / "src" / "generated" / "main" / "scala"
       val converter = fileConverter.value
       val classpath = (Compile / fullClasspath).value.map(entry => converter.toPath(entry.data).toString)
       val java      = file(sys.props("java.home")) / "bin" / "java"
@@ -256,6 +297,21 @@ lazy val codegen = projectMatrix
         output.getAbsolutePath
       )).!
       require(scalaExit == 0, s"Scala API validation exited with $scalaExit")
+      val surfaceExit = Process(Seq(
+        java.getAbsolutePath,
+        "-cp",
+        classpath.mkString(sys.props("path.separator")),
+        "net.kurobako.gemstone.codegen.GenerateAPISurfaces",
+        "--check",
+        output.getAbsolutePath,
+        (root / "api" / "src" / "generated" / "main" / "scala").getAbsolutePath,
+        cudaAPIVersion,
+        hipVersion,
+        hsaVersion,
+        levelZeroVersion,
+        openCLHeadersVersion
+      )).!
+      require(surfaceExit == 0, s"generated Scala API surface validation exited with $surfaceExit")
     },
     checkGeneratedAPISources := Def.uncached {
       val root      = (LocalRootProject / baseDirectory).value
@@ -268,7 +324,8 @@ lazy val codegen = projectMatrix
         classpath.mkString(sys.props("path.separator")),
         "net.kurobako.gemstone.codegen.GenerateAPI",
         "--check",
-        (root / "generated").getAbsolutePath
+        (root / "generated").getAbsolutePath,
+        (root / "core" / "src" / "generated" / "main" / "scala").getAbsolutePath
       )).!
       require(exit == 0, s"generated API validation exited with $exit")
     }
@@ -279,16 +336,17 @@ lazy val core = projectMatrix
   .dependsOn(api)
   .settings(
     commonSettings,
+    checkedInGeneratedSources("core"),
     name := "gemstone-core",
-    Compile / unmanagedSourceDirectories += (LocalRootProject / baseDirectory).value / "generated" / "scala"
   )
   .jvmPlatform(scalaVersions = Seq(scala3Version))
-  .nativePlatform(scalaVersions = Seq(scala3Version))
+  .nativePlatform(scalaVersions = Seq(scala3Version), settings = skipSharedSourceFormatting)
 
 lazy val isa_ptx = projectMatrix
   .dependsOn(core)
   .settings(
     commonSettings,
+    checkedInGeneratedSources("isa_ptx"),
     name               := "gemstone-isa-ptx",
     generatePTXSources := Def.uncached {
       val root          = (LocalRootProject / baseDirectory).value
@@ -302,8 +360,8 @@ lazy val isa_ptx = projectMatrix
         case found => sys.error(s"expected one prepared ISA reference view, found ${found.size} in $referenceRoot")
       }
       val input  = references / "nvidia" / "ptx" / "index.html"
-      val output = root / "isa_ptx" / "src" / "main" / "scala" / "net" / "kurobako" / "gemstone" / "isa" / "ptx" /
-        ptxISAPackage / "generated" / "Instructions.scala"
+      val output = root / "isa_ptx" / "src" / "generated" / "main" / "scala" / "net" / "kurobako" / "gemstone" /
+        "isa" / "ptx" / ptxISAPackage / "Instructions.scala"
       val converter = fileConverter.value
       val classpath = (codegen.jvm(scala3Version) / Compile / fullClasspath).value
         .map(entry => converter.toPath(entry.data).toString)
@@ -334,8 +392,8 @@ lazy val isa_ptx = projectMatrix
         case found => sys.error(s"expected one prepared ISA reference view, found ${found.size} in $referenceRoot")
       }
       val input  = references / "nvidia" / "ptx" / "index.html"
-      val output = root / "isa_ptx" / "src" / "test" / "scala" / "net" / "kurobako" / "gemstone" / "isa" / "ptx" /
-        ptxISAPackage / "generated" / "DocumentationSuite.scala"
+      val output = root / "isa_ptx" / "src" / "generated" / "test" / "scala" / "net" / "kurobako" / "gemstone" /
+        "isa" / "ptx" / ptxISAPackage / "generated" / "DocumentationSuite.scala"
       val converter = fileConverter.value
       val classpath = (codegen.jvm(scala3Version) / Compile / fullClasspath).value
         .map(entry => converter.toPath(entry.data).toString)
@@ -361,13 +419,16 @@ lazy val isa_ptx = projectMatrix
   )
   .nativePlatform(
     scalaVersions = Seq(scala3Version),
-    settings = Seq(libraryDependencies += "org.typelevel" % "cats-parse_native0.5_3" % catsParseVersion)
+    settings = skipSharedSourceFormatting ++ Seq(
+      libraryDependencies += "org.typelevel" % "cats-parse_native0.5_3" % catsParseVersion
+    )
   )
 
 lazy val isa_amdgpu = projectMatrix
   .dependsOn(core)
   .settings(
     commonSettings,
+    checkedInGeneratedSources("isa_amdgpu"),
     name                  := "gemstone-isa-amdgpu",
     generateAMDGPUSources := Def.uncached {
       val root          = (LocalRootProject / baseDirectory).value
@@ -381,9 +442,10 @@ lazy val isa_amdgpu = projectMatrix
         case found => sys.error(s"expected one prepared ISA reference view, found ${found.size} in $referenceRoot")
       }
       val exporter = root / "codegen" / "amdgpu" / "export_aco.py"
-      val output   = root / "isa_amdgpu" / "src" / "main" / "scala" / "net" / "kurobako" / "gemstone" / "isa" /
-        "amdgpu" / "common" / "generated" / "Database.scala"
-      val instructions = output.getParentFile / "Instructions.scala"
+      val output = root / "isa_amdgpu" / "src" / "generated" / "main" / "scala" / "net" / "kurobako" / "gemstone" /
+        "isa" / "amdgpu" / "common" / "generated" / "Database.scala"
+      val instructions = output.getParentFile.getParentFile / "Instructions.scala"
+      val architectures = instructions.getParentFile.getParentFile / "Architectures.scala"
       val converter    = fileConverter.value
       val classpath    =
         (codegen.jvm(scala3Version) / Compile / fullClasspath).value.map(entry => converter.toPath(entry.data).toString)
@@ -398,7 +460,7 @@ lazy val isa_amdgpu = projectMatrix
         output.getAbsolutePath
       )).!
       require(exit == 0, s"AMDGPU metadata generator exited with $exit")
-      Seq(output, instructions)
+      Seq(output, instructions, architectures) ++ ((instructions.getParentFile / "definitions") * "*.scala").get()
     },
     generateAMDGPUGoldenTests := Def.uncached {
       val root          = (LocalRootProject / baseDirectory).value
@@ -411,10 +473,10 @@ lazy val isa_amdgpu = projectMatrix
         case Vector(directory) => directory
         case found => sys.error(s"expected one prepared ISA reference view, found ${found.size} in $referenceRoot")
       }
-      val output = root / "isa_amdgpu" / "src" / "test" / "scala" / "net" / "kurobako" / "gemstone" / "isa" /
-        "amdgpu" / "common" / "generated" / "GoldenCorpus.scala"
-      val dataRoot = root / "isa_amdgpu" / "src" / "test" / "resources" / "net" / "kurobako" / "gemstone" / "isa" /
-        "amdgpu" / "common" / "generated"
+      val output = root / "isa_amdgpu" / "src" / "generated" / "test" / "scala" / "net" / "kurobako" / "gemstone" /
+        "isa" / "amdgpu" / "common" / "generated" / "GoldenCorpus.scala"
+      val dataRoot = root / "isa_amdgpu" / "src" / "generated" / "test" / "resources" / "net" / "kurobako" /
+        "gemstone" / "isa" / "amdgpu" / "common" / "generated"
       val converter = fileConverter.value
       val classpath =
         (codegen.jvm(scala3Version) / Compile / fullClasspath).value.map(entry => converter.toPath(entry.data).toString)
@@ -435,7 +497,7 @@ lazy val isa_amdgpu = projectMatrix
   .jvmPlatform(scalaVersions = Seq(scala3Version))
   .nativePlatform(
     scalaVersions = Seq(scala3Version),
-    settings = Seq(
+    settings = skipSharedSourceFormatting ++ Seq(
       // The exhaustive LLVM oracle is a JVM code-generation/conformance gate. Running 407k parser cases in an
       // unoptimised Native test binary adds minutes without exercising a different implementation.
       Test / unmanagedSources / excludeFilter := "GoldenCorpusSuite.scala"
@@ -446,6 +508,7 @@ lazy val isa_spirv = projectMatrix
   .dependsOn(core)
   .settings(
     commonSettings,
+    checkedInGeneratedSources("isa_spirv"),
     name                 := "gemstone-isa-spirv",
     generateSPIRVSources := Def.uncached {
       val root          = (LocalRootProject / baseDirectory).value
@@ -458,8 +521,8 @@ lazy val isa_spirv = projectMatrix
         case Vector(directory) => directory
         case found             => sys.error(s"expected one prepared SPIR-V reference view, found ${found.size}")
       }
-      val output = root / "isa_spirv" / "src" / "main" / "scala" / "net" / "kurobako" / "gemstone" / "isa" /
-        "spirv" / spirvPackage / "generated" / "Instructions.scala"
+      val output = root / "isa_spirv" / "src" / "generated" / "main" / "scala" / "net" / "kurobako" / "gemstone" /
+        "isa" / "spirv" / spirvPackage / "Instructions.scala"
       val converter = fileConverter.value
       val classpath = (codegen.jvm(scala3Version) / Compile / fullClasspath).value
         .map(entry => converter.toPath(entry.data).toString)
@@ -490,8 +553,8 @@ lazy val isa_spirv = projectMatrix
         case Vector(directory) => directory
         case found             => sys.error(s"expected one prepared SPIR-V test reference view, found ${found.size}")
       }
-      val output = root / "isa_spirv" / "src" / "test" / "scala" / "net" / "kurobako" / "gemstone" / "isa" /
-        "spirv" / spirvPackage / "generated" / "ReferenceSuite.scala"
+      val output = root / "isa_spirv" / "src" / "generated" / "test" / "scala" / "net" / "kurobako" / "gemstone" /
+        "isa" / "spirv" / spirvPackage / "generated" / "ReferenceSuite.scala"
       val converter = fileConverter.value
       val classpath = (codegen.jvm(scala3Version) / Compile / fullClasspath).value
         .map(entry => converter.toPath(entry.data).toString)
@@ -515,7 +578,7 @@ lazy val isa_spirv = projectMatrix
     }
   )
   .jvmPlatform(scalaVersions = Seq(scala3Version))
-  .nativePlatform(scalaVersions = Seq(scala3Version))
+  .nativePlatform(scalaVersions = Seq(scala3Version), settings = skipSharedSourceFormatting)
 
 lazy val server = projectMatrix
   .configs(ThrustTest)

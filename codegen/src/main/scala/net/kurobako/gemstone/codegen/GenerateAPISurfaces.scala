@@ -1,5 +1,8 @@
 package net.kurobako.gemstone.codegen
 
+import net.kurobako.gemstone.abi.ABIDerivation
+import net.kurobako.gemstone.cuda.CUDACustomSurface
+
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
@@ -7,10 +10,9 @@ import java.nio.file.Paths
 import scala.collection.mutable
 import upickle.default.read
 
-/** Materializes the pinned Clang declarations as checked-in Scala API contracts. The generated source is deliberately
-  * boring: exact C names, nominal C types, and fail-closed method bodies. Hand-written API work consists of changing a
-  * selected method to abstract (RPC) or giving it a `delegate[...]` body; validation derives its declaration from the
-  * Scala ABI types and compares it with the normalized header manifest.
+/** Materializes the pinned Clang declarations as checked-in Scala API surface bases. The generated source is
+  * deliberately boring: exact C names, nominal C types, and fail-closed method bodies. Hand-written API traits refine
+  * selected methods as RPC endpoints or native delegates without editing this output.
   */
 object GenerateAPISurfaces {
   private final case class Target(
@@ -18,10 +20,13 @@ object GenerateAPISurfaces {
       packageName: String,
       traitName: String,
       output: Path,
-      versions: Vector[(String, String)]
+      versions: Vector[(String, String)],
+      excludedFunctions: Set[String] = Set.empty,
+      excludedTypes: Set[String] = Set.empty
   )
 
   def main(arguments: Array[String]): Unit = {
+    require(APISourceFingerprint.Value.nonEmpty, "API source fingerprint must be available")
     val (check, manifestPath, sourceRoot, versions) = arguments.toVector match {
       case Vector(manifest, root, cuda, hip, hsa, levelZero, openCL) =>
         (false, Paths.get(manifest), Paths.get(root), Vector(cuda, hip, hsa, levelZero, openCL))
@@ -32,48 +37,54 @@ object GenerateAPISurfaces {
           "usage: GenerateAPISurfaces [--check] <manifest> <api-source-root> <cuda> <hip> <hsa> <level-zero> <opencl>"
         )
     }
-    val manifest = read[ValidateAPIs.Manifest](Files.readString(manifestPath, StandardCharsets.UTF_8))
-    val targets  = Vector(
+    val manifest            = read[ValidateAPIs.Manifest](Files.readString(manifestPath, StandardCharsets.UTF_8))
+    val cudaCustomFunctions = ABIDerivation.methods[CUDACustomSurface].iterator.map(_.name).toSet
+    val targets             = Vector(
       Target(
         Vector("cuda-driver", "cuda-runtime"),
         "net.kurobako.gemstone.cuda",
-        "CUDA",
-        sourceRoot.resolve("net/kurobako/gemstone/cuda/CUDA.scala"),
-        Vector("HeaderVersion" -> versions(0))
+        "CUDASurface",
+        sourceRoot.resolve("net/kurobako/gemstone/cuda/CUDASurface.scala"),
+        Vector("HeaderVersion" -> versions(0)),
+        cudaCustomFunctions,
+        Set("CUctxCreateParams", "CUhostFn", "CUstreamCallback")
       ),
       Target(
         Vector("hip"),
         "net.kurobako.gemstone.hip",
-        "HIP",
-        sourceRoot.resolve("net/kurobako/gemstone/hip/HIP.scala"),
+        "HIPSurface",
+        sourceRoot.resolve("net/kurobako/gemstone/hip/HIPSurface.scala"),
         Vector("HeaderVersion" -> versions(1))
       ),
       Target(
         Vector("hsa"),
         "net.kurobako.gemstone.hsa",
-        "HSA",
-        sourceRoot.resolve("net/kurobako/gemstone/hsa/HSA.scala"),
+        "HSASurface",
+        sourceRoot.resolve("net/kurobako/gemstone/hsa/HSASurface.scala"),
         Vector("HeaderVersion" -> versions(2))
       ),
       Target(
         Vector("level-zero"),
         "net.kurobako.gemstone.levelzero",
-        "LevelZero",
-        sourceRoot.resolve("net/kurobako/gemstone/levelzero/LevelZero.scala"),
+        "LevelZeroSurface",
+        sourceRoot.resolve("net/kurobako/gemstone/levelzero/LevelZeroSurface.scala"),
         Vector("HeaderVersion" -> versions(3))
       ),
       Target(
         Vector("opencl"),
         "net.kurobako.gemstone.opencl",
-        "OpenCL",
-        sourceRoot.resolve("net/kurobako/gemstone/opencl/OpenCL.scala"),
+        "OpenCLSurface",
+        sourceRoot.resolve("net/kurobako/gemstone/opencl/OpenCLSurface.scala"),
         Vector("HeaderVersion" -> versions(4))
       )
     )
     val byName = manifest.surfaces.map(surface => surface.name -> surface).toMap
     targets.foreach { target =>
       val functions = target.manifestNames.flatMap(name => byName.getOrElse(name, missing(name)).functions)
-      val content   = render(target, functions)
+      val content   = GeneratedScalaFormatter(
+        target.output,
+        render(target, functions.filterNot(function => target.excludedFunctions(function.name)), functions.size)
+      )
       if (check) {
         require(Files.isRegularFile(target.output), s"API surface is absent: ${target.output}")
         require(
@@ -91,9 +102,9 @@ object GenerateAPISurfaces {
 
   private def missing(name: String): Nothing = throw new IllegalArgumentException(s"manifest surface is absent: $name")
 
-  private def render(target: Target, functions: Vector[ValidateAPIs.Function]): String = {
+  private def render(target: Target, functions: Vector[ValidateAPIs.Function], surfaceSize: Int): String = {
     val aliases                          = mutable.LinkedHashMap.empty[String, String]
-    def scalaType(cType: String): String = mapType(cType.trim, aliases, target.traitName)
+    def scalaType(cType: String): String = mapType(cType.trim, aliases, target.traitName.stripSuffix("Surface"))
     val declarations                     = functions.map { function =>
       val used       = mutable.Set.empty[String]
       val parameters = function.parameters.zipWithIndex.map { case (parameter, index) =>
@@ -103,8 +114,9 @@ object GenerateAPISurfaces {
       }
       s"  def ${identifier(function.name)}(${parameters.mkString(", ")}): ${scalaType(function.returnType)} = unsupported"
     }
-    val aliasLines = aliases.toVector.sortBy(_._1).map { case (name, definition) =>
-      s"type ${identifier(name)} = $definition"
+    val aliasLines = aliases.toVector.filterNot(entry => target.excludedTypes(entry._1)).sortBy(_._1).map {
+      case (name, definition) =>
+        s"type ${identifier(name)} = $definition"
     }
     val versionLines = target.versions.map { case (name, value) => s"  val $name: String = ${literal(value)}" }
     s"""|// Generated from pinned official headers by GenerateAPISurfaces. Do not edit mechanically.
@@ -120,7 +132,7 @@ object GenerateAPISurfaces {
         |
         |object ${target.traitName} {
         |${versionLines.mkString("\n")}
-        |  val SurfaceSize: Int = ${functions.size}
+        |  val SurfaceSize: Int = $surfaceSize
         |}
         |""".stripMargin
   }
@@ -136,6 +148,7 @@ object GenerateAPISurfaces {
         val readOnly = pointee0.startsWith("const ") || pointee0.endsWith(" const")
         val pointee  = pointee0.stripPrefix("const ").stripSuffix(" const").trim
         if (readOnly && pointee == "char") "CString"
+        else if (!readOnly && pointee == "void") "OpaquePointer"
         else {
           val access  = if (readOnly) "Read" else "ReadWrite"
           val element = if (pointee == "void") "CVoid" else mapType(pointee, aliases, api)
@@ -148,7 +161,7 @@ object GenerateAPISurfaces {
               .getOrElse(throw new IllegalStateException(s"invalid callback typedef signature: $value = $signature"))
             val arguments = callbackArguments(parameters.map(mapType(_, aliases, api)))
             aliases(value) = s"CallbackTypedef[${literal(value)}, $arguments, ${mapType(result, aliases, api)}]"
-            identifier(value)
+            typeIdentifier(value)
           case None =>
             fixedArray(value) match {
               case Some((element, count)) => s"CArray[${mapType(element, aliases, api)}, $count]"
@@ -233,6 +246,8 @@ object GenerateAPISurfaces {
     val cleaned = cType.replaceAll("[^A-Za-z0-9_]", "_").replaceAll("_+", "_").stripSuffix("_")
     if (cleaned.headOption.exists(_.isDigit)) s"C_$cleaned" else cleaned
   }
+
+  private def typeIdentifier(value: String): String = identifier(identifierName(value))
 
   private val keywords = Set(
     "abstract",
