@@ -1014,10 +1014,7 @@ object GeneratePTXISA {
   private def renderTests(version: String, packageVersion: String, examples: Vector[(String, String)]): String = {
     require(packageVersion.matches("v[0-9]+(?:_[0-9]+)*"), s"invalid PTX package version: $packageVersion")
     val values = examples.map { case (id, source) => s"    ${literal(id)} -> ${literal(source)}" }.mkString(",\n")
-    s"""|package net.kurobako.gemstone.isa.ptx.$packageVersion.generated
-        |
-        |import net.kurobako.gemstone.isa.ptx.$packageVersion.Printer
-        |import net.kurobako.gemstone.isa.ptx.$packageVersion.Parser
+    s"""|package net.kurobako.gemstone.isa.ptx.$packageVersion
         |
         |// Generated from examples in the pinned NVIDIA PTX ISA $version specification. Do not edit.
         |final class DocumentationSuite extends munit.FunSuite {

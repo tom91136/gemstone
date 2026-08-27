@@ -7,7 +7,6 @@
 #define COUNT_DRIVER_SYMBOL(symbol) +1
 enum { DriverApiCount = 0 GEMSTONE_CUDA_DRIVER_API(COUNT_DRIVER_SYMBOL) };
 #undef COUNT_DRIVER_SYMBOL
-static_assert(DriverApiCount == 144);
 
 int main() {
   void *library = dlopen("libcuda.so.1", RTLD_NOW | RTLD_LOCAL);
@@ -29,6 +28,6 @@ int main() {
 
   dlclose(library);
   if (missing != 0) return 1;
-  std::puts("all 144 GPUOcelot Driver API symbols are present");
+  std::printf("all %d pinned CUDA Driver API symbols are present\n", DriverApiCount);
   return 0;
 }

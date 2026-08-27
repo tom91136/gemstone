@@ -1,9 +1,5 @@
 package net.kurobako.gemstone.isa.amdgpu.common
 
-import net.kurobako.gemstone.isa.amdgpu.common.generated.SOPPEncodingPrefix
-import net.kurobako.gemstone.isa.amdgpu.common.generated.SOPPImmediateBits
-import net.kurobako.gemstone.isa.amdgpu.common.generated.SOPPOpcodeShift
-
 enum CodecError {
   case WrongGeneration(target: Target, expected: Generation)
   case UnsupportedInstruction(opcode: String, target: Target)

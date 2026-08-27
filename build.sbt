@@ -393,7 +393,7 @@ lazy val isa_ptx = projectMatrix
       }
       val input  = references / "nvidia" / "ptx" / "index.html"
       val output = root / "isa_ptx" / "src" / "generated" / "test" / "scala" / "net" / "kurobako" / "gemstone" /
-        "isa" / "ptx" / ptxISAPackage / "generated" / "DocumentationSuite.scala"
+        "isa" / "ptx" / ptxISAPackage / "DocumentationSuite.scala"
       val converter = fileConverter.value
       val classpath = (codegen.jvm(scala3Version) / Compile / fullClasspath).value
         .map(entry => converter.toPath(entry.data).toString)
@@ -443,8 +443,8 @@ lazy val isa_amdgpu = projectMatrix
       }
       val exporter = root / "codegen" / "amdgpu" / "export_aco.py"
       val output = root / "isa_amdgpu" / "src" / "generated" / "main" / "scala" / "net" / "kurobako" / "gemstone" /
-        "isa" / "amdgpu" / "common" / "generated" / "Database.scala"
-      val instructions = output.getParentFile.getParentFile / "Instructions.scala"
+        "isa" / "amdgpu" / "common" / "EncodingConstants.scala"
+      val instructions = output.getParentFile / "Instructions.scala"
       val architectures = instructions.getParentFile.getParentFile / "Architectures.scala"
       val converter    = fileConverter.value
       val classpath    =
@@ -474,9 +474,9 @@ lazy val isa_amdgpu = projectMatrix
         case found => sys.error(s"expected one prepared ISA reference view, found ${found.size} in $referenceRoot")
       }
       val output = root / "isa_amdgpu" / "src" / "generated" / "test" / "scala" / "net" / "kurobako" / "gemstone" /
-        "isa" / "amdgpu" / "common" / "generated" / "GoldenCorpus.scala"
+        "isa" / "amdgpu" / "common" / "GoldenCorpus.scala"
       val dataRoot = root / "isa_amdgpu" / "src" / "generated" / "test" / "resources" / "net" / "kurobako" /
-        "gemstone" / "isa" / "amdgpu" / "common" / "generated"
+        "gemstone" / "isa" / "amdgpu" / "common"
       val converter = fileConverter.value
       val classpath =
         (codegen.jvm(scala3Version) / Compile / fullClasspath).value.map(entry => converter.toPath(entry.data).toString)
@@ -554,7 +554,7 @@ lazy val isa_spirv = projectMatrix
         case found             => sys.error(s"expected one prepared SPIR-V test reference view, found ${found.size}")
       }
       val output = root / "isa_spirv" / "src" / "generated" / "test" / "scala" / "net" / "kurobako" / "gemstone" /
-        "isa" / "spirv" / spirvPackage / "generated" / "ReferenceSuite.scala"
+        "isa" / "spirv" / spirvPackage / "ReferenceSuite.scala"
       val converter = fileConverter.value
       val classpath = (codegen.jvm(scala3Version) / Compile / fullClasspath).value
         .map(entry => converter.toPath(entry.data).toString)

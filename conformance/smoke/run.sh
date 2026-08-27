@@ -2,18 +2,24 @@
 set -euo pipefail
 
 root_dir="$(cd "$(dirname "$0")/../.." && pwd)"
-core_library="$root_dir/target/out/native0.5/scala-3.8.3/gemstone-core/libgemstone-core.so"
+native_library="$root_dir/target/out/native0.5/scala-3.8.3/gemstone-native/libgemstone-native.so"
 output_dir="$root_dir/target/conformance/smoke"
 library_dir="$output_dir/lib"
 recording="$output_dir/api-recording.jsonl"
+cuda_header="$(find "$root_dir/target/out" -path '*/gemstone-codegen/isa-references/*/nvidia/cuda/usr/local/cuda-13.3/targets/*/include/cuda.h' -print -quit)"
 
-if [[ ! -f "$core_library" ]]; then
-  printf 'missing %s; run sbt nativeNative/nativeLink first\n' "$core_library" >&2
+if [[ ! -f "$native_library" ]]; then
+  printf 'missing %s; run sbt nativeNative/nativeLink first\n' "$native_library" >&2
   exit 1
 fi
+if [[ -z "$cuda_header" ]]; then
+  printf 'pinned CUDA 13.3 headers are absent; run sbt codegen/prepareISAReferences first\n' >&2
+  exit 1
+fi
+cuda_include="$(dirname "$cuda_header")"
 
 mkdir -p "$library_dir"
-install -m 755 "$core_library" "$library_dir/libgemstone-core.so"
+install -m 755 "$native_library" "$library_dir/libgemstone-native.so"
 
 cc \
   -std=c17 \
@@ -29,7 +35,7 @@ cc \
   -Wl,-soname,libgemstone_dispatch.so \
   -Wl,-rpath,'$ORIGIN' \
   -Wl,--no-as-needed \
-  -l:libgemstone-core.so \
+  -l:libgemstone-native.so \
   -pthread \
   -o "$library_dir/libgemstone_dispatch.so"
 
@@ -46,6 +52,7 @@ cc \
   "$root_dir/native/dispatch/gemstone_rpc_transport.c" \
   -I"$root_dir/generated/c" \
   -I"$root_dir/native/dispatch" \
+  -I"$cuda_include" \
   -L"$library_dir" \
   -Wl,-rpath,'$ORIGIN' \
   -Wl,-soname,libcuda.so.1 \
@@ -85,11 +92,11 @@ fi
 
 {
   printf 'GEMSTONE generated facade report\n\n'
-  file "$library_dir/libcuda.so.1" "$library_dir/libgemstone_dispatch.so" "$library_dir/libgemstone-core.so"
+  file "$library_dir/libcuda.so.1" "$library_dir/libgemstone_dispatch.so" "$library_dir/libgemstone-native.so"
   printf '\nFacade exports:\n'
   nm -D --defined-only "$library_dir/libcuda.so.1"
   printf '\nCore exports:\n'
-  nm -D --defined-only "$library_dir/libgemstone-core.so"
+  nm -D --defined-only "$library_dir/libgemstone-native.so"
   printf '\nFacade dynamic metadata:\n'
   readelf -d "$library_dir/libcuda.so.1" | grep -E 'SONAME|NEEDED|RUNPATH'
   printf '\nFacade symbol versions:\n'

@@ -23,9 +23,9 @@ per-family package sources:
 
 The public AST has one generated Scala 3 `Instruction` enum with one parameterized case per normalized operand form.
 Each case exposes meaningful positional fields such as `dest`, `srcA`, `srcB`, `srcAddr`, `destAddr`, and `mods`.
-A closed `InstructionDef` descriptor set has one singleton per canonical opcode and owns that opcode's decoder and
-fully structured `Metadata(Vector(Encoding(...)))` value directly; there is no encoded string table or index lookup.
-`Instructions` is its sole ordered enumeration. Each decoded instruction exposes its descriptor, opcode,
+A completely generated `InstructionDef` descriptor set has one singleton per canonical opcode and owns that opcode's
+decoder and fully structured `Metadata(Vector(Encoding(...)))` value directly; there is no encoded string table or
+index lookup. `Instructions` is its sole ordered enumeration. Each decoded instruction exposes its descriptor, opcode,
 decoder, metadata, and operand vector directly. Text and binary decoding construct these cases or return a typed
 error. There is no raw unknown-instruction node, detached metadata catalog, or second “known instruction” layer.
 

@@ -15,10 +15,10 @@ therefore remain a validation concern rather than another copy of the parser pac
 
 The `isa_ptx` source generators read the pinned CUDA PTX HTML prepared by `codegen / prepareISAReferences`. They emit:
 
-- `generated/Instructions.scala`, containing the enums, `Version`, and the top-level `Instructions` definition
-  vector for 195 concrete operations; and
-- `DocumentationSuite`, 892 complete example statements extracted from the document and checked for typed parsing
-  and AST-preserving canonical round-trips.
+- `src/generated/main/scala/.../Instructions.scala`, containing the enums, `Version`, and the top-level `Instructions`
+  definition vector for 195 concrete operations; and
+- `src/generated/test/scala/.../DocumentationSuite.scala`, containing 892 complete example statements extracted from
+  the document and checked for typed parsing and AST-preserving canonical round-trips.
 
 Generated files are checked in so ISA changes are reviewable and normal compilation is offline. The explicit
 `generatePTXSources` and `generatePTXReferenceTests` tasks update them from the pinned source. The small execution

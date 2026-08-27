@@ -1,9 +1,5 @@
 package net.kurobako.gemstone.isa.amdgpu.common
 
-import net.kurobako.gemstone.isa.amdgpu.common.generated.AMDXMLRecordCount
-import net.kurobako.gemstone.isa.amdgpu.common.generated.MetadataRecordCount
-import net.kurobako.gemstone.isa.amdgpu.common.generated.MesaACORecordCount
-
 class MetadataSuite extends munit.FunSuite {
   test("generate normalized ACO and official XML instruction metadata") {
     assert(MesaACORecordCount >= 3500)

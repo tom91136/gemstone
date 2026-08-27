@@ -44,7 +44,7 @@ libgemstone_dispatch.so
   - waits on per-call condition variable
       |
       v
-Scala Native-owned thread in libgemstone-core.so
+Scala Native-owned thread in libgemstone-native.so
   - decodes generated opcode
   - invokes logical vendor handler
   - catches every exception

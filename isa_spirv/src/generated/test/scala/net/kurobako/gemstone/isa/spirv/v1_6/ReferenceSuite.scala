@@ -1,7 +1,5 @@
 // Generated from pinned Khronos grammar and SPIRV-Tools tests. Do not edit by hand.
-package net.kurobako.gemstone.isa.spirv.v1_6.generated
-
-import net.kurobako.gemstone.isa.spirv.v1_6.*
+package net.kurobako.gemstone.isa.spirv.v1_6
 
 final class ReferenceSuite extends munit.FunSuite {
   private val upstreamTestCounts: Map[String, Int] = Map(

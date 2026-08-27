@@ -10,11 +10,7 @@ enum CUDAError(val value: Int) {
   case Unknown             extends CUDAError(999)
 }
 
-final case class APIResult[+A](value: Option[A], error: CUDAError)
-
 final class CUDARuntime(runtime: RuntimeState) extends GeneratedAPI.Handler {
-  def getDeviceCount: APIResult[Int] = APIResult(Some(runtime.deviceCount), CUDAError.Success)
-
   override def cudaGetDeviceCount(): GeneratedAPI.DispatchResult =
     GeneratedAPI.DispatchResult(CUDAError.Success.value, runtime.deviceCount.toLong)
 

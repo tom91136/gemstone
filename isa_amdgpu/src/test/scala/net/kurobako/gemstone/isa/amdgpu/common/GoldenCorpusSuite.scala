@@ -1,6 +1,5 @@
 package net.kurobako.gemstone.isa.amdgpu.common
 
-import net.kurobako.gemstone.isa.amdgpu.common.generated.GoldenCorpus
 import scala.collection.mutable
 
 class GoldenCorpusSuite extends munit.FunSuite {

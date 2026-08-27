@@ -2,7 +2,7 @@
 
 ## Working
 
-- Scala Native 0.5.12 links `libgemstone-core.so` under sbt 2.0.6.
+- Scala Native 0.5.12 links `libgemstone-native.so` under sbt 2.0.6.
 - A generated `libcuda.so.1` contains only C facade code and links to one process-wide `libgemstone_dispatch.so`.
 - The core exports only `ScalaNativeInit` and `gemstoneStartServer`; vendor symbols do not expose Scala implementation symbols.
 - The generated GNU ld scripts enforce explicit facade and core symbol versions.

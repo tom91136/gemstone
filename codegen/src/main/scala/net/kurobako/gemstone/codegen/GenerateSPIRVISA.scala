@@ -377,9 +377,7 @@ object GenerateSPIRVISA {
   ): String = {
     val sourceRows = upstream.map { case (file, names) => s"    \"${escape(file)}\" -> ${names.size}" }.mkString(",\n")
     s"""|// Generated from pinned Khronos grammar and SPIRV-Tools tests. Do not edit by hand.
-        |package net.kurobako.gemstone.isa.spirv.$packageVersion.generated
-        |
-        |import net.kurobako.gemstone.isa.spirv.$packageVersion.*
+        |package net.kurobako.gemstone.isa.spirv.$packageVersion
         |
         |final class ReferenceSuite extends munit.FunSuite {
         |  private val upstreamTestCounts: Map[String, Int] = Map(

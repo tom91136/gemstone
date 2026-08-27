@@ -1,4 +1,4 @@
-package net.kurobako.gemstone.isa.amdgpu.common.generated
+package net.kurobako.gemstone.isa.amdgpu.common
 
 // Generated encoding constants from pinned Mesa ACO inputs. Instruction metadata is attached
 // directly to generated InstructionDef cases in Instructions.scala. Do not edit.

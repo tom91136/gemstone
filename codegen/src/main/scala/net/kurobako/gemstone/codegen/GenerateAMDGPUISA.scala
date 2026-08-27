@@ -47,12 +47,12 @@ object GenerateAMDGPUISA {
       val catalog = Paths.get(output)
       write(catalog, render(result.records, result.acoCount, result.xmlCount, result.sopp))
       val instructions    = renderInstructions(result.records)
-      val instructionRoot = catalog.getParent.getParent
+      val instructionRoot = catalog.getParent
       write(instructionRoot.resolve("Instructions.scala"), instructions.main)
       val definitionsRoot = instructionRoot.resolve("definitions")
       deleteScalaFiles(definitionsRoot)
       instructions.definitions.foreach { case (name, content) => write(definitionsRoot.resolve(name), content) }
-      write(catalog.getParent.getParent.getParent.resolve("Architectures.scala"), renderArchitectures())
+      write(instructionRoot.getParent.resolve("Architectures.scala"), renderArchitectures())
     case _ =>
       throw new IllegalArgumentException(
         "usage: GenerateAMDGPUISA <prepared-references> <aco-exporter.py> <output.scala>"
@@ -193,7 +193,7 @@ object GenerateAMDGPUISA {
   }
 
   private def render(records: Vector[Instruction], acoCount: Int, xmlCount: Int, sopp: SOPPRule): String =
-    s"""|package net.kurobako.gemstone.isa.amdgpu.common.generated
+    s"""|package net.kurobako.gemstone.isa.amdgpu.common
         |
         |// Generated encoding constants from pinned Mesa ACO inputs. Instruction metadata is attached
         |// directly to generated InstructionDef cases in Instructions.scala. Do not edit.

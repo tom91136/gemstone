@@ -172,7 +172,7 @@ object GenerateAMDGPUGolden {
       encodingCheckCount: Int,
       diagnosticCheckCount: Int
   ): String =
-    s"""|package net.kurobako.gemstone.isa.amdgpu.common.generated
+    s"""|package net.kurobako.gemstone.isa.amdgpu.common
         |
         |import java.io.BufferedReader
         |import java.io.InputStreamReader
@@ -182,8 +182,6 @@ object GenerateAMDGPUGolden {
         |import java.nio.file.Paths
         |import java.util.zip.GZIPInputStream
         |import scala.collection.mutable.ArrayBuffer
-        |
-        |import net.kurobako.gemstone.isa.amdgpu.common.Target
         |
         |// Generated exhaustively from pinned LLVM MC/AMDGPU checks. Do not edit.
         |final case class AMDGPUGoldenCase(target: Target, assembly: String, bytes: Vector[Byte], source: String)
@@ -211,7 +209,7 @@ object GenerateAMDGPUGolden {
         |  private def load(name: String): Vector[String] = {
         |    val root = repositoryRoot(Paths.get(sys.props("user.dir")))
         |    val path = root.resolve(
-        |      "isa_amdgpu/src/generated/test/resources/net/kurobako/gemstone/isa/amdgpu/common/generated"
+        |      "isa_amdgpu/src/generated/test/resources/net/kurobako/gemstone/isa/amdgpu/common"
         |    ).resolve(name)
         |    val input  = new GZIPInputStream(Files.newInputStream(path))
         |    val reader = new BufferedReader(new InputStreamReader(input, StandardCharsets.UTF_8))

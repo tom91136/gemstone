@@ -1,7 +1,4 @@
-package net.kurobako.gemstone.isa.ptx.v9_3.generated
-
-import net.kurobako.gemstone.isa.ptx.v9_3.Printer
-import net.kurobako.gemstone.isa.ptx.v9_3.Parser
+package net.kurobako.gemstone.isa.ptx.v9_3
 
 // Generated from examples in the pinned NVIDIA PTX ISA 9.3 specification. Do not edit.
 final class DocumentationSuite extends munit.FunSuite {
