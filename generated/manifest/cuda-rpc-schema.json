@@ -1,4 +1,6 @@
-{"interface":"net.kurobako.gemstone.cuda.CUDA","identity":"exact-c-function-name","messageId":"sha256-128(function-name-utf8)","fingerprint":"639c93e36ccba7921e326fd8c375efad7e5f086750854fe1ab71d6c4ab391217","methods":[
+{"interface":"net.kurobako.gemstone.cuda.CUDA","identity":"exact-c-function-name","messageId":"sha256-128(function-name-utf8)","fingerprint":"43600c6dea6e9c839cf2881d8b7068e1d772d8df9052d9e6965db3b12abe869f","methods":[
+    {"name":"__cudaGemsiManagedRegister","messageId":"710ed6cabac43f0663e544ec115aef33","parameters":[{"name":"pointer","wireType":"DevicePtr"},{"name":"bytesize","wireType":"SizeT"}],"result":"UnitValue"},
+    {"name":"__cudaGemsiManagedUnregister","messageId":"293db04a48efebbbd342e867af7ded7e","parameters":[{"name":"pointer","wireType":"DevicePtr"}],"result":"UnitValue"},
     {"name":"cuCtxCreate_v2","messageId":"e6eb5473c0a097e3a17c8d63cec75a44","parameters":[{"name":"flags","wireType":"UInt32"},{"name":"device","wireType":"Device"}],"result":"Context"},
     {"name":"cuCtxDestroy_v2","messageId":"b574aacc9b35ee6a8135b883071cc261","parameters":[{"name":"context","wireType":"Context"}],"result":"UnitValue"},
     {"name":"cuCtxSynchronize","messageId":"e21f80c194a589d44af681a7ef75bb10","parameters":[],"result":"UnitValue"},

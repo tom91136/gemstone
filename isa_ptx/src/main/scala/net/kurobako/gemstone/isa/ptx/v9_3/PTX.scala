@@ -12,6 +12,7 @@ import scala.collection.mutable.ArrayBuffer
 enum PTXValue {
   case Register(name: String)
   case Immediate(value: Long)
+  case Address(base: PTXValue, offset: Long)
   case ThreadIdX
   case BlockIdX
   case BlockDimX
@@ -20,17 +21,40 @@ enum PTXValue {
 enum PTXIntegerOperation {
   case Add
   case Subtract
+  case MultiplyLow
   case MultiplyWideUnsigned32
+  case MultiplyWideSigned32
   case ShiftLeft
+}
+
+enum PTXIntegerUnaryOperation {
+  case Negate
+  case BitwiseNot
 }
 
 enum PTXComparison {
   case Equal
+  case EqualUnordered
   case NotEqual
+  case NotEqualUnordered
   case LessThan
+  case LessThanUnordered
   case LessThanOrEqual
+  case LessThanOrEqualUnordered
   case GreaterThan
+  case GreaterThanUnordered
   case GreaterThanOrEqual
+  case GreaterThanOrEqualUnordered
+}
+
+enum PTXFloatOperation {
+  case Add
+  case Subtract
+  case Multiply
+}
+
+enum PTXFloatUnaryOperation {
+  case Negate
 }
 
 sealed trait PTXInstruction extends Product with Serializable {
@@ -38,12 +62,18 @@ sealed trait PTXInstruction extends Product with Serializable {
 }
 
 object PTXInstruction {
-  final case class LoadParameter(destination: String, parameter: String, width: Int) extends PTXInstruction {
-    override val opcode: String = s"ld.param.u$width"
+  final case class LoadParameter(destinations: Vector[String], parameter: String, offset: Int, elementWidth: Int)
+      extends PTXInstruction {
+    override val opcode: String = s"ld.param.u$elementWidth"
   }
 
   final case class Move(destination: String, source: PTXValue, width: Int) extends PTXInstruction {
     override val opcode: String = s"mov.u$width"
+  }
+
+  final case class IntegerUnary(operation: PTXIntegerUnaryOperation, destination: String, source: PTXValue, width: Int)
+      extends PTXInstruction {
+    override val opcode: String = s"${if (operation == PTXIntegerUnaryOperation.Negate) "neg" else "not"}.b$width"
   }
 
   final case class IntegerBinary(
@@ -56,7 +86,9 @@ object PTXInstruction {
     override val opcode: String = operation match {
       case PTXIntegerOperation.Add                    => s"add.u$width"
       case PTXIntegerOperation.Subtract               => s"sub.u$width"
+      case PTXIntegerOperation.MultiplyLow            => s"mul.lo.u$width"
       case PTXIntegerOperation.MultiplyWideUnsigned32 => "mul.wide.u32"
+      case PTXIntegerOperation.MultiplyWideSigned32   => "mul.wide.s32"
       case PTXIntegerOperation.ShiftLeft              => s"shl.b$width"
     }
   }
@@ -66,18 +98,43 @@ object PTXInstruction {
     override val opcode: String = "mad.lo.s32"
   }
 
-  final case class LoadGlobal32(destination: String, address: PTXValue) extends PTXInstruction {
-    override val opcode: String = "ld.global.u32"
+  final case class FloatBinary(
+      operation: PTXFloatOperation,
+      destination: String,
+      left: PTXValue,
+      right: PTXValue,
+      width: Int
+  ) extends PTXInstruction {
+    override val opcode: String = s"${operation.toString.toLowerCase}.f$width"
   }
 
-  final case class StoreGlobal32(address: PTXValue, source: PTXValue) extends PTXInstruction {
-    override val opcode: String = "st.global.u32"
+  final case class FloatUnary(operation: PTXFloatUnaryOperation, destination: String, source: PTXValue, width: Int)
+      extends PTXInstruction {
+    override val opcode: String = s"neg.f$width"
+  }
+
+  final case class Convert(
+      destination: String,
+      source: PTXValue,
+      sourceType: String,
+      destinationType: String,
+      rounding: Option[String]
+  ) extends PTXInstruction {
+    override val opcode: String = s"cvt.${rounding.map(_ + ".").getOrElse("")}$destinationType.$sourceType"
+  }
+
+  final case class LoadGlobal(destination: String, address: PTXValue, width: Int) extends PTXInstruction {
+    override val opcode: String = s"ld.global.u$width"
+  }
+
+  final case class StoreGlobal(address: PTXValue, source: PTXValue, width: Int) extends PTXInstruction {
+    override val opcode: String = s"st.global.u$width"
   }
 
   final case class SetPredicate(
       destination: String,
       comparison: PTXComparison,
-      signed: Boolean,
+      kind: Char,
       left: PTXValue,
       right: PTXValue,
       width: Int
@@ -105,7 +162,12 @@ final case class PTXExecutable(instruction: PTXInstruction, predication: Option[
 }
 
 final case class PTXParameter(name: String, widthBytes: Int)
-final case class PTXArgument(value: Long)
+final case class PTXArgument(bytes: IArray[Byte])
+
+object PTXArgument {
+  def apply(value: Long): PTXArgument =
+    PTXArgument(IArray.tabulate(8)(index => (value >>> (index * 8)).toByte))
+}
 
 final case class PTXKernel(name: String, parameters: Vector[PTXParameter], program: ExecutableProgram[PTXExecutable]) {
   def instructions: Vector[PTXInstruction] = program.instructions.map(_.instruction)
@@ -170,10 +232,21 @@ object PTXLowerer {
         case "u32" | "s32" | "b32" | "f32" => 4
         case "u64" | "s64" | "b64" | "f64" => 8
       }
-      if (parameter.dimensions.nonEmpty)
-        return Left(PTXLoweringError.Unsupported(parameter.name, "array-valued kernel parameters"))
       widths.lastOption match {
-        case Some(width) => result += PTXParameter(parameter.name, width)
+        case Some(width) =>
+          val elements = parameter.dimensions.foldLeft[Either[PTXLoweringError, Long]](Right(1L)) { (current, value) =>
+            for {
+              count   <- current
+              element <- immediate(value)
+              product <-
+                if (element > 0 && count <= Int.MaxValue.toLong / element) Right(count * element)
+                else invalid(s"kernel parameter ${parameter.name} has an invalid array dimension: $element")
+            } yield product
+          }
+          elements match {
+            case Left(error)  => return Left(error)
+            case Right(count) => result += PTXParameter(parameter.name, Math.toIntExact(width.toLong * count))
+          }
         case None => return Left(PTXLoweringError.Invalid(s"kernel parameter ${parameter.name} has no scalar width"))
       }
       index += 1
@@ -191,15 +264,17 @@ object PTXLowerer {
       labels: Map[String, Pc]
   ): Either[PTXLoweringError, PTXExecutable] = {
     val lowered = instruction match {
-      case Instruction.Ld(destination, address, None, _, _)
-          if instruction.qualifiedOpcode == "ld.param.u32" || instruction.qualifiedOpcode == "ld.param.u64" =>
+      case Instruction.Ld(destination, address, None, modifiers, _)
+          if instruction.qualifiedOpcode.startsWith("ld.param.") =>
         for {
-          destinationName <- registerName(destination)
-          parameter       <- addressSymbol(address)
+          destinationNames   <- registerNames(destination)
+          parameterAndOffset <- parameterAddress(address)
+          width              <- integerWidth(modifiers)
         } yield PTXInstruction.LoadParameter(
-          destinationName,
-          parameter,
-          if (instruction.qualifiedOpcode.endsWith("32")) 32 else 64
+          destinationNames,
+          parameterAndOffset._1,
+          parameterAndOffset._2,
+          width
         )
       case Instruction.Mov(destination, source, _, _)
           if instruction.qualifiedOpcode == "mov.u32" || instruction.qualifiedOpcode == "mov.b32" =>
@@ -213,6 +288,24 @@ object PTXLowerer {
           destinationName <- registerName(destination)
           sourceValue     <- value(source)
         } yield PTXInstruction.Move(destinationName, sourceValue, 64)
+      case Instruction.Neg(destination, source, modifiers, _) if !instruction.qualifiedOpcode.contains(".f") =>
+        for {
+          destinationName <- registerName(destination)
+          sourceValue     <- value(source)
+          width           <- integerWidth(modifiers)
+        } yield PTXInstruction.IntegerUnary(PTXIntegerUnaryOperation.Negate, destinationName, sourceValue, width)
+      case Instruction.Neg(destination, source, modifiers, _) if instruction.qualifiedOpcode.contains(".f") =>
+        for {
+          destinationName <- registerName(destination)
+          sourceValue     <- value(source)
+          width           <- integerWidth(modifiers)
+        } yield PTXInstruction.FloatUnary(PTXFloatUnaryOperation.Negate, destinationName, sourceValue, width)
+      case Instruction.Not(destination, source, modifiers, _) =>
+        for {
+          destinationName <- registerName(destination)
+          sourceValue     <- value(source)
+          width           <- integerWidth(modifiers)
+        } yield PTXInstruction.IntegerUnary(PTXIntegerUnaryOperation.BitwiseNot, destinationName, sourceValue, width)
       case Instruction.Mul(destination, left, right, _, _) if instruction.qualifiedOpcode == "mul.wide.u32" =>
         for {
           destinationName <- registerName(destination)
@@ -225,8 +318,28 @@ object PTXLowerer {
           rightValue,
           64
         )
+      case Instruction.Mul(destination, left, right, _, _) if instruction.qualifiedOpcode == "mul.wide.s32" =>
+        for {
+          destinationName <- registerName(destination)
+          leftValue       <- value(left)
+          rightValue      <- value(right)
+        } yield PTXInstruction.IntegerBinary(
+          PTXIntegerOperation.MultiplyWideSigned32,
+          destinationName,
+          leftValue,
+          rightValue,
+          64
+        )
+      case Instruction.Mul(destination, left, right, modifiers, _)
+          if instruction.qualifiedOpcode.startsWith("mul.lo.") =>
+        integerWidth(modifiers).flatMap(integerBinary(PTXIntegerOperation.MultiplyLow, _, destination, left, right))
+      case Instruction.Mul(destination, left, right, modifiers, _)
+          if instruction.qualifiedOpcode.startsWith("mul.f") =>
+        floatBinary(PTXFloatOperation.Multiply, destination, left, right, modifiers)
       case Instruction.Shl(destination, left, right, _, _) if instruction.qualifiedOpcode == "shl.b32" =>
         integerBinary(PTXIntegerOperation.ShiftLeft, 32, destination, left, right)
+      case Instruction.Shl(destination, left, right, modifiers, _) if instruction.qualifiedOpcode.startsWith("shl.") =>
+        integerWidth(modifiers).flatMap(integerBinary(PTXIntegerOperation.ShiftLeft, _, destination, left, right))
       case Instruction.Mad(destination, left, right, addend, _, _)
           if instruction.qualifiedOpcode == "mad.lo.s32" =>
         for {
@@ -247,16 +360,51 @@ object PTXLowerer {
       case Instruction.Sub(destination, left, right, _, _)
           if instruction.qualifiedOpcode == "sub.u64" || instruction.qualifiedOpcode == "sub.s64" =>
         integerBinary(PTXIntegerOperation.Subtract, 64, destination, left, right)
-      case Instruction.Ld(destination, address, None, _, _) if instruction.qualifiedOpcode == "ld.global.u32" =>
+      case Instruction.Add(destination, left, right, modifiers, _)
+          if instruction.qualifiedOpcode.startsWith("add.f") =>
+        floatBinary(PTXFloatOperation.Add, destination, left, right, modifiers)
+      case Instruction.Sub(destination, left, right, modifiers, _)
+          if instruction.qualifiedOpcode.startsWith("sub.f") =>
+        floatBinary(PTXFloatOperation.Subtract, destination, left, right, modifiers)
+      case Instruction.Add(destination, left, right, modifiers, _)
+          if instruction.qualifiedOpcode.startsWith("add.") =>
+        integerWidth(modifiers).flatMap(integerBinary(PTXIntegerOperation.Add, _, destination, left, right))
+      case Instruction.Sub(destination, left, right, modifiers, _)
+          if instruction.qualifiedOpcode.startsWith("sub.") =>
+        integerWidth(modifiers).flatMap(integerBinary(PTXIntegerOperation.Subtract, _, destination, left, right))
+      case Instruction.Cvta(destination, source, _, _) if instruction.qualifiedOpcode == "cvta.to.global.u64" =>
+        for {
+          destinationName <- registerName(destination)
+          sourceValue     <- value(source)
+        } yield PTXInstruction.Move(destinationName, sourceValue, 64)
+      case Instruction.Cvt(destination, source, None, None, modifiers, _) =>
+        val types = modifiers.map(_.name).filter(name => name.matches("[usbf][0-9]+"))
+        if (types.size < 2) invalid(s"expected conversion source and destination types: ${instruction.qualifiedOpcode}")
+        else
+          for {
+            destinationName <- registerName(destination)
+            sourceValue     <- value(source)
+          } yield PTXInstruction.Convert(
+            destinationName,
+            sourceValue,
+            types.last,
+            types(types.size - 2),
+            modifiers.map(_.name).find(name => Set("rn", "rz", "rzi", "rm", "rmi", "rp", "rpi").contains(name))
+          )
+      case Instruction.Ld(destination, address, None, modifiers, _)
+          if instruction.qualifiedOpcode.startsWith("ld.global.") =>
         for {
           destinationName <- registerName(destination)
           addressValue    <- addressValue(address)
-        } yield PTXInstruction.LoadGlobal32(destinationName, addressValue)
-      case Instruction.St(address, source, None, _, _) if instruction.qualifiedOpcode == "st.global.u32" =>
+          width           <- integerWidth(modifiers)
+        } yield PTXInstruction.LoadGlobal(destinationName, addressValue, width)
+      case Instruction.St(address, source, None, modifiers, _)
+          if instruction.qualifiedOpcode.startsWith("st.global.") =>
         for {
           addressValue <- addressValue(address)
           sourceValue  <- value(source)
-        } yield PTXInstruction.StoreGlobal32(addressValue, sourceValue)
+          width        <- integerWidth(modifiers)
+        } yield PTXInstruction.StoreGlobal(addressValue, sourceValue, width)
       case Instruction.Setp(destination, left, right, None, modifiers, _) =>
         lowerSetPredicate(destination, left, right, modifiers)
       case Instruction.Bra(target, _, _)
@@ -296,6 +444,20 @@ object PTXLowerer {
       rightValue      <- value(right)
     } yield PTXInstruction.IntegerBinary(operation, destinationName, leftValue, rightValue, width)
 
+  private def floatBinary(
+      operation: PTXFloatOperation,
+      destination: Operand,
+      left: Operand,
+      right: Operand,
+      modifiers: Vector[Modifier]
+  ): Either[PTXLoweringError, PTXInstruction] =
+    for {
+      destinationName <- registerName(destination)
+      leftValue       <- value(left)
+      rightValue      <- value(right)
+      width           <- integerWidth(modifiers)
+    } yield PTXInstruction.FloatBinary(operation, destinationName, leftValue, rightValue, width)
+
   private def lowerSetPredicate(
       destination: Operand,
       left: Operand,
@@ -305,33 +467,45 @@ object PTXLowerer {
     val modifiers   = instructionModifiers.map(_.name)
     val instruction = ("setp" +: modifiers).mkString(".")
     val comparison  = modifiers.collectFirst(Function.unlift {
-      case "eq" => Some(PTXComparison.Equal)
-      case "ne" => Some(PTXComparison.NotEqual)
-      case "lt" => Some(PTXComparison.LessThan)
-      case "le" => Some(PTXComparison.LessThanOrEqual)
-      case "gt" => Some(PTXComparison.GreaterThan)
-      case "ge" => Some(PTXComparison.GreaterThanOrEqual)
-      case _    => None
+      case "eq"  => Some(PTXComparison.Equal)
+      case "equ" => Some(PTXComparison.EqualUnordered)
+      case "ne"  => Some(PTXComparison.NotEqual)
+      case "neu" => Some(PTXComparison.NotEqualUnordered)
+      case "lt"  => Some(PTXComparison.LessThan)
+      case "ltu" => Some(PTXComparison.LessThanUnordered)
+      case "le"  => Some(PTXComparison.LessThanOrEqual)
+      case "leu" => Some(PTXComparison.LessThanOrEqualUnordered)
+      case "gt"  => Some(PTXComparison.GreaterThan)
+      case "gtu" => Some(PTXComparison.GreaterThanUnordered)
+      case "ge"  => Some(PTXComparison.GreaterThanOrEqual)
+      case "geu" => Some(PTXComparison.GreaterThanOrEqualUnordered)
+      case _     => None
     })
     val kind = modifiers.collectFirst {
-      case "u32" => false -> 32
-      case "s32" => true  -> 32
-      case "u64" => false -> 64
-      case "s64" => true  -> 64
+      case "u8"  => 'u' -> 8
+      case "s8"  => 's' -> 8
+      case "u16" => 'u' -> 16
+      case "s16" => 's' -> 16
+      case "u32" => 'u' -> 32
+      case "s32" => 's' -> 32
+      case "u64" => 'u' -> 64
+      case "s64" => 's' -> 64
+      case "f32" => 'f' -> 32
+      case "f64" => 'f' -> 64
     }
     for {
       predicate       <- comparison.toRight(PTXLoweringError.Invalid(s"unsupported setp comparison: $instruction"))
-      signedAndWidth  <- kind.toRight(PTXLoweringError.Invalid(s"unsupported setp type: $instruction"))
+      kindAndWidth    <- kind.toRight(PTXLoweringError.Invalid(s"unsupported setp type: $instruction"))
       destinationName <- registerName(destination)
       leftValue       <- value(left)
       rightValue      <- value(right)
     } yield PTXInstruction.SetPredicate(
       destinationName,
       predicate,
-      signedAndWidth._1,
+      kindAndWidth._1,
       leftValue,
       rightValue,
-      signedAndWidth._2
+      kindAndWidth._2
     )
   }
 
@@ -345,15 +519,54 @@ object PTXLowerer {
     case other                        => invalid(s"expected register, found ${Printer.render(other)}")
   }
 
+  private def registerNames(operand: Operand): Either[PTXLoweringError, Vector[String]] = operand match {
+    case Operand.VectorLiteral(items) =>
+      items.foldLeft[Either[PTXLoweringError, Vector[String]]](Right(Vector.empty)) { (current, item) =>
+        for {
+          names <- current
+          name  <- registerName(item)
+        } yield names :+ name
+      }
+    case other => registerName(other).map(Vector(_))
+  }
+
   private def addressValue(operand: Operand): Either[PTXLoweringError, PTXValue] = operand match {
-    case Operand.Address(Vector(single)) => value(single)
+    case Operand.Address(Vector(single)) => valueWithOffset(single)
     case other                           => invalid(s"expected address operand, found ${Printer.render(other)}")
   }
 
-  private def addressSymbol(operand: Operand): Either[PTXLoweringError, String] = operand match {
-    case Operand.Address(Vector(Operand.Symbol(name))) => Right(name)
+  private def parameterAddress(operand: Operand): Either[PTXLoweringError, (String, Int)] = operand match {
+    case Operand.Address(Vector(Operand.Symbol(name)))                      => Right(name -> 0)
+    case Operand.Address(Vector(Operand.Add(Operand.Symbol(name), offset))) =>
+      immediate(offset).flatMap(value =>
+        if (value >= 0L && value <= Int.MaxValue.toLong) Right(name -> value.toInt)
+        else invalid(s"parameter offset is outside Int range: $value")
+      )
     case other => invalid(s"expected parameter address, found ${Printer.render(other)}")
   }
+
+  private def valueWithOffset(operand: Operand): Either[PTXLoweringError, PTXValue] = operand match {
+    case Operand.Add(base, offset) =>
+      for {
+        baseValue   <- value(base)
+        offsetValue <- immediate(offset)
+      } yield PTXValue.Address(baseValue, offsetValue)
+    case Operand.Subtract(base, offset) =>
+      for {
+        baseValue   <- value(base)
+        offsetValue <- immediate(offset)
+      } yield PTXValue.Address(baseValue, -offsetValue)
+    case other => value(other)
+  }
+
+  private def integerWidth(modifiers: Vector[Modifier]): Either[PTXLoweringError, Int] =
+    modifiers.reverseIterator.collectFirst {
+      case Modifier(name) if name.matches("[usbf][0-9]+") => name.drop(1).toInt
+    }.filter(Set(8, 16, 32, 64).contains).toRight(
+      PTXLoweringError.Invalid(
+        s"expected an 8, 16, 32, or 64-bit integer type in ${modifiers.map(_.name).mkString(".")}"
+      )
+    )
 
   private def value(operand: Operand): Either[PTXLoweringError, PTXValue] = operand match {
     case Operand.Register("%tid.x", None)   => Right(PTXValue.ThreadIdX)
@@ -373,6 +586,8 @@ object PTXLowerer {
           Some(
             if (signless.startsWith("0x") || signless.startsWith("0X")) BigInt(signless.drop(2), 16) * sign
             else if (signless.startsWith("0b") || signless.startsWith("0B")) BigInt(signless.drop(2), 2) * sign
+            else if (signless.startsWith("0f") || signless.startsWith("0F")) BigInt(signless.drop(2), 16) * sign
+            else if (signless.startsWith("0d") || signless.startsWith("0D")) BigInt(signless.drop(2), 16) * sign
             else BigInt(raw)
           )
         catch {
@@ -402,7 +617,7 @@ object PTXParser {
 private enum PTXWrite extends Write {
   case Register(lane: Int, name: String, value: Long)
   case Predicate(lane: Int, name: String, value: Boolean)
-  case Memory32(lane: Int, address: GuestAddress, value: Int)
+  case Memory(lane: Int, address: GuestAddress, width: Int, value: Long)
 }
 
 private final class PTXBlockState(val laneCount: Int) {
@@ -424,10 +639,11 @@ private final class PTXExecutionContext(
   def read(lane: Int, value: PTXValue): Either[ExecutionFault, Long] = value match {
     case PTXValue.Register(name) => state.registers(lane).get(name)
         .toRight(ExecutionFault.UndefinedRegister(name, pc, lane))
-    case PTXValue.Immediate(immediate) => Right(immediate)
-    case PTXValue.ThreadIdX            => Right(lane.toLong)
-    case PTXValue.BlockIdX             => Right(block.toLong)
-    case PTXValue.BlockDimX            => Right(state.laneCount.toLong)
+    case PTXValue.Immediate(immediate)  => Right(immediate)
+    case PTXValue.Address(base, offset) => read(lane, base).map(_ + offset)
+    case PTXValue.ThreadIdX             => Right(lane.toLong)
+    case PTXValue.BlockIdX              => Right(block.toLong)
+    case PTXValue.BlockDimX             => Right(state.laneCount.toLong)
   }
 }
 
@@ -435,20 +651,38 @@ private object PTXSemantics {
   extension (instruction: PTXInstruction) {
     def execute(context: PTXExecutionContext, effects: Effects[PTXWrite]): Either[ExecutionFault, Step] =
       instruction match {
-        case PTXInstruction.LoadParameter(destination, parameter, width) =>
+        case PTXInstruction.LoadParameter(destinations, parameter, offset, elementWidth) =>
           context.arguments.get(parameter).toRight(
             ExecutionFault.InvalidState(s"missing kernel argument $parameter")
-          ).map { address =>
-            context.active.foreachLane(lane =>
-              effects.stage(PTXWrite.Register(lane, destination, truncate(address.value, width)))
-            )
-            Step.Advance
+          ).flatMap { argument =>
+            val elementBytes = elementWidth / 8
+            if (offset < 0 || offset > argument.bytes.length - elementBytes * destinations.size)
+              Left(ExecutionFault.InvalidState(
+                s"parameter $parameter load at $offset exceeds ${argument.bytes.length} bytes"
+              ))
+            else {
+              destinations.zipWithIndex.foreach { case (destination, index) =>
+                val value = decodeLittleEndian(argument.bytes, offset + index * elementBytes, elementBytes)
+                context.active.foreachLane(lane => effects.stage(PTXWrite.Register(lane, destination, value)))
+              }
+              Right(Step.Advance)
+            }
           }
         case PTXInstruction.Move(destination, source, width) =>
           forEveryLane(context) { lane =>
             context.read(lane, source).map(value =>
               effects.stage(PTXWrite.Register(lane, destination, truncate(value, width)))
             )
+          }.map(_ => Step.Advance)
+        case PTXInstruction.IntegerUnary(operation, destination, source, width) =>
+          forEveryLane(context) { lane =>
+            context.read(lane, source).map { value =>
+              val result = operation match {
+                case PTXIntegerUnaryOperation.Negate     => -value
+                case PTXIntegerUnaryOperation.BitwiseNot => ~value
+              }
+              effects.stage(PTXWrite.Register(lane, destination, truncate(result, width)))
+            }
           }.map(_ => Step.Advance)
         case PTXInstruction.IntegerBinary(operation, destination, left, right, width) =>
           forEveryLane(context) { lane =>
@@ -459,11 +693,23 @@ private object PTXSemantics {
               val result = operation match {
                 case PTXIntegerOperation.Add                    => leftValue + rightValue
                 case PTXIntegerOperation.Subtract               => leftValue - rightValue
+                case PTXIntegerOperation.MultiplyLow            => leftValue * rightValue
                 case PTXIntegerOperation.MultiplyWideUnsigned32 =>
                   (leftValue & 0xffffffffL) * (rightValue & 0xffffffffL)
-                case PTXIntegerOperation.ShiftLeft => leftValue << (rightValue & 0x1fL).toInt
+                case PTXIntegerOperation.MultiplyWideSigned32 => leftValue.toInt.toLong * rightValue.toInt.toLong
+                case PTXIntegerOperation.ShiftLeft            => leftValue << (rightValue & (width - 1).toLong).toInt
               }
               effects.stage(PTXWrite.Register(lane, destination, truncate(result, width)))
+            }
+          }.map(_ => Step.Advance)
+        case PTXInstruction.Convert(destination, source, sourceType, destinationType, rounding) =>
+          forEveryLane(context) { lane =>
+            context.read(lane, source).map { value =>
+              effects.stage(PTXWrite.Register(
+                lane,
+                destination,
+                convert(value, sourceType, destinationType, rounding)
+              ))
             }
           }.map(_ => Step.Advance)
         case PTXInstruction.MultiplyAddLow32(destination, left, right, addend) =>
@@ -476,30 +722,64 @@ private object PTXSemantics {
               PTXWrite.Register(lane, destination, truncate(leftValue * rightValue + addendValue, 32))
             )
           }.map(_ => Step.Advance)
-        case PTXInstruction.LoadGlobal32(destination, address) =>
+        case PTXInstruction.FloatBinary(operation, destination, left, right, width) =>
+          forEveryLane(context) { lane =>
+            for {
+              leftBits  <- context.read(lane, left)
+              rightBits <- context.read(lane, right)
+            } yield {
+              val result =
+                if (width == 32) {
+                  val leftValue  = java.lang.Float.intBitsToFloat(leftBits.toInt)
+                  val rightValue = java.lang.Float.intBitsToFloat(rightBits.toInt)
+                  val value      = operation match {
+                    case PTXFloatOperation.Add      => leftValue + rightValue
+                    case PTXFloatOperation.Subtract => leftValue - rightValue
+                    case PTXFloatOperation.Multiply => leftValue * rightValue
+                  }
+                  java.lang.Float.floatToRawIntBits(value).toLong & 0xffffffffL
+                } else {
+                  val leftValue  = java.lang.Double.longBitsToDouble(leftBits)
+                  val rightValue = java.lang.Double.longBitsToDouble(rightBits)
+                  val value      = operation match {
+                    case PTXFloatOperation.Add      => leftValue + rightValue
+                    case PTXFloatOperation.Subtract => leftValue - rightValue
+                    case PTXFloatOperation.Multiply => leftValue * rightValue
+                  }
+                  java.lang.Double.doubleToRawLongBits(value)
+                }
+              effects.stage(PTXWrite.Register(lane, destination, result))
+            }
+          }.map(_ => Step.Advance)
+        case PTXInstruction.FloatUnary(PTXFloatUnaryOperation.Negate, destination, source, width) =>
+          forEveryLane(context) { lane =>
+            context.read(lane, source).map { value =>
+              val signBit = if (width == 32) 1L << 31 else 1L << 63
+              effects.stage(PTXWrite.Register(lane, destination, value ^ signBit))
+            }
+          }.map(_ => Step.Advance)
+        case PTXInstruction.LoadGlobal(destination, address, width) =>
           forEveryLane(context) { lane =>
             context.read(lane, address).flatMap { rawAddress =>
-              context.memory.readInt32(GuestAddress(rawAddress)).left.map(error =>
-                ExecutionFault.Memory(error.message)
-              ).map {
-                loaded => effects.stage(PTXWrite.Register(lane, destination, loaded.toLong & 0xffffffffL))
+              readMemory(context.memory, GuestAddress(rawAddress), width).map { loaded =>
+                effects.stage(PTXWrite.Register(lane, destination, loaded))
               }
             }
           }.map(_ => Step.Advance)
-        case PTXInstruction.StoreGlobal32(address, source) =>
+        case PTXInstruction.StoreGlobal(address, source, width) =>
           forEveryLane(context) { lane =>
             for {
               rawAddress <- context.read(lane, address)
               value      <- context.read(lane, source)
-            } yield effects.stage(PTXWrite.Memory32(lane, GuestAddress(rawAddress), value.toInt))
+            } yield effects.stage(PTXWrite.Memory(lane, GuestAddress(rawAddress), width, value))
           }.map(_ => Step.Advance)
-        case PTXInstruction.SetPredicate(destination, comparison, signed, left, right, width) =>
+        case PTXInstruction.SetPredicate(destination, comparison, kind, left, right, width) =>
           forEveryLane(context) { lane =>
             for {
               leftValue  <- context.read(lane, left)
               rightValue <- context.read(lane, right)
             } yield effects.stage(
-              PTXWrite.Predicate(lane, destination, compare(leftValue, rightValue, comparison, signed, width))
+              PTXWrite.Predicate(lane, destination, compare(leftValue, rightValue, comparison, kind, width))
             )
           }.map(_ => Step.Advance)
         case PTXInstruction.Branch(target)  => Right(Step.Jump(target))
@@ -526,27 +806,105 @@ private object PTXSemantics {
       left: Long,
       right: Long,
       comparison: PTXComparison,
-      signed: Boolean,
+      kind: Char,
       width: Int
   ): Boolean = {
-    val leftValue  = truncate(left, width)
-    val rightValue = truncate(right, width)
-    val order      =
-      if (signed) java.lang.Long.compare(signExtend(leftValue, width), signExtend(rightValue, width))
-      else if (width == 64) java.lang.Long.compareUnsigned(leftValue, rightValue)
-      else java.lang.Long.compare(leftValue, rightValue)
+    val leftValue          = truncate(left, width)
+    val rightValue         = truncate(right, width)
+    val (order, unordered) =
+      if (kind == 'f') {
+        val leftFloat = if (width == 32) java.lang.Float.intBitsToFloat(leftValue.toInt).toDouble
+        else java.lang.Double.longBitsToDouble(leftValue)
+        val rightFloat = if (width == 32) java.lang.Float.intBitsToFloat(rightValue.toInt).toDouble
+        else java.lang.Double.longBitsToDouble(rightValue)
+        val order = if (leftFloat < rightFloat) -1 else if (leftFloat > rightFloat) 1 else 0
+        order -> (leftFloat.isNaN || rightFloat.isNaN)
+      } else {
+        val integerOrder =
+          if (kind == 's') java.lang.Long.compare(signExtend(leftValue, width), signExtend(rightValue, width))
+          else if (width == 64) java.lang.Long.compareUnsigned(leftValue, rightValue)
+          else java.lang.Long.compare(leftValue, rightValue)
+        integerOrder -> false
+      }
     comparison match {
-      case PTXComparison.Equal              => leftValue == rightValue
-      case PTXComparison.NotEqual           => leftValue != rightValue
-      case PTXComparison.LessThan           => order < 0
-      case PTXComparison.LessThanOrEqual    => order <= 0
-      case PTXComparison.GreaterThan        => order > 0
-      case PTXComparison.GreaterThanOrEqual => order >= 0
+      case PTXComparison.Equal                       => !unordered && order == 0
+      case PTXComparison.EqualUnordered              => unordered || order == 0
+      case PTXComparison.NotEqual                    => !unordered && order != 0
+      case PTXComparison.NotEqualUnordered           => unordered || order != 0
+      case PTXComparison.LessThan                    => !unordered && order < 0
+      case PTXComparison.LessThanUnordered           => unordered || order < 0
+      case PTXComparison.LessThanOrEqual             => !unordered && order <= 0
+      case PTXComparison.LessThanOrEqualUnordered    => unordered || order <= 0
+      case PTXComparison.GreaterThan                 => !unordered && order > 0
+      case PTXComparison.GreaterThanUnordered        => unordered || order > 0
+      case PTXComparison.GreaterThanOrEqual          => !unordered && order >= 0
+      case PTXComparison.GreaterThanOrEqualUnordered => unordered || order >= 0
     }
   }
 
   private def signExtend(value: Long, width: Int): Long =
     if (width == 64) value else (value << (64 - width)) >> (64 - width)
+
+  private def convert(value: Long, sourceType: String, destinationType: String, rounding: Option[String]): Long = {
+    val sourceWidth      = sourceType.drop(1).toInt
+    val destinationWidth = destinationType.drop(1).toInt
+    val sourceKind       = sourceType.head
+    val destinationKind  = destinationType.head
+    if (sourceKind == 'f') {
+      val floating =
+        if (sourceWidth == 32) java.lang.Float.intBitsToFloat(value.toInt).toDouble
+        else java.lang.Double.longBitsToDouble(value)
+      if (destinationKind == 'f') {
+        if (destinationWidth == 32) java.lang.Float.floatToRawIntBits(floating.toFloat).toLong & 0xffffffffL
+        else java.lang.Double.doubleToRawLongBits(floating)
+      } else {
+        val rounded = rounding match {
+          case Some("rn")               => Math.rint(floating)
+          case Some("rm") | Some("rmi") => Math.floor(floating)
+          case Some("rp") | Some("rpi") => Math.ceil(floating)
+          case _                        => if (floating < 0) Math.ceil(floating) else Math.floor(floating)
+        }
+        truncate(rounded.toLong, destinationWidth)
+      }
+    } else {
+      val sourceBits = truncate(value, sourceWidth)
+      val integer    =
+        if (sourceKind == 's') signExtend(sourceBits, sourceWidth)
+        else sourceBits
+      if (destinationKind == 'f') {
+        val floating =
+          if (sourceKind == 'u' && sourceWidth == 64 && integer < 0)
+            BigInt(java.lang.Long.toUnsignedString(integer)).toDouble
+          else integer.toDouble
+        if (destinationWidth == 32) java.lang.Float.floatToRawIntBits(floating.toFloat).toLong & 0xffffffffL
+        else java.lang.Double.doubleToRawLongBits(floating)
+      } else truncate(integer, destinationWidth)
+    }
+  }
+
+  private def decodeLittleEndian(bytes: IArray[Byte], offset: Int, size: Int): Long = {
+    var result = 0L
+    var index  = 0
+    while (index < size) {
+      result |= (bytes(offset + index).toLong & 0xffL) << (index * 8)
+      index += 1
+    }
+    result
+  }
+
+  private def readMemory(memory: CheckedMemory, address: GuestAddress, width: Int): Either[ExecutionFault, Long] = {
+    val bytes  = width / 8
+    var result = 0L
+    var index  = 0
+    while (index < bytes) {
+      memory.readInt8(address.offset(index.toLong)) match {
+        case Left(error)  => return Left(ExecutionFault.Memory(error.message))
+        case Right(value) => result |= (value.toLong & 0xffL) << (index * 8)
+      }
+      index += 1
+    }
+    Right(result)
+  }
 }
 
 final case class PTXExecutionError(message: String)
@@ -562,12 +920,9 @@ object PTXInterpreter {
       arguments: Map[String, PTXArgument],
       memory: CheckedMemory,
       limits: ExecutionLimits = ExecutionLimits.Default,
-      cancellation: CancellationToken = CancellationToken.Never
+      cancellation: CancellationToken = CancellationToken.Never,
+      captureTrace: Boolean = true
   ): Either[PTXExecutionError, PTXExecutionResult] = {
-    if (shape.threadsPerBlock > 64)
-      return Left(PTXExecutionError(
-        s"the initial PTX cohort engine supports at most 64 threads per block, found ${shape.threadsPerBlock}"
-      ))
     if (limits.maxInstructions <= 0L || limits.quantum <= 0)
       return Left(PTXExecutionError(s"invalid execution limits: $limits"))
     val budget = ExecutionBudget(limits.maxInstructions) match {
@@ -587,6 +942,7 @@ object PTXInterpreter {
         limits,
         budget,
         cancellation,
+        captureTrace,
         trace,
         step
       ) match {
@@ -609,6 +965,7 @@ object PTXInterpreter {
       limits: ExecutionLimits,
       budget: ExecutionBudget,
       cancellation: CancellationToken,
+      captureTrace: Boolean,
       initialTrace: Trace,
       initialStep: Long
   ): Either[ExecutionFault, (Trace, Long)] = {
@@ -691,19 +1048,20 @@ object PTXInterpreter {
             case None        => ()
           }
           val skipped = cohort.lanes.subtract(active)
-          cohort.lanes.foreachLane { lane =>
-            trace = trace
-              .append(TraceEvent.SchedulerDecision(traceStep, block, lane))
-              .append(TraceEvent.Instruction(
-                traceStep + 1L,
-                kernel.name,
-                block,
-                lane,
-                cohort.pc.value,
-                executable.opcode
-              ))
-            traceStep += 2L
-          }
+          if (captureTrace)
+            cohort.lanes.foreachLane { lane =>
+              trace = trace
+                .append(TraceEvent.SchedulerDecision(traceStep, block, lane))
+                .append(TraceEvent.Instruction(
+                  traceStep + 1L,
+                  kernel.name,
+                  block,
+                  lane,
+                  cohort.pc.value,
+                  executable.opcode
+                ))
+              traceStep += 2L
+            }
 
           val context = new PTXExecutionContext(kernel, block, state, cohort.pc, active, arguments, memory)
           effects.clear()
@@ -718,12 +1076,13 @@ object PTXInterpreter {
               effects.commit(validateWrite(memory), applyWrite(state, memory)) match {
                 case Left(fault) => return Left(fault)
                 case Right(())   =>
-                  writes.foreach {
-                    case PTXWrite.Memory32(lane, address, value) =>
-                      trace = trace.append(TraceEvent.OutputWrite(traceStep, block, lane, address.value, value))
-                      traceStep += 1L
-                    case _ => ()
-                  }
+                  if (captureTrace)
+                    writes.foreach {
+                      case PTXWrite.Memory(lane, address, _, value) =>
+                        trace = trace.append(TraceEvent.OutputWrite(traceStep, block, lane, address.value, value.toInt))
+                        traceStep += 1L
+                      case _ => ()
+                    }
               }
               control match {
                 case Step.Advance =>
@@ -778,18 +1137,24 @@ object PTXInterpreter {
   }
 
   private def validateWrite(memory: CheckedMemory)(write: PTXWrite): Either[ExecutionFault, Unit] = write match {
-    case PTXWrite.Memory32(_, address, _) =>
-      memory.readInt32(address).left.map(error => ExecutionFault.Memory(error.message)).map(_ => ())
+    case PTXWrite.Memory(_, address, width, _) =>
+      memory.readInt8(address.offset(width / 8L - 1L)).left.map(error => ExecutionFault.Memory(error.message)).map(_ =>
+        ()
+      )
     case _ => Right(())
   }
 
   private def applyWrite(state: PTXBlockState, memory: CheckedMemory)(write: PTXWrite): Unit = write match {
-    case PTXWrite.Register(lane, name, value)  => state.registers(lane)(name) = value
-    case PTXWrite.Predicate(lane, name, value) => state.predicates(lane)(name) = value
-    case PTXWrite.Memory32(_, address, value)  =>
-      memory.writeInt32(address, value) match {
-        case Left(error) => throw new IllegalStateException(error.message)
-        case Right(())   => ()
+    case PTXWrite.Register(lane, name, value)      => state.registers(lane)(name) = value
+    case PTXWrite.Predicate(lane, name, value)     => state.predicates(lane)(name) = value
+    case PTXWrite.Memory(_, address, width, value) =>
+      var index = 0
+      while (index < width / 8) {
+        memory.writeInt8(address.offset(index.toLong), (value >>> (index * 8)).toByte) match {
+          case Left(error) => throw new IllegalStateException(error.message)
+          case Right(())   => ()
+        }
+        index += 1
       }
   }
 }

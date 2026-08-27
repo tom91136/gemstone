@@ -4,8 +4,10 @@ import net.kurobako.gemstone.cuda.*
 import net.kurobako.gemstone.rpc.*
 
 object GeneratedCUDARPC {
-  val SchemaFingerprint: String = "639c93e36ccba7921e326fd8c375efad7e5f086750854fe1ab71d6c4ab391217"
+  val SchemaFingerprint: String = "43600c6dea6e9c839cf2881d8b7068e1d772d8df9052d9e6965db3b12abe869f"
 
+  private val __cudaGemsiManagedRegisterId = MessageId(0x710ed6cabac43f06L, 0x63e544ec115aef33L)
+  private val __cudaGemsiManagedUnregisterId = MessageId(0x293db04a48efebbbL, 0xd342e867af7ded7eL)
   private val cuCtxCreate_v2Id = MessageId(0xe6eb5473c0a097e3L, 0xa17c8d63cec75a44L)
   private val cuCtxDestroy_v2Id = MessageId(0xb574aacc9b35ee6aL, 0x8135b883071cc261L)
   private val cuCtxSynchronizeId = MessageId(0xe21f80c194a589d4L, 0x4af681a7ef75bb10L)
@@ -28,6 +30,8 @@ object GeneratedCUDARPC {
   private val cudaMallocId = MessageId(0x36207ff276ba04dbL, 0x8ed2474e0fef125dL)
 
   val Schema: RPCSchema = RPCSchema("net.kurobako.gemstone.cuda.CUDA", SchemaFingerprint, Vector(
+    RPCMethod("__cudaGemsiManagedRegister", __cudaGemsiManagedRegisterId, Vector(RPCParameter("pointer", WireType.DevicePtr), RPCParameter("bytesize", WireType.SizeT)), WireType.UnitValue),
+    RPCMethod("__cudaGemsiManagedUnregister", __cudaGemsiManagedUnregisterId, Vector(RPCParameter("pointer", WireType.DevicePtr)), WireType.UnitValue),
     RPCMethod("cuCtxCreate_v2", cuCtxCreate_v2Id, Vector(RPCParameter("flags", WireType.UInt32), RPCParameter("device", WireType.Device)), WireType.Context),
     RPCMethod("cuCtxDestroy_v2", cuCtxDestroy_v2Id, Vector(RPCParameter("context", WireType.Context)), WireType.UnitValue),
     RPCMethod("cuCtxSynchronize", cuCtxSynchronizeId, Vector(), WireType.UnitValue),
@@ -55,6 +59,12 @@ object GeneratedCUDARPC {
       transport.schemaFingerprint == SchemaFingerprint,
       s"CUDA RPC schema mismatch: client=$SchemaFingerprint server=${transport.schemaFingerprint}"
     )
+
+    override def __cudaGemsiManagedRegister(pointer: DevicePtr, bytesize: SizeT): CUDAResult[Unit] =
+      decodeUnitValue(transport.call(RPCRequest(__cudaGemsiManagedRegisterId, "__cudaGemsiManagedRegister", Vector(WireValue.DevicePtrValue(pointer), WireValue.SizeTValue(bytesize)))))
+
+    override def __cudaGemsiManagedUnregister(pointer: DevicePtr): CUDAResult[Unit] =
+      decodeUnitValue(transport.call(RPCRequest(__cudaGemsiManagedUnregisterId, "__cudaGemsiManagedUnregister", Vector(WireValue.DevicePtrValue(pointer)))))
 
     override def cuCtxCreate_v2(flags: UInt32, device: Device): CUDAResult[Context] =
       decodeContext(transport.call(RPCRequest(cuCtxCreate_v2Id, "cuCtxCreate_v2", Vector(WireValue.UInt32Value(flags), WireValue.DeviceValue(device)))))
@@ -122,6 +132,16 @@ object GeneratedCUDARPC {
 
     override def dispatch(request: RPCRequest, implementation: CUDA): RPCResponse =
       request.messageId match {
+      case `__cudaGemsiManagedRegisterId` if request.functionName == "__cudaGemsiManagedRegister" =>
+        request.arguments match {
+          case Vector(WireValue.DevicePtrValue(pointer), WireValue.SizeTValue(bytesize)) => encodeUnitValue(implementation.__cudaGemsiManagedRegister(pointer, bytesize))
+          case _ => invalid("invalid arguments for __cudaGemsiManagedRegister")
+        }
+      case `__cudaGemsiManagedUnregisterId` if request.functionName == "__cudaGemsiManagedUnregister" =>
+        request.arguments match {
+          case Vector(WireValue.DevicePtrValue(pointer)) => encodeUnitValue(implementation.__cudaGemsiManagedUnregister(pointer))
+          case _ => invalid("invalid arguments for __cudaGemsiManagedUnregister")
+        }
       case `cuCtxCreate_v2Id` if request.functionName == "cuCtxCreate_v2" =>
         request.arguments match {
           case Vector(WireValue.UInt32Value(flags), WireValue.DeviceValue(device)) => encodeContext(implementation.cuCtxCreate_v2(flags, device))
@@ -228,17 +248,6 @@ object GeneratedCUDARPC {
 
   private def invalid(message: String): RPCResponse = RPCResponse.Failure(CUDAError(999, message))
 
-  private def decodeContext(response: RPCResponse): CUDAResult[Context] = response match {
-    case RPCResponse.Success(WireValue.ContextValue(value)) => CUDAResult.Success(value)
-    case RPCResponse.Success(_) => CUDAResult.Failure(CUDAError(999, "invalid Context response payload"))
-    case RPCResponse.Failure(error) => CUDAResult.Failure(error)
-  }
-
-  private def encodeContext(result: CUDAResult[Context]): RPCResponse = result match {
-    case CUDAResult.Success(value) => RPCResponse.Success(WireValue.ContextValue(value))
-    case CUDAResult.Failure(error) => RPCResponse.Failure(error)
-  }
-
   private def decodeUnitValue(response: RPCResponse): CUDAResult[Unit] = response match {
     case RPCResponse.Success(WireValue.UnitValue) => CUDAResult.Success(())
     case RPCResponse.Success(_) => CUDAResult.Failure(CUDAError(999, "invalid UnitValue response payload"))
@@ -247,6 +256,17 @@ object GeneratedCUDARPC {
 
   private def encodeUnitValue(result: CUDAResult[Unit]): RPCResponse = result match {
     case CUDAResult.Success(_) => RPCResponse.Success(WireValue.UnitValue)
+    case CUDAResult.Failure(error) => RPCResponse.Failure(error)
+  }
+
+  private def decodeContext(response: RPCResponse): CUDAResult[Context] = response match {
+    case RPCResponse.Success(WireValue.ContextValue(value)) => CUDAResult.Success(value)
+    case RPCResponse.Success(_) => CUDAResult.Failure(CUDAError(999, "invalid Context response payload"))
+    case RPCResponse.Failure(error) => CUDAResult.Failure(error)
+  }
+
+  private def encodeContext(result: CUDAResult[Context]): RPCResponse = result match {
+    case CUDAResult.Success(value) => RPCResponse.Success(WireValue.ContextValue(value))
     case CUDAResult.Failure(error) => RPCResponse.Failure(error)
   }
 

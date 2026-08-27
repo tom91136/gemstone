@@ -1,6 +1,7 @@
 package net.kurobako.gemstone.execution
 
 import scala.collection.mutable.ArrayBuffer
+import scala.collection.immutable.BitSet
 
 opaque type Pc = Int
 
@@ -23,41 +24,35 @@ object Pc {
   }
 }
 
-opaque type LaneMask = Long
+opaque type LaneMask = BitSet
 
 object LaneMask {
-  val Empty: LaneMask = 0L
+  private val MaximumLanes = 1024
+  val Empty: LaneMask      = BitSet.empty
 
   def all(laneCount: Int): Either[ExecutionFault, LaneMask] =
-    if (laneCount < 1 || laneCount > 64)
-      Left(ExecutionFault.InvalidProgram(s"lane count must be between 1 and 64, found $laneCount"))
-    else if (laneCount == 64) Right(-1L)
-    else Right((1L << laneCount) - 1L)
+    if (laneCount < 1 || laneCount > MaximumLanes)
+      Left(ExecutionFault.InvalidProgram(s"lane count must be between 1 and $MaximumLanes, found $laneCount"))
+    else Right(BitSet.fromSpecific(0 until laneCount))
 
   def one(lane: Int): Either[ExecutionFault, LaneMask] =
-    if (lane < 0 || lane >= 64) Left(ExecutionFault.InvalidProgram(s"lane index must be between 0 and 63, found $lane"))
-    else Right(1L << lane)
+    if (lane < 0 || lane >= MaximumLanes)
+      Left(ExecutionFault.InvalidProgram(s"lane index must be between 0 and ${MaximumLanes - 1}, found $lane"))
+    else Right(BitSet(lane))
 
-  def unsafe(value: Long): LaneMask = value
+  def unsafe(value: Long): LaneMask = BitSet.fromSpecific((0 until 64).filter(index => (value & (1L << index)) != 0L))
 
   extension (mask: LaneMask) {
-    def bits: Long                           = mask
-    def isEmpty: Boolean                     = mask == 0L
-    def nonEmpty: Boolean                    = mask != 0L
-    def size: Int                            = java.lang.Long.bitCount(mask)
-    def contains(lane: Int): Boolean         = lane >= 0 && lane < 64 && (mask & (1L << lane)) != 0L
+    def bits: Long                   = mask.iterator.filter(_ < 64).foldLeft(0L)((value, lane) => value | (1L << lane))
+    def isEmpty: Boolean             = mask.isEmpty
+    def nonEmpty: Boolean            = mask.nonEmpty
+    def size: Int                    = mask.size
+    def contains(lane: Int): Boolean = mask.contains(lane)
     def intersect(other: LaneMask): LaneMask = mask & other
     def union(other: LaneMask): LaneMask     = mask | other
-    def subtract(other: LaneMask): LaneMask  = mask & ~other
+    def subtract(other: LaneMask): LaneMask  = mask -- other
 
-    def foreachLane(function: Int => Unit): Unit = {
-      var remaining = mask
-      while (remaining != 0L) {
-        val lane = java.lang.Long.numberOfTrailingZeros(remaining)
-        function(lane)
-        remaining &= remaining - 1L
-      }
-    }
+    def foreachLane(function: Int => Unit): Unit = mask.foreach(function)
   }
 }
 

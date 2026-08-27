@@ -9,7 +9,7 @@ object Parser {
     P.charWhere(character => character == ' ' || character == '\t' || character == '\r' || character == '\n').void
 
   private val lineComment: P[Unit] =
-    P.string("//") *> P.charsWhile(character => character != '\n' && character != '\r').void
+    P.string("//") *> P.charsWhile0(character => character != '\n' && character != '\r').void
 
   private val blockComment: P[Unit] =
     P.string("/*") *> P.until(P.string("*/")).void <* P.string("*/")
@@ -233,6 +233,11 @@ object Parser {
       }
     }
 
+  private val functionDirective: P[Unit] = {
+    val names = Set("maxntid", "reqntid", "minnctapersm", "maxnreg", "maxclusterrank", "explicitcluster")
+    (dottedPath.filter(path => path.size == 1 && names.contains(path.head)) ~ directiveArguments).void
+  }
+
   private def entryOrFunction(self: P[Statement]): P[Statement] =
     for {
       _          <- lexeme(P.char('.'))
@@ -241,6 +246,7 @@ object Parser {
       returns    <- if (isEntry) P.pure(Vector.empty) else parameterList.backtrack.?.map(_.getOrElse(Vector.empty))
       name       <- identifier
       parameters <- parameterList.backtrack.?.map(_.getOrElse(Vector.empty))
+      _          <- functionDirective.backtrack.rep0
       body       <- (lexeme(P.char('{')) *> (self.rep0 <* lexeme(P.char('}')))).map(_.toVector).backtrack.?
       _          <- if (!isEntry && body.isEmpty) semicolon.backtrack.? else P.pure(Option.empty[Unit])
     } yield

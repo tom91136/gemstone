@@ -101,7 +101,7 @@ final class PTXCUDAKernelExecution extends CUDAKernelExecution {
               Left(
                 s"kernel argument ${parameter.name} expects ${parameter.widthBytes} bytes, found ${argument.bytes.length}"
               )
-            else Right(parameter.name -> PTXArgument(decodeLittleEndian(argument.bytes)))
+            else Right(parameter.name -> PTXArgument(argument.bytes))
           }
           decoded.collectFirst { case Left(error) => error } match {
             case Some(error) => failure(1, error)
@@ -111,7 +111,7 @@ final class PTXCUDAKernelExecution extends CUDAKernelExecution {
               shape match {
                 case Left(error)  => failure(1, error)
                 case Right(value) =>
-                  PTXInterpreter.execute(loaded.kernel, value, arguments, memory) match {
+                  PTXInterpreter.execute(loaded.kernel, value, arguments, memory, captureTrace = false) match {
                     case Left(error) => failure(700, error.message)
                     case Right(_)    => success(())
                   }
@@ -130,16 +130,6 @@ final class PTXCUDAKernelExecution extends CUDAKernelExecution {
     } catch {
       case error: Exception => failure(200, s"module image is not UTF-8 PTX: ${error.getMessage}")
     }
-
-  private def decodeLittleEndian(bytes: IArray[Byte]): Long = {
-    var value = 0L
-    var index = 0
-    while (index < bytes.length) {
-      value |= (bytes(index).toLong & 0xffL) << (index * 8)
-      index += 1
-    }
-    value
-  }
 
   private def success[A](value: A): CUDAResult[A]                   = CUDAResult.Success(value)
   private def failure[A](code: Int, message: String): CUDAResult[A] = CUDAResult.Failure(CUDAError(code, message))

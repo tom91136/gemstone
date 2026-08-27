@@ -128,6 +128,24 @@ final class CUDAEmulatorServer(kernelExecution: CUDAKernelExecution = CUDAKernel
   override def cuLaunchKernel(function: CUDAFunction, launch: KernelLaunch): CUDAResult[Unit] =
     kernelExecution.cuLaunchKernel(function, launch, deviceMemory)
 
+  override def __cudaGemsiManagedRegister(pointer: DevicePtr, bytesize: SizeT): CUDAResult[Unit] = synchronized {
+    checkedSize(bytesize).flatMap { size =>
+      val overlaps = allocations.exists { case (base, allocation) =>
+        val end        = Math.addExact(pointer.address, size.toLong)
+        val currentEnd = Math.addExact(base, allocation.length.toLong)
+        pointer.address < currentEnd && base < end
+      }
+      if (size == 0 || overlaps)
+        failure(1, s"invalid managed allocation at 0x${java.lang.Long.toUnsignedString(pointer.address, 16)}")
+      else {
+        allocations(pointer.address) = new Array[Byte](size)
+        success(())
+      }
+    }
+  }
+
+  override def __cudaGemsiManagedUnregister(pointer: DevicePtr): CUDAResult[Unit] = free(pointer)
+
   override def cudaGetDeviceCount(): CUDAResult[Int] = cuDeviceGetCount()
 
   override def cudaMalloc(bytesize: SizeT): CUDAResult[DevicePtr] = allocate(bytesize)
@@ -172,6 +190,13 @@ final class CUDAEmulatorServer(kernelExecution: CUDAKernelExecution = CUDAKernel
     override val allocation: Allocation =
       Allocation(GuestAddress(0L), Int.MaxValue, AllocationKind.Device, "CUDA allocation registry")
 
+    override def readInt8(address: GuestAddress): Either[MemoryError, Byte] = CUDAEmulatorServer.this.synchronized {
+      resolve(DevicePtr(address.value), 1).map { case (bytes, offset) => bytes(offset) } match {
+        case CUDAResult.Success(value) => Right(value)
+        case CUDAResult.Failure(error) => Left(MemoryError.InvalidAddress(address, 1, error.message))
+      }
+    }
+
     override def readInt32(address: GuestAddress): Either[MemoryError, Int] = CUDAEmulatorServer.this.synchronized {
       resolve(DevicePtr(address.value), 4).map { case (bytes, offset) =>
         (bytes(offset) & 0xff) |
@@ -194,6 +219,14 @@ final class CUDAEmulatorServer(kernelExecution: CUDAKernelExecution = CUDAKernel
         } match {
           case CUDAResult.Success(())    => Right(())
           case CUDAResult.Failure(error) => Left(MemoryError.InvalidAddress(address, 4, error.message))
+        }
+      }
+
+    override def writeInt8(address: GuestAddress, value: Byte): Either[MemoryError, Unit] =
+      CUDAEmulatorServer.this.synchronized {
+        resolve(DevicePtr(address.value), 1).map { case (bytes, offset) => bytes(offset) = value } match {
+          case CUDAResult.Success(())    => Right(())
+          case CUDAResult.Failure(error) => Left(MemoryError.InvalidAddress(address, 1, error.message))
         }
       }
 

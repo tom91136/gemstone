@@ -18,6 +18,13 @@ class ExecutionSuite extends munit.FunSuite {
     assert(mask.contains(63))
   }
 
+  test("lane masks scale to CUDA-sized blocks") {
+    val mask = LaneMask.all(256).toOption.get
+    assertEquals(mask.size, 256)
+    assert(mask.contains(0))
+    assert(mask.contains(255))
+  }
+
   test("effects validate every write before committing any") {
     val effects = new Effects[TestWrite]
     val applied = Vector.newBuilder[Int]

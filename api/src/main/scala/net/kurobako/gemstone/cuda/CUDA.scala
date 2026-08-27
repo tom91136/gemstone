@@ -23,14 +23,40 @@ trait CUDA {
   def cuModuleUnload(module: CUDAModule): CUDAResult[Unit]
   def cuLaunchKernel(function: CUDAFunction, launch: KernelLaunch): CUDAResult[Unit]
 
+  /** Internal transport operations backing host-dereferenceable managed and pinned allocations. */
+  def __cudaGemsiManagedRegister(pointer: DevicePtr, bytesize: SizeT): CUDAResult[Unit]
+  def __cudaGemsiManagedUnregister(pointer: DevicePtr): CUDAResult[Unit]
+
   def cudaGetDeviceCount(): CUDAResult[Int]
   def cudaMalloc(bytesize: SizeT): CUDAResult[DevicePtr]
   def cudaFree(pointer: DevicePtr): CUDAResult[Unit]
-  def cudaMemcpy(): CUDAResult[Nothing]                 = unsupported("cudaMemcpy")
-  def cudaGetErrorString(): CUDAResult[Nothing]         = unsupported("cudaGetErrorString")
-  def __cudaRegisterFatBinary(): CUDAResult[Nothing]    = unsupported("__cudaRegisterFatBinary")
-  def __cudaRegisterFatBinaryEnd(): CUDAResult[Nothing] = unsupported("__cudaRegisterFatBinaryEnd")
-  def __cudaUnregisterFatBinary(): CUDAResult[Nothing]  = unsupported("__cudaUnregisterFatBinary")
+  def cudaMemcpy(): CUDAResult[Nothing]              = unsupported("cudaMemcpy")
+  def cudaGetErrorString(): CUDAResult[Nothing]      = unsupported("cudaGetErrorString")
+  def cudaGetErrorName(): CUDAResult[Nothing]        = unsupported("cudaGetErrorName")
+  def cudaGetLastError(): CUDAResult[Nothing]        = unsupported("cudaGetLastError")
+  def cudaPeekAtLastError(): CUDAResult[Nothing]     = unsupported("cudaPeekAtLastError")
+  def cudaGetDevice(): CUDAResult[Nothing]           = unsupported("cudaGetDevice")
+  def cudaSetDevice(): CUDAResult[Nothing]           = unsupported("cudaSetDevice")
+  def cudaDeviceGetAttribute(): CUDAResult[Nothing]  = unsupported("cudaDeviceGetAttribute")
+  def cudaGetDeviceProperties(): CUDAResult[Nothing] = unsupported("cudaGetDeviceProperties")
+  def cudaDeviceSynchronize(): CUDAResult[Nothing]   = unsupported("cudaDeviceSynchronize")
+  def cudaStreamSynchronize(): CUDAResult[Nothing]   = unsupported("cudaStreamSynchronize")
+  def cudaMallocHost(): CUDAResult[Nothing]          = unsupported("cudaMallocHost")
+  def cudaFreeHost(): CUDAResult[Nothing]            = unsupported("cudaFreeHost")
+  def cudaMallocManaged(): CUDAResult[Nothing]       = unsupported("cudaMallocManaged")
+  def cudaMemcpyAsync(): CUDAResult[Nothing]         = unsupported("cudaMemcpyAsync")
+  def cudaFuncGetAttributes(): CUDAResult[Nothing]   = unsupported("cudaFuncGetAttributes")
+  def cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(): CUDAResult[Nothing] =
+    unsupported("cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags")
+  def __cudaGetKernel(): CUDAResult[Nothing]             = unsupported("__cudaGetKernel")
+  def __cudaLaunchKernel(): CUDAResult[Nothing]          = unsupported("__cudaLaunchKernel")
+  def __cudaPushCallConfiguration(): CUDAResult[Nothing] = unsupported("__cudaPushCallConfiguration")
+  def __cudaPopCallConfiguration(): CUDAResult[Nothing]  = unsupported("__cudaPopCallConfiguration")
+  def __cudaRegisterFunction(): CUDAResult[Nothing]      = unsupported("__cudaRegisterFunction")
+  def __cudaRegisterVar(): CUDAResult[Nothing]           = unsupported("__cudaRegisterVar")
+  def __cudaRegisterFatBinary(): CUDAResult[Nothing]     = unsupported("__cudaRegisterFatBinary")
+  def __cudaRegisterFatBinaryEnd(): CUDAResult[Nothing]  = unsupported("__cudaRegisterFatBinaryEnd")
+  def __cudaUnregisterFatBinary(): CUDAResult[Nothing]   = unsupported("__cudaUnregisterFatBinary")
 
   /** Stub-only symbols deliberately have no logical parameters: their native entry points ignore vendor ABI arguments
     * and return `CUDA_ERROR_NOT_SUPPORTED` without transport. Implementing one means replacing its concrete method with

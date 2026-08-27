@@ -40,13 +40,17 @@ object MemoryError {
 
 trait CheckedMemory {
   def allocation: Allocation
+  def readInt8(address: GuestAddress): Either[MemoryError, Byte]
   def readInt32(address: GuestAddress): Either[MemoryError, Int]
+  def writeInt8(address: GuestAddress, value: Byte): Either[MemoryError, Unit]
   def writeInt32(address: GuestAddress, value: Int): Either[MemoryError, Unit]
   def free(): Unit
 }
 
 final class ArrayCheckedMemory private (val allocation: Allocation, bytes: Array[Byte]) extends CheckedMemory {
   private var live = true
+
+  override def readInt8(address: GuestAddress): Either[MemoryError, Byte] = validate(address, 1).map(bytes(_))
 
   override def readInt32(address: GuestAddress): Either[MemoryError, Int] = validate(address, 4).map { offset =>
     (bytes(offset) & 0xff) |
@@ -61,6 +65,10 @@ final class ArrayCheckedMemory private (val allocation: Allocation, bytes: Array
       bytes(offset + 1) = (value >>> 8).toByte
       bytes(offset + 2) = (value >>> 16).toByte
       bytes(offset + 3) = (value >>> 24).toByte
+  }
+
+  override def writeInt8(address: GuestAddress, value: Byte): Either[MemoryError, Unit] = validate(address, 1).map {
+    offset => bytes(offset) = value
   }
 
   override def free(): Unit = live = false

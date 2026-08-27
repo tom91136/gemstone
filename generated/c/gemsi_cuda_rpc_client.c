@@ -9,6 +9,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+static const uint64_t gemsi___cudaGemsiManagedRegister_high = UINT64_C(0x710ed6cabac43f06);
+static const uint64_t gemsi___cudaGemsiManagedRegister_low = UINT64_C(0x63e544ec115aef33);
+static const uint64_t gemsi___cudaGemsiManagedUnregister_high = UINT64_C(0x293db04a48efebbb);
+static const uint64_t gemsi___cudaGemsiManagedUnregister_low = UINT64_C(0xd342e867af7ded7e);
 static const uint64_t gemsi_cuCtxCreate_v2_high = UINT64_C(0xe6eb5473c0a097e3);
 static const uint64_t gemsi_cuCtxCreate_v2_low = UINT64_C(0xa17c8d63cec75a44);
 static const uint64_t gemsi_cuCtxDestroy_v2_high = UINT64_C(0xb574aacc9b35ee6a);
@@ -267,6 +271,37 @@ int32_t cuMemsetD8_v2(uint64_t destination, uint8_t value, size_t count) {
   return gemsi_expect_unit(gemsi_call(gemsi_cuMemsetD8_v2_high, gemsi_cuMemsetD8_v2_low, "cuMemsetD8_v2", payload, sizeof(payload), &response), &response);
 }
 
+static int32_t gemsi_managed_register_remote(uint64_t pointer, size_t size) {
+  uint8_t payload[16];
+  gemsi_put_u64(payload, pointer);
+  gemsi_put_u64(payload + 8, (uint64_t)size);
+  GemsiRpcBuffer response = {0};
+  return gemsi_expect_unit(
+      gemsi_call(
+          gemsi___cudaGemsiManagedRegister_high,
+          gemsi___cudaGemsiManagedRegister_low,
+          "__cudaGemsiManagedRegister",
+          payload,
+          sizeof(payload),
+          &response),
+      &response);
+}
+
+static int32_t gemsi_managed_unregister_remote(uint64_t pointer) {
+  uint8_t payload[8];
+  gemsi_put_u64(payload, pointer);
+  GemsiRpcBuffer response = {0};
+  return gemsi_expect_unit(
+      gemsi_call(
+          gemsi___cudaGemsiManagedUnregister_high,
+          gemsi___cudaGemsiManagedUnregister_low,
+          "__cudaGemsiManagedUnregister",
+          payload,
+          sizeof(payload),
+          &response),
+      &response);
+}
+
 int32_t cuModuleLoadData(void **module, const void *image) {
   if (module == NULL || image == NULL) return GEMSI_STATUS_INVALID_VALUE;
   const size_t size = gemsi_bounded_string_length((const char *)image, GEMSI_RPC_MAXIMUM_PAYLOAD_SIZE);
@@ -348,9 +383,10 @@ int32_t cuLaunchKernel(
     void **kernel_params,
     void **extra) {
   if (function == NULL || grid_x == 0 || grid_y == 0 || grid_z == 0 ||
-      block_x == 0 || block_y == 0 || block_z == 0 || stream != NULL || extra != NULL) {
+      block_x == 0 || block_y == 0 || block_z == 0 || extra != NULL) {
     return GEMSI_STATUS_INVALID_VALUE;
   }
+  (void)stream;
   pthread_mutex_lock(&gemsi_kernel_mutex);
   GemsiKernelSignature *signature = gemsi_kernel_signatures;
   while (signature != NULL && signature->function != (uint64_t)(uintptr_t)function) signature = signature->next;
@@ -361,7 +397,7 @@ int32_t cuLaunchKernel(
   size_t payload_size = 40;
   for (uint32_t index = 0; index < signature->count; ++index) {
     const uint8_t width = signature->widths[index];
-    if ((width != 1 && width != 2 && width != 4 && width != 8) || kernel_params[index] == NULL ||
+    if (width == 0 || kernel_params[index] == NULL ||
         payload_size > GEMSI_RPC_MAXIMUM_PAYLOAD_SIZE - 4 - width) {
       pthread_mutex_unlock(&gemsi_kernel_mutex);
       return GEMSI_STATUS_INVALID_VALUE;
@@ -395,6 +431,83 @@ int32_t cuLaunchKernel(
   return status;
 }
 
+typedef struct GemsiMirroredAllocation {
+  void *host;
+  size_t size;
+  struct GemsiMirroredAllocation *next;
+} GemsiMirroredAllocation;
+
+static pthread_mutex_t gemsi_mirrored_mutex = PTHREAD_MUTEX_INITIALIZER;
+static GemsiMirroredAllocation *gemsi_mirrored_allocations = NULL;
+
+static int32_t gemsi_mirrored_allocate(void **pointer, size_t size) {
+  if (pointer == NULL) return GEMSI_STATUS_INVALID_VALUE;
+  void *host = malloc(size == 0 ? 1 : size);
+  if (host == NULL) return GEMSI_STATUS_UNKNOWN;
+  const int32_t status = gemsi_managed_register_remote((uint64_t)(uintptr_t)host, size == 0 ? 1 : size);
+  if (status != GEMSI_STATUS_SUCCESS) {
+    free(host);
+    return status;
+  }
+  GemsiMirroredAllocation *entry = (GemsiMirroredAllocation *)calloc(1, sizeof(*entry));
+  if (entry == NULL) {
+    (void)gemsi_managed_unregister_remote((uint64_t)(uintptr_t)host);
+    free(host);
+    return GEMSI_STATUS_UNKNOWN;
+  }
+  entry->host = host;
+  entry->size = size == 0 ? 1 : size;
+  pthread_mutex_lock(&gemsi_mirrored_mutex);
+  entry->next = gemsi_mirrored_allocations;
+  gemsi_mirrored_allocations = entry;
+  pthread_mutex_unlock(&gemsi_mirrored_mutex);
+  *pointer = host;
+  return GEMSI_STATUS_SUCCESS;
+}
+
+static int32_t gemsi_mirrored_free(void *pointer, int *found) {
+  *found = 0;
+  pthread_mutex_lock(&gemsi_mirrored_mutex);
+  GemsiMirroredAllocation **cursor = &gemsi_mirrored_allocations;
+  while (*cursor != NULL && (*cursor)->host != pointer) cursor = &(*cursor)->next;
+  if (*cursor == NULL) {
+    pthread_mutex_unlock(&gemsi_mirrored_mutex);
+    return GEMSI_STATUS_INVALID_VALUE;
+  }
+  GemsiMirroredAllocation *entry = *cursor;
+  *cursor = entry->next;
+  *found = 1;
+  pthread_mutex_unlock(&gemsi_mirrored_mutex);
+  const int32_t status = gemsi_managed_unregister_remote((uint64_t)(uintptr_t)entry->host);
+  free(entry->host);
+  free(entry);
+  return status;
+}
+
+static int32_t gemsi_mirrored_synchronize_to_device(void) {
+  int32_t status = GEMSI_STATUS_SUCCESS;
+  pthread_mutex_lock(&gemsi_mirrored_mutex);
+  for (GemsiMirroredAllocation *entry = gemsi_mirrored_allocations;
+       entry != NULL && status == GEMSI_STATUS_SUCCESS;
+       entry = entry->next) {
+    status = cuMemcpyHtoD_v2((uint64_t)(uintptr_t)entry->host, entry->host, entry->size);
+  }
+  pthread_mutex_unlock(&gemsi_mirrored_mutex);
+  return status;
+}
+
+static int32_t gemsi_mirrored_synchronize_from_device(void) {
+  int32_t status = GEMSI_STATUS_SUCCESS;
+  pthread_mutex_lock(&gemsi_mirrored_mutex);
+  for (GemsiMirroredAllocation *entry = gemsi_mirrored_allocations;
+       entry != NULL && status == GEMSI_STATUS_SUCCESS;
+       entry = entry->next) {
+    status = cuMemcpyDtoH_v2(entry->host, (uint64_t)(uintptr_t)entry->host, entry->size);
+  }
+  pthread_mutex_unlock(&gemsi_mirrored_mutex);
+  return status;
+}
+
 #if defined(__GNUC__)
 __attribute__((weak))
 #endif
@@ -411,7 +524,9 @@ int32_t cudaMalloc(void **pointer, size_t size) {
 }
 
 int32_t cudaFree(void *pointer) {
-  return cuMemFree_v2((uint64_t)(uintptr_t)pointer);
+  int found = 0;
+  const int32_t mirrored_status = gemsi_mirrored_free(pointer, &found);
+  return found ? mirrored_status : cuMemFree_v2((uint64_t)(uintptr_t)pointer);
 }
 
 int32_t cudaMemcpy(void *destination, const void *source, size_t size, int32_t kind) {
@@ -437,18 +552,435 @@ const char *cudaGetErrorString(int32_t status) {
   }
 }
 
-static void *gemsi_fat_binary_token = NULL;
+const char *cudaGetErrorName(int32_t status) {
+  switch (status) {
+    case GEMSI_STATUS_SUCCESS: return "cudaSuccess";
+    case GEMSI_STATUS_INVALID_VALUE: return "cudaErrorInvalidValue";
+    case GEMSI_STATUS_NOT_SUPPORTED: return "cudaErrorNotSupported";
+    case GEMSI_STATUS_INITIALIZATION_ERROR: return "cudaErrorInitializationError";
+    default: return "cudaErrorUnknown";
+  }
+}
+
+static _Thread_local int32_t gemsi_last_error = GEMSI_STATUS_SUCCESS;
+
+int32_t cudaPeekAtLastError(void) {
+  return gemsi_last_error;
+}
+
+int32_t cudaGetLastError(void) {
+  const int32_t status = gemsi_last_error;
+  gemsi_last_error = GEMSI_STATUS_SUCCESS;
+  return status;
+}
+
+int32_t cudaGetDevice(int32_t *device) {
+  if (device == NULL) return GEMSI_STATUS_INVALID_VALUE;
+  *device = 0;
+  return GEMSI_STATUS_SUCCESS;
+}
+
+int32_t cudaSetDevice(int32_t device) {
+  return device == 0 ? GEMSI_STATUS_SUCCESS : GEMSI_STATUS_INVALID_VALUE;
+}
+
+int32_t cudaDeviceSynchronize(void) {
+  return cuCtxSynchronize();
+}
+
+int32_t cudaStreamSynchronize(void *stream) {
+  (void)stream;
+  return cuCtxSynchronize();
+}
+
+int32_t cudaDeviceGetAttribute(int32_t *value, int32_t attribute, int32_t device) {
+  if (value == NULL || device != 0) return GEMSI_STATUS_INVALID_VALUE;
+  switch (attribute) {
+    case 1: *value = 1024; break;
+    case 2: *value = 1024; break;
+    case 3: *value = 1024; break;
+    case 4: *value = 64; break;
+    case 5: *value = 2147483647; break;
+    case 6: *value = 65535; break;
+    case 7: *value = 65535; break;
+    case 8: *value = 49152; break;
+    case 10: *value = 32; break;
+    case 16: *value = 1; break;
+    case 39: *value = 1024; break;
+    case 41: *value = 1; break;
+    case 75: *value = 7; break;
+    case 76: *value = 5; break;
+    case 81: *value = 49152; break;
+    case 83: *value = 1; break;
+    case 89: *value = 1; break;
+    case 95: *value = 1; break;
+    case 106: *value = 32; break;
+    default: *value = 0; break;
+  }
+  return GEMSI_STATUS_SUCCESS;
+}
+
+typedef struct GemsiDevicePropertiesPrefix {
+  char name[256];
+  uint8_t uuid[16];
+  char luid[8];
+  uint32_t luid_device_node_mask;
+  size_t total_global_memory;
+  size_t shared_memory_per_block;
+  int32_t registers_per_block;
+  int32_t warp_size;
+  size_t memory_pitch;
+  int32_t max_threads_per_block;
+  int32_t max_threads_dimension[3];
+  int32_t max_grid_size[3];
+  size_t total_constant_memory;
+  int32_t major;
+  int32_t minor;
+  size_t texture_alignment;
+  size_t texture_pitch_alignment;
+  int32_t multiprocessor_count;
+} GemsiDevicePropertiesPrefix;
+
+int32_t cudaGetDeviceProperties(void *properties, int32_t device) {
+  if (properties == NULL || device != 0) return GEMSI_STATUS_INVALID_VALUE;
+  GemsiDevicePropertiesPrefix *value = (GemsiDevicePropertiesPrefix *)properties;
+  memset(value, 0, sizeof(*value));
+  memcpy(value->name, "Gemstone PTX emulator", sizeof("Gemstone PTX emulator"));
+  value->total_global_memory = UINT64_C(8) * 1024 * 1024 * 1024;
+  value->shared_memory_per_block = 49152;
+  value->registers_per_block = 65536;
+  value->warp_size = 32;
+  value->memory_pitch = SIZE_MAX;
+  value->max_threads_per_block = 1024;
+  value->max_threads_dimension[0] = 1024;
+  value->max_threads_dimension[1] = 1024;
+  value->max_threads_dimension[2] = 64;
+  value->max_grid_size[0] = INT_MAX;
+  value->max_grid_size[1] = 65535;
+  value->max_grid_size[2] = 65535;
+  value->total_constant_memory = 65536;
+  value->major = 7;
+  value->minor = 5;
+  value->texture_alignment = 256;
+  value->texture_pitch_alignment = 32;
+  value->multiprocessor_count = 1;
+  return GEMSI_STATUS_SUCCESS;
+}
+
+typedef struct GemsiFunctionAttributesPrefix {
+  size_t shared_size_bytes;
+  size_t constant_size_bytes;
+  size_t local_size_bytes;
+  int32_t max_threads_per_block;
+  int32_t register_count;
+  int32_t ptx_version;
+  int32_t binary_version;
+  int32_t cache_mode_ca;
+  int32_t max_dynamic_shared_size_bytes;
+  int32_t preferred_shared_memory_carveout;
+} GemsiFunctionAttributesPrefix;
+
+int32_t cudaFuncGetAttributes(void *attributes, const void *function) {
+  if (attributes == NULL || function == NULL) return GEMSI_STATUS_INVALID_VALUE;
+  GemsiFunctionAttributesPrefix *value = (GemsiFunctionAttributesPrefix *)attributes;
+  memset(value, 0, sizeof(*value));
+  value->max_threads_per_block = 1024;
+  value->ptx_version = 92;
+  value->binary_version = 75;
+  value->max_dynamic_shared_size_bytes = 49152;
+  return GEMSI_STATUS_SUCCESS;
+}
+
+int32_t cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(
+    int32_t *blocks,
+    const void *function,
+    int32_t block_size,
+    size_t dynamic_shared_memory,
+    uint32_t flags) {
+  (void)function;
+  (void)dynamic_shared_memory;
+  (void)flags;
+  if (blocks == NULL || block_size <= 0 || block_size > 1024) return GEMSI_STATUS_INVALID_VALUE;
+  *blocks = 1024 / block_size;
+  if (*blocks == 0) *blocks = 1;
+  return GEMSI_STATUS_SUCCESS;
+}
+
+int32_t cudaMallocHost(void **pointer, size_t size) {
+  return gemsi_mirrored_allocate(pointer, size);
+}
+
+int32_t cudaFreeHost(void *pointer) {
+  int found = 0;
+  const int32_t status = gemsi_mirrored_free(pointer, &found);
+  return found ? status : GEMSI_STATUS_INVALID_VALUE;
+}
+
+int32_t cudaMallocManaged(void **pointer, size_t size, uint32_t flags) {
+  (void)flags;
+  return gemsi_mirrored_allocate(pointer, size);
+}
+
+int32_t cudaMemcpyAsync(
+    void *destination,
+    const void *source,
+    size_t size,
+    int32_t kind,
+    void *stream) {
+  (void)stream;
+  return cudaMemcpy(destination, source, size, kind);
+}
+
+typedef struct GemsiFatBinaryWrapper {
+  int32_t magic;
+  int32_t version;
+  const void *data;
+  void *filename;
+} GemsiFatBinaryWrapper;
+
+typedef struct GemsiFatBinary {
+  void *token;
+  void *module;
+  struct GemsiFatBinary *next;
+} GemsiFatBinary;
+
+typedef struct GemsiRegisteredFunction {
+  const void *host_function;
+  void *device_function;
+  char *device_name;
+  GemsiFatBinary *fat_binary;
+  struct GemsiRegisteredFunction *next;
+} GemsiRegisteredFunction;
+
+typedef struct GemsiDim3 {
+  uint32_t x;
+  uint32_t y;
+  uint32_t z;
+} GemsiDim3;
+
+typedef struct GemsiLaunchConfiguration {
+  GemsiDim3 grid;
+  GemsiDim3 block;
+  size_t shared_memory;
+  void *stream;
+  int valid;
+} GemsiLaunchConfiguration;
+
+static pthread_mutex_t gemsi_registration_mutex = PTHREAD_MUTEX_INITIALIZER;
+static GemsiFatBinary *gemsi_fat_binaries = NULL;
+static GemsiRegisteredFunction *gemsi_registered_functions = NULL;
+static _Thread_local GemsiLaunchConfiguration gemsi_launch_configuration = {0};
+
+static uint16_t gemsi_read_native_u16(const uint8_t *source) {
+  uint16_t value;
+  memcpy(&value, source, sizeof(value));
+  return value;
+}
+
+static uint32_t gemsi_read_native_u32(const uint8_t *source) {
+  uint32_t value;
+  memcpy(&value, source, sizeof(value));
+  return value;
+}
+
+static uint64_t gemsi_read_native_u64(const uint8_t *source) {
+  uint64_t value;
+  memcpy(&value, source, sizeof(value));
+  return value;
+}
+
+static const char *gemsi_find_uncompressed_ptx(const void *fat_binary) {
+  if (fat_binary == NULL) return NULL;
+  const GemsiFatBinaryWrapper *wrapper = (const GemsiFatBinaryWrapper *)fat_binary;
+  if (wrapper->magic != INT32_C(0x466243b1) || wrapper->data == NULL) return NULL;
+  const uint8_t *data = (const uint8_t *)wrapper->data;
+  if (gemsi_read_native_u32(data) != UINT32_C(0xba55ed50)) return NULL;
+  const uint16_t outer_header_size = gemsi_read_native_u16(data + 6);
+  const uint64_t content_size = gemsi_read_native_u64(data + 8);
+  if (outer_header_size < 16 || content_size > GEMSI_RPC_MAXIMUM_PAYLOAD_SIZE) return NULL;
+  const uint64_t total_size = (uint64_t)outer_header_size + content_size;
+  uint64_t offset = outer_header_size;
+  while (offset <= total_size && total_size - offset >= 16) {
+    const uint8_t *entry = data + offset;
+    const uint16_t kind = gemsi_read_native_u16(entry);
+    const uint32_t header_size = gemsi_read_native_u32(entry + 4);
+    const uint64_t payload_size = gemsi_read_native_u64(entry + 8);
+    if (header_size < 16 || (uint64_t)header_size > total_size - offset ||
+        payload_size > total_size - offset - header_size) return NULL;
+    const char *payload = (const char *)(entry + header_size);
+    size_t prefix = 0;
+    while (prefix < payload_size &&
+        (payload[prefix] == ' ' || payload[prefix] == '\t' || payload[prefix] == '\r' || payload[prefix] == '\n')) ++prefix;
+    if ((kind & 1u) != 0 && payload_size - prefix >= 9 &&
+        memcmp(payload + prefix, ".version", 8) == 0 && memchr(payload + prefix, '\0', payload_size - prefix) != NULL) {
+      return payload + prefix;
+    }
+    offset += (uint64_t)header_size + payload_size;
+  }
+  return NULL;
+}
 
 void **__cudaRegisterFatBinary(void *fat_binary) {
-  gemsi_fat_binary_token = fat_binary;
-  return &gemsi_fat_binary_token;
+  GemsiFatBinary *entry = (GemsiFatBinary *)calloc(1, sizeof(*entry));
+  if (entry == NULL) return NULL;
+  entry->token = entry;
+  const char *ptx = gemsi_find_uncompressed_ptx(fat_binary);
+  if (ptx != NULL && cuModuleLoadData(&entry->module, ptx) != GEMSI_STATUS_SUCCESS) entry->module = NULL;
+  pthread_mutex_lock(&gemsi_registration_mutex);
+  entry->next = gemsi_fat_binaries;
+  gemsi_fat_binaries = entry;
+  pthread_mutex_unlock(&gemsi_registration_mutex);
+  return &entry->token;
 }
 
 void __cudaRegisterFatBinaryEnd(void **handle) {
   (void)handle;
 }
 
+void __cudaRegisterFunction(
+    void **handle,
+    const char *host_function,
+    char *device_function,
+    const char *device_name,
+    int32_t thread_limit,
+    void *thread_id,
+    void *block_id,
+    void *block_dimension,
+    void *grid_dimension,
+    int32_t *warp_size) {
+  (void)device_function;
+  (void)thread_limit;
+  (void)thread_id;
+  (void)block_id;
+  (void)block_dimension;
+  (void)grid_dimension;
+  (void)warp_size;
+  if (handle == NULL || *handle == NULL || host_function == NULL || device_name == NULL) return;
+  GemsiFatBinary *fat = (GemsiFatBinary *)*handle;
+  GemsiRegisteredFunction *entry = (GemsiRegisteredFunction *)calloc(1, sizeof(*entry));
+  if (entry == NULL) return;
+  const size_t name_size = strlen(device_name);
+  entry->device_name = (char *)malloc(name_size + 1);
+  if (entry->device_name == NULL) {
+    free(entry);
+    return;
+  }
+  memcpy(entry->device_name, device_name, name_size + 1);
+  entry->host_function = host_function;
+  entry->fat_binary = fat;
+  pthread_mutex_lock(&gemsi_registration_mutex);
+  entry->next = gemsi_registered_functions;
+  gemsi_registered_functions = entry;
+  pthread_mutex_unlock(&gemsi_registration_mutex);
+}
+
+void __cudaRegisterVar(
+    void **handle,
+    char *host_variable,
+    char *device_address,
+    const char *device_name,
+    int32_t external,
+    size_t size,
+    int32_t constant,
+    int32_t global) {
+  (void)handle;
+  (void)host_variable;
+  (void)device_address;
+  (void)device_name;
+  (void)external;
+  (void)size;
+  (void)constant;
+  (void)global;
+}
+
 void __cudaUnregisterFatBinary(void **handle) {
-  if (handle == &gemsi_fat_binary_token) gemsi_fat_binary_token = NULL;
+  if (handle == NULL || *handle == NULL) return;
+  GemsiFatBinary *fat = (GemsiFatBinary *)*handle;
+  pthread_mutex_lock(&gemsi_registration_mutex);
+  GemsiRegisteredFunction **function_cursor = &gemsi_registered_functions;
+  while (*function_cursor != NULL) {
+    GemsiRegisteredFunction *entry = *function_cursor;
+    if (entry->fat_binary == fat) {
+      *function_cursor = entry->next;
+      free(entry->device_name);
+      free(entry);
+    } else function_cursor = &entry->next;
+  }
+  GemsiFatBinary **fat_cursor = &gemsi_fat_binaries;
+  while (*fat_cursor != NULL && *fat_cursor != fat) fat_cursor = &(*fat_cursor)->next;
+  if (*fat_cursor == fat) *fat_cursor = fat->next;
+  pthread_mutex_unlock(&gemsi_registration_mutex);
+  if (fat->module != NULL) (void)cuModuleUnload(fat->module);
+  fat->token = NULL;
+  free(fat);
+}
+
+int32_t __cudaGetKernel(void **kernel, const void *host_function) {
+  if (kernel == NULL || host_function == NULL) return GEMSI_STATUS_INVALID_VALUE;
+  pthread_mutex_lock(&gemsi_registration_mutex);
+  GemsiRegisteredFunction *entry = gemsi_registered_functions;
+  while (entry != NULL && entry->host_function != host_function) entry = entry->next;
+  int32_t status = GEMSI_STATUS_INVALID_VALUE;
+  if (entry != NULL && entry->fat_binary->module != NULL) {
+    if (entry->device_function == NULL) {
+      status = cuModuleGetFunction(&entry->device_function, entry->fat_binary->module, entry->device_name);
+    } else status = GEMSI_STATUS_SUCCESS;
+    if (status == GEMSI_STATUS_SUCCESS) *kernel = entry->device_function;
+  }
+  pthread_mutex_unlock(&gemsi_registration_mutex);
+  return status;
+}
+
+unsigned __cudaPushCallConfiguration(
+    GemsiDim3 grid,
+    GemsiDim3 block,
+    size_t shared_memory,
+    void *stream) {
+  gemsi_launch_configuration.grid = grid;
+  gemsi_launch_configuration.block = block;
+  gemsi_launch_configuration.shared_memory = shared_memory;
+  gemsi_launch_configuration.stream = stream;
+  gemsi_launch_configuration.valid = 1;
+  return GEMSI_STATUS_SUCCESS;
+}
+
+int32_t __cudaPopCallConfiguration(
+    GemsiDim3 *grid,
+    GemsiDim3 *block,
+    size_t *shared_memory,
+    void *stream) {
+  if (!gemsi_launch_configuration.valid || grid == NULL || block == NULL ||
+      shared_memory == NULL || stream == NULL) return GEMSI_STATUS_INVALID_VALUE;
+  *grid = gemsi_launch_configuration.grid;
+  *block = gemsi_launch_configuration.block;
+  *shared_memory = gemsi_launch_configuration.shared_memory;
+  *(void **)stream = gemsi_launch_configuration.stream;
+  gemsi_launch_configuration.valid = 0;
+  return GEMSI_STATUS_SUCCESS;
+}
+
+int32_t __cudaLaunchKernel(
+    void *kernel,
+    GemsiDim3 grid,
+    GemsiDim3 block,
+    void **arguments,
+    size_t shared_memory,
+    void *stream) {
+  int32_t status = gemsi_mirrored_synchronize_to_device();
+  if (status == GEMSI_STATUS_SUCCESS) status = cuLaunchKernel(
+      kernel,
+      grid.x,
+      grid.y,
+      grid.z,
+      block.x,
+      block.y,
+      block.z,
+      (uint32_t)shared_memory,
+      stream,
+      arguments,
+      NULL);
+  if (status == GEMSI_STATUS_SUCCESS) status = gemsi_mirrored_synchronize_from_device();
+  gemsi_last_error = status;
+  return status;
 }
 

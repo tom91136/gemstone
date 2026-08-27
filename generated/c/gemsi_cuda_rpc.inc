@@ -3,8 +3,10 @@
 
 #include <stdint.h>
 
-#define GEMSI_CUDA_RPC_SCHEMA_FINGERPRINT "639c93e36ccba7921e326fd8c375efad7e5f086750854fe1ab71d6c4ab391217"
+#define GEMSI_CUDA_RPC_SCHEMA_FINGERPRINT "43600c6dea6e9c839cf2881d8b7068e1d772d8df9052d9e6965db3b12abe869f"
 #define GEMSI_CUDA_RPC_METHODS(X) \
+  X(__cudaGemsiManagedRegister, UINT64_C(0x710ed6cabac43f06), UINT64_C(0x63e544ec115aef33)) \
+  X(__cudaGemsiManagedUnregister, UINT64_C(0x293db04a48efebbb), UINT64_C(0xd342e867af7ded7e)) \
   X(cuCtxCreate_v2, UINT64_C(0xe6eb5473c0a097e3), UINT64_C(0xa17c8d63cec75a44)) \
   X(cuCtxDestroy_v2, UINT64_C(0xb574aacc9b35ee6a), UINT64_C(0x8135b883071cc261)) \
   X(cuCtxSynchronize, UINT64_C(0xe21f80c194a589d4), UINT64_C(0x4af681a7ef75bb10)) \

@@ -1,6 +1,14 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
 final class SyntaxSuite extends munit.FunSuite {
+  test("empty line comments are valid trivia") {
+    assert(Parser.parse("//\n.version 9.2;").isRight)
+  }
+
+  test("entry launch directives parse between parameters and body") {
+    assert(Parser.parse(".visible .entry kernel() .maxntid 256, 1, 1 { ret; }").isRight)
+  }
+
   private def statement(source: String): Statement =
     Parser.parseStatement(source) match {
       case Right(value) => value

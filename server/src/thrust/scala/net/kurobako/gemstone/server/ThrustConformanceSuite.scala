@@ -35,6 +35,8 @@ class ThrustConformanceSuite extends munit.FunSuite {
     pattern.fold(discovered)(regex => discovered.filter(testCase => regex.findFirstIn(testCase.name).nonEmpty))
   }
   private val sizes = sys.env.getOrElse("GEMSTONE_THRUST_SIZES", "tiny")
+  private val unitFilters = sys.env.get("GEMSTONE_THRUST_UNIT_FILTER").toVector
+    .flatMap(_.split(',').iterator.map(_.trim).filter(_.nonEmpty))
   private val architecture = sys.env.getOrElse("GEMSTONE_THRUST_ARCH", "native")
   private val compileJobs = sys.env.get("GEMSTONE_THRUST_JOBS").fold(Math.min(4, Runtime.getRuntime.availableProcessors))(
     _.toInt
@@ -148,10 +150,12 @@ class ThrustConformanceSuite extends munit.FunSuite {
     val output   = caseRoot.resolve("test")
     val stdout = caseRoot.resolve("stdout")
     val stderr = caseRoot.resolve("stderr")
+    val recording = caseRoot.resolve("api-recording.jsonl")
+    Files.writeString(recording, "", StandardCharsets.UTF_8)
     val exit = run(
-      Vector(output.toString, s"--sizes=$sizes", "--concise"),
+      Vector(output.toString) ++ unitFilters ++ Vector(s"--sizes=$sizes", "--concise"),
       caseRoot,
-      backend.environment(libraryDir, server, token),
+      backend.environment(libraryDir, server, token) ++ Map("GEMSI_RECORD" -> recording.toString),
       stdout,
       stderr
     )
@@ -174,6 +178,7 @@ class ThrustConformanceSuite extends munit.FunSuite {
     "--allow-unsupported-compiler",
     "-std=c++14",
     "-O0",
+    "-no-compress",
     s"-arch=$architecture",
     "-Xcompiler=-Wno-template-body",
     "-DCUDA_FORCE_CDP1_IF_SUPPORTED"
