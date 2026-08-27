@@ -1,5 +1,6 @@
 package net.kurobako.gemstone.server
 
+import net.kurobako.gemstone.abi.*
 import net.kurobako.gemstone.cuda.*
 import net.kurobako.gemstone.generated.GeneratedCUDARPC
 import net.kurobako.gemstone.rpc.*
@@ -23,13 +24,15 @@ import java.nio.file.StandardOpenOption
 import java.security.MessageDigest
 
 object CUDARPCServer {
-  private val RequestMagic     = 0x474d5331
-  private val ResponseMagic    = 0x474d5231
-  private val ProtocolVersion  = 1
-  private val FingerprintBytes = 64
-  private val TokenBytes       = 64
-  private val MaximumNameBytes = 128
-  private val MaximumPayload   = 64 * 1024 * 1024
+  private val RequestMagic       = 0x474d5331
+  private val ResponseMagic      = 0x474d5231
+  private val ProtocolVersion    = 2
+  private val CallbackMagic      = 0x474d4331
+  private val CallbackReplyMagic = 0x474d4131
+  private val FingerprintBytes   = 64
+  private val TokenBytes         = 64
+  private val MaximumNameBytes   = 128
+  private val MaximumPayload     = 64 * 1024 * 1024
 
   final class RunningServer private[CUDARPCServer] (
       val port: Int,
@@ -102,10 +105,11 @@ object CUDARPCServer {
       val implementation = new CUDAEmulatorServer(new PTXCUDAKernelExecution)
       val input          = new DataInputStream(socket.getInputStream)
       val output         = new DataOutputStream(socket.getOutputStream)
+      val callbacks      = new CallbackConnection(input, output)
       var open           = true
       while (open)
         try {
-          val response = readRequest(input, expectedToken) match {
+          val response = readRequest(input, expectedToken, callbacks) match {
             case Right(request) =>
               try GeneratedCUDARPC.Dispatcher.dispatch(request, implementation)
               catch {
@@ -122,7 +126,11 @@ object CUDARPCServer {
         }
     } finally socket.close()
 
-  private def readRequest(input: DataInputStream, expectedToken: Array[Byte]): Either[CUDAError, RPCRequest] = {
+  private def readRequest(
+      input: DataInputStream,
+      expectedToken: Array[Byte],
+      callbacks: CallbackConnection
+  ): Either[CUDAError, RPCRequest] = {
     if (input.readInt() != RequestMagic) throw new IllegalArgumentException("invalid request magic")
     if (input.readInt() != ProtocolVersion) throw new IllegalArgumentException("unsupported protocol version")
     val fingerprint = new String(readExactly(input, FingerprintBytes), StandardCharsets.US_ASCII)
@@ -146,24 +154,32 @@ object CUDARPCServer {
       ) match {
         case None         => Left(CUDAError(1, s"unknown or mismatched CUDA RPC function: $functionName"))
         case Some(method) =>
-          decodeArguments(method, payload).map(arguments => RPCRequest(messageId, functionName, arguments))
+          decodeArguments(method, payload, callbacks).map(arguments => RPCRequest(messageId, functionName, arguments))
       }
     }
   }
 
-  private def decodeArguments(method: RPCMethod, payload: Array[Byte]): Either[CUDAError, Vector[WireValue]] =
+  private def decodeArguments(
+      method: RPCMethod,
+      payload: Array[Byte],
+      callbacks: CallbackConnection
+  ): Either[CUDAError, Vector[WireValue]] =
     try {
       val buffer    = ByteBuffer.wrap(payload).order(ByteOrder.BIG_ENDIAN)
       val arguments = method.parameters
         .filter(_.direction != WireDirection.Out)
-        .map(parameter => decodeValue(parameter.wireType, buffer))
+        .map(parameter => decodeValue(parameter.wireType, buffer, callbacks))
       if (buffer.hasRemaining) Left(CUDAError(1, s"trailing payload bytes for ${method.name}: ${buffer.remaining}"))
       else Right(arguments)
     } catch {
       case error: Throwable => Left(CUDAError(1, s"invalid arguments for ${method.name}: ${error.getMessage}"))
     }
 
-  private def decodeValue(wireType: WireType, buffer: ByteBuffer): WireValue = wireType match {
+  private def decodeValue(
+      wireType: WireType,
+      buffer: ByteBuffer,
+      callbacks: CallbackConnection
+  ): WireValue = wireType match {
     case WireType.UnitValue    => WireValue.UnitValue
     case WireType.Int32        => WireValue.Int32Value(buffer.getInt())
     case WireType.UInt8        => WireValue.UInt8Value(UInt8(buffer.get() & 0xff))
@@ -208,6 +224,9 @@ object CUDARPCServer {
         }))
       )
     case WireType.NullableOpaquePointer => WireValue.NullableOpaquePointerValue(buffer.get() != 0)
+    case WireType.CallbackData          => WireValue.CallbackDataValue(CallbackData.remote(buffer.getLong()))
+    case WireType.CUDAHostCallback      => WireValue.CUDAHostCallbackValue(callbacks.host(buffer.getLong()))
+    case WireType.CUDAStreamCallback    => WireValue.CUDAStreamCallbackValue(callbacks.stream(buffer.getLong()))
     case WireType.CUDAStatus            => WireValue.CUDAStatusValue(CUDAStatus(buffer.getInt()))
   }
 
@@ -260,8 +279,14 @@ object CUDARPCServer {
       case WireValue.KernelParametersValue(_) =>
         throw new IllegalArgumentException("KernelParameters is a request-only wire type")
       case WireValue.NullableOpaquePointerValue(value) => output.writeBoolean(value)
-      case WireValue.CUDAStatusValue(value)            => output.writeInt(value.code)
-      case WireValue.CallResult(_, _)                  =>
+      case WireValue.CallbackDataValue(_)              =>
+        throw new IllegalArgumentException("CallbackData is a request-only wire type")
+      case WireValue.CUDAHostCallbackValue(_) =>
+        throw new IllegalArgumentException("CUDAHostCallback is a request-only wire type")
+      case WireValue.CUDAStreamCallbackValue(_) =>
+        throw new IllegalArgumentException("CUDAStreamCallback is a request-only wire type")
+      case WireValue.CUDAStatusValue(value) => output.writeInt(value.code)
+      case WireValue.CallResult(_, _)       =>
         throw new IllegalArgumentException("CallResult must be encoded as an RPC response")
     }
     output.flush()
@@ -287,6 +312,69 @@ object CUDARPCServer {
     val value = buffer.getLong()
     if (value < 0L) throw new IllegalArgumentException(s"$label exceeds signed 64-bit range")
     value
+  }
+
+  private final class CallbackConnection(input: DataInputStream, output: DataOutputStream) {
+    private val HostKind   = 1
+    private val StreamKind = 2
+
+    def host(callbackId: Long): CUhostFn = {
+      require(callbackId != 0L, "host callback ID must be non-zero")
+      CallbackTypedef.remote["CUhostFn", Tuple1[CallbackData], Unit] { arguments =>
+        invoke(callbackId, arguments._1, HostKind, Array.emptyByteArray)
+      }
+    }
+
+    def stream(callbackId: Long): CUstreamCallback = {
+      require(callbackId != 0L, "stream callback ID must be non-zero")
+      CallbackTypedef.remote["CUstreamCallback", (Stream, CUDAStatus, CallbackData), Unit] { arguments =>
+        val payload = ByteBuffer.allocate(12).order(ByteOrder.BIG_ENDIAN)
+          .putLong(arguments._1.handle)
+          .putInt(arguments._2.code)
+          .array()
+        invoke(callbackId, arguments._3, StreamKind, payload)
+      }
+    }
+
+    private def invoke(
+        callbackId: Long,
+        callbackData: CallbackData,
+        kind: Int,
+        payload: Array[Byte]
+    ): Either[CallbackFailure, Unit] = synchronized {
+      if (callbackData.capabilityId != callbackId) {
+        Left(CallbackFailure.Protocol("callback userdata does not belong to this callback capability"))
+      } else
+        try {
+          output.writeInt(CallbackMagic)
+          output.writeInt(ProtocolVersion)
+          output.writeLong(callbackId)
+          output.writeInt(kind)
+          output.writeInt(payload.length)
+          output.write(payload)
+          output.flush()
+
+          if (input.readInt() != CallbackReplyMagic)
+            Left(CallbackFailure.Protocol("invalid native callback reply magic"))
+          else if (input.readInt() != ProtocolVersion)
+            Left(CallbackFailure.Protocol("native callback protocol version mismatch"))
+          else {
+            val status       = input.readInt()
+            val messageSize  = input.readInt()
+            val responseSize = input.readInt()
+            if (messageSize < 0 || messageSize > 1024 || responseSize < 0 || responseSize > MaximumPayload) {
+              Left(CallbackFailure.Protocol("invalid native callback reply size"))
+            } else {
+              val message = new String(readExactly(input, messageSize), StandardCharsets.UTF_8)
+              val _       = readExactly(input, responseSize)
+              if (status == 0 && responseSize == 0) Right(())
+              else Left(CallbackFailure.Failed(if (message.nonEmpty) message else s"native callback failed: $status"))
+            }
+          }
+        } catch {
+          case error: Throwable => Left(CallbackFailure.Unavailable(error.getMessage))
+        }
+    }
   }
 
   private def readExactly(input: DataInputStream, size: Int): Array[Byte] = {

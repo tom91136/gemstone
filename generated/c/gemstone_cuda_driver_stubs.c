@@ -1504,13 +1504,6 @@ CUresult CUDAAPI cuLaunchGridAsync(CUfunction f, int grid_width, int grid_height
   return CUDA_ERROR_NOT_SUPPORTED;
 }
 
-CUresult CUDAAPI cuLaunchHostFunc(CUstream hStream, CUhostFn fn, void * userData) {
-  (void)hStream;
-  (void)fn;
-  (void)userData;
-  return CUDA_ERROR_NOT_SUPPORTED;
-}
-
 CUresult CUDAAPI cuLaunchHostFunc_v2(CUstream hStream, CUhostFn fn, void * userData, unsigned int syncMode) {
   (void)hStream;
   (void)fn;
@@ -2708,14 +2701,6 @@ CUresult CUDAAPI cuSignalExternalSemaphoresAsync(const CUexternalSemaphore * ext
   (void)paramsArray;
   (void)numExtSems;
   (void)stream;
-  return CUDA_ERROR_NOT_SUPPORTED;
-}
-
-CUresult CUDAAPI cuStreamAddCallback(CUstream hStream, CUstreamCallback callback, void * userData, unsigned int flags) {
-  (void)hStream;
-  (void)callback;
-  (void)userData;
-  (void)flags;
   return CUDA_ERROR_NOT_SUPPORTED;
 }
 

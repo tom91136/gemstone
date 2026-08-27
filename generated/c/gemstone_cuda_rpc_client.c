@@ -27,6 +27,8 @@ static const uint64_t gemstone_cuDriverGetVersion_high = UINT64_C(0xe584ec56943a
 static const uint64_t gemstone_cuDriverGetVersion_low = UINT64_C(0x3c512e60803234f9);
 static const uint64_t gemstone_cuInit_high = UINT64_C(0x3c1688958f08660e);
 static const uint64_t gemstone_cuInit_low = UINT64_C(0x1c2a40d0799c268c);
+static const uint64_t gemstone_cuLaunchHostFunc_high = UINT64_C(0xced40f65d252b18e);
+static const uint64_t gemstone_cuLaunchHostFunc_low = UINT64_C(0xdc2b29f9f2e965b6);
 static const uint64_t gemstone_cuLaunchKernel_high = UINT64_C(0x0541d9142559d437);
 static const uint64_t gemstone_cuLaunchKernel_low = UINT64_C(0x4cd345cbce10e2df);
 static const uint64_t gemstone_cuMemAlloc_v2_high = UINT64_C(0x7077a5441f532f0e);
@@ -47,6 +49,8 @@ static const uint64_t gemstone_cuModuleLoadData_high = UINT64_C(0xfef489c6c628b4
 static const uint64_t gemstone_cuModuleLoadData_low = UINT64_C(0x480e5cb6fe964d3f);
 static const uint64_t gemstone_cuModuleUnload_high = UINT64_C(0xb94c365c6c5c3902);
 static const uint64_t gemstone_cuModuleUnload_low = UINT64_C(0x2a1466600700709a);
+static const uint64_t gemstone_cuStreamAddCallback_high = UINT64_C(0x589d21fb33f2aca5);
+static const uint64_t gemstone_cuStreamAddCallback_low = UINT64_C(0xbe72b9cfe9179b7a);
 
 static void gemstone_put_u32(uint8_t *destination, uint32_t value) {
   destination[0] = (uint8_t)(value >> 24);
@@ -222,6 +226,41 @@ int32_t cuCtxDestroy_v2(void *context) {
 int32_t cuCtxSynchronize(void) {
   GemstoneRpcBuffer response = {0};
   return gemstone_expect_unit(gemstone_call(gemstone_cuCtxSynchronize_high, gemstone_cuCtxSynchronize_low, "cuCtxSynchronize", NULL, 0, &response), &response);
+}
+
+int32_t cuLaunchHostFunc(void *stream, GemstoneHostCallback callback, void *user_data) {
+  const uint64_t callback_id = gemstone_rpc_register_host_callback(callback, user_data);
+  if (callback_id == 0) return GEMSTONE_STATUS_INVALID_VALUE;
+  uint8_t payload[24];
+  gemstone_put_u64(payload, (uint64_t)(uintptr_t)stream);
+  gemstone_put_u64(payload + 8, callback_id);
+  gemstone_put_u64(payload + 16, callback_id);
+  GemstoneRpcBuffer response = {0};
+  const int32_t status = gemstone_expect_unit(
+      gemstone_call(gemstone_cuLaunchHostFunc_high, gemstone_cuLaunchHostFunc_low, "cuLaunchHostFunc", payload, sizeof(payload), &response),
+      &response);
+  if (status != GEMSTONE_STATUS_SUCCESS) gemstone_rpc_unregister_callback(callback_id);
+  return status;
+}
+
+int32_t cuStreamAddCallback(
+    void *stream,
+    GemstoneStreamCallback callback,
+    void *user_data,
+    uint32_t flags) {
+  const uint64_t callback_id = gemstone_rpc_register_stream_callback(callback, user_data);
+  if (callback_id == 0) return GEMSTONE_STATUS_INVALID_VALUE;
+  uint8_t payload[28];
+  gemstone_put_u64(payload, (uint64_t)(uintptr_t)stream);
+  gemstone_put_u64(payload + 8, callback_id);
+  gemstone_put_u64(payload + 16, callback_id);
+  gemstone_put_u32(payload + 24, flags);
+  GemstoneRpcBuffer response = {0};
+  const int32_t status = gemstone_expect_unit(
+      gemstone_call(gemstone_cuStreamAddCallback_high, gemstone_cuStreamAddCallback_low, "cuStreamAddCallback", payload, sizeof(payload), &response),
+      &response);
+  if (status != GEMSTONE_STATUS_SUCCESS) gemstone_rpc_unregister_callback(callback_id);
+  return status;
 }
 
 int32_t cuMemAlloc_v2(uint64_t *pointer, size_t size) {

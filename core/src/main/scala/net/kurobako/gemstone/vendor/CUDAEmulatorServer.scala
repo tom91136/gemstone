@@ -1,6 +1,8 @@
 package net.kurobako.gemstone.vendor
 
 import net.kurobako.gemstone.abi.InOut
+import net.kurobako.gemstone.abi.CallbackData
+import net.kurobako.gemstone.abi.CallbackFailure
 import net.kurobako.gemstone.abi.Nullable
 import net.kurobako.gemstone.abi.OpaquePointer
 import net.kurobako.gemstone.abi.Opaque
@@ -17,6 +19,8 @@ import net.kurobako.gemstone.cuda.CUDAError as RPCCUDAError
 import net.kurobako.gemstone.cuda.CUDAResult
 import net.kurobako.gemstone.cuda.CUDAStatus
 import net.kurobako.gemstone.cuda.CUctxCreateParams
+import net.kurobako.gemstone.cuda.CUhostFn
+import net.kurobako.gemstone.cuda.CUstreamCallback
 import net.kurobako.gemstone.cuda.Device
 import net.kurobako.gemstone.cuda.DevicePtr
 import net.kurobako.gemstone.cuda.FunctionName
@@ -63,9 +67,10 @@ object CUDAKernelExecution {
 
 final class CUDAEmulatorServer(kernelExecution: CUDAKernelExecution = CUDAKernelExecution.Unsupported)
     extends CUDA {
-  private val allocations = mutable.Map.empty[Long, Array[Byte]]
-  private var nextAddress = 0x100000000L
-  private var contextLive = false
+  private val allocations      = mutable.Map.empty[Long, Array[Byte]]
+  private var nextAddress      = 0x100000000L
+  private var contextLive      = false
+  private val pendingCallbacks = mutable.ArrayDeque.empty[() => Either[CallbackFailure, Unit]]
 
   override def cuInit(flags: UInt32): CUDAStatus = CUDAStatus.Success
 
@@ -104,15 +109,56 @@ final class CUDAEmulatorServer(kernelExecution: CUDAKernelExecution = CUDAKernel
     }
   }
 
-  override def cuCtxDestroy_v2(context: Context): CUDAStatus = synchronized {
-    if (!contextLive || context.handle != 1L) CUDAStatus.InvalidContext
+  override def cuCtxDestroy_v2(context: Context): CUDAStatus = {
+    val callbacks = drainCallbacks()
+    if (!callbacks.isSuccess) callbacks
+    else
+      synchronized {
+        if (!contextLive || context.handle != 1L) CUDAStatus.InvalidContext
+        else {
+          contextLive = false
+          CUDAStatus.Success
+        }
+      }
+  }
+
+  override def cuCtxSynchronize(): CUDAStatus = drainCallbacks()
+
+  override def cuLaunchHostFunc(hStream: Stream, fn: CUhostFn, userData: CallbackData): CUDAStatus = synchronized {
+    if (!contextLive) CUDAStatus.InvalidContext
+    else if (hStream != Stream.Default) CUDAStatus.InvalidValue
     else {
-      contextLive = false
+      pendingCallbacks.append(() => fn(Tuple1(userData)))
       CUDAStatus.Success
     }
   }
 
-  override def cuCtxSynchronize(): CUDAStatus = CUDAStatus.Success
+  override def cuStreamAddCallback(
+      hStream: Stream,
+      callback: CUstreamCallback,
+      userData: CallbackData,
+      flags: UInt32
+  ): CUDAStatus = synchronized {
+    if (!contextLive) CUDAStatus.InvalidContext
+    else if (hStream != Stream.Default || flags.toLong != 0L) CUDAStatus.InvalidValue
+    else {
+      pendingCallbacks.append(() => callback((hStream, CUDAStatus.Success, userData)))
+      CUDAStatus.Success
+    }
+  }
+
+  private def drainCallbacks(): CUDAStatus = {
+    var result = CUDAStatus.Success
+    var next   = synchronized(pendingCallbacks.removeHeadOption())
+    while (result.isSuccess && next.nonEmpty) {
+      result = next.get() match {
+        case Right(()) => CUDAStatus.Success
+        case Left(_)   => CUDAStatus.Unknown
+      }
+      next = synchronized(pendingCallbacks.removeHeadOption())
+    }
+    result
+  }
 
   override def cuMemAlloc_v2(pointer: Out[DevicePtr], bytesize: SizeT): CUDAStatus =
     writeOutcome(pointer, allocate(bytesize))

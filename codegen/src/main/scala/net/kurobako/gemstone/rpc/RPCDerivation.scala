@@ -186,6 +186,7 @@ object RPCDerivation {
       raw: quotes.reflect.TypeRepr,
       method: quotes.reflect.Symbol
   ): WireType = {
+    import net.kurobako.gemstone.abi.CallbackData
     import net.kurobako.gemstone.abi.OpaquePointer
     import net.kurobako.gemstone.cuda
     import quotes.reflect.*
@@ -205,9 +206,17 @@ object RPCDerivation {
     else if (value =:= TypeRepr.of[cuda.KernelFunction]) WireType.KernelFunction
     else if (value =:= TypeRepr.of[cuda.Stream]) WireType.Stream
     else if (value =:= TypeRepr.of[cuda.KernelParameters]) WireType.KernelParameters
+    else if (value =:= TypeRepr.of[CallbackData]) WireType.CallbackData
     else if (value =:= TypeRepr.of[cuda.CUDAStatus]) WireType.CUDAStatus
     else
       value match {
+        case AppliedType(constructor, List(ConstantType(StringConstant(name)), _, _))
+            if constructor.typeSymbol.fullName == "net.kurobako.gemstone.abi.CallbackTypedef" =>
+          name match {
+            case "CUhostFn"         => WireType.CUDAHostCallback
+            case "CUstreamCallback" => WireType.CUDAStreamCallback
+            case _                  => abortAt(method, s"unsupported CUDA callback typedef $name in ${method.name}")
+          }
         case AppliedType(option, List(element))
             if option.typeSymbol.fullName == "scala.Option" && (
               element.dealias =:= TypeRepr.of[OpaquePointer] || (element.dealias match {
@@ -243,6 +252,9 @@ object RPCDerivation {
     case WireType.ByteBuffer            => '{ WireType.ByteBuffer }
     case WireType.KernelParameters      => '{ WireType.KernelParameters }
     case WireType.NullableOpaquePointer => '{ WireType.NullableOpaquePointer }
+    case WireType.CallbackData          => '{ WireType.CallbackData }
+    case WireType.CUDAHostCallback      => '{ WireType.CUDAHostCallback }
+    case WireType.CUDAStreamCallback    => '{ WireType.CUDAStreamCallback }
     case WireType.CUDAStatus            => '{ WireType.CUDAStatus }
   }
 

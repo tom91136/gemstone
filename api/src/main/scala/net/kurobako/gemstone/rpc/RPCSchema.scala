@@ -25,6 +25,9 @@ enum WireType {
   case ByteBuffer
   case KernelParameters
   case NullableOpaquePointer
+  case CallbackData
+  case CUDAHostCallback
+  case CUDAStreamCallback
   case CUDAStatus
 
   /** Stable protocol spelling. Scala identifier casing may evolve without silently changing the RPC schema. */
@@ -49,6 +52,9 @@ enum WireType {
     case ByteBuffer            => "ByteBuffer"
     case KernelParameters      => "KernelParameters"
     case NullableOpaquePointer => "NullableOpaquePointer"
+    case CallbackData          => "CallbackData"
+    case CUDAHostCallback      => "CUDAHostCallback"
+    case CUDAStreamCallback    => "CUDAStreamCallback"
     case CUDAStatus            => "CUDAStatus"
   }
 }
@@ -108,6 +114,9 @@ enum WireValue {
   case ByteBufferValue(value: IArray[Byte])
   case KernelParametersValue(value: net.kurobako.gemstone.cuda.KernelParameters)
   case NullableOpaquePointerValue(present: Boolean)
+  case CallbackDataValue(value: net.kurobako.gemstone.abi.CallbackData)
+  case CUDAHostCallbackValue(value: net.kurobako.gemstone.cuda.CUhostFn)
+  case CUDAStreamCallbackValue(value: net.kurobako.gemstone.cuda.CUstreamCallback)
   case CUDAStatusValue(value: net.kurobako.gemstone.cuda.CUDAStatus)
   case CallResult(status: net.kurobako.gemstone.cuda.CUDAStatus, outputs: Vector[WireValue])
 }

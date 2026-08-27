@@ -16,12 +16,31 @@ class RPCDerivationSuite extends munit.FunSuite {
   }
 
   test("derives stable identities solely from exact C function names") {
-    assertEquals(schema.methods.size, 22)
+    assertEquals(schema.methods.size, 24)
     assertEquals(schema.methods.map(_.name), schema.methods.map(_.name).sorted)
     assertEquals(schema.methods.map(_.name).distinct.size, schema.methods.size)
     assertEquals(schema.methods.map(_.messageId).distinct.size, schema.methods.size)
     assertEquals(schema.fingerprint.length, 64)
     assertEquals(schema, RPCDerivation.schema[CUDA])
+  }
+
+  test("derives typed callback capabilities and their native user data") {
+    val host = schema.methods.find(_.name == "cuLaunchHostFunc").getOrElse(fail("missing cuLaunchHostFunc"))
+    assertEquals(
+      host.parameters.map(parameter => parameter.name -> parameter.wireType),
+      Vector("hStream" -> WireType.Stream, "fn" -> WireType.CUDAHostCallback, "userData" -> WireType.CallbackData)
+    )
+
+    val stream = schema.methods.find(_.name == "cuStreamAddCallback").getOrElse(fail("missing cuStreamAddCallback"))
+    assertEquals(
+      stream.parameters.map(parameter => parameter.name -> parameter.wireType),
+      Vector(
+        "hStream"  -> WireType.Stream,
+        "callback" -> WireType.CUDAStreamCallback,
+        "userData" -> WireType.CallbackData,
+        "flags"    -> WireType.UInt32
+      )
+    )
   }
 
   test("rejects a Scala name that is not a CUDA C symbol") {

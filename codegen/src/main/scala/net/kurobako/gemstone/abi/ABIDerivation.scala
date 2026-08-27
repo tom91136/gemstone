@@ -99,6 +99,7 @@ object ABIDerivation {
                 if constructor.typeSymbol.fullName == "net.kurobako.gemstone.abi.CallbackTypedef" =>
               literalArgument(name)
                 .getOrElse(report.errorAndAbort(s"CallbackTypedef in $methodName has no literal C name"))
+            case _ if tpe.typeSymbol.fullName == "net.kurobako.gemstone.abi.CallbackData" => "void *"
             case AppliedType(constructor, List(element, count))
                 if constructor.typeSymbol.fullName == "net.kurobako.gemstone.abi.CArray" =>
               val size = count.dealias match {

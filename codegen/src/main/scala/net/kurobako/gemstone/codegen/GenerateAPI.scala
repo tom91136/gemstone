@@ -677,6 +677,41 @@ object GenerateAPI {
         |  return gemstone_expect_unit(gemstone_call(gemstone_cuCtxSynchronize_high, gemstone_cuCtxSynchronize_low, "cuCtxSynchronize", NULL, 0, &response), &response);
         |}
         |
+        |int32_t cuLaunchHostFunc(void *stream, GemstoneHostCallback callback, void *user_data) {
+        |  const uint64_t callback_id = gemstone_rpc_register_host_callback(callback, user_data);
+        |  if (callback_id == 0) return GEMSTONE_STATUS_INVALID_VALUE;
+        |  uint8_t payload[24];
+        |  gemstone_put_u64(payload, (uint64_t)(uintptr_t)stream);
+        |  gemstone_put_u64(payload + 8, callback_id);
+        |  gemstone_put_u64(payload + 16, callback_id);
+        |  GemstoneRpcBuffer response = {0};
+        |  const int32_t status = gemstone_expect_unit(
+        |      gemstone_call(gemstone_cuLaunchHostFunc_high, gemstone_cuLaunchHostFunc_low, "cuLaunchHostFunc", payload, sizeof(payload), &response),
+        |      &response);
+        |  if (status != GEMSTONE_STATUS_SUCCESS) gemstone_rpc_unregister_callback(callback_id);
+        |  return status;
+        |}
+        |
+        |int32_t cuStreamAddCallback(
+        |    void *stream,
+        |    GemstoneStreamCallback callback,
+        |    void *user_data,
+        |    uint32_t flags) {
+        |  const uint64_t callback_id = gemstone_rpc_register_stream_callback(callback, user_data);
+        |  if (callback_id == 0) return GEMSTONE_STATUS_INVALID_VALUE;
+        |  uint8_t payload[28];
+        |  gemstone_put_u64(payload, (uint64_t)(uintptr_t)stream);
+        |  gemstone_put_u64(payload + 8, callback_id);
+        |  gemstone_put_u64(payload + 16, callback_id);
+        |  gemstone_put_u32(payload + 24, flags);
+        |  GemstoneRpcBuffer response = {0};
+        |  const int32_t status = gemstone_expect_unit(
+        |      gemstone_call(gemstone_cuStreamAddCallback_high, gemstone_cuStreamAddCallback_low, "cuStreamAddCallback", payload, sizeof(payload), &response),
+        |      &response);
+        |  if (status != GEMSTONE_STATUS_SUCCESS) gemstone_rpc_unregister_callback(callback_id);
+        |  return status;
+        |}
+        |
         |int32_t cuMemAlloc_v2(uint64_t *pointer, size_t size) {
         |  if (pointer == NULL) return GEMSTONE_STATUS_INVALID_VALUE;
         |  uint8_t payload[8];
@@ -1713,7 +1748,10 @@ object GenerateAPI {
     case WireType.KernelParameters      => "KernelParameters"
     case WireType.NullableOpaquePointer =>
       "Option[Pointer[net.kurobako.gemstone.abi.OpaquePointer, ReadWrite, Opaque]]"
-    case WireType.CUDAStatus => "CUDAStatus"
+    case WireType.CallbackData       => "CallbackData"
+    case WireType.CUDAHostCallback   => "CUhostFn"
+    case WireType.CUDAStreamCallback => "CUstreamCallback"
+    case WireType.CUDAStatus         => "CUDAStatus"
   }
 
   private def encodeWire(wireType: WireType, value: String): String = wireType match {
@@ -1737,6 +1775,9 @@ object GenerateAPI {
     case WireType.ByteBuffer            => s"WireValue.ByteBufferValue($value)"
     case WireType.KernelParameters      => s"WireValue.KernelParametersValue($value)"
     case WireType.NullableOpaquePointer => s"WireValue.NullableOpaquePointerValue($value.nonEmpty)"
+    case WireType.CallbackData          => s"WireValue.CallbackDataValue($value)"
+    case WireType.CUDAHostCallback      => s"WireValue.CUDAHostCallbackValue($value)"
+    case WireType.CUDAStreamCallback    => s"WireValue.CUDAStreamCallbackValue($value)"
     case WireType.CUDAStatus            => s"WireValue.CUDAStatusValue($value)"
   }
 
@@ -1761,6 +1802,9 @@ object GenerateAPI {
     case WireType.ByteBuffer            => s"WireValue.ByteBufferValue($binding)"
     case WireType.KernelParameters      => s"WireValue.KernelParametersValue($binding)"
     case WireType.NullableOpaquePointer => s"WireValue.NullableOpaquePointerValue($binding)"
+    case WireType.CallbackData          => s"WireValue.CallbackDataValue($binding)"
+    case WireType.CUDAHostCallback      => s"WireValue.CUDAHostCallbackValue($binding)"
+    case WireType.CUDAStreamCallback    => s"WireValue.CUDAStreamCallbackValue($binding)"
     case WireType.CUDAStatus            => s"WireValue.CUDAStatusValue($binding)"
   }
 

@@ -97,6 +97,18 @@ enum CallbackFailure {
   case Failed(message: String)
 }
 
+/** Opaque identity of native callback userdata. Its numeric native address never enters the JVM process. */
+final class CallbackData private[gemstone] (private[gemstone] val capabilityId: Long) {
+  override def toString: String = "CallbackData(<native>)"
+}
+
+object CallbackData {
+  private[gemstone] def remote(capabilityId: Long): CallbackData = {
+    require(capabilityId != 0L, "callback capability ID must be non-zero")
+    new CallbackData(capabilityId)
+  }
+}
+
 /** A typed, process-neutral C callback capability. The native endpoint owns the actual function pointer and any user
   * data; a JVM implementation invokes it like an ordinary tupled Scala function and receives failures explicitly.
   */
@@ -106,6 +118,14 @@ trait Callback[-Args <: Tuple, +Result] extends (Args => Either[CallbackFailure,
   * vendor's exact typedef name.
   */
 trait CallbackTypedef[Name <: String & Singleton, -Args <: Tuple, +Result] extends Callback[Args, Result]
+
+object CallbackTypedef {
+  private[gemstone] def remote[Name <: String & Singleton, Args <: Tuple, Result](
+      invocation: Args => Either[CallbackFailure, Result]
+  ): CallbackTypedef[Name, Args, Result] = new CallbackTypedef[Name, Args, Result] {
+    override def apply(arguments: Args): Either[CallbackFailure, Result] = invocation(arguments)
+  }
+}
 
 /** A fixed-size C array embedded in an ABI declaration. */
 sealed trait CArray[Element, Count <: Int & Singleton]

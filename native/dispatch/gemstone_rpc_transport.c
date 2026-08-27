@@ -16,9 +16,10 @@
 #include <sys/time.h>
 
 enum {
-  GEMSTONE_RPC_PROTOCOL_VERSION = 1,
+  GEMSTONE_RPC_PROTOCOL_VERSION = 2,
   GEMSTONE_RPC_REQUEST_HEADER_SIZE = 160,
   GEMSTONE_RPC_RESPONSE_HEADER_SIZE = 20,
+  GEMSTONE_RPC_CALLBACK_REQUEST_REMAINDER_SIZE = 20,
   GEMSTONE_RPC_FINGERPRINT_SIZE = 64,
   GEMSTONE_RPC_TOKEN_SIZE = 64,
   GEMSTONE_RPC_MAXIMUM_NAME_SIZE = 128
@@ -26,8 +27,25 @@ enum {
 
 static const uint32_t request_magic = UINT32_C(0x474d5331);
 static const uint32_t response_magic = UINT32_C(0x474d5231);
+static const uint32_t callback_magic = UINT32_C(0x474d4331);
+static const uint32_t callback_reply_magic = UINT32_C(0x474d4131);
 static pthread_mutex_t connection_mutex = PTHREAD_MUTEX_INITIALIZER;
 static int connection_fd = -1;
+
+enum { GEMSTONE_CALLBACK_HOST = 1, GEMSTONE_CALLBACK_STREAM = 2 };
+
+typedef struct GemstoneCallbackEntry {
+  uint64_t id;
+  uint32_t kind;
+  GemstoneHostCallback host;
+  GemstoneStreamCallback stream;
+  void *user_data;
+  struct GemstoneCallbackEntry *next;
+} GemstoneCallbackEntry;
+
+static pthread_mutex_t callback_mutex = PTHREAD_MUTEX_INITIALIZER;
+static GemstoneCallbackEntry *callbacks = NULL;
+static uint64_t next_callback_id = UINT64_C(1);
 
 static void record_call(const char *function_name, uint64_t message_id_high, uint64_t message_id_low, uint32_t request_size, int32_t status,
                         uint32_t response_size) {
@@ -58,6 +76,68 @@ static uint32_t get_u32(const uint8_t *source) {
   return ((uint32_t)source[0] << 24) | ((uint32_t)source[1] << 16) | ((uint32_t)source[2] << 8) | (uint32_t)source[3];
 }
 
+static uint64_t get_u64(const uint8_t *source) {
+  return ((uint64_t)get_u32(source) << 32) | get_u32(source + 4);
+}
+
+static uint64_t register_callback(uint32_t kind, GemstoneHostCallback host, GemstoneStreamCallback stream, void *user_data) {
+  GemstoneCallbackEntry *entry = (GemstoneCallbackEntry *)calloc(1, sizeof(*entry));
+  if (entry == NULL) return 0;
+  entry->kind = kind;
+  entry->host = host;
+  entry->stream = stream;
+  entry->user_data = user_data;
+  pthread_mutex_lock(&callback_mutex);
+  if (next_callback_id == 0) next_callback_id = 1;
+  entry->id = next_callback_id++;
+  entry->next = callbacks;
+  callbacks = entry;
+  pthread_mutex_unlock(&callback_mutex);
+  return entry->id;
+}
+
+uint64_t gemstone_rpc_register_host_callback(GemstoneHostCallback callback, void *user_data) {
+  if (callback == NULL) return 0;
+  return register_callback(GEMSTONE_CALLBACK_HOST, callback, NULL, user_data);
+}
+
+uint64_t gemstone_rpc_register_stream_callback(GemstoneStreamCallback callback, void *user_data) {
+  if (callback == NULL) return 0;
+  return register_callback(GEMSTONE_CALLBACK_STREAM, NULL, callback, user_data);
+}
+
+void gemstone_rpc_unregister_callback(uint64_t callback_id) {
+  pthread_mutex_lock(&callback_mutex);
+  GemstoneCallbackEntry **cursor = &callbacks;
+  while (*cursor != NULL && (*cursor)->id != callback_id) cursor = &(*cursor)->next;
+  if (*cursor != NULL) {
+    GemstoneCallbackEntry *entry = *cursor;
+    *cursor = entry->next;
+    free(entry);
+  }
+  pthread_mutex_unlock(&callback_mutex);
+}
+
+static GemstoneCallbackEntry *take_callback(uint64_t callback_id, uint32_t kind) {
+  pthread_mutex_lock(&callback_mutex);
+  GemstoneCallbackEntry **cursor = &callbacks;
+  while (*cursor != NULL && ((*cursor)->id != callback_id || (*cursor)->kind != kind)) cursor = &(*cursor)->next;
+  GemstoneCallbackEntry *entry = *cursor;
+  if (entry != NULL) *cursor = entry->next;
+  pthread_mutex_unlock(&callback_mutex);
+  return entry;
+}
+
+static void clear_callbacks(void) {
+  pthread_mutex_lock(&callback_mutex);
+  while (callbacks != NULL) {
+    GemstoneCallbackEntry *entry = callbacks;
+    callbacks = entry->next;
+    free(entry);
+  }
+  pthread_mutex_unlock(&callback_mutex);
+}
+
 static int send_all(int fd, const uint8_t *data, size_t size) {
   while (size != 0) {
     const ssize_t sent = send(fd, data, size, MSG_NOSIGNAL);
@@ -83,6 +163,40 @@ static int receive_all(int fd, uint8_t *data, size_t size) {
 static void close_connection(void) {
   if (connection_fd >= 0) close(connection_fd);
   connection_fd = -1;
+  clear_callbacks();
+}
+
+static int service_callback(int fd) {
+  uint8_t header[GEMSTONE_RPC_CALLBACK_REQUEST_REMAINDER_SIZE];
+  if (receive_all(fd, header, sizeof(header)) != 0) return -1;
+  const uint32_t version = get_u32(header);
+  const uint64_t callback_id = get_u64(header + 4);
+  const uint32_t kind = get_u32(header + 12);
+  const uint32_t payload_size = get_u32(header + 16);
+  if (version != GEMSTONE_RPC_PROTOCOL_VERSION || callback_id == 0 || payload_size > 64) return -1;
+
+  uint8_t payload[64];
+  if (payload_size != 0 && receive_all(fd, payload, payload_size) != 0) return -1;
+  int32_t status = 1;
+  GemstoneCallbackEntry *entry = take_callback(callback_id, kind);
+  if (entry != NULL) {
+    if (kind == GEMSTONE_CALLBACK_HOST && payload_size == 0 && entry->host != NULL) {
+      entry->host(entry->user_data);
+      status = 0;
+    } else if (kind == GEMSTONE_CALLBACK_STREAM && payload_size == 12 && entry->stream != NULL) {
+      entry->stream((void *)(uintptr_t)get_u64(payload), (int32_t)get_u32(payload + 8), entry->user_data);
+      status = 0;
+    }
+    free(entry);
+  }
+
+  uint8_t reply[GEMSTONE_RPC_RESPONSE_HEADER_SIZE];
+  put_u32(reply, callback_reply_magic);
+  put_u32(reply + 4, GEMSTONE_RPC_PROTOCOL_VERSION);
+  put_u32(reply + 8, (uint32_t)status);
+  put_u32(reply + 12, 0);
+  put_u32(reply + 16, 0);
+  return send_all(fd, reply, sizeof(reply));
 }
 
 static int connect_to_server(void) {
@@ -156,13 +270,25 @@ int gemstone_rpc_call(uint64_t message_id_high, uint64_t message_id_low, const c
   }
 
   uint8_t response_header[GEMSTONE_RPC_RESPONSE_HEADER_SIZE];
-  if (receive_all(connection_fd, response_header, sizeof(response_header)) != 0) {
-    close_connection();
-    goto complete;
-  }
-  if (get_u32(response_header) != response_magic || get_u32(response_header + 4) != GEMSTONE_RPC_PROTOCOL_VERSION) {
-    close_connection();
-    goto complete;
+  for (;;) {
+    if (receive_all(connection_fd, response_header, 4) != 0) {
+      close_connection();
+      goto complete;
+    }
+    const uint32_t magic = get_u32(response_header);
+    if (magic == callback_magic) {
+      if (service_callback(connection_fd) != 0) {
+        close_connection();
+        goto complete;
+      }
+      continue;
+    }
+    if (magic != response_magic || receive_all(connection_fd, response_header + 4, sizeof(response_header) - 4) != 0
+        || get_u32(response_header + 4) != GEMSTONE_RPC_PROTOCOL_VERSION) {
+      close_connection();
+      goto complete;
+    }
+    break;
   }
   *cuda_status = (int32_t)get_u32(response_header + 8);
   const uint32_t message_size = get_u32(response_header + 12);

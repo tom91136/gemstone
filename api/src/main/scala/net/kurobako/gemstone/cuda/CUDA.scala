@@ -91,7 +91,7 @@ type CUgraphRecaptureCallback         = CallbackTypedef[
 type CUgraphRecaptureStatus         = CValue["CUgraphRecaptureStatus"]
 type CUgraphicsResource             = CValue["CUgraphicsResource"]
 type CUgreenCtx                     = CValue["CUgreenCtx"]
-type CUhostFn                       = CallbackTypedef["CUhostFn", Tuple1[OpaquePointer], Unit]
+type CUhostFn                       = CallbackTypedef["CUhostFn", Tuple1[CallbackData], Unit]
 type CUipcEventHandle               = CValue["CUipcEventHandle"]
 type CUipcMemHandle                 = CValue["CUipcMemHandle"]
 type CUjitInputType                 = CValue["CUjitInputType"]
@@ -144,7 +144,7 @@ type CUstream                         = CValue["CUstream"]
 type CUstreamAttrID                   = CValue["CUstreamAttrID"]
 type CUstreamAttrValue                = CValue["CUstreamAttrValue"]
 type CUstreamBatchMemOpParams         = CValue["CUstreamBatchMemOpParams"]
-type CUstreamCallback                 = CallbackTypedef["CUstreamCallback", (CUstream, CUDAStatus, OpaquePointer), Unit]
+type CUstreamCallback                 = CallbackTypedef["CUstreamCallback", (Stream, CUDAStatus, CallbackData), Unit]
 type CUstreamCaptureMode              = CValue["CUstreamCaptureMode"]
 type CUstreamCaptureStatus            = CValue["CUstreamCaptureStatus"]
 type CUstreamCigCaptureParams         = CValue["CUstreamCigCaptureParams"]
@@ -1093,8 +1093,7 @@ trait CUDA {
   ): CUDAStatus = unsupported
   def cuLaunchGrid(f: CUDAFunction, grid_width: Int, grid_height: Int): CUDAStatus                         = unsupported
   def cuLaunchGridAsync(f: CUDAFunction, grid_width: Int, grid_height: Int, hStream: CUstream): CUDAStatus = unsupported
-  def cuLaunchHostFunc(hStream: CUstream, fn: CUhostFn, userData: Pointer[CVoid, ReadWrite, Opaque]): CUDAStatus =
-    unsupported
+  def cuLaunchHostFunc(hStream: Stream, fn: CUhostFn, userData: CallbackData): CUDAStatus
   def cuLaunchHostFunc_v2(
       hStream: CUstream,
       fn: CUhostFn,
@@ -1829,11 +1828,11 @@ trait CUDA {
       stream: CUstream
   ): CUDAStatus = unsupported
   def cuStreamAddCallback(
-      hStream: CUstream,
+      hStream: Stream,
       callback: CUstreamCallback,
-      userData: Pointer[CVoid, ReadWrite, Opaque],
+      userData: CallbackData,
       flags: UInt32
-  ): CUDAStatus = unsupported
+  ): CUDAStatus
   def cuStreamAttachMemAsync(hStream: CUstream, dptr: DevicePtr, length: SizeT, flags: UInt32): CUDAStatus = unsupported
   def cuStreamBatchMemOp_v2(
       stream: CUstream,

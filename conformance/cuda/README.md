@@ -21,8 +21,12 @@ sbt server/test
 
 No Scala registry needs updating when a translation unit is added. With no `targets:` pragma a new test runs against
 both `cuda` and `gemstone`; an explicit target list narrows it. Cases whose APIs or instructions are not implemented
-yet are marked `targets: cuda`. Both Driver cases, the compact PTX semantic case, and the allocation/copy plus
+yet are marked `targets: cuda`. All three Driver cases, the compact PTX semantic case, and the allocation/copy plus
 interior-pointer Runtime cases currently run on Gemstone.
+
+The Driver callback case mixes `cuLaunchHostFunc` and `cuStreamAddCallback` on one stream, checks ordered shared-state
+transitions and callback-local TLS, and verifies that Gemstone services reverse RPC on the native thread blocked in
+`cuCtxSynchronize`.
 
 The suite builds the facade, starts a loopback-only JVM server with a random authentication token, substitutes
 backend-specific link variables into the same pragma commands, executes each case in an isolated directory, and

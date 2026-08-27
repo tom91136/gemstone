@@ -1,4 +1,4 @@
-{"interface":"net.kurobako.gemstone.cuda.CUDA","identity":"exact-c-function-name","messageId":"sha256-128(function-name-utf8)","fingerprint":"4aa09e44add4ef88141eca24add2130cbb31a2d28bb67f1f4b9ebf5a432f28c3","methods":[
+{"interface":"net.kurobako.gemstone.cuda.CUDA","identity":"exact-c-function-name","messageId":"sha256-128(function-name-utf8)","fingerprint":"ec53bf9a873f247b54719e7328615bc3ff5fa3c0eb4321e934c923c0a2a6016a","methods":[
     {"name":"__cudaGemstoneManagedRegister","messageId":"c6207aea8d73f5ba2db4cd6e3a364b1a","parameters":[{"name":"pointer","wireType":"DevicePtr"},{"name":"bytesize","wireType":"SizeT"}],"result":"CUDAStatus"},
     {"name":"__cudaGemstoneManagedUnregister","messageId":"93e5439ad242c3c08e20904fec96004c","parameters":[{"name":"pointer","wireType":"DevicePtr"}],"result":"CUDAStatus"},
     {"name":"cuCtxCreate_v2","messageId":"e6eb5473c0a097e3a17c8d63cec75a44","parameters":[{"name":"pctx","wireType":"Context"},{"name":"flags","wireType":"UInt32"},{"name":"dev","wireType":"Device"}],"result":"CUDAStatus"},
@@ -8,6 +8,7 @@
     {"name":"cuDeviceGetCount","messageId":"831f6fffdf16f0d43c498239d16d9867","parameters":[{"name":"count","wireType":"Int32"}],"result":"CUDAStatus"},
     {"name":"cuDriverGetVersion","messageId":"e584ec56943a425d3c512e60803234f9","parameters":[{"name":"driverVersion","wireType":"Int32"}],"result":"CUDAStatus"},
     {"name":"cuInit","messageId":"3c1688958f08660e1c2a40d0799c268c","parameters":[{"name":"Flags","wireType":"UInt32"}],"result":"CUDAStatus"},
+    {"name":"cuLaunchHostFunc","messageId":"ced40f65d252b18edc2b29f9f2e965b6","parameters":[{"name":"hStream","wireType":"Stream"},{"name":"fn","wireType":"CUDAHostCallback"},{"name":"userData","wireType":"CallbackData"}],"result":"CUDAStatus"},
     {"name":"cuLaunchKernel","messageId":"0541d9142559d4374cd345cbce10e2df","parameters":[{"name":"f","wireType":"CudaFunction"},{"name":"gridDimX","wireType":"UInt32"},{"name":"gridDimY","wireType":"UInt32"},{"name":"gridDimZ","wireType":"UInt32"},{"name":"blockDimX","wireType":"UInt32"},{"name":"blockDimY","wireType":"UInt32"},{"name":"blockDimZ","wireType":"UInt32"},{"name":"sharedMemBytes","wireType":"UInt32"},{"name":"hStream","wireType":"Stream"},{"name":"kernelParams","wireType":"KernelParameters"},{"name":"extra","wireType":"NullableOpaquePointer"}],"result":"CUDAStatus"},
     {"name":"cuMemAlloc_v2","messageId":"7077a5441f532f0e677e154cf996113d","parameters":[{"name":"dptr","wireType":"DevicePtr"},{"name":"bytesize","wireType":"SizeT"}],"result":"CUDAStatus"},
     {"name":"cuMemFree_v2","messageId":"b5fdc569871ec54e418d186e2d8efa3a","parameters":[{"name":"dptr","wireType":"DevicePtr"}],"result":"CUDAStatus"},
@@ -18,6 +19,7 @@
     {"name":"cuModuleGetFunction","messageId":"4b6b65a1226b0723c3ac0d7e32b1d4b5","parameters":[{"name":"hfunc","wireType":"KernelFunction"},{"name":"hmod","wireType":"CudaModule"},{"name":"name","wireType":"FunctionName"}],"result":"CUDAStatus"},
     {"name":"cuModuleLoadData","messageId":"fef489c6c628b458480e5cb6fe964d3f","parameters":[{"name":"module","wireType":"CudaModule"},{"name":"image","wireType":"ModuleImage"}],"result":"CUDAStatus"},
     {"name":"cuModuleUnload","messageId":"b94c365c6c5c39022a1466600700709a","parameters":[{"name":"hmod","wireType":"CudaModule"}],"result":"CUDAStatus"},
+    {"name":"cuStreamAddCallback","messageId":"589d21fb33f2aca5be72b9cfe9179b7a","parameters":[{"name":"hStream","wireType":"Stream"},{"name":"callback","wireType":"CUDAStreamCallback"},{"name":"userData","wireType":"CallbackData"},{"name":"flags","wireType":"UInt32"}],"result":"CUDAStatus"},
     {"name":"cudaFree","messageId":"c9831c51cb850c1e0300fb6b734556b4","parameters":[{"name":"devPtr","wireType":"DevicePtr"}],"result":"CUDAStatus"},
     {"name":"cudaGetDeviceCount","messageId":"29770d4f155d9a98ccec9231bf109bef","parameters":[{"name":"count","wireType":"Int32"}],"result":"CUDAStatus"},
     {"name":"cudaMalloc","messageId":"36207ff276ba04db8ed2474e0fef125d","parameters":[{"name":"devPtr","wireType":"DevicePtr"},{"name":"size","wireType":"SizeT"}],"result":"CUDAStatus"}
