@@ -25,6 +25,7 @@ class CUDAConformanceSuite extends munit.FunSuite {
   override def beforeAll(): Unit = {
     Files.createDirectories(libraryDir)
     buildGemstoneFacade(root, libraryDir)
+    verifyGemstoneSurface(root, libraryDir, runRoot)
     server = Some(CUDARPCServer.start(token))
   }
 
@@ -363,6 +364,32 @@ object CUDAConformanceSuite {
     val link = libraryDir.resolve("libcuda.so")
     Files.deleteIfExists(link)
     val _ = Files.createSymbolicLink(link, library.getFileName)
+  }
+
+  private def verifyGemstoneSurface(root: Path, libraryDir: Path, runRoot: Path): Unit = {
+    val executable = runRoot.resolve("surface-smoke")
+    runChecked(
+      Vector(
+        "c++",
+        "-std=c++17",
+        "-Wall",
+        "-Wextra",
+        "-Werror",
+        root.resolve("conformance/cuda/support/surface-smoke.cpp").toString,
+        s"-I${root.resolve("generated/c")}",
+        "-ldl",
+        "-o",
+        executable.toString
+      ),
+      root,
+      Map.empty
+    )
+    val inherited = sys.env.get("LD_LIBRARY_PATH").filter(_.nonEmpty).map(value => s":$value").getOrElse("")
+    runChecked(
+      Vector(executable.toString),
+      root,
+      Map("LD_LIBRARY_PATH" -> s"$libraryDir$inherited")
+    )
   }
 
   private def cudaHeaderInclude(root: Path): Path = {

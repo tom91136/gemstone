@@ -4,15 +4,12 @@ The generated `CUDASurface` owns the 820 declarations from the pinned CUDA 13.3 
 handwritten `CUDA` overlay refines the implemented RPC and native-delegate subset and adds the compatibility/compiler
 entry points; concrete defaults fail as unsupported. Exact C function names identify methods, and a Scala 3 quoted
 macro derives the export inventory plus typed schemas, IDs, proxies, dispatch, and fingerprints. See
-[CUDA_RPC.md](CUDA_RPC.md). The older registry remains only for the phase-0 two-call transport.
+[CUDA_RPC.md](CUDA_RPC.md).
 
 `codegen` currently emits:
 
-- `gemstone_protocol.h`: pointer-free request and response structures, protocol version, status values, and opcodes;
-- `gemstone_cuda.h` and `gemstone_cuda.c`: the public ABI and pure-C validation/marshalling facade;
+- `gemstone_status.h`: transport-independent CUDA status constants used by generated C;
 - `gemstone_cuda.map`: the exact exported ELF symbol surface and version node;
-- `GeneratedAPI.scala`: handler interface, allocation-free result representation, and opcode dispatch;
-- `api-manifest.json`: machine-readable ABI and protocol coverage metadata.
 - `cuda-rpc-schema.json` and `gemstone_cuda_rpc.inc`: trait-derived names, types, IDs, and schema fingerprint;
 - `gemstone_cuda_rpc_client.c`: generated CUDA Driver ABI projection and typed marshalling;
 - `GeneratedCUDARPC.scala`: typed client and receiving dispatcher for JVM and Scala Native;
@@ -23,39 +20,7 @@ Generated C outputs and manifests are checked into `generated/`; generated Scala
 Run the generator with `sbt 'codegen/run generated core/src/generated/main/scala'` and verify it with
 `sbt 'codegen/run --check generated core/src/generated/main/scala'`.
 
-## In-process transport
-
-The original two-call phase-0 smoke path remains in process while it continues to stress foreign-thread isolation:
-
-```text
-application thread
-      |
-      v
-generated vendor facade
-  - validates pointers
-  - copies scalar/input values
-  - preserves C TLS state
-      |
-      v
-libgemstone_dispatch.so
-  - allocates request ID
-  - records request
-  - queues stack-owned call envelope
-  - waits on per-call condition variable
-      |
-      v
-Scala Native-owned thread in libgemstone-native.so
-  - decodes generated opcode
-  - invokes logical vendor handler
-  - catches every exception
-  - completes response
-```
-
-Only the wire request and response cross the language boundary. They contain fixed-width values and no application,
-Scala, or guest pointers. The C-only call envelope contains queue links and synchronization objects but is not part of
-the serializable protocol.
-
-## JVM IPC transport
+## IPC transport
 
 The trait-derived Driver path is now isolated:
 
@@ -79,16 +44,17 @@ server
 CUDAEmulatorServer
 ```
 
-The server binds only to the loopback interface on an ephemeral port. The conformance runner supplies a random
+The current JVM endpoint binds only to the loopback interface on an ephemeral port. The conformance runner supplies a random
 256-bit token to both processes. Names are capped at 128 bytes and request/response payloads at 64 MiB. Multi-byte
 values use network byte order; every variable-length byte array has a checked length prefix. The current C socket
-backend is POSIX; the framing and TCP design are portable, while Windows still needs its Winsock implementation.
+backend is POSIX; the framing and TCP design are portable, while Windows still needs its Winsock implementation. The
+server semantics, generated dispatcher, and PTX execution layer also compile as `serverNative`; a Native transport
+endpoint can be added without changing the API or wire schema.
 
 ## Recording and blob evolution
 
 Setting `GEMSTONE_RECORD` to a path records ordered JSON-lines events. The JVM RPC record contains exact function name,
-message ID, payload sizes, CUDA status, and response size. Validation failures that do not reach the legacy queue are
-recorded as boundary events there.
+message ID, payload sizes, CUDA status, and response size.
 
 Host blobs currently travel inline as owned copies. Content-addressed or shared-memory blob transfer can replace that
 representation above a size threshold without changing the generated dispatcher; the JVM will continue to receive
@@ -102,4 +68,4 @@ The initial CUDA Runtime compatibility calls are C-side compositions over this D
 allocation/copy programs use the same server without introducing a second RPC schema; Runtime registration and launch
 machinery remain a separate, fail-closed boundary.
 
-Callbacks will use reverse messages. C-owned callback dispatchers—not Scala code—will invoke host function pointers.
+Callbacks use reverse messages. C-owned callback dispatchers—not Scala code—invoke host function pointers.

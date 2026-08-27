@@ -1,7 +1,0 @@
-GEMSTONE_CORE_0.1 {
-  global:
-    ScalaNativeInit;
-    gemstoneStartServer;
-  local:
-    *;
-};

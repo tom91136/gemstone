@@ -1,8 +1,6 @@
 #include <stdint.h>
 #include <cuda.h>
 
-#include "gemstone_protocol.h"
-
 typedef struct GemstoneDim3 { uint32_t x; uint32_t y; uint32_t z; } GemstoneDim3;
 
 /* Exact ABI-presence stubs. Trait methods opt into RPC or a native delegate. */

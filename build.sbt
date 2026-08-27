@@ -1,4 +1,3 @@
-import scala.scalanative.build.BuildTarget
 import scala.sys.process.Process
 
 Global / onChangedBuildSource := ReloadOnSourceChanges
@@ -592,30 +591,27 @@ lazy val server = projectMatrix
     ThrustTest / parallelExecution         := false,
     ThrustTest / test / fork               := false,
     Test / test := (Test / test).dependsOn(codegen.jvm(scala3Version) / prepareISAReferences).evaluated,
+    Test / testFull := Def.uncached {
+      (Test / testFull).dependsOn(codegen.jvm(scala3Version) / prepareISAReferences).value
+    },
     ThrustTest / test := (ThrustTest / test)
       .dependsOn(codegen.jvm(scala3Version) / prepareISAReferences)
       .evaluated,
     libraryDependencies += "org.scalameta" %% "munit" % munitVersion % ThrustTest
   )
-  .jvmPlatform(scalaVersions = Seq(scala3Version))
+  .jvmPlatform(
+    scalaVersions = Seq(scala3Version),
+    settings = Seq(
+      Compile / unmanagedSourceDirectories +=
+        (LocalRootProject / baseDirectory).value / "server" / "src" / "main-jvm" / "scala",
+      Test / unmanagedSourceDirectories +=
+        (LocalRootProject / baseDirectory).value / "server" / "src" / "test-jvm" / "scala"
+    )
+  )
+  .nativePlatform(scalaVersions = Seq(scala3Version), settings = skipSharedSourceFormatting)
 
 addCommandAlias("testThrust", "server / Thrust / testOnly net.kurobako.gemstone.server.ThrustConformanceSuite")
 addCommandAlias(
   "check",
-  ";api / test;codegen / test;core / test;apiNative / compile;coreNative / compile;nativeNative / compile;server / test"
+  ";api / test;codegen / test;core / test;apiNative / compile;coreNative / compile;serverNative / compile;server / test"
 )
-
-lazy val native = projectMatrix
-  .dependsOn(core, isa_ptx, isa_amdgpu, isa_spirv)
-  .settings(
-    commonSettings,
-    name         := "gemstone-native",
-    nativeConfig := {
-      val exportMap = (LocalRootProject / baseDirectory).value / "native" / "core-exports.map"
-      nativeConfig.value
-        .withBuildTarget(BuildTarget.libraryDynamic)
-        .withMultithreading(true)
-        .withLinkingOptions(Seq(s"-Wl,--version-script=${exportMap.getAbsolutePath}"))
-    }
-  )
-  .nativePlatform(scalaVersions = Seq(scala3Version))

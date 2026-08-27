@@ -24,10 +24,10 @@ class CUDAEmulatorServerSuite extends munit.FunSuite {
   }
 
   test("generated client and dispatcher round-trip allocation and bytes") {
-    val server    = new CUDAEmulatorServer
-    val transport = new RPCTransport {
+    val implementation = new CUDAEmulatorServer
+    val transport      = new RPCTransport {
       override val schemaFingerprint: String = GeneratedCUDARPC.Dispatcher.schemaFingerprint
-      override def call(request: RPCRequest) = GeneratedCUDARPC.Dispatcher.dispatch(request, server)
+      override def call(request: RPCRequest) = GeneratedCUDARPC.Dispatcher.dispatch(request, implementation)
     }
     val client = new GeneratedCUDARPC.Client(transport)
 

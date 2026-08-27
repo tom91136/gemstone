@@ -1,10 +1,5 @@
 package net.kurobako.gemstone.codegen
 
-import net.kurobako.gemstone.apispec.API
-import net.kurobako.gemstone.apispec.APIFunction
-import net.kurobako.gemstone.apispec.Direction
-import net.kurobako.gemstone.apispec.GemstoneAPIRegistry
-import net.kurobako.gemstone.apispec.ReturnConvention
 import net.kurobako.gemstone.abi.ABIDeclaration
 import net.kurobako.gemstone.abi.ABIDerivation
 import net.kurobako.gemstone.abi.MethodImplementation
@@ -50,24 +45,18 @@ object GenerateAPI {
     else write(generated)
   }
 
-  private def files(output: Path, scalaOutput: Path): Vector[(Path, String)] = {
-    val api = GemstoneAPIRegistry.cuda
+  private def files(output: Path, scalaOutput: Path): Vector[(Path, String)] =
     Vector(
-      output.resolve("c/gemstone_protocol.h")                                       -> renderProtocol(api),
-      output.resolve("c/gemstone_cuda.h")                                           -> renderHeader(api),
-      output.resolve("c/gemstone_cuda.c")                                           -> renderFacade(api),
+      output.resolve("c/gemstone_status.h")                                         -> renderStatus,
       output.resolve("c/gemstone_cuda_driver_stubs.c")                              -> renderCUDADriverStubs(output),
-      output.resolve("c/gemstone_cuda.map")                                         -> renderVersionMap(api),
+      output.resolve("c/gemstone_cuda.map")                                         -> renderVersionMap,
       output.resolve("c/gemstone_cuda_driver_surface.inc")                          -> renderCUDASurfaceInclude,
       output.resolve("c/gemstone_cuda_rpc.inc")                                     -> renderCUDARPCInclude,
       output.resolve("c/gemstone_cuda_rpc_client.c")                                -> renderCUDARPCClient,
-      scalaOutput.resolve("net/kurobako/gemstone/generated/GeneratedAPI.scala")     -> renderScala(api),
       scalaOutput.resolve("net/kurobako/gemstone/generated/GeneratedCUDARPC.scala") -> renderCUDARPCScala,
-      output.resolve("manifest/api-manifest.json")                                  -> renderManifest(api),
       output.resolve("manifest/cuda-rpc-schema.json")                               -> renderCUDARPCManifest,
-      output.resolve("manifest/cuda-driver-surface.json")                           -> renderCUDASurfaceManifest(api)
+      output.resolve("manifest/cuda-driver-surface.json")                           -> renderCUDASurfaceManifest
     )
-  }
 
   private def write(files: Vector[(Path, String)]): Unit = files.foreach { case (path, content) =>
     Files.createDirectories(path.getParent)
@@ -85,26 +74,9 @@ object GenerateAPI {
     println(s"verified ${files.size} generated API files")
   }
 
-  private def renderProtocol(api: API): String = {
-    val opcodes = api.functions.map(function => s"  GEMSTONE_OPCODE_${upperSnake(function.name)} = ${function.opcode}")
-    val names   = api.functions.map { function =>
-      s"    case GEMSTONE_OPCODE_${upperSnake(function.name)}: return \"${function.name}\";"
-    }
-    s"""|#ifndef GEMSTONE_PROTOCOL_H
-        |#define GEMSTONE_PROTOCOL_H
-        |
-        |#include <stddef.h>
-        |#include <stdint.h>
-        |
-        |#ifdef __cplusplus
-        |extern "C" {
-        |#endif
-        |
-        |enum {
-        |  GEMSTONE_PROTOCOL_VERSION = ${GemstoneAPIRegistry.protocolVersion},
-        |  GEMSTONE_OPCODE_SHUTDOWN = 0,
-        |${opcodes.mkString(",\n")}
-        |};
+  private def renderStatus: String =
+    s"""|#ifndef GEMSTONE_STATUS_H
+        |#define GEMSTONE_STATUS_H
         |
         |enum {
         |  GEMSTONE_STATUS_SUCCESS = 0,
@@ -114,154 +86,13 @@ object GenerateAPI {
         |  GEMSTONE_STATUS_UNKNOWN = 999
         |};
         |
-        |typedef struct GemstoneWireRequest {
-        |  uint32_t protocol_version;
-        |  uint32_t opcode;
-        |  uint64_t request_id;
-        |  uint64_t foreign_thread_id;
-        |  int64_t argument0;
-        |  int64_t argument1;
-        |} GemstoneWireRequest;
-        |
-        |typedef struct GemstoneWireResponse {
-        |  uint32_t protocol_version;
-        |  int32_t status;
-        |  uint64_t request_id;
-        |  int64_t result0;
-        |} GemstoneWireResponse;
-        |
-        |#if defined(__cplusplus)
-        |#define GEMSTONE_STATIC_ASSERT(condition, message) static_assert(condition, message)
-        |#else
-        |#define GEMSTONE_STATIC_ASSERT(condition, message) _Static_assert(condition, message)
-        |#endif
-        |
-        |GEMSTONE_STATIC_ASSERT(sizeof(GemstoneWireRequest) == 40, "GemstoneWireRequest ABI size changed");
-        |GEMSTONE_STATIC_ASSERT(offsetof(GemstoneWireRequest, protocol_version) == 0, "request protocol_version offset changed");
-        |GEMSTONE_STATIC_ASSERT(offsetof(GemstoneWireRequest, opcode) == 4, "request opcode offset changed");
-        |GEMSTONE_STATIC_ASSERT(offsetof(GemstoneWireRequest, request_id) == 8, "request request_id offset changed");
-        |GEMSTONE_STATIC_ASSERT(offsetof(GemstoneWireRequest, foreign_thread_id) == 16, "request foreign_thread_id offset changed");
-        |GEMSTONE_STATIC_ASSERT(offsetof(GemstoneWireRequest, argument0) == 24, "request argument0 offset changed");
-        |GEMSTONE_STATIC_ASSERT(offsetof(GemstoneWireRequest, argument1) == 32, "request argument1 offset changed");
-        |GEMSTONE_STATIC_ASSERT(sizeof(GemstoneWireResponse) == 24, "GemstoneWireResponse ABI size changed");
-        |GEMSTONE_STATIC_ASSERT(offsetof(GemstoneWireResponse, protocol_version) == 0, "response protocol_version offset changed");
-        |GEMSTONE_STATIC_ASSERT(offsetof(GemstoneWireResponse, status) == 4, "response status offset changed");
-        |GEMSTONE_STATIC_ASSERT(offsetof(GemstoneWireResponse, request_id) == 8, "response request_id offset changed");
-        |GEMSTONE_STATIC_ASSERT(offsetof(GemstoneWireResponse, result0) == 16, "response result0 offset changed");
-        |
-        |#undef GEMSTONE_STATIC_ASSERT
-        |
-        |static inline const char *gemstone_operation_name(uint32_t opcode) {
-        |  switch (opcode) {
-        |    case GEMSTONE_OPCODE_SHUTDOWN: return "shutdown";
-        |${names.mkString("\n")}
-        |    default: return "unknown";
-        |  }
-        |}
-        |
-        |#ifdef __cplusplus
-        |}
-        |#endif
-        |
         |#endif
         |""".stripMargin
-  }
-
-  private def renderHeader(api: API): String = {
-    val declarations = api.functions.map { function =>
-      val parameters = function.parameters.map(renderCParameter).mkString(", ")
-      s"int32_t ${function.name}($parameters);"
-    }
-    s"""|#ifndef GEMSTONE_CUDA_H
-        |#define GEMSTONE_CUDA_H
-        |
-        |#include <stdint.h>
-        |
-        |#ifdef __cplusplus
-        |extern "C" {
-        |#endif
-        |
-        |${declarations.mkString("\n")}
-        |
-        |#ifdef __cplusplus
-        |}
-        |#endif
-        |
-        |#endif
-        |""".stripMargin
-  }
-
-  private def renderFacade(api: API): String = {
-    val functions = api.functions.map(renderFunction)
-    s"""|#include "gemstone_cuda.h"
-        |#include "gemstone_dispatch.h"
-        |#include "gemstone_protocol.h"
-        |
-        |#include <stddef.h>
-        |
-        |static _Thread_local int32_t gemstone_cuda_last_error = GEMSTONE_STATUS_SUCCESS;
-        |
-        |${functions.mkString("\n\n")}
-        |""".stripMargin
-  }
-
-  private def renderFunction(function: APIFunction): String = {
-    val parameters    = function.parameters.map(renderCParameter).mkString(", ")
-    val invalidReturn =
-      if (function.returnConvention == ReturnConvention.StatusCode) "GEMSTONE_STATUS_INVALID_VALUE" else "0"
-    val invalidChecks = function.parameters.collect {
-      case parameter if parameter.direction != Direction.In && !parameter.nullable =>
-        s"""|  if (${parameter.name} == NULL) {
-            |    gemstone_dispatch_record_boundary(GEMSTONE_OPCODE_${upperSnake(
-             function.name
-           )}, GEMSTONE_STATUS_INVALID_VALUE);
-            |    return $invalidReturn;
-            |  }""".stripMargin
-    }
-    val inputs = function.parameters.filter(_.direction != Direction.Out)
-    require(inputs.size <= 2, s"wire prototype supports at most two input values: ${function.name}")
-    val arguments = Vector.tabulate(2) { index =>
-      inputs.lift(index).map(parameter => s"(int64_t)${parameter.name}").getOrElse("0")
-    }
-    val outputAssignments = function.parameters.collect {
-      case parameter if parameter.direction != Direction.In =>
-        s"    *${parameter.name} = (int32_t)response.result0;"
-    }
-    val statusUpdate = if (function.threadLocalError) "  gemstone_cuda_last_error = response.status;\n" else ""
-    val result       = function.returnConvention match {
-      case ReturnConvention.StatusCode =>
-        s"""|$statusUpdate  if (response.status == GEMSTONE_STATUS_SUCCESS) {
-            |${outputAssignments.mkString("\n")}
-            |  }
-            |  return response.status;""".stripMargin
-      case ReturnConvention.DirectInt32 =>
-        "  if (response.status != GEMSTONE_STATUS_SUCCESS) return 0;\n  return (int32_t)response.result0;"
-    }
-    val checkedBoundary = if (invalidChecks.isEmpty) "" else s"${invalidChecks.mkString("\n")}\n"
-    s"""|int32_t ${function.name}($parameters) {
-        |$checkedBoundary  GemstoneWireRequest request = {
-        |    .protocol_version = GEMSTONE_PROTOCOL_VERSION,
-        |    .opcode = GEMSTONE_OPCODE_${upperSnake(function.name)},
-        |    .argument0 = ${arguments(0)},
-        |    .argument1 = ${arguments(1)}
-        |  };
-        |  GemstoneWireResponse response = {0};
-        |  if (gemstone_dispatch_request(&request, &response) != 0) {
-        |    gemstone_cuda_last_error = GEMSTONE_STATUS_INITIALIZATION_ERROR;
-        |    return ${
-         if (function.returnConvention == ReturnConvention.StatusCode) "GEMSTONE_STATUS_INITIALIZATION_ERROR" else "0"
-       };
-        |  }
-        |$result
-        |}""".stripMargin
-  }
-
-  private def renderVersionMap(api: API): String = {
-    val symbols =
-      (api.functions.map(_.name) ++ cudaDriverSurface ++ cudaRuntimeSurface ++ cudaBootstrapSurface).distinct
-        .map(symbol => s"    $symbol;")
-        .mkString("\n")
-    s"""|${api.symbolVersion} {
+  private def renderVersionMap: String = {
+    val symbols = (cudaDriverSurface ++ cudaRuntimeSurface ++ cudaBootstrapSurface).distinct
+      .map(symbol => s"    $symbol;")
+      .mkString("\n")
+    s"""|GEMSTONE_0.1 {
         |  global:
         |$symbols
         |  local:
@@ -271,9 +102,7 @@ object GenerateAPI {
   }
 
   private def renderCUDADriverStubs(output: Path): String = {
-    val wired = GemstoneAPIRegistry.cuda.functions.map(_.name).toSet ++ cudaRPC.methods.map(
-      _.name
-    ).filterNot(_.startsWith("cuda"))
+    val wired              = cudaRPC.methods.map(_.name).filterNot(_.startsWith("cuda")).toSet
     val driverDeclarations = officialCUDADeclarations(output)
     val delegatedNames     = cudaNativeDelegates.map(_.name).toSet
     val stubs              = driverDeclarations.collect {
@@ -296,8 +125,6 @@ object GenerateAPI {
     }
     s"""|#include <stdint.h>
         |#include <cuda.h>
-        |
-        |#include "gemstone_protocol.h"
         |
         |typedef struct GemstoneDim3 { uint32_t x; uint32_t y; uint32_t z; } GemstoneDim3;
         |
@@ -376,66 +203,6 @@ object GenerateAPI {
     result.result()
   }
 
-  private def renderScala(api: API): String = {
-    val opcodes = api.functions.map { function =>
-      s"    final val ${scalaName(function.name)}: Int = ${function.opcode}"
-    }
-    val handlerMethods = api.functions.map { function =>
-      val inputs     = function.parameters.filter(_.direction != Direction.Out)
-      val parameters = inputs.map(parameter => s"${parameter.name}: Int").mkString(", ")
-      s"    def ${function.name}($parameters): DispatchResult"
-    }
-    val cases = api.functions.map { function =>
-      val inputs =
-        function.parameters.filter(_.direction != Direction.Out).indices.map(index => s"argument$index.toInt")
-      s"      case Opcode.${scalaName(function.name)} => handler.${function.name}(${inputs.mkString(", ")})"
-    }
-    s"""|package net.kurobako.gemstone.generated
-        |
-        |object GeneratedAPI {
-        |  final val ProtocolVersion: Int = ${GemstoneAPIRegistry.protocolVersion}
-        |
-        |  object Opcode {
-        |    final val Shutdown: Int = 0
-        |${opcodes.mkString("\n")}
-        |  }
-        |
-        |  opaque type DispatchResult = Long
-        |
-        |  object DispatchResult {
-        |    def apply(status: Int, result0: Long): DispatchResult =
-        |      (status.toLong << 32) | (result0 & 0xffffffffL)
-        |
-        |    extension (result: DispatchResult) {
-        |      def status: Int   = (result >>> 32).toInt
-        |      def result0: Long = result.toInt.toLong
-        |    }
-        |  }
-        |
-        |  trait Handler {
-        |${handlerMethods.mkString("\n")}
-        |  }
-        |
-        |  def dispatch(opcode: Int, argument0: Long, argument1: Long, handler: Handler): DispatchResult = {
-        |    opcode match {
-        |${cases.mkString("\n")}
-        |      case _ => DispatchResult(status = 999, result0 = 0L)
-        |    }
-        |  }
-        |}
-        |""".stripMargin
-  }
-
-  private def renderManifest(api: API): String = {
-    val functions = api.functions.map { function =>
-      s"""|    {"name":"${function.name}","opcode":${function.opcode},"synchronous":${function.synchronous},"threadLocalError":${function.threadLocalError}}""".stripMargin
-    }
-    s"""|{"protocolVersion":${GemstoneAPIRegistry.protocolVersion},"api":"${api.name}","abiVersion":"${api.abiVersion}","soname":"${api.soname}","symbolVersion":"${api.symbolVersion}","functions":[
-        |${functions.mkString(",\n")}
-        |]}
-        |""".stripMargin
-  }
-
   private def renderCUDASurfaceInclude: String = {
     def renderMacro(name: String, entries: Vector[String]): String = {
       val body = entries.zipWithIndex.map { case (entry, index) =>
@@ -455,8 +222,8 @@ object GenerateAPI {
         |""".stripMargin
   }
 
-  private def renderCUDASurfaceManifest(wiredAPI: API): String = {
-    val wired     = wiredAPI.functions.map(_.name).toSet ++ cudaRPC.methods.map(_.name).filterNot(_.startsWith("cuda"))
+  private def renderCUDASurfaceManifest: String = {
+    val wired     = cudaRPC.methods.map(_.name).filterNot(_.startsWith("cuda")).toSet
     val functions = cudaDriverSurface.map { name =>
       val state = if (wired(name)) "wired" else "stub"
       s"""|    {"name":"$name","transport":"$state"}""".stripMargin
@@ -494,7 +261,7 @@ object GenerateAPI {
       s"static const uint64_t gemstone_${method.name}_high = UINT64_C(0x$high);\nstatic const uint64_t gemstone_${method.name}_low = UINT64_C(0x$low);"
     }
     s"""|#include "gemstone_cuda_rpc.inc"
-        |#include "gemstone_protocol.h"
+        |#include "gemstone_status.h"
         |#include "gemstone_rpc_transport.h"
         |
         |#include <limits.h>
@@ -1813,17 +1580,4 @@ object GenerateAPI {
     case WireType.CUDAStatus            => s"WireValue.CUDAStatusValue($binding)"
   }
 
-  private def upperSnake(value: String): String = value
-    .flatMap(character => if (character.isUpper) s"_${character}" else character.toString)
-    .stripPrefix("_")
-    .toUpperCase
-
-  private def scalaName(value: String): String =
-    if (value.startsWith("cuda")) s"CUDA${value.drop(4)}"
-    else s"${value.head.toUpper}${value.tail}"
-
-  private def renderCParameter(parameter: net.kurobako.gemstone.apispec.Parameter): String = {
-    val separator = if (parameter.cType.cName.endsWith("*")) "" else " "
-    s"${parameter.cType.cName}$separator${parameter.name}"
-  }
 }

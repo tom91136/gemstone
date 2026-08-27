@@ -1,5 +1,5 @@
 #include "gemstone_cuda_rpc.inc"
-#include "gemstone_protocol.h"
+#include "gemstone_status.h"
 #include "gemstone_rpc_transport.h"
 
 #include <limits.h>

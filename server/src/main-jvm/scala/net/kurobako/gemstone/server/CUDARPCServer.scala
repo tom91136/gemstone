@@ -4,7 +4,6 @@ import net.kurobako.gemstone.abi.*
 import net.kurobako.gemstone.cuda.*
 import net.kurobako.gemstone.generated.GeneratedCUDARPC
 import net.kurobako.gemstone.rpc.*
-import net.kurobako.gemstone.vendor.CUDAEmulatorServer
 
 import java.io.ByteArrayOutputStream
 import java.io.DataInputStream
@@ -102,19 +101,16 @@ object CUDARPCServer {
     try {
       socket.setTcpNoDelay(true)
       socket.setSoTimeout(30000)
-      val implementation = new CUDAEmulatorServer(new PTXCUDAKernelExecution)
-      val input          = new DataInputStream(socket.getInputStream)
-      val output         = new DataOutputStream(socket.getOutputStream)
-      val callbacks      = new CallbackConnection(input, output)
-      var open           = true
+      val server    = CUDAServer.emulated
+      val input     = new DataInputStream(socket.getInputStream)
+      val output    = new DataOutputStream(socket.getOutputStream)
+      val callbacks = new CallbackConnection(input, output)
+      var open      = true
       while (open)
         try {
           val response = readRequest(input, expectedToken, callbacks) match {
             case Right(request) =>
-              try GeneratedCUDARPC.Dispatcher.dispatch(request, implementation)
-              catch {
-                case error: Throwable => RPCResponse.Failure(CUDAError(999, s"server failure: ${error.getMessage}"))
-              }
+              server.dispatch(request)
             case Left(error) => RPCResponse.Failure(error)
           }
           writeResponse(output, response)

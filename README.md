@@ -7,7 +7,7 @@ execution sandbox. The command and native-library name are `gemstone`; Scala pac
 This repository currently contains the first vertical scaffold:
 
 - sbt 2 with Scala 3.8 and JVM/Scala Native project-matrix rows;
-- a typed Scala API registry and deterministic JVM generator;
+- official-header-validated API traits and deterministic JVM generators;
 - a Scala 3 macro-derived `CUDA` trait contract with name-derived IDs, schema negotiation, and generated client/server dispatch;
 - canonical runtime objects and a CUDA-shaped logical API handler;
 - bounds-checked guest memory with provenance and use-after-free detection;
@@ -18,15 +18,14 @@ This repository currently contains the first vertical scaffold:
 - generated exact-C-name OpenCL and Level Zero API surfaces;
 - a bounded PTX integer/control executor wired through module load, function lookup, and kernel launch RPC;
 - deterministic JSON-lines instruction and output-write traces;
-- a generated `libcuda.so.1`, pure-C dispatcher/recorder, and separated Scala Native core ABI;
+- a generated `libcuda.so.1` with authenticated RPC, recording, and reverse callbacks;
 - the same semantic tests compiled and run on the JVM and Scala Native.
 
-The generated message boundary resolves Scala Native foreign-thread entry: eight C++ threads execute 16,000 calls
-through the C queue without entering Scala. See [docs/API_TRANSPORT.md](docs/API_TRANSPORT.md) and
-[docs/PHASE_0_FINDINGS.md](docs/PHASE_0_FINDINGS.md). The hand-written semantics boundary and scheduler design are
+The generated message boundary keeps native application pointers and callback entry out of managed server runtimes.
+See [docs/API_TRANSPORT.md](docs/API_TRANSPORT.md). The hand-written semantics boundary and scheduler design are
 described in [docs/ISA_EXECUTION.md](docs/ISA_EXECUTION.md).
 
-The build has eight module boundaries: `api`, `codegen`, `core`, `isa_ptx`, `isa_amdgpu`, `isa_spirv`, `server`, and `native`.
+The build has seven module boundaries: `api`, `codegen`, `core`, `isa_ptx`, `isa_amdgpu`, `isa_spirv`, and `server`.
 Each bare `projectMatrix` uses its matching repository directory directly; there are no manual source mappings or
 redundant `.in(file(...))` declarations.
 
@@ -40,8 +39,7 @@ sbt 'isa_amdgpu / generateAMDGPUSources; isa_amdgpu / generateAMDGPUGoldenTests'
 sbt 'codegen / generateAPISources; isa_spirv / generateSPIRVSources; isa_spirv / generateSPIRVReferenceTests'
 sbt test
 sbt testFull
-sbt nativeNative/nativeLink
-conformance/smoke/run.sh
+sbt serverNative/compile
 ```
 
 `test` is incremental in sbt 2. Use `testFull` when every JVM and Native suite must be executed regardless of the

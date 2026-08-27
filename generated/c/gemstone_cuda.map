@@ -1,7 +1,5 @@
 GEMSTONE_0.1 {
   global:
-    cudaGetDeviceCount;
-    gemstoneAddI32;
     cuArray3DCreate_v2;
     cuArray3DGetDescriptor_v2;
     cuArrayCreate_v2;
@@ -566,6 +564,7 @@ GEMSTONE_0.1 {
     cudaFuncSetSharedMemConfig;
     cudaGetChannelDesc;
     cudaGetDevice;
+    cudaGetDeviceCount;
     cudaGetDeviceFlags;
     cudaGetDeviceProperties;
     cudaGetDriverEntryPoint;
