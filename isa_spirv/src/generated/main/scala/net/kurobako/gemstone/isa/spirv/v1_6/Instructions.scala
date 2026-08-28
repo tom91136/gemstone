@@ -1,6 +1,9 @@
 // Generated from the pinned Khronos SPIR-V core grammar. Do not edit by hand.
 package net.kurobako.gemstone.isa.spirv.v1_6
 
+import net.kurobako.gemstone.Col
+import net.kurobako.gemstone.Col.*
+
 type Decoder = RawInstruction => Either[InstructionDecodeError, Instruction]
 
 enum InstructionDef(
@@ -8,15 +11,15 @@ enum InstructionDef(
     val opcodeNumber: Int,
     val meta: Metadata
 ) {
-  case Nop extends InstructionDef("OpNop", 0, Metadata("Miscellaneous", Some("1.0"), Vector(), Vector()))
+  case Nop extends InstructionDef("OpNop", 0, Metadata("Miscellaneous", Some("1.0"), Col(), Col()))
   case Undef extends InstructionDef(
         "OpUndef",
         1,
         Metadata(
           "Miscellaneous",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One)
           )
@@ -25,12 +28,7 @@ enum InstructionDef(
   case SourceContinued extends InstructionDef(
         "OpSourceContinued",
         2,
-        Metadata(
-          "Debug",
-          Some("1.0"),
-          Vector(),
-          Vector(OperandShape("LiteralString", "continuedSrc", OperandQuantifier.One))
-        )
+        Metadata("Debug", Some("1.0"), Col(), Col(OperandShape("LiteralString", "continuedSrc", OperandQuantifier.One)))
       )
   case Source extends InstructionDef(
         "OpSource",
@@ -38,8 +36,8 @@ enum InstructionDef(
         Metadata(
           "Debug",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("SourceLanguage", "sourceLanguage", OperandQuantifier.One),
             OperandShape("LiteralInteger", "version", OperandQuantifier.One),
             OperandShape("IdRef", "file", OperandQuantifier.Optional),
@@ -53,8 +51,8 @@ enum InstructionDef(
         Metadata(
           "Debug",
           Some("1.0"),
-          Vector(),
-          Vector(OperandShape("LiteralString", "extensionValue", OperandQuantifier.One))
+          Col(),
+          Col(OperandShape("LiteralString", "extensionValue", OperandQuantifier.One))
         )
       )
   case Name extends InstructionDef(
@@ -63,8 +61,8 @@ enum InstructionDef(
         Metadata(
           "Debug",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdRef", "target", OperandQuantifier.One),
             OperandShape("LiteralString", "name", OperandQuantifier.One)
           )
@@ -76,8 +74,8 @@ enum InstructionDef(
         Metadata(
           "Debug",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdRef", "dataType", OperandQuantifier.One),
             OperandShape("LiteralInteger", "member", OperandQuantifier.One),
             OperandShape("LiteralString", "name", OperandQuantifier.One)
@@ -90,8 +88,8 @@ enum InstructionDef(
         Metadata(
           "Debug",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("LiteralString", "string", OperandQuantifier.One)
           )
@@ -103,8 +101,8 @@ enum InstructionDef(
         Metadata(
           "Debug",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdRef", "file", OperandQuantifier.One),
             OperandShape("LiteralInteger", "line", OperandQuantifier.One),
             OperandShape("LiteralInteger", "column", OperandQuantifier.One)
@@ -114,12 +112,7 @@ enum InstructionDef(
   case Extension extends InstructionDef(
         "OpExtension",
         10,
-        Metadata(
-          "Extension",
-          Some("1.0"),
-          Vector(),
-          Vector(OperandShape("LiteralString", "name", OperandQuantifier.One))
-        )
+        Metadata("Extension", Some("1.0"), Col(), Col(OperandShape("LiteralString", "name", OperandQuantifier.One)))
       )
   case ExtInstImport extends InstructionDef(
         "OpExtInstImport",
@@ -127,8 +120,8 @@ enum InstructionDef(
         Metadata(
           "Extension",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("LiteralString", "name", OperandQuantifier.One)
           )
@@ -140,8 +133,8 @@ enum InstructionDef(
         Metadata(
           "Extension",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "set", OperandQuantifier.One),
@@ -156,8 +149,8 @@ enum InstructionDef(
         Metadata(
           "Mode-Setting",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("AddressingModel", "addressingModel", OperandQuantifier.One),
             OperandShape("MemoryModel", "memoryModel", OperandQuantifier.One)
           )
@@ -169,8 +162,8 @@ enum InstructionDef(
         Metadata(
           "Mode-Setting",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("ExecutionModel", "executionModel", OperandQuantifier.One),
             OperandShape("IdRef", "entryPoint", OperandQuantifier.One),
             OperandShape("LiteralString", "name", OperandQuantifier.One),
@@ -184,8 +177,8 @@ enum InstructionDef(
         Metadata(
           "Mode-Setting",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdRef", "entryPoint", OperandQuantifier.One),
             OperandShape("ExecutionMode", "mode", OperandQuantifier.One)
           )
@@ -197,29 +190,19 @@ enum InstructionDef(
         Metadata(
           "Mode-Setting",
           Some("1.0"),
-          Vector(),
-          Vector(OperandShape("Capability", "capability", OperandQuantifier.One))
+          Col(),
+          Col(OperandShape("Capability", "capability", OperandQuantifier.One))
         )
       )
   case TypeVoid extends InstructionDef(
         "OpTypeVoid",
         19,
-        Metadata(
-          "Type-Declaration",
-          Some("1.0"),
-          Vector(),
-          Vector(OperandShape("IdResult", "dest", OperandQuantifier.One))
-        )
+        Metadata("Type-Declaration", Some("1.0"), Col(), Col(OperandShape("IdResult", "dest", OperandQuantifier.One)))
       )
   case TypeBool extends InstructionDef(
         "OpTypeBool",
         20,
-        Metadata(
-          "Type-Declaration",
-          Some("1.0"),
-          Vector(),
-          Vector(OperandShape("IdResult", "dest", OperandQuantifier.One))
-        )
+        Metadata("Type-Declaration", Some("1.0"), Col(), Col(OperandShape("IdResult", "dest", OperandQuantifier.One)))
       )
   case TypeInt extends InstructionDef(
         "OpTypeInt",
@@ -227,8 +210,8 @@ enum InstructionDef(
         Metadata(
           "Type-Declaration",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("LiteralInteger", "width", OperandQuantifier.One),
             OperandShape("LiteralInteger", "signedness", OperandQuantifier.One)
@@ -241,8 +224,8 @@ enum InstructionDef(
         Metadata(
           "Type-Declaration",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("LiteralInteger", "width", OperandQuantifier.One),
             OperandShape("FPEncoding", "floatingPointEncoding", OperandQuantifier.Optional)
@@ -255,8 +238,8 @@ enum InstructionDef(
         Metadata(
           "Type-Declaration",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "componentType", OperandQuantifier.One),
             OperandShape("LiteralInteger", "componentCount", OperandQuantifier.One)
@@ -269,8 +252,8 @@ enum InstructionDef(
         Metadata(
           "Type-Declaration",
           Some("1.0"),
-          Vector("Matrix"),
-          Vector(
+          Col("Matrix"),
+          Col(
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "columnType", OperandQuantifier.One),
             OperandShape("LiteralInteger", "columnCount", OperandQuantifier.One)
@@ -283,8 +266,8 @@ enum InstructionDef(
         Metadata(
           "Type-Declaration",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "sampledType", OperandQuantifier.One),
             OperandShape("Dim", "dim", OperandQuantifier.One),
@@ -300,12 +283,7 @@ enum InstructionDef(
   case TypeSampler extends InstructionDef(
         "OpTypeSampler",
         26,
-        Metadata(
-          "Type-Declaration",
-          Some("1.0"),
-          Vector(),
-          Vector(OperandShape("IdResult", "dest", OperandQuantifier.One))
-        )
+        Metadata("Type-Declaration", Some("1.0"), Col(), Col(OperandShape("IdResult", "dest", OperandQuantifier.One)))
       )
   case TypeSampledImage extends InstructionDef(
         "OpTypeSampledImage",
@@ -313,8 +291,8 @@ enum InstructionDef(
         Metadata(
           "Type-Declaration",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "imageType", OperandQuantifier.One)
           )
@@ -326,8 +304,8 @@ enum InstructionDef(
         Metadata(
           "Type-Declaration",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "elementType", OperandQuantifier.One),
             OperandShape("IdRef", "length", OperandQuantifier.One)
@@ -340,8 +318,8 @@ enum InstructionDef(
         Metadata(
           "Type-Declaration",
           Some("1.0"),
-          Vector("Shader"),
-          Vector(
+          Col("Shader"),
+          Col(
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "elementType", OperandQuantifier.One)
           )
@@ -353,8 +331,8 @@ enum InstructionDef(
         Metadata(
           "Type-Declaration",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "member0TypeMember1Type", OperandQuantifier.Repeated)
           )
@@ -366,8 +344,8 @@ enum InstructionDef(
         Metadata(
           "Type-Declaration",
           Some("1.0"),
-          Vector("Kernel"),
-          Vector(
+          Col("Kernel"),
+          Col(
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("LiteralString", "theNameOfTheOpaqueType", OperandQuantifier.One)
           )
@@ -379,8 +357,8 @@ enum InstructionDef(
         Metadata(
           "Type-Declaration",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("StorageClass", "storageClass", OperandQuantifier.One),
             OperandShape("IdRef", "dataType", OperandQuantifier.One)
@@ -393,8 +371,8 @@ enum InstructionDef(
         Metadata(
           "Type-Declaration",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "returnType", OperandQuantifier.One),
             OperandShape("IdRef", "parameter0TypeParameter1Type", OperandQuantifier.Repeated)
@@ -407,8 +385,8 @@ enum InstructionDef(
         Metadata(
           "Type-Declaration",
           Some("1.0"),
-          Vector("Kernel"),
-          Vector(OperandShape("IdResult", "dest", OperandQuantifier.One))
+          Col("Kernel"),
+          Col(OperandShape("IdResult", "dest", OperandQuantifier.One))
         )
       )
   case TypeDeviceEvent extends InstructionDef(
@@ -417,8 +395,8 @@ enum InstructionDef(
         Metadata(
           "Type-Declaration",
           Some("1.0"),
-          Vector("DeviceEnqueue"),
-          Vector(OperandShape("IdResult", "dest", OperandQuantifier.One))
+          Col("DeviceEnqueue"),
+          Col(OperandShape("IdResult", "dest", OperandQuantifier.One))
         )
       )
   case TypeReserveId extends InstructionDef(
@@ -427,8 +405,8 @@ enum InstructionDef(
         Metadata(
           "Type-Declaration",
           Some("1.0"),
-          Vector("Pipes"),
-          Vector(OperandShape("IdResult", "dest", OperandQuantifier.One))
+          Col("Pipes"),
+          Col(OperandShape("IdResult", "dest", OperandQuantifier.One))
         )
       )
   case TypeQueue extends InstructionDef(
@@ -437,8 +415,8 @@ enum InstructionDef(
         Metadata(
           "Type-Declaration",
           Some("1.0"),
-          Vector("DeviceEnqueue"),
-          Vector(OperandShape("IdResult", "dest", OperandQuantifier.One))
+          Col("DeviceEnqueue"),
+          Col(OperandShape("IdResult", "dest", OperandQuantifier.One))
         )
       )
   case TypePipe extends InstructionDef(
@@ -447,8 +425,8 @@ enum InstructionDef(
         Metadata(
           "Type-Declaration",
           Some("1.0"),
-          Vector("Pipes"),
-          Vector(
+          Col("Pipes"),
+          Col(
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("AccessQualifier", "qualifier", OperandQuantifier.One)
           )
@@ -460,8 +438,8 @@ enum InstructionDef(
         Metadata(
           "Type-Declaration",
           Some("1.0"),
-          Vector("Addresses", "PhysicalStorageBufferAddresses"),
-          Vector(
+          Col("Addresses", "PhysicalStorageBufferAddresses"),
+          Col(
             OperandShape("IdRef", "pointerType", OperandQuantifier.One),
             OperandShape("StorageClass", "storageClass", OperandQuantifier.One)
           )
@@ -473,8 +451,8 @@ enum InstructionDef(
         Metadata(
           "Constant-Creation",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One)
           )
@@ -486,8 +464,8 @@ enum InstructionDef(
         Metadata(
           "Constant-Creation",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One)
           )
@@ -499,8 +477,8 @@ enum InstructionDef(
         Metadata(
           "Constant-Creation",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("LiteralContextDependentNumber", "value", OperandQuantifier.One)
@@ -513,8 +491,8 @@ enum InstructionDef(
         Metadata(
           "Constant-Creation",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "constituents", OperandQuantifier.Repeated)
@@ -527,8 +505,8 @@ enum InstructionDef(
         Metadata(
           "Constant-Creation",
           Some("1.0"),
-          Vector("LiteralSampler"),
-          Vector(
+          Col("LiteralSampler"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("SamplerAddressingMode", "samplerAddressingMode", OperandQuantifier.One),
@@ -543,8 +521,8 @@ enum InstructionDef(
         Metadata(
           "Constant-Creation",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One)
           )
@@ -556,8 +534,8 @@ enum InstructionDef(
         Metadata(
           "Constant-Creation",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One)
           )
@@ -569,8 +547,8 @@ enum InstructionDef(
         Metadata(
           "Constant-Creation",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One)
           )
@@ -582,8 +560,8 @@ enum InstructionDef(
         Metadata(
           "Constant-Creation",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("LiteralContextDependentNumber", "value", OperandQuantifier.One)
@@ -596,8 +574,8 @@ enum InstructionDef(
         Metadata(
           "Constant-Creation",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "constituents", OperandQuantifier.Repeated)
@@ -610,8 +588,8 @@ enum InstructionDef(
         Metadata(
           "Constant-Creation",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("LiteralSpecConstantOpInteger", "instructionOpcode", OperandQuantifier.One)
@@ -624,8 +602,8 @@ enum InstructionDef(
         Metadata(
           "Function",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("FunctionControl", "functionControl", OperandQuantifier.One),
@@ -639,22 +617,22 @@ enum InstructionDef(
         Metadata(
           "Function",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One)
           )
         )
       )
-  case FunctionEnd extends InstructionDef("OpFunctionEnd", 56, Metadata("Function", Some("1.0"), Vector(), Vector()))
+  case FunctionEnd extends InstructionDef("OpFunctionEnd", 56, Metadata("Function", Some("1.0"), Col(), Col()))
   case FunctionCall extends InstructionDef(
         "OpFunctionCall",
         57,
         Metadata(
           "Function",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "function", OperandQuantifier.One),
@@ -668,8 +646,8 @@ enum InstructionDef(
         Metadata(
           "Memory",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("StorageClass", "storageClass", OperandQuantifier.One),
@@ -683,8 +661,8 @@ enum InstructionDef(
         Metadata(
           "Memory",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "image", OperandQuantifier.One),
@@ -699,8 +677,8 @@ enum InstructionDef(
         Metadata(
           "Memory",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "pointer", OperandQuantifier.One),
@@ -714,8 +692,8 @@ enum InstructionDef(
         Metadata(
           "Memory",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdRef", "pointer", OperandQuantifier.One),
             OperandShape("IdRef", "src", OperandQuantifier.One),
             OperandShape("MemoryAccess", "mods", OperandQuantifier.Optional)
@@ -728,8 +706,8 @@ enum InstructionDef(
         Metadata(
           "Memory",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdRef", "target", OperandQuantifier.One),
             OperandShape("IdRef", "src", OperandQuantifier.One),
             OperandShape("MemoryAccess", "modsA", OperandQuantifier.Optional),
@@ -743,8 +721,8 @@ enum InstructionDef(
         Metadata(
           "Memory",
           Some("1.0"),
-          Vector("Addresses", "UntypedPointersKHR"),
-          Vector(
+          Col("Addresses", "UntypedPointersKHR"),
+          Col(
             OperandShape("IdRef", "target", OperandQuantifier.One),
             OperandShape("IdRef", "src", OperandQuantifier.One),
             OperandShape("IdRef", "size", OperandQuantifier.One),
@@ -759,8 +737,8 @@ enum InstructionDef(
         Metadata(
           "Memory",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "base", OperandQuantifier.One),
@@ -774,8 +752,8 @@ enum InstructionDef(
         Metadata(
           "Memory",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "base", OperandQuantifier.One),
@@ -789,8 +767,8 @@ enum InstructionDef(
         Metadata(
           "Memory",
           Some("1.0"),
-          Vector("Addresses", "VariablePointers", "VariablePointersStorageBuffer", "PhysicalStorageBufferAddresses"),
-          Vector(
+          Col("Addresses", "VariablePointers", "VariablePointersStorageBuffer", "PhysicalStorageBufferAddresses"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "base", OperandQuantifier.One),
@@ -805,8 +783,8 @@ enum InstructionDef(
         Metadata(
           "Memory",
           Some("1.0"),
-          Vector("Shader"),
-          Vector(
+          Col("Shader"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "structure", OperandQuantifier.One),
@@ -820,8 +798,8 @@ enum InstructionDef(
         Metadata(
           "Memory",
           Some("1.0"),
-          Vector("Kernel"),
-          Vector(
+          Col("Kernel"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "pointer", OperandQuantifier.One)
@@ -834,8 +812,8 @@ enum InstructionDef(
         Metadata(
           "Memory",
           Some("1.0"),
-          Vector("Addresses"),
-          Vector(
+          Col("Addresses"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "base", OperandQuantifier.One),
@@ -850,8 +828,8 @@ enum InstructionDef(
         Metadata(
           "Annotation",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdRef", "target", OperandQuantifier.One),
             OperandShape("Decoration", "decoration", OperandQuantifier.One)
           )
@@ -863,8 +841,8 @@ enum InstructionDef(
         Metadata(
           "Annotation",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdRef", "structureType", OperandQuantifier.One),
             OperandShape("LiteralInteger", "member", OperandQuantifier.One),
             OperandShape("Decoration", "decoration", OperandQuantifier.One)
@@ -874,7 +852,7 @@ enum InstructionDef(
   case DecorationGroup extends InstructionDef(
         "OpDecorationGroup",
         73,
-        Metadata("Annotation", Some("1.0"), Vector(), Vector(OperandShape("IdResult", "dest", OperandQuantifier.One)))
+        Metadata("Annotation", Some("1.0"), Col(), Col(OperandShape("IdResult", "dest", OperandQuantifier.One)))
       )
   case GroupDecorate extends InstructionDef(
         "OpGroupDecorate",
@@ -882,8 +860,8 @@ enum InstructionDef(
         Metadata(
           "Annotation",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdRef", "decorationGroup", OperandQuantifier.One),
             OperandShape("IdRef", "targets", OperandQuantifier.Repeated)
           )
@@ -895,8 +873,8 @@ enum InstructionDef(
         Metadata(
           "Annotation",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdRef", "decorationGroup", OperandQuantifier.One),
             OperandShape("PairIdRefLiteralInteger", "targets", OperandQuantifier.Repeated)
           )
@@ -908,8 +886,8 @@ enum InstructionDef(
         Metadata(
           "Composite",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "vector", OperandQuantifier.One),
@@ -923,8 +901,8 @@ enum InstructionDef(
         Metadata(
           "Composite",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "vector", OperandQuantifier.One),
@@ -939,8 +917,8 @@ enum InstructionDef(
         Metadata(
           "Composite",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "vector1", OperandQuantifier.One),
@@ -955,8 +933,8 @@ enum InstructionDef(
         Metadata(
           "Composite",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "constituents", OperandQuantifier.Repeated)
@@ -969,8 +947,8 @@ enum InstructionDef(
         Metadata(
           "Composite",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "composite", OperandQuantifier.One),
@@ -984,8 +962,8 @@ enum InstructionDef(
         Metadata(
           "Composite",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "src", OperandQuantifier.One),
@@ -1000,8 +978,8 @@ enum InstructionDef(
         Metadata(
           "Composite",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "src", OperandQuantifier.One)
@@ -1014,8 +992,8 @@ enum InstructionDef(
         Metadata(
           "Composite",
           Some("1.0"),
-          Vector("Matrix"),
-          Vector(
+          Col("Matrix"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "matrix", OperandQuantifier.One)
@@ -1028,8 +1006,8 @@ enum InstructionDef(
         Metadata(
           "Image",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "image", OperandQuantifier.One),
@@ -1043,8 +1021,8 @@ enum InstructionDef(
         Metadata(
           "Image",
           Some("1.0"),
-          Vector("Shader"),
-          Vector(
+          Col("Shader"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "sampledImage", OperandQuantifier.One),
@@ -1059,8 +1037,8 @@ enum InstructionDef(
         Metadata(
           "Image",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "sampledImage", OperandQuantifier.One),
@@ -1075,8 +1053,8 @@ enum InstructionDef(
         Metadata(
           "Image",
           Some("1.0"),
-          Vector("Shader"),
-          Vector(
+          Col("Shader"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "sampledImage", OperandQuantifier.One),
@@ -1092,8 +1070,8 @@ enum InstructionDef(
         Metadata(
           "Image",
           Some("1.0"),
-          Vector("Shader"),
-          Vector(
+          Col("Shader"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "sampledImage", OperandQuantifier.One),
@@ -1109,8 +1087,8 @@ enum InstructionDef(
         Metadata(
           "Image",
           Some("1.0"),
-          Vector("Shader"),
-          Vector(
+          Col("Shader"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "sampledImage", OperandQuantifier.One),
@@ -1125,8 +1103,8 @@ enum InstructionDef(
         Metadata(
           "Image",
           Some("1.0"),
-          Vector("Shader"),
-          Vector(
+          Col("Shader"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "sampledImage", OperandQuantifier.One),
@@ -1141,8 +1119,8 @@ enum InstructionDef(
         Metadata(
           "Image",
           Some("1.0"),
-          Vector("Shader"),
-          Vector(
+          Col("Shader"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "sampledImage", OperandQuantifier.One),
@@ -1158,8 +1136,8 @@ enum InstructionDef(
         Metadata(
           "Image",
           Some("1.0"),
-          Vector("Shader"),
-          Vector(
+          Col("Shader"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "sampledImage", OperandQuantifier.One),
@@ -1175,8 +1153,8 @@ enum InstructionDef(
         Metadata(
           "Image",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "image", OperandQuantifier.One),
@@ -1191,8 +1169,8 @@ enum InstructionDef(
         Metadata(
           "Image",
           Some("1.0"),
-          Vector("Shader"),
-          Vector(
+          Col("Shader"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "sampledImage", OperandQuantifier.One),
@@ -1208,8 +1186,8 @@ enum InstructionDef(
         Metadata(
           "Image",
           Some("1.0"),
-          Vector("Shader"),
-          Vector(
+          Col("Shader"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "sampledImage", OperandQuantifier.One),
@@ -1225,8 +1203,8 @@ enum InstructionDef(
         Metadata(
           "Image",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "image", OperandQuantifier.One),
@@ -1241,8 +1219,8 @@ enum InstructionDef(
         Metadata(
           "Image",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdRef", "image", OperandQuantifier.One),
             OperandShape("IdRef", "coordinate", OperandQuantifier.One),
             OperandShape("IdRef", "texel", OperandQuantifier.One),
@@ -1256,8 +1234,8 @@ enum InstructionDef(
         Metadata(
           "Image",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "sampledImage", OperandQuantifier.One)
@@ -1270,8 +1248,8 @@ enum InstructionDef(
         Metadata(
           "Image",
           Some("1.0"),
-          Vector("Kernel"),
-          Vector(
+          Col("Kernel"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "image", OperandQuantifier.One)
@@ -1284,8 +1262,8 @@ enum InstructionDef(
         Metadata(
           "Image",
           Some("1.0"),
-          Vector("Kernel"),
-          Vector(
+          Col("Kernel"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "image", OperandQuantifier.One)
@@ -1298,8 +1276,8 @@ enum InstructionDef(
         Metadata(
           "Image",
           Some("1.0"),
-          Vector("Kernel", "ImageQuery"),
-          Vector(
+          Col("Kernel", "ImageQuery"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "image", OperandQuantifier.One),
@@ -1313,8 +1291,8 @@ enum InstructionDef(
         Metadata(
           "Image",
           Some("1.0"),
-          Vector("Kernel", "ImageQuery"),
-          Vector(
+          Col("Kernel", "ImageQuery"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "image", OperandQuantifier.One)
@@ -1327,8 +1305,8 @@ enum InstructionDef(
         Metadata(
           "Image",
           Some("1.0"),
-          Vector("ImageQuery"),
-          Vector(
+          Col("ImageQuery"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "sampledImage", OperandQuantifier.One),
@@ -1342,8 +1320,8 @@ enum InstructionDef(
         Metadata(
           "Image",
           Some("1.0"),
-          Vector("Kernel", "ImageQuery"),
-          Vector(
+          Col("Kernel", "ImageQuery"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "image", OperandQuantifier.One)
@@ -1356,8 +1334,8 @@ enum InstructionDef(
         Metadata(
           "Image",
           Some("1.0"),
-          Vector("Kernel", "ImageQuery"),
-          Vector(
+          Col("Kernel", "ImageQuery"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "image", OperandQuantifier.One)
@@ -1370,8 +1348,8 @@ enum InstructionDef(
         Metadata(
           "Conversion",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "floatValue", OperandQuantifier.One)
@@ -1384,8 +1362,8 @@ enum InstructionDef(
         Metadata(
           "Conversion",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "floatValue", OperandQuantifier.One)
@@ -1398,8 +1376,8 @@ enum InstructionDef(
         Metadata(
           "Conversion",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "signedValue", OperandQuantifier.One)
@@ -1412,8 +1390,8 @@ enum InstructionDef(
         Metadata(
           "Conversion",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "unsignedValue", OperandQuantifier.One)
@@ -1426,8 +1404,8 @@ enum InstructionDef(
         Metadata(
           "Conversion",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "unsignedValue", OperandQuantifier.One)
@@ -1440,8 +1418,8 @@ enum InstructionDef(
         Metadata(
           "Conversion",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "signedValue", OperandQuantifier.One)
@@ -1454,8 +1432,8 @@ enum InstructionDef(
         Metadata(
           "Conversion",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "floatValue", OperandQuantifier.One)
@@ -1468,8 +1446,8 @@ enum InstructionDef(
         Metadata(
           "Conversion",
           Some("1.0"),
-          Vector("Shader"),
-          Vector(
+          Col("Shader"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "value", OperandQuantifier.One)
@@ -1482,8 +1460,8 @@ enum InstructionDef(
         Metadata(
           "Conversion",
           Some("1.0"),
-          Vector("Addresses", "PhysicalStorageBufferAddresses"),
-          Vector(
+          Col("Addresses", "PhysicalStorageBufferAddresses"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "pointer", OperandQuantifier.One)
@@ -1496,8 +1474,8 @@ enum InstructionDef(
         Metadata(
           "Conversion",
           Some("1.0"),
-          Vector("Kernel"),
-          Vector(
+          Col("Kernel"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "signedValue", OperandQuantifier.One)
@@ -1510,8 +1488,8 @@ enum InstructionDef(
         Metadata(
           "Conversion",
           Some("1.0"),
-          Vector("Kernel"),
-          Vector(
+          Col("Kernel"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "unsignedValue", OperandQuantifier.One)
@@ -1524,8 +1502,8 @@ enum InstructionDef(
         Metadata(
           "Conversion",
           Some("1.0"),
-          Vector("Addresses", "PhysicalStorageBufferAddresses"),
-          Vector(
+          Col("Addresses", "PhysicalStorageBufferAddresses"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "integerValue", OperandQuantifier.One)
@@ -1538,8 +1516,8 @@ enum InstructionDef(
         Metadata(
           "Conversion",
           Some("1.0"),
-          Vector("Kernel"),
-          Vector(
+          Col("Kernel"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "pointer", OperandQuantifier.One)
@@ -1552,8 +1530,8 @@ enum InstructionDef(
         Metadata(
           "Conversion",
           Some("1.0"),
-          Vector("Kernel"),
-          Vector(
+          Col("Kernel"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "pointer", OperandQuantifier.One)
@@ -1566,8 +1544,8 @@ enum InstructionDef(
         Metadata(
           "Conversion",
           Some("1.0"),
-          Vector("Kernel"),
-          Vector(
+          Col("Kernel"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "pointer", OperandQuantifier.One),
@@ -1581,8 +1559,8 @@ enum InstructionDef(
         Metadata(
           "Conversion",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "src", OperandQuantifier.One)
@@ -1595,8 +1573,8 @@ enum InstructionDef(
         Metadata(
           "Arithmetic",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "src", OperandQuantifier.One)
@@ -1609,8 +1587,8 @@ enum InstructionDef(
         Metadata(
           "Arithmetic",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "src", OperandQuantifier.One)
@@ -1623,8 +1601,8 @@ enum InstructionDef(
         Metadata(
           "Arithmetic",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcA", OperandQuantifier.One),
@@ -1638,8 +1616,8 @@ enum InstructionDef(
         Metadata(
           "Arithmetic",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcA", OperandQuantifier.One),
@@ -1653,8 +1631,8 @@ enum InstructionDef(
         Metadata(
           "Arithmetic",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcA", OperandQuantifier.One),
@@ -1668,8 +1646,8 @@ enum InstructionDef(
         Metadata(
           "Arithmetic",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcA", OperandQuantifier.One),
@@ -1683,8 +1661,8 @@ enum InstructionDef(
         Metadata(
           "Arithmetic",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcA", OperandQuantifier.One),
@@ -1698,8 +1676,8 @@ enum InstructionDef(
         Metadata(
           "Arithmetic",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcA", OperandQuantifier.One),
@@ -1713,8 +1691,8 @@ enum InstructionDef(
         Metadata(
           "Arithmetic",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcA", OperandQuantifier.One),
@@ -1728,8 +1706,8 @@ enum InstructionDef(
         Metadata(
           "Arithmetic",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcA", OperandQuantifier.One),
@@ -1743,8 +1721,8 @@ enum InstructionDef(
         Metadata(
           "Arithmetic",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcA", OperandQuantifier.One),
@@ -1758,8 +1736,8 @@ enum InstructionDef(
         Metadata(
           "Arithmetic",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcA", OperandQuantifier.One),
@@ -1773,8 +1751,8 @@ enum InstructionDef(
         Metadata(
           "Arithmetic",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcA", OperandQuantifier.One),
@@ -1788,8 +1766,8 @@ enum InstructionDef(
         Metadata(
           "Arithmetic",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcA", OperandQuantifier.One),
@@ -1803,8 +1781,8 @@ enum InstructionDef(
         Metadata(
           "Arithmetic",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcA", OperandQuantifier.One),
@@ -1818,8 +1796,8 @@ enum InstructionDef(
         Metadata(
           "Arithmetic",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcA", OperandQuantifier.One),
@@ -1833,8 +1811,8 @@ enum InstructionDef(
         Metadata(
           "Arithmetic",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "vector", OperandQuantifier.One),
@@ -1848,8 +1826,8 @@ enum InstructionDef(
         Metadata(
           "Arithmetic",
           Some("1.0"),
-          Vector("Matrix"),
-          Vector(
+          Col("Matrix"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "matrix", OperandQuantifier.One),
@@ -1863,8 +1841,8 @@ enum InstructionDef(
         Metadata(
           "Arithmetic",
           Some("1.0"),
-          Vector("Matrix"),
-          Vector(
+          Col("Matrix"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "vector", OperandQuantifier.One),
@@ -1878,8 +1856,8 @@ enum InstructionDef(
         Metadata(
           "Arithmetic",
           Some("1.0"),
-          Vector("Matrix"),
-          Vector(
+          Col("Matrix"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "matrix", OperandQuantifier.One),
@@ -1893,8 +1871,8 @@ enum InstructionDef(
         Metadata(
           "Arithmetic",
           Some("1.0"),
-          Vector("Matrix"),
-          Vector(
+          Col("Matrix"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "leftMatrix", OperandQuantifier.One),
@@ -1908,8 +1886,8 @@ enum InstructionDef(
         Metadata(
           "Arithmetic",
           Some("1.0"),
-          Vector("Matrix"),
-          Vector(
+          Col("Matrix"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "vector1", OperandQuantifier.One),
@@ -1923,8 +1901,8 @@ enum InstructionDef(
         Metadata(
           "Arithmetic",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "vector1", OperandQuantifier.One),
@@ -1938,8 +1916,8 @@ enum InstructionDef(
         Metadata(
           "Arithmetic",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcA", OperandQuantifier.One),
@@ -1953,8 +1931,8 @@ enum InstructionDef(
         Metadata(
           "Arithmetic",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcA", OperandQuantifier.One),
@@ -1968,8 +1946,8 @@ enum InstructionDef(
         Metadata(
           "Arithmetic",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcA", OperandQuantifier.One),
@@ -1983,8 +1961,8 @@ enum InstructionDef(
         Metadata(
           "Arithmetic",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcA", OperandQuantifier.One),
@@ -1998,8 +1976,8 @@ enum InstructionDef(
         Metadata(
           "Relational_and_Logical",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "vector", OperandQuantifier.One)
@@ -2012,8 +1990,8 @@ enum InstructionDef(
         Metadata(
           "Relational_and_Logical",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "vector", OperandQuantifier.One)
@@ -2026,8 +2004,8 @@ enum InstructionDef(
         Metadata(
           "Relational_and_Logical",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "x", OperandQuantifier.One)
@@ -2040,8 +2018,8 @@ enum InstructionDef(
         Metadata(
           "Relational_and_Logical",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "x", OperandQuantifier.One)
@@ -2054,8 +2032,8 @@ enum InstructionDef(
         Metadata(
           "Relational_and_Logical",
           Some("1.0"),
-          Vector("Kernel"),
-          Vector(
+          Col("Kernel"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "x", OperandQuantifier.One)
@@ -2068,8 +2046,8 @@ enum InstructionDef(
         Metadata(
           "Relational_and_Logical",
           Some("1.0"),
-          Vector("Kernel"),
-          Vector(
+          Col("Kernel"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "x", OperandQuantifier.One)
@@ -2082,8 +2060,8 @@ enum InstructionDef(
         Metadata(
           "Relational_and_Logical",
           Some("1.0"),
-          Vector("Kernel"),
-          Vector(
+          Col("Kernel"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "x", OperandQuantifier.One)
@@ -2096,8 +2074,8 @@ enum InstructionDef(
         Metadata(
           "Relational_and_Logical",
           Some("1.0"),
-          Vector("Kernel"),
-          Vector(
+          Col("Kernel"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "x", OperandQuantifier.One),
@@ -2111,8 +2089,8 @@ enum InstructionDef(
         Metadata(
           "Relational_and_Logical",
           Some("1.0"),
-          Vector("Kernel"),
-          Vector(
+          Col("Kernel"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "x", OperandQuantifier.One),
@@ -2126,8 +2104,8 @@ enum InstructionDef(
         Metadata(
           "Relational_and_Logical",
           Some("1.0"),
-          Vector("Kernel"),
-          Vector(
+          Col("Kernel"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "x", OperandQuantifier.One),
@@ -2141,8 +2119,8 @@ enum InstructionDef(
         Metadata(
           "Relational_and_Logical",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcA", OperandQuantifier.One),
@@ -2156,8 +2134,8 @@ enum InstructionDef(
         Metadata(
           "Relational_and_Logical",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcA", OperandQuantifier.One),
@@ -2171,8 +2149,8 @@ enum InstructionDef(
         Metadata(
           "Relational_and_Logical",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcA", OperandQuantifier.One),
@@ -2186,8 +2164,8 @@ enum InstructionDef(
         Metadata(
           "Relational_and_Logical",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcA", OperandQuantifier.One),
@@ -2201,8 +2179,8 @@ enum InstructionDef(
         Metadata(
           "Relational_and_Logical",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "src", OperandQuantifier.One)
@@ -2215,8 +2193,8 @@ enum InstructionDef(
         Metadata(
           "Relational_and_Logical",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "pred", OperandQuantifier.One),
@@ -2231,8 +2209,8 @@ enum InstructionDef(
         Metadata(
           "Relational_and_Logical",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcA", OperandQuantifier.One),
@@ -2246,8 +2224,8 @@ enum InstructionDef(
         Metadata(
           "Relational_and_Logical",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcA", OperandQuantifier.One),
@@ -2261,8 +2239,8 @@ enum InstructionDef(
         Metadata(
           "Relational_and_Logical",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcA", OperandQuantifier.One),
@@ -2276,8 +2254,8 @@ enum InstructionDef(
         Metadata(
           "Relational_and_Logical",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcA", OperandQuantifier.One),
@@ -2291,8 +2269,8 @@ enum InstructionDef(
         Metadata(
           "Relational_and_Logical",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcA", OperandQuantifier.One),
@@ -2306,8 +2284,8 @@ enum InstructionDef(
         Metadata(
           "Relational_and_Logical",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcA", OperandQuantifier.One),
@@ -2321,8 +2299,8 @@ enum InstructionDef(
         Metadata(
           "Relational_and_Logical",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcA", OperandQuantifier.One),
@@ -2336,8 +2314,8 @@ enum InstructionDef(
         Metadata(
           "Relational_and_Logical",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcA", OperandQuantifier.One),
@@ -2351,8 +2329,8 @@ enum InstructionDef(
         Metadata(
           "Relational_and_Logical",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcA", OperandQuantifier.One),
@@ -2366,8 +2344,8 @@ enum InstructionDef(
         Metadata(
           "Relational_and_Logical",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcA", OperandQuantifier.One),
@@ -2381,8 +2359,8 @@ enum InstructionDef(
         Metadata(
           "Relational_and_Logical",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcA", OperandQuantifier.One),
@@ -2396,8 +2374,8 @@ enum InstructionDef(
         Metadata(
           "Relational_and_Logical",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcA", OperandQuantifier.One),
@@ -2411,8 +2389,8 @@ enum InstructionDef(
         Metadata(
           "Relational_and_Logical",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcA", OperandQuantifier.One),
@@ -2426,8 +2404,8 @@ enum InstructionDef(
         Metadata(
           "Relational_and_Logical",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcA", OperandQuantifier.One),
@@ -2441,8 +2419,8 @@ enum InstructionDef(
         Metadata(
           "Relational_and_Logical",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcA", OperandQuantifier.One),
@@ -2456,8 +2434,8 @@ enum InstructionDef(
         Metadata(
           "Relational_and_Logical",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcA", OperandQuantifier.One),
@@ -2471,8 +2449,8 @@ enum InstructionDef(
         Metadata(
           "Relational_and_Logical",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcA", OperandQuantifier.One),
@@ -2486,8 +2464,8 @@ enum InstructionDef(
         Metadata(
           "Relational_and_Logical",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcA", OperandQuantifier.One),
@@ -2501,8 +2479,8 @@ enum InstructionDef(
         Metadata(
           "Relational_and_Logical",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcA", OperandQuantifier.One),
@@ -2516,8 +2494,8 @@ enum InstructionDef(
         Metadata(
           "Relational_and_Logical",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcA", OperandQuantifier.One),
@@ -2531,8 +2509,8 @@ enum InstructionDef(
         Metadata(
           "Relational_and_Logical",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcA", OperandQuantifier.One),
@@ -2546,8 +2524,8 @@ enum InstructionDef(
         Metadata(
           "Relational_and_Logical",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcA", OperandQuantifier.One),
@@ -2561,8 +2539,8 @@ enum InstructionDef(
         Metadata(
           "Bit",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "base", OperandQuantifier.One),
@@ -2576,8 +2554,8 @@ enum InstructionDef(
         Metadata(
           "Bit",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "base", OperandQuantifier.One),
@@ -2591,8 +2569,8 @@ enum InstructionDef(
         Metadata(
           "Bit",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "base", OperandQuantifier.One),
@@ -2606,8 +2584,8 @@ enum InstructionDef(
         Metadata(
           "Bit",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcA", OperandQuantifier.One),
@@ -2621,8 +2599,8 @@ enum InstructionDef(
         Metadata(
           "Bit",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcA", OperandQuantifier.One),
@@ -2636,8 +2614,8 @@ enum InstructionDef(
         Metadata(
           "Bit",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcA", OperandQuantifier.One),
@@ -2651,8 +2629,8 @@ enum InstructionDef(
         Metadata(
           "Bit",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "src", OperandQuantifier.One)
@@ -2665,8 +2643,8 @@ enum InstructionDef(
         Metadata(
           "Bit",
           Some("1.0"),
-          Vector("Shader", "BitInstructions"),
-          Vector(
+          Col("Shader", "BitInstructions"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "base", OperandQuantifier.One),
@@ -2682,8 +2660,8 @@ enum InstructionDef(
         Metadata(
           "Bit",
           Some("1.0"),
-          Vector("Shader", "BitInstructions"),
-          Vector(
+          Col("Shader", "BitInstructions"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "base", OperandQuantifier.One),
@@ -2698,8 +2676,8 @@ enum InstructionDef(
         Metadata(
           "Bit",
           Some("1.0"),
-          Vector("Shader", "BitInstructions"),
-          Vector(
+          Col("Shader", "BitInstructions"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "base", OperandQuantifier.One),
@@ -2714,8 +2692,8 @@ enum InstructionDef(
         Metadata(
           "Bit",
           Some("1.0"),
-          Vector("Shader", "BitInstructions"),
-          Vector(
+          Col("Shader", "BitInstructions"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "base", OperandQuantifier.One)
@@ -2728,8 +2706,8 @@ enum InstructionDef(
         Metadata(
           "Bit",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "base", OperandQuantifier.One)
@@ -2742,8 +2720,8 @@ enum InstructionDef(
         Metadata(
           "Derivative",
           Some("1.0"),
-          Vector("Shader"),
-          Vector(
+          Col("Shader"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "p", OperandQuantifier.One)
@@ -2756,8 +2734,8 @@ enum InstructionDef(
         Metadata(
           "Derivative",
           Some("1.0"),
-          Vector("Shader"),
-          Vector(
+          Col("Shader"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "p", OperandQuantifier.One)
@@ -2770,8 +2748,8 @@ enum InstructionDef(
         Metadata(
           "Derivative",
           Some("1.0"),
-          Vector("Shader"),
-          Vector(
+          Col("Shader"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "p", OperandQuantifier.One)
@@ -2784,8 +2762,8 @@ enum InstructionDef(
         Metadata(
           "Derivative",
           Some("1.0"),
-          Vector("DerivativeControl"),
-          Vector(
+          Col("DerivativeControl"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "p", OperandQuantifier.One)
@@ -2798,8 +2776,8 @@ enum InstructionDef(
         Metadata(
           "Derivative",
           Some("1.0"),
-          Vector("DerivativeControl"),
-          Vector(
+          Col("DerivativeControl"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "p", OperandQuantifier.One)
@@ -2812,8 +2790,8 @@ enum InstructionDef(
         Metadata(
           "Derivative",
           Some("1.0"),
-          Vector("DerivativeControl"),
-          Vector(
+          Col("DerivativeControl"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "p", OperandQuantifier.One)
@@ -2826,8 +2804,8 @@ enum InstructionDef(
         Metadata(
           "Derivative",
           Some("1.0"),
-          Vector("DerivativeControl"),
-          Vector(
+          Col("DerivativeControl"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "p", OperandQuantifier.One)
@@ -2840,8 +2818,8 @@ enum InstructionDef(
         Metadata(
           "Derivative",
           Some("1.0"),
-          Vector("DerivativeControl"),
-          Vector(
+          Col("DerivativeControl"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "p", OperandQuantifier.One)
@@ -2854,8 +2832,8 @@ enum InstructionDef(
         Metadata(
           "Derivative",
           Some("1.0"),
-          Vector("DerivativeControl"),
-          Vector(
+          Col("DerivativeControl"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "p", OperandQuantifier.One)
@@ -2863,17 +2841,17 @@ enum InstructionDef(
         )
       )
   case EmitVertex
-      extends InstructionDef("OpEmitVertex", 218, Metadata("Primitive", Some("1.0"), Vector("Geometry"), Vector()))
+      extends InstructionDef("OpEmitVertex", 218, Metadata("Primitive", Some("1.0"), Col("Geometry"), Col()))
   case EndPrimitive
-      extends InstructionDef("OpEndPrimitive", 219, Metadata("Primitive", Some("1.0"), Vector("Geometry"), Vector()))
+      extends InstructionDef("OpEndPrimitive", 219, Metadata("Primitive", Some("1.0"), Col("Geometry"), Col()))
   case EmitStreamVertex extends InstructionDef(
         "OpEmitStreamVertex",
         220,
         Metadata(
           "Primitive",
           Some("1.0"),
-          Vector("GeometryStreams"),
-          Vector(OperandShape("IdRef", "stream", OperandQuantifier.One))
+          Col("GeometryStreams"),
+          Col(OperandShape("IdRef", "stream", OperandQuantifier.One))
         )
       )
   case EndStreamPrimitive extends InstructionDef(
@@ -2882,8 +2860,8 @@ enum InstructionDef(
         Metadata(
           "Primitive",
           Some("1.0"),
-          Vector("GeometryStreams"),
-          Vector(OperandShape("IdRef", "stream", OperandQuantifier.One))
+          Col("GeometryStreams"),
+          Col(OperandShape("IdRef", "stream", OperandQuantifier.One))
         )
       )
   case ControlBarrier extends InstructionDef(
@@ -2892,8 +2870,8 @@ enum InstructionDef(
         Metadata(
           "Barrier",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdScope", "execution", OperandQuantifier.One),
             OperandShape("IdScope", "memory", OperandQuantifier.One),
             OperandShape("IdMemorySemantics", "semantics", OperandQuantifier.One)
@@ -2906,8 +2884,8 @@ enum InstructionDef(
         Metadata(
           "Barrier",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdScope", "memory", OperandQuantifier.One),
             OperandShape("IdMemorySemantics", "semantics", OperandQuantifier.One)
           )
@@ -2919,8 +2897,8 @@ enum InstructionDef(
         Metadata(
           "Atomic",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "pointer", OperandQuantifier.One),
@@ -2935,8 +2913,8 @@ enum InstructionDef(
         Metadata(
           "Atomic",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdRef", "pointer", OperandQuantifier.One),
             OperandShape("IdScope", "memory", OperandQuantifier.One),
             OperandShape("IdMemorySemantics", "semantics", OperandQuantifier.One),
@@ -2950,8 +2928,8 @@ enum InstructionDef(
         Metadata(
           "Atomic",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "pointer", OperandQuantifier.One),
@@ -2967,8 +2945,8 @@ enum InstructionDef(
         Metadata(
           "Atomic",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "pointer", OperandQuantifier.One),
@@ -2986,8 +2964,8 @@ enum InstructionDef(
         Metadata(
           "Atomic",
           Some("1.0"),
-          Vector("Kernel"),
-          Vector(
+          Col("Kernel"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "pointer", OperandQuantifier.One),
@@ -3005,8 +2983,8 @@ enum InstructionDef(
         Metadata(
           "Atomic",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "pointer", OperandQuantifier.One),
@@ -3021,8 +2999,8 @@ enum InstructionDef(
         Metadata(
           "Atomic",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "pointer", OperandQuantifier.One),
@@ -3037,8 +3015,8 @@ enum InstructionDef(
         Metadata(
           "Atomic",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "pointer", OperandQuantifier.One),
@@ -3054,8 +3032,8 @@ enum InstructionDef(
         Metadata(
           "Atomic",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "pointer", OperandQuantifier.One),
@@ -3071,8 +3049,8 @@ enum InstructionDef(
         Metadata(
           "Atomic",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "pointer", OperandQuantifier.One),
@@ -3088,8 +3066,8 @@ enum InstructionDef(
         Metadata(
           "Atomic",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "pointer", OperandQuantifier.One),
@@ -3105,8 +3083,8 @@ enum InstructionDef(
         Metadata(
           "Atomic",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "pointer", OperandQuantifier.One),
@@ -3122,8 +3100,8 @@ enum InstructionDef(
         Metadata(
           "Atomic",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "pointer", OperandQuantifier.One),
@@ -3139,8 +3117,8 @@ enum InstructionDef(
         Metadata(
           "Atomic",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "pointer", OperandQuantifier.One),
@@ -3156,8 +3134,8 @@ enum InstructionDef(
         Metadata(
           "Atomic",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "pointer", OperandQuantifier.One),
@@ -3173,8 +3151,8 @@ enum InstructionDef(
         Metadata(
           "Atomic",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "pointer", OperandQuantifier.One),
@@ -3190,8 +3168,8 @@ enum InstructionDef(
         Metadata(
           "Control-Flow",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("PairIdRefIdRef", "variableParent", OperandQuantifier.Repeated)
@@ -3204,8 +3182,8 @@ enum InstructionDef(
         Metadata(
           "Control-Flow",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdRef", "mergeBlock", OperandQuantifier.One),
             OperandShape("IdRef", "continueTarget", OperandQuantifier.One),
             OperandShape("LoopControl", "loopControl", OperandQuantifier.One)
@@ -3218,8 +3196,8 @@ enum InstructionDef(
         Metadata(
           "Control-Flow",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdRef", "mergeBlock", OperandQuantifier.One),
             OperandShape("SelectionControl", "selectionControl", OperandQuantifier.One)
           )
@@ -3228,17 +3206,12 @@ enum InstructionDef(
   case Label extends InstructionDef(
         "OpLabel",
         248,
-        Metadata("Control-Flow", Some("1.0"), Vector(), Vector(OperandShape("IdResult", "dest", OperandQuantifier.One)))
+        Metadata("Control-Flow", Some("1.0"), Col(), Col(OperandShape("IdResult", "dest", OperandQuantifier.One)))
       )
   case Branch extends InstructionDef(
         "OpBranch",
         249,
-        Metadata(
-          "Control-Flow",
-          Some("1.0"),
-          Vector(),
-          Vector(OperandShape("IdRef", "targetLabel", OperandQuantifier.One))
-        )
+        Metadata("Control-Flow", Some("1.0"), Col(), Col(OperandShape("IdRef", "targetLabel", OperandQuantifier.One)))
       )
   case BranchConditional extends InstructionDef(
         "OpBranchConditional",
@@ -3246,8 +3219,8 @@ enum InstructionDef(
         Metadata(
           "Control-Flow",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdRef", "pred", OperandQuantifier.One),
             OperandShape("IdRef", "trueLabel", OperandQuantifier.One),
             OperandShape("IdRef", "falseLabel", OperandQuantifier.One),
@@ -3261,31 +3234,30 @@ enum InstructionDef(
         Metadata(
           "Control-Flow",
           Some("1.0"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdRef", "selector", OperandQuantifier.One),
             OperandShape("IdRef", "default", OperandQuantifier.One),
             OperandShape("PairLiteralIntegerIdRef", "target", OperandQuantifier.Repeated)
           )
         )
       )
-  case Kill extends InstructionDef("OpKill", 252, Metadata("Control-Flow", Some("1.0"), Vector("Shader"), Vector()))
-  case Return extends InstructionDef("OpReturn", 253, Metadata("Control-Flow", Some("1.0"), Vector(), Vector()))
+  case Kill extends InstructionDef("OpKill", 252, Metadata("Control-Flow", Some("1.0"), Col("Shader"), Col()))
+  case Return extends InstructionDef("OpReturn", 253, Metadata("Control-Flow", Some("1.0"), Col(), Col()))
   case ReturnValue extends InstructionDef(
         "OpReturnValue",
         254,
-        Metadata("Control-Flow", Some("1.0"), Vector(), Vector(OperandShape("IdRef", "value", OperandQuantifier.One)))
+        Metadata("Control-Flow", Some("1.0"), Col(), Col(OperandShape("IdRef", "value", OperandQuantifier.One)))
       )
-  case Unreachable
-      extends InstructionDef("OpUnreachable", 255, Metadata("Control-Flow", Some("1.0"), Vector(), Vector()))
+  case Unreachable extends InstructionDef("OpUnreachable", 255, Metadata("Control-Flow", Some("1.0"), Col(), Col()))
   case LifetimeStart extends InstructionDef(
         "OpLifetimeStart",
         256,
         Metadata(
           "Control-Flow",
           Some("1.0"),
-          Vector("Kernel"),
-          Vector(
+          Col("Kernel"),
+          Col(
             OperandShape("IdRef", "pointer", OperandQuantifier.One),
             OperandShape("LiteralInteger", "size", OperandQuantifier.One)
           )
@@ -3297,8 +3269,8 @@ enum InstructionDef(
         Metadata(
           "Control-Flow",
           Some("1.0"),
-          Vector("Kernel"),
-          Vector(
+          Col("Kernel"),
+          Col(
             OperandShape("IdRef", "pointer", OperandQuantifier.One),
             OperandShape("LiteralInteger", "size", OperandQuantifier.One)
           )
@@ -3310,8 +3282,8 @@ enum InstructionDef(
         Metadata(
           "Group",
           Some("1.0"),
-          Vector("Kernel"),
-          Vector(
+          Col("Kernel"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdScope", "execution", OperandQuantifier.One),
@@ -3329,8 +3301,8 @@ enum InstructionDef(
         Metadata(
           "Group",
           Some("1.0"),
-          Vector("Kernel"),
-          Vector(
+          Col("Kernel"),
+          Col(
             OperandShape("IdScope", "execution", OperandQuantifier.One),
             OperandShape("IdRef", "numEvents", OperandQuantifier.One),
             OperandShape("IdRef", "eventsList", OperandQuantifier.One)
@@ -3343,8 +3315,8 @@ enum InstructionDef(
         Metadata(
           "Group",
           Some("1.0"),
-          Vector("Groups"),
-          Vector(
+          Col("Groups"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdScope", "execution", OperandQuantifier.One),
@@ -3358,8 +3330,8 @@ enum InstructionDef(
         Metadata(
           "Group",
           Some("1.0"),
-          Vector("Groups"),
-          Vector(
+          Col("Groups"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdScope", "execution", OperandQuantifier.One),
@@ -3373,8 +3345,8 @@ enum InstructionDef(
         Metadata(
           "Group",
           Some("1.0"),
-          Vector("Groups"),
-          Vector(
+          Col("Groups"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdScope", "execution", OperandQuantifier.One),
@@ -3389,8 +3361,8 @@ enum InstructionDef(
         Metadata(
           "Group",
           Some("1.0"),
-          Vector("Groups"),
-          Vector(
+          Col("Groups"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdScope", "execution", OperandQuantifier.One),
@@ -3405,8 +3377,8 @@ enum InstructionDef(
         Metadata(
           "Group",
           Some("1.0"),
-          Vector("Groups"),
-          Vector(
+          Col("Groups"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdScope", "execution", OperandQuantifier.One),
@@ -3421,8 +3393,8 @@ enum InstructionDef(
         Metadata(
           "Group",
           Some("1.0"),
-          Vector("Groups"),
-          Vector(
+          Col("Groups"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdScope", "execution", OperandQuantifier.One),
@@ -3437,8 +3409,8 @@ enum InstructionDef(
         Metadata(
           "Group",
           Some("1.0"),
-          Vector("Groups"),
-          Vector(
+          Col("Groups"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdScope", "execution", OperandQuantifier.One),
@@ -3453,8 +3425,8 @@ enum InstructionDef(
         Metadata(
           "Group",
           Some("1.0"),
-          Vector("Groups"),
-          Vector(
+          Col("Groups"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdScope", "execution", OperandQuantifier.One),
@@ -3469,8 +3441,8 @@ enum InstructionDef(
         Metadata(
           "Group",
           Some("1.0"),
-          Vector("Groups"),
-          Vector(
+          Col("Groups"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdScope", "execution", OperandQuantifier.One),
@@ -3485,8 +3457,8 @@ enum InstructionDef(
         Metadata(
           "Group",
           Some("1.0"),
-          Vector("Groups"),
-          Vector(
+          Col("Groups"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdScope", "execution", OperandQuantifier.One),
@@ -3501,8 +3473,8 @@ enum InstructionDef(
         Metadata(
           "Group",
           Some("1.0"),
-          Vector("Groups"),
-          Vector(
+          Col("Groups"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdScope", "execution", OperandQuantifier.One),
@@ -3517,8 +3489,8 @@ enum InstructionDef(
         Metadata(
           "Pipe",
           Some("1.0"),
-          Vector("Pipes"),
-          Vector(
+          Col("Pipes"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "pipe", OperandQuantifier.One),
@@ -3534,8 +3506,8 @@ enum InstructionDef(
         Metadata(
           "Pipe",
           Some("1.0"),
-          Vector("Pipes"),
-          Vector(
+          Col("Pipes"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "pipe", OperandQuantifier.One),
@@ -3551,8 +3523,8 @@ enum InstructionDef(
         Metadata(
           "Pipe",
           Some("1.0"),
-          Vector("Pipes"),
-          Vector(
+          Col("Pipes"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "pipe", OperandQuantifier.One),
@@ -3570,8 +3542,8 @@ enum InstructionDef(
         Metadata(
           "Pipe",
           Some("1.0"),
-          Vector("Pipes"),
-          Vector(
+          Col("Pipes"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "pipe", OperandQuantifier.One),
@@ -3589,8 +3561,8 @@ enum InstructionDef(
         Metadata(
           "Pipe",
           Some("1.0"),
-          Vector("Pipes"),
-          Vector(
+          Col("Pipes"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "pipe", OperandQuantifier.One),
@@ -3606,8 +3578,8 @@ enum InstructionDef(
         Metadata(
           "Pipe",
           Some("1.0"),
-          Vector("Pipes"),
-          Vector(
+          Col("Pipes"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "pipe", OperandQuantifier.One),
@@ -3623,8 +3595,8 @@ enum InstructionDef(
         Metadata(
           "Pipe",
           Some("1.0"),
-          Vector("Pipes"),
-          Vector(
+          Col("Pipes"),
+          Col(
             OperandShape("IdRef", "pipe", OperandQuantifier.One),
             OperandShape("IdRef", "reserveId", OperandQuantifier.One),
             OperandShape("IdRef", "packetSize", OperandQuantifier.One),
@@ -3638,8 +3610,8 @@ enum InstructionDef(
         Metadata(
           "Pipe",
           Some("1.0"),
-          Vector("Pipes"),
-          Vector(
+          Col("Pipes"),
+          Col(
             OperandShape("IdRef", "pipe", OperandQuantifier.One),
             OperandShape("IdRef", "reserveId", OperandQuantifier.One),
             OperandShape("IdRef", "packetSize", OperandQuantifier.One),
@@ -3653,8 +3625,8 @@ enum InstructionDef(
         Metadata(
           "Pipe",
           Some("1.0"),
-          Vector("Pipes"),
-          Vector(
+          Col("Pipes"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "reserveId", OperandQuantifier.One)
@@ -3667,8 +3639,8 @@ enum InstructionDef(
         Metadata(
           "Pipe",
           Some("1.0"),
-          Vector("Pipes"),
-          Vector(
+          Col("Pipes"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "pipe", OperandQuantifier.One),
@@ -3683,8 +3655,8 @@ enum InstructionDef(
         Metadata(
           "Pipe",
           Some("1.0"),
-          Vector("Pipes"),
-          Vector(
+          Col("Pipes"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "pipe", OperandQuantifier.One),
@@ -3699,8 +3671,8 @@ enum InstructionDef(
         Metadata(
           "Pipe",
           Some("1.0"),
-          Vector("Pipes"),
-          Vector(
+          Col("Pipes"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdScope", "execution", OperandQuantifier.One),
@@ -3717,8 +3689,8 @@ enum InstructionDef(
         Metadata(
           "Pipe",
           Some("1.0"),
-          Vector("Pipes"),
-          Vector(
+          Col("Pipes"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdScope", "execution", OperandQuantifier.One),
@@ -3735,8 +3707,8 @@ enum InstructionDef(
         Metadata(
           "Pipe",
           Some("1.0"),
-          Vector("Pipes"),
-          Vector(
+          Col("Pipes"),
+          Col(
             OperandShape("IdScope", "execution", OperandQuantifier.One),
             OperandShape("IdRef", "pipe", OperandQuantifier.One),
             OperandShape("IdRef", "reserveId", OperandQuantifier.One),
@@ -3751,8 +3723,8 @@ enum InstructionDef(
         Metadata(
           "Pipe",
           Some("1.0"),
-          Vector("Pipes"),
-          Vector(
+          Col("Pipes"),
+          Col(
             OperandShape("IdScope", "execution", OperandQuantifier.One),
             OperandShape("IdRef", "pipe", OperandQuantifier.One),
             OperandShape("IdRef", "reserveId", OperandQuantifier.One),
@@ -3767,8 +3739,8 @@ enum InstructionDef(
         Metadata(
           "Device-Side_Enqueue",
           Some("1.0"),
-          Vector("DeviceEnqueue"),
-          Vector(
+          Col("DeviceEnqueue"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "queue", OperandQuantifier.One),
@@ -3784,8 +3756,8 @@ enum InstructionDef(
         Metadata(
           "Device-Side_Enqueue",
           Some("1.0"),
-          Vector("DeviceEnqueue"),
-          Vector(
+          Col("DeviceEnqueue"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "queue", OperandQuantifier.One),
@@ -3808,8 +3780,8 @@ enum InstructionDef(
         Metadata(
           "Device-Side_Enqueue",
           Some("1.0"),
-          Vector("DeviceEnqueue"),
-          Vector(
+          Col("DeviceEnqueue"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "nDRange", OperandQuantifier.One),
@@ -3826,8 +3798,8 @@ enum InstructionDef(
         Metadata(
           "Device-Side_Enqueue",
           Some("1.0"),
-          Vector("DeviceEnqueue"),
-          Vector(
+          Col("DeviceEnqueue"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "nDRange", OperandQuantifier.One),
@@ -3844,8 +3816,8 @@ enum InstructionDef(
         Metadata(
           "Device-Side_Enqueue",
           Some("1.0"),
-          Vector("DeviceEnqueue"),
-          Vector(
+          Col("DeviceEnqueue"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "invoke", OperandQuantifier.One),
@@ -3861,8 +3833,8 @@ enum InstructionDef(
         Metadata(
           "Device-Side_Enqueue",
           Some("1.0"),
-          Vector("DeviceEnqueue"),
-          Vector(
+          Col("DeviceEnqueue"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "invoke", OperandQuantifier.One),
@@ -3878,8 +3850,8 @@ enum InstructionDef(
         Metadata(
           "Device-Side_Enqueue",
           Some("1.0"),
-          Vector("DeviceEnqueue"),
-          Vector(OperandShape("IdRef", "event", OperandQuantifier.One))
+          Col("DeviceEnqueue"),
+          Col(OperandShape("IdRef", "event", OperandQuantifier.One))
         )
       )
   case ReleaseEvent extends InstructionDef(
@@ -3888,8 +3860,8 @@ enum InstructionDef(
         Metadata(
           "Device-Side_Enqueue",
           Some("1.0"),
-          Vector("DeviceEnqueue"),
-          Vector(OperandShape("IdRef", "event", OperandQuantifier.One))
+          Col("DeviceEnqueue"),
+          Col(OperandShape("IdRef", "event", OperandQuantifier.One))
         )
       )
   case CreateUserEvent extends InstructionDef(
@@ -3898,8 +3870,8 @@ enum InstructionDef(
         Metadata(
           "Device-Side_Enqueue",
           Some("1.0"),
-          Vector("DeviceEnqueue"),
-          Vector(
+          Col("DeviceEnqueue"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One)
           )
@@ -3911,8 +3883,8 @@ enum InstructionDef(
         Metadata(
           "Device-Side_Enqueue",
           Some("1.0"),
-          Vector("DeviceEnqueue"),
-          Vector(
+          Col("DeviceEnqueue"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "event", OperandQuantifier.One)
@@ -3925,8 +3897,8 @@ enum InstructionDef(
         Metadata(
           "Device-Side_Enqueue",
           Some("1.0"),
-          Vector("DeviceEnqueue"),
-          Vector(
+          Col("DeviceEnqueue"),
+          Col(
             OperandShape("IdRef", "event", OperandQuantifier.One),
             OperandShape("IdRef", "status", OperandQuantifier.One)
           )
@@ -3938,8 +3910,8 @@ enum InstructionDef(
         Metadata(
           "Device-Side_Enqueue",
           Some("1.0"),
-          Vector("DeviceEnqueue"),
-          Vector(
+          Col("DeviceEnqueue"),
+          Col(
             OperandShape("IdRef", "event", OperandQuantifier.One),
             OperandShape("IdRef", "profilingInfo", OperandQuantifier.One),
             OperandShape("IdRef", "value", OperandQuantifier.One)
@@ -3952,8 +3924,8 @@ enum InstructionDef(
         Metadata(
           "Device-Side_Enqueue",
           Some("1.0"),
-          Vector("DeviceEnqueue"),
-          Vector(
+          Col("DeviceEnqueue"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One)
           )
@@ -3965,8 +3937,8 @@ enum InstructionDef(
         Metadata(
           "Device-Side_Enqueue",
           Some("1.0"),
-          Vector("DeviceEnqueue"),
-          Vector(
+          Col("DeviceEnqueue"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "globalWorkSize", OperandQuantifier.One),
@@ -3981,8 +3953,8 @@ enum InstructionDef(
         Metadata(
           "Image",
           Some("1.0"),
-          Vector("SparseResidency"),
-          Vector(
+          Col("SparseResidency"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "sampledImage", OperandQuantifier.One),
@@ -3997,8 +3969,8 @@ enum InstructionDef(
         Metadata(
           "Image",
           Some("1.0"),
-          Vector("SparseResidency"),
-          Vector(
+          Col("SparseResidency"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "sampledImage", OperandQuantifier.One),
@@ -4013,8 +3985,8 @@ enum InstructionDef(
         Metadata(
           "Image",
           Some("1.0"),
-          Vector("SparseResidency"),
-          Vector(
+          Col("SparseResidency"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "sampledImage", OperandQuantifier.One),
@@ -4030,8 +4002,8 @@ enum InstructionDef(
         Metadata(
           "Image",
           Some("1.0"),
-          Vector("SparseResidency"),
-          Vector(
+          Col("SparseResidency"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "sampledImage", OperandQuantifier.One),
@@ -4047,8 +4019,8 @@ enum InstructionDef(
         Metadata(
           "Image",
           Some("None"),
-          Vector("SparseResidency"),
-          Vector(
+          Col("SparseResidency"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "sampledImage", OperandQuantifier.One),
@@ -4063,8 +4035,8 @@ enum InstructionDef(
         Metadata(
           "Image",
           Some("None"),
-          Vector("SparseResidency"),
-          Vector(
+          Col("SparseResidency"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "sampledImage", OperandQuantifier.One),
@@ -4079,8 +4051,8 @@ enum InstructionDef(
         Metadata(
           "Image",
           Some("None"),
-          Vector("SparseResidency"),
-          Vector(
+          Col("SparseResidency"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "sampledImage", OperandQuantifier.One),
@@ -4096,8 +4068,8 @@ enum InstructionDef(
         Metadata(
           "Image",
           Some("None"),
-          Vector("SparseResidency"),
-          Vector(
+          Col("SparseResidency"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "sampledImage", OperandQuantifier.One),
@@ -4113,8 +4085,8 @@ enum InstructionDef(
         Metadata(
           "Image",
           Some("1.0"),
-          Vector("SparseResidency"),
-          Vector(
+          Col("SparseResidency"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "image", OperandQuantifier.One),
@@ -4129,8 +4101,8 @@ enum InstructionDef(
         Metadata(
           "Image",
           Some("1.0"),
-          Vector("SparseResidency"),
-          Vector(
+          Col("SparseResidency"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "sampledImage", OperandQuantifier.One),
@@ -4146,8 +4118,8 @@ enum InstructionDef(
         Metadata(
           "Image",
           Some("1.0"),
-          Vector("SparseResidency"),
-          Vector(
+          Col("SparseResidency"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "sampledImage", OperandQuantifier.One),
@@ -4163,23 +4135,23 @@ enum InstructionDef(
         Metadata(
           "Image",
           Some("1.0"),
-          Vector("SparseResidency"),
-          Vector(
+          Col("SparseResidency"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "residentCode", OperandQuantifier.One)
           )
         )
       )
-  case NoLine extends InstructionDef("OpNoLine", 317, Metadata("Debug", Some("1.0"), Vector(), Vector()))
+  case NoLine extends InstructionDef("OpNoLine", 317, Metadata("Debug", Some("1.0"), Col(), Col()))
   case AtomicFlagTestAndSet extends InstructionDef(
         "OpAtomicFlagTestAndSet",
         318,
         Metadata(
           "Atomic",
           Some("1.0"),
-          Vector("Kernel"),
-          Vector(
+          Col("Kernel"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "pointer", OperandQuantifier.One),
@@ -4194,8 +4166,8 @@ enum InstructionDef(
         Metadata(
           "Atomic",
           Some("1.0"),
-          Vector("Kernel"),
-          Vector(
+          Col("Kernel"),
+          Col(
             OperandShape("IdRef", "pointer", OperandQuantifier.One),
             OperandShape("IdScope", "memory", OperandQuantifier.One),
             OperandShape("IdMemorySemantics", "semantics", OperandQuantifier.One)
@@ -4208,8 +4180,8 @@ enum InstructionDef(
         Metadata(
           "Image",
           Some("1.0"),
-          Vector("SparseResidency"),
-          Vector(
+          Col("SparseResidency"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "image", OperandQuantifier.One),
@@ -4224,8 +4196,8 @@ enum InstructionDef(
         Metadata(
           "Miscellaneous",
           Some("1.1"),
-          Vector("Addresses"),
-          Vector(
+          Col("Addresses"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "pointer", OperandQuantifier.One)
@@ -4238,8 +4210,8 @@ enum InstructionDef(
         Metadata(
           "Type-Declaration",
           Some("1.1"),
-          Vector("PipeStorage"),
-          Vector(OperandShape("IdResult", "dest", OperandQuantifier.One))
+          Col("PipeStorage"),
+          Col(OperandShape("IdResult", "dest", OperandQuantifier.One))
         )
       )
   case ConstantPipeStorage extends InstructionDef(
@@ -4248,8 +4220,8 @@ enum InstructionDef(
         Metadata(
           "Pipe",
           Some("1.1"),
-          Vector("PipeStorage"),
-          Vector(
+          Col("PipeStorage"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("LiteralInteger", "packetSize", OperandQuantifier.One),
@@ -4264,8 +4236,8 @@ enum InstructionDef(
         Metadata(
           "Pipe",
           Some("1.1"),
-          Vector("PipeStorage"),
-          Vector(
+          Col("PipeStorage"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "pipeStorage", OperandQuantifier.One)
@@ -4278,8 +4250,8 @@ enum InstructionDef(
         Metadata(
           "Device-Side_Enqueue",
           Some("1.1"),
-          Vector("SubgroupDispatch"),
-          Vector(
+          Col("SubgroupDispatch"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "subgroupCount", OperandQuantifier.One),
@@ -4296,8 +4268,8 @@ enum InstructionDef(
         Metadata(
           "Device-Side_Enqueue",
           Some("1.1"),
-          Vector("SubgroupDispatch"),
-          Vector(
+          Col("SubgroupDispatch"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "invoke", OperandQuantifier.One),
@@ -4313,8 +4285,8 @@ enum InstructionDef(
         Metadata(
           "Type-Declaration",
           Some("1.1"),
-          Vector("NamedBarrier"),
-          Vector(OperandShape("IdResult", "dest", OperandQuantifier.One))
+          Col("NamedBarrier"),
+          Col(OperandShape("IdResult", "dest", OperandQuantifier.One))
         )
       )
   case NamedBarrierInitialize extends InstructionDef(
@@ -4323,8 +4295,8 @@ enum InstructionDef(
         Metadata(
           "Barrier",
           Some("1.1"),
-          Vector("NamedBarrier"),
-          Vector(
+          Col("NamedBarrier"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "subgroupCount", OperandQuantifier.One)
@@ -4337,8 +4309,8 @@ enum InstructionDef(
         Metadata(
           "Barrier",
           Some("1.1"),
-          Vector("NamedBarrier"),
-          Vector(
+          Col("NamedBarrier"),
+          Col(
             OperandShape("IdRef", "namedBarrier", OperandQuantifier.One),
             OperandShape("IdScope", "memory", OperandQuantifier.One),
             OperandShape("IdMemorySemantics", "semantics", OperandQuantifier.One)
@@ -4348,12 +4320,7 @@ enum InstructionDef(
   case ModuleProcessed extends InstructionDef(
         "OpModuleProcessed",
         330,
-        Metadata(
-          "Debug",
-          Some("1.1"),
-          Vector(),
-          Vector(OperandShape("LiteralString", "process", OperandQuantifier.One))
-        )
+        Metadata("Debug", Some("1.1"), Col(), Col(OperandShape("LiteralString", "process", OperandQuantifier.One)))
       )
   case ExecutionModeId extends InstructionDef(
         "OpExecutionModeId",
@@ -4361,8 +4328,8 @@ enum InstructionDef(
         Metadata(
           "Mode-Setting",
           Some("1.2"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdRef", "entryPoint", OperandQuantifier.One),
             OperandShape("ExecutionMode", "mode", OperandQuantifier.One)
           )
@@ -4374,8 +4341,8 @@ enum InstructionDef(
         Metadata(
           "Annotation",
           Some("1.2"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdRef", "target", OperandQuantifier.One),
             OperandShape("Decoration", "decoration", OperandQuantifier.One)
           )
@@ -4387,8 +4354,8 @@ enum InstructionDef(
         Metadata(
           "Non-Uniform",
           Some("1.3"),
-          Vector("GroupNonUniform"),
-          Vector(
+          Col("GroupNonUniform"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdScope", "execution", OperandQuantifier.One)
@@ -4401,8 +4368,8 @@ enum InstructionDef(
         Metadata(
           "Non-Uniform",
           Some("1.3"),
-          Vector("GroupNonUniformVote"),
-          Vector(
+          Col("GroupNonUniformVote"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdScope", "execution", OperandQuantifier.One),
@@ -4416,8 +4383,8 @@ enum InstructionDef(
         Metadata(
           "Non-Uniform",
           Some("1.3"),
-          Vector("GroupNonUniformVote"),
-          Vector(
+          Col("GroupNonUniformVote"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdScope", "execution", OperandQuantifier.One),
@@ -4431,8 +4398,8 @@ enum InstructionDef(
         Metadata(
           "Non-Uniform",
           Some("1.3"),
-          Vector("GroupNonUniformVote"),
-          Vector(
+          Col("GroupNonUniformVote"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdScope", "execution", OperandQuantifier.One),
@@ -4446,8 +4413,8 @@ enum InstructionDef(
         Metadata(
           "Non-Uniform",
           Some("1.3"),
-          Vector("GroupNonUniformBallot"),
-          Vector(
+          Col("GroupNonUniformBallot"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdScope", "execution", OperandQuantifier.One),
@@ -4462,8 +4429,8 @@ enum InstructionDef(
         Metadata(
           "Non-Uniform",
           Some("1.3"),
-          Vector("GroupNonUniformBallot"),
-          Vector(
+          Col("GroupNonUniformBallot"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdScope", "execution", OperandQuantifier.One),
@@ -4477,8 +4444,8 @@ enum InstructionDef(
         Metadata(
           "Non-Uniform",
           Some("1.3"),
-          Vector("GroupNonUniformBallot"),
-          Vector(
+          Col("GroupNonUniformBallot"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdScope", "execution", OperandQuantifier.One),
@@ -4492,8 +4459,8 @@ enum InstructionDef(
         Metadata(
           "Non-Uniform",
           Some("1.3"),
-          Vector("GroupNonUniformBallot"),
-          Vector(
+          Col("GroupNonUniformBallot"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdScope", "execution", OperandQuantifier.One),
@@ -4507,8 +4474,8 @@ enum InstructionDef(
         Metadata(
           "Non-Uniform",
           Some("1.3"),
-          Vector("GroupNonUniformBallot"),
-          Vector(
+          Col("GroupNonUniformBallot"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdScope", "execution", OperandQuantifier.One),
@@ -4523,8 +4490,8 @@ enum InstructionDef(
         Metadata(
           "Non-Uniform",
           Some("1.3"),
-          Vector("GroupNonUniformBallot"),
-          Vector(
+          Col("GroupNonUniformBallot"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdScope", "execution", OperandQuantifier.One),
@@ -4539,8 +4506,8 @@ enum InstructionDef(
         Metadata(
           "Non-Uniform",
           Some("1.3"),
-          Vector("GroupNonUniformBallot"),
-          Vector(
+          Col("GroupNonUniformBallot"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdScope", "execution", OperandQuantifier.One),
@@ -4554,8 +4521,8 @@ enum InstructionDef(
         Metadata(
           "Non-Uniform",
           Some("1.3"),
-          Vector("GroupNonUniformBallot"),
-          Vector(
+          Col("GroupNonUniformBallot"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdScope", "execution", OperandQuantifier.One),
@@ -4569,8 +4536,8 @@ enum InstructionDef(
         Metadata(
           "Non-Uniform",
           Some("1.3"),
-          Vector("GroupNonUniformShuffle"),
-          Vector(
+          Col("GroupNonUniformShuffle"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdScope", "execution", OperandQuantifier.One),
@@ -4585,8 +4552,8 @@ enum InstructionDef(
         Metadata(
           "Non-Uniform",
           Some("1.3"),
-          Vector("GroupNonUniformShuffle"),
-          Vector(
+          Col("GroupNonUniformShuffle"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdScope", "execution", OperandQuantifier.One),
@@ -4601,8 +4568,8 @@ enum InstructionDef(
         Metadata(
           "Non-Uniform",
           Some("1.3"),
-          Vector("GroupNonUniformShuffleRelative"),
-          Vector(
+          Col("GroupNonUniformShuffleRelative"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdScope", "execution", OperandQuantifier.One),
@@ -4617,8 +4584,8 @@ enum InstructionDef(
         Metadata(
           "Non-Uniform",
           Some("1.3"),
-          Vector("GroupNonUniformShuffleRelative"),
-          Vector(
+          Col("GroupNonUniformShuffleRelative"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdScope", "execution", OperandQuantifier.One),
@@ -4633,8 +4600,8 @@ enum InstructionDef(
         Metadata(
           "Non-Uniform",
           Some("1.3"),
-          Vector("GroupNonUniformArithmetic", "GroupNonUniformClustered", "GroupNonUniformPartitionedEXT"),
-          Vector(
+          Col("GroupNonUniformArithmetic", "GroupNonUniformClustered", "GroupNonUniformPartitionedEXT"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdScope", "execution", OperandQuantifier.One),
@@ -4650,8 +4617,8 @@ enum InstructionDef(
         Metadata(
           "Non-Uniform",
           Some("1.3"),
-          Vector("GroupNonUniformArithmetic", "GroupNonUniformClustered", "GroupNonUniformPartitionedEXT"),
-          Vector(
+          Col("GroupNonUniformArithmetic", "GroupNonUniformClustered", "GroupNonUniformPartitionedEXT"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdScope", "execution", OperandQuantifier.One),
@@ -4667,8 +4634,8 @@ enum InstructionDef(
         Metadata(
           "Non-Uniform",
           Some("1.3"),
-          Vector("GroupNonUniformArithmetic", "GroupNonUniformClustered", "GroupNonUniformPartitionedEXT"),
-          Vector(
+          Col("GroupNonUniformArithmetic", "GroupNonUniformClustered", "GroupNonUniformPartitionedEXT"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdScope", "execution", OperandQuantifier.One),
@@ -4684,8 +4651,8 @@ enum InstructionDef(
         Metadata(
           "Non-Uniform",
           Some("1.3"),
-          Vector("GroupNonUniformArithmetic", "GroupNonUniformClustered", "GroupNonUniformPartitionedEXT"),
-          Vector(
+          Col("GroupNonUniformArithmetic", "GroupNonUniformClustered", "GroupNonUniformPartitionedEXT"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdScope", "execution", OperandQuantifier.One),
@@ -4701,8 +4668,8 @@ enum InstructionDef(
         Metadata(
           "Non-Uniform",
           Some("1.3"),
-          Vector("GroupNonUniformArithmetic", "GroupNonUniformClustered", "GroupNonUniformPartitionedEXT"),
-          Vector(
+          Col("GroupNonUniformArithmetic", "GroupNonUniformClustered", "GroupNonUniformPartitionedEXT"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdScope", "execution", OperandQuantifier.One),
@@ -4718,8 +4685,8 @@ enum InstructionDef(
         Metadata(
           "Non-Uniform",
           Some("1.3"),
-          Vector("GroupNonUniformArithmetic", "GroupNonUniformClustered", "GroupNonUniformPartitionedEXT"),
-          Vector(
+          Col("GroupNonUniformArithmetic", "GroupNonUniformClustered", "GroupNonUniformPartitionedEXT"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdScope", "execution", OperandQuantifier.One),
@@ -4735,8 +4702,8 @@ enum InstructionDef(
         Metadata(
           "Non-Uniform",
           Some("1.3"),
-          Vector("GroupNonUniformArithmetic", "GroupNonUniformClustered", "GroupNonUniformPartitionedEXT"),
-          Vector(
+          Col("GroupNonUniformArithmetic", "GroupNonUniformClustered", "GroupNonUniformPartitionedEXT"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdScope", "execution", OperandQuantifier.One),
@@ -4752,8 +4719,8 @@ enum InstructionDef(
         Metadata(
           "Non-Uniform",
           Some("1.3"),
-          Vector("GroupNonUniformArithmetic", "GroupNonUniformClustered", "GroupNonUniformPartitionedEXT"),
-          Vector(
+          Col("GroupNonUniformArithmetic", "GroupNonUniformClustered", "GroupNonUniformPartitionedEXT"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdScope", "execution", OperandQuantifier.One),
@@ -4769,8 +4736,8 @@ enum InstructionDef(
         Metadata(
           "Non-Uniform",
           Some("1.3"),
-          Vector("GroupNonUniformArithmetic", "GroupNonUniformClustered", "GroupNonUniformPartitionedEXT"),
-          Vector(
+          Col("GroupNonUniformArithmetic", "GroupNonUniformClustered", "GroupNonUniformPartitionedEXT"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdScope", "execution", OperandQuantifier.One),
@@ -4786,8 +4753,8 @@ enum InstructionDef(
         Metadata(
           "Non-Uniform",
           Some("1.3"),
-          Vector("GroupNonUniformArithmetic", "GroupNonUniformClustered", "GroupNonUniformPartitionedEXT"),
-          Vector(
+          Col("GroupNonUniformArithmetic", "GroupNonUniformClustered", "GroupNonUniformPartitionedEXT"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdScope", "execution", OperandQuantifier.One),
@@ -4803,8 +4770,8 @@ enum InstructionDef(
         Metadata(
           "Non-Uniform",
           Some("1.3"),
-          Vector("GroupNonUniformArithmetic", "GroupNonUniformClustered", "GroupNonUniformPartitionedEXT"),
-          Vector(
+          Col("GroupNonUniformArithmetic", "GroupNonUniformClustered", "GroupNonUniformPartitionedEXT"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdScope", "execution", OperandQuantifier.One),
@@ -4820,8 +4787,8 @@ enum InstructionDef(
         Metadata(
           "Non-Uniform",
           Some("1.3"),
-          Vector("GroupNonUniformArithmetic", "GroupNonUniformClustered", "GroupNonUniformPartitionedEXT"),
-          Vector(
+          Col("GroupNonUniformArithmetic", "GroupNonUniformClustered", "GroupNonUniformPartitionedEXT"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdScope", "execution", OperandQuantifier.One),
@@ -4837,8 +4804,8 @@ enum InstructionDef(
         Metadata(
           "Non-Uniform",
           Some("1.3"),
-          Vector("GroupNonUniformArithmetic", "GroupNonUniformClustered", "GroupNonUniformPartitionedEXT"),
-          Vector(
+          Col("GroupNonUniformArithmetic", "GroupNonUniformClustered", "GroupNonUniformPartitionedEXT"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdScope", "execution", OperandQuantifier.One),
@@ -4854,8 +4821,8 @@ enum InstructionDef(
         Metadata(
           "Non-Uniform",
           Some("1.3"),
-          Vector("GroupNonUniformArithmetic", "GroupNonUniformClustered", "GroupNonUniformPartitionedEXT"),
-          Vector(
+          Col("GroupNonUniformArithmetic", "GroupNonUniformClustered", "GroupNonUniformPartitionedEXT"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdScope", "execution", OperandQuantifier.One),
@@ -4871,8 +4838,8 @@ enum InstructionDef(
         Metadata(
           "Non-Uniform",
           Some("1.3"),
-          Vector("GroupNonUniformArithmetic", "GroupNonUniformClustered", "GroupNonUniformPartitionedEXT"),
-          Vector(
+          Col("GroupNonUniformArithmetic", "GroupNonUniformClustered", "GroupNonUniformPartitionedEXT"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdScope", "execution", OperandQuantifier.One),
@@ -4888,8 +4855,8 @@ enum InstructionDef(
         Metadata(
           "Non-Uniform",
           Some("1.3"),
-          Vector("GroupNonUniformArithmetic", "GroupNonUniformClustered", "GroupNonUniformPartitionedEXT"),
-          Vector(
+          Col("GroupNonUniformArithmetic", "GroupNonUniformClustered", "GroupNonUniformPartitionedEXT"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdScope", "execution", OperandQuantifier.One),
@@ -4905,8 +4872,8 @@ enum InstructionDef(
         Metadata(
           "Non-Uniform",
           Some("1.3"),
-          Vector("GroupNonUniformQuad"),
-          Vector(
+          Col("GroupNonUniformQuad"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdScope", "execution", OperandQuantifier.One),
@@ -4921,8 +4888,8 @@ enum InstructionDef(
         Metadata(
           "Non-Uniform",
           Some("1.3"),
-          Vector("GroupNonUniformQuad"),
-          Vector(
+          Col("GroupNonUniformQuad"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdScope", "execution", OperandQuantifier.One),
@@ -4937,8 +4904,8 @@ enum InstructionDef(
         Metadata(
           "Composite",
           Some("1.4"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "src", OperandQuantifier.One)
@@ -4951,8 +4918,8 @@ enum InstructionDef(
         Metadata(
           "Memory",
           Some("1.4"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcA", OperandQuantifier.One),
@@ -4966,8 +4933,8 @@ enum InstructionDef(
         Metadata(
           "Memory",
           Some("1.4"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcA", OperandQuantifier.One),
@@ -4981,8 +4948,8 @@ enum InstructionDef(
         Metadata(
           "Memory",
           Some("1.4"),
-          Vector("Addresses", "VariablePointers", "VariablePointersStorageBuffer"),
-          Vector(
+          Col("Addresses", "VariablePointers", "VariablePointersStorageBuffer"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcA", OperandQuantifier.One),
@@ -4996,8 +4963,8 @@ enum InstructionDef(
         Metadata(
           "Image",
           Some("None"),
-          Vector("TileImageColorReadAccessEXT"),
-          Vector(
+          Col("TileImageColorReadAccessEXT"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "attachment", OperandQuantifier.One),
@@ -5011,8 +4978,8 @@ enum InstructionDef(
         Metadata(
           "Image",
           Some("None"),
-          Vector("TileImageDepthReadAccessEXT"),
-          Vector(
+          Col("TileImageDepthReadAccessEXT"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "sample", OperandQuantifier.Optional)
@@ -5025,8 +4992,8 @@ enum InstructionDef(
         Metadata(
           "Image",
           Some("None"),
-          Vector("TileImageStencilReadAccessEXT"),
-          Vector(
+          Col("TileImageStencilReadAccessEXT"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "sample", OperandQuantifier.Optional)
@@ -5039,8 +5006,8 @@ enum InstructionDef(
         Metadata(
           "Type-Declaration",
           Some("None"),
-          Vector("TensorsARM"),
-          Vector(
+          Col("TensorsARM"),
+          Col(
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "elementType", OperandQuantifier.One),
             OperandShape("IdRef", "rank", OperandQuantifier.Optional),
@@ -5054,8 +5021,8 @@ enum InstructionDef(
         Metadata(
           "Tensor",
           Some("None"),
-          Vector("TensorsARM"),
-          Vector(
+          Col("TensorsARM"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "tensor", OperandQuantifier.One),
@@ -5070,8 +5037,8 @@ enum InstructionDef(
         Metadata(
           "Tensor",
           Some("None"),
-          Vector("TensorsARM"),
-          Vector(
+          Col("TensorsARM"),
+          Col(
             OperandShape("IdRef", "tensor", OperandQuantifier.One),
             OperandShape("IdRef", "coordinates", OperandQuantifier.One),
             OperandShape("IdRef", "src", OperandQuantifier.One),
@@ -5085,8 +5052,8 @@ enum InstructionDef(
         Metadata(
           "Tensor",
           Some("None"),
-          Vector("TensorsARM"),
-          Vector(
+          Col("TensorsARM"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "tensor", OperandQuantifier.One),
@@ -5100,8 +5067,8 @@ enum InstructionDef(
         Metadata(
           "Graph",
           Some("None"),
-          Vector("GraphARM"),
-          Vector(
+          Col("GraphARM"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("LiteralInteger", "graphConstantID", OperandQuantifier.One)
@@ -5114,8 +5081,8 @@ enum InstructionDef(
         Metadata(
           "Graph",
           Some("None"),
-          Vector("GraphARM"),
-          Vector(
+          Col("GraphARM"),
+          Col(
             OperandShape("IdRef", "graph", OperandQuantifier.One),
             OperandShape("LiteralString", "name", OperandQuantifier.One),
             OperandShape("IdRef", "interface", OperandQuantifier.Repeated)
@@ -5128,8 +5095,8 @@ enum InstructionDef(
         Metadata(
           "Graph",
           Some("None"),
-          Vector("GraphARM"),
-          Vector(
+          Col("GraphARM"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One)
           )
@@ -5141,8 +5108,8 @@ enum InstructionDef(
         Metadata(
           "Graph",
           Some("None"),
-          Vector("GraphARM"),
-          Vector(
+          Col("GraphARM"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "inputIndex", OperandQuantifier.One),
@@ -5156,8 +5123,8 @@ enum InstructionDef(
         Metadata(
           "Graph",
           Some("None"),
-          Vector("GraphARM"),
-          Vector(
+          Col("GraphARM"),
+          Col(
             OperandShape("IdRef", "value", OperandQuantifier.One),
             OperandShape("IdRef", "outputIndex", OperandQuantifier.One),
             OperandShape("IdRef", "elementIndex", OperandQuantifier.Repeated)
@@ -5165,15 +5132,15 @@ enum InstructionDef(
         )
       )
   case GraphEndARM
-      extends InstructionDef("OpGraphEndARM", 4186, Metadata("Graph", Some("None"), Vector("GraphARM"), Vector()))
+      extends InstructionDef("OpGraphEndARM", 4186, Metadata("Graph", Some("None"), Col("GraphARM"), Col()))
   case TypeGraphARM extends InstructionDef(
         "OpTypeGraphARM",
         4190,
         Metadata(
           "Type-Declaration",
           Some("None"),
-          Vector("GraphARM"),
-          Vector(
+          Col("GraphARM"),
+          Col(
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("LiteralInteger", "numInputs", OperandQuantifier.One),
             OperandShape("IdRef", "inOutTypes", OperandQuantifier.Repeated)
@@ -5186,8 +5153,8 @@ enum InstructionDef(
         Metadata(
           "Conversion",
           Some("None"),
-          Vector("BitcastExtractEXT"),
-          Vector(
+          Col("BitcastExtractEXT"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "base", OperandQuantifier.One),
@@ -5195,19 +5162,16 @@ enum InstructionDef(
           )
         )
       )
-  case TerminateInvocation extends InstructionDef(
-        "OpTerminateInvocation",
-        4416,
-        Metadata("Control-Flow", Some("1.6"), Vector("Shader"), Vector())
-      )
+  case TerminateInvocation
+      extends InstructionDef("OpTerminateInvocation", 4416, Metadata("Control-Flow", Some("1.6"), Col("Shader"), Col()))
   case TypeUntypedPointerKHR extends InstructionDef(
         "OpTypeUntypedPointerKHR",
         4417,
         Metadata(
           "Type-Declaration",
           Some("None"),
-          Vector("UntypedPointersKHR"),
-          Vector(
+          Col("UntypedPointersKHR"),
+          Col(
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("StorageClass", "storageClass", OperandQuantifier.One)
           )
@@ -5219,8 +5183,8 @@ enum InstructionDef(
         Metadata(
           "Memory",
           Some("None"),
-          Vector("UntypedPointersKHR"),
-          Vector(
+          Col("UntypedPointersKHR"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("StorageClass", "storageClass", OperandQuantifier.One),
@@ -5235,8 +5199,8 @@ enum InstructionDef(
         Metadata(
           "Memory",
           Some("None"),
-          Vector("UntypedPointersKHR"),
-          Vector(
+          Col("UntypedPointersKHR"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "baseType", OperandQuantifier.One),
@@ -5251,8 +5215,8 @@ enum InstructionDef(
         Metadata(
           "Memory",
           Some("None"),
-          Vector("UntypedPointersKHR"),
-          Vector(
+          Col("UntypedPointersKHR"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "baseType", OperandQuantifier.One),
@@ -5267,8 +5231,8 @@ enum InstructionDef(
         Metadata(
           "Group",
           Some("None"),
-          Vector("SubgroupBallotKHR"),
-          Vector(
+          Col("SubgroupBallotKHR"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "pred", OperandQuantifier.One)
@@ -5281,8 +5245,8 @@ enum InstructionDef(
         Metadata(
           "Group",
           Some("None"),
-          Vector("SubgroupBallotKHR"),
-          Vector(
+          Col("SubgroupBallotKHR"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "value", OperandQuantifier.One)
@@ -5295,8 +5259,8 @@ enum InstructionDef(
         Metadata(
           "Memory",
           Some("None"),
-          Vector("UntypedPointersKHR"),
-          Vector(
+          Col("UntypedPointersKHR"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "baseType", OperandQuantifier.One),
@@ -5312,8 +5276,8 @@ enum InstructionDef(
         Metadata(
           "Memory",
           Some("None"),
-          Vector("UntypedPointersKHR"),
-          Vector(
+          Col("UntypedPointersKHR"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "baseType", OperandQuantifier.One),
@@ -5329,8 +5293,8 @@ enum InstructionDef(
         Metadata(
           "Memory",
           Some("None"),
-          Vector("UntypedPointersKHR"),
-          Vector(
+          Col("UntypedPointersKHR"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "structure", OperandQuantifier.One),
@@ -5345,8 +5309,8 @@ enum InstructionDef(
         Metadata(
           "Memory",
           Some("None"),
-          Vector("UntypedPointersKHR"),
-          Vector(
+          Col("UntypedPointersKHR"),
+          Col(
             OperandShape("IdRef", "pointerType", OperandQuantifier.One),
             OperandShape("IdRef", "numBytes", OperandQuantifier.One),
             OperandShape("IdRef", "rW", OperandQuantifier.Optional),
@@ -5361,8 +5325,8 @@ enum InstructionDef(
         Metadata(
           "Arithmetic",
           Some("None"),
-          Vector("FMAKHR"),
-          Vector(
+          Col("FMAKHR"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcA", OperandQuantifier.One),
@@ -5377,8 +5341,8 @@ enum InstructionDef(
         Metadata(
           "Group",
           Some("None"),
-          Vector("SubgroupVoteKHR"),
-          Vector(
+          Col("SubgroupVoteKHR"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "pred", OperandQuantifier.One)
@@ -5391,8 +5355,8 @@ enum InstructionDef(
         Metadata(
           "Group",
           Some("None"),
-          Vector("SubgroupVoteKHR"),
-          Vector(
+          Col("SubgroupVoteKHR"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "pred", OperandQuantifier.One)
@@ -5405,8 +5369,8 @@ enum InstructionDef(
         Metadata(
           "Group",
           Some("None"),
-          Vector("SubgroupVoteKHR"),
-          Vector(
+          Col("SubgroupVoteKHR"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "pred", OperandQuantifier.One)
@@ -5419,8 +5383,8 @@ enum InstructionDef(
         Metadata(
           "Group",
           Some("None"),
-          Vector("GroupNonUniformRotateKHR"),
-          Vector(
+          Col("GroupNonUniformRotateKHR"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdScope", "execution", OperandQuantifier.One),
@@ -5436,8 +5400,8 @@ enum InstructionDef(
         Metadata(
           "Group",
           Some("None"),
-          Vector("SubgroupBallotKHR"),
-          Vector(
+          Col("SubgroupBallotKHR"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "value", OperandQuantifier.One),
@@ -5451,8 +5415,8 @@ enum InstructionDef(
         Metadata(
           "Extension",
           Some("None"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "set", OperandQuantifier.One),
@@ -5467,8 +5431,8 @@ enum InstructionDef(
         Metadata(
           "Group",
           Some("None"),
-          Vector("UntypedPointersKHR"),
-          Vector(
+          Col("UntypedPointersKHR"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "execution", OperandQuantifier.One),
@@ -5489,8 +5453,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("RayTracingKHR"),
-          Vector(
+          Col("RayTracingKHR"),
+          Col(
             OperandShape("IdRef", "accel", OperandQuantifier.One),
             OperandShape("IdRef", "rayFlags", OperandQuantifier.One),
             OperandShape("IdRef", "cullMask", OperandQuantifier.One),
@@ -5511,8 +5475,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("RayTracingKHR"),
-          Vector(
+          Col("RayTracingKHR"),
+          Col(
             OperandShape("IdRef", "sBTIndex", OperandQuantifier.One),
             OperandShape("IdRef", "callableData", OperandQuantifier.One)
           )
@@ -5524,8 +5488,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("RayTracingKHR", "RayQueryKHR"),
-          Vector(
+          Col("RayTracingKHR", "RayQueryKHR"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "accel", OperandQuantifier.One)
@@ -5535,21 +5499,18 @@ enum InstructionDef(
   case IgnoreIntersectionKHR extends InstructionDef(
         "OpIgnoreIntersectionKHR",
         4448,
-        Metadata("Reserved", Some("None"), Vector("RayTracingKHR"), Vector())
+        Metadata("Reserved", Some("None"), Col("RayTracingKHR"), Col())
       )
-  case TerminateRayKHR extends InstructionDef(
-        "OpTerminateRayKHR",
-        4449,
-        Metadata("Reserved", Some("None"), Vector("RayTracingKHR"), Vector())
-      )
+  case TerminateRayKHR
+      extends InstructionDef("OpTerminateRayKHR", 4449, Metadata("Reserved", Some("None"), Col("RayTracingKHR"), Col()))
   case SDot extends InstructionDef(
         "OpSDot",
         4450,
         Metadata(
           "Arithmetic",
           Some("1.6"),
-          Vector("DotProduct"),
-          Vector(
+          Col("DotProduct"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "vector1", OperandQuantifier.One),
@@ -5564,8 +5525,8 @@ enum InstructionDef(
         Metadata(
           "Arithmetic",
           Some("1.6"),
-          Vector("DotProduct"),
-          Vector(
+          Col("DotProduct"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "vector1", OperandQuantifier.One),
@@ -5580,8 +5541,8 @@ enum InstructionDef(
         Metadata(
           "Arithmetic",
           Some("1.6"),
-          Vector("DotProduct"),
-          Vector(
+          Col("DotProduct"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "vector1", OperandQuantifier.One),
@@ -5596,8 +5557,8 @@ enum InstructionDef(
         Metadata(
           "Arithmetic",
           Some("1.6"),
-          Vector("DotProduct"),
-          Vector(
+          Col("DotProduct"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "vector1", OperandQuantifier.One),
@@ -5613,8 +5574,8 @@ enum InstructionDef(
         Metadata(
           "Arithmetic",
           Some("1.6"),
-          Vector("DotProduct"),
-          Vector(
+          Col("DotProduct"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "vector1", OperandQuantifier.One),
@@ -5630,8 +5591,8 @@ enum InstructionDef(
         Metadata(
           "Arithmetic",
           Some("1.6"),
-          Vector("DotProduct"),
-          Vector(
+          Col("DotProduct"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "vector1", OperandQuantifier.One),
@@ -5647,8 +5608,8 @@ enum InstructionDef(
         Metadata(
           "Type-Declaration",
           Some("None"),
-          Vector("CooperativeMatrixKHR"),
-          Vector(
+          Col("CooperativeMatrixKHR"),
+          Col(
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "componentType", OperandQuantifier.One),
             OperandShape("IdScope", "scope", OperandQuantifier.One),
@@ -5664,8 +5625,8 @@ enum InstructionDef(
         Metadata(
           "Memory",
           Some("None"),
-          Vector("CooperativeMatrixKHR"),
-          Vector(
+          Col("CooperativeMatrixKHR"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "pointer", OperandQuantifier.One),
@@ -5681,8 +5642,8 @@ enum InstructionDef(
         Metadata(
           "Memory",
           Some("None"),
-          Vector("CooperativeMatrixKHR"),
-          Vector(
+          Col("CooperativeMatrixKHR"),
+          Col(
             OperandShape("IdRef", "pointer", OperandQuantifier.One),
             OperandShape("IdRef", "src", OperandQuantifier.One),
             OperandShape("IdRef", "memoryLayout", OperandQuantifier.One),
@@ -5697,8 +5658,8 @@ enum InstructionDef(
         Metadata(
           "Arithmetic",
           Some("None"),
-          Vector("CooperativeMatrixKHR"),
-          Vector(
+          Col("CooperativeMatrixKHR"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "a", OperandQuantifier.One),
@@ -5714,8 +5675,8 @@ enum InstructionDef(
         Metadata(
           "Miscellaneous",
           Some("None"),
-          Vector("CooperativeMatrixKHR"),
-          Vector(
+          Col("CooperativeMatrixKHR"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "dataType", OperandQuantifier.One)
@@ -5728,8 +5689,8 @@ enum InstructionDef(
         Metadata(
           "Constant-Creation",
           Some("None"),
-          Vector("ReplicatedCompositesEXT"),
-          Vector(
+          Col("ReplicatedCompositesEXT"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "value", OperandQuantifier.One)
@@ -5742,8 +5703,8 @@ enum InstructionDef(
         Metadata(
           "Constant-Creation",
           Some("None"),
-          Vector("ReplicatedCompositesEXT"),
-          Vector(
+          Col("ReplicatedCompositesEXT"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "value", OperandQuantifier.One)
@@ -5756,8 +5717,8 @@ enum InstructionDef(
         Metadata(
           "Composite",
           Some("None"),
-          Vector("ReplicatedCompositesEXT"),
-          Vector(
+          Col("ReplicatedCompositesEXT"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "value", OperandQuantifier.One)
@@ -5770,8 +5731,8 @@ enum InstructionDef(
         Metadata(
           "Type-Declaration",
           Some("None"),
-          Vector("RayQueryKHR"),
-          Vector(OperandShape("IdResult", "dest", OperandQuantifier.One))
+          Col("RayQueryKHR"),
+          Col(OperandShape("IdResult", "dest", OperandQuantifier.One))
         )
       )
   case RayQueryInitializeKHR extends InstructionDef(
@@ -5780,8 +5741,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("RayQueryKHR"),
-          Vector(
+          Col("RayQueryKHR"),
+          Col(
             OperandShape("IdRef", "rayQuery", OperandQuantifier.One),
             OperandShape("IdRef", "accel", OperandQuantifier.One),
             OperandShape("IdRef", "rayFlags", OperandQuantifier.One),
@@ -5799,8 +5760,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("RayQueryKHR"),
-          Vector(OperandShape("IdRef", "rayQuery", OperandQuantifier.One))
+          Col("RayQueryKHR"),
+          Col(OperandShape("IdRef", "rayQuery", OperandQuantifier.One))
         )
       )
   case RayQueryGenerateIntersectionKHR extends InstructionDef(
@@ -5809,8 +5770,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("RayQueryKHR"),
-          Vector(
+          Col("RayQueryKHR"),
+          Col(
             OperandShape("IdRef", "rayQuery", OperandQuantifier.One),
             OperandShape("IdRef", "hitT", OperandQuantifier.One)
           )
@@ -5822,8 +5783,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("RayQueryKHR"),
-          Vector(OperandShape("IdRef", "rayQuery", OperandQuantifier.One))
+          Col("RayQueryKHR"),
+          Col(OperandShape("IdRef", "rayQuery", OperandQuantifier.One))
         )
       )
   case RayQueryProceedKHR extends InstructionDef(
@@ -5832,8 +5793,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("RayQueryKHR"),
-          Vector(
+          Col("RayQueryKHR"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "rayQuery", OperandQuantifier.One)
@@ -5846,8 +5807,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("RayQueryKHR"),
-          Vector(
+          Col("RayQueryKHR"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "rayQuery", OperandQuantifier.One),
@@ -5861,8 +5822,8 @@ enum InstructionDef(
         Metadata(
           "Image",
           Some("None"),
-          Vector("TextureSampleWeightedQCOM"),
-          Vector(
+          Col("TextureSampleWeightedQCOM"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "texture", OperandQuantifier.One),
@@ -5877,8 +5838,8 @@ enum InstructionDef(
         Metadata(
           "Image",
           Some("None"),
-          Vector("TextureBoxFilterQCOM"),
-          Vector(
+          Col("TextureBoxFilterQCOM"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "texture", OperandQuantifier.One),
@@ -5893,8 +5854,8 @@ enum InstructionDef(
         Metadata(
           "Image",
           Some("None"),
-          Vector("TextureBlockMatchQCOM"),
-          Vector(
+          Col("TextureBlockMatchQCOM"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "target", OperandQuantifier.One),
@@ -5911,8 +5872,8 @@ enum InstructionDef(
         Metadata(
           "Image",
           Some("None"),
-          Vector("TextureBlockMatchQCOM"),
-          Vector(
+          Col("TextureBlockMatchQCOM"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "target", OperandQuantifier.One),
@@ -5929,8 +5890,8 @@ enum InstructionDef(
         Metadata(
           "Conversion",
           Some("None"),
-          Vector("CooperativeMatrixConversionQCOM"),
-          Vector(
+          Col("CooperativeMatrixConversionQCOM"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcArray", OperandQuantifier.One)
@@ -5943,8 +5904,8 @@ enum InstructionDef(
         Metadata(
           "Image",
           Some("None"),
-          Vector("TextureBlockMatch2QCOM"),
-          Vector(
+          Col("TextureBlockMatch2QCOM"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "targetSampledImage", OperandQuantifier.One),
@@ -5961,8 +5922,8 @@ enum InstructionDef(
         Metadata(
           "Image",
           Some("None"),
-          Vector("TextureBlockMatch2QCOM"),
-          Vector(
+          Col("TextureBlockMatch2QCOM"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "targetSampledImage", OperandQuantifier.One),
@@ -5979,8 +5940,8 @@ enum InstructionDef(
         Metadata(
           "Image",
           Some("None"),
-          Vector("TextureBlockMatch2QCOM"),
-          Vector(
+          Col("TextureBlockMatch2QCOM"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "targetSampledImage", OperandQuantifier.One),
@@ -5997,8 +5958,8 @@ enum InstructionDef(
         Metadata(
           "Image",
           Some("None"),
-          Vector("TextureBlockMatch2QCOM"),
-          Vector(
+          Col("TextureBlockMatch2QCOM"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "targetSampledImage", OperandQuantifier.One),
@@ -6015,8 +5976,8 @@ enum InstructionDef(
         Metadata(
           "Composite",
           Some("None"),
-          Vector("CooperativeMatrixConversionQCOM"),
-          Vector(
+          Col("CooperativeMatrixConversionQCOM"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcArray", OperandQuantifier.One)
@@ -6029,8 +5990,8 @@ enum InstructionDef(
         Metadata(
           "Composite",
           Some("None"),
-          Vector("CooperativeMatrixConversionQCOM"),
-          Vector(
+          Col("CooperativeMatrixConversionQCOM"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcCooperativeMatrix", OperandQuantifier.One)
@@ -6043,8 +6004,8 @@ enum InstructionDef(
         Metadata(
           "Composite",
           Some("None"),
-          Vector("CooperativeMatrixConversionQCOM"),
-          Vector(
+          Col("CooperativeMatrixConversionQCOM"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcArray", OperandQuantifier.One),
@@ -6058,8 +6019,8 @@ enum InstructionDef(
         Metadata(
           "Image",
           Some("None"),
-          Vector("ImageGatherLinearQCOM", "ImageGatherExtendedModesQCOM"),
-          Vector(
+          Col("ImageGatherLinearQCOM", "ImageGatherExtendedModesQCOM"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "sampledImage", OperandQuantifier.One),
@@ -6076,8 +6037,8 @@ enum InstructionDef(
         Metadata(
           "Group",
           Some("None"),
-          Vector("Groups"),
-          Vector(
+          Col("Groups"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdScope", "execution", OperandQuantifier.One),
@@ -6092,8 +6053,8 @@ enum InstructionDef(
         Metadata(
           "Group",
           Some("None"),
-          Vector("Groups"),
-          Vector(
+          Col("Groups"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdScope", "execution", OperandQuantifier.One),
@@ -6108,8 +6069,8 @@ enum InstructionDef(
         Metadata(
           "Group",
           Some("None"),
-          Vector("Groups"),
-          Vector(
+          Col("Groups"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdScope", "execution", OperandQuantifier.One),
@@ -6124,8 +6085,8 @@ enum InstructionDef(
         Metadata(
           "Group",
           Some("None"),
-          Vector("Groups"),
-          Vector(
+          Col("Groups"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdScope", "execution", OperandQuantifier.One),
@@ -6140,8 +6101,8 @@ enum InstructionDef(
         Metadata(
           "Group",
           Some("None"),
-          Vector("Groups"),
-          Vector(
+          Col("Groups"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdScope", "execution", OperandQuantifier.One),
@@ -6156,8 +6117,8 @@ enum InstructionDef(
         Metadata(
           "Group",
           Some("None"),
-          Vector("Groups"),
-          Vector(
+          Col("Groups"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdScope", "execution", OperandQuantifier.One),
@@ -6172,8 +6133,8 @@ enum InstructionDef(
         Metadata(
           "Group",
           Some("None"),
-          Vector("Groups"),
-          Vector(
+          Col("Groups"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdScope", "execution", OperandQuantifier.One),
@@ -6188,8 +6149,8 @@ enum InstructionDef(
         Metadata(
           "Group",
           Some("None"),
-          Vector("Groups"),
-          Vector(
+          Col("Groups"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdScope", "execution", OperandQuantifier.One),
@@ -6204,8 +6165,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("FragmentMaskAMD"),
-          Vector(
+          Col("FragmentMaskAMD"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "image", OperandQuantifier.One),
@@ -6219,8 +6180,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("FragmentMaskAMD"),
-          Vector(
+          Col("FragmentMaskAMD"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "image", OperandQuantifier.One),
@@ -6235,8 +6196,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("ShaderClockKHR"),
-          Vector(
+          Col("ShaderClockKHR"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdScope", "scope", OperandQuantifier.One)
@@ -6249,8 +6210,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("ShaderEnqueueAMDX"),
-          Vector(
+          Col("ShaderEnqueueAMDX"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdScope", "visibility", OperandQuantifier.One),
@@ -6265,8 +6226,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("ShaderEnqueueAMDX"),
-          Vector(OperandShape("IdRef", "payloadArray", OperandQuantifier.One))
+          Col("ShaderEnqueueAMDX"),
+          Col(OperandShape("IdRef", "payloadArray", OperandQuantifier.One))
         )
       )
   case TypeNodePayloadArrayAMDX extends InstructionDef(
@@ -6275,8 +6236,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("ShaderEnqueueAMDX"),
-          Vector(
+          Col("ShaderEnqueueAMDX"),
+          Col(
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "payloadType", OperandQuantifier.One)
           )
@@ -6288,8 +6249,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("ShaderEnqueueAMDX"),
-          Vector(
+          Col("ShaderEnqueueAMDX"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "payload", OperandQuantifier.One)
@@ -6302,8 +6263,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("ShaderEnqueueAMDX"),
-          Vector(
+          Col("ShaderEnqueueAMDX"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "payloadArray", OperandQuantifier.One)
@@ -6316,8 +6277,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("ShaderEnqueueAMDX"),
-          Vector(
+          Col("ShaderEnqueueAMDX"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "payloadType", OperandQuantifier.One),
@@ -6331,8 +6292,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("ShaderEnqueueAMDX"),
-          Vector(
+          Col("ShaderEnqueueAMDX"),
+          Col(
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("LiteralString", "literalString", OperandQuantifier.One)
           )
@@ -6344,8 +6305,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("ShaderEnqueueAMDX"),
-          Vector(
+          Col("ShaderEnqueueAMDX"),
+          Col(
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("LiteralString", "literalString", OperandQuantifier.One)
           )
@@ -6357,8 +6318,8 @@ enum InstructionDef(
         Metadata(
           "Non-Uniform",
           Some("None"),
-          Vector("QuadControlKHR"),
-          Vector(
+          Col("QuadControlKHR"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "pred", OperandQuantifier.One)
@@ -6371,8 +6332,8 @@ enum InstructionDef(
         Metadata(
           "Non-Uniform",
           Some("None"),
-          Vector("QuadControlKHR"),
-          Vector(
+          Col("QuadControlKHR"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "pred", OperandQuantifier.One)
@@ -6385,8 +6346,8 @@ enum InstructionDef(
         Metadata(
           "Type-Declaration",
           Some("None"),
-          Vector("DescriptorHeapEXT"),
-          Vector(
+          Col("DescriptorHeapEXT"),
+          Col(
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("StorageClass", "storageClass", OperandQuantifier.One)
           )
@@ -6398,8 +6359,8 @@ enum InstructionDef(
         Metadata(
           "Memory",
           Some("None"),
-          Vector("DescriptorHeapEXT"),
-          Vector(
+          Col("DescriptorHeapEXT"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "buffer", OperandQuantifier.One)
@@ -6412,8 +6373,8 @@ enum InstructionDef(
         Metadata(
           "Control-Flow",
           Some("None"),
-          Vector("AbortKHR"),
-          Vector(
+          Col("AbortKHR"),
+          Col(
             OperandShape("IdRef", "messageType", OperandQuantifier.One),
             OperandShape("IdRef", "message", OperandQuantifier.One)
           )
@@ -6425,8 +6386,8 @@ enum InstructionDef(
         Metadata(
           "Memory",
           Some("None"),
-          Vector("DescriptorHeapEXT"),
-          Vector(
+          Col("DescriptorHeapEXT"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "imageType", OperandQuantifier.One),
@@ -6442,8 +6403,8 @@ enum InstructionDef(
         Metadata(
           "Annotation",
           Some("None"),
-          Vector("DescriptorHeapEXT"),
-          Vector(
+          Col("DescriptorHeapEXT"),
+          Col(
             OperandShape("IdRef", "structureType", OperandQuantifier.One),
             OperandShape("LiteralInteger", "member", OperandQuantifier.One),
             OperandShape("Decoration", "decoration", OperandQuantifier.One)
@@ -6456,8 +6417,8 @@ enum InstructionDef(
         Metadata(
           "Constant-Creation",
           Some("None"),
-          Vector("DescriptorHeapEXT"),
-          Vector(
+          Col("DescriptorHeapEXT"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "dataType", OperandQuantifier.One)
@@ -6470,8 +6431,8 @@ enum InstructionDef(
         Metadata(
           "Constant-Creation",
           Some("None"),
-          Vector("ConstantDataKHR"),
-          Vector(
+          Col("ConstantDataKHR"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("LiteralInteger", "data", OperandQuantifier.Repeated)
@@ -6484,8 +6445,8 @@ enum InstructionDef(
         Metadata(
           "Constant-Creation",
           Some("None"),
-          Vector("ConstantDataKHR"),
-          Vector(
+          Col("ConstantDataKHR"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("LiteralInteger", "data", OperandQuantifier.Repeated)
@@ -6498,8 +6459,8 @@ enum InstructionDef(
         Metadata(
           "Miscellaneous",
           Some("None"),
-          Vector("PoisonFreezeKHR"),
-          Vector(
+          Col("PoisonFreezeKHR"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One)
           )
@@ -6511,8 +6472,8 @@ enum InstructionDef(
         Metadata(
           "Miscellaneous",
           Some("None"),
-          Vector("PoisonFreezeKHR"),
-          Vector(
+          Col("PoisonFreezeKHR"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "value", OperandQuantifier.One)
@@ -6525,8 +6486,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("ShaderInvocationReorderNV", "RayTracingMotionBlurNV"),
-          Vector(
+          Col("ShaderInvocationReorderNV", "RayTracingMotionBlurNV"),
+          Col(
             OperandShape("IdRef", "hitObject", OperandQuantifier.One),
             OperandShape("IdRef", "accelerationStructure", OperandQuantifier.One),
             OperandShape("IdRef", "instanceId", OperandQuantifier.One),
@@ -6550,8 +6511,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("ShaderInvocationReorderNV", "RayTracingMotionBlurNV"),
-          Vector(
+          Col("ShaderInvocationReorderNV", "RayTracingMotionBlurNV"),
+          Col(
             OperandShape("IdRef", "hitObject", OperandQuantifier.One),
             OperandShape("IdRef", "accelerationStructure", OperandQuantifier.One),
             OperandShape("IdRef", "instanceId", OperandQuantifier.One),
@@ -6574,8 +6535,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("ShaderInvocationReorderNV", "RayTracingMotionBlurNV"),
-          Vector(
+          Col("ShaderInvocationReorderNV", "RayTracingMotionBlurNV"),
+          Col(
             OperandShape("IdRef", "hitObject", OperandQuantifier.One),
             OperandShape("IdRef", "sBTIndex", OperandQuantifier.One),
             OperandShape("IdRef", "origin", OperandQuantifier.One),
@@ -6592,8 +6553,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("ShaderInvocationReorderNV"),
-          Vector(
+          Col("ShaderInvocationReorderNV"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "hitObject", OperandQuantifier.One)
@@ -6606,8 +6567,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("ShaderInvocationReorderNV"),
-          Vector(
+          Col("ShaderInvocationReorderNV"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "hitObject", OperandQuantifier.One)
@@ -6620,8 +6581,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("ShaderInvocationReorderNV"),
-          Vector(
+          Col("ShaderInvocationReorderNV"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "hitObject", OperandQuantifier.One)
@@ -6634,8 +6595,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("ShaderInvocationReorderNV"),
-          Vector(
+          Col("ShaderInvocationReorderNV"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "hitObject", OperandQuantifier.One)
@@ -6648,8 +6609,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("ShaderInvocationReorderNV", "RayTracingMotionBlurNV"),
-          Vector(
+          Col("ShaderInvocationReorderNV", "RayTracingMotionBlurNV"),
+          Col(
             OperandShape("IdRef", "hitObject", OperandQuantifier.One),
             OperandShape("IdRef", "accelerationStructure", OperandQuantifier.One),
             OperandShape("IdRef", "rayFlags", OperandQuantifier.One),
@@ -6672,8 +6633,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("ShaderInvocationReorderNV"),
-          Vector(
+          Col("ShaderInvocationReorderNV"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "hitObject", OperandQuantifier.One)
@@ -6686,8 +6647,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("ShaderInvocationReorderNV"),
-          Vector(
+          Col("ShaderInvocationReorderNV"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "hitObject", OperandQuantifier.One)
@@ -6700,8 +6661,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("ShaderInvocationReorderNV"),
-          Vector(OperandShape("IdRef", "hitObject", OperandQuantifier.One))
+          Col("ShaderInvocationReorderNV"),
+          Col(OperandShape("IdRef", "hitObject", OperandQuantifier.One))
         )
       )
   case HitObjectTraceRayNV extends InstructionDef(
@@ -6710,8 +6671,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("ShaderInvocationReorderNV"),
-          Vector(
+          Col("ShaderInvocationReorderNV"),
+          Col(
             OperandShape("IdRef", "hitObject", OperandQuantifier.One),
             OperandShape("IdRef", "accelerationStructure", OperandQuantifier.One),
             OperandShape("IdRef", "rayFlags", OperandQuantifier.One),
@@ -6733,8 +6694,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("ShaderInvocationReorderNV"),
-          Vector(
+          Col("ShaderInvocationReorderNV"),
+          Col(
             OperandShape("IdRef", "hitObject", OperandQuantifier.One),
             OperandShape("IdRef", "accelerationStructure", OperandQuantifier.One),
             OperandShape("IdRef", "instanceId", OperandQuantifier.One),
@@ -6757,8 +6718,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("ShaderInvocationReorderNV"),
-          Vector(
+          Col("ShaderInvocationReorderNV"),
+          Col(
             OperandShape("IdRef", "hitObject", OperandQuantifier.One),
             OperandShape("IdRef", "accelerationStructure", OperandQuantifier.One),
             OperandShape("IdRef", "instanceId", OperandQuantifier.One),
@@ -6780,8 +6741,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("ShaderInvocationReorderNV"),
-          Vector(
+          Col("ShaderInvocationReorderNV"),
+          Col(
             OperandShape("IdRef", "hitObject", OperandQuantifier.One),
             OperandShape("IdRef", "sBTIndex", OperandQuantifier.One),
             OperandShape("IdRef", "origin", OperandQuantifier.One),
@@ -6797,8 +6758,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("ShaderInvocationReorderNV"),
-          Vector(
+          Col("ShaderInvocationReorderNV"),
+          Col(
             OperandShape("IdRef", "hitObject", OperandQuantifier.One),
             OperandShape("IdRef", "payload", OperandQuantifier.One)
           )
@@ -6810,8 +6771,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("ShaderInvocationReorderNV"),
-          Vector(
+          Col("ShaderInvocationReorderNV"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "hitObject", OperandQuantifier.One)
@@ -6824,8 +6785,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("ShaderInvocationReorderNV"),
-          Vector(
+          Col("ShaderInvocationReorderNV"),
+          Col(
             OperandShape("IdRef", "hitObject", OperandQuantifier.One),
             OperandShape("IdRef", "hitObjectAttribute", OperandQuantifier.One)
           )
@@ -6837,8 +6798,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("ShaderInvocationReorderNV"),
-          Vector(
+          Col("ShaderInvocationReorderNV"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "hitObject", OperandQuantifier.One)
@@ -6851,8 +6812,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("ShaderInvocationReorderNV"),
-          Vector(
+          Col("ShaderInvocationReorderNV"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "hitObject", OperandQuantifier.One)
@@ -6865,8 +6826,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("ShaderInvocationReorderNV"),
-          Vector(
+          Col("ShaderInvocationReorderNV"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "hitObject", OperandQuantifier.One)
@@ -6879,8 +6840,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("ShaderInvocationReorderNV"),
-          Vector(
+          Col("ShaderInvocationReorderNV"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "hitObject", OperandQuantifier.One)
@@ -6893,8 +6854,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("ShaderInvocationReorderNV"),
-          Vector(
+          Col("ShaderInvocationReorderNV"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "hitObject", OperandQuantifier.One)
@@ -6907,8 +6868,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("ShaderInvocationReorderNV"),
-          Vector(
+          Col("ShaderInvocationReorderNV"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "hitObject", OperandQuantifier.One)
@@ -6921,8 +6882,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("ShaderInvocationReorderNV"),
-          Vector(
+          Col("ShaderInvocationReorderNV"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "hitObject", OperandQuantifier.One)
@@ -6935,8 +6896,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("ShaderInvocationReorderNV"),
-          Vector(
+          Col("ShaderInvocationReorderNV"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "hitObject", OperandQuantifier.One)
@@ -6949,8 +6910,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("ShaderInvocationReorderNV"),
-          Vector(
+          Col("ShaderInvocationReorderNV"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "hitObject", OperandQuantifier.One)
@@ -6963,8 +6924,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("ShaderInvocationReorderNV"),
-          Vector(
+          Col("ShaderInvocationReorderNV"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "hitObject", OperandQuantifier.One)
@@ -6977,8 +6938,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("ShaderInvocationReorderNV"),
-          Vector(
+          Col("ShaderInvocationReorderNV"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "hitObject", OperandQuantifier.One)
@@ -6991,8 +6952,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("ShaderInvocationReorderNV"),
-          Vector(
+          Col("ShaderInvocationReorderNV"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "hitObject", OperandQuantifier.One)
@@ -7005,8 +6966,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("ShaderInvocationReorderNV"),
-          Vector(
+          Col("ShaderInvocationReorderNV"),
+          Col(
             OperandShape("IdRef", "hitObject", OperandQuantifier.One),
             OperandShape("IdRef", "hint", OperandQuantifier.Optional),
             OperandShape("IdRef", "bits", OperandQuantifier.Optional)
@@ -7019,8 +6980,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("ShaderInvocationReorderNV"),
-          Vector(
+          Col("ShaderInvocationReorderNV"),
+          Col(
             OperandShape("IdRef", "hint", OperandQuantifier.One),
             OperandShape("IdRef", "bits", OperandQuantifier.One)
           )
@@ -7032,8 +6993,8 @@ enum InstructionDef(
         Metadata(
           "Type-Declaration",
           Some("None"),
-          Vector("ShaderInvocationReorderNV"),
-          Vector(OperandShape("IdResult", "dest", OperandQuantifier.One))
+          Col("ShaderInvocationReorderNV"),
+          Col(OperandShape("IdResult", "dest", OperandQuantifier.One))
         )
       )
   case ImageSampleFootprintNV extends InstructionDef(
@@ -7042,8 +7003,8 @@ enum InstructionDef(
         Metadata(
           "Image",
           Some("None"),
-          Vector("ImageFootprintNV"),
-          Vector(
+          Col("ImageFootprintNV"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "sampledImage", OperandQuantifier.One),
@@ -7060,8 +7021,8 @@ enum InstructionDef(
         Metadata(
           "Type-Declaration",
           Some("None"),
-          Vector("CooperativeVectorNV", "LongVectorEXT"),
-          Vector(
+          Col("CooperativeVectorNV", "LongVectorEXT"),
+          Col(
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "componentType", OperandQuantifier.One),
             OperandShape("IdRef", "componentCount", OperandQuantifier.One)
@@ -7074,8 +7035,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("CooperativeVectorNV"),
-          Vector(
+          Col("CooperativeVectorNV"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "input", OperandQuantifier.One),
@@ -7098,8 +7059,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("CooperativeVectorTrainingNV"),
-          Vector(
+          Col("CooperativeVectorTrainingNV"),
+          Col(
             OperandShape("IdRef", "pointer", OperandQuantifier.One),
             OperandShape("IdRef", "offset", OperandQuantifier.One),
             OperandShape("IdRef", "a", OperandQuantifier.One),
@@ -7116,8 +7077,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("CooperativeVectorTrainingNV"),
-          Vector(
+          Col("CooperativeVectorTrainingNV"),
+          Col(
             OperandShape("IdRef", "pointer", OperandQuantifier.One),
             OperandShape("IdRef", "offset", OperandQuantifier.One),
             OperandShape("IdRef", "v", OperandQuantifier.One)
@@ -7130,8 +7091,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("CooperativeVectorNV"),
-          Vector(
+          Col("CooperativeVectorNV"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "input", OperandQuantifier.One),
@@ -7157,8 +7118,8 @@ enum InstructionDef(
         Metadata(
           "Conversion",
           Some("None"),
-          Vector("CooperativeMatrixConversionsNV"),
-          Vector(
+          Col("CooperativeMatrixConversionsNV"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "matrix", OperandQuantifier.One)
@@ -7171,8 +7132,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("MeshShadingEXT"),
-          Vector(
+          Col("MeshShadingEXT"),
+          Col(
             OperandShape("IdRef", "groupCountX", OperandQuantifier.One),
             OperandShape("IdRef", "groupCountY", OperandQuantifier.One),
             OperandShape("IdRef", "groupCountZ", OperandQuantifier.One),
@@ -7186,8 +7147,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("MeshShadingEXT"),
-          Vector(
+          Col("MeshShadingEXT"),
+          Col(
             OperandShape("IdRef", "vertexCount", OperandQuantifier.One),
             OperandShape("IdRef", "primitiveCount", OperandQuantifier.One)
           )
@@ -7199,8 +7160,8 @@ enum InstructionDef(
         Metadata(
           "Non-Uniform",
           Some("None"),
-          Vector("GroupNonUniformPartitionedEXT"),
-          Vector(
+          Col("GroupNonUniformPartitionedEXT"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "value", OperandQuantifier.One)
@@ -7213,8 +7174,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("MeshShadingNV"),
-          Vector(
+          Col("MeshShadingNV"),
+          Col(
             OperandShape("IdRef", "indexOffset", OperandQuantifier.One),
             OperandShape("IdRef", "packedIndices", OperandQuantifier.One)
           )
@@ -7226,8 +7187,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("DisplacementMicromapNV"),
-          Vector(
+          Col("DisplacementMicromapNV"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "accel", OperandQuantifier.One),
@@ -7244,8 +7205,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("DisplacementMicromapNV"),
-          Vector(
+          Col("DisplacementMicromapNV"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "accel", OperandQuantifier.One),
@@ -7262,8 +7223,8 @@ enum InstructionDef(
         Metadata(
           "Memory",
           Some("None"),
-          Vector("CooperativeVectorNV"),
-          Vector(
+          Col("CooperativeVectorNV"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "pointer", OperandQuantifier.One),
@@ -7278,8 +7239,8 @@ enum InstructionDef(
         Metadata(
           "Memory",
           Some("None"),
-          Vector("CooperativeVectorNV"),
-          Vector(
+          Col("CooperativeVectorNV"),
+          Col(
             OperandShape("IdRef", "pointer", OperandQuantifier.One),
             OperandShape("IdRef", "offset", OperandQuantifier.One),
             OperandShape("IdRef", "src", OperandQuantifier.One),
@@ -7293,8 +7254,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("ShaderInvocationReorderEXT"),
-          Vector(
+          Col("ShaderInvocationReorderEXT"),
+          Col(
             OperandShape("IdRef", "hitObject", OperandQuantifier.One),
             OperandShape("IdRef", "rayQuery", OperandQuantifier.One),
             OperandShape("IdRef", "sBTRecordIndex", OperandQuantifier.One),
@@ -7309,8 +7270,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("ShaderInvocationReorderEXT"),
-          Vector(
+          Col("ShaderInvocationReorderEXT"),
+          Col(
             OperandShape("IdRef", "hitObject", OperandQuantifier.One),
             OperandShape("IdRef", "rayFlags", OperandQuantifier.One),
             OperandShape("IdRef", "missIndex", OperandQuantifier.One),
@@ -7327,8 +7288,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("ShaderInvocationReorderEXT", "RayTracingMotionBlurNV"),
-          Vector(
+          Col("ShaderInvocationReorderEXT", "RayTracingMotionBlurNV"),
+          Col(
             OperandShape("IdRef", "hitObject", OperandQuantifier.One),
             OperandShape("IdRef", "rayFlags", OperandQuantifier.One),
             OperandShape("IdRef", "missIndex", OperandQuantifier.One),
@@ -7346,8 +7307,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("ShaderInvocationReorderEXT"),
-          Vector(
+          Col("ShaderInvocationReorderEXT"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "hitObject", OperandQuantifier.One)
@@ -7360,8 +7321,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("ShaderInvocationReorderEXT"),
-          Vector(
+          Col("ShaderInvocationReorderEXT"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "hitObject", OperandQuantifier.One)
@@ -7374,8 +7335,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("ShaderInvocationReorderEXT"),
-          Vector(
+          Col("ShaderInvocationReorderEXT"),
+          Col(
             OperandShape("IdRef", "hitObject", OperandQuantifier.One),
             OperandShape("IdRef", "sBTRecordIndex", OperandQuantifier.One)
           )
@@ -7387,8 +7348,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("ShaderInvocationReorderEXT"),
-          Vector(
+          Col("ShaderInvocationReorderEXT"),
+          Col(
             OperandShape("IdRef", "hitObject", OperandQuantifier.One),
             OperandShape("IdRef", "payload", OperandQuantifier.One),
             OperandShape("IdRef", "hint", OperandQuantifier.Optional),
@@ -7402,8 +7363,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("ShaderInvocationReorderEXT"),
-          Vector(
+          Col("ShaderInvocationReorderEXT"),
+          Col(
             OperandShape("IdRef", "hitObject", OperandQuantifier.One),
             OperandShape("IdRef", "accelerationStructure", OperandQuantifier.One),
             OperandShape("IdRef", "rayFlags", OperandQuantifier.One),
@@ -7427,8 +7388,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("ShaderInvocationReorderEXT", "RayTracingMotionBlurNV"),
-          Vector(
+          Col("ShaderInvocationReorderEXT", "RayTracingMotionBlurNV"),
+          Col(
             OperandShape("IdRef", "hitObject", OperandQuantifier.One),
             OperandShape("IdRef", "accelerationStructure", OperandQuantifier.One),
             OperandShape("IdRef", "rayFlags", OperandQuantifier.One),
@@ -7453,8 +7414,8 @@ enum InstructionDef(
         Metadata(
           "Type-Declaration",
           Some("None"),
-          Vector("ShaderInvocationReorderEXT"),
-          Vector(OperandShape("IdResult", "dest", OperandQuantifier.One))
+          Col("ShaderInvocationReorderEXT"),
+          Col(OperandShape("IdResult", "dest", OperandQuantifier.One))
         )
       )
   case ReorderThreadWithHintEXT extends InstructionDef(
@@ -7463,8 +7424,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("ShaderInvocationReorderEXT"),
-          Vector(
+          Col("ShaderInvocationReorderEXT"),
+          Col(
             OperandShape("IdRef", "hint", OperandQuantifier.One),
             OperandShape("IdRef", "bits", OperandQuantifier.One)
           )
@@ -7476,8 +7437,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("ShaderInvocationReorderEXT"),
-          Vector(
+          Col("ShaderInvocationReorderEXT"),
+          Col(
             OperandShape("IdRef", "hitObject", OperandQuantifier.One),
             OperandShape("IdRef", "hint", OperandQuantifier.Optional),
             OperandShape("IdRef", "bits", OperandQuantifier.Optional)
@@ -7490,8 +7451,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("ShaderInvocationReorderEXT"),
-          Vector(
+          Col("ShaderInvocationReorderEXT"),
+          Col(
             OperandShape("IdRef", "hitObject", OperandQuantifier.One),
             OperandShape("IdRef", "accelerationStructure", OperandQuantifier.One),
             OperandShape("IdRef", "rayFlags", OperandQuantifier.One),
@@ -7513,8 +7474,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("ShaderInvocationReorderEXT", "RayTracingMotionBlurNV"),
-          Vector(
+          Col("ShaderInvocationReorderEXT", "RayTracingMotionBlurNV"),
+          Col(
             OperandShape("IdRef", "hitObject", OperandQuantifier.One),
             OperandShape("IdRef", "accelerationStructure", OperandQuantifier.One),
             OperandShape("IdRef", "rayFlags", OperandQuantifier.One),
@@ -7537,8 +7498,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("ShaderInvocationReorderEXT"),
-          Vector(OperandShape("IdRef", "hitObject", OperandQuantifier.One))
+          Col("ShaderInvocationReorderEXT"),
+          Col(OperandShape("IdRef", "hitObject", OperandQuantifier.One))
         )
       )
   case HitObjectExecuteShaderEXT extends InstructionDef(
@@ -7547,8 +7508,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("ShaderInvocationReorderEXT"),
-          Vector(
+          Col("ShaderInvocationReorderEXT"),
+          Col(
             OperandShape("IdRef", "hitObject", OperandQuantifier.One),
             OperandShape("IdRef", "payload", OperandQuantifier.One)
           )
@@ -7560,8 +7521,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("ShaderInvocationReorderEXT", "RayTracingMotionBlurNV"),
-          Vector(
+          Col("ShaderInvocationReorderEXT", "RayTracingMotionBlurNV"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "hitObject", OperandQuantifier.One)
@@ -7574,8 +7535,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("ShaderInvocationReorderEXT"),
-          Vector(
+          Col("ShaderInvocationReorderEXT"),
+          Col(
             OperandShape("IdRef", "hitObject", OperandQuantifier.One),
             OperandShape("IdRef", "hitObjectAttribute", OperandQuantifier.One)
           )
@@ -7587,8 +7548,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("ShaderInvocationReorderEXT"),
-          Vector(
+          Col("ShaderInvocationReorderEXT"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "hitObject", OperandQuantifier.One)
@@ -7601,8 +7562,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("ShaderInvocationReorderEXT"),
-          Vector(
+          Col("ShaderInvocationReorderEXT"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "hitObject", OperandQuantifier.One)
@@ -7615,8 +7576,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("ShaderInvocationReorderEXT"),
-          Vector(
+          Col("ShaderInvocationReorderEXT"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "hitObject", OperandQuantifier.One)
@@ -7629,8 +7590,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("ShaderInvocationReorderEXT"),
-          Vector(
+          Col("ShaderInvocationReorderEXT"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "hitObject", OperandQuantifier.One)
@@ -7643,8 +7604,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("ShaderInvocationReorderEXT"),
-          Vector(
+          Col("ShaderInvocationReorderEXT"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "hitObject", OperandQuantifier.One)
@@ -7657,8 +7618,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("ShaderInvocationReorderEXT"),
-          Vector(
+          Col("ShaderInvocationReorderEXT"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "hitObject", OperandQuantifier.One)
@@ -7671,8 +7632,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("ShaderInvocationReorderEXT"),
-          Vector(
+          Col("ShaderInvocationReorderEXT"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "hitObject", OperandQuantifier.One)
@@ -7685,8 +7646,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("ShaderInvocationReorderEXT"),
-          Vector(
+          Col("ShaderInvocationReorderEXT"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "hitObject", OperandQuantifier.One)
@@ -7699,8 +7660,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("ShaderInvocationReorderEXT"),
-          Vector(
+          Col("ShaderInvocationReorderEXT"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "hitObject", OperandQuantifier.One)
@@ -7713,8 +7674,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("ShaderInvocationReorderEXT"),
-          Vector(
+          Col("ShaderInvocationReorderEXT"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "hitObject", OperandQuantifier.One)
@@ -7727,8 +7688,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("ShaderInvocationReorderEXT"),
-          Vector(
+          Col("ShaderInvocationReorderEXT"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "hitObject", OperandQuantifier.One)
@@ -7741,8 +7702,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("ShaderInvocationReorderEXT"),
-          Vector(
+          Col("ShaderInvocationReorderEXT"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "hitObject", OperandQuantifier.One)
@@ -7755,8 +7716,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("RayTracingNV", "RayTracingKHR"),
-          Vector(
+          Col("RayTracingNV", "RayTracingKHR"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "hit", OperandQuantifier.One),
@@ -7767,21 +7728,18 @@ enum InstructionDef(
   case IgnoreIntersectionNV extends InstructionDef(
         "OpIgnoreIntersectionNV",
         5335,
-        Metadata("Reserved", Some("None"), Vector("RayTracingNV"), Vector())
+        Metadata("Reserved", Some("None"), Col("RayTracingNV"), Col())
       )
-  case TerminateRayNV extends InstructionDef(
-        "OpTerminateRayNV",
-        5336,
-        Metadata("Reserved", Some("None"), Vector("RayTracingNV"), Vector())
-      )
+  case TerminateRayNV
+      extends InstructionDef("OpTerminateRayNV", 5336, Metadata("Reserved", Some("None"), Col("RayTracingNV"), Col()))
   case TraceNV extends InstructionDef(
         "OpTraceNV",
         5337,
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("RayTracingNV"),
-          Vector(
+          Col("RayTracingNV"),
+          Col(
             OperandShape("IdRef", "accel", OperandQuantifier.One),
             OperandShape("IdRef", "rayFlags", OperandQuantifier.One),
             OperandShape("IdRef", "cullMask", OperandQuantifier.One),
@@ -7802,8 +7760,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("RayTracingMotionBlurNV"),
-          Vector(
+          Col("RayTracingMotionBlurNV"),
+          Col(
             OperandShape("IdRef", "accel", OperandQuantifier.One),
             OperandShape("IdRef", "rayFlags", OperandQuantifier.One),
             OperandShape("IdRef", "cullMask", OperandQuantifier.One),
@@ -7825,8 +7783,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("RayTracingMotionBlurNV"),
-          Vector(
+          Col("RayTracingMotionBlurNV"),
+          Col(
             OperandShape("IdRef", "accel", OperandQuantifier.One),
             OperandShape("IdRef", "rayFlags", OperandQuantifier.One),
             OperandShape("IdRef", "cullMask", OperandQuantifier.One),
@@ -7848,8 +7806,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("RayQueryPositionFetchKHR"),
-          Vector(
+          Col("RayQueryPositionFetchKHR"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "rayQuery", OperandQuantifier.One),
@@ -7863,8 +7821,8 @@ enum InstructionDef(
         Metadata(
           "Type-Declaration",
           Some("None"),
-          Vector("RayTracingNV", "RayTracingKHR", "RayQueryKHR", "DisplacementMicromapNV"),
-          Vector(OperandShape("IdResult", "dest", OperandQuantifier.One))
+          Col("RayTracingNV", "RayTracingKHR", "RayQueryKHR", "DisplacementMicromapNV"),
+          Col(OperandShape("IdResult", "dest", OperandQuantifier.One))
         )
       )
   case ExecuteCallableNV extends InstructionDef(
@@ -7873,8 +7831,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("RayTracingNV"),
-          Vector(
+          Col("RayTracingNV"),
+          Col(
             OperandShape("IdRef", "sBTIndex", OperandQuantifier.One),
             OperandShape("IdRef", "callableDataId", OperandQuantifier.One)
           )
@@ -7886,8 +7844,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("RayTracingClusterAccelerationStructureNV"),
-          Vector(
+          Col("RayTracingClusterAccelerationStructureNV"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "rayQuery", OperandQuantifier.One),
@@ -7901,8 +7859,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("RayTracingClusterAccelerationStructureNV"),
-          Vector(
+          Col("RayTracingClusterAccelerationStructureNV"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "hitObject", OperandQuantifier.One)
@@ -7915,8 +7873,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("ShaderInvocationReorderEXT"),
-          Vector(
+          Col("ShaderInvocationReorderEXT"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "hitObject", OperandQuantifier.One)
@@ -7929,8 +7887,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("ShaderInvocationReorderEXT"),
-          Vector(
+          Col("ShaderInvocationReorderEXT"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "hitObject", OperandQuantifier.One)
@@ -7943,8 +7901,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("ShaderInvocationReorderEXT"),
-          Vector(
+          Col("ShaderInvocationReorderEXT"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "hitObject", OperandQuantifier.One)
@@ -7957,8 +7915,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("ShaderInvocationReorderEXT"),
-          Vector(
+          Col("ShaderInvocationReorderEXT"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "hitObject", OperandQuantifier.One)
@@ -7971,8 +7929,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("ShaderInvocationReorderEXT"),
-          Vector(
+          Col("ShaderInvocationReorderEXT"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "hitObject", OperandQuantifier.One)
@@ -7985,8 +7943,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("ShaderInvocationReorderEXT"),
-          Vector(
+          Col("ShaderInvocationReorderEXT"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "hitObject", OperandQuantifier.One)
@@ -7999,8 +7957,8 @@ enum InstructionDef(
         Metadata(
           "Type-Declaration",
           Some("None"),
-          Vector("CooperativeMatrixNV"),
-          Vector(
+          Col("CooperativeMatrixNV"),
+          Col(
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "componentType", OperandQuantifier.One),
             OperandShape("IdScope", "execution", OperandQuantifier.One),
@@ -8015,8 +7973,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("CooperativeMatrixNV"),
-          Vector(
+          Col("CooperativeMatrixNV"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "pointer", OperandQuantifier.One),
@@ -8032,8 +7990,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("CooperativeMatrixNV"),
-          Vector(
+          Col("CooperativeMatrixNV"),
+          Col(
             OperandShape("IdRef", "pointer", OperandQuantifier.One),
             OperandShape("IdRef", "src", OperandQuantifier.One),
             OperandShape("IdRef", "stride", OperandQuantifier.One),
@@ -8048,8 +8006,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("CooperativeMatrixNV"),
-          Vector(
+          Col("CooperativeMatrixNV"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "a", OperandQuantifier.One),
@@ -8064,8 +8022,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("CooperativeMatrixNV"),
-          Vector(
+          Col("CooperativeMatrixNV"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "dataType", OperandQuantifier.One)
@@ -8078,12 +8036,12 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector(
+          Col(
             "FragmentShaderSampleInterlockEXT",
             "FragmentShaderPixelInterlockEXT",
             "FragmentShaderShadingRateInterlockEXT"
           ),
-          Vector()
+          Col()
         )
       )
   case EndInvocationInterlockEXT extends InstructionDef(
@@ -8092,12 +8050,12 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector(
+          Col(
             "FragmentShaderSampleInterlockEXT",
             "FragmentShaderPixelInterlockEXT",
             "FragmentShaderShadingRateInterlockEXT"
           ),
-          Vector()
+          Col()
         )
       )
   case CooperativeMatrixReduceNV extends InstructionDef(
@@ -8106,8 +8064,8 @@ enum InstructionDef(
         Metadata(
           "Arithmetic",
           Some("None"),
-          Vector("CooperativeMatrixReductionsNV"),
-          Vector(
+          Col("CooperativeMatrixReductionsNV"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "matrix", OperandQuantifier.One),
@@ -8122,8 +8080,8 @@ enum InstructionDef(
         Metadata(
           "Memory",
           Some("None"),
-          Vector("CooperativeMatrixTensorAddressingNV"),
-          Vector(
+          Col("CooperativeMatrixTensorAddressingNV"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "pointer", OperandQuantifier.One),
@@ -8140,8 +8098,8 @@ enum InstructionDef(
         Metadata(
           "Memory",
           Some("None"),
-          Vector("CooperativeMatrixTensorAddressingNV"),
-          Vector(
+          Col("CooperativeMatrixTensorAddressingNV"),
+          Col(
             OperandShape("IdRef", "pointer", OperandQuantifier.One),
             OperandShape("IdRef", "src", OperandQuantifier.One),
             OperandShape("IdRef", "tensorLayout", OperandQuantifier.One),
@@ -8156,8 +8114,8 @@ enum InstructionDef(
         Metadata(
           "Function",
           Some("None"),
-          Vector("CooperativeMatrixPerElementOperationsNV"),
-          Vector(
+          Col("CooperativeMatrixPerElementOperationsNV"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "matrix", OperandQuantifier.One),
@@ -8172,8 +8130,8 @@ enum InstructionDef(
         Metadata(
           "Type-Declaration",
           Some("None"),
-          Vector("TensorAddressingNV"),
-          Vector(
+          Col("TensorAddressingNV"),
+          Col(
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "dim", OperandQuantifier.One),
             OperandShape("IdRef", "clampMode", OperandQuantifier.One)
@@ -8186,8 +8144,8 @@ enum InstructionDef(
         Metadata(
           "Type-Declaration",
           Some("None"),
-          Vector("TensorAddressingNV"),
-          Vector(
+          Col("TensorAddressingNV"),
+          Col(
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "dim", OperandQuantifier.One),
             OperandShape("IdRef", "hasDimensions", OperandQuantifier.One),
@@ -8201,8 +8159,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("TensorAddressingNV"),
-          Vector(
+          Col("TensorAddressingNV"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One)
           )
@@ -8214,8 +8172,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("TensorAddressingNV"),
-          Vector(
+          Col("TensorAddressingNV"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "tensorLayout", OperandQuantifier.One),
@@ -8229,8 +8187,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("TensorAddressingNV"),
-          Vector(
+          Col("TensorAddressingNV"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "tensorLayout", OperandQuantifier.One),
@@ -8244,8 +8202,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("TensorAddressingNV"),
-          Vector(
+          Col("TensorAddressingNV"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "tensorLayout", OperandQuantifier.One),
@@ -8259,8 +8217,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("TensorAddressingNV"),
-          Vector(
+          Col("TensorAddressingNV"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "tensorLayout", OperandQuantifier.One),
@@ -8274,8 +8232,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("TensorAddressingNV"),
-          Vector(
+          Col("TensorAddressingNV"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One)
           )
@@ -8287,8 +8245,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("TensorAddressingNV"),
-          Vector(
+          Col("TensorAddressingNV"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "tensorView", OperandQuantifier.One),
@@ -8302,8 +8260,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("TensorAddressingNV"),
-          Vector(
+          Col("TensorAddressingNV"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "tensorView", OperandQuantifier.One),
@@ -8314,7 +8272,7 @@ enum InstructionDef(
   case DemoteToHelperInvocation extends InstructionDef(
         "OpDemoteToHelperInvocation",
         5380,
-        Metadata("Control-Flow", Some("1.6"), Vector("DemoteToHelperInvocation"), Vector())
+        Metadata("Control-Flow", Some("1.6"), Col("DemoteToHelperInvocation"), Col())
       )
   case IsHelperInvocationEXT extends InstructionDef(
         "OpIsHelperInvocationEXT",
@@ -8322,8 +8280,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("DemoteToHelperInvocation"),
-          Vector(
+          Col("DemoteToHelperInvocation"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One)
           )
@@ -8335,8 +8293,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("TensorAddressingNV"),
-          Vector(
+          Col("TensorAddressingNV"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "tensorView", OperandQuantifier.One),
@@ -8353,8 +8311,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("TensorAddressingNV"),
-          Vector(
+          Col("TensorAddressingNV"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "tensorLayout", OperandQuantifier.One),
@@ -8368,8 +8326,8 @@ enum InstructionDef(
         Metadata(
           "Conversion",
           Some("None"),
-          Vector("CooperativeMatrixConversionsNV"),
-          Vector(
+          Col("CooperativeMatrixConversionsNV"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "matrix", OperandQuantifier.One)
@@ -8382,8 +8340,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("BindlessTextureNV"),
-          Vector(
+          Col("BindlessTextureNV"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "src", OperandQuantifier.One)
@@ -8396,8 +8354,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("BindlessTextureNV"),
-          Vector(
+          Col("BindlessTextureNV"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "src", OperandQuantifier.One)
@@ -8410,8 +8368,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("BindlessTextureNV"),
-          Vector(
+          Col("BindlessTextureNV"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "src", OperandQuantifier.One)
@@ -8424,8 +8382,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("BindlessTextureNV"),
-          Vector(
+          Col("BindlessTextureNV"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "src", OperandQuantifier.One)
@@ -8438,8 +8396,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("BindlessTextureNV"),
-          Vector(
+          Col("BindlessTextureNV"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "src", OperandQuantifier.One)
@@ -8452,8 +8410,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("BindlessTextureNV"),
-          Vector(
+          Col("BindlessTextureNV"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "src", OperandQuantifier.One)
@@ -8466,8 +8424,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("BindlessTextureNV"),
-          Vector(OperandShape("LiteralInteger", "bitWidth", OperandQuantifier.One))
+          Col("BindlessTextureNV"),
+          Col(OperandShape("LiteralInteger", "bitWidth", OperandQuantifier.One))
         )
       )
   case RawAccessChainNV extends InstructionDef(
@@ -8476,8 +8434,8 @@ enum InstructionDef(
         Metadata(
           "Memory",
           Some("None"),
-          Vector("RawAccessChainsNV"),
-          Vector(
+          Col("RawAccessChainsNV"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "base", OperandQuantifier.One),
@@ -8494,8 +8452,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("RayTracingSpheresGeometryNV"),
-          Vector(
+          Col("RayTracingSpheresGeometryNV"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "rayQuery", OperandQuantifier.One),
@@ -8509,8 +8467,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("RayTracingSpheresGeometryNV"),
-          Vector(
+          Col("RayTracingSpheresGeometryNV"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "rayQuery", OperandQuantifier.One),
@@ -8524,8 +8482,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("RayTracingLinearSweptSpheresGeometryNV"),
-          Vector(
+          Col("RayTracingLinearSweptSpheresGeometryNV"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "rayQuery", OperandQuantifier.One),
@@ -8539,8 +8497,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("RayTracingLinearSweptSpheresGeometryNV"),
-          Vector(
+          Col("RayTracingLinearSweptSpheresGeometryNV"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "rayQuery", OperandQuantifier.One),
@@ -8554,8 +8512,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("RayTracingLinearSweptSpheresGeometryNV"),
-          Vector(
+          Col("RayTracingLinearSweptSpheresGeometryNV"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "rayQuery", OperandQuantifier.One),
@@ -8569,8 +8527,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("RayTracingSpheresGeometryNV"),
-          Vector(
+          Col("RayTracingSpheresGeometryNV"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "hitObject", OperandQuantifier.One)
@@ -8583,8 +8541,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("RayTracingSpheresGeometryNV"),
-          Vector(
+          Col("RayTracingSpheresGeometryNV"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "hitObject", OperandQuantifier.One)
@@ -8597,8 +8555,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("RayTracingLinearSweptSpheresGeometryNV"),
-          Vector(
+          Col("RayTracingLinearSweptSpheresGeometryNV"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "hitObject", OperandQuantifier.One)
@@ -8611,8 +8569,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("RayTracingLinearSweptSpheresGeometryNV"),
-          Vector(
+          Col("RayTracingLinearSweptSpheresGeometryNV"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "hitObject", OperandQuantifier.One)
@@ -8625,8 +8583,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("RayTracingSpheresGeometryNV"),
-          Vector(
+          Col("RayTracingSpheresGeometryNV"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "hitObject", OperandQuantifier.One)
@@ -8639,8 +8597,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("RayTracingLinearSweptSpheresGeometryNV"),
-          Vector(
+          Col("RayTracingLinearSweptSpheresGeometryNV"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "hitObject", OperandQuantifier.One)
@@ -8653,8 +8611,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("RayTracingSpheresGeometryNV"),
-          Vector(
+          Col("RayTracingSpheresGeometryNV"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "rayQuery", OperandQuantifier.One),
@@ -8668,8 +8626,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("RayTracingLinearSweptSpheresGeometryNV"),
-          Vector(
+          Col("RayTracingLinearSweptSpheresGeometryNV"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "rayQuery", OperandQuantifier.One),
@@ -8683,8 +8641,8 @@ enum InstructionDef(
         Metadata(
           "Group",
           Some("None"),
-          Vector("SubgroupShuffleINTEL"),
-          Vector(
+          Col("SubgroupShuffleINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "data", OperandQuantifier.One),
@@ -8698,8 +8656,8 @@ enum InstructionDef(
         Metadata(
           "Group",
           Some("None"),
-          Vector("SubgroupShuffleINTEL"),
-          Vector(
+          Col("SubgroupShuffleINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "current", OperandQuantifier.One),
@@ -8714,8 +8672,8 @@ enum InstructionDef(
         Metadata(
           "Group",
           Some("None"),
-          Vector("SubgroupShuffleINTEL"),
-          Vector(
+          Col("SubgroupShuffleINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "previous", OperandQuantifier.One),
@@ -8730,8 +8688,8 @@ enum InstructionDef(
         Metadata(
           "Group",
           Some("None"),
-          Vector("SubgroupShuffleINTEL"),
-          Vector(
+          Col("SubgroupShuffleINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "data", OperandQuantifier.One),
@@ -8745,8 +8703,8 @@ enum InstructionDef(
         Metadata(
           "Group",
           Some("None"),
-          Vector("SubgroupBufferBlockIOINTEL"),
-          Vector(
+          Col("SubgroupBufferBlockIOINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "ptr", OperandQuantifier.One)
@@ -8759,11 +8717,8 @@ enum InstructionDef(
         Metadata(
           "Group",
           Some("None"),
-          Vector("SubgroupBufferBlockIOINTEL"),
-          Vector(
-            OperandShape("IdRef", "ptr", OperandQuantifier.One),
-            OperandShape("IdRef", "data", OperandQuantifier.One)
-          )
+          Col("SubgroupBufferBlockIOINTEL"),
+          Col(OperandShape("IdRef", "ptr", OperandQuantifier.One), OperandShape("IdRef", "data", OperandQuantifier.One))
         )
       )
   case SubgroupImageBlockReadINTEL extends InstructionDef(
@@ -8772,8 +8727,8 @@ enum InstructionDef(
         Metadata(
           "Group",
           Some("None"),
-          Vector("SubgroupImageBlockIOINTEL"),
-          Vector(
+          Col("SubgroupImageBlockIOINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "image", OperandQuantifier.One),
@@ -8787,8 +8742,8 @@ enum InstructionDef(
         Metadata(
           "Group",
           Some("None"),
-          Vector("SubgroupImageBlockIOINTEL"),
-          Vector(
+          Col("SubgroupImageBlockIOINTEL"),
+          Col(
             OperandShape("IdRef", "image", OperandQuantifier.One),
             OperandShape("IdRef", "coordinate", OperandQuantifier.One),
             OperandShape("IdRef", "data", OperandQuantifier.One)
@@ -8801,8 +8756,8 @@ enum InstructionDef(
         Metadata(
           "Group",
           Some("None"),
-          Vector("SubgroupImageMediaBlockIOINTEL"),
-          Vector(
+          Col("SubgroupImageMediaBlockIOINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "image", OperandQuantifier.One),
@@ -8818,8 +8773,8 @@ enum InstructionDef(
         Metadata(
           "Group",
           Some("None"),
-          Vector("SubgroupImageMediaBlockIOINTEL"),
-          Vector(
+          Col("SubgroupImageMediaBlockIOINTEL"),
+          Col(
             OperandShape("IdRef", "image", OperandQuantifier.One),
             OperandShape("IdRef", "coordinate", OperandQuantifier.One),
             OperandShape("IdRef", "width", OperandQuantifier.One),
@@ -8834,8 +8789,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("IntegerFunctions2INTEL"),
-          Vector(
+          Col("IntegerFunctions2INTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "src", OperandQuantifier.One)
@@ -8848,8 +8803,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("IntegerFunctions2INTEL"),
-          Vector(
+          Col("IntegerFunctions2INTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "src", OperandQuantifier.One)
@@ -8862,8 +8817,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("IntegerFunctions2INTEL"),
-          Vector(
+          Col("IntegerFunctions2INTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcA", OperandQuantifier.One),
@@ -8877,8 +8832,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("IntegerFunctions2INTEL"),
-          Vector(
+          Col("IntegerFunctions2INTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcA", OperandQuantifier.One),
@@ -8892,8 +8847,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("IntegerFunctions2INTEL"),
-          Vector(
+          Col("IntegerFunctions2INTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcA", OperandQuantifier.One),
@@ -8907,8 +8862,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("IntegerFunctions2INTEL"),
-          Vector(
+          Col("IntegerFunctions2INTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcA", OperandQuantifier.One),
@@ -8922,8 +8877,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("IntegerFunctions2INTEL"),
-          Vector(
+          Col("IntegerFunctions2INTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcA", OperandQuantifier.One),
@@ -8937,8 +8892,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("IntegerFunctions2INTEL"),
-          Vector(
+          Col("IntegerFunctions2INTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcA", OperandQuantifier.One),
@@ -8952,8 +8907,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("IntegerFunctions2INTEL"),
-          Vector(
+          Col("IntegerFunctions2INTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcA", OperandQuantifier.One),
@@ -8967,8 +8922,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("IntegerFunctions2INTEL"),
-          Vector(
+          Col("IntegerFunctions2INTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcA", OperandQuantifier.One),
@@ -8982,8 +8937,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("IntegerFunctions2INTEL"),
-          Vector(
+          Col("IntegerFunctions2INTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcA", OperandQuantifier.One),
@@ -8997,8 +8952,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("IntegerFunctions2INTEL"),
-          Vector(
+          Col("IntegerFunctions2INTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcA", OperandQuantifier.One),
@@ -9012,8 +8967,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("IntegerFunctions2INTEL"),
-          Vector(
+          Col("IntegerFunctions2INTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcA", OperandQuantifier.One),
@@ -9027,8 +8982,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("IntegerFunctions2INTEL"),
-          Vector(
+          Col("IntegerFunctions2INTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcA", OperandQuantifier.One),
@@ -9042,8 +8997,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("FunctionPointersINTEL"),
-          Vector(
+          Col("FunctionPointersINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "function", OperandQuantifier.One)
@@ -9056,8 +9011,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("FunctionPointersINTEL"),
-          Vector(
+          Col("FunctionPointersINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcs", OperandQuantifier.Repeated)
@@ -9070,8 +9025,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("AsmINTEL"),
-          Vector(
+          Col("AsmINTEL"),
+          Col(
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("LiteralString", "asmTarget", OperandQuantifier.One)
           )
@@ -9083,8 +9038,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("AsmINTEL"),
-          Vector(
+          Col("AsmINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "asmType", OperandQuantifier.One),
@@ -9100,8 +9055,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("AsmINTEL"),
-          Vector(
+          Col("AsmINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "asm", OperandQuantifier.One),
@@ -9115,8 +9070,8 @@ enum InstructionDef(
         Metadata(
           "Atomic",
           Some("None"),
-          Vector("AtomicFloat16MinMaxEXT", "AtomicFloat32MinMaxEXT", "AtomicFloat64MinMaxEXT", "AtomicFloat16VectorNV"),
-          Vector(
+          Col("AtomicFloat16MinMaxEXT", "AtomicFloat32MinMaxEXT", "AtomicFloat64MinMaxEXT", "AtomicFloat16VectorNV"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "pointer", OperandQuantifier.One),
@@ -9132,8 +9087,8 @@ enum InstructionDef(
         Metadata(
           "Atomic",
           Some("None"),
-          Vector("AtomicFloat16MinMaxEXT", "AtomicFloat32MinMaxEXT", "AtomicFloat64MinMaxEXT", "AtomicFloat16VectorNV"),
-          Vector(
+          Col("AtomicFloat16MinMaxEXT", "AtomicFloat32MinMaxEXT", "AtomicFloat64MinMaxEXT", "AtomicFloat16VectorNV"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "pointer", OperandQuantifier.One),
@@ -9149,8 +9104,8 @@ enum InstructionDef(
         Metadata(
           "Miscellaneous",
           Some("None"),
-          Vector("ExpectAssumeKHR"),
-          Vector(OperandShape("IdRef", "pred", OperandQuantifier.One))
+          Col("ExpectAssumeKHR"),
+          Col(OperandShape("IdRef", "pred", OperandQuantifier.One))
         )
       )
   case ExpectKHR extends InstructionDef(
@@ -9159,8 +9114,8 @@ enum InstructionDef(
         Metadata(
           "Miscellaneous",
           Some("None"),
-          Vector("ExpectAssumeKHR"),
-          Vector(
+          Col("ExpectAssumeKHR"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "value", OperandQuantifier.One),
@@ -9174,8 +9129,8 @@ enum InstructionDef(
         Metadata(
           "Annotation",
           Some("1.4"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdRef", "target", OperandQuantifier.One),
             OperandShape("Decoration", "decoration", OperandQuantifier.One)
           )
@@ -9187,8 +9142,8 @@ enum InstructionDef(
         Metadata(
           "Annotation",
           Some("1.4"),
-          Vector(),
-          Vector(
+          Col(),
+          Col(
             OperandShape("IdRef", "structType", OperandQuantifier.One),
             OperandShape("LiteralInteger", "member", OperandQuantifier.One),
             OperandShape("Decoration", "decoration", OperandQuantifier.One)
@@ -9201,8 +9156,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "imageType", OperandQuantifier.One),
@@ -9216,8 +9171,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "imageType", OperandQuantifier.One)
           )
@@ -9229,8 +9184,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(OperandShape("IdResult", "dest", OperandQuantifier.One))
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(OperandShape("IdResult", "dest", OperandQuantifier.One))
         )
       )
   case TypeAvcRefPayloadINTEL extends InstructionDef(
@@ -9239,8 +9194,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(OperandShape("IdResult", "dest", OperandQuantifier.One))
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(OperandShape("IdResult", "dest", OperandQuantifier.One))
         )
       )
   case TypeAvcSicPayloadINTEL extends InstructionDef(
@@ -9249,8 +9204,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(OperandShape("IdResult", "dest", OperandQuantifier.One))
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(OperandShape("IdResult", "dest", OperandQuantifier.One))
         )
       )
   case TypeAvcMcePayloadINTEL extends InstructionDef(
@@ -9259,8 +9214,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(OperandShape("IdResult", "dest", OperandQuantifier.One))
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(OperandShape("IdResult", "dest", OperandQuantifier.One))
         )
       )
   case TypeAvcMceResultINTEL extends InstructionDef(
@@ -9269,8 +9224,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(OperandShape("IdResult", "dest", OperandQuantifier.One))
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(OperandShape("IdResult", "dest", OperandQuantifier.One))
         )
       )
   case TypeAvcImeResultINTEL extends InstructionDef(
@@ -9279,8 +9234,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(OperandShape("IdResult", "dest", OperandQuantifier.One))
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(OperandShape("IdResult", "dest", OperandQuantifier.One))
         )
       )
   case TypeAvcImeResultSingleReferenceStreamoutINTEL extends InstructionDef(
@@ -9289,8 +9244,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(OperandShape("IdResult", "dest", OperandQuantifier.One))
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(OperandShape("IdResult", "dest", OperandQuantifier.One))
         )
       )
   case TypeAvcImeResultDualReferenceStreamoutINTEL extends InstructionDef(
@@ -9299,8 +9254,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(OperandShape("IdResult", "dest", OperandQuantifier.One))
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(OperandShape("IdResult", "dest", OperandQuantifier.One))
         )
       )
   case TypeAvcImeSingleReferenceStreaminINTEL extends InstructionDef(
@@ -9309,8 +9264,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(OperandShape("IdResult", "dest", OperandQuantifier.One))
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(OperandShape("IdResult", "dest", OperandQuantifier.One))
         )
       )
   case TypeAvcImeDualReferenceStreaminINTEL extends InstructionDef(
@@ -9319,8 +9274,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(OperandShape("IdResult", "dest", OperandQuantifier.One))
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(OperandShape("IdResult", "dest", OperandQuantifier.One))
         )
       )
   case TypeAvcRefResultINTEL extends InstructionDef(
@@ -9329,8 +9284,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(OperandShape("IdResult", "dest", OperandQuantifier.One))
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(OperandShape("IdResult", "dest", OperandQuantifier.One))
         )
       )
   case TypeAvcSicResultINTEL extends InstructionDef(
@@ -9339,8 +9294,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(OperandShape("IdResult", "dest", OperandQuantifier.One))
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(OperandShape("IdResult", "dest", OperandQuantifier.One))
         )
       )
   case SubgroupAvcMceGetDefaultInterBaseMultiReferencePenaltyINTEL extends InstructionDef(
@@ -9349,8 +9304,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "sliceType", OperandQuantifier.One),
@@ -9364,8 +9319,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "referenceBasePenalty", OperandQuantifier.One),
@@ -9379,8 +9334,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "sliceType", OperandQuantifier.One),
@@ -9394,8 +9349,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "packedShapePenalty", OperandQuantifier.One),
@@ -9409,8 +9364,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "sliceType", OperandQuantifier.One),
@@ -9424,8 +9379,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "directionCost", OperandQuantifier.One),
@@ -9439,8 +9394,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL", "SubgroupAvcMotionEstimationIntraINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL", "SubgroupAvcMotionEstimationIntraINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "sliceType", OperandQuantifier.One),
@@ -9454,8 +9409,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "sliceType", OperandQuantifier.One),
@@ -9469,8 +9424,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One)
           )
@@ -9482,8 +9437,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One)
           )
@@ -9495,8 +9450,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One)
           )
@@ -9508,8 +9463,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "packedCostCenterDelta", OperandQuantifier.One),
@@ -9525,8 +9480,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL", "SubgroupAvcMotionEstimationIntraINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL", "SubgroupAvcMotionEstimationIntraINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "sliceType", OperandQuantifier.One),
@@ -9540,8 +9495,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL", "SubgroupAvcMotionEstimationIntraINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL", "SubgroupAvcMotionEstimationIntraINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One)
           )
@@ -9553,8 +9508,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL", "SubgroupAvcMotionEstimationChromaINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL", "SubgroupAvcMotionEstimationChromaINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One)
           )
@@ -9566,8 +9521,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "payload", OperandQuantifier.One)
@@ -9580,8 +9535,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcFieldPolarity", OperandQuantifier.One),
@@ -9595,8 +9550,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "referenceFieldPolarity", OperandQuantifier.One),
@@ -9610,8 +9565,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "forwardReferenceFieldPolarity", OperandQuantifier.One),
@@ -9626,8 +9581,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "payload", OperandQuantifier.One)
@@ -9640,8 +9595,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "payload", OperandQuantifier.One)
@@ -9654,8 +9609,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "payload", OperandQuantifier.One)
@@ -9668,8 +9623,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "payload", OperandQuantifier.One)
@@ -9682,8 +9637,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "payload", OperandQuantifier.One)
@@ -9696,8 +9651,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "payload", OperandQuantifier.One)
@@ -9710,8 +9665,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "payload", OperandQuantifier.One)
@@ -9724,8 +9679,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "payload", OperandQuantifier.One)
@@ -9738,8 +9693,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "payload", OperandQuantifier.One)
@@ -9752,8 +9707,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "payload", OperandQuantifier.One)
@@ -9766,8 +9721,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "payload", OperandQuantifier.One)
@@ -9780,8 +9735,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "payload", OperandQuantifier.One)
@@ -9794,8 +9749,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "payload", OperandQuantifier.One)
@@ -9808,8 +9763,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "payload", OperandQuantifier.One)
@@ -9822,8 +9777,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "packedReferenceIds", OperandQuantifier.One),
@@ -9838,8 +9793,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcCoord", OperandQuantifier.One),
@@ -9854,8 +9809,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "refOffset", OperandQuantifier.One),
@@ -9870,8 +9825,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "fwdRefOffset", OperandQuantifier.One),
@@ -9887,8 +9842,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "searchWindowConfig", OperandQuantifier.One),
@@ -9902,8 +9857,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "refOffset", OperandQuantifier.One),
@@ -9919,8 +9874,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "payload", OperandQuantifier.One)
@@ -9933,8 +9888,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "maxMotionVectorCount", OperandQuantifier.One),
@@ -9948,8 +9903,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "payload", OperandQuantifier.One)
@@ -9962,8 +9917,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "threshold", OperandQuantifier.One),
@@ -9977,8 +9932,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "packedSadWeights", OperandQuantifier.One),
@@ -9992,8 +9947,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcImage", OperandQuantifier.One),
@@ -10008,8 +9963,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcImage", OperandQuantifier.One),
@@ -10025,8 +9980,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcImage", OperandQuantifier.One),
@@ -10042,8 +9997,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcImage", OperandQuantifier.One),
@@ -10060,8 +10015,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcImage", OperandQuantifier.One),
@@ -10076,8 +10031,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcImage", OperandQuantifier.One),
@@ -10093,8 +10048,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcImage", OperandQuantifier.One),
@@ -10110,8 +10065,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcImage", OperandQuantifier.One),
@@ -10128,8 +10083,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "payload", OperandQuantifier.One)
@@ -10142,8 +10097,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "payload", OperandQuantifier.One)
@@ -10156,8 +10111,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "payload", OperandQuantifier.One)
@@ -10170,8 +10125,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "payload", OperandQuantifier.One)
@@ -10184,8 +10139,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "payload", OperandQuantifier.One)
@@ -10198,8 +10153,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "payload", OperandQuantifier.One),
@@ -10213,8 +10168,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "payload", OperandQuantifier.One),
@@ -10228,8 +10183,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "payload", OperandQuantifier.One),
@@ -10243,8 +10198,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "payload", OperandQuantifier.One),
@@ -10259,8 +10214,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "payload", OperandQuantifier.One),
@@ -10275,8 +10230,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "payload", OperandQuantifier.One),
@@ -10291,8 +10246,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "imageSelect", OperandQuantifier.One),
@@ -10306,8 +10261,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "payload", OperandQuantifier.One)
@@ -10320,8 +10275,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "payload", OperandQuantifier.One)
@@ -10334,8 +10289,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "payload", OperandQuantifier.One)
@@ -10348,8 +10303,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "payload", OperandQuantifier.One)
@@ -10362,8 +10317,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcCoord", OperandQuantifier.One),
@@ -10382,8 +10337,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcCoord", OperandQuantifier.One),
@@ -10403,8 +10358,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "payload", OperandQuantifier.One)
@@ -10417,8 +10372,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "payload", OperandQuantifier.One)
@@ -10431,8 +10386,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "payload", OperandQuantifier.One)
@@ -10445,8 +10400,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcImage", OperandQuantifier.One),
@@ -10461,8 +10416,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcImage", OperandQuantifier.One),
@@ -10478,8 +10433,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcImage", OperandQuantifier.One),
@@ -10494,8 +10449,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcImage", OperandQuantifier.One),
@@ -10511,8 +10466,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "payload", OperandQuantifier.One)
@@ -10525,8 +10480,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcCoord", OperandQuantifier.One)
@@ -10539,8 +10494,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "skipBlockPartitionType", OperandQuantifier.One),
@@ -10558,8 +10513,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL", "SubgroupAvcMotionEstimationIntraINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL", "SubgroupAvcMotionEstimationIntraINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "lumaIntraPartitionMask", OperandQuantifier.One),
@@ -10579,8 +10534,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL", "SubgroupAvcMotionEstimationChromaINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL", "SubgroupAvcMotionEstimationChromaINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "lumaIntraPartitionMask", OperandQuantifier.One),
@@ -10603,8 +10558,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "skipBlockPartitionType", OperandQuantifier.One),
@@ -10618,8 +10573,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "payload", OperandQuantifier.One)
@@ -10632,8 +10587,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "packedShapePenalty", OperandQuantifier.One),
@@ -10647,8 +10602,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL", "SubgroupAvcMotionEstimationIntraINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL", "SubgroupAvcMotionEstimationIntraINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "lumaModePenalty", OperandQuantifier.One),
@@ -10664,8 +10619,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL", "SubgroupAvcMotionEstimationChromaINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL", "SubgroupAvcMotionEstimationChromaINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "chromaModeBasePenalty", OperandQuantifier.One),
@@ -10679,8 +10634,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "payload", OperandQuantifier.One)
@@ -10693,8 +10648,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "packedSadCoefficients", OperandQuantifier.One),
@@ -10708,8 +10663,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "blockBasedSkipType", OperandQuantifier.One),
@@ -10723,8 +10678,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL", "SubgroupAvcMotionEstimationIntraINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL", "SubgroupAvcMotionEstimationIntraINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcImage", OperandQuantifier.One),
@@ -10738,8 +10693,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcImage", OperandQuantifier.One),
@@ -10754,8 +10709,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcImage", OperandQuantifier.One),
@@ -10771,8 +10726,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcImage", OperandQuantifier.One),
@@ -10787,8 +10742,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "srcImage", OperandQuantifier.One),
@@ -10804,8 +10759,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "payload", OperandQuantifier.One)
@@ -10818,8 +10773,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL", "SubgroupAvcMotionEstimationIntraINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL", "SubgroupAvcMotionEstimationIntraINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "payload", OperandQuantifier.One)
@@ -10832,8 +10787,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL", "SubgroupAvcMotionEstimationIntraINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL", "SubgroupAvcMotionEstimationIntraINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "payload", OperandQuantifier.One)
@@ -10846,8 +10801,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "payload", OperandQuantifier.One)
@@ -10860,8 +10815,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL", "SubgroupAvcMotionEstimationIntraINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL", "SubgroupAvcMotionEstimationIntraINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "payload", OperandQuantifier.One)
@@ -10874,8 +10829,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL", "SubgroupAvcMotionEstimationChromaINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL", "SubgroupAvcMotionEstimationChromaINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "payload", OperandQuantifier.One)
@@ -10888,8 +10843,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL", "SubgroupAvcMotionEstimationIntraINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL", "SubgroupAvcMotionEstimationIntraINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "payload", OperandQuantifier.One)
@@ -10902,8 +10857,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL", "SubgroupAvcMotionEstimationIntraINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL", "SubgroupAvcMotionEstimationIntraINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "payload", OperandQuantifier.One)
@@ -10916,8 +10871,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("SubgroupAvcMotionEstimationINTEL"),
-          Vector(
+          Col("SubgroupAvcMotionEstimationINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "payload", OperandQuantifier.One)
@@ -10930,8 +10885,8 @@ enum InstructionDef(
         Metadata(
           "Memory",
           Some("None"),
-          Vector("VariableLengthArrayINTEL"),
-          Vector(
+          Col("VariableLengthArrayINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "length", OperandQuantifier.One)
@@ -10944,8 +10899,8 @@ enum InstructionDef(
         Metadata(
           "Memory",
           Some("None"),
-          Vector("VariableLengthArrayINTEL"),
-          Vector(
+          Col("VariableLengthArrayINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One)
           )
@@ -10957,8 +10912,8 @@ enum InstructionDef(
         Metadata(
           "Memory",
           Some("None"),
-          Vector("VariableLengthArrayINTEL"),
-          Vector(OperandShape("IdRef", "ptr", OperandQuantifier.One))
+          Col("VariableLengthArrayINTEL"),
+          Col(OperandShape("IdRef", "ptr", OperandQuantifier.One))
         )
       )
   case ArbitraryFloatSinCosPiALTERA extends InstructionDef(
@@ -10967,8 +10922,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("ArbitraryPrecisionFloatingPointALTERA"),
-          Vector(
+          Col("ArbitraryPrecisionFloatingPointALTERA"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "a", OperandQuantifier.One),
@@ -10986,8 +10941,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("ArbitraryPrecisionFloatingPointALTERA"),
-          Vector(
+          Col("ArbitraryPrecisionFloatingPointALTERA"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "a", OperandQuantifier.One),
@@ -11005,8 +10960,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("ArbitraryPrecisionFloatingPointALTERA"),
-          Vector(
+          Col("ArbitraryPrecisionFloatingPointALTERA"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "a", OperandQuantifier.One),
@@ -11024,8 +10979,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("ArbitraryPrecisionFloatingPointALTERA"),
-          Vector(
+          Col("ArbitraryPrecisionFloatingPointALTERA"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "a", OperandQuantifier.One),
@@ -11043,8 +10998,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("ArbitraryPrecisionFloatingPointALTERA"),
-          Vector(
+          Col("ArbitraryPrecisionFloatingPointALTERA"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "a", OperandQuantifier.One),
@@ -11064,8 +11019,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("ArbitraryPrecisionFloatingPointALTERA"),
-          Vector(
+          Col("ArbitraryPrecisionFloatingPointALTERA"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "a", OperandQuantifier.One),
@@ -11085,8 +11040,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("ArbitraryPrecisionFloatingPointALTERA"),
-          Vector(
+          Col("ArbitraryPrecisionFloatingPointALTERA"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "a", OperandQuantifier.One),
@@ -11106,8 +11061,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("ArbitraryPrecisionFloatingPointALTERA"),
-          Vector(
+          Col("ArbitraryPrecisionFloatingPointALTERA"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "a", OperandQuantifier.One),
@@ -11127,8 +11082,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("ArbitraryPrecisionFloatingPointALTERA"),
-          Vector(
+          Col("ArbitraryPrecisionFloatingPointALTERA"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "a", OperandQuantifier.One),
@@ -11144,8 +11099,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("ArbitraryPrecisionFloatingPointALTERA"),
-          Vector(
+          Col("ArbitraryPrecisionFloatingPointALTERA"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "a", OperandQuantifier.One),
@@ -11161,8 +11116,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("ArbitraryPrecisionFloatingPointALTERA"),
-          Vector(
+          Col("ArbitraryPrecisionFloatingPointALTERA"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "a", OperandQuantifier.One),
@@ -11178,8 +11133,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("ArbitraryPrecisionFloatingPointALTERA"),
-          Vector(
+          Col("ArbitraryPrecisionFloatingPointALTERA"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "a", OperandQuantifier.One),
@@ -11195,8 +11150,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("ArbitraryPrecisionFloatingPointALTERA"),
-          Vector(
+          Col("ArbitraryPrecisionFloatingPointALTERA"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "a", OperandQuantifier.One),
@@ -11212,8 +11167,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("ArbitraryPrecisionFloatingPointALTERA"),
-          Vector(
+          Col("ArbitraryPrecisionFloatingPointALTERA"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "a", OperandQuantifier.One),
@@ -11231,8 +11186,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("ArbitraryPrecisionFloatingPointALTERA"),
-          Vector(
+          Col("ArbitraryPrecisionFloatingPointALTERA"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "a", OperandQuantifier.One),
@@ -11250,8 +11205,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("ArbitraryPrecisionFloatingPointALTERA"),
-          Vector(
+          Col("ArbitraryPrecisionFloatingPointALTERA"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "a", OperandQuantifier.One),
@@ -11269,8 +11224,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("ArbitraryPrecisionFloatingPointALTERA"),
-          Vector(
+          Col("ArbitraryPrecisionFloatingPointALTERA"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "a", OperandQuantifier.One),
@@ -11290,8 +11245,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("ArbitraryPrecisionFloatingPointALTERA"),
-          Vector(
+          Col("ArbitraryPrecisionFloatingPointALTERA"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "a", OperandQuantifier.One),
@@ -11309,8 +11264,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("ArbitraryPrecisionFloatingPointALTERA"),
-          Vector(
+          Col("ArbitraryPrecisionFloatingPointALTERA"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "a", OperandQuantifier.One),
@@ -11328,8 +11283,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("ArbitraryPrecisionFloatingPointALTERA"),
-          Vector(
+          Col("ArbitraryPrecisionFloatingPointALTERA"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "a", OperandQuantifier.One),
@@ -11347,8 +11302,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("ArbitraryPrecisionFloatingPointALTERA"),
-          Vector(
+          Col("ArbitraryPrecisionFloatingPointALTERA"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "a", OperandQuantifier.One),
@@ -11366,8 +11321,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("ArbitraryPrecisionFloatingPointALTERA"),
-          Vector(
+          Col("ArbitraryPrecisionFloatingPointALTERA"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "a", OperandQuantifier.One),
@@ -11385,8 +11340,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("ArbitraryPrecisionFloatingPointALTERA"),
-          Vector(
+          Col("ArbitraryPrecisionFloatingPointALTERA"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "a", OperandQuantifier.One),
@@ -11404,8 +11359,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("ArbitraryPrecisionFloatingPointALTERA"),
-          Vector(
+          Col("ArbitraryPrecisionFloatingPointALTERA"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "a", OperandQuantifier.One),
@@ -11423,8 +11378,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("ArbitraryPrecisionFloatingPointALTERA"),
-          Vector(
+          Col("ArbitraryPrecisionFloatingPointALTERA"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "a", OperandQuantifier.One),
@@ -11442,8 +11397,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("ArbitraryPrecisionFloatingPointALTERA"),
-          Vector(
+          Col("ArbitraryPrecisionFloatingPointALTERA"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "a", OperandQuantifier.One),
@@ -11461,8 +11416,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("ArbitraryPrecisionFloatingPointALTERA"),
-          Vector(
+          Col("ArbitraryPrecisionFloatingPointALTERA"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "a", OperandQuantifier.One),
@@ -11480,8 +11435,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("ArbitraryPrecisionFloatingPointALTERA"),
-          Vector(
+          Col("ArbitraryPrecisionFloatingPointALTERA"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "a", OperandQuantifier.One),
@@ -11499,8 +11454,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("ArbitraryPrecisionFloatingPointALTERA"),
-          Vector(
+          Col("ArbitraryPrecisionFloatingPointALTERA"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "a", OperandQuantifier.One),
@@ -11518,8 +11473,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("ArbitraryPrecisionFloatingPointALTERA"),
-          Vector(
+          Col("ArbitraryPrecisionFloatingPointALTERA"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "a", OperandQuantifier.One),
@@ -11537,8 +11492,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("ArbitraryPrecisionFloatingPointALTERA"),
-          Vector(
+          Col("ArbitraryPrecisionFloatingPointALTERA"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "a", OperandQuantifier.One),
@@ -11556,8 +11511,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("ArbitraryPrecisionFloatingPointALTERA"),
-          Vector(
+          Col("ArbitraryPrecisionFloatingPointALTERA"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "a", OperandQuantifier.One),
@@ -11575,8 +11530,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("ArbitraryPrecisionFloatingPointALTERA"),
-          Vector(
+          Col("ArbitraryPrecisionFloatingPointALTERA"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "a", OperandQuantifier.One),
@@ -11594,8 +11549,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("ArbitraryPrecisionFloatingPointALTERA"),
-          Vector(
+          Col("ArbitraryPrecisionFloatingPointALTERA"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "a", OperandQuantifier.One),
@@ -11613,8 +11568,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("ArbitraryPrecisionFloatingPointALTERA"),
-          Vector(
+          Col("ArbitraryPrecisionFloatingPointALTERA"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "a", OperandQuantifier.One),
@@ -11632,8 +11587,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("ArbitraryPrecisionFloatingPointALTERA"),
-          Vector(
+          Col("ArbitraryPrecisionFloatingPointALTERA"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "a", OperandQuantifier.One),
@@ -11651,8 +11606,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("ArbitraryPrecisionFloatingPointALTERA"),
-          Vector(
+          Col("ArbitraryPrecisionFloatingPointALTERA"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "a", OperandQuantifier.One),
@@ -11670,8 +11625,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("ArbitraryPrecisionFloatingPointALTERA"),
-          Vector(
+          Col("ArbitraryPrecisionFloatingPointALTERA"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "a", OperandQuantifier.One),
@@ -11691,8 +11646,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("ArbitraryPrecisionFloatingPointALTERA"),
-          Vector(
+          Col("ArbitraryPrecisionFloatingPointALTERA"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "a", OperandQuantifier.One),
@@ -11712,8 +11667,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("ArbitraryPrecisionFloatingPointALTERA"),
-          Vector(
+          Col("ArbitraryPrecisionFloatingPointALTERA"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "a", OperandQuantifier.One),
@@ -11733,8 +11688,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("ArbitraryPrecisionFloatingPointALTERA"),
-          Vector(
+          Col("ArbitraryPrecisionFloatingPointALTERA"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "a", OperandQuantifier.One),
@@ -11754,8 +11709,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("UnstructuredLoopControlsINTEL"),
-          Vector(OperandShape("LiteralInteger", "loopControlParameters", OperandQuantifier.Repeated))
+          Col("UnstructuredLoopControlsINTEL"),
+          Col(OperandShape("LiteralInteger", "loopControlParameters", OperandQuantifier.Repeated))
         )
       )
   case AliasDomainDeclINTEL extends InstructionDef(
@@ -11764,8 +11719,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("MemoryAccessAliasingINTEL"),
-          Vector(
+          Col("MemoryAccessAliasingINTEL"),
+          Col(
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "name", OperandQuantifier.Optional)
           )
@@ -11777,8 +11732,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("MemoryAccessAliasingINTEL"),
-          Vector(
+          Col("MemoryAccessAliasingINTEL"),
+          Col(
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "aliasDomain", OperandQuantifier.One),
             OperandShape("IdRef", "name", OperandQuantifier.Optional)
@@ -11791,8 +11746,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("MemoryAccessAliasingINTEL"),
-          Vector(
+          Col("MemoryAccessAliasingINTEL"),
+          Col(
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "aliasScope1AliasScope2", OperandQuantifier.Repeated)
           )
@@ -11804,8 +11759,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("ArbitraryPrecisionFixedPointALTERA"),
-          Vector(
+          Col("ArbitraryPrecisionFixedPointALTERA"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "input", OperandQuantifier.One),
@@ -11823,8 +11778,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("ArbitraryPrecisionFixedPointALTERA"),
-          Vector(
+          Col("ArbitraryPrecisionFixedPointALTERA"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "input", OperandQuantifier.One),
@@ -11842,8 +11797,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("ArbitraryPrecisionFixedPointALTERA"),
-          Vector(
+          Col("ArbitraryPrecisionFixedPointALTERA"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "input", OperandQuantifier.One),
@@ -11861,8 +11816,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("ArbitraryPrecisionFixedPointALTERA"),
-          Vector(
+          Col("ArbitraryPrecisionFixedPointALTERA"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "input", OperandQuantifier.One),
@@ -11880,8 +11835,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("ArbitraryPrecisionFixedPointALTERA"),
-          Vector(
+          Col("ArbitraryPrecisionFixedPointALTERA"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "input", OperandQuantifier.One),
@@ -11899,8 +11854,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("ArbitraryPrecisionFixedPointALTERA"),
-          Vector(
+          Col("ArbitraryPrecisionFixedPointALTERA"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "input", OperandQuantifier.One),
@@ -11918,8 +11873,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("ArbitraryPrecisionFixedPointALTERA"),
-          Vector(
+          Col("ArbitraryPrecisionFixedPointALTERA"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "input", OperandQuantifier.One),
@@ -11937,8 +11892,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("ArbitraryPrecisionFixedPointALTERA"),
-          Vector(
+          Col("ArbitraryPrecisionFixedPointALTERA"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "input", OperandQuantifier.One),
@@ -11956,8 +11911,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("ArbitraryPrecisionFixedPointALTERA"),
-          Vector(
+          Col("ArbitraryPrecisionFixedPointALTERA"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "input", OperandQuantifier.One),
@@ -11975,8 +11930,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("ArbitraryPrecisionFixedPointALTERA"),
-          Vector(
+          Col("ArbitraryPrecisionFixedPointALTERA"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "input", OperandQuantifier.One),
@@ -11994,8 +11949,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("ArbitraryPrecisionFixedPointALTERA"),
-          Vector(
+          Col("ArbitraryPrecisionFixedPointALTERA"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "input", OperandQuantifier.One),
@@ -12013,8 +11968,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("USMStorageClassesALTERA"),
-          Vector(
+          Col("USMStorageClassesALTERA"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "pointer", OperandQuantifier.One)
@@ -12027,8 +11982,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("USMStorageClassesALTERA"),
-          Vector(
+          Col("USMStorageClassesALTERA"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "pointer", OperandQuantifier.One)
@@ -12041,8 +11996,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("BlockingPipesALTERA"),
-          Vector(
+          Col("BlockingPipesALTERA"),
+          Col(
             OperandShape("IdRef", "pipe", OperandQuantifier.One),
             OperandShape("IdRef", "pointer", OperandQuantifier.One),
             OperandShape("IdRef", "packetSize", OperandQuantifier.One),
@@ -12056,8 +12011,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("BlockingPipesALTERA"),
-          Vector(
+          Col("BlockingPipesALTERA"),
+          Col(
             OperandShape("IdRef", "pipe", OperandQuantifier.One),
             OperandShape("IdRef", "pointer", OperandQuantifier.One),
             OperandShape("IdRef", "packetSize", OperandQuantifier.One),
@@ -12071,8 +12026,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("FPGARegALTERA"),
-          Vector(
+          Col("FPGARegALTERA"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "input", OperandQuantifier.One)
@@ -12085,8 +12040,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("RayQueryKHR"),
-          Vector(
+          Col("RayQueryKHR"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "rayQuery", OperandQuantifier.One)
@@ -12099,8 +12054,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("RayQueryKHR"),
-          Vector(
+          Col("RayQueryKHR"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "rayQuery", OperandQuantifier.One)
@@ -12113,8 +12068,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("RayQueryKHR"),
-          Vector(
+          Col("RayQueryKHR"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "rayQuery", OperandQuantifier.One),
@@ -12128,8 +12083,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("RayQueryKHR"),
-          Vector(
+          Col("RayQueryKHR"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "rayQuery", OperandQuantifier.One),
@@ -12143,8 +12098,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("RayQueryKHR"),
-          Vector(
+          Col("RayQueryKHR"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "rayQuery", OperandQuantifier.One),
@@ -12158,8 +12113,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("RayQueryKHR"),
-          Vector(
+          Col("RayQueryKHR"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "rayQuery", OperandQuantifier.One),
@@ -12173,8 +12128,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("RayQueryKHR"),
-          Vector(
+          Col("RayQueryKHR"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "rayQuery", OperandQuantifier.One),
@@ -12188,8 +12143,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("RayQueryKHR"),
-          Vector(
+          Col("RayQueryKHR"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "rayQuery", OperandQuantifier.One),
@@ -12203,8 +12158,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("RayQueryKHR"),
-          Vector(
+          Col("RayQueryKHR"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "rayQuery", OperandQuantifier.One),
@@ -12218,8 +12173,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("RayQueryKHR"),
-          Vector(
+          Col("RayQueryKHR"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "rayQuery", OperandQuantifier.One),
@@ -12233,8 +12188,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("RayQueryKHR"),
-          Vector(
+          Col("RayQueryKHR"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "rayQuery", OperandQuantifier.One)
@@ -12247,8 +12202,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("RayQueryKHR"),
-          Vector(
+          Col("RayQueryKHR"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "rayQuery", OperandQuantifier.One),
@@ -12262,8 +12217,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("RayQueryKHR"),
-          Vector(
+          Col("RayQueryKHR"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "rayQuery", OperandQuantifier.One),
@@ -12277,8 +12232,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("RayQueryKHR"),
-          Vector(
+          Col("RayQueryKHR"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "rayQuery", OperandQuantifier.One)
@@ -12291,8 +12246,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("RayQueryKHR"),
-          Vector(
+          Col("RayQueryKHR"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "rayQuery", OperandQuantifier.One)
@@ -12305,8 +12260,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("RayQueryKHR"),
-          Vector(
+          Col("RayQueryKHR"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "rayQuery", OperandQuantifier.One),
@@ -12320,8 +12275,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("RayQueryKHR"),
-          Vector(
+          Col("RayQueryKHR"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "rayQuery", OperandQuantifier.One),
@@ -12335,8 +12290,8 @@ enum InstructionDef(
         Metadata(
           "Atomic",
           Some("None"),
-          Vector("AtomicFloat16AddEXT", "AtomicFloat32AddEXT", "AtomicFloat64AddEXT", "AtomicFloat16VectorNV"),
-          Vector(
+          Col("AtomicFloat16AddEXT", "AtomicFloat32AddEXT", "AtomicFloat64AddEXT", "AtomicFloat16VectorNV"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "pointer", OperandQuantifier.One),
@@ -12352,8 +12307,8 @@ enum InstructionDef(
         Metadata(
           "Type-Declaration",
           Some("None"),
-          Vector("VectorComputeINTEL"),
-          Vector(
+          Col("VectorComputeINTEL"),
+          Col(
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("AccessQualifier", "accessQualifier", OperandQuantifier.One)
           )
@@ -12365,8 +12320,8 @@ enum InstructionDef(
         Metadata(
           "Type-Declaration",
           Some("None"),
-          Vector("LongCompositesINTEL"),
-          Vector(OperandShape("IdRef", "member0TypeMember1Type", OperandQuantifier.Repeated))
+          Col("LongCompositesINTEL"),
+          Col(OperandShape("IdRef", "member0TypeMember1Type", OperandQuantifier.Repeated))
         )
       )
   case ConstantCompositeContinuedINTEL extends InstructionDef(
@@ -12375,8 +12330,8 @@ enum InstructionDef(
         Metadata(
           "Constant-Creation",
           Some("None"),
-          Vector("LongCompositesINTEL"),
-          Vector(OperandShape("IdRef", "constituents", OperandQuantifier.Repeated))
+          Col("LongCompositesINTEL"),
+          Col(OperandShape("IdRef", "constituents", OperandQuantifier.Repeated))
         )
       )
   case SpecConstantCompositeContinuedINTEL extends InstructionDef(
@@ -12385,8 +12340,8 @@ enum InstructionDef(
         Metadata(
           "Constant-Creation",
           Some("None"),
-          Vector("LongCompositesINTEL"),
-          Vector(OperandShape("IdRef", "constituents", OperandQuantifier.Repeated))
+          Col("LongCompositesINTEL"),
+          Col(OperandShape("IdRef", "constituents", OperandQuantifier.Repeated))
         )
       )
   case CompositeConstructContinuedINTEL extends InstructionDef(
@@ -12395,8 +12350,8 @@ enum InstructionDef(
         Metadata(
           "Composite",
           Some("None"),
-          Vector("LongCompositesINTEL"),
-          Vector(OperandShape("IdRef", "constituents", OperandQuantifier.Repeated))
+          Col("LongCompositesINTEL"),
+          Col(OperandShape("IdRef", "constituents", OperandQuantifier.Repeated))
         )
       )
   case ConvertFToBF16INTEL extends InstructionDef(
@@ -12405,8 +12360,8 @@ enum InstructionDef(
         Metadata(
           "Conversion",
           Some("None"),
-          Vector("BFloat16ConversionINTEL"),
-          Vector(
+          Col("BFloat16ConversionINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "floatValue", OperandQuantifier.One)
@@ -12419,8 +12374,8 @@ enum InstructionDef(
         Metadata(
           "Conversion",
           Some("None"),
-          Vector("BFloat16ConversionINTEL"),
-          Vector(
+          Col("BFloat16ConversionINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "bFloat16Value", OperandQuantifier.One)
@@ -12433,8 +12388,8 @@ enum InstructionDef(
         Metadata(
           "Barrier",
           Some("None"),
-          Vector("SplitBarrierEXT"),
-          Vector(
+          Col("SplitBarrierEXT"),
+          Col(
             OperandShape("IdScope", "execution", OperandQuantifier.One),
             OperandShape("IdScope", "memory", OperandQuantifier.One),
             OperandShape("IdMemorySemantics", "semantics", OperandQuantifier.One)
@@ -12447,8 +12402,8 @@ enum InstructionDef(
         Metadata(
           "Barrier",
           Some("None"),
-          Vector("SplitBarrierEXT"),
-          Vector(
+          Col("SplitBarrierEXT"),
+          Col(
             OperandShape("IdScope", "execution", OperandQuantifier.One),
             OperandShape("IdScope", "memory", OperandQuantifier.One),
             OperandShape("IdMemorySemantics", "semantics", OperandQuantifier.One)
@@ -12461,8 +12416,8 @@ enum InstructionDef(
         Metadata(
           "Miscellaneous",
           Some("None"),
-          Vector("ArithmeticFenceEXT"),
-          Vector(
+          Col("ArithmeticFenceEXT"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "target", OperandQuantifier.One)
@@ -12475,8 +12430,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("TaskSequenceALTERA"),
-          Vector(
+          Col("TaskSequenceALTERA"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "function", OperandQuantifier.One),
@@ -12493,8 +12448,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("TaskSequenceALTERA"),
-          Vector(
+          Col("TaskSequenceALTERA"),
+          Col(
             OperandShape("IdRef", "sequence", OperandQuantifier.One),
             OperandShape("IdRef", "arguments", OperandQuantifier.Repeated)
           )
@@ -12506,8 +12461,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("TaskSequenceALTERA"),
-          Vector(
+          Col("TaskSequenceALTERA"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "sequence", OperandQuantifier.One)
@@ -12520,8 +12475,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("TaskSequenceALTERA"),
-          Vector(OperandShape("IdRef", "sequence", OperandQuantifier.One))
+          Col("TaskSequenceALTERA"),
+          Col(OperandShape("IdRef", "sequence", OperandQuantifier.One))
         )
       )
   case TypeTaskSequenceALTERA extends InstructionDef(
@@ -12530,8 +12485,8 @@ enum InstructionDef(
         Metadata(
           "@exclude",
           Some("None"),
-          Vector("TaskSequenceALTERA"),
-          Vector(OperandShape("IdResult", "dest", OperandQuantifier.One))
+          Col("TaskSequenceALTERA"),
+          Col(OperandShape("IdResult", "dest", OperandQuantifier.One))
         )
       )
   case SubgroupBlockPrefetchINTEL extends InstructionDef(
@@ -12540,8 +12495,8 @@ enum InstructionDef(
         Metadata(
           "Group",
           Some("None"),
-          Vector("SubgroupBufferPrefetchINTEL"),
-          Vector(
+          Col("SubgroupBufferPrefetchINTEL"),
+          Col(
             OperandShape("IdRef", "ptr", OperandQuantifier.One),
             OperandShape("IdRef", "numBytes", OperandQuantifier.One),
             OperandShape("MemoryAccess", "mods", OperandQuantifier.Optional)
@@ -12554,8 +12509,8 @@ enum InstructionDef(
         Metadata(
           "Group",
           Some("None"),
-          Vector("Subgroup2DBlockIOINTEL"),
-          Vector(
+          Col("Subgroup2DBlockIOINTEL"),
+          Col(
             OperandShape("IdRef", "elementSize", OperandQuantifier.One),
             OperandShape("IdRef", "blockWidth", OperandQuantifier.One),
             OperandShape("IdRef", "blockHeight", OperandQuantifier.One),
@@ -12575,8 +12530,8 @@ enum InstructionDef(
         Metadata(
           "Group",
           Some("None"),
-          Vector("Subgroup2DBlockTransformINTEL"),
-          Vector(
+          Col("Subgroup2DBlockTransformINTEL"),
+          Col(
             OperandShape("IdRef", "elementSize", OperandQuantifier.One),
             OperandShape("IdRef", "blockWidth", OperandQuantifier.One),
             OperandShape("IdRef", "blockHeight", OperandQuantifier.One),
@@ -12596,8 +12551,8 @@ enum InstructionDef(
         Metadata(
           "Group",
           Some("None"),
-          Vector("Subgroup2DBlockTransposeINTEL"),
-          Vector(
+          Col("Subgroup2DBlockTransposeINTEL"),
+          Col(
             OperandShape("IdRef", "elementSize", OperandQuantifier.One),
             OperandShape("IdRef", "blockWidth", OperandQuantifier.One),
             OperandShape("IdRef", "blockHeight", OperandQuantifier.One),
@@ -12617,8 +12572,8 @@ enum InstructionDef(
         Metadata(
           "Group",
           Some("None"),
-          Vector("Subgroup2DBlockIOINTEL"),
-          Vector(
+          Col("Subgroup2DBlockIOINTEL"),
+          Col(
             OperandShape("IdRef", "elementSize", OperandQuantifier.One),
             OperandShape("IdRef", "blockWidth", OperandQuantifier.One),
             OperandShape("IdRef", "blockHeight", OperandQuantifier.One),
@@ -12637,8 +12592,8 @@ enum InstructionDef(
         Metadata(
           "Group",
           Some("None"),
-          Vector("Subgroup2DBlockIOINTEL"),
-          Vector(
+          Col("Subgroup2DBlockIOINTEL"),
+          Col(
             OperandShape("IdRef", "elementSize", OperandQuantifier.One),
             OperandShape("IdRef", "blockWidth", OperandQuantifier.One),
             OperandShape("IdRef", "blockHeight", OperandQuantifier.One),
@@ -12658,8 +12613,8 @@ enum InstructionDef(
         Metadata(
           "Group",
           Some("None"),
-          Vector("SubgroupMatrixMultiplyAccumulateINTEL"),
-          Vector(
+          Col("SubgroupMatrixMultiplyAccumulateINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "kDim", OperandQuantifier.One),
@@ -12680,8 +12635,8 @@ enum InstructionDef(
         Metadata(
           "Bit",
           Some("None"),
-          Vector("TernaryBitwiseFunctionINTEL"),
-          Vector(
+          Col("TernaryBitwiseFunctionINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "a", OperandQuantifier.One),
@@ -12697,8 +12652,8 @@ enum InstructionDef(
         Metadata(
           "Memory",
           Some("None"),
-          Vector("UntypedVariableLengthArrayINTEL"),
-          Vector(
+          Col("UntypedVariableLengthArrayINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "elementType", OperandQuantifier.One),
@@ -12712,8 +12667,8 @@ enum InstructionDef(
         Metadata(
           "Extension",
           Some("None"),
-          Vector("SpecConditionalINTEL"),
-          Vector(
+          Col("SpecConditionalINTEL"),
+          Col(
             OperandShape("IdRef", "pred", OperandQuantifier.One),
             OperandShape("LiteralString", "name", OperandQuantifier.One)
           )
@@ -12725,8 +12680,8 @@ enum InstructionDef(
         Metadata(
           "Mode-Setting",
           Some("None"),
-          Vector("SpecConditionalINTEL"),
-          Vector(
+          Col("SpecConditionalINTEL"),
+          Col(
             OperandShape("IdRef", "pred", OperandQuantifier.One),
             OperandShape("ExecutionModel", "executionModel", OperandQuantifier.One),
             OperandShape("IdRef", "entryPoint", OperandQuantifier.One),
@@ -12741,8 +12696,8 @@ enum InstructionDef(
         Metadata(
           "Mode-Setting",
           Some("None"),
-          Vector("SpecConditionalINTEL"),
-          Vector(
+          Col("SpecConditionalINTEL"),
+          Col(
             OperandShape("IdRef", "pred", OperandQuantifier.One),
             OperandShape("Capability", "capability", OperandQuantifier.One)
           )
@@ -12754,8 +12709,8 @@ enum InstructionDef(
         Metadata(
           "Constant-Creation",
           Some("None"),
-          Vector("FunctionVariantsINTEL"),
-          Vector(
+          Col("FunctionVariantsINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("LiteralInteger", "target", OperandQuantifier.One),
@@ -12769,8 +12724,8 @@ enum InstructionDef(
         Metadata(
           "Constant-Creation",
           Some("None"),
-          Vector("FunctionVariantsINTEL"),
-          Vector(
+          Col("FunctionVariantsINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("LiteralInteger", "category", OperandQuantifier.One),
@@ -12786,8 +12741,8 @@ enum InstructionDef(
         Metadata(
           "Constant-Creation",
           Some("None"),
-          Vector("FunctionVariantsINTEL"),
-          Vector(
+          Col("FunctionVariantsINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("Capability", "capabilities", OperandQuantifier.Repeated)
@@ -12800,8 +12755,8 @@ enum InstructionDef(
         Metadata(
           "Composite",
           Some("None"),
-          Vector("SpecConditionalINTEL"),
-          Vector(
+          Col("SpecConditionalINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "condition0Operand0Condition1Operand1", OperandQuantifier.Repeated)
@@ -12814,8 +12769,8 @@ enum InstructionDef(
         Metadata(
           "Memory",
           Some("None"),
-          Vector("PredicatedIOINTEL"),
-          Vector(
+          Col("PredicatedIOINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "pointer", OperandQuantifier.One),
@@ -12831,8 +12786,8 @@ enum InstructionDef(
         Metadata(
           "Memory",
           Some("None"),
-          Vector("PredicatedIOINTEL"),
-          Vector(
+          Col("PredicatedIOINTEL"),
+          Col(
             OperandShape("IdRef", "pointer", OperandQuantifier.One),
             OperandShape("IdRef", "src", OperandQuantifier.One),
             OperandShape("IdRef", "pred", OperandQuantifier.One),
@@ -12846,8 +12801,8 @@ enum InstructionDef(
         Metadata(
           "Group",
           Some("None"),
-          Vector("GroupUniformArithmeticKHR"),
-          Vector(
+          Col("GroupUniformArithmeticKHR"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdScope", "execution", OperandQuantifier.One),
@@ -12862,8 +12817,8 @@ enum InstructionDef(
         Metadata(
           "Group",
           Some("None"),
-          Vector("GroupUniformArithmeticKHR"),
-          Vector(
+          Col("GroupUniformArithmeticKHR"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdScope", "execution", OperandQuantifier.One),
@@ -12878,8 +12833,8 @@ enum InstructionDef(
         Metadata(
           "Group",
           Some("None"),
-          Vector("GroupUniformArithmeticKHR"),
-          Vector(
+          Col("GroupUniformArithmeticKHR"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdScope", "execution", OperandQuantifier.One),
@@ -12894,8 +12849,8 @@ enum InstructionDef(
         Metadata(
           "Group",
           Some("None"),
-          Vector("GroupUniformArithmeticKHR"),
-          Vector(
+          Col("GroupUniformArithmeticKHR"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdScope", "execution", OperandQuantifier.One),
@@ -12910,8 +12865,8 @@ enum InstructionDef(
         Metadata(
           "Group",
           Some("None"),
-          Vector("GroupUniformArithmeticKHR"),
-          Vector(
+          Col("GroupUniformArithmeticKHR"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdScope", "execution", OperandQuantifier.One),
@@ -12926,8 +12881,8 @@ enum InstructionDef(
         Metadata(
           "Group",
           Some("None"),
-          Vector("GroupUniformArithmeticKHR"),
-          Vector(
+          Col("GroupUniformArithmeticKHR"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdScope", "execution", OperandQuantifier.One),
@@ -12942,8 +12897,8 @@ enum InstructionDef(
         Metadata(
           "Group",
           Some("None"),
-          Vector("GroupUniformArithmeticKHR"),
-          Vector(
+          Col("GroupUniformArithmeticKHR"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdScope", "execution", OperandQuantifier.One),
@@ -12958,8 +12913,8 @@ enum InstructionDef(
         Metadata(
           "Group",
           Some("None"),
-          Vector("GroupUniformArithmeticKHR"),
-          Vector(
+          Col("GroupUniformArithmeticKHR"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdScope", "execution", OperandQuantifier.One),
@@ -12974,8 +12929,8 @@ enum InstructionDef(
         Metadata(
           "Conversion",
           Some("None"),
-          Vector("TensorFloat32RoundingINTEL"),
-          Vector(
+          Col("TensorFloat32RoundingINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "floatValue", OperandQuantifier.One)
@@ -12988,8 +12943,8 @@ enum InstructionDef(
         Metadata(
           "Memory",
           Some("None"),
-          Vector("MaskedGatherScatterINTEL"),
-          Vector(
+          Col("MaskedGatherScatterINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "ptrVector", OperandQuantifier.One),
@@ -13005,8 +12960,8 @@ enum InstructionDef(
         Metadata(
           "Memory",
           Some("None"),
-          Vector("MaskedGatherScatterINTEL"),
-          Vector(
+          Col("MaskedGatherScatterINTEL"),
+          Col(
             OperandShape("IdRef", "inputVector", OperandQuantifier.One),
             OperandShape("IdRef", "ptrVector", OperandQuantifier.One),
             OperandShape("LiteralInteger", "alignment", OperandQuantifier.One),
@@ -13020,8 +12975,8 @@ enum InstructionDef(
         Metadata(
           "Image",
           Some("None"),
-          Vector("BindlessImagesINTEL"),
-          Vector(
+          Col("BindlessImagesINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "src", OperandQuantifier.One)
@@ -13034,8 +12989,8 @@ enum InstructionDef(
         Metadata(
           "Image",
           Some("None"),
-          Vector("BindlessImagesINTEL"),
-          Vector(
+          Col("BindlessImagesINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "src", OperandQuantifier.One)
@@ -13048,8 +13003,8 @@ enum InstructionDef(
         Metadata(
           "Image",
           Some("None"),
-          Vector("BindlessImagesINTEL"),
-          Vector(
+          Col("BindlessImagesINTEL"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "src", OperandQuantifier.One)
@@ -13062,8 +13017,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("DotProductFloat16AccFloat32VALVE", "DotProductBFloat16AccVALVE"),
-          Vector(
+          Col("DotProductFloat16AccFloat32VALVE", "DotProductBFloat16AccVALVE"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "vector1", OperandQuantifier.One),
@@ -13078,8 +13033,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("DotProductFloat16AccFloat16VALVE", "DotProductBFloat16AccVALVE"),
-          Vector(
+          Col("DotProductFloat16AccFloat16VALVE", "DotProductBFloat16AccVALVE"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "vector1", OperandQuantifier.One),
@@ -13094,8 +13049,8 @@ enum InstructionDef(
         Metadata(
           "Reserved",
           Some("None"),
-          Vector("DotProductFloat8AccFloat32VALVE"),
-          Vector(
+          Col("DotProductFloat8AccFloat32VALVE"),
+          Col(
             OperandShape("IdResultType", "resultType", OperandQuantifier.One),
             OperandShape("IdResult", "dest", OperandQuantifier.One),
             OperandShape("IdRef", "vector1", OperandQuantifier.One),
@@ -13113,7 +13068,7 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
   case Undef(resultType: Operand, dest: Operand) extends Instruction(InstructionDef.Undef, resultType, dest)
   case SourceContinued(continuedSrc: Operand) extends Instruction(InstructionDef.SourceContinued, continuedSrc)
   case Source(sourceLanguage: Operand, version: Operand, file: Option[Operand], src: Option[Operand])
-      extends Instruction(InstructionDef.Source, (Vector(sourceLanguage, version) ++ file.toVector ++ src.toVector)*)
+      extends Instruction(InstructionDef.Source, (Col(sourceLanguage, version) ++ file.toCol ++ src.toCol)*)
   case SourceExtension(extensionValue: Operand) extends Instruction(InstructionDef.SourceExtension, extensionValue)
   case Name(target: Operand, name: Operand) extends Instruction(InstructionDef.Name, target, name)
   case MemberName(dataType: Operand, member: Operand, name: Operand)
@@ -13122,12 +13077,12 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
   case Line(file: Operand, line: Operand, column: Operand) extends Instruction(InstructionDef.Line, file, line, column)
   case Extension(name: Operand) extends Instruction(InstructionDef.Extension, name)
   case ExtInstImport(dest: Operand, name: Operand) extends Instruction(InstructionDef.ExtInstImport, dest, name)
-  case ExtInst(resultType: Operand, dest: Operand, set: Operand, inst: Operand, srcs: Vector[Operand])
-      extends Instruction(InstructionDef.ExtInst, (Vector(resultType, dest, set, inst) ++ srcs)*)
+  case ExtInst(resultType: Operand, dest: Operand, set: Operand, inst: Operand, srcs: Col[Operand])
+      extends Instruction(InstructionDef.ExtInst, (Col(resultType, dest, set, inst) ++ srcs)*)
   case MemoryModel(addressingModel: Operand, memoryModel: Operand)
       extends Instruction(InstructionDef.MemoryModel, addressingModel, memoryModel)
-  case EntryPoint(executionModel: Operand, entryPoint: Operand, name: Operand, interface: Vector[Operand])
-      extends Instruction(InstructionDef.EntryPoint, (Vector(executionModel, entryPoint, name) ++ interface)*)
+  case EntryPoint(executionModel: Operand, entryPoint: Operand, name: Operand, interface: Col[Operand])
+      extends Instruction(InstructionDef.EntryPoint, (Col(executionModel, entryPoint, name) ++ interface)*)
   case ExecutionMode(entryPoint: Operand, mode: Operand)
       extends Instruction(InstructionDef.ExecutionMode, entryPoint, mode)
   case Capability(capability: Operand) extends Instruction(InstructionDef.Capability, capability)
@@ -13136,7 +13091,7 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
   case TypeInt(dest: Operand, width: Operand, signedness: Operand)
       extends Instruction(InstructionDef.TypeInt, dest, width, signedness)
   case TypeFloat(dest: Operand, width: Operand, floatingPointEncoding: Option[Operand])
-      extends Instruction(InstructionDef.TypeFloat, (Vector(dest, width) ++ floatingPointEncoding.toVector)*)
+      extends Instruction(InstructionDef.TypeFloat, (Col(dest, width) ++ floatingPointEncoding.toCol)*)
   case TypeVector(dest: Operand, componentType: Operand, componentCount: Operand)
       extends Instruction(InstructionDef.TypeVector, dest, componentType, componentCount)
   case TypeMatrix(dest: Operand, columnType: Operand, columnCount: Operand)
@@ -13153,7 +13108,7 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
       accessQualifier: Option[Operand]
   ) extends Instruction(
         InstructionDef.TypeImage,
-        (Vector(dest, sampledType, dim, depth, arrayed, mS, sampled, imageFormat) ++ accessQualifier.toVector)*
+        (Col(dest, sampledType, dim, depth, arrayed, mS, sampled, imageFormat) ++ accessQualifier.toCol)*
       )
   case TypeSampler(dest: Operand) extends Instruction(InstructionDef.TypeSampler, dest)
   case TypeSampledImage(dest: Operand, imageType: Operand)
@@ -13162,14 +13117,14 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
       extends Instruction(InstructionDef.TypeArray, dest, elementType, length)
   case TypeRuntimeArray(dest: Operand, elementType: Operand)
       extends Instruction(InstructionDef.TypeRuntimeArray, dest, elementType)
-  case TypeStruct(dest: Operand, member0TypeMember1Type: Vector[Operand])
-      extends Instruction(InstructionDef.TypeStruct, (Vector(dest) ++ member0TypeMember1Type)*)
+  case TypeStruct(dest: Operand, member0TypeMember1Type: Col[Operand])
+      extends Instruction(InstructionDef.TypeStruct, (Col(dest) ++ member0TypeMember1Type)*)
   case TypeOpaque(dest: Operand, theNameOfTheOpaqueType: Operand)
       extends Instruction(InstructionDef.TypeOpaque, dest, theNameOfTheOpaqueType)
   case TypePointer(dest: Operand, storageClass: Operand, dataType: Operand)
       extends Instruction(InstructionDef.TypePointer, dest, storageClass, dataType)
-  case TypeFunction(dest: Operand, returnType: Operand, parameter0TypeParameter1Type: Vector[Operand])
-      extends Instruction(InstructionDef.TypeFunction, (Vector(dest, returnType) ++ parameter0TypeParameter1Type)*)
+  case TypeFunction(dest: Operand, returnType: Operand, parameter0TypeParameter1Type: Col[Operand])
+      extends Instruction(InstructionDef.TypeFunction, (Col(dest, returnType) ++ parameter0TypeParameter1Type)*)
   case TypeEvent(dest: Operand) extends Instruction(InstructionDef.TypeEvent, dest)
   case TypeDeviceEvent(dest: Operand) extends Instruction(InstructionDef.TypeDeviceEvent, dest)
   case TypeReserveId(dest: Operand) extends Instruction(InstructionDef.TypeReserveId, dest)
@@ -13183,8 +13138,8 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
       extends Instruction(InstructionDef.ConstantFalse, resultType, dest)
   case Constant(resultType: Operand, dest: Operand, value: Operand)
       extends Instruction(InstructionDef.Constant, resultType, dest, value)
-  case ConstantComposite(resultType: Operand, dest: Operand, constituents: Vector[Operand])
-      extends Instruction(InstructionDef.ConstantComposite, (Vector(resultType, dest) ++ constituents)*)
+  case ConstantComposite(resultType: Operand, dest: Operand, constituents: Col[Operand])
+      extends Instruction(InstructionDef.ConstantComposite, (Col(resultType, dest) ++ constituents)*)
   case ConstantSampler(
       resultType: Operand,
       dest: Operand,
@@ -13207,8 +13162,8 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
       extends Instruction(InstructionDef.SpecConstantFalse, resultType, dest)
   case SpecConstant(resultType: Operand, dest: Operand, value: Operand)
       extends Instruction(InstructionDef.SpecConstant, resultType, dest, value)
-  case SpecConstantComposite(resultType: Operand, dest: Operand, constituents: Vector[Operand])
-      extends Instruction(InstructionDef.SpecConstantComposite, (Vector(resultType, dest) ++ constituents)*)
+  case SpecConstantComposite(resultType: Operand, dest: Operand, constituents: Col[Operand])
+      extends Instruction(InstructionDef.SpecConstantComposite, (Col(resultType, dest) ++ constituents)*)
   case SpecConstantOp(resultType: Operand, dest: Operand, instructionOpcode: Operand)
       extends Instruction(InstructionDef.SpecConstantOp, resultType, dest, instructionOpcode)
   case Function(resultType: Operand, dest: Operand, functionControl: Operand, functionType: Operand)
@@ -13216,29 +13171,26 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
   case FunctionParameter(resultType: Operand, dest: Operand)
       extends Instruction(InstructionDef.FunctionParameter, resultType, dest)
   case FunctionEnd extends Instruction(InstructionDef.FunctionEnd)
-  case FunctionCall(resultType: Operand, dest: Operand, function: Operand, argument0Argument1: Vector[Operand])
-      extends Instruction(InstructionDef.FunctionCall, (Vector(resultType, dest, function) ++ argument0Argument1)*)
+  case FunctionCall(resultType: Operand, dest: Operand, function: Operand, argument0Argument1: Col[Operand])
+      extends Instruction(InstructionDef.FunctionCall, (Col(resultType, dest, function) ++ argument0Argument1)*)
   case Variable(resultType: Operand, dest: Operand, storageClass: Operand, initializer: Option[Operand])
-      extends Instruction(InstructionDef.Variable, (Vector(resultType, dest, storageClass) ++ initializer.toVector)*)
+      extends Instruction(InstructionDef.Variable, (Col(resultType, dest, storageClass) ++ initializer.toCol)*)
   case ImageTexelPointer(resultType: Operand, dest: Operand, image: Operand, coordinate: Operand, sample: Operand)
       extends Instruction(InstructionDef.ImageTexelPointer, resultType, dest, image, coordinate, sample)
   case Load(resultType: Operand, dest: Operand, pointer: Operand, mods: Option[Operand])
-      extends Instruction(InstructionDef.Load, (Vector(resultType, dest, pointer) ++ mods.toVector)*)
+      extends Instruction(InstructionDef.Load, (Col(resultType, dest, pointer) ++ mods.toCol)*)
   case Store(pointer: Operand, src: Operand, mods: Option[Operand])
-      extends Instruction(InstructionDef.Store, (Vector(pointer, src) ++ mods.toVector)*)
+      extends Instruction(InstructionDef.Store, (Col(pointer, src) ++ mods.toCol)*)
   case CopyMemory(target: Operand, src: Operand, modsA: Option[Operand], modsB: Option[Operand])
-      extends Instruction(InstructionDef.CopyMemory, (Vector(target, src) ++ modsA.toVector ++ modsB.toVector)*)
+      extends Instruction(InstructionDef.CopyMemory, (Col(target, src) ++ modsA.toCol ++ modsB.toCol)*)
   case CopyMemorySized(target: Operand, src: Operand, size: Operand, modsA: Option[Operand], modsB: Option[Operand])
-      extends Instruction(
-        InstructionDef.CopyMemorySized,
-        (Vector(target, src, size) ++ modsA.toVector ++ modsB.toVector)*
-      )
-  case AccessChain(resultType: Operand, dest: Operand, base: Operand, indexes: Vector[Operand])
-      extends Instruction(InstructionDef.AccessChain, (Vector(resultType, dest, base) ++ indexes)*)
-  case InBoundsAccessChain(resultType: Operand, dest: Operand, base: Operand, indexes: Vector[Operand])
-      extends Instruction(InstructionDef.InBoundsAccessChain, (Vector(resultType, dest, base) ++ indexes)*)
-  case PtrAccessChain(resultType: Operand, dest: Operand, base: Operand, element: Operand, indexes: Vector[Operand])
-      extends Instruction(InstructionDef.PtrAccessChain, (Vector(resultType, dest, base, element) ++ indexes)*)
+      extends Instruction(InstructionDef.CopyMemorySized, (Col(target, src, size) ++ modsA.toCol ++ modsB.toCol)*)
+  case AccessChain(resultType: Operand, dest: Operand, base: Operand, indexes: Col[Operand])
+      extends Instruction(InstructionDef.AccessChain, (Col(resultType, dest, base) ++ indexes)*)
+  case InBoundsAccessChain(resultType: Operand, dest: Operand, base: Operand, indexes: Col[Operand])
+      extends Instruction(InstructionDef.InBoundsAccessChain, (Col(resultType, dest, base) ++ indexes)*)
+  case PtrAccessChain(resultType: Operand, dest: Operand, base: Operand, element: Operand, indexes: Col[Operand])
+      extends Instruction(InstructionDef.PtrAccessChain, (Col(resultType, dest, base, element) ++ indexes)*)
   case ArrayLength(resultType: Operand, dest: Operand, structure: Operand, arrayMember: Operand)
       extends Instruction(InstructionDef.ArrayLength, resultType, dest, structure, arrayMember)
   case GenericPtrMemSemantics(resultType: Operand, dest: Operand, pointer: Operand)
@@ -13248,33 +13200,28 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
       dest: Operand,
       base: Operand,
       element: Operand,
-      indexes: Vector[Operand]
-  ) extends Instruction(InstructionDef.InBoundsPtrAccessChain, (Vector(resultType, dest, base, element) ++ indexes)*)
+      indexes: Col[Operand]
+  ) extends Instruction(InstructionDef.InBoundsPtrAccessChain, (Col(resultType, dest, base, element) ++ indexes)*)
   case Decorate(target: Operand, decoration: Operand) extends Instruction(InstructionDef.Decorate, target, decoration)
   case MemberDecorate(structureType: Operand, member: Operand, decoration: Operand)
       extends Instruction(InstructionDef.MemberDecorate, structureType, member, decoration)
   case DecorationGroup(dest: Operand) extends Instruction(InstructionDef.DecorationGroup, dest)
-  case GroupDecorate(decorationGroup: Operand, targets: Vector[Operand])
-      extends Instruction(InstructionDef.GroupDecorate, (Vector(decorationGroup) ++ targets)*)
-  case GroupMemberDecorate(decorationGroup: Operand, targets: Vector[Operand])
-      extends Instruction(InstructionDef.GroupMemberDecorate, (Vector(decorationGroup) ++ targets)*)
+  case GroupDecorate(decorationGroup: Operand, targets: Col[Operand])
+      extends Instruction(InstructionDef.GroupDecorate, (Col(decorationGroup) ++ targets)*)
+  case GroupMemberDecorate(decorationGroup: Operand, targets: Col[Operand])
+      extends Instruction(InstructionDef.GroupMemberDecorate, (Col(decorationGroup) ++ targets)*)
   case VectorExtractDynamic(resultType: Operand, dest: Operand, vector: Operand, index: Operand)
       extends Instruction(InstructionDef.VectorExtractDynamic, resultType, dest, vector, index)
   case VectorInsertDynamic(resultType: Operand, dest: Operand, vector: Operand, component: Operand, index: Operand)
       extends Instruction(InstructionDef.VectorInsertDynamic, resultType, dest, vector, component, index)
-  case VectorShuffle(
-      resultType: Operand,
-      dest: Operand,
-      vector1: Operand,
-      vector2: Operand,
-      components: Vector[Operand]
-  ) extends Instruction(InstructionDef.VectorShuffle, (Vector(resultType, dest, vector1, vector2) ++ components)*)
-  case CompositeConstruct(resultType: Operand, dest: Operand, constituents: Vector[Operand])
-      extends Instruction(InstructionDef.CompositeConstruct, (Vector(resultType, dest) ++ constituents)*)
-  case CompositeExtract(resultType: Operand, dest: Operand, composite: Operand, indexes: Vector[Operand])
-      extends Instruction(InstructionDef.CompositeExtract, (Vector(resultType, dest, composite) ++ indexes)*)
-  case CompositeInsert(resultType: Operand, dest: Operand, src: Operand, composite: Operand, indexes: Vector[Operand])
-      extends Instruction(InstructionDef.CompositeInsert, (Vector(resultType, dest, src, composite) ++ indexes)*)
+  case VectorShuffle(resultType: Operand, dest: Operand, vector1: Operand, vector2: Operand, components: Col[Operand])
+      extends Instruction(InstructionDef.VectorShuffle, (Col(resultType, dest, vector1, vector2) ++ components)*)
+  case CompositeConstruct(resultType: Operand, dest: Operand, constituents: Col[Operand])
+      extends Instruction(InstructionDef.CompositeConstruct, (Col(resultType, dest) ++ constituents)*)
+  case CompositeExtract(resultType: Operand, dest: Operand, composite: Operand, indexes: Col[Operand])
+      extends Instruction(InstructionDef.CompositeExtract, (Col(resultType, dest, composite) ++ indexes)*)
+  case CompositeInsert(resultType: Operand, dest: Operand, src: Operand, composite: Operand, indexes: Col[Operand])
+      extends Instruction(InstructionDef.CompositeInsert, (Col(resultType, dest, src, composite) ++ indexes)*)
   case CopyObject(resultType: Operand, dest: Operand, src: Operand)
       extends Instruction(InstructionDef.CopyObject, resultType, dest, src)
   case Transpose(resultType: Operand, dest: Operand, matrix: Operand)
@@ -13289,7 +13236,7 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
       mods: Option[Operand]
   ) extends Instruction(
         InstructionDef.ImageSampleImplicitLod,
-        (Vector(resultType, dest, sampledImage, coordinate) ++ mods.toVector)*
+        (Col(resultType, dest, sampledImage, coordinate) ++ mods.toCol)*
       )
   case ImageSampleExplicitLod(
       resultType: Operand,
@@ -13307,7 +13254,7 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
       mods: Option[Operand]
   ) extends Instruction(
         InstructionDef.ImageSampleDrefImplicitLod,
-        (Vector(resultType, dest, sampledImage, coordinate, dref) ++ mods.toVector)*
+        (Col(resultType, dest, sampledImage, coordinate, dref) ++ mods.toCol)*
       )
   case ImageSampleDrefExplicitLod(
       resultType: Operand,
@@ -13333,7 +13280,7 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
       mods: Option[Operand]
   ) extends Instruction(
         InstructionDef.ImageSampleProjImplicitLod,
-        (Vector(resultType, dest, sampledImage, coordinate) ++ mods.toVector)*
+        (Col(resultType, dest, sampledImage, coordinate) ++ mods.toCol)*
       )
   case ImageSampleProjExplicitLod(
       resultType: Operand,
@@ -13351,7 +13298,7 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
       mods: Option[Operand]
   ) extends Instruction(
         InstructionDef.ImageSampleProjDrefImplicitLod,
-        (Vector(resultType, dest, sampledImage, coordinate, dref) ++ mods.toVector)*
+        (Col(resultType, dest, sampledImage, coordinate, dref) ++ mods.toCol)*
       )
   case ImageSampleProjDrefExplicitLod(
       resultType: Operand,
@@ -13370,7 +13317,7 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
         mods
       )
   case ImageFetch(resultType: Operand, dest: Operand, image: Operand, coordinate: Operand, mods: Option[Operand])
-      extends Instruction(InstructionDef.ImageFetch, (Vector(resultType, dest, image, coordinate) ++ mods.toVector)*)
+      extends Instruction(InstructionDef.ImageFetch, (Col(resultType, dest, image, coordinate) ++ mods.toCol)*)
   case ImageGather(
       resultType: Operand,
       dest: Operand,
@@ -13380,7 +13327,7 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
       mods: Option[Operand]
   ) extends Instruction(
         InstructionDef.ImageGather,
-        (Vector(resultType, dest, sampledImage, coordinate, component) ++ mods.toVector)*
+        (Col(resultType, dest, sampledImage, coordinate, component) ++ mods.toCol)*
       )
   case ImageDrefGather(
       resultType: Operand,
@@ -13391,12 +13338,12 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
       mods: Option[Operand]
   ) extends Instruction(
         InstructionDef.ImageDrefGather,
-        (Vector(resultType, dest, sampledImage, coordinate, dref) ++ mods.toVector)*
+        (Col(resultType, dest, sampledImage, coordinate, dref) ++ mods.toCol)*
       )
   case ImageRead(resultType: Operand, dest: Operand, image: Operand, coordinate: Operand, mods: Option[Operand])
-      extends Instruction(InstructionDef.ImageRead, (Vector(resultType, dest, image, coordinate) ++ mods.toVector)*)
+      extends Instruction(InstructionDef.ImageRead, (Col(resultType, dest, image, coordinate) ++ mods.toCol)*)
   case ImageWrite(image: Operand, coordinate: Operand, texel: Operand, mods: Option[Operand])
-      extends Instruction(InstructionDef.ImageWrite, (Vector(image, coordinate, texel) ++ mods.toVector)*)
+      extends Instruction(InstructionDef.ImageWrite, (Col(image, coordinate, texel) ++ mods.toCol)*)
   case Image(resultType: Operand, dest: Operand, sampledImage: Operand)
       extends Instruction(InstructionDef.Image, resultType, dest, sampledImage)
   case ImageQueryFormat(resultType: Operand, dest: Operand, image: Operand)
@@ -13759,18 +13706,18 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
       semantics: Operand,
       value: Operand
   ) extends Instruction(InstructionDef.AtomicXor, resultType, dest, pointer, memory, semantics, value)
-  case Phi(resultType: Operand, dest: Operand, variableParent: Vector[Operand])
-      extends Instruction(InstructionDef.Phi, (Vector(resultType, dest) ++ variableParent)*)
+  case Phi(resultType: Operand, dest: Operand, variableParent: Col[Operand])
+      extends Instruction(InstructionDef.Phi, (Col(resultType, dest) ++ variableParent)*)
   case LoopMerge(mergeBlock: Operand, continueTarget: Operand, loopControl: Operand)
       extends Instruction(InstructionDef.LoopMerge, mergeBlock, continueTarget, loopControl)
   case SelectionMerge(mergeBlock: Operand, selectionControl: Operand)
       extends Instruction(InstructionDef.SelectionMerge, mergeBlock, selectionControl)
   case Label(dest: Operand) extends Instruction(InstructionDef.Label, dest)
   case Branch(targetLabel: Operand) extends Instruction(InstructionDef.Branch, targetLabel)
-  case BranchConditional(pred: Operand, trueLabel: Operand, falseLabel: Operand, branchWeights: Vector[Operand])
-      extends Instruction(InstructionDef.BranchConditional, (Vector(pred, trueLabel, falseLabel) ++ branchWeights)*)
-  case Switch(selector: Operand, default: Operand, target: Vector[Operand])
-      extends Instruction(InstructionDef.Switch, (Vector(selector, default) ++ target)*)
+  case BranchConditional(pred: Operand, trueLabel: Operand, falseLabel: Operand, branchWeights: Col[Operand])
+      extends Instruction(InstructionDef.BranchConditional, (Col(pred, trueLabel, falseLabel) ++ branchWeights)*)
+  case Switch(selector: Operand, default: Operand, target: Col[Operand])
+      extends Instruction(InstructionDef.Switch, (Col(selector, default) ++ target)*)
   case Kill extends Instruction(InstructionDef.Kill)
   case Return extends Instruction(InstructionDef.Return)
   case ReturnValue(value: Operand) extends Instruction(InstructionDef.ReturnValue, value)
@@ -14000,10 +13947,10 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
       param: Operand,
       paramSize: Operand,
       paramAlign: Operand,
-      localSize: Vector[Operand]
+      localSize: Col[Operand]
   ) extends Instruction(
         InstructionDef.EnqueueKernel,
-        (Vector(
+        (Col(
           resultType,
           dest,
           queue,
@@ -14105,7 +14052,7 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
       mods: Option[Operand]
   ) extends Instruction(
         InstructionDef.ImageSparseSampleImplicitLod,
-        (Vector(resultType, dest, sampledImage, coordinate) ++ mods.toVector)*
+        (Col(resultType, dest, sampledImage, coordinate) ++ mods.toCol)*
       )
   case ImageSparseSampleExplicitLod(
       resultType: Operand,
@@ -14123,7 +14070,7 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
       mods: Option[Operand]
   ) extends Instruction(
         InstructionDef.ImageSparseSampleDrefImplicitLod,
-        (Vector(resultType, dest, sampledImage, coordinate, dref) ++ mods.toVector)*
+        (Col(resultType, dest, sampledImage, coordinate, dref) ++ mods.toCol)*
       )
   case ImageSparseSampleDrefExplicitLod(
       resultType: Operand,
@@ -14149,7 +14096,7 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
       mods: Option[Operand]
   ) extends Instruction(
         InstructionDef.ImageSparseSampleProjImplicitLod,
-        (Vector(resultType, dest, sampledImage, coordinate) ++ mods.toVector)*
+        (Col(resultType, dest, sampledImage, coordinate) ++ mods.toCol)*
       )
   case ImageSparseSampleProjExplicitLod(
       resultType: Operand,
@@ -14174,7 +14121,7 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
       mods: Option[Operand]
   ) extends Instruction(
         InstructionDef.ImageSparseSampleProjDrefImplicitLod,
-        (Vector(resultType, dest, sampledImage, coordinate, dref) ++ mods.toVector)*
+        (Col(resultType, dest, sampledImage, coordinate, dref) ++ mods.toCol)*
       )
   case ImageSparseSampleProjDrefExplicitLod(
       resultType: Operand,
@@ -14193,10 +14140,7 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
         mods
       )
   case ImageSparseFetch(resultType: Operand, dest: Operand, image: Operand, coordinate: Operand, mods: Option[Operand])
-      extends Instruction(
-        InstructionDef.ImageSparseFetch,
-        (Vector(resultType, dest, image, coordinate) ++ mods.toVector)*
-      )
+      extends Instruction(InstructionDef.ImageSparseFetch, (Col(resultType, dest, image, coordinate) ++ mods.toCol)*)
   case ImageSparseGather(
       resultType: Operand,
       dest: Operand,
@@ -14206,7 +14150,7 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
       mods: Option[Operand]
   ) extends Instruction(
         InstructionDef.ImageSparseGather,
-        (Vector(resultType, dest, sampledImage, coordinate, component) ++ mods.toVector)*
+        (Col(resultType, dest, sampledImage, coordinate, component) ++ mods.toCol)*
       )
   case ImageSparseDrefGather(
       resultType: Operand,
@@ -14217,7 +14161,7 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
       mods: Option[Operand]
   ) extends Instruction(
         InstructionDef.ImageSparseDrefGather,
-        (Vector(resultType, dest, sampledImage, coordinate, dref) ++ mods.toVector)*
+        (Col(resultType, dest, sampledImage, coordinate, dref) ++ mods.toCol)*
       )
   case ImageSparseTexelsResident(resultType: Operand, dest: Operand, residentCode: Operand)
       extends Instruction(InstructionDef.ImageSparseTexelsResident, resultType, dest, residentCode)
@@ -14227,10 +14171,7 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
   case AtomicFlagClear(pointer: Operand, memory: Operand, semantics: Operand)
       extends Instruction(InstructionDef.AtomicFlagClear, pointer, memory, semantics)
   case ImageSparseRead(resultType: Operand, dest: Operand, image: Operand, coordinate: Operand, mods: Option[Operand])
-      extends Instruction(
-        InstructionDef.ImageSparseRead,
-        (Vector(resultType, dest, image, coordinate) ++ mods.toVector)*
-      )
+      extends Instruction(InstructionDef.ImageSparseRead, (Col(resultType, dest, image, coordinate) ++ mods.toCol)*)
   case SizeOf(resultType: Operand, dest: Operand, pointer: Operand)
       extends Instruction(InstructionDef.SizeOf, resultType, dest, pointer)
   case TypePipeStorage(dest: Operand) extends Instruction(InstructionDef.TypePipeStorage, dest)
@@ -14345,7 +14286,7 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
       clusterSize: Option[Operand]
   ) extends Instruction(
         InstructionDef.GroupNonUniformIAdd,
-        (Vector(resultType, dest, execution, operation, value) ++ clusterSize.toVector)*
+        (Col(resultType, dest, execution, operation, value) ++ clusterSize.toCol)*
       )
   case GroupNonUniformFAdd(
       resultType: Operand,
@@ -14356,7 +14297,7 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
       clusterSize: Option[Operand]
   ) extends Instruction(
         InstructionDef.GroupNonUniformFAdd,
-        (Vector(resultType, dest, execution, operation, value) ++ clusterSize.toVector)*
+        (Col(resultType, dest, execution, operation, value) ++ clusterSize.toCol)*
       )
   case GroupNonUniformIMul(
       resultType: Operand,
@@ -14367,7 +14308,7 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
       clusterSize: Option[Operand]
   ) extends Instruction(
         InstructionDef.GroupNonUniformIMul,
-        (Vector(resultType, dest, execution, operation, value) ++ clusterSize.toVector)*
+        (Col(resultType, dest, execution, operation, value) ++ clusterSize.toCol)*
       )
   case GroupNonUniformFMul(
       resultType: Operand,
@@ -14378,7 +14319,7 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
       clusterSize: Option[Operand]
   ) extends Instruction(
         InstructionDef.GroupNonUniformFMul,
-        (Vector(resultType, dest, execution, operation, value) ++ clusterSize.toVector)*
+        (Col(resultType, dest, execution, operation, value) ++ clusterSize.toCol)*
       )
   case GroupNonUniformSMin(
       resultType: Operand,
@@ -14389,7 +14330,7 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
       clusterSize: Option[Operand]
   ) extends Instruction(
         InstructionDef.GroupNonUniformSMin,
-        (Vector(resultType, dest, execution, operation, value) ++ clusterSize.toVector)*
+        (Col(resultType, dest, execution, operation, value) ++ clusterSize.toCol)*
       )
   case GroupNonUniformUMin(
       resultType: Operand,
@@ -14400,7 +14341,7 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
       clusterSize: Option[Operand]
   ) extends Instruction(
         InstructionDef.GroupNonUniformUMin,
-        (Vector(resultType, dest, execution, operation, value) ++ clusterSize.toVector)*
+        (Col(resultType, dest, execution, operation, value) ++ clusterSize.toCol)*
       )
   case GroupNonUniformFMin(
       resultType: Operand,
@@ -14411,7 +14352,7 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
       clusterSize: Option[Operand]
   ) extends Instruction(
         InstructionDef.GroupNonUniformFMin,
-        (Vector(resultType, dest, execution, operation, value) ++ clusterSize.toVector)*
+        (Col(resultType, dest, execution, operation, value) ++ clusterSize.toCol)*
       )
   case GroupNonUniformSMax(
       resultType: Operand,
@@ -14422,7 +14363,7 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
       clusterSize: Option[Operand]
   ) extends Instruction(
         InstructionDef.GroupNonUniformSMax,
-        (Vector(resultType, dest, execution, operation, value) ++ clusterSize.toVector)*
+        (Col(resultType, dest, execution, operation, value) ++ clusterSize.toCol)*
       )
   case GroupNonUniformUMax(
       resultType: Operand,
@@ -14433,7 +14374,7 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
       clusterSize: Option[Operand]
   ) extends Instruction(
         InstructionDef.GroupNonUniformUMax,
-        (Vector(resultType, dest, execution, operation, value) ++ clusterSize.toVector)*
+        (Col(resultType, dest, execution, operation, value) ++ clusterSize.toCol)*
       )
   case GroupNonUniformFMax(
       resultType: Operand,
@@ -14444,7 +14385,7 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
       clusterSize: Option[Operand]
   ) extends Instruction(
         InstructionDef.GroupNonUniformFMax,
-        (Vector(resultType, dest, execution, operation, value) ++ clusterSize.toVector)*
+        (Col(resultType, dest, execution, operation, value) ++ clusterSize.toCol)*
       )
   case GroupNonUniformBitwiseAnd(
       resultType: Operand,
@@ -14455,7 +14396,7 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
       clusterSize: Option[Operand]
   ) extends Instruction(
         InstructionDef.GroupNonUniformBitwiseAnd,
-        (Vector(resultType, dest, execution, operation, value) ++ clusterSize.toVector)*
+        (Col(resultType, dest, execution, operation, value) ++ clusterSize.toCol)*
       )
   case GroupNonUniformBitwiseOr(
       resultType: Operand,
@@ -14466,7 +14407,7 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
       clusterSize: Option[Operand]
   ) extends Instruction(
         InstructionDef.GroupNonUniformBitwiseOr,
-        (Vector(resultType, dest, execution, operation, value) ++ clusterSize.toVector)*
+        (Col(resultType, dest, execution, operation, value) ++ clusterSize.toCol)*
       )
   case GroupNonUniformBitwiseXor(
       resultType: Operand,
@@ -14477,7 +14418,7 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
       clusterSize: Option[Operand]
   ) extends Instruction(
         InstructionDef.GroupNonUniformBitwiseXor,
-        (Vector(resultType, dest, execution, operation, value) ++ clusterSize.toVector)*
+        (Col(resultType, dest, execution, operation, value) ++ clusterSize.toCol)*
       )
   case GroupNonUniformLogicalAnd(
       resultType: Operand,
@@ -14488,7 +14429,7 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
       clusterSize: Option[Operand]
   ) extends Instruction(
         InstructionDef.GroupNonUniformLogicalAnd,
-        (Vector(resultType, dest, execution, operation, value) ++ clusterSize.toVector)*
+        (Col(resultType, dest, execution, operation, value) ++ clusterSize.toCol)*
       )
   case GroupNonUniformLogicalOr(
       resultType: Operand,
@@ -14499,7 +14440,7 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
       clusterSize: Option[Operand]
   ) extends Instruction(
         InstructionDef.GroupNonUniformLogicalOr,
-        (Vector(resultType, dest, execution, operation, value) ++ clusterSize.toVector)*
+        (Col(resultType, dest, execution, operation, value) ++ clusterSize.toCol)*
       )
   case GroupNonUniformLogicalXor(
       resultType: Operand,
@@ -14510,7 +14451,7 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
       clusterSize: Option[Operand]
   ) extends Instruction(
         InstructionDef.GroupNonUniformLogicalXor,
-        (Vector(resultType, dest, execution, operation, value) ++ clusterSize.toVector)*
+        (Col(resultType, dest, execution, operation, value) ++ clusterSize.toCol)*
       )
   case GroupNonUniformQuadBroadcast(
       resultType: Operand,
@@ -14535,16 +14476,13 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
   case PtrDiff(resultType: Operand, dest: Operand, srcA: Operand, srcB: Operand)
       extends Instruction(InstructionDef.PtrDiff, resultType, dest, srcA, srcB)
   case ColorAttachmentReadEXT(resultType: Operand, dest: Operand, attachment: Operand, sample: Option[Operand])
-      extends Instruction(
-        InstructionDef.ColorAttachmentReadEXT,
-        (Vector(resultType, dest, attachment) ++ sample.toVector)*
-      )
+      extends Instruction(InstructionDef.ColorAttachmentReadEXT, (Col(resultType, dest, attachment) ++ sample.toCol)*)
   case DepthAttachmentReadEXT(resultType: Operand, dest: Operand, sample: Option[Operand])
-      extends Instruction(InstructionDef.DepthAttachmentReadEXT, (Vector(resultType, dest) ++ sample.toVector)*)
+      extends Instruction(InstructionDef.DepthAttachmentReadEXT, (Col(resultType, dest) ++ sample.toCol)*)
   case StencilAttachmentReadEXT(resultType: Operand, dest: Operand, sample: Option[Operand])
-      extends Instruction(InstructionDef.StencilAttachmentReadEXT, (Vector(resultType, dest) ++ sample.toVector)*)
+      extends Instruction(InstructionDef.StencilAttachmentReadEXT, (Col(resultType, dest) ++ sample.toCol)*)
   case TypeTensorARM(dest: Operand, elementType: Operand, rank: Option[Operand], shape: Option[Operand])
-      extends Instruction(InstructionDef.TypeTensorARM, (Vector(dest, elementType) ++ rank.toVector ++ shape.toVector)*)
+      extends Instruction(InstructionDef.TypeTensorARM, (Col(dest, elementType) ++ rank.toCol ++ shape.toCol)*)
   case TensorReadARM(
       resultType: Operand,
       dest: Operand,
@@ -14553,24 +14491,24 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
       tensorOperands: Option[Operand]
   ) extends Instruction(
         InstructionDef.TensorReadARM,
-        (Vector(resultType, dest, tensor, coordinates) ++ tensorOperands.toVector)*
+        (Col(resultType, dest, tensor, coordinates) ++ tensorOperands.toCol)*
       )
   case TensorWriteARM(tensor: Operand, coordinates: Operand, src: Operand, tensorOperands: Option[Operand])
-      extends Instruction(InstructionDef.TensorWriteARM, (Vector(tensor, coordinates, src) ++ tensorOperands.toVector)*)
+      extends Instruction(InstructionDef.TensorWriteARM, (Col(tensor, coordinates, src) ++ tensorOperands.toCol)*)
   case TensorQuerySizeARM(resultType: Operand, dest: Operand, tensor: Operand, dimension: Operand)
       extends Instruction(InstructionDef.TensorQuerySizeARM, resultType, dest, tensor, dimension)
   case GraphConstantARM(resultType: Operand, dest: Operand, graphConstantID: Operand)
       extends Instruction(InstructionDef.GraphConstantARM, resultType, dest, graphConstantID)
-  case GraphEntryPointARM(graph: Operand, name: Operand, interface: Vector[Operand])
-      extends Instruction(InstructionDef.GraphEntryPointARM, (Vector(graph, name) ++ interface)*)
+  case GraphEntryPointARM(graph: Operand, name: Operand, interface: Col[Operand])
+      extends Instruction(InstructionDef.GraphEntryPointARM, (Col(graph, name) ++ interface)*)
   case GraphARM(resultType: Operand, dest: Operand) extends Instruction(InstructionDef.GraphARM, resultType, dest)
-  case GraphInputARM(resultType: Operand, dest: Operand, inputIndex: Operand, elementIndex: Vector[Operand])
-      extends Instruction(InstructionDef.GraphInputARM, (Vector(resultType, dest, inputIndex) ++ elementIndex)*)
-  case GraphSetOutputARM(value: Operand, outputIndex: Operand, elementIndex: Vector[Operand])
-      extends Instruction(InstructionDef.GraphSetOutputARM, (Vector(value, outputIndex) ++ elementIndex)*)
+  case GraphInputARM(resultType: Operand, dest: Operand, inputIndex: Operand, elementIndex: Col[Operand])
+      extends Instruction(InstructionDef.GraphInputARM, (Col(resultType, dest, inputIndex) ++ elementIndex)*)
+  case GraphSetOutputARM(value: Operand, outputIndex: Operand, elementIndex: Col[Operand])
+      extends Instruction(InstructionDef.GraphSetOutputARM, (Col(value, outputIndex) ++ elementIndex)*)
   case GraphEndARM extends Instruction(InstructionDef.GraphEndARM)
-  case TypeGraphARM(dest: Operand, numInputs: Operand, inOutTypes: Vector[Operand])
-      extends Instruction(InstructionDef.TypeGraphARM, (Vector(dest, numInputs) ++ inOutTypes)*)
+  case TypeGraphARM(dest: Operand, numInputs: Operand, inOutTypes: Col[Operand])
+      extends Instruction(InstructionDef.TypeGraphARM, (Col(dest, numInputs) ++ inOutTypes)*)
   case BitcastExtractEXT(resultType: Operand, dest: Operand, base: Operand, offset: Operand)
       extends Instruction(InstructionDef.BitcastExtractEXT, resultType, dest, base, offset)
   case TerminateInvocation extends Instruction(InstructionDef.TerminateInvocation)
@@ -14584,24 +14522,24 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
       initializer: Option[Operand]
   ) extends Instruction(
         InstructionDef.UntypedVariableKHR,
-        (Vector(resultType, dest, storageClass) ++ dataType.toVector ++ initializer.toVector)*
+        (Col(resultType, dest, storageClass) ++ dataType.toCol ++ initializer.toCol)*
       )
   case UntypedAccessChainKHR(
       resultType: Operand,
       dest: Operand,
       baseType: Operand,
       base: Operand,
-      indexes: Vector[Operand]
-  ) extends Instruction(InstructionDef.UntypedAccessChainKHR, (Vector(resultType, dest, baseType, base) ++ indexes)*)
+      indexes: Col[Operand]
+  ) extends Instruction(InstructionDef.UntypedAccessChainKHR, (Col(resultType, dest, baseType, base) ++ indexes)*)
   case UntypedInBoundsAccessChainKHR(
       resultType: Operand,
       dest: Operand,
       baseType: Operand,
       base: Operand,
-      indexes: Vector[Operand]
+      indexes: Col[Operand]
   ) extends Instruction(
         InstructionDef.UntypedInBoundsAccessChainKHR,
-        (Vector(resultType, dest, baseType, base) ++ indexes)*
+        (Col(resultType, dest, baseType, base) ++ indexes)*
       )
   case SubgroupBallotKHR(resultType: Operand, dest: Operand, pred: Operand)
       extends Instruction(InstructionDef.SubgroupBallotKHR, resultType, dest, pred)
@@ -14613,10 +14551,10 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
       baseType: Operand,
       base: Operand,
       element: Operand,
-      indexes: Vector[Operand]
+      indexes: Col[Operand]
   ) extends Instruction(
         InstructionDef.UntypedPtrAccessChainKHR,
-        (Vector(resultType, dest, baseType, base, element) ++ indexes)*
+        (Col(resultType, dest, baseType, base, element) ++ indexes)*
       )
   case UntypedInBoundsPtrAccessChainKHR(
       resultType: Operand,
@@ -14624,10 +14562,10 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
       baseType: Operand,
       base: Operand,
       element: Operand,
-      indexes: Vector[Operand]
+      indexes: Col[Operand]
   ) extends Instruction(
         InstructionDef.UntypedInBoundsPtrAccessChainKHR,
-        (Vector(resultType, dest, baseType, base, element) ++ indexes)*
+        (Col(resultType, dest, baseType, base, element) ++ indexes)*
       )
   case UntypedArrayLengthKHR(
       resultType: Operand,
@@ -14644,7 +14582,7 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
       cacheType: Option[Operand]
   ) extends Instruction(
         InstructionDef.UntypedPrefetchKHR,
-        (Vector(pointerType, numBytes) ++ rW.toVector ++ locality.toVector ++ cacheType.toVector)*
+        (Col(pointerType, numBytes) ++ rW.toCol ++ locality.toCol ++ cacheType.toCol)*
       )
   case FmaKHR(resultType: Operand, dest: Operand, srcA: Operand, srcB: Operand, srcC: Operand)
       extends Instruction(InstructionDef.FmaKHR, resultType, dest, srcA, srcB, srcC)
@@ -14663,12 +14601,12 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
       clusterSize: Option[Operand]
   ) extends Instruction(
         InstructionDef.GroupNonUniformRotateKHR,
-        (Vector(resultType, dest, execution, value, delta) ++ clusterSize.toVector)*
+        (Col(resultType, dest, execution, value, delta) ++ clusterSize.toCol)*
       )
   case SubgroupReadInvocationKHR(resultType: Operand, dest: Operand, value: Operand, index: Operand)
       extends Instruction(InstructionDef.SubgroupReadInvocationKHR, resultType, dest, value, index)
-  case ExtInstWithForwardRefsKHR(resultType: Operand, dest: Operand, set: Operand, inst: Operand, srcs: Vector[Operand])
-      extends Instruction(InstructionDef.ExtInstWithForwardRefsKHR, (Vector(resultType, dest, set, inst) ++ srcs)*)
+  case ExtInstWithForwardRefsKHR(resultType: Operand, dest: Operand, set: Operand, inst: Operand, srcs: Col[Operand])
+      extends Instruction(InstructionDef.ExtInstWithForwardRefsKHR, (Col(resultType, dest, set, inst) ++ srcs)*)
   case UntypedGroupAsyncCopyKHR(
       resultType: Operand,
       dest: Operand,
@@ -14683,7 +14621,7 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
       modsB: Option[Operand]
   ) extends Instruction(
         InstructionDef.UntypedGroupAsyncCopyKHR,
-        (Vector(
+        (Col(
           resultType,
           dest,
           execution,
@@ -14693,7 +14631,7 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
           numElements,
           stride,
           event
-        ) ++ modsA.toVector ++ modsB.toVector)*
+        ) ++ modsA.toCol ++ modsB.toCol)*
       )
   case TraceRayKHR(
       accel: Operand,
@@ -14728,25 +14666,16 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
   case IgnoreIntersectionKHR extends Instruction(InstructionDef.IgnoreIntersectionKHR)
   case TerminateRayKHR extends Instruction(InstructionDef.TerminateRayKHR)
   case SDot(resultType: Operand, dest: Operand, vector1: Operand, vector2: Operand, packedVectorFormat: Option[Operand])
-      extends Instruction(
-        InstructionDef.SDot,
-        (Vector(resultType, dest, vector1, vector2) ++ packedVectorFormat.toVector)*
-      )
+      extends Instruction(InstructionDef.SDot, (Col(resultType, dest, vector1, vector2) ++ packedVectorFormat.toCol)*)
   case UDot(resultType: Operand, dest: Operand, vector1: Operand, vector2: Operand, packedVectorFormat: Option[Operand])
-      extends Instruction(
-        InstructionDef.UDot,
-        (Vector(resultType, dest, vector1, vector2) ++ packedVectorFormat.toVector)*
-      )
+      extends Instruction(InstructionDef.UDot, (Col(resultType, dest, vector1, vector2) ++ packedVectorFormat.toCol)*)
   case SUDot(
       resultType: Operand,
       dest: Operand,
       vector1: Operand,
       vector2: Operand,
       packedVectorFormat: Option[Operand]
-  ) extends Instruction(
-        InstructionDef.SUDot,
-        (Vector(resultType, dest, vector1, vector2) ++ packedVectorFormat.toVector)*
-      )
+  ) extends Instruction(InstructionDef.SUDot, (Col(resultType, dest, vector1, vector2) ++ packedVectorFormat.toCol)*)
   case SDotAccSat(
       resultType: Operand,
       dest: Operand,
@@ -14756,7 +14685,7 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
       packedVectorFormat: Option[Operand]
   ) extends Instruction(
         InstructionDef.SDotAccSat,
-        (Vector(resultType, dest, vector1, vector2, accumulator) ++ packedVectorFormat.toVector)*
+        (Col(resultType, dest, vector1, vector2, accumulator) ++ packedVectorFormat.toCol)*
       )
   case UDotAccSat(
       resultType: Operand,
@@ -14767,7 +14696,7 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
       packedVectorFormat: Option[Operand]
   ) extends Instruction(
         InstructionDef.UDotAccSat,
-        (Vector(resultType, dest, vector1, vector2, accumulator) ++ packedVectorFormat.toVector)*
+        (Col(resultType, dest, vector1, vector2, accumulator) ++ packedVectorFormat.toCol)*
       )
   case SUDotAccSat(
       resultType: Operand,
@@ -14778,7 +14707,7 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
       packedVectorFormat: Option[Operand]
   ) extends Instruction(
         InstructionDef.SUDotAccSat,
-        (Vector(resultType, dest, vector1, vector2, accumulator) ++ packedVectorFormat.toVector)*
+        (Col(resultType, dest, vector1, vector2, accumulator) ++ packedVectorFormat.toCol)*
       )
   case TypeCooperativeMatrixKHR(
       dest: Operand,
@@ -14797,7 +14726,7 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
       mods: Option[Operand]
   ) extends Instruction(
         InstructionDef.CooperativeMatrixLoadKHR,
-        (Vector(resultType, dest, pointer, memoryLayout) ++ stride.toVector ++ mods.toVector)*
+        (Col(resultType, dest, pointer, memoryLayout) ++ stride.toCol ++ mods.toCol)*
       )
   case CooperativeMatrixStoreKHR(
       pointer: Operand,
@@ -14807,7 +14736,7 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
       mods: Option[Operand]
   ) extends Instruction(
         InstructionDef.CooperativeMatrixStoreKHR,
-        (Vector(pointer, src, memoryLayout) ++ stride.toVector ++ mods.toVector)*
+        (Col(pointer, src, memoryLayout) ++ stride.toCol ++ mods.toCol)*
       )
   case CooperativeMatrixMulAddKHR(
       resultType: Operand,
@@ -14818,7 +14747,7 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
       cooperativeMatrixOperands: Option[Operand]
   ) extends Instruction(
         InstructionDef.CooperativeMatrixMulAddKHR,
-        (Vector(resultType, dest, a, b, c) ++ cooperativeMatrixOperands.toVector)*
+        (Col(resultType, dest, a, b, c) ++ cooperativeMatrixOperands.toCol)*
       )
   case CooperativeMatrixLengthKHR(resultType: Operand, dest: Operand, dataType: Operand)
       extends Instruction(InstructionDef.CooperativeMatrixLengthKHR, resultType, dest, dataType)
@@ -14993,7 +14922,7 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
       mods: Option[Operand]
   ) extends Instruction(
         InstructionDef.ImageGatherQCOM,
-        (Vector(resultType, dest, sampledImage, coordinate, component, mode) ++ mods.toVector)*
+        (Col(resultType, dest, sampledImage, coordinate, component, mode) ++ mods.toCol)*
       )
   case GroupIAddNonUniformAMD(resultType: Operand, dest: Operand, execution: Operand, operation: Operand, x: Operand)
       extends Instruction(InstructionDef.GroupIAddNonUniformAMD, resultType, dest, execution, operation, x)
@@ -15068,10 +14997,10 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
       extends Instruction(InstructionDef.MemberDecorateIdEXT, structureType, member, decoration)
   case ConstantSizeOfEXT(resultType: Operand, dest: Operand, dataType: Operand)
       extends Instruction(InstructionDef.ConstantSizeOfEXT, resultType, dest, dataType)
-  case ConstantDataKHR(resultType: Operand, dest: Operand, data: Vector[Operand])
-      extends Instruction(InstructionDef.ConstantDataKHR, (Vector(resultType, dest) ++ data)*)
-  case SpecConstantDataKHR(resultType: Operand, dest: Operand, data: Vector[Operand])
-      extends Instruction(InstructionDef.SpecConstantDataKHR, (Vector(resultType, dest) ++ data)*)
+  case ConstantDataKHR(resultType: Operand, dest: Operand, data: Col[Operand])
+      extends Instruction(InstructionDef.ConstantDataKHR, (Col(resultType, dest) ++ data)*)
+  case SpecConstantDataKHR(resultType: Operand, dest: Operand, data: Col[Operand])
+      extends Instruction(InstructionDef.SpecConstantDataKHR, (Col(resultType, dest) ++ data)*)
   case PoisonKHR(resultType: Operand, dest: Operand) extends Instruction(InstructionDef.PoisonKHR, resultType, dest)
   case FreezeKHR(resultType: Operand, dest: Operand, value: Operand)
       extends Instruction(InstructionDef.FreezeKHR, resultType, dest, value)
@@ -15323,10 +15252,7 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
   case HitObjectIsMissNV(resultType: Operand, dest: Operand, hitObject: Operand)
       extends Instruction(InstructionDef.HitObjectIsMissNV, resultType, dest, hitObject)
   case ReorderThreadWithHitObjectNV(hitObject: Operand, hint: Option[Operand], bits: Option[Operand])
-      extends Instruction(
-        InstructionDef.ReorderThreadWithHitObjectNV,
-        (Vector(hitObject) ++ hint.toVector ++ bits.toVector)*
-      )
+      extends Instruction(InstructionDef.ReorderThreadWithHitObjectNV, (Col(hitObject) ++ hint.toCol ++ bits.toCol)*)
   case ReorderThreadWithHintNV(hint: Operand, bits: Operand)
       extends Instruction(InstructionDef.ReorderThreadWithHintNV, hint, bits)
   case TypeHitObjectNV(dest: Operand) extends Instruction(InstructionDef.TypeHitObjectNV, dest)
@@ -15340,7 +15266,7 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
       mods: Option[Operand]
   ) extends Instruction(
         InstructionDef.ImageSampleFootprintNV,
-        (Vector(resultType, dest, sampledImage, coordinate, granularity, coarse) ++ mods.toVector)*
+        (Col(resultType, dest, sampledImage, coordinate, granularity, coarse) ++ mods.toCol)*
       )
   case TypeVectorIdEXT(dest: Operand, componentType: Operand, componentCount: Operand)
       extends Instruction(InstructionDef.TypeVectorIdEXT, dest, componentType, componentCount)
@@ -15360,7 +15286,7 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
       cooperativeMatrixOperands: Option[Operand]
   ) extends Instruction(
         InstructionDef.CooperativeVectorMatrixMulNV,
-        (Vector(
+        (Col(
           resultType,
           dest,
           input,
@@ -15372,7 +15298,7 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
           k,
           memoryLayout,
           transpose
-        ) ++ matrixStride.toVector ++ cooperativeMatrixOperands.toVector)*
+        ) ++ matrixStride.toCol ++ cooperativeMatrixOperands.toCol)*
       )
   case CooperativeVectorOuterProductAccumulateNV(
       pointer: Operand,
@@ -15384,7 +15310,7 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
       matrixStride: Option[Operand]
   ) extends Instruction(
         InstructionDef.CooperativeVectorOuterProductAccumulateNV,
-        (Vector(pointer, offset, a, b, memoryLayout, matrixInterpretation) ++ matrixStride.toVector)*
+        (Col(pointer, offset, a, b, memoryLayout, matrixInterpretation) ++ matrixStride.toCol)*
       )
   case CooperativeVectorReduceSumAccumulateNV(pointer: Operand, offset: Operand, v: Operand)
       extends Instruction(InstructionDef.CooperativeVectorReduceSumAccumulateNV, pointer, offset, v)
@@ -15407,7 +15333,7 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
       cooperativeMatrixOperands: Option[Operand]
   ) extends Instruction(
         InstructionDef.CooperativeVectorMatrixMulAddNV,
-        (Vector(
+        (Col(
           resultType,
           dest,
           input,
@@ -15422,14 +15348,14 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
           k,
           memoryLayout,
           transpose
-        ) ++ matrixStride.toVector ++ cooperativeMatrixOperands.toVector)*
+        ) ++ matrixStride.toCol ++ cooperativeMatrixOperands.toCol)*
       )
   case CooperativeMatrixConvertNV(resultType: Operand, dest: Operand, matrix: Operand)
       extends Instruction(InstructionDef.CooperativeMatrixConvertNV, resultType, dest, matrix)
   case EmitMeshTasksEXT(groupCountX: Operand, groupCountY: Operand, groupCountZ: Operand, payload: Option[Operand])
       extends Instruction(
         InstructionDef.EmitMeshTasksEXT,
-        (Vector(groupCountX, groupCountY, groupCountZ) ++ payload.toVector)*
+        (Col(groupCountX, groupCountY, groupCountZ) ++ payload.toCol)*
       )
   case SetMeshOutputsEXT(vertexCount: Operand, primitiveCount: Operand)
       extends Instruction(InstructionDef.SetMeshOutputsEXT, vertexCount, primitiveCount)
@@ -15479,12 +15405,9 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
       pointer: Operand,
       offset: Operand,
       mods: Option[Operand]
-  ) extends Instruction(
-        InstructionDef.CooperativeVectorLoadNV,
-        (Vector(resultType, dest, pointer, offset) ++ mods.toVector)*
-      )
+  ) extends Instruction(InstructionDef.CooperativeVectorLoadNV, (Col(resultType, dest, pointer, offset) ++ mods.toCol)*)
   case CooperativeVectorStoreNV(pointer: Operand, offset: Operand, src: Operand, mods: Option[Operand])
-      extends Instruction(InstructionDef.CooperativeVectorStoreNV, (Vector(pointer, offset, src) ++ mods.toVector)*)
+      extends Instruction(InstructionDef.CooperativeVectorStoreNV, (Col(pointer, offset, src) ++ mods.toCol)*)
   case HitObjectRecordFromQueryEXT(
       hitObject: Operand,
       rayQuery: Operand,
@@ -15493,7 +15416,7 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
       hitKind: Option[Operand]
   ) extends Instruction(
         InstructionDef.HitObjectRecordFromQueryEXT,
-        (Vector(hitObject, rayQuery, sBTRecordIndex, hitObjectAttributes) ++ hitKind.toVector)*
+        (Col(hitObject, rayQuery, sBTRecordIndex, hitObjectAttributes) ++ hitKind.toCol)*
       )
   case HitObjectRecordMissEXT(
       hitObject: Operand,
@@ -15549,7 +15472,7 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
       bits: Option[Operand]
   ) extends Instruction(
         InstructionDef.HitObjectReorderExecuteShaderEXT,
-        (Vector(hitObject, payload) ++ hint.toVector ++ bits.toVector)*
+        (Col(hitObject, payload) ++ hint.toCol ++ bits.toCol)*
       )
   case HitObjectTraceReorderExecuteEXT(
       hitObject: Operand,
@@ -15568,7 +15491,7 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
       bits: Option[Operand]
   ) extends Instruction(
         InstructionDef.HitObjectTraceReorderExecuteEXT,
-        (Vector(
+        (Col(
           hitObject,
           accelerationStructure,
           rayFlags,
@@ -15581,7 +15504,7 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
           rayDirection,
           rayTmax,
           payload
-        ) ++ hint.toVector ++ bits.toVector)*
+        ) ++ hint.toCol ++ bits.toCol)*
       )
   case HitObjectTraceMotionReorderExecuteEXT(
       hitObject: Operand,
@@ -15601,7 +15524,7 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
       bits: Option[Operand]
   ) extends Instruction(
         InstructionDef.HitObjectTraceMotionReorderExecuteEXT,
-        (Vector(
+        (Col(
           hitObject,
           accelerationStructure,
           rayFlags,
@@ -15615,16 +15538,13 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
           rayTmax,
           currentTime,
           payload
-        ) ++ hint.toVector ++ bits.toVector)*
+        ) ++ hint.toCol ++ bits.toCol)*
       )
   case TypeHitObjectEXT(dest: Operand) extends Instruction(InstructionDef.TypeHitObjectEXT, dest)
   case ReorderThreadWithHintEXT(hint: Operand, bits: Operand)
       extends Instruction(InstructionDef.ReorderThreadWithHintEXT, hint, bits)
   case ReorderThreadWithHitObjectEXT(hitObject: Operand, hint: Option[Operand], bits: Option[Operand])
-      extends Instruction(
-        InstructionDef.ReorderThreadWithHitObjectEXT,
-        (Vector(hitObject) ++ hint.toVector ++ bits.toVector)*
-      )
+      extends Instruction(InstructionDef.ReorderThreadWithHitObjectEXT, (Col(hitObject) ++ hint.toCol ++ bits.toCol)*)
   case HitObjectTraceRayEXT(
       hitObject: Operand,
       accelerationStructure: Operand,
@@ -15849,7 +15769,7 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
       mods: Option[Operand]
   ) extends Instruction(
         InstructionDef.CooperativeMatrixLoadNV,
-        (Vector(resultType, dest, pointer, stride, columnMajor) ++ mods.toVector)*
+        (Col(resultType, dest, pointer, stride, columnMajor) ++ mods.toCol)*
       )
   case CooperativeMatrixStoreNV(
       pointer: Operand,
@@ -15859,7 +15779,7 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
       mods: Option[Operand]
   ) extends Instruction(
         InstructionDef.CooperativeMatrixStoreNV,
-        (Vector(pointer, src, stride, columnMajor) ++ mods.toVector)*
+        (Col(pointer, src, stride, columnMajor) ++ mods.toCol)*
       )
   case CooperativeMatrixMulAddNV(resultType: Operand, dest: Operand, a: Operand, b: Operand, c: Operand)
       extends Instruction(InstructionDef.CooperativeMatrixMulAddNV, resultType, dest, a, b, c)
@@ -15911,31 +15831,28 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
       dest: Operand,
       matrix: Operand,
       func: Operand,
-      srcs: Vector[Operand]
-  ) extends Instruction(
-        InstructionDef.CooperativeMatrixPerElementOpNV,
-        (Vector(resultType, dest, matrix, func) ++ srcs)*
-      )
+      srcs: Col[Operand]
+  ) extends Instruction(InstructionDef.CooperativeMatrixPerElementOpNV, (Col(resultType, dest, matrix, func) ++ srcs)*)
   case TypeTensorLayoutNV(dest: Operand, dim: Operand, clampMode: Operand)
       extends Instruction(InstructionDef.TypeTensorLayoutNV, dest, dim, clampMode)
-  case TypeTensorViewNV(dest: Operand, dim: Operand, hasDimensions: Operand, p: Vector[Operand])
-      extends Instruction(InstructionDef.TypeTensorViewNV, (Vector(dest, dim, hasDimensions) ++ p)*)
+  case TypeTensorViewNV(dest: Operand, dim: Operand, hasDimensions: Operand, p: Col[Operand])
+      extends Instruction(InstructionDef.TypeTensorViewNV, (Col(dest, dim, hasDimensions) ++ p)*)
   case CreateTensorLayoutNV(resultType: Operand, dest: Operand)
       extends Instruction(InstructionDef.CreateTensorLayoutNV, resultType, dest)
-  case TensorLayoutSetDimensionNV(resultType: Operand, dest: Operand, tensorLayout: Operand, dim: Vector[Operand])
-      extends Instruction(InstructionDef.TensorLayoutSetDimensionNV, (Vector(resultType, dest, tensorLayout) ++ dim)*)
-  case TensorLayoutSetStrideNV(resultType: Operand, dest: Operand, tensorLayout: Operand, stride: Vector[Operand])
-      extends Instruction(InstructionDef.TensorLayoutSetStrideNV, (Vector(resultType, dest, tensorLayout) ++ stride)*)
-  case TensorLayoutSliceNV(resultType: Operand, dest: Operand, tensorLayout: Operand, srcs: Vector[Operand])
-      extends Instruction(InstructionDef.TensorLayoutSliceNV, (Vector(resultType, dest, tensorLayout) ++ srcs)*)
+  case TensorLayoutSetDimensionNV(resultType: Operand, dest: Operand, tensorLayout: Operand, dim: Col[Operand])
+      extends Instruction(InstructionDef.TensorLayoutSetDimensionNV, (Col(resultType, dest, tensorLayout) ++ dim)*)
+  case TensorLayoutSetStrideNV(resultType: Operand, dest: Operand, tensorLayout: Operand, stride: Col[Operand])
+      extends Instruction(InstructionDef.TensorLayoutSetStrideNV, (Col(resultType, dest, tensorLayout) ++ stride)*)
+  case TensorLayoutSliceNV(resultType: Operand, dest: Operand, tensorLayout: Operand, srcs: Col[Operand])
+      extends Instruction(InstructionDef.TensorLayoutSliceNV, (Col(resultType, dest, tensorLayout) ++ srcs)*)
   case TensorLayoutSetClampValueNV(resultType: Operand, dest: Operand, tensorLayout: Operand, value: Operand)
       extends Instruction(InstructionDef.TensorLayoutSetClampValueNV, resultType, dest, tensorLayout, value)
   case CreateTensorViewNV(resultType: Operand, dest: Operand)
       extends Instruction(InstructionDef.CreateTensorViewNV, resultType, dest)
-  case TensorViewSetDimensionNV(resultType: Operand, dest: Operand, tensorView: Operand, dim: Vector[Operand])
-      extends Instruction(InstructionDef.TensorViewSetDimensionNV, (Vector(resultType, dest, tensorView) ++ dim)*)
-  case TensorViewSetStrideNV(resultType: Operand, dest: Operand, tensorView: Operand, stride: Vector[Operand])
-      extends Instruction(InstructionDef.TensorViewSetStrideNV, (Vector(resultType, dest, tensorView) ++ stride)*)
+  case TensorViewSetDimensionNV(resultType: Operand, dest: Operand, tensorView: Operand, dim: Col[Operand])
+      extends Instruction(InstructionDef.TensorViewSetDimensionNV, (Col(resultType, dest, tensorView) ++ dim)*)
+  case TensorViewSetStrideNV(resultType: Operand, dest: Operand, tensorView: Operand, stride: Col[Operand])
+      extends Instruction(InstructionDef.TensorViewSetStrideNV, (Col(resultType, dest, tensorView) ++ stride)*)
   case DemoteToHelperInvocation extends Instruction(InstructionDef.DemoteToHelperInvocation)
   case IsHelperInvocationEXT(resultType: Operand, dest: Operand)
       extends Instruction(InstructionDef.IsHelperInvocationEXT, resultType, dest)
@@ -15957,10 +15874,10 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
         clipColOffset,
         clipColSpan
       )
-  case TensorLayoutSetBlockSizeNV(resultType: Operand, dest: Operand, tensorLayout: Operand, blockSize: Vector[Operand])
+  case TensorLayoutSetBlockSizeNV(resultType: Operand, dest: Operand, tensorLayout: Operand, blockSize: Col[Operand])
       extends Instruction(
         InstructionDef.TensorLayoutSetBlockSizeNV,
-        (Vector(resultType, dest, tensorLayout) ++ blockSize)*
+        (Col(resultType, dest, tensorLayout) ++ blockSize)*
       )
   case CooperativeMatrixTransposeNV(resultType: Operand, dest: Operand, matrix: Operand)
       extends Instruction(InstructionDef.CooperativeMatrixTransposeNV, resultType, dest, matrix)
@@ -15988,7 +15905,7 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
       rawAccessChainOperands: Option[Operand]
   ) extends Instruction(
         InstructionDef.RawAccessChainNV,
-        (Vector(resultType, dest, base, byteStride, elementIndex, byteOffset) ++ rawAccessChainOperands.toVector)*
+        (Col(resultType, dest, base, byteStride, elementIndex, byteOffset) ++ rawAccessChainOperands.toCol)*
       )
   case RayQueryGetIntersectionSpherePositionNV(
       resultType: Operand,
@@ -16107,8 +16024,8 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
       extends Instruction(InstructionDef.UMul32x16INTEL, resultType, dest, srcA, srcB)
   case ConstantFunctionPointerINTEL(resultType: Operand, dest: Operand, function: Operand)
       extends Instruction(InstructionDef.ConstantFunctionPointerINTEL, resultType, dest, function)
-  case FunctionPointerCallINTEL(resultType: Operand, dest: Operand, srcs: Vector[Operand])
-      extends Instruction(InstructionDef.FunctionPointerCallINTEL, (Vector(resultType, dest) ++ srcs)*)
+  case FunctionPointerCallINTEL(resultType: Operand, dest: Operand, srcs: Col[Operand])
+      extends Instruction(InstructionDef.FunctionPointerCallINTEL, (Col(resultType, dest) ++ srcs)*)
   case AsmTargetINTEL(dest: Operand, asmTarget: Operand)
       extends Instruction(InstructionDef.AsmTargetINTEL, dest, asmTarget)
   case AsmINTEL(
@@ -16119,8 +16036,8 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
       asmInsts: Operand,
       constraints: Operand
   ) extends Instruction(InstructionDef.AsmINTEL, resultType, dest, asmType, target, asmInsts, constraints)
-  case AsmCallINTEL(resultType: Operand, dest: Operand, asm: Operand, argument: Vector[Operand])
-      extends Instruction(InstructionDef.AsmCallINTEL, (Vector(resultType, dest, asm) ++ argument)*)
+  case AsmCallINTEL(resultType: Operand, dest: Operand, asm: Operand, argument: Col[Operand])
+      extends Instruction(InstructionDef.AsmCallINTEL, (Col(resultType, dest, asm) ++ argument)*)
   case AtomicFMinEXT(
       resultType: Operand,
       dest: Operand,
@@ -17836,14 +17753,14 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
         rounding,
         accuracy
       )
-  case LoopControlINTEL(loopControlParameters: Vector[Operand])
+  case LoopControlINTEL(loopControlParameters: Col[Operand])
       extends Instruction(InstructionDef.LoopControlINTEL, (loopControlParameters)*)
   case AliasDomainDeclINTEL(dest: Operand, name: Option[Operand])
-      extends Instruction(InstructionDef.AliasDomainDeclINTEL, (Vector(dest) ++ name.toVector)*)
+      extends Instruction(InstructionDef.AliasDomainDeclINTEL, (Col(dest) ++ name.toCol)*)
   case AliasScopeDeclINTEL(dest: Operand, aliasDomain: Operand, name: Option[Operand])
-      extends Instruction(InstructionDef.AliasScopeDeclINTEL, (Vector(dest, aliasDomain) ++ name.toVector)*)
-  case AliasScopeListDeclINTEL(dest: Operand, aliasScope1AliasScope2: Vector[Operand])
-      extends Instruction(InstructionDef.AliasScopeListDeclINTEL, (Vector(dest) ++ aliasScope1AliasScope2)*)
+      extends Instruction(InstructionDef.AliasScopeDeclINTEL, (Col(dest, aliasDomain) ++ name.toCol)*)
+  case AliasScopeListDeclINTEL(dest: Operand, aliasScope1AliasScope2: Col[Operand])
+      extends Instruction(InstructionDef.AliasScopeListDeclINTEL, (Col(dest) ++ aliasScope1AliasScope2)*)
   case FixedSqrtALTERA(
       resultType: Operand,
       dest: Operand,
@@ -18096,13 +18013,13 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
   ) extends Instruction(InstructionDef.AtomicFAddEXT, resultType, dest, pointer, memory, semantics, value)
   case TypeBufferSurfaceINTEL(dest: Operand, accessQualifier: Operand)
       extends Instruction(InstructionDef.TypeBufferSurfaceINTEL, dest, accessQualifier)
-  case TypeStructContinuedINTEL(member0TypeMember1Type: Vector[Operand])
+  case TypeStructContinuedINTEL(member0TypeMember1Type: Col[Operand])
       extends Instruction(InstructionDef.TypeStructContinuedINTEL, (member0TypeMember1Type)*)
-  case ConstantCompositeContinuedINTEL(constituents: Vector[Operand])
+  case ConstantCompositeContinuedINTEL(constituents: Col[Operand])
       extends Instruction(InstructionDef.ConstantCompositeContinuedINTEL, (constituents)*)
-  case SpecConstantCompositeContinuedINTEL(constituents: Vector[Operand])
+  case SpecConstantCompositeContinuedINTEL(constituents: Col[Operand])
       extends Instruction(InstructionDef.SpecConstantCompositeContinuedINTEL, (constituents)*)
-  case CompositeConstructContinuedINTEL(constituents: Vector[Operand])
+  case CompositeConstructContinuedINTEL(constituents: Col[Operand])
       extends Instruction(InstructionDef.CompositeConstructContinuedINTEL, (constituents)*)
   case ConvertFToBF16INTEL(resultType: Operand, dest: Operand, floatValue: Operand)
       extends Instruction(InstructionDef.ConvertFToBF16INTEL, resultType, dest, floatValue)
@@ -18132,15 +18049,15 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
         getCapacity,
         asyncCapacity
       )
-  case TaskSequenceAsyncALTERA(sequence: Operand, arguments: Vector[Operand])
-      extends Instruction(InstructionDef.TaskSequenceAsyncALTERA, (Vector(sequence) ++ arguments)*)
+  case TaskSequenceAsyncALTERA(sequence: Operand, arguments: Col[Operand])
+      extends Instruction(InstructionDef.TaskSequenceAsyncALTERA, (Col(sequence) ++ arguments)*)
   case TaskSequenceGetALTERA(resultType: Operand, dest: Operand, sequence: Operand)
       extends Instruction(InstructionDef.TaskSequenceGetALTERA, resultType, dest, sequence)
   case TaskSequenceReleaseALTERA(sequence: Operand)
       extends Instruction(InstructionDef.TaskSequenceReleaseALTERA, sequence)
   case TypeTaskSequenceALTERA(dest: Operand) extends Instruction(InstructionDef.TypeTaskSequenceALTERA, dest)
   case SubgroupBlockPrefetchINTEL(ptr: Operand, numBytes: Operand, mods: Option[Operand])
-      extends Instruction(InstructionDef.SubgroupBlockPrefetchINTEL, (Vector(ptr, numBytes) ++ mods.toVector)*)
+      extends Instruction(InstructionDef.SubgroupBlockPrefetchINTEL, (Col(ptr, numBytes) ++ mods.toCol)*)
   case Subgroup2DBlockLoadINTEL(
       elementSize: Operand,
       blockWidth: Operand,
@@ -18269,7 +18186,7 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
       matrixMultiplyAccumulateOperands: Option[Operand]
   ) extends Instruction(
         InstructionDef.SubgroupMatrixMultiplyAccumulateINTEL,
-        (Vector(resultType, dest, kDim, matrixA, matrixB, matrixC) ++ matrixMultiplyAccumulateOperands.toVector)*
+        (Col(resultType, dest, kDim, matrixA, matrixB, matrixC) ++ matrixMultiplyAccumulateOperands.toCol)*
       )
   case BitwiseFunctionINTEL(resultType: Operand, dest: Operand, a: Operand, b: Operand, c: Operand, lUTIndex: Operand)
       extends Instruction(InstructionDef.BitwiseFunctionINTEL, resultType, dest, a, b, c, lUTIndex)
@@ -18282,15 +18199,15 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
       executionModel: Operand,
       entryPoint: Operand,
       name: Operand,
-      interface: Vector[Operand]
+      interface: Col[Operand]
   ) extends Instruction(
         InstructionDef.ConditionalEntryPointINTEL,
-        (Vector(pred, executionModel, entryPoint, name) ++ interface)*
+        (Col(pred, executionModel, entryPoint, name) ++ interface)*
       )
   case ConditionalCapabilityINTEL(pred: Operand, capability: Operand)
       extends Instruction(InstructionDef.ConditionalCapabilityINTEL, pred, capability)
-  case SpecConstantTargetINTEL(resultType: Operand, dest: Operand, target: Operand, features: Vector[Operand])
-      extends Instruction(InstructionDef.SpecConstantTargetINTEL, (Vector(resultType, dest, target) ++ features)*)
+  case SpecConstantTargetINTEL(resultType: Operand, dest: Operand, target: Operand, features: Col[Operand])
+      extends Instruction(InstructionDef.SpecConstantTargetINTEL, (Col(resultType, dest, target) ++ features)*)
   case SpecConstantArchitectureINTEL(
       resultType: Operand,
       dest: Operand,
@@ -18307,15 +18224,15 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
         instructionOpcode,
         architecture
       )
-  case SpecConstantCapabilitiesINTEL(resultType: Operand, dest: Operand, capabilities: Vector[Operand])
-      extends Instruction(InstructionDef.SpecConstantCapabilitiesINTEL, (Vector(resultType, dest) ++ capabilities)*)
+  case SpecConstantCapabilitiesINTEL(resultType: Operand, dest: Operand, capabilities: Col[Operand])
+      extends Instruction(InstructionDef.SpecConstantCapabilitiesINTEL, (Col(resultType, dest) ++ capabilities)*)
   case ConditionalCopyObjectINTEL(
       resultType: Operand,
       dest: Operand,
-      condition0Operand0Condition1Operand1: Vector[Operand]
+      condition0Operand0Condition1Operand1: Col[Operand]
   ) extends Instruction(
         InstructionDef.ConditionalCopyObjectINTEL,
-        (Vector(resultType, dest) ++ condition0Operand0Condition1Operand1)*
+        (Col(resultType, dest) ++ condition0Operand0Condition1Operand1)*
       )
   case PredicatedLoadINTEL(
       resultType: Operand,
@@ -18326,10 +18243,10 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
       mods: Option[Operand]
   ) extends Instruction(
         InstructionDef.PredicatedLoadINTEL,
-        (Vector(resultType, dest, pointer, pred, defaultValue) ++ mods.toVector)*
+        (Col(resultType, dest, pointer, pred, defaultValue) ++ mods.toCol)*
       )
   case PredicatedStoreINTEL(pointer: Operand, src: Operand, pred: Operand, mods: Option[Operand])
-      extends Instruction(InstructionDef.PredicatedStoreINTEL, (Vector(pointer, src, pred) ++ mods.toVector)*)
+      extends Instruction(InstructionDef.PredicatedStoreINTEL, (Col(pointer, src, pred) ++ mods.toCol)*)
   case GroupIMulKHR(resultType: Operand, dest: Operand, execution: Operand, operation: Operand, x: Operand)
       extends Instruction(InstructionDef.GroupIMulKHR, resultType, dest, execution, operation, x)
   case GroupFMulKHR(resultType: Operand, dest: Operand, execution: Operand, operation: Operand, x: Operand)
@@ -18371,7 +18288,7 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
   case FDot4MixAcc32VALVE(resultType: Operand, dest: Operand, vector1: Operand, vector2: Operand, accumulator: Operand)
       extends Instruction(InstructionDef.FDot4MixAcc32VALVE, resultType, dest, vector1, vector2, accumulator)
 
-  final val operands: Vector[Operand] = operandValues.toVector
+  final val operands: Col[Operand] = operandValues.toCol
   final def opcode: Predef.String = definition.opcode
   final def opcodeNumber: Int = definition.opcodeNumber
   final def decoder: Decoder = definition.decoder
@@ -18380,10 +18297,10 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
 
 val Version: SPIRVVersion = SPIRVVersion(1, 6)
 val GrammarRevision: Int = 7
-val Instructions: Vector[InstructionDef] = InstructionDef.values.toVector
+val Instructions: Col[InstructionDef] = InstructionDef.values.toCol
 
 object Instruction {
-  private def decoders0: Vector[Decoder] = Vector(
+  private def decoders0: Col[Decoder] = Col(
     raw => Instruction.decodeDefinition(InstructionDef.fromOrdinal(0), raw, _ => Instruction.Nop),
     raw =>
       Instruction.decodeDefinition(
@@ -18639,7 +18556,7 @@ object Instruction {
       )
   )
 
-  private def decoders1: Vector[Decoder] = Vector(
+  private def decoders1: Col[Decoder] = Col(
     raw =>
       Instruction.decodeDefinition(
         InstructionDef.fromOrdinal(40),
@@ -18964,7 +18881,7 @@ object Instruction {
       )
   )
 
-  private def decoders2: Vector[Decoder] = Vector(
+  private def decoders2: Col[Decoder] = Col(
     raw =>
       Instruction.decodeDefinition(
         InstructionDef.fromOrdinal(80),
@@ -19291,7 +19208,7 @@ object Instruction {
       )
   )
 
-  private def decoders3: Vector[Decoder] = Vector(
+  private def decoders3: Col[Decoder] = Col(
     raw =>
       Instruction.decodeDefinition(
         InstructionDef.fromOrdinal(120),
@@ -19552,7 +19469,7 @@ object Instruction {
       )
   )
 
-  private def decoders4: Vector[Decoder] = Vector(
+  private def decoders4: Col[Decoder] = Col(
     raw =>
       Instruction.decodeDefinition(
         InstructionDef.fromOrdinal(160),
@@ -19857,7 +19774,7 @@ object Instruction {
       )
   )
 
-  private def decoders5: Vector[Decoder] = Vector(
+  private def decoders5: Col[Decoder] = Col(
     raw =>
       Instruction.decodeDefinition(
         InstructionDef.fromOrdinal(200),
@@ -20208,7 +20125,7 @@ object Instruction {
       )
   )
 
-  private def decoders6: Vector[Decoder] = Vector(
+  private def decoders6: Col[Decoder] = Col(
     raw =>
       Instruction.decodeDefinition(
         InstructionDef.fromOrdinal(240),
@@ -20692,7 +20609,7 @@ object Instruction {
       )
   )
 
-  private def decoders7: Vector[Decoder] = Vector(
+  private def decoders7: Col[Decoder] = Col(
     raw =>
       Instruction.decodeDefinition(
         InstructionDef.fromOrdinal(280),
@@ -21110,7 +21027,7 @@ object Instruction {
       )
   )
 
-  private def decoders8: Vector[Decoder] = Vector(
+  private def decoders8: Col[Decoder] = Col(
     raw =>
       Instruction.decodeDefinition(
         InstructionDef.fromOrdinal(320),
@@ -21518,7 +21435,7 @@ object Instruction {
     raw => Instruction.decodeDefinition(InstructionDef.fromOrdinal(359), raw, _ => Instruction.TerminateInvocation)
   )
 
-  private def decoders9: Vector[Decoder] = Vector(
+  private def decoders9: Col[Decoder] = Col(
     raw =>
       Instruction.decodeDefinition(
         InstructionDef.fromOrdinal(360),
@@ -21944,7 +21861,7 @@ object Instruction {
       )
   )
 
-  private def decoders10: Vector[Decoder] = Vector(
+  private def decoders10: Col[Decoder] = Col(
     raw =>
       Instruction.decodeDefinition(
         InstructionDef.fromOrdinal(400),
@@ -22358,7 +22275,7 @@ object Instruction {
       )
   )
 
-  private def decoders11: Vector[Decoder] = Vector(
+  private def decoders11: Col[Decoder] = Col(
     raw =>
       Instruction.decodeDefinition(
         InstructionDef.fromOrdinal(440),
@@ -22724,7 +22641,7 @@ object Instruction {
       )
   )
 
-  private def decoders12: Vector[Decoder] = Vector(
+  private def decoders12: Col[Decoder] = Col(
     raw =>
       Instruction.decodeDefinition(
         InstructionDef.fromOrdinal(480),
@@ -23151,7 +23068,7 @@ object Instruction {
       )
   )
 
-  private def decoders13: Vector[Decoder] = Vector(
+  private def decoders13: Col[Decoder] = Col(
     raw =>
       Instruction.decodeDefinition(
         InstructionDef.fromOrdinal(520),
@@ -23525,7 +23442,7 @@ object Instruction {
       )
   )
 
-  private def decoders14: Vector[Decoder] = Vector(
+  private def decoders14: Col[Decoder] = Col(
     raw =>
       Instruction.decodeDefinition(
         InstructionDef.fromOrdinal(560),
@@ -23890,7 +23807,7 @@ object Instruction {
       )
   )
 
-  private def decoders15: Vector[Decoder] = Vector(
+  private def decoders15: Col[Decoder] = Col(
     raw =>
       Instruction.decodeDefinition(
         InstructionDef.fromOrdinal(600),
@@ -24187,7 +24104,7 @@ object Instruction {
       )
   )
 
-  private def decoders16: Vector[Decoder] = Vector(
+  private def decoders16: Col[Decoder] = Col(
     raw =>
       Instruction.decodeDefinition(
         InstructionDef.fromOrdinal(640),
@@ -24584,7 +24501,7 @@ object Instruction {
       )
   )
 
-  private def decoders17: Vector[Decoder] = Vector(
+  private def decoders17: Col[Decoder] = Col(
     raw =>
       Instruction.decodeDefinition(
         InstructionDef.fromOrdinal(680),
@@ -25081,7 +24998,7 @@ object Instruction {
       )
   )
 
-  private def decoders18: Vector[Decoder] = Vector(
+  private def decoders18: Col[Decoder] = Col(
     raw =>
       Instruction.decodeDefinition(
         InstructionDef.fromOrdinal(720),
@@ -25586,7 +25503,7 @@ object Instruction {
       )
   )
 
-  private def decoders19: Vector[Decoder] = Vector(
+  private def decoders19: Col[Decoder] = Col(
     raw =>
       Instruction.decodeDefinition(
         InstructionDef.fromOrdinal(760),
@@ -26199,7 +26116,7 @@ object Instruction {
       )
   )
 
-  private def decoders20: Vector[Decoder] = Vector(
+  private def decoders20: Col[Decoder] = Col(
     raw =>
       Instruction.decodeDefinition(
         InstructionDef.fromOrdinal(800),
@@ -26569,7 +26486,7 @@ object Instruction {
       )
   )
 
-  private def decoders21: Vector[Decoder] = Vector(
+  private def decoders21: Col[Decoder] = Col(
     raw =>
       Instruction.decodeDefinition(
         InstructionDef.fromOrdinal(840),
@@ -26986,1425 +26903,1405 @@ object Instruction {
       )
   )
 
-  private def operandKinds0: Vector[OperandKindInfo] = Vector(
+  private def operandKinds0: Col[OperandKindInfo] = Col(
     OperandKindInfo(
       "ImageOperands",
       "BitEnum",
-      Vector(
-        OperandEnumerant(0L, Vector()),
-        OperandEnumerant(1L, Vector("IdRef")),
-        OperandEnumerant(2L, Vector("IdRef")),
-        OperandEnumerant(4L, Vector("IdRef", "IdRef")),
-        OperandEnumerant(8L, Vector("IdRef")),
-        OperandEnumerant(16L, Vector("IdRef")),
-        OperandEnumerant(32L, Vector("IdRef")),
-        OperandEnumerant(64L, Vector("IdRef")),
-        OperandEnumerant(128L, Vector("IdRef")),
-        OperandEnumerant(256L, Vector("IdScope")),
-        OperandEnumerant(512L, Vector("IdScope")),
-        OperandEnumerant(1024L, Vector()),
-        OperandEnumerant(2048L, Vector()),
-        OperandEnumerant(4096L, Vector()),
-        OperandEnumerant(8192L, Vector()),
-        OperandEnumerant(16384L, Vector()),
-        OperandEnumerant(65536L, Vector("IdRef"))
+      Col(
+        OperandEnumerant(0L, Col()),
+        OperandEnumerant(1L, Col("IdRef")),
+        OperandEnumerant(2L, Col("IdRef")),
+        OperandEnumerant(4L, Col("IdRef", "IdRef")),
+        OperandEnumerant(8L, Col("IdRef")),
+        OperandEnumerant(16L, Col("IdRef")),
+        OperandEnumerant(32L, Col("IdRef")),
+        OperandEnumerant(64L, Col("IdRef")),
+        OperandEnumerant(128L, Col("IdRef")),
+        OperandEnumerant(256L, Col("IdScope")),
+        OperandEnumerant(512L, Col("IdScope")),
+        OperandEnumerant(1024L, Col()),
+        OperandEnumerant(2048L, Col()),
+        OperandEnumerant(4096L, Col()),
+        OperandEnumerant(8192L, Col()),
+        OperandEnumerant(16384L, Col()),
+        OperandEnumerant(65536L, Col("IdRef"))
       )
     ),
     OperandKindInfo(
       "FPFastMathMode",
       "BitEnum",
-      Vector(
-        OperandEnumerant(0L, Vector()),
-        OperandEnumerant(1L, Vector()),
-        OperandEnumerant(2L, Vector()),
-        OperandEnumerant(4L, Vector()),
-        OperandEnumerant(8L, Vector()),
-        OperandEnumerant(16L, Vector()),
-        OperandEnumerant(65536L, Vector()),
-        OperandEnumerant(131072L, Vector()),
-        OperandEnumerant(262144L, Vector())
+      Col(
+        OperandEnumerant(0L, Col()),
+        OperandEnumerant(1L, Col()),
+        OperandEnumerant(2L, Col()),
+        OperandEnumerant(4L, Col()),
+        OperandEnumerant(8L, Col()),
+        OperandEnumerant(16L, Col()),
+        OperandEnumerant(65536L, Col()),
+        OperandEnumerant(131072L, Col()),
+        OperandEnumerant(262144L, Col())
       )
     ),
     OperandKindInfo(
       "SelectionControl",
       "BitEnum",
-      Vector(OperandEnumerant(0L, Vector()), OperandEnumerant(1L, Vector()), OperandEnumerant(2L, Vector()))
+      Col(OperandEnumerant(0L, Col()), OperandEnumerant(1L, Col()), OperandEnumerant(2L, Col()))
     ),
     OperandKindInfo(
       "LoopControl",
       "BitEnum",
-      Vector(
-        OperandEnumerant(0L, Vector()),
-        OperandEnumerant(1L, Vector()),
-        OperandEnumerant(2L, Vector()),
-        OperandEnumerant(4L, Vector()),
-        OperandEnumerant(8L, Vector("LiteralInteger")),
-        OperandEnumerant(16L, Vector("LiteralInteger")),
-        OperandEnumerant(32L, Vector("LiteralInteger")),
-        OperandEnumerant(64L, Vector("LiteralInteger")),
-        OperandEnumerant(128L, Vector("LiteralInteger")),
-        OperandEnumerant(256L, Vector("LiteralInteger")),
-        OperandEnumerant(65536L, Vector("LiteralInteger")),
-        OperandEnumerant(131072L, Vector("LiteralInteger")),
-        OperandEnumerant(262144L, Vector("LiteralInteger")),
-        OperandEnumerant(524288L, Vector("LiteralInteger")),
-        OperandEnumerant(1048576L, Vector("LiteralInteger")),
-        OperandEnumerant(2097152L, Vector("LiteralInteger")),
-        OperandEnumerant(4194304L, Vector("LiteralInteger")),
-        OperandEnumerant(8388608L, Vector()),
-        OperandEnumerant(16777216L, Vector("LiteralInteger")),
-        OperandEnumerant(33554432L, Vector("LiteralInteger")),
-        OperandEnumerant(268435456L, Vector("LiteralInteger"))
+      Col(
+        OperandEnumerant(0L, Col()),
+        OperandEnumerant(1L, Col()),
+        OperandEnumerant(2L, Col()),
+        OperandEnumerant(4L, Col()),
+        OperandEnumerant(8L, Col("LiteralInteger")),
+        OperandEnumerant(16L, Col("LiteralInteger")),
+        OperandEnumerant(32L, Col("LiteralInteger")),
+        OperandEnumerant(64L, Col("LiteralInteger")),
+        OperandEnumerant(128L, Col("LiteralInteger")),
+        OperandEnumerant(256L, Col("LiteralInteger")),
+        OperandEnumerant(65536L, Col("LiteralInteger")),
+        OperandEnumerant(131072L, Col("LiteralInteger")),
+        OperandEnumerant(262144L, Col("LiteralInteger")),
+        OperandEnumerant(524288L, Col("LiteralInteger")),
+        OperandEnumerant(1048576L, Col("LiteralInteger")),
+        OperandEnumerant(2097152L, Col("LiteralInteger")),
+        OperandEnumerant(4194304L, Col("LiteralInteger")),
+        OperandEnumerant(8388608L, Col()),
+        OperandEnumerant(16777216L, Col("LiteralInteger")),
+        OperandEnumerant(33554432L, Col("LiteralInteger")),
+        OperandEnumerant(268435456L, Col("LiteralInteger"))
       )
     ),
     OperandKindInfo(
       "FunctionControl",
       "BitEnum",
-      Vector(
-        OperandEnumerant(0L, Vector()),
-        OperandEnumerant(1L, Vector()),
-        OperandEnumerant(2L, Vector()),
-        OperandEnumerant(4L, Vector()),
-        OperandEnumerant(8L, Vector()),
-        OperandEnumerant(65536L, Vector())
+      Col(
+        OperandEnumerant(0L, Col()),
+        OperandEnumerant(1L, Col()),
+        OperandEnumerant(2L, Col()),
+        OperandEnumerant(4L, Col()),
+        OperandEnumerant(8L, Col()),
+        OperandEnumerant(65536L, Col())
       )
     ),
     OperandKindInfo(
       "MemorySemantics",
       "BitEnum",
-      Vector(
-        OperandEnumerant(0L, Vector()),
-        OperandEnumerant(2L, Vector()),
-        OperandEnumerant(4L, Vector()),
-        OperandEnumerant(8L, Vector()),
-        OperandEnumerant(16L, Vector()),
-        OperandEnumerant(64L, Vector()),
-        OperandEnumerant(128L, Vector()),
-        OperandEnumerant(256L, Vector()),
-        OperandEnumerant(512L, Vector()),
-        OperandEnumerant(1024L, Vector()),
-        OperandEnumerant(2048L, Vector()),
-        OperandEnumerant(4096L, Vector()),
-        OperandEnumerant(8192L, Vector()),
-        OperandEnumerant(16384L, Vector()),
-        OperandEnumerant(32768L, Vector())
+      Col(
+        OperandEnumerant(0L, Col()),
+        OperandEnumerant(2L, Col()),
+        OperandEnumerant(4L, Col()),
+        OperandEnumerant(8L, Col()),
+        OperandEnumerant(16L, Col()),
+        OperandEnumerant(64L, Col()),
+        OperandEnumerant(128L, Col()),
+        OperandEnumerant(256L, Col()),
+        OperandEnumerant(512L, Col()),
+        OperandEnumerant(1024L, Col()),
+        OperandEnumerant(2048L, Col()),
+        OperandEnumerant(4096L, Col()),
+        OperandEnumerant(8192L, Col()),
+        OperandEnumerant(16384L, Col()),
+        OperandEnumerant(32768L, Col())
       )
     ),
     OperandKindInfo(
       "MemoryAccess",
       "BitEnum",
-      Vector(
-        OperandEnumerant(0L, Vector()),
-        OperandEnumerant(1L, Vector()),
-        OperandEnumerant(2L, Vector("LiteralInteger")),
-        OperandEnumerant(4L, Vector()),
-        OperandEnumerant(8L, Vector("IdScope")),
-        OperandEnumerant(16L, Vector("IdScope")),
-        OperandEnumerant(32L, Vector()),
-        OperandEnumerant(65536L, Vector("IdRef")),
-        OperandEnumerant(131072L, Vector("IdRef"))
+      Col(
+        OperandEnumerant(0L, Col()),
+        OperandEnumerant(1L, Col()),
+        OperandEnumerant(2L, Col("LiteralInteger")),
+        OperandEnumerant(4L, Col()),
+        OperandEnumerant(8L, Col("IdScope")),
+        OperandEnumerant(16L, Col("IdScope")),
+        OperandEnumerant(32L, Col()),
+        OperandEnumerant(65536L, Col("IdRef")),
+        OperandEnumerant(131072L, Col("IdRef"))
       )
     ),
-    OperandKindInfo(
-      "KernelProfilingInfo",
-      "BitEnum",
-      Vector(OperandEnumerant(0L, Vector()), OperandEnumerant(1L, Vector()))
-    )
+    OperandKindInfo("KernelProfilingInfo", "BitEnum", Col(OperandEnumerant(0L, Col()), OperandEnumerant(1L, Col())))
   )
 
-  private def operandKinds1: Vector[OperandKindInfo] = Vector(
+  private def operandKinds1: Col[OperandKindInfo] = Col(
     OperandKindInfo(
       "RayFlags",
       "BitEnum",
-      Vector(
-        OperandEnumerant(0L, Vector()),
-        OperandEnumerant(1L, Vector()),
-        OperandEnumerant(2L, Vector()),
-        OperandEnumerant(4L, Vector()),
-        OperandEnumerant(8L, Vector()),
-        OperandEnumerant(16L, Vector()),
-        OperandEnumerant(32L, Vector()),
-        OperandEnumerant(64L, Vector()),
-        OperandEnumerant(128L, Vector()),
-        OperandEnumerant(256L, Vector()),
-        OperandEnumerant(512L, Vector()),
-        OperandEnumerant(1024L, Vector())
+      Col(
+        OperandEnumerant(0L, Col()),
+        OperandEnumerant(1L, Col()),
+        OperandEnumerant(2L, Col()),
+        OperandEnumerant(4L, Col()),
+        OperandEnumerant(8L, Col()),
+        OperandEnumerant(16L, Col()),
+        OperandEnumerant(32L, Col()),
+        OperandEnumerant(64L, Col()),
+        OperandEnumerant(128L, Col()),
+        OperandEnumerant(256L, Col()),
+        OperandEnumerant(512L, Col()),
+        OperandEnumerant(1024L, Col())
       )
     ),
     OperandKindInfo(
       "FragmentShadingRate",
       "BitEnum",
-      Vector(
-        OperandEnumerant(1L, Vector()),
-        OperandEnumerant(2L, Vector()),
-        OperandEnumerant(4L, Vector()),
-        OperandEnumerant(8L, Vector())
+      Col(
+        OperandEnumerant(1L, Col()),
+        OperandEnumerant(2L, Col()),
+        OperandEnumerant(4L, Col()),
+        OperandEnumerant(8L, Col())
       )
     ),
     OperandKindInfo(
       "RawAccessChainOperands",
       "BitEnum",
-      Vector(OperandEnumerant(0L, Vector()), OperandEnumerant(1L, Vector()), OperandEnumerant(2L, Vector()))
+      Col(OperandEnumerant(0L, Col()), OperandEnumerant(1L, Col()), OperandEnumerant(2L, Col()))
     ),
     OperandKindInfo(
       "SourceLanguage",
       "ValueEnum",
-      Vector(
-        OperandEnumerant(0L, Vector()),
-        OperandEnumerant(1L, Vector()),
-        OperandEnumerant(2L, Vector()),
-        OperandEnumerant(3L, Vector()),
-        OperandEnumerant(4L, Vector()),
-        OperandEnumerant(5L, Vector()),
-        OperandEnumerant(6L, Vector()),
-        OperandEnumerant(7L, Vector()),
-        OperandEnumerant(8L, Vector()),
-        OperandEnumerant(9L, Vector()),
-        OperandEnumerant(10L, Vector()),
-        OperandEnumerant(11L, Vector()),
-        OperandEnumerant(12L, Vector()),
-        OperandEnumerant(13L, Vector()),
-        OperandEnumerant(14L, Vector()),
-        OperandEnumerant(15L, Vector())
+      Col(
+        OperandEnumerant(0L, Col()),
+        OperandEnumerant(1L, Col()),
+        OperandEnumerant(2L, Col()),
+        OperandEnumerant(3L, Col()),
+        OperandEnumerant(4L, Col()),
+        OperandEnumerant(5L, Col()),
+        OperandEnumerant(6L, Col()),
+        OperandEnumerant(7L, Col()),
+        OperandEnumerant(8L, Col()),
+        OperandEnumerant(9L, Col()),
+        OperandEnumerant(10L, Col()),
+        OperandEnumerant(11L, Col()),
+        OperandEnumerant(12L, Col()),
+        OperandEnumerant(13L, Col()),
+        OperandEnumerant(14L, Col()),
+        OperandEnumerant(15L, Col())
       )
     ),
     OperandKindInfo(
       "ExecutionModel",
       "ValueEnum",
-      Vector(
-        OperandEnumerant(0L, Vector()),
-        OperandEnumerant(1L, Vector()),
-        OperandEnumerant(2L, Vector()),
-        OperandEnumerant(3L, Vector()),
-        OperandEnumerant(4L, Vector()),
-        OperandEnumerant(5L, Vector()),
-        OperandEnumerant(6L, Vector()),
-        OperandEnumerant(5267L, Vector()),
-        OperandEnumerant(5268L, Vector()),
-        OperandEnumerant(5313L, Vector()),
-        OperandEnumerant(5314L, Vector()),
-        OperandEnumerant(5315L, Vector()),
-        OperandEnumerant(5316L, Vector()),
-        OperandEnumerant(5317L, Vector()),
-        OperandEnumerant(5318L, Vector()),
-        OperandEnumerant(5364L, Vector()),
-        OperandEnumerant(5365L, Vector())
+      Col(
+        OperandEnumerant(0L, Col()),
+        OperandEnumerant(1L, Col()),
+        OperandEnumerant(2L, Col()),
+        OperandEnumerant(3L, Col()),
+        OperandEnumerant(4L, Col()),
+        OperandEnumerant(5L, Col()),
+        OperandEnumerant(6L, Col()),
+        OperandEnumerant(5267L, Col()),
+        OperandEnumerant(5268L, Col()),
+        OperandEnumerant(5313L, Col()),
+        OperandEnumerant(5314L, Col()),
+        OperandEnumerant(5315L, Col()),
+        OperandEnumerant(5316L, Col()),
+        OperandEnumerant(5317L, Col()),
+        OperandEnumerant(5318L, Col()),
+        OperandEnumerant(5364L, Col()),
+        OperandEnumerant(5365L, Col())
       )
     ),
     OperandKindInfo(
       "AddressingModel",
       "ValueEnum",
-      Vector(
-        OperandEnumerant(0L, Vector()),
-        OperandEnumerant(1L, Vector()),
-        OperandEnumerant(2L, Vector()),
-        OperandEnumerant(5348L, Vector())
+      Col(
+        OperandEnumerant(0L, Col()),
+        OperandEnumerant(1L, Col()),
+        OperandEnumerant(2L, Col()),
+        OperandEnumerant(5348L, Col())
       )
     ),
     OperandKindInfo(
       "MemoryModel",
       "ValueEnum",
-      Vector(
-        OperandEnumerant(0L, Vector()),
-        OperandEnumerant(1L, Vector()),
-        OperandEnumerant(2L, Vector()),
-        OperandEnumerant(3L, Vector())
+      Col(
+        OperandEnumerant(0L, Col()),
+        OperandEnumerant(1L, Col()),
+        OperandEnumerant(2L, Col()),
+        OperandEnumerant(3L, Col())
       )
     ),
     OperandKindInfo(
       "ExecutionMode",
       "ValueEnum",
-      Vector(
-        OperandEnumerant(0L, Vector("LiteralInteger")),
-        OperandEnumerant(1L, Vector()),
-        OperandEnumerant(2L, Vector()),
-        OperandEnumerant(3L, Vector()),
-        OperandEnumerant(4L, Vector()),
-        OperandEnumerant(5L, Vector()),
-        OperandEnumerant(6L, Vector()),
-        OperandEnumerant(7L, Vector()),
-        OperandEnumerant(8L, Vector()),
-        OperandEnumerant(9L, Vector()),
-        OperandEnumerant(10L, Vector()),
-        OperandEnumerant(11L, Vector()),
-        OperandEnumerant(12L, Vector()),
-        OperandEnumerant(14L, Vector()),
-        OperandEnumerant(15L, Vector()),
-        OperandEnumerant(16L, Vector()),
-        OperandEnumerant(17L, Vector("LiteralInteger", "LiteralInteger", "LiteralInteger")),
-        OperandEnumerant(18L, Vector("LiteralInteger", "LiteralInteger", "LiteralInteger")),
-        OperandEnumerant(19L, Vector()),
-        OperandEnumerant(20L, Vector()),
-        OperandEnumerant(21L, Vector()),
-        OperandEnumerant(22L, Vector()),
-        OperandEnumerant(23L, Vector()),
-        OperandEnumerant(24L, Vector()),
-        OperandEnumerant(25L, Vector()),
-        OperandEnumerant(26L, Vector("LiteralInteger")),
-        OperandEnumerant(27L, Vector()),
-        OperandEnumerant(28L, Vector()),
-        OperandEnumerant(29L, Vector()),
-        OperandEnumerant(30L, Vector("LiteralInteger")),
-        OperandEnumerant(31L, Vector()),
-        OperandEnumerant(33L, Vector()),
-        OperandEnumerant(34L, Vector()),
-        OperandEnumerant(35L, Vector("LiteralInteger")),
-        OperandEnumerant(36L, Vector("LiteralInteger")),
-        OperandEnumerant(37L, Vector("IdRef")),
-        OperandEnumerant(38L, Vector("IdRef", "IdRef", "IdRef")),
-        OperandEnumerant(39L, Vector("IdRef", "IdRef", "IdRef")),
-        OperandEnumerant(4169L, Vector()),
-        OperandEnumerant(4170L, Vector()),
-        OperandEnumerant(4171L, Vector()),
-        OperandEnumerant(4421L, Vector()),
-        OperandEnumerant(4446L, Vector()),
-        OperandEnumerant(4459L, Vector("LiteralInteger")),
-        OperandEnumerant(4460L, Vector("LiteralInteger")),
-        OperandEnumerant(4461L, Vector("LiteralInteger")),
-        OperandEnumerant(4462L, Vector("LiteralInteger")),
-        OperandEnumerant(4463L, Vector("LiteralInteger")),
-        OperandEnumerant(4489L, Vector()),
-        OperandEnumerant(4490L, Vector("LiteralInteger", "LiteralInteger", "LiteralInteger")),
-        OperandEnumerant(5017L, Vector()),
-        OperandEnumerant(5027L, Vector()),
-        OperandEnumerant(5069L, Vector()),
-        OperandEnumerant(5070L, Vector("IdRef")),
-        OperandEnumerant(5071L, Vector("IdRef")),
-        OperandEnumerant(5072L, Vector("IdRef", "IdRef", "IdRef")),
-        OperandEnumerant(5073L, Vector("IdRef")),
-        OperandEnumerant(5077L, Vector("IdRef", "IdRef", "IdRef")),
-        OperandEnumerant(5079L, Vector()),
-        OperandEnumerant(5080L, Vector()),
-        OperandEnumerant(5081L, Vector()),
-        OperandEnumerant(5082L, Vector()),
-        OperandEnumerant(5083L, Vector()),
-        OperandEnumerant(5084L, Vector()),
-        OperandEnumerant(5088L, Vector()),
-        OperandEnumerant(5089L, Vector()),
-        OperandEnumerant(5102L, Vector("IdRef", "IdRef")),
-        OperandEnumerant(5157L, Vector()),
-        OperandEnumerant(5269L, Vector()),
-        OperandEnumerant(5270L, Vector("LiteralInteger")),
-        OperandEnumerant(5289L, Vector()),
-        OperandEnumerant(5290L, Vector()),
-        OperandEnumerant(5298L, Vector()),
-        OperandEnumerant(5366L, Vector()),
-        OperandEnumerant(5367L, Vector()),
-        OperandEnumerant(5368L, Vector()),
-        OperandEnumerant(5369L, Vector()),
-        OperandEnumerant(5370L, Vector()),
-        OperandEnumerant(5371L, Vector()),
-        OperandEnumerant(5427L, Vector()),
-        OperandEnumerant(5618L, Vector("LiteralInteger")),
-        OperandEnumerant(5620L, Vector("LiteralInteger")),
-        OperandEnumerant(5621L, Vector("LiteralInteger")),
-        OperandEnumerant(5622L, Vector("LiteralInteger")),
-        OperandEnumerant(5623L, Vector("LiteralInteger")),
-        OperandEnumerant(5893L, Vector("LiteralInteger", "LiteralInteger", "LiteralInteger")),
-        OperandEnumerant(5894L, Vector("LiteralInteger")),
-        OperandEnumerant(5895L, Vector()),
-        OperandEnumerant(5896L, Vector("LiteralInteger")),
-        OperandEnumerant(5903L, Vector("LiteralInteger")),
-        OperandEnumerant(6023L, Vector()),
-        OperandEnumerant(6028L, Vector("IdRef", "IdRef")),
-        OperandEnumerant(6031L, Vector("IdRef")),
-        OperandEnumerant(6154L, Vector("LiteralInteger")),
-        OperandEnumerant(6160L, Vector("LiteralInteger")),
-        OperandEnumerant(6417L, Vector("LiteralInteger")),
-        OperandEnumerant(6461L, Vector("LiteralInteger")),
-        OperandEnumerant(6462L, Vector("IdRef")),
-        OperandEnumerant(6463L, Vector("NamedMaximumNumberOfRegisters"))
+      Col(
+        OperandEnumerant(0L, Col("LiteralInteger")),
+        OperandEnumerant(1L, Col()),
+        OperandEnumerant(2L, Col()),
+        OperandEnumerant(3L, Col()),
+        OperandEnumerant(4L, Col()),
+        OperandEnumerant(5L, Col()),
+        OperandEnumerant(6L, Col()),
+        OperandEnumerant(7L, Col()),
+        OperandEnumerant(8L, Col()),
+        OperandEnumerant(9L, Col()),
+        OperandEnumerant(10L, Col()),
+        OperandEnumerant(11L, Col()),
+        OperandEnumerant(12L, Col()),
+        OperandEnumerant(14L, Col()),
+        OperandEnumerant(15L, Col()),
+        OperandEnumerant(16L, Col()),
+        OperandEnumerant(17L, Col("LiteralInteger", "LiteralInteger", "LiteralInteger")),
+        OperandEnumerant(18L, Col("LiteralInteger", "LiteralInteger", "LiteralInteger")),
+        OperandEnumerant(19L, Col()),
+        OperandEnumerant(20L, Col()),
+        OperandEnumerant(21L, Col()),
+        OperandEnumerant(22L, Col()),
+        OperandEnumerant(23L, Col()),
+        OperandEnumerant(24L, Col()),
+        OperandEnumerant(25L, Col()),
+        OperandEnumerant(26L, Col("LiteralInteger")),
+        OperandEnumerant(27L, Col()),
+        OperandEnumerant(28L, Col()),
+        OperandEnumerant(29L, Col()),
+        OperandEnumerant(30L, Col("LiteralInteger")),
+        OperandEnumerant(31L, Col()),
+        OperandEnumerant(33L, Col()),
+        OperandEnumerant(34L, Col()),
+        OperandEnumerant(35L, Col("LiteralInteger")),
+        OperandEnumerant(36L, Col("LiteralInteger")),
+        OperandEnumerant(37L, Col("IdRef")),
+        OperandEnumerant(38L, Col("IdRef", "IdRef", "IdRef")),
+        OperandEnumerant(39L, Col("IdRef", "IdRef", "IdRef")),
+        OperandEnumerant(4169L, Col()),
+        OperandEnumerant(4170L, Col()),
+        OperandEnumerant(4171L, Col()),
+        OperandEnumerant(4421L, Col()),
+        OperandEnumerant(4446L, Col()),
+        OperandEnumerant(4459L, Col("LiteralInteger")),
+        OperandEnumerant(4460L, Col("LiteralInteger")),
+        OperandEnumerant(4461L, Col("LiteralInteger")),
+        OperandEnumerant(4462L, Col("LiteralInteger")),
+        OperandEnumerant(4463L, Col("LiteralInteger")),
+        OperandEnumerant(4489L, Col()),
+        OperandEnumerant(4490L, Col("LiteralInteger", "LiteralInteger", "LiteralInteger")),
+        OperandEnumerant(5017L, Col()),
+        OperandEnumerant(5027L, Col()),
+        OperandEnumerant(5069L, Col()),
+        OperandEnumerant(5070L, Col("IdRef")),
+        OperandEnumerant(5071L, Col("IdRef")),
+        OperandEnumerant(5072L, Col("IdRef", "IdRef", "IdRef")),
+        OperandEnumerant(5073L, Col("IdRef")),
+        OperandEnumerant(5077L, Col("IdRef", "IdRef", "IdRef")),
+        OperandEnumerant(5079L, Col()),
+        OperandEnumerant(5080L, Col()),
+        OperandEnumerant(5081L, Col()),
+        OperandEnumerant(5082L, Col()),
+        OperandEnumerant(5083L, Col()),
+        OperandEnumerant(5084L, Col()),
+        OperandEnumerant(5088L, Col()),
+        OperandEnumerant(5089L, Col()),
+        OperandEnumerant(5102L, Col("IdRef", "IdRef")),
+        OperandEnumerant(5157L, Col()),
+        OperandEnumerant(5269L, Col()),
+        OperandEnumerant(5270L, Col("LiteralInteger")),
+        OperandEnumerant(5289L, Col()),
+        OperandEnumerant(5290L, Col()),
+        OperandEnumerant(5298L, Col()),
+        OperandEnumerant(5366L, Col()),
+        OperandEnumerant(5367L, Col()),
+        OperandEnumerant(5368L, Col()),
+        OperandEnumerant(5369L, Col()),
+        OperandEnumerant(5370L, Col()),
+        OperandEnumerant(5371L, Col()),
+        OperandEnumerant(5427L, Col()),
+        OperandEnumerant(5618L, Col("LiteralInteger")),
+        OperandEnumerant(5620L, Col("LiteralInteger")),
+        OperandEnumerant(5621L, Col("LiteralInteger")),
+        OperandEnumerant(5622L, Col("LiteralInteger")),
+        OperandEnumerant(5623L, Col("LiteralInteger")),
+        OperandEnumerant(5893L, Col("LiteralInteger", "LiteralInteger", "LiteralInteger")),
+        OperandEnumerant(5894L, Col("LiteralInteger")),
+        OperandEnumerant(5895L, Col()),
+        OperandEnumerant(5896L, Col("LiteralInteger")),
+        OperandEnumerant(5903L, Col("LiteralInteger")),
+        OperandEnumerant(6023L, Col()),
+        OperandEnumerant(6028L, Col("IdRef", "IdRef")),
+        OperandEnumerant(6031L, Col("IdRef")),
+        OperandEnumerant(6154L, Col("LiteralInteger")),
+        OperandEnumerant(6160L, Col("LiteralInteger")),
+        OperandEnumerant(6417L, Col("LiteralInteger")),
+        OperandEnumerant(6461L, Col("LiteralInteger")),
+        OperandEnumerant(6462L, Col("IdRef")),
+        OperandEnumerant(6463L, Col("NamedMaximumNumberOfRegisters"))
       )
     )
   )
 
-  private def operandKinds2: Vector[OperandKindInfo] = Vector(
+  private def operandKinds2: Col[OperandKindInfo] = Col(
     OperandKindInfo(
       "StorageClass",
       "ValueEnum",
-      Vector(
-        OperandEnumerant(0L, Vector()),
-        OperandEnumerant(1L, Vector()),
-        OperandEnumerant(2L, Vector()),
-        OperandEnumerant(3L, Vector()),
-        OperandEnumerant(4L, Vector()),
-        OperandEnumerant(5L, Vector()),
-        OperandEnumerant(6L, Vector()),
-        OperandEnumerant(7L, Vector()),
-        OperandEnumerant(8L, Vector()),
-        OperandEnumerant(9L, Vector()),
-        OperandEnumerant(10L, Vector()),
-        OperandEnumerant(11L, Vector()),
-        OperandEnumerant(12L, Vector()),
-        OperandEnumerant(4172L, Vector()),
-        OperandEnumerant(4491L, Vector()),
-        OperandEnumerant(5068L, Vector()),
-        OperandEnumerant(5328L, Vector()),
-        OperandEnumerant(5329L, Vector()),
-        OperandEnumerant(5338L, Vector()),
-        OperandEnumerant(5339L, Vector()),
-        OperandEnumerant(5342L, Vector()),
-        OperandEnumerant(5343L, Vector()),
-        OperandEnumerant(5349L, Vector()),
-        OperandEnumerant(5385L, Vector()),
-        OperandEnumerant(5402L, Vector()),
-        OperandEnumerant(5411L, Vector()),
-        OperandEnumerant(5605L, Vector()),
-        OperandEnumerant(5936L, Vector()),
-        OperandEnumerant(5937L, Vector())
+      Col(
+        OperandEnumerant(0L, Col()),
+        OperandEnumerant(1L, Col()),
+        OperandEnumerant(2L, Col()),
+        OperandEnumerant(3L, Col()),
+        OperandEnumerant(4L, Col()),
+        OperandEnumerant(5L, Col()),
+        OperandEnumerant(6L, Col()),
+        OperandEnumerant(7L, Col()),
+        OperandEnumerant(8L, Col()),
+        OperandEnumerant(9L, Col()),
+        OperandEnumerant(10L, Col()),
+        OperandEnumerant(11L, Col()),
+        OperandEnumerant(12L, Col()),
+        OperandEnumerant(4172L, Col()),
+        OperandEnumerant(4491L, Col()),
+        OperandEnumerant(5068L, Col()),
+        OperandEnumerant(5328L, Col()),
+        OperandEnumerant(5329L, Col()),
+        OperandEnumerant(5338L, Col()),
+        OperandEnumerant(5339L, Col()),
+        OperandEnumerant(5342L, Col()),
+        OperandEnumerant(5343L, Col()),
+        OperandEnumerant(5349L, Col()),
+        OperandEnumerant(5385L, Col()),
+        OperandEnumerant(5402L, Col()),
+        OperandEnumerant(5411L, Col()),
+        OperandEnumerant(5605L, Col()),
+        OperandEnumerant(5936L, Col()),
+        OperandEnumerant(5937L, Col())
       )
     ),
     OperandKindInfo(
       "Dim",
       "ValueEnum",
-      Vector(
-        OperandEnumerant(0L, Vector()),
-        OperandEnumerant(1L, Vector()),
-        OperandEnumerant(2L, Vector()),
-        OperandEnumerant(3L, Vector()),
-        OperandEnumerant(4L, Vector()),
-        OperandEnumerant(5L, Vector()),
-        OperandEnumerant(6L, Vector()),
-        OperandEnumerant(4173L, Vector())
+      Col(
+        OperandEnumerant(0L, Col()),
+        OperandEnumerant(1L, Col()),
+        OperandEnumerant(2L, Col()),
+        OperandEnumerant(3L, Col()),
+        OperandEnumerant(4L, Col()),
+        OperandEnumerant(5L, Col()),
+        OperandEnumerant(6L, Col()),
+        OperandEnumerant(4173L, Col())
       )
     ),
     OperandKindInfo(
       "SamplerAddressingMode",
       "ValueEnum",
-      Vector(
-        OperandEnumerant(0L, Vector()),
-        OperandEnumerant(1L, Vector()),
-        OperandEnumerant(2L, Vector()),
-        OperandEnumerant(3L, Vector()),
-        OperandEnumerant(4L, Vector())
+      Col(
+        OperandEnumerant(0L, Col()),
+        OperandEnumerant(1L, Col()),
+        OperandEnumerant(2L, Col()),
+        OperandEnumerant(3L, Col()),
+        OperandEnumerant(4L, Col())
       )
     ),
-    OperandKindInfo(
-      "SamplerFilterMode",
-      "ValueEnum",
-      Vector(OperandEnumerant(0L, Vector()), OperandEnumerant(1L, Vector()))
-    ),
+    OperandKindInfo("SamplerFilterMode", "ValueEnum", Col(OperandEnumerant(0L, Col()), OperandEnumerant(1L, Col()))),
     OperandKindInfo(
       "ImageFormat",
       "ValueEnum",
-      Vector(
-        OperandEnumerant(0L, Vector()),
-        OperandEnumerant(1L, Vector()),
-        OperandEnumerant(2L, Vector()),
-        OperandEnumerant(3L, Vector()),
-        OperandEnumerant(4L, Vector()),
-        OperandEnumerant(5L, Vector()),
-        OperandEnumerant(6L, Vector()),
-        OperandEnumerant(7L, Vector()),
-        OperandEnumerant(8L, Vector()),
-        OperandEnumerant(9L, Vector()),
-        OperandEnumerant(10L, Vector()),
-        OperandEnumerant(11L, Vector()),
-        OperandEnumerant(12L, Vector()),
-        OperandEnumerant(13L, Vector()),
-        OperandEnumerant(14L, Vector()),
-        OperandEnumerant(15L, Vector()),
-        OperandEnumerant(16L, Vector()),
-        OperandEnumerant(17L, Vector()),
-        OperandEnumerant(18L, Vector()),
-        OperandEnumerant(19L, Vector()),
-        OperandEnumerant(20L, Vector()),
-        OperandEnumerant(21L, Vector()),
-        OperandEnumerant(22L, Vector()),
-        OperandEnumerant(23L, Vector()),
-        OperandEnumerant(24L, Vector()),
-        OperandEnumerant(25L, Vector()),
-        OperandEnumerant(26L, Vector()),
-        OperandEnumerant(27L, Vector()),
-        OperandEnumerant(28L, Vector()),
-        OperandEnumerant(29L, Vector()),
-        OperandEnumerant(30L, Vector()),
-        OperandEnumerant(31L, Vector()),
-        OperandEnumerant(32L, Vector()),
-        OperandEnumerant(33L, Vector()),
-        OperandEnumerant(34L, Vector()),
-        OperandEnumerant(35L, Vector()),
-        OperandEnumerant(36L, Vector()),
-        OperandEnumerant(37L, Vector()),
-        OperandEnumerant(38L, Vector()),
-        OperandEnumerant(39L, Vector()),
-        OperandEnumerant(40L, Vector()),
-        OperandEnumerant(41L, Vector())
+      Col(
+        OperandEnumerant(0L, Col()),
+        OperandEnumerant(1L, Col()),
+        OperandEnumerant(2L, Col()),
+        OperandEnumerant(3L, Col()),
+        OperandEnumerant(4L, Col()),
+        OperandEnumerant(5L, Col()),
+        OperandEnumerant(6L, Col()),
+        OperandEnumerant(7L, Col()),
+        OperandEnumerant(8L, Col()),
+        OperandEnumerant(9L, Col()),
+        OperandEnumerant(10L, Col()),
+        OperandEnumerant(11L, Col()),
+        OperandEnumerant(12L, Col()),
+        OperandEnumerant(13L, Col()),
+        OperandEnumerant(14L, Col()),
+        OperandEnumerant(15L, Col()),
+        OperandEnumerant(16L, Col()),
+        OperandEnumerant(17L, Col()),
+        OperandEnumerant(18L, Col()),
+        OperandEnumerant(19L, Col()),
+        OperandEnumerant(20L, Col()),
+        OperandEnumerant(21L, Col()),
+        OperandEnumerant(22L, Col()),
+        OperandEnumerant(23L, Col()),
+        OperandEnumerant(24L, Col()),
+        OperandEnumerant(25L, Col()),
+        OperandEnumerant(26L, Col()),
+        OperandEnumerant(27L, Col()),
+        OperandEnumerant(28L, Col()),
+        OperandEnumerant(29L, Col()),
+        OperandEnumerant(30L, Col()),
+        OperandEnumerant(31L, Col()),
+        OperandEnumerant(32L, Col()),
+        OperandEnumerant(33L, Col()),
+        OperandEnumerant(34L, Col()),
+        OperandEnumerant(35L, Col()),
+        OperandEnumerant(36L, Col()),
+        OperandEnumerant(37L, Col()),
+        OperandEnumerant(38L, Col()),
+        OperandEnumerant(39L, Col()),
+        OperandEnumerant(40L, Col()),
+        OperandEnumerant(41L, Col())
       )
     ),
     OperandKindInfo(
       "ImageChannelOrder",
       "ValueEnum",
-      Vector(
-        OperandEnumerant(0L, Vector()),
-        OperandEnumerant(1L, Vector()),
-        OperandEnumerant(2L, Vector()),
-        OperandEnumerant(3L, Vector()),
-        OperandEnumerant(4L, Vector()),
-        OperandEnumerant(5L, Vector()),
-        OperandEnumerant(6L, Vector()),
-        OperandEnumerant(7L, Vector()),
-        OperandEnumerant(8L, Vector()),
-        OperandEnumerant(9L, Vector()),
-        OperandEnumerant(10L, Vector()),
-        OperandEnumerant(11L, Vector()),
-        OperandEnumerant(12L, Vector()),
-        OperandEnumerant(13L, Vector()),
-        OperandEnumerant(14L, Vector()),
-        OperandEnumerant(15L, Vector()),
-        OperandEnumerant(16L, Vector()),
-        OperandEnumerant(17L, Vector()),
-        OperandEnumerant(18L, Vector()),
-        OperandEnumerant(19L, Vector())
+      Col(
+        OperandEnumerant(0L, Col()),
+        OperandEnumerant(1L, Col()),
+        OperandEnumerant(2L, Col()),
+        OperandEnumerant(3L, Col()),
+        OperandEnumerant(4L, Col()),
+        OperandEnumerant(5L, Col()),
+        OperandEnumerant(6L, Col()),
+        OperandEnumerant(7L, Col()),
+        OperandEnumerant(8L, Col()),
+        OperandEnumerant(9L, Col()),
+        OperandEnumerant(10L, Col()),
+        OperandEnumerant(11L, Col()),
+        OperandEnumerant(12L, Col()),
+        OperandEnumerant(13L, Col()),
+        OperandEnumerant(14L, Col()),
+        OperandEnumerant(15L, Col()),
+        OperandEnumerant(16L, Col()),
+        OperandEnumerant(17L, Col()),
+        OperandEnumerant(18L, Col()),
+        OperandEnumerant(19L, Col())
       )
     ),
     OperandKindInfo(
       "ImageChannelDataType",
       "ValueEnum",
-      Vector(
-        OperandEnumerant(0L, Vector()),
-        OperandEnumerant(1L, Vector()),
-        OperandEnumerant(2L, Vector()),
-        OperandEnumerant(3L, Vector()),
-        OperandEnumerant(4L, Vector()),
-        OperandEnumerant(5L, Vector()),
-        OperandEnumerant(6L, Vector()),
-        OperandEnumerant(7L, Vector()),
-        OperandEnumerant(8L, Vector()),
-        OperandEnumerant(9L, Vector()),
-        OperandEnumerant(10L, Vector()),
-        OperandEnumerant(11L, Vector()),
-        OperandEnumerant(12L, Vector()),
-        OperandEnumerant(13L, Vector()),
-        OperandEnumerant(14L, Vector()),
-        OperandEnumerant(15L, Vector()),
-        OperandEnumerant(16L, Vector()),
-        OperandEnumerant(17L, Vector()),
-        OperandEnumerant(19L, Vector()),
-        OperandEnumerant(20L, Vector()),
-        OperandEnumerant(21L, Vector()),
-        OperandEnumerant(22L, Vector()),
-        OperandEnumerant(23L, Vector()),
-        OperandEnumerant(24L, Vector()),
-        OperandEnumerant(25L, Vector()),
-        OperandEnumerant(26L, Vector())
+      Col(
+        OperandEnumerant(0L, Col()),
+        OperandEnumerant(1L, Col()),
+        OperandEnumerant(2L, Col()),
+        OperandEnumerant(3L, Col()),
+        OperandEnumerant(4L, Col()),
+        OperandEnumerant(5L, Col()),
+        OperandEnumerant(6L, Col()),
+        OperandEnumerant(7L, Col()),
+        OperandEnumerant(8L, Col()),
+        OperandEnumerant(9L, Col()),
+        OperandEnumerant(10L, Col()),
+        OperandEnumerant(11L, Col()),
+        OperandEnumerant(12L, Col()),
+        OperandEnumerant(13L, Col()),
+        OperandEnumerant(14L, Col()),
+        OperandEnumerant(15L, Col()),
+        OperandEnumerant(16L, Col()),
+        OperandEnumerant(17L, Col()),
+        OperandEnumerant(19L, Col()),
+        OperandEnumerant(20L, Col()),
+        OperandEnumerant(21L, Col()),
+        OperandEnumerant(22L, Col()),
+        OperandEnumerant(23L, Col()),
+        OperandEnumerant(24L, Col()),
+        OperandEnumerant(25L, Col()),
+        OperandEnumerant(26L, Col())
       )
     ),
     OperandKindInfo(
       "FPRoundingMode",
       "ValueEnum",
-      Vector(
-        OperandEnumerant(0L, Vector()),
-        OperandEnumerant(1L, Vector()),
-        OperandEnumerant(2L, Vector()),
-        OperandEnumerant(3L, Vector())
+      Col(
+        OperandEnumerant(0L, Col()),
+        OperandEnumerant(1L, Col()),
+        OperandEnumerant(2L, Col()),
+        OperandEnumerant(3L, Col())
       )
     )
   )
 
-  private def operandKinds3: Vector[OperandKindInfo] = Vector(
-    OperandKindInfo(
-      "FPDenormMode",
-      "ValueEnum",
-      Vector(OperandEnumerant(0L, Vector()), OperandEnumerant(1L, Vector()))
-    ),
+  private def operandKinds3: Col[OperandKindInfo] = Col(
+    OperandKindInfo("FPDenormMode", "ValueEnum", Col(OperandEnumerant(0L, Col()), OperandEnumerant(1L, Col()))),
     OperandKindInfo(
       "QuantizationModes",
       "ValueEnum",
-      Vector(
-        OperandEnumerant(0L, Vector()),
-        OperandEnumerant(1L, Vector()),
-        OperandEnumerant(2L, Vector()),
-        OperandEnumerant(3L, Vector()),
-        OperandEnumerant(4L, Vector()),
-        OperandEnumerant(5L, Vector()),
-        OperandEnumerant(6L, Vector()),
-        OperandEnumerant(7L, Vector())
+      Col(
+        OperandEnumerant(0L, Col()),
+        OperandEnumerant(1L, Col()),
+        OperandEnumerant(2L, Col()),
+        OperandEnumerant(3L, Col()),
+        OperandEnumerant(4L, Col()),
+        OperandEnumerant(5L, Col()),
+        OperandEnumerant(6L, Col()),
+        OperandEnumerant(7L, Col())
       )
     ),
-    OperandKindInfo(
-      "FPOperationMode",
-      "ValueEnum",
-      Vector(OperandEnumerant(0L, Vector()), OperandEnumerant(1L, Vector()))
-    ),
+    OperandKindInfo("FPOperationMode", "ValueEnum", Col(OperandEnumerant(0L, Col()), OperandEnumerant(1L, Col()))),
     OperandKindInfo(
       "OverflowModes",
       "ValueEnum",
-      Vector(
-        OperandEnumerant(0L, Vector()),
-        OperandEnumerant(1L, Vector()),
-        OperandEnumerant(2L, Vector()),
-        OperandEnumerant(3L, Vector())
+      Col(
+        OperandEnumerant(0L, Col()),
+        OperandEnumerant(1L, Col()),
+        OperandEnumerant(2L, Col()),
+        OperandEnumerant(3L, Col())
       )
     ),
     OperandKindInfo(
       "LinkageType",
       "ValueEnum",
-      Vector(
-        OperandEnumerant(0L, Vector()),
-        OperandEnumerant(1L, Vector()),
-        OperandEnumerant(2L, Vector()),
-        OperandEnumerant(3L, Vector())
+      Col(
+        OperandEnumerant(0L, Col()),
+        OperandEnumerant(1L, Col()),
+        OperandEnumerant(2L, Col()),
+        OperandEnumerant(3L, Col())
       )
     ),
     OperandKindInfo(
       "AccessQualifier",
       "ValueEnum",
-      Vector(OperandEnumerant(0L, Vector()), OperandEnumerant(1L, Vector()), OperandEnumerant(2L, Vector()))
+      Col(OperandEnumerant(0L, Col()), OperandEnumerant(1L, Col()), OperandEnumerant(2L, Col()))
     ),
     OperandKindInfo(
       "HostAccessQualifier",
       "ValueEnum",
-      Vector(
-        OperandEnumerant(0L, Vector()),
-        OperandEnumerant(1L, Vector()),
-        OperandEnumerant(2L, Vector()),
-        OperandEnumerant(3L, Vector())
+      Col(
+        OperandEnumerant(0L, Col()),
+        OperandEnumerant(1L, Col()),
+        OperandEnumerant(2L, Col()),
+        OperandEnumerant(3L, Col())
       )
     ),
     OperandKindInfo(
       "FunctionParameterAttribute",
       "ValueEnum",
-      Vector(
-        OperandEnumerant(0L, Vector()),
-        OperandEnumerant(1L, Vector()),
-        OperandEnumerant(2L, Vector()),
-        OperandEnumerant(3L, Vector()),
-        OperandEnumerant(4L, Vector()),
-        OperandEnumerant(5L, Vector()),
-        OperandEnumerant(6L, Vector()),
-        OperandEnumerant(7L, Vector()),
-        OperandEnumerant(5940L, Vector())
+      Col(
+        OperandEnumerant(0L, Col()),
+        OperandEnumerant(1L, Col()),
+        OperandEnumerant(2L, Col()),
+        OperandEnumerant(3L, Col()),
+        OperandEnumerant(4L, Col()),
+        OperandEnumerant(5L, Col()),
+        OperandEnumerant(6L, Col()),
+        OperandEnumerant(7L, Col()),
+        OperandEnumerant(5940L, Col())
       )
     )
   )
 
-  private def operandKinds4: Vector[OperandKindInfo] = Vector(
+  private def operandKinds4: Col[OperandKindInfo] = Col(
     OperandKindInfo(
       "Decoration",
       "ValueEnum",
-      Vector(
-        OperandEnumerant(0L, Vector()),
-        OperandEnumerant(1L, Vector("LiteralInteger")),
-        OperandEnumerant(2L, Vector()),
-        OperandEnumerant(3L, Vector()),
-        OperandEnumerant(4L, Vector()),
-        OperandEnumerant(5L, Vector()),
-        OperandEnumerant(6L, Vector("LiteralInteger")),
-        OperandEnumerant(7L, Vector("LiteralInteger")),
-        OperandEnumerant(8L, Vector()),
-        OperandEnumerant(9L, Vector()),
-        OperandEnumerant(10L, Vector()),
-        OperandEnumerant(11L, Vector("BuiltIn")),
-        OperandEnumerant(13L, Vector()),
-        OperandEnumerant(14L, Vector()),
-        OperandEnumerant(15L, Vector()),
-        OperandEnumerant(16L, Vector()),
-        OperandEnumerant(17L, Vector()),
-        OperandEnumerant(18L, Vector()),
-        OperandEnumerant(19L, Vector()),
-        OperandEnumerant(20L, Vector()),
-        OperandEnumerant(21L, Vector()),
-        OperandEnumerant(22L, Vector()),
-        OperandEnumerant(23L, Vector()),
-        OperandEnumerant(24L, Vector()),
-        OperandEnumerant(25L, Vector()),
-        OperandEnumerant(26L, Vector()),
-        OperandEnumerant(27L, Vector("IdScope")),
-        OperandEnumerant(28L, Vector()),
-        OperandEnumerant(29L, Vector("LiteralInteger")),
-        OperandEnumerant(30L, Vector("LiteralInteger")),
-        OperandEnumerant(31L, Vector("LiteralInteger")),
-        OperandEnumerant(32L, Vector("LiteralInteger")),
-        OperandEnumerant(33L, Vector("LiteralInteger")),
-        OperandEnumerant(34L, Vector("LiteralInteger")),
-        OperandEnumerant(35L, Vector("LiteralInteger")),
-        OperandEnumerant(36L, Vector("LiteralInteger")),
-        OperandEnumerant(37L, Vector("LiteralInteger")),
-        OperandEnumerant(38L, Vector("FunctionParameterAttribute")),
-        OperandEnumerant(39L, Vector("FPRoundingMode")),
-        OperandEnumerant(40L, Vector("FPFastMathMode")),
-        OperandEnumerant(41L, Vector("LiteralString", "LinkageType")),
-        OperandEnumerant(42L, Vector()),
-        OperandEnumerant(43L, Vector("LiteralInteger")),
-        OperandEnumerant(44L, Vector("LiteralInteger")),
-        OperandEnumerant(45L, Vector("LiteralInteger")),
-        OperandEnumerant(46L, Vector("IdRef")),
-        OperandEnumerant(47L, Vector("IdRef")),
-        OperandEnumerant(4216L, Vector()),
-        OperandEnumerant(4469L, Vector()),
-        OperandEnumerant(4470L, Vector()),
-        OperandEnumerant(4487L, Vector()),
-        OperandEnumerant(4488L, Vector()),
-        OperandEnumerant(4499L, Vector()),
-        OperandEnumerant(4999L, Vector()),
-        OperandEnumerant(5019L, Vector("IdRef")),
-        OperandEnumerant(5020L, Vector("IdRef")),
-        OperandEnumerant(5078L, Vector()),
-        OperandEnumerant(5091L, Vector("IdRef")),
-        OperandEnumerant(5098L, Vector("IdRef")),
-        OperandEnumerant(5099L, Vector()),
-        OperandEnumerant(5100L, Vector("IdRef")),
-        OperandEnumerant(5105L, Vector()),
-        OperandEnumerant(5124L, Vector("IdRef")),
-        OperandEnumerant(5125L, Vector("IdRef")),
-        OperandEnumerant(5145L, Vector()),
-        OperandEnumerant(5248L, Vector()),
-        OperandEnumerant(5250L, Vector()),
-        OperandEnumerant(5252L, Vector()),
-        OperandEnumerant(5256L, Vector("LiteralInteger")),
-        OperandEnumerant(5271L, Vector()),
-        OperandEnumerant(5272L, Vector()),
-        OperandEnumerant(5273L, Vector()),
-        OperandEnumerant(5285L, Vector()),
-        OperandEnumerant(5300L, Vector()),
-        OperandEnumerant(5355L, Vector()),
-        OperandEnumerant(5356L, Vector()),
-        OperandEnumerant(5358L, Vector("LiteralInteger")),
-        OperandEnumerant(5386L, Vector()),
-        OperandEnumerant(5389L, Vector()),
-        OperandEnumerant(5397L, Vector("LiteralInteger")),
-        OperandEnumerant(5398L, Vector()),
-        OperandEnumerant(5399L, Vector()),
-        OperandEnumerant(5400L, Vector()),
-        OperandEnumerant(5401L, Vector()),
-        OperandEnumerant(5599L, Vector("LiteralInteger")),
-        OperandEnumerant(5602L, Vector()),
-        OperandEnumerant(5607L, Vector("LiteralString")),
-        OperandEnumerant(5608L, Vector()),
-        OperandEnumerant(5624L, Vector()),
-        OperandEnumerant(5625L, Vector("LiteralInteger")),
-        OperandEnumerant(5626L, Vector()),
-        OperandEnumerant(5627L, Vector()),
-        OperandEnumerant(5628L, Vector("LiteralInteger")),
-        OperandEnumerant(5634L, Vector("IdRef")),
-        OperandEnumerant(5635L, Vector("LiteralString")),
-        OperandEnumerant(5636L, Vector("LiteralString")),
-        OperandEnumerant(5822L, Vector("LiteralInteger", "FPRoundingMode")),
-        OperandEnumerant(5823L, Vector("LiteralInteger", "FPDenormMode")),
-        OperandEnumerant(5825L, Vector()),
-        OperandEnumerant(5826L, Vector("LiteralString")),
-        OperandEnumerant(5827L, Vector("LiteralInteger")),
-        OperandEnumerant(5828L, Vector("LiteralInteger")),
-        OperandEnumerant(5829L, Vector("LiteralInteger")),
-        OperandEnumerant(5830L, Vector()),
-        OperandEnumerant(5831L, Vector()),
-        OperandEnumerant(5832L, Vector("LiteralInteger")),
-        OperandEnumerant(5833L, Vector()),
-        OperandEnumerant(5834L, Vector("LiteralString", "LiteralString")),
-        OperandEnumerant(5835L, Vector("LiteralInteger")),
-        OperandEnumerant(5836L, Vector("LiteralInteger")),
-        OperandEnumerant(5883L, Vector("LiteralInteger")),
-        OperandEnumerant(5884L, Vector("LiteralInteger")),
-        OperandEnumerant(5885L, Vector()),
-        OperandEnumerant(5899L, Vector()),
-        OperandEnumerant(5900L, Vector("LiteralInteger")),
-        OperandEnumerant(5901L, Vector()),
-        OperandEnumerant(5902L, Vector("LiteralInteger")),
-        OperandEnumerant(5905L, Vector()),
-        OperandEnumerant(5907L, Vector()),
-        OperandEnumerant(5909L, Vector("LiteralInteger", "LiteralInteger")),
-        OperandEnumerant(5914L, Vector("IdRef")),
-        OperandEnumerant(5915L, Vector("IdRef")),
-        OperandEnumerant(5917L, Vector("LiteralInteger")),
-        OperandEnumerant(5918L, Vector("LiteralInteger")),
-        OperandEnumerant(5919L, Vector("LiteralInteger")),
-        OperandEnumerant(5921L, Vector("LiteralInteger")),
-        OperandEnumerant(5944L, Vector("LiteralInteger")),
-        OperandEnumerant(6080L, Vector("LiteralInteger", "FPOperationMode")),
-        OperandEnumerant(6085L, Vector()),
-        OperandEnumerant(6087L, Vector()),
-        OperandEnumerant(6140L, Vector()),
-        OperandEnumerant(6151L, Vector()),
-        OperandEnumerant(6170L, Vector("LiteralFloat")),
-        OperandEnumerant(6172L, Vector("LiteralInteger")),
-        OperandEnumerant(6173L, Vector("LiteralInteger", "LiteralInteger", "LiteralInteger")),
-        OperandEnumerant(6175L, Vector()),
-        OperandEnumerant(6176L, Vector()),
-        OperandEnumerant(6177L, Vector("LiteralInteger")),
-        OperandEnumerant(6178L, Vector("LiteralInteger")),
-        OperandEnumerant(6179L, Vector("LiteralInteger")),
-        OperandEnumerant(6180L, Vector("AccessQualifier")),
-        OperandEnumerant(6181L, Vector("LiteralInteger")),
-        OperandEnumerant(6182L, Vector("LiteralInteger")),
-        OperandEnumerant(6183L, Vector()),
-        OperandEnumerant(6188L, Vector("HostAccessQualifier", "LiteralString")),
-        OperandEnumerant(6190L, Vector("InitializationModeQualifier")),
-        OperandEnumerant(6191L, Vector("LiteralInteger")),
-        OperandEnumerant(6247L, Vector("IdRef")),
-        OperandEnumerant(6442L, Vector("LiteralInteger", "LoadCacheControl")),
-        OperandEnumerant(6443L, Vector("LiteralInteger", "StoreCacheControl")),
-        OperandEnumerant(7040L, Vector("LiteralInteger"))
+      Col(
+        OperandEnumerant(0L, Col()),
+        OperandEnumerant(1L, Col("LiteralInteger")),
+        OperandEnumerant(2L, Col()),
+        OperandEnumerant(3L, Col()),
+        OperandEnumerant(4L, Col()),
+        OperandEnumerant(5L, Col()),
+        OperandEnumerant(6L, Col("LiteralInteger")),
+        OperandEnumerant(7L, Col("LiteralInteger")),
+        OperandEnumerant(8L, Col()),
+        OperandEnumerant(9L, Col()),
+        OperandEnumerant(10L, Col()),
+        OperandEnumerant(11L, Col("BuiltIn")),
+        OperandEnumerant(13L, Col()),
+        OperandEnumerant(14L, Col()),
+        OperandEnumerant(15L, Col()),
+        OperandEnumerant(16L, Col()),
+        OperandEnumerant(17L, Col()),
+        OperandEnumerant(18L, Col()),
+        OperandEnumerant(19L, Col()),
+        OperandEnumerant(20L, Col()),
+        OperandEnumerant(21L, Col()),
+        OperandEnumerant(22L, Col()),
+        OperandEnumerant(23L, Col()),
+        OperandEnumerant(24L, Col()),
+        OperandEnumerant(25L, Col()),
+        OperandEnumerant(26L, Col()),
+        OperandEnumerant(27L, Col("IdScope")),
+        OperandEnumerant(28L, Col()),
+        OperandEnumerant(29L, Col("LiteralInteger")),
+        OperandEnumerant(30L, Col("LiteralInteger")),
+        OperandEnumerant(31L, Col("LiteralInteger")),
+        OperandEnumerant(32L, Col("LiteralInteger")),
+        OperandEnumerant(33L, Col("LiteralInteger")),
+        OperandEnumerant(34L, Col("LiteralInteger")),
+        OperandEnumerant(35L, Col("LiteralInteger")),
+        OperandEnumerant(36L, Col("LiteralInteger")),
+        OperandEnumerant(37L, Col("LiteralInteger")),
+        OperandEnumerant(38L, Col("FunctionParameterAttribute")),
+        OperandEnumerant(39L, Col("FPRoundingMode")),
+        OperandEnumerant(40L, Col("FPFastMathMode")),
+        OperandEnumerant(41L, Col("LiteralString", "LinkageType")),
+        OperandEnumerant(42L, Col()),
+        OperandEnumerant(43L, Col("LiteralInteger")),
+        OperandEnumerant(44L, Col("LiteralInteger")),
+        OperandEnumerant(45L, Col("LiteralInteger")),
+        OperandEnumerant(46L, Col("IdRef")),
+        OperandEnumerant(47L, Col("IdRef")),
+        OperandEnumerant(4216L, Col()),
+        OperandEnumerant(4469L, Col()),
+        OperandEnumerant(4470L, Col()),
+        OperandEnumerant(4487L, Col()),
+        OperandEnumerant(4488L, Col()),
+        OperandEnumerant(4499L, Col()),
+        OperandEnumerant(4999L, Col()),
+        OperandEnumerant(5019L, Col("IdRef")),
+        OperandEnumerant(5020L, Col("IdRef")),
+        OperandEnumerant(5078L, Col()),
+        OperandEnumerant(5091L, Col("IdRef")),
+        OperandEnumerant(5098L, Col("IdRef")),
+        OperandEnumerant(5099L, Col()),
+        OperandEnumerant(5100L, Col("IdRef")),
+        OperandEnumerant(5105L, Col()),
+        OperandEnumerant(5124L, Col("IdRef")),
+        OperandEnumerant(5125L, Col("IdRef")),
+        OperandEnumerant(5145L, Col()),
+        OperandEnumerant(5248L, Col()),
+        OperandEnumerant(5250L, Col()),
+        OperandEnumerant(5252L, Col()),
+        OperandEnumerant(5256L, Col("LiteralInteger")),
+        OperandEnumerant(5271L, Col()),
+        OperandEnumerant(5272L, Col()),
+        OperandEnumerant(5273L, Col()),
+        OperandEnumerant(5285L, Col()),
+        OperandEnumerant(5300L, Col()),
+        OperandEnumerant(5355L, Col()),
+        OperandEnumerant(5356L, Col()),
+        OperandEnumerant(5358L, Col("LiteralInteger")),
+        OperandEnumerant(5386L, Col()),
+        OperandEnumerant(5389L, Col()),
+        OperandEnumerant(5397L, Col("LiteralInteger")),
+        OperandEnumerant(5398L, Col()),
+        OperandEnumerant(5399L, Col()),
+        OperandEnumerant(5400L, Col()),
+        OperandEnumerant(5401L, Col()),
+        OperandEnumerant(5599L, Col("LiteralInteger")),
+        OperandEnumerant(5602L, Col()),
+        OperandEnumerant(5607L, Col("LiteralString")),
+        OperandEnumerant(5608L, Col()),
+        OperandEnumerant(5624L, Col()),
+        OperandEnumerant(5625L, Col("LiteralInteger")),
+        OperandEnumerant(5626L, Col()),
+        OperandEnumerant(5627L, Col()),
+        OperandEnumerant(5628L, Col("LiteralInteger")),
+        OperandEnumerant(5634L, Col("IdRef")),
+        OperandEnumerant(5635L, Col("LiteralString")),
+        OperandEnumerant(5636L, Col("LiteralString")),
+        OperandEnumerant(5822L, Col("LiteralInteger", "FPRoundingMode")),
+        OperandEnumerant(5823L, Col("LiteralInteger", "FPDenormMode")),
+        OperandEnumerant(5825L, Col()),
+        OperandEnumerant(5826L, Col("LiteralString")),
+        OperandEnumerant(5827L, Col("LiteralInteger")),
+        OperandEnumerant(5828L, Col("LiteralInteger")),
+        OperandEnumerant(5829L, Col("LiteralInteger")),
+        OperandEnumerant(5830L, Col()),
+        OperandEnumerant(5831L, Col()),
+        OperandEnumerant(5832L, Col("LiteralInteger")),
+        OperandEnumerant(5833L, Col()),
+        OperandEnumerant(5834L, Col("LiteralString", "LiteralString")),
+        OperandEnumerant(5835L, Col("LiteralInteger")),
+        OperandEnumerant(5836L, Col("LiteralInteger")),
+        OperandEnumerant(5883L, Col("LiteralInteger")),
+        OperandEnumerant(5884L, Col("LiteralInteger")),
+        OperandEnumerant(5885L, Col()),
+        OperandEnumerant(5899L, Col()),
+        OperandEnumerant(5900L, Col("LiteralInteger")),
+        OperandEnumerant(5901L, Col()),
+        OperandEnumerant(5902L, Col("LiteralInteger")),
+        OperandEnumerant(5905L, Col()),
+        OperandEnumerant(5907L, Col()),
+        OperandEnumerant(5909L, Col("LiteralInteger", "LiteralInteger")),
+        OperandEnumerant(5914L, Col("IdRef")),
+        OperandEnumerant(5915L, Col("IdRef")),
+        OperandEnumerant(5917L, Col("LiteralInteger")),
+        OperandEnumerant(5918L, Col("LiteralInteger")),
+        OperandEnumerant(5919L, Col("LiteralInteger")),
+        OperandEnumerant(5921L, Col("LiteralInteger")),
+        OperandEnumerant(5944L, Col("LiteralInteger")),
+        OperandEnumerant(6080L, Col("LiteralInteger", "FPOperationMode")),
+        OperandEnumerant(6085L, Col()),
+        OperandEnumerant(6087L, Col()),
+        OperandEnumerant(6140L, Col()),
+        OperandEnumerant(6151L, Col()),
+        OperandEnumerant(6170L, Col("LiteralFloat")),
+        OperandEnumerant(6172L, Col("LiteralInteger")),
+        OperandEnumerant(6173L, Col("LiteralInteger", "LiteralInteger", "LiteralInteger")),
+        OperandEnumerant(6175L, Col()),
+        OperandEnumerant(6176L, Col()),
+        OperandEnumerant(6177L, Col("LiteralInteger")),
+        OperandEnumerant(6178L, Col("LiteralInteger")),
+        OperandEnumerant(6179L, Col("LiteralInteger")),
+        OperandEnumerant(6180L, Col("AccessQualifier")),
+        OperandEnumerant(6181L, Col("LiteralInteger")),
+        OperandEnumerant(6182L, Col("LiteralInteger")),
+        OperandEnumerant(6183L, Col()),
+        OperandEnumerant(6188L, Col("HostAccessQualifier", "LiteralString")),
+        OperandEnumerant(6190L, Col("InitializationModeQualifier")),
+        OperandEnumerant(6191L, Col("LiteralInteger")),
+        OperandEnumerant(6247L, Col("IdRef")),
+        OperandEnumerant(6442L, Col("LiteralInteger", "LoadCacheControl")),
+        OperandEnumerant(6443L, Col("LiteralInteger", "StoreCacheControl")),
+        OperandEnumerant(7040L, Col("LiteralInteger"))
       )
     ),
     OperandKindInfo(
       "BuiltIn",
       "ValueEnum",
-      Vector(
-        OperandEnumerant(0L, Vector()),
-        OperandEnumerant(1L, Vector()),
-        OperandEnumerant(3L, Vector()),
-        OperandEnumerant(4L, Vector()),
-        OperandEnumerant(5L, Vector()),
-        OperandEnumerant(6L, Vector()),
-        OperandEnumerant(7L, Vector()),
-        OperandEnumerant(8L, Vector()),
-        OperandEnumerant(9L, Vector()),
-        OperandEnumerant(10L, Vector()),
-        OperandEnumerant(11L, Vector()),
-        OperandEnumerant(12L, Vector()),
-        OperandEnumerant(13L, Vector()),
-        OperandEnumerant(14L, Vector()),
-        OperandEnumerant(15L, Vector()),
-        OperandEnumerant(16L, Vector()),
-        OperandEnumerant(17L, Vector()),
-        OperandEnumerant(18L, Vector()),
-        OperandEnumerant(19L, Vector()),
-        OperandEnumerant(20L, Vector()),
-        OperandEnumerant(22L, Vector()),
-        OperandEnumerant(23L, Vector()),
-        OperandEnumerant(24L, Vector()),
-        OperandEnumerant(25L, Vector()),
-        OperandEnumerant(26L, Vector()),
-        OperandEnumerant(27L, Vector()),
-        OperandEnumerant(28L, Vector()),
-        OperandEnumerant(29L, Vector()),
-        OperandEnumerant(30L, Vector()),
-        OperandEnumerant(31L, Vector()),
-        OperandEnumerant(32L, Vector()),
-        OperandEnumerant(33L, Vector()),
-        OperandEnumerant(34L, Vector()),
-        OperandEnumerant(36L, Vector()),
-        OperandEnumerant(37L, Vector()),
-        OperandEnumerant(38L, Vector()),
-        OperandEnumerant(39L, Vector()),
-        OperandEnumerant(40L, Vector()),
-        OperandEnumerant(41L, Vector()),
-        OperandEnumerant(42L, Vector()),
-        OperandEnumerant(43L, Vector()),
-        OperandEnumerant(4160L, Vector()),
-        OperandEnumerant(4161L, Vector()),
-        OperandEnumerant(4162L, Vector()),
-        OperandEnumerant(4163L, Vector()),
-        OperandEnumerant(4164L, Vector()),
-        OperandEnumerant(4416L, Vector()),
-        OperandEnumerant(4417L, Vector()),
-        OperandEnumerant(4418L, Vector()),
-        OperandEnumerant(4419L, Vector()),
-        OperandEnumerant(4420L, Vector()),
-        OperandEnumerant(4424L, Vector()),
-        OperandEnumerant(4425L, Vector()),
-        OperandEnumerant(4426L, Vector()),
-        OperandEnumerant(4432L, Vector()),
-        OperandEnumerant(4438L, Vector()),
-        OperandEnumerant(4440L, Vector()),
-        OperandEnumerant(4444L, Vector()),
-        OperandEnumerant(4492L, Vector()),
-        OperandEnumerant(4493L, Vector()),
-        OperandEnumerant(4494L, Vector()),
-        OperandEnumerant(4992L, Vector()),
-        OperandEnumerant(4993L, Vector()),
-        OperandEnumerant(4994L, Vector()),
-        OperandEnumerant(4995L, Vector()),
-        OperandEnumerant(4996L, Vector()),
-        OperandEnumerant(4997L, Vector()),
-        OperandEnumerant(4998L, Vector()),
-        OperandEnumerant(5014L, Vector()),
-        OperandEnumerant(5021L, Vector()),
-        OperandEnumerant(5073L, Vector()),
-        OperandEnumerant(5122L, Vector()),
-        OperandEnumerant(5123L, Vector()),
-        OperandEnumerant(5253L, Vector()),
-        OperandEnumerant(5257L, Vector()),
-        OperandEnumerant(5258L, Vector()),
-        OperandEnumerant(5261L, Vector()),
-        OperandEnumerant(5262L, Vector()),
-        OperandEnumerant(5264L, Vector()),
-        OperandEnumerant(5274L, Vector()),
-        OperandEnumerant(5275L, Vector()),
-        OperandEnumerant(5276L, Vector()),
-        OperandEnumerant(5277L, Vector()),
-        OperandEnumerant(5278L, Vector()),
-        OperandEnumerant(5279L, Vector()),
-        OperandEnumerant(5280L, Vector()),
-        OperandEnumerant(5281L, Vector()),
-        OperandEnumerant(5286L, Vector()),
-        OperandEnumerant(5287L, Vector()),
-        OperandEnumerant(5292L, Vector()),
-        OperandEnumerant(5293L, Vector()),
-        OperandEnumerant(5294L, Vector()),
-        OperandEnumerant(5295L, Vector()),
-        OperandEnumerant(5296L, Vector()),
-        OperandEnumerant(5299L, Vector()),
-        OperandEnumerant(5319L, Vector()),
-        OperandEnumerant(5320L, Vector()),
-        OperandEnumerant(5321L, Vector()),
-        OperandEnumerant(5322L, Vector()),
-        OperandEnumerant(5323L, Vector()),
-        OperandEnumerant(5324L, Vector()),
-        OperandEnumerant(5325L, Vector()),
-        OperandEnumerant(5326L, Vector()),
-        OperandEnumerant(5327L, Vector()),
-        OperandEnumerant(5330L, Vector()),
-        OperandEnumerant(5331L, Vector()),
-        OperandEnumerant(5332L, Vector()),
-        OperandEnumerant(5333L, Vector()),
-        OperandEnumerant(5334L, Vector()),
-        OperandEnumerant(5335L, Vector()),
-        OperandEnumerant(5337L, Vector()),
-        OperandEnumerant(5344L, Vector()),
-        OperandEnumerant(5351L, Vector()),
-        OperandEnumerant(5352L, Vector()),
-        OperandEnumerant(5359L, Vector()),
-        OperandEnumerant(5360L, Vector()),
-        OperandEnumerant(5361L, Vector()),
-        OperandEnumerant(5374L, Vector()),
-        OperandEnumerant(5375L, Vector()),
-        OperandEnumerant(5376L, Vector()),
-        OperandEnumerant(5377L, Vector()),
-        OperandEnumerant(5396L, Vector()),
-        OperandEnumerant(5405L, Vector()),
-        OperandEnumerant(5406L, Vector()),
-        OperandEnumerant(5420L, Vector()),
-        OperandEnumerant(5421L, Vector()),
-        OperandEnumerant(5436L, Vector()),
-        OperandEnumerant(6021L, Vector())
+      Col(
+        OperandEnumerant(0L, Col()),
+        OperandEnumerant(1L, Col()),
+        OperandEnumerant(3L, Col()),
+        OperandEnumerant(4L, Col()),
+        OperandEnumerant(5L, Col()),
+        OperandEnumerant(6L, Col()),
+        OperandEnumerant(7L, Col()),
+        OperandEnumerant(8L, Col()),
+        OperandEnumerant(9L, Col()),
+        OperandEnumerant(10L, Col()),
+        OperandEnumerant(11L, Col()),
+        OperandEnumerant(12L, Col()),
+        OperandEnumerant(13L, Col()),
+        OperandEnumerant(14L, Col()),
+        OperandEnumerant(15L, Col()),
+        OperandEnumerant(16L, Col()),
+        OperandEnumerant(17L, Col()),
+        OperandEnumerant(18L, Col()),
+        OperandEnumerant(19L, Col()),
+        OperandEnumerant(20L, Col()),
+        OperandEnumerant(22L, Col()),
+        OperandEnumerant(23L, Col()),
+        OperandEnumerant(24L, Col()),
+        OperandEnumerant(25L, Col()),
+        OperandEnumerant(26L, Col()),
+        OperandEnumerant(27L, Col()),
+        OperandEnumerant(28L, Col()),
+        OperandEnumerant(29L, Col()),
+        OperandEnumerant(30L, Col()),
+        OperandEnumerant(31L, Col()),
+        OperandEnumerant(32L, Col()),
+        OperandEnumerant(33L, Col()),
+        OperandEnumerant(34L, Col()),
+        OperandEnumerant(36L, Col()),
+        OperandEnumerant(37L, Col()),
+        OperandEnumerant(38L, Col()),
+        OperandEnumerant(39L, Col()),
+        OperandEnumerant(40L, Col()),
+        OperandEnumerant(41L, Col()),
+        OperandEnumerant(42L, Col()),
+        OperandEnumerant(43L, Col()),
+        OperandEnumerant(4160L, Col()),
+        OperandEnumerant(4161L, Col()),
+        OperandEnumerant(4162L, Col()),
+        OperandEnumerant(4163L, Col()),
+        OperandEnumerant(4164L, Col()),
+        OperandEnumerant(4416L, Col()),
+        OperandEnumerant(4417L, Col()),
+        OperandEnumerant(4418L, Col()),
+        OperandEnumerant(4419L, Col()),
+        OperandEnumerant(4420L, Col()),
+        OperandEnumerant(4424L, Col()),
+        OperandEnumerant(4425L, Col()),
+        OperandEnumerant(4426L, Col()),
+        OperandEnumerant(4432L, Col()),
+        OperandEnumerant(4438L, Col()),
+        OperandEnumerant(4440L, Col()),
+        OperandEnumerant(4444L, Col()),
+        OperandEnumerant(4492L, Col()),
+        OperandEnumerant(4493L, Col()),
+        OperandEnumerant(4494L, Col()),
+        OperandEnumerant(4992L, Col()),
+        OperandEnumerant(4993L, Col()),
+        OperandEnumerant(4994L, Col()),
+        OperandEnumerant(4995L, Col()),
+        OperandEnumerant(4996L, Col()),
+        OperandEnumerant(4997L, Col()),
+        OperandEnumerant(4998L, Col()),
+        OperandEnumerant(5014L, Col()),
+        OperandEnumerant(5021L, Col()),
+        OperandEnumerant(5073L, Col()),
+        OperandEnumerant(5122L, Col()),
+        OperandEnumerant(5123L, Col()),
+        OperandEnumerant(5253L, Col()),
+        OperandEnumerant(5257L, Col()),
+        OperandEnumerant(5258L, Col()),
+        OperandEnumerant(5261L, Col()),
+        OperandEnumerant(5262L, Col()),
+        OperandEnumerant(5264L, Col()),
+        OperandEnumerant(5274L, Col()),
+        OperandEnumerant(5275L, Col()),
+        OperandEnumerant(5276L, Col()),
+        OperandEnumerant(5277L, Col()),
+        OperandEnumerant(5278L, Col()),
+        OperandEnumerant(5279L, Col()),
+        OperandEnumerant(5280L, Col()),
+        OperandEnumerant(5281L, Col()),
+        OperandEnumerant(5286L, Col()),
+        OperandEnumerant(5287L, Col()),
+        OperandEnumerant(5292L, Col()),
+        OperandEnumerant(5293L, Col()),
+        OperandEnumerant(5294L, Col()),
+        OperandEnumerant(5295L, Col()),
+        OperandEnumerant(5296L, Col()),
+        OperandEnumerant(5299L, Col()),
+        OperandEnumerant(5319L, Col()),
+        OperandEnumerant(5320L, Col()),
+        OperandEnumerant(5321L, Col()),
+        OperandEnumerant(5322L, Col()),
+        OperandEnumerant(5323L, Col()),
+        OperandEnumerant(5324L, Col()),
+        OperandEnumerant(5325L, Col()),
+        OperandEnumerant(5326L, Col()),
+        OperandEnumerant(5327L, Col()),
+        OperandEnumerant(5330L, Col()),
+        OperandEnumerant(5331L, Col()),
+        OperandEnumerant(5332L, Col()),
+        OperandEnumerant(5333L, Col()),
+        OperandEnumerant(5334L, Col()),
+        OperandEnumerant(5335L, Col()),
+        OperandEnumerant(5337L, Col()),
+        OperandEnumerant(5344L, Col()),
+        OperandEnumerant(5351L, Col()),
+        OperandEnumerant(5352L, Col()),
+        OperandEnumerant(5359L, Col()),
+        OperandEnumerant(5360L, Col()),
+        OperandEnumerant(5361L, Col()),
+        OperandEnumerant(5374L, Col()),
+        OperandEnumerant(5375L, Col()),
+        OperandEnumerant(5376L, Col()),
+        OperandEnumerant(5377L, Col()),
+        OperandEnumerant(5396L, Col()),
+        OperandEnumerant(5405L, Col()),
+        OperandEnumerant(5406L, Col()),
+        OperandEnumerant(5420L, Col()),
+        OperandEnumerant(5421L, Col()),
+        OperandEnumerant(5436L, Col()),
+        OperandEnumerant(6021L, Col())
       )
     ),
     OperandKindInfo(
       "Scope",
       "ValueEnum",
-      Vector(
-        OperandEnumerant(0L, Vector()),
-        OperandEnumerant(1L, Vector()),
-        OperandEnumerant(2L, Vector()),
-        OperandEnumerant(3L, Vector()),
-        OperandEnumerant(4L, Vector()),
-        OperandEnumerant(5L, Vector()),
-        OperandEnumerant(6L, Vector())
+      Col(
+        OperandEnumerant(0L, Col()),
+        OperandEnumerant(1L, Col()),
+        OperandEnumerant(2L, Col()),
+        OperandEnumerant(3L, Col()),
+        OperandEnumerant(4L, Col()),
+        OperandEnumerant(5L, Col()),
+        OperandEnumerant(6L, Col())
       )
     ),
     OperandKindInfo(
       "GroupOperation",
       "ValueEnum",
-      Vector(
-        OperandEnumerant(0L, Vector()),
-        OperandEnumerant(1L, Vector()),
-        OperandEnumerant(2L, Vector()),
-        OperandEnumerant(3L, Vector()),
-        OperandEnumerant(6L, Vector()),
-        OperandEnumerant(7L, Vector()),
-        OperandEnumerant(8L, Vector())
+      Col(
+        OperandEnumerant(0L, Col()),
+        OperandEnumerant(1L, Col()),
+        OperandEnumerant(2L, Col()),
+        OperandEnumerant(3L, Col()),
+        OperandEnumerant(6L, Col()),
+        OperandEnumerant(7L, Col()),
+        OperandEnumerant(8L, Col())
       )
     ),
     OperandKindInfo(
       "KernelEnqueueFlags",
       "ValueEnum",
-      Vector(OperandEnumerant(0L, Vector()), OperandEnumerant(1L, Vector()), OperandEnumerant(2L, Vector()))
+      Col(OperandEnumerant(0L, Col()), OperandEnumerant(1L, Col()), OperandEnumerant(2L, Col()))
     ),
     OperandKindInfo(
       "Capability",
       "ValueEnum",
-      Vector(
-        OperandEnumerant(0L, Vector()),
-        OperandEnumerant(1L, Vector()),
-        OperandEnumerant(2L, Vector()),
-        OperandEnumerant(3L, Vector()),
-        OperandEnumerant(4L, Vector()),
-        OperandEnumerant(5L, Vector()),
-        OperandEnumerant(6L, Vector()),
-        OperandEnumerant(7L, Vector()),
-        OperandEnumerant(8L, Vector()),
-        OperandEnumerant(9L, Vector()),
-        OperandEnumerant(10L, Vector()),
-        OperandEnumerant(11L, Vector()),
-        OperandEnumerant(12L, Vector()),
-        OperandEnumerant(13L, Vector()),
-        OperandEnumerant(14L, Vector()),
-        OperandEnumerant(15L, Vector()),
-        OperandEnumerant(17L, Vector()),
-        OperandEnumerant(18L, Vector()),
-        OperandEnumerant(19L, Vector()),
-        OperandEnumerant(20L, Vector()),
-        OperandEnumerant(21L, Vector()),
-        OperandEnumerant(22L, Vector()),
-        OperandEnumerant(23L, Vector()),
-        OperandEnumerant(24L, Vector()),
-        OperandEnumerant(25L, Vector()),
-        OperandEnumerant(27L, Vector()),
-        OperandEnumerant(28L, Vector()),
-        OperandEnumerant(29L, Vector()),
-        OperandEnumerant(30L, Vector()),
-        OperandEnumerant(31L, Vector()),
-        OperandEnumerant(32L, Vector()),
-        OperandEnumerant(33L, Vector()),
-        OperandEnumerant(34L, Vector()),
-        OperandEnumerant(35L, Vector()),
-        OperandEnumerant(36L, Vector()),
-        OperandEnumerant(37L, Vector()),
-        OperandEnumerant(38L, Vector()),
-        OperandEnumerant(39L, Vector()),
-        OperandEnumerant(40L, Vector()),
-        OperandEnumerant(41L, Vector()),
-        OperandEnumerant(42L, Vector()),
-        OperandEnumerant(43L, Vector()),
-        OperandEnumerant(44L, Vector()),
-        OperandEnumerant(45L, Vector()),
-        OperandEnumerant(46L, Vector()),
-        OperandEnumerant(47L, Vector()),
-        OperandEnumerant(48L, Vector()),
-        OperandEnumerant(49L, Vector()),
-        OperandEnumerant(50L, Vector()),
-        OperandEnumerant(51L, Vector()),
-        OperandEnumerant(52L, Vector()),
-        OperandEnumerant(53L, Vector()),
-        OperandEnumerant(54L, Vector()),
-        OperandEnumerant(55L, Vector()),
-        OperandEnumerant(56L, Vector()),
-        OperandEnumerant(57L, Vector()),
-        OperandEnumerant(58L, Vector()),
-        OperandEnumerant(59L, Vector()),
-        OperandEnumerant(60L, Vector()),
-        OperandEnumerant(61L, Vector()),
-        OperandEnumerant(62L, Vector()),
-        OperandEnumerant(63L, Vector()),
-        OperandEnumerant(64L, Vector()),
-        OperandEnumerant(65L, Vector()),
-        OperandEnumerant(66L, Vector()),
-        OperandEnumerant(67L, Vector()),
-        OperandEnumerant(68L, Vector()),
-        OperandEnumerant(69L, Vector()),
-        OperandEnumerant(70L, Vector()),
-        OperandEnumerant(71L, Vector()),
-        OperandEnumerant(4165L, Vector()),
-        OperandEnumerant(4166L, Vector()),
-        OperandEnumerant(4167L, Vector()),
-        OperandEnumerant(4168L, Vector()),
-        OperandEnumerant(4174L, Vector()),
-        OperandEnumerant(4175L, Vector()),
-        OperandEnumerant(4176L, Vector()),
-        OperandEnumerant(4191L, Vector()),
-        OperandEnumerant(4201L, Vector()),
-        OperandEnumerant(4212L, Vector()),
-        OperandEnumerant(4213L, Vector()),
-        OperandEnumerant(4228L, Vector()),
-        OperandEnumerant(4229L, Vector()),
-        OperandEnumerant(4230L, Vector()),
-        OperandEnumerant(4231L, Vector()),
-        OperandEnumerant(4232L, Vector()),
-        OperandEnumerant(4422L, Vector()),
-        OperandEnumerant(4423L, Vector()),
-        OperandEnumerant(4427L, Vector()),
-        OperandEnumerant(4428L, Vector()),
-        OperandEnumerant(4429L, Vector()),
-        OperandEnumerant(4430L, Vector()),
-        OperandEnumerant(4431L, Vector()),
-        OperandEnumerant(4433L, Vector()),
-        OperandEnumerant(4434L, Vector()),
-        OperandEnumerant(4435L, Vector()),
-        OperandEnumerant(4436L, Vector()),
-        OperandEnumerant(4437L, Vector()),
-        OperandEnumerant(4439L, Vector()),
-        OperandEnumerant(4441L, Vector()),
-        OperandEnumerant(4442L, Vector()),
-        OperandEnumerant(4445L, Vector()),
-        OperandEnumerant(4447L, Vector()),
-        OperandEnumerant(4448L, Vector()),
-        OperandEnumerant(4449L, Vector()),
-        OperandEnumerant(4450L, Vector()),
-        OperandEnumerant(4464L, Vector()),
-        OperandEnumerant(4465L, Vector()),
-        OperandEnumerant(4466L, Vector()),
-        OperandEnumerant(4467L, Vector()),
-        OperandEnumerant(4468L, Vector()),
-        OperandEnumerant(4471L, Vector()),
-        OperandEnumerant(4472L, Vector()),
-        OperandEnumerant(4473L, Vector()),
-        OperandEnumerant(4478L, Vector()),
-        OperandEnumerant(4479L, Vector()),
-        OperandEnumerant(4484L, Vector()),
-        OperandEnumerant(4485L, Vector()),
-        OperandEnumerant(4486L, Vector()),
-        OperandEnumerant(4495L, Vector()),
-        OperandEnumerant(4496L, Vector()),
-        OperandEnumerant(4498L, Vector()),
-        OperandEnumerant(4539L, Vector()),
-        OperandEnumerant(4543L, Vector()),
-        OperandEnumerant(4544L, Vector()),
-        OperandEnumerant(5008L, Vector()),
-        OperandEnumerant(5009L, Vector()),
-        OperandEnumerant(5010L, Vector()),
-        OperandEnumerant(5013L, Vector()),
-        OperandEnumerant(5015L, Vector()),
-        OperandEnumerant(5016L, Vector()),
-        OperandEnumerant(5055L, Vector()),
-        OperandEnumerant(5067L, Vector()),
-        OperandEnumerant(5087L, Vector()),
-        OperandEnumerant(5112L, Vector()),
-        OperandEnumerant(5114L, Vector()),
-        OperandEnumerant(5116L, Vector()),
-        OperandEnumerant(5117L, Vector()),
-        OperandEnumerant(5118L, Vector()),
-        OperandEnumerant(5120L, Vector()),
-        OperandEnumerant(5128L, Vector()),
-        OperandEnumerant(5146L, Vector()),
-        OperandEnumerant(5156L, Vector()),
-        OperandEnumerant(5181L, Vector()),
-        OperandEnumerant(5249L, Vector()),
-        OperandEnumerant(5251L, Vector()),
-        OperandEnumerant(5254L, Vector()),
-        OperandEnumerant(5255L, Vector()),
-        OperandEnumerant(5259L, Vector()),
-        OperandEnumerant(5260L, Vector()),
-        OperandEnumerant(5265L, Vector()),
-        OperandEnumerant(5266L, Vector()),
-        OperandEnumerant(5282L, Vector()),
-        OperandEnumerant(5283L, Vector()),
-        OperandEnumerant(5284L, Vector()),
-        OperandEnumerant(5288L, Vector()),
-        OperandEnumerant(5291L, Vector()),
-        OperandEnumerant(5297L, Vector()),
-        OperandEnumerant(5301L, Vector()),
-        OperandEnumerant(5302L, Vector()),
-        OperandEnumerant(5303L, Vector()),
-        OperandEnumerant(5304L, Vector()),
-        OperandEnumerant(5305L, Vector()),
-        OperandEnumerant(5306L, Vector()),
-        OperandEnumerant(5307L, Vector()),
-        OperandEnumerant(5308L, Vector()),
-        OperandEnumerant(5309L, Vector()),
-        OperandEnumerant(5310L, Vector()),
-        OperandEnumerant(5311L, Vector()),
-        OperandEnumerant(5312L, Vector()),
-        OperandEnumerant(5336L, Vector()),
-        OperandEnumerant(5340L, Vector()),
-        OperandEnumerant(5341L, Vector()),
-        OperandEnumerant(5345L, Vector()),
-        OperandEnumerant(5346L, Vector()),
-        OperandEnumerant(5347L, Vector()),
-        OperandEnumerant(5350L, Vector()),
-        OperandEnumerant(5353L, Vector()),
-        OperandEnumerant(5357L, Vector()),
-        OperandEnumerant(5363L, Vector()),
-        OperandEnumerant(5372L, Vector()),
-        OperandEnumerant(5373L, Vector()),
-        OperandEnumerant(5378L, Vector()),
-        OperandEnumerant(5379L, Vector()),
-        OperandEnumerant(5380L, Vector()),
-        OperandEnumerant(5381L, Vector()),
-        OperandEnumerant(5383L, Vector()),
-        OperandEnumerant(5388L, Vector()),
-        OperandEnumerant(5390L, Vector()),
-        OperandEnumerant(5391L, Vector()),
-        OperandEnumerant(5394L, Vector()),
-        OperandEnumerant(5404L, Vector()),
-        OperandEnumerant(5409L, Vector()),
-        OperandEnumerant(5414L, Vector()),
-        OperandEnumerant(5418L, Vector()),
-        OperandEnumerant(5419L, Vector()),
-        OperandEnumerant(5423L, Vector()),
-        OperandEnumerant(5425L, Vector()),
-        OperandEnumerant(5426L, Vector()),
-        OperandEnumerant(5430L, Vector()),
-        OperandEnumerant(5431L, Vector()),
-        OperandEnumerant(5432L, Vector()),
-        OperandEnumerant(5433L, Vector()),
-        OperandEnumerant(5434L, Vector()),
-        OperandEnumerant(5435L, Vector()),
-        OperandEnumerant(5437L, Vector()),
-        OperandEnumerant(5439L, Vector()),
-        OperandEnumerant(5447L, Vector()),
-        OperandEnumerant(5568L, Vector()),
-        OperandEnumerant(5569L, Vector()),
-        OperandEnumerant(5570L, Vector()),
-        OperandEnumerant(5579L, Vector()),
-        OperandEnumerant(5582L, Vector()),
-        OperandEnumerant(5583L, Vector()),
-        OperandEnumerant(5584L, Vector()),
-        OperandEnumerant(5603L, Vector()),
-        OperandEnumerant(5604L, Vector()),
-        OperandEnumerant(5606L, Vector()),
-        OperandEnumerant(5612L, Vector()),
-        OperandEnumerant(5613L, Vector()),
-        OperandEnumerant(5616L, Vector()),
-        OperandEnumerant(5617L, Vector()),
-        OperandEnumerant(5619L, Vector()),
-        OperandEnumerant(5629L, Vector()),
-        OperandEnumerant(5696L, Vector()),
-        OperandEnumerant(5697L, Vector()),
-        OperandEnumerant(5698L, Vector()),
-        OperandEnumerant(5817L, Vector()),
-        OperandEnumerant(5821L, Vector()),
-        OperandEnumerant(5824L, Vector()),
-        OperandEnumerant(5837L, Vector()),
-        OperandEnumerant(5844L, Vector()),
-        OperandEnumerant(5845L, Vector()),
-        OperandEnumerant(5886L, Vector()),
-        OperandEnumerant(5888L, Vector()),
-        OperandEnumerant(5892L, Vector()),
-        OperandEnumerant(5897L, Vector()),
-        OperandEnumerant(5898L, Vector()),
-        OperandEnumerant(5904L, Vector()),
-        OperandEnumerant(5906L, Vector()),
-        OperandEnumerant(5908L, Vector()),
-        OperandEnumerant(5910L, Vector()),
-        OperandEnumerant(5916L, Vector()),
-        OperandEnumerant(5920L, Vector()),
-        OperandEnumerant(5922L, Vector()),
-        OperandEnumerant(5935L, Vector()),
-        OperandEnumerant(5939L, Vector()),
-        OperandEnumerant(5943L, Vector()),
-        OperandEnumerant(5945L, Vector()),
-        OperandEnumerant(5948L, Vector()),
-        OperandEnumerant(6016L, Vector()),
-        OperandEnumerant(6017L, Vector()),
-        OperandEnumerant(6018L, Vector()),
-        OperandEnumerant(6019L, Vector()),
-        OperandEnumerant(6020L, Vector()),
-        OperandEnumerant(6022L, Vector()),
-        OperandEnumerant(6024L, Vector()),
-        OperandEnumerant(6025L, Vector()),
-        OperandEnumerant(6026L, Vector()),
-        OperandEnumerant(6029L, Vector()),
-        OperandEnumerant(6030L, Vector()),
-        OperandEnumerant(6032L, Vector()),
-        OperandEnumerant(6033L, Vector()),
-        OperandEnumerant(6034L, Vector()),
-        OperandEnumerant(6089L, Vector()),
-        OperandEnumerant(6094L, Vector()),
-        OperandEnumerant(6095L, Vector()),
-        OperandEnumerant(6114L, Vector()),
-        OperandEnumerant(6115L, Vector()),
-        OperandEnumerant(6141L, Vector()),
-        OperandEnumerant(6144L, Vector()),
-        OperandEnumerant(6150L, Vector()),
-        OperandEnumerant(6161L, Vector()),
-        OperandEnumerant(6162L, Vector()),
-        OperandEnumerant(6169L, Vector()),
-        OperandEnumerant(6171L, Vector()),
-        OperandEnumerant(6174L, Vector()),
-        OperandEnumerant(6187L, Vector()),
-        OperandEnumerant(6189L, Vector()),
-        OperandEnumerant(6220L, Vector()),
-        OperandEnumerant(6228L, Vector()),
-        OperandEnumerant(6229L, Vector()),
-        OperandEnumerant(6230L, Vector()),
-        OperandEnumerant(6236L, Vector()),
-        OperandEnumerant(6241L, Vector()),
-        OperandEnumerant(6243L, Vector()),
-        OperandEnumerant(6245L, Vector()),
-        OperandEnumerant(6246L, Vector()),
-        OperandEnumerant(6257L, Vector()),
-        OperandEnumerant(6265L, Vector()),
-        OperandEnumerant(6400L, Vector()),
-        OperandEnumerant(6425L, Vector()),
-        OperandEnumerant(6427L, Vector()),
-        OperandEnumerant(6441L, Vector()),
-        OperandEnumerant(6460L, Vector()),
-        OperandEnumerant(6528L, Vector()),
-        OperandEnumerant(6912L, Vector()),
-        OperandEnumerant(6913L, Vector()),
-        OperandEnumerant(6914L, Vector()),
-        OperandEnumerant(6915L, Vector()),
-        OperandEnumerant(7041L, Vector())
+      Col(
+        OperandEnumerant(0L, Col()),
+        OperandEnumerant(1L, Col()),
+        OperandEnumerant(2L, Col()),
+        OperandEnumerant(3L, Col()),
+        OperandEnumerant(4L, Col()),
+        OperandEnumerant(5L, Col()),
+        OperandEnumerant(6L, Col()),
+        OperandEnumerant(7L, Col()),
+        OperandEnumerant(8L, Col()),
+        OperandEnumerant(9L, Col()),
+        OperandEnumerant(10L, Col()),
+        OperandEnumerant(11L, Col()),
+        OperandEnumerant(12L, Col()),
+        OperandEnumerant(13L, Col()),
+        OperandEnumerant(14L, Col()),
+        OperandEnumerant(15L, Col()),
+        OperandEnumerant(17L, Col()),
+        OperandEnumerant(18L, Col()),
+        OperandEnumerant(19L, Col()),
+        OperandEnumerant(20L, Col()),
+        OperandEnumerant(21L, Col()),
+        OperandEnumerant(22L, Col()),
+        OperandEnumerant(23L, Col()),
+        OperandEnumerant(24L, Col()),
+        OperandEnumerant(25L, Col()),
+        OperandEnumerant(27L, Col()),
+        OperandEnumerant(28L, Col()),
+        OperandEnumerant(29L, Col()),
+        OperandEnumerant(30L, Col()),
+        OperandEnumerant(31L, Col()),
+        OperandEnumerant(32L, Col()),
+        OperandEnumerant(33L, Col()),
+        OperandEnumerant(34L, Col()),
+        OperandEnumerant(35L, Col()),
+        OperandEnumerant(36L, Col()),
+        OperandEnumerant(37L, Col()),
+        OperandEnumerant(38L, Col()),
+        OperandEnumerant(39L, Col()),
+        OperandEnumerant(40L, Col()),
+        OperandEnumerant(41L, Col()),
+        OperandEnumerant(42L, Col()),
+        OperandEnumerant(43L, Col()),
+        OperandEnumerant(44L, Col()),
+        OperandEnumerant(45L, Col()),
+        OperandEnumerant(46L, Col()),
+        OperandEnumerant(47L, Col()),
+        OperandEnumerant(48L, Col()),
+        OperandEnumerant(49L, Col()),
+        OperandEnumerant(50L, Col()),
+        OperandEnumerant(51L, Col()),
+        OperandEnumerant(52L, Col()),
+        OperandEnumerant(53L, Col()),
+        OperandEnumerant(54L, Col()),
+        OperandEnumerant(55L, Col()),
+        OperandEnumerant(56L, Col()),
+        OperandEnumerant(57L, Col()),
+        OperandEnumerant(58L, Col()),
+        OperandEnumerant(59L, Col()),
+        OperandEnumerant(60L, Col()),
+        OperandEnumerant(61L, Col()),
+        OperandEnumerant(62L, Col()),
+        OperandEnumerant(63L, Col()),
+        OperandEnumerant(64L, Col()),
+        OperandEnumerant(65L, Col()),
+        OperandEnumerant(66L, Col()),
+        OperandEnumerant(67L, Col()),
+        OperandEnumerant(68L, Col()),
+        OperandEnumerant(69L, Col()),
+        OperandEnumerant(70L, Col()),
+        OperandEnumerant(71L, Col()),
+        OperandEnumerant(4165L, Col()),
+        OperandEnumerant(4166L, Col()),
+        OperandEnumerant(4167L, Col()),
+        OperandEnumerant(4168L, Col()),
+        OperandEnumerant(4174L, Col()),
+        OperandEnumerant(4175L, Col()),
+        OperandEnumerant(4176L, Col()),
+        OperandEnumerant(4191L, Col()),
+        OperandEnumerant(4201L, Col()),
+        OperandEnumerant(4212L, Col()),
+        OperandEnumerant(4213L, Col()),
+        OperandEnumerant(4228L, Col()),
+        OperandEnumerant(4229L, Col()),
+        OperandEnumerant(4230L, Col()),
+        OperandEnumerant(4231L, Col()),
+        OperandEnumerant(4232L, Col()),
+        OperandEnumerant(4422L, Col()),
+        OperandEnumerant(4423L, Col()),
+        OperandEnumerant(4427L, Col()),
+        OperandEnumerant(4428L, Col()),
+        OperandEnumerant(4429L, Col()),
+        OperandEnumerant(4430L, Col()),
+        OperandEnumerant(4431L, Col()),
+        OperandEnumerant(4433L, Col()),
+        OperandEnumerant(4434L, Col()),
+        OperandEnumerant(4435L, Col()),
+        OperandEnumerant(4436L, Col()),
+        OperandEnumerant(4437L, Col()),
+        OperandEnumerant(4439L, Col()),
+        OperandEnumerant(4441L, Col()),
+        OperandEnumerant(4442L, Col()),
+        OperandEnumerant(4445L, Col()),
+        OperandEnumerant(4447L, Col()),
+        OperandEnumerant(4448L, Col()),
+        OperandEnumerant(4449L, Col()),
+        OperandEnumerant(4450L, Col()),
+        OperandEnumerant(4464L, Col()),
+        OperandEnumerant(4465L, Col()),
+        OperandEnumerant(4466L, Col()),
+        OperandEnumerant(4467L, Col()),
+        OperandEnumerant(4468L, Col()),
+        OperandEnumerant(4471L, Col()),
+        OperandEnumerant(4472L, Col()),
+        OperandEnumerant(4473L, Col()),
+        OperandEnumerant(4478L, Col()),
+        OperandEnumerant(4479L, Col()),
+        OperandEnumerant(4484L, Col()),
+        OperandEnumerant(4485L, Col()),
+        OperandEnumerant(4486L, Col()),
+        OperandEnumerant(4495L, Col()),
+        OperandEnumerant(4496L, Col()),
+        OperandEnumerant(4498L, Col()),
+        OperandEnumerant(4539L, Col()),
+        OperandEnumerant(4543L, Col()),
+        OperandEnumerant(4544L, Col()),
+        OperandEnumerant(5008L, Col()),
+        OperandEnumerant(5009L, Col()),
+        OperandEnumerant(5010L, Col()),
+        OperandEnumerant(5013L, Col()),
+        OperandEnumerant(5015L, Col()),
+        OperandEnumerant(5016L, Col()),
+        OperandEnumerant(5055L, Col()),
+        OperandEnumerant(5067L, Col()),
+        OperandEnumerant(5087L, Col()),
+        OperandEnumerant(5112L, Col()),
+        OperandEnumerant(5114L, Col()),
+        OperandEnumerant(5116L, Col()),
+        OperandEnumerant(5117L, Col()),
+        OperandEnumerant(5118L, Col()),
+        OperandEnumerant(5120L, Col()),
+        OperandEnumerant(5128L, Col()),
+        OperandEnumerant(5146L, Col()),
+        OperandEnumerant(5156L, Col()),
+        OperandEnumerant(5181L, Col()),
+        OperandEnumerant(5249L, Col()),
+        OperandEnumerant(5251L, Col()),
+        OperandEnumerant(5254L, Col()),
+        OperandEnumerant(5255L, Col()),
+        OperandEnumerant(5259L, Col()),
+        OperandEnumerant(5260L, Col()),
+        OperandEnumerant(5265L, Col()),
+        OperandEnumerant(5266L, Col()),
+        OperandEnumerant(5282L, Col()),
+        OperandEnumerant(5283L, Col()),
+        OperandEnumerant(5284L, Col()),
+        OperandEnumerant(5288L, Col()),
+        OperandEnumerant(5291L, Col()),
+        OperandEnumerant(5297L, Col()),
+        OperandEnumerant(5301L, Col()),
+        OperandEnumerant(5302L, Col()),
+        OperandEnumerant(5303L, Col()),
+        OperandEnumerant(5304L, Col()),
+        OperandEnumerant(5305L, Col()),
+        OperandEnumerant(5306L, Col()),
+        OperandEnumerant(5307L, Col()),
+        OperandEnumerant(5308L, Col()),
+        OperandEnumerant(5309L, Col()),
+        OperandEnumerant(5310L, Col()),
+        OperandEnumerant(5311L, Col()),
+        OperandEnumerant(5312L, Col()),
+        OperandEnumerant(5336L, Col()),
+        OperandEnumerant(5340L, Col()),
+        OperandEnumerant(5341L, Col()),
+        OperandEnumerant(5345L, Col()),
+        OperandEnumerant(5346L, Col()),
+        OperandEnumerant(5347L, Col()),
+        OperandEnumerant(5350L, Col()),
+        OperandEnumerant(5353L, Col()),
+        OperandEnumerant(5357L, Col()),
+        OperandEnumerant(5363L, Col()),
+        OperandEnumerant(5372L, Col()),
+        OperandEnumerant(5373L, Col()),
+        OperandEnumerant(5378L, Col()),
+        OperandEnumerant(5379L, Col()),
+        OperandEnumerant(5380L, Col()),
+        OperandEnumerant(5381L, Col()),
+        OperandEnumerant(5383L, Col()),
+        OperandEnumerant(5388L, Col()),
+        OperandEnumerant(5390L, Col()),
+        OperandEnumerant(5391L, Col()),
+        OperandEnumerant(5394L, Col()),
+        OperandEnumerant(5404L, Col()),
+        OperandEnumerant(5409L, Col()),
+        OperandEnumerant(5414L, Col()),
+        OperandEnumerant(5418L, Col()),
+        OperandEnumerant(5419L, Col()),
+        OperandEnumerant(5423L, Col()),
+        OperandEnumerant(5425L, Col()),
+        OperandEnumerant(5426L, Col()),
+        OperandEnumerant(5430L, Col()),
+        OperandEnumerant(5431L, Col()),
+        OperandEnumerant(5432L, Col()),
+        OperandEnumerant(5433L, Col()),
+        OperandEnumerant(5434L, Col()),
+        OperandEnumerant(5435L, Col()),
+        OperandEnumerant(5437L, Col()),
+        OperandEnumerant(5439L, Col()),
+        OperandEnumerant(5447L, Col()),
+        OperandEnumerant(5568L, Col()),
+        OperandEnumerant(5569L, Col()),
+        OperandEnumerant(5570L, Col()),
+        OperandEnumerant(5579L, Col()),
+        OperandEnumerant(5582L, Col()),
+        OperandEnumerant(5583L, Col()),
+        OperandEnumerant(5584L, Col()),
+        OperandEnumerant(5603L, Col()),
+        OperandEnumerant(5604L, Col()),
+        OperandEnumerant(5606L, Col()),
+        OperandEnumerant(5612L, Col()),
+        OperandEnumerant(5613L, Col()),
+        OperandEnumerant(5616L, Col()),
+        OperandEnumerant(5617L, Col()),
+        OperandEnumerant(5619L, Col()),
+        OperandEnumerant(5629L, Col()),
+        OperandEnumerant(5696L, Col()),
+        OperandEnumerant(5697L, Col()),
+        OperandEnumerant(5698L, Col()),
+        OperandEnumerant(5817L, Col()),
+        OperandEnumerant(5821L, Col()),
+        OperandEnumerant(5824L, Col()),
+        OperandEnumerant(5837L, Col()),
+        OperandEnumerant(5844L, Col()),
+        OperandEnumerant(5845L, Col()),
+        OperandEnumerant(5886L, Col()),
+        OperandEnumerant(5888L, Col()),
+        OperandEnumerant(5892L, Col()),
+        OperandEnumerant(5897L, Col()),
+        OperandEnumerant(5898L, Col()),
+        OperandEnumerant(5904L, Col()),
+        OperandEnumerant(5906L, Col()),
+        OperandEnumerant(5908L, Col()),
+        OperandEnumerant(5910L, Col()),
+        OperandEnumerant(5916L, Col()),
+        OperandEnumerant(5920L, Col()),
+        OperandEnumerant(5922L, Col()),
+        OperandEnumerant(5935L, Col()),
+        OperandEnumerant(5939L, Col()),
+        OperandEnumerant(5943L, Col()),
+        OperandEnumerant(5945L, Col()),
+        OperandEnumerant(5948L, Col()),
+        OperandEnumerant(6016L, Col()),
+        OperandEnumerant(6017L, Col()),
+        OperandEnumerant(6018L, Col()),
+        OperandEnumerant(6019L, Col()),
+        OperandEnumerant(6020L, Col()),
+        OperandEnumerant(6022L, Col()),
+        OperandEnumerant(6024L, Col()),
+        OperandEnumerant(6025L, Col()),
+        OperandEnumerant(6026L, Col()),
+        OperandEnumerant(6029L, Col()),
+        OperandEnumerant(6030L, Col()),
+        OperandEnumerant(6032L, Col()),
+        OperandEnumerant(6033L, Col()),
+        OperandEnumerant(6034L, Col()),
+        OperandEnumerant(6089L, Col()),
+        OperandEnumerant(6094L, Col()),
+        OperandEnumerant(6095L, Col()),
+        OperandEnumerant(6114L, Col()),
+        OperandEnumerant(6115L, Col()),
+        OperandEnumerant(6141L, Col()),
+        OperandEnumerant(6144L, Col()),
+        OperandEnumerant(6150L, Col()),
+        OperandEnumerant(6161L, Col()),
+        OperandEnumerant(6162L, Col()),
+        OperandEnumerant(6169L, Col()),
+        OperandEnumerant(6171L, Col()),
+        OperandEnumerant(6174L, Col()),
+        OperandEnumerant(6187L, Col()),
+        OperandEnumerant(6189L, Col()),
+        OperandEnumerant(6220L, Col()),
+        OperandEnumerant(6228L, Col()),
+        OperandEnumerant(6229L, Col()),
+        OperandEnumerant(6230L, Col()),
+        OperandEnumerant(6236L, Col()),
+        OperandEnumerant(6241L, Col()),
+        OperandEnumerant(6243L, Col()),
+        OperandEnumerant(6245L, Col()),
+        OperandEnumerant(6246L, Col()),
+        OperandEnumerant(6257L, Col()),
+        OperandEnumerant(6265L, Col()),
+        OperandEnumerant(6400L, Col()),
+        OperandEnumerant(6425L, Col()),
+        OperandEnumerant(6427L, Col()),
+        OperandEnumerant(6441L, Col()),
+        OperandEnumerant(6460L, Col()),
+        OperandEnumerant(6528L, Col()),
+        OperandEnumerant(6912L, Col()),
+        OperandEnumerant(6913L, Col()),
+        OperandEnumerant(6914L, Col()),
+        OperandEnumerant(6915L, Col()),
+        OperandEnumerant(7041L, Col())
       )
     ),
-    OperandKindInfo(
-      "RayQueryIntersection",
-      "ValueEnum",
-      Vector(OperandEnumerant(0L, Vector()), OperandEnumerant(1L, Vector()))
-    ),
+    OperandKindInfo("RayQueryIntersection", "ValueEnum", Col(OperandEnumerant(0L, Col()), OperandEnumerant(1L, Col()))),
     OperandKindInfo(
       "RayQueryCommittedIntersectionType",
       "ValueEnum",
-      Vector(OperandEnumerant(0L, Vector()), OperandEnumerant(1L, Vector()), OperandEnumerant(2L, Vector()))
+      Col(OperandEnumerant(0L, Col()), OperandEnumerant(1L, Col()), OperandEnumerant(2L, Col()))
     )
   )
 
-  private def operandKinds5: Vector[OperandKindInfo] = Vector(
+  private def operandKinds5: Col[OperandKindInfo] = Col(
     OperandKindInfo(
       "RayQueryCandidateIntersectionType",
       "ValueEnum",
-      Vector(OperandEnumerant(0L, Vector()), OperandEnumerant(1L, Vector()))
+      Col(OperandEnumerant(0L, Col()), OperandEnumerant(1L, Col()))
     ),
-    OperandKindInfo("PackedVectorFormat", "ValueEnum", Vector(OperandEnumerant(0L, Vector()))),
+    OperandKindInfo("PackedVectorFormat", "ValueEnum", Col(OperandEnumerant(0L, Col()))),
     OperandKindInfo(
       "CooperativeMatrixOperands",
       "BitEnum",
-      Vector(
-        OperandEnumerant(0L, Vector()),
-        OperandEnumerant(1L, Vector()),
-        OperandEnumerant(2L, Vector()),
-        OperandEnumerant(4L, Vector()),
-        OperandEnumerant(8L, Vector()),
-        OperandEnumerant(16L, Vector())
+      Col(
+        OperandEnumerant(0L, Col()),
+        OperandEnumerant(1L, Col()),
+        OperandEnumerant(2L, Col()),
+        OperandEnumerant(4L, Col()),
+        OperandEnumerant(8L, Col()),
+        OperandEnumerant(16L, Col())
       )
     ),
     OperandKindInfo(
       "CooperativeMatrixLayout",
       "ValueEnum",
-      Vector(
-        OperandEnumerant(0L, Vector()),
-        OperandEnumerant(1L, Vector()),
-        OperandEnumerant(4202L, Vector()),
-        OperandEnumerant(4203L, Vector())
+      Col(
+        OperandEnumerant(0L, Col()),
+        OperandEnumerant(1L, Col()),
+        OperandEnumerant(4202L, Col()),
+        OperandEnumerant(4203L, Col())
       )
     ),
     OperandKindInfo(
       "CooperativeMatrixUse",
       "ValueEnum",
-      Vector(OperandEnumerant(0L, Vector()), OperandEnumerant(1L, Vector()), OperandEnumerant(2L, Vector()))
+      Col(OperandEnumerant(0L, Col()), OperandEnumerant(1L, Col()), OperandEnumerant(2L, Col()))
     ),
     OperandKindInfo(
       "CooperativeMatrixReduce",
       "BitEnum",
-      Vector(OperandEnumerant(1L, Vector()), OperandEnumerant(2L, Vector()), OperandEnumerant(4L, Vector()))
+      Col(OperandEnumerant(1L, Col()), OperandEnumerant(2L, Col()), OperandEnumerant(4L, Col()))
     ),
     OperandKindInfo(
       "TensorClampMode",
       "ValueEnum",
-      Vector(
-        OperandEnumerant(0L, Vector()),
-        OperandEnumerant(1L, Vector()),
-        OperandEnumerant(2L, Vector()),
-        OperandEnumerant(3L, Vector()),
-        OperandEnumerant(4L, Vector())
+      Col(
+        OperandEnumerant(0L, Col()),
+        OperandEnumerant(1L, Col()),
+        OperandEnumerant(2L, Col()),
+        OperandEnumerant(3L, Col()),
+        OperandEnumerant(4L, Col())
       )
     ),
     OperandKindInfo(
       "TensorAddressingOperands",
       "BitEnum",
-      Vector(
-        OperandEnumerant(0L, Vector()),
-        OperandEnumerant(1L, Vector("IdRef")),
-        OperandEnumerant(2L, Vector("IdRef")),
-        OperandEnumerant(4L, Vector("IdRef"))
+      Col(
+        OperandEnumerant(0L, Col()),
+        OperandEnumerant(1L, Col("IdRef")),
+        OperandEnumerant(2L, Col("IdRef")),
+        OperandEnumerant(4L, Col("IdRef"))
       )
     )
   )
 
-  private def operandKinds6: Vector[OperandKindInfo] = Vector(
+  private def operandKinds6: Col[OperandKindInfo] = Col(
     OperandKindInfo(
       "InitializationModeQualifier",
       "ValueEnum",
-      Vector(OperandEnumerant(0L, Vector()), OperandEnumerant(1L, Vector()))
+      Col(OperandEnumerant(0L, Col()), OperandEnumerant(1L, Col()))
     ),
     OperandKindInfo(
       "LoadCacheControl",
       "ValueEnum",
-      Vector(
-        OperandEnumerant(0L, Vector()),
-        OperandEnumerant(1L, Vector()),
-        OperandEnumerant(2L, Vector()),
-        OperandEnumerant(3L, Vector()),
-        OperandEnumerant(4L, Vector())
+      Col(
+        OperandEnumerant(0L, Col()),
+        OperandEnumerant(1L, Col()),
+        OperandEnumerant(2L, Col()),
+        OperandEnumerant(3L, Col()),
+        OperandEnumerant(4L, Col())
       )
     ),
     OperandKindInfo(
       "StoreCacheControl",
       "ValueEnum",
-      Vector(
-        OperandEnumerant(0L, Vector()),
-        OperandEnumerant(1L, Vector()),
-        OperandEnumerant(2L, Vector()),
-        OperandEnumerant(3L, Vector())
+      Col(
+        OperandEnumerant(0L, Col()),
+        OperandEnumerant(1L, Col()),
+        OperandEnumerant(2L, Col()),
+        OperandEnumerant(3L, Col())
       )
     ),
-    OperandKindInfo("NamedMaximumNumberOfRegisters", "ValueEnum", Vector(OperandEnumerant(0L, Vector()))),
+    OperandKindInfo("NamedMaximumNumberOfRegisters", "ValueEnum", Col(OperandEnumerant(0L, Col()))),
     OperandKindInfo(
       "MatrixMultiplyAccumulateOperands",
       "BitEnum",
-      Vector(
-        OperandEnumerant(0L, Vector()),
-        OperandEnumerant(1L, Vector()),
-        OperandEnumerant(2L, Vector()),
-        OperandEnumerant(4L, Vector()),
-        OperandEnumerant(8L, Vector()),
-        OperandEnumerant(16L, Vector()),
-        OperandEnumerant(32L, Vector()),
-        OperandEnumerant(64L, Vector()),
-        OperandEnumerant(128L, Vector()),
-        OperandEnumerant(256L, Vector()),
-        OperandEnumerant(512L, Vector()),
-        OperandEnumerant(1024L, Vector()),
-        OperandEnumerant(2048L, Vector()),
-        OperandEnumerant(4096L, Vector()),
-        OperandEnumerant(8192L, Vector())
+      Col(
+        OperandEnumerant(0L, Col()),
+        OperandEnumerant(1L, Col()),
+        OperandEnumerant(2L, Col()),
+        OperandEnumerant(4L, Col()),
+        OperandEnumerant(8L, Col()),
+        OperandEnumerant(16L, Col()),
+        OperandEnumerant(32L, Col()),
+        OperandEnumerant(64L, Col()),
+        OperandEnumerant(128L, Col()),
+        OperandEnumerant(256L, Col()),
+        OperandEnumerant(512L, Col()),
+        OperandEnumerant(1024L, Col()),
+        OperandEnumerant(2048L, Col()),
+        OperandEnumerant(4096L, Col()),
+        OperandEnumerant(8192L, Col())
       )
     ),
     OperandKindInfo(
       "FPEncoding",
       "ValueEnum",
-      Vector(
-        OperandEnumerant(0L, Vector()),
-        OperandEnumerant(4214L, Vector()),
-        OperandEnumerant(4215L, Vector()),
-        OperandEnumerant(4223L, Vector()),
-        OperandEnumerant(4224L, Vector()),
-        OperandEnumerant(4225L, Vector()),
-        OperandEnumerant(4226L, Vector()),
-        OperandEnumerant(4227L, Vector())
+      Col(
+        OperandEnumerant(0L, Col()),
+        OperandEnumerant(4214L, Col()),
+        OperandEnumerant(4215L, Col()),
+        OperandEnumerant(4223L, Col()),
+        OperandEnumerant(4224L, Col()),
+        OperandEnumerant(4225L, Col()),
+        OperandEnumerant(4226L, Col()),
+        OperandEnumerant(4227L, Col())
       )
     ),
     OperandKindInfo(
       "CooperativeVectorMatrixLayout",
       "ValueEnum",
-      Vector(
-        OperandEnumerant(0L, Vector()),
-        OperandEnumerant(1L, Vector()),
-        OperandEnumerant(2L, Vector()),
-        OperandEnumerant(3L, Vector())
+      Col(
+        OperandEnumerant(0L, Col()),
+        OperandEnumerant(1L, Col()),
+        OperandEnumerant(2L, Col()),
+        OperandEnumerant(3L, Col())
       )
     ),
     OperandKindInfo(
       "ComponentType",
       "ValueEnum",
-      Vector(
-        OperandEnumerant(0L, Vector()),
-        OperandEnumerant(1L, Vector()),
-        OperandEnumerant(2L, Vector()),
-        OperandEnumerant(3L, Vector()),
-        OperandEnumerant(4L, Vector()),
-        OperandEnumerant(5L, Vector()),
-        OperandEnumerant(6L, Vector()),
-        OperandEnumerant(7L, Vector()),
-        OperandEnumerant(8L, Vector()),
-        OperandEnumerant(9L, Vector()),
-        OperandEnumerant(10L, Vector()),
-        OperandEnumerant(1000491000L, Vector()),
-        OperandEnumerant(1000491001L, Vector()),
-        OperandEnumerant(1000491002L, Vector()),
-        OperandEnumerant(1000491003L, Vector())
+      Col(
+        OperandEnumerant(0L, Col()),
+        OperandEnumerant(1L, Col()),
+        OperandEnumerant(2L, Col()),
+        OperandEnumerant(3L, Col()),
+        OperandEnumerant(4L, Col()),
+        OperandEnumerant(5L, Col()),
+        OperandEnumerant(6L, Col()),
+        OperandEnumerant(7L, Col()),
+        OperandEnumerant(8L, Col()),
+        OperandEnumerant(9L, Col()),
+        OperandEnumerant(10L, Col()),
+        OperandEnumerant(1000491000L, Col()),
+        OperandEnumerant(1000491001L, Col()),
+        OperandEnumerant(1000491002L, Col()),
+        OperandEnumerant(1000491003L, Col())
       )
     )
   )
 
-  private def operandKinds7: Vector[OperandKindInfo] = Vector(
+  private def operandKinds7: Col[OperandKindInfo] = Col(
     OperandKindInfo(
       "GatherModes",
       "ValueEnum",
-      Vector(
-        OperandEnumerant(0L, Vector()),
-        OperandEnumerant(1L, Vector()),
-        OperandEnumerant(2L, Vector()),
-        OperandEnumerant(3L, Vector())
+      Col(
+        OperandEnumerant(0L, Col()),
+        OperandEnumerant(1L, Col()),
+        OperandEnumerant(2L, Col()),
+        OperandEnumerant(3L, Col())
       )
     ),
     OperandKindInfo(
       "TensorOperands",
       "BitEnum",
-      Vector(
-        OperandEnumerant(0L, Vector()),
-        OperandEnumerant(1L, Vector()),
-        OperandEnumerant(2L, Vector("IdRef")),
-        OperandEnumerant(4L, Vector("IdRef")),
-        OperandEnumerant(8L, Vector("IdRef")),
-        OperandEnumerant(16L, Vector())
+      Col(
+        OperandEnumerant(0L, Col()),
+        OperandEnumerant(1L, Col()),
+        OperandEnumerant(2L, Col("IdRef")),
+        OperandEnumerant(4L, Col("IdRef")),
+        OperandEnumerant(8L, Col("IdRef")),
+        OperandEnumerant(16L, Col())
       )
     )
   )
 
-  private val decoders: Vector[Decoder] = Vector(
+  private val decoders: Col[Decoder] = Col(
     decoders0,
     decoders1,
     decoders2,
@@ -28430,7 +28327,7 @@ object Instruction {
   ).flatten
 
   private val operandKinds: Map[Predef.String, OperandKindInfo] =
-    Vector(
+    Col(
       operandKinds0,
       operandKinds1,
       operandKinds2,
@@ -28441,26 +28338,28 @@ object Instruction {
       operandKinds7
     ).flatten.iterator.map(value => value.kind -> value).toMap
 
-  private val byNumber: Map[Int, Vector[InstructionDef]] =
+  private val byNumber: Map[Int, Col[InstructionDef]] =
     Instructions.groupMap(_.opcodeNumber)(identity)
-  private val byOpcode: Map[Predef.String, Vector[InstructionDef]] =
+  private val byOpcode: Map[Predef.String, Col[InstructionDef]] =
     Instructions.groupMap(_.opcode)(identity)
 
-  def definitions(opcodeNumber: Int): Vector[InstructionDef] = byNumber.getOrElse(opcodeNumber, Vector.empty)
-  def definitions(opcode: Predef.String): Vector[InstructionDef] = byOpcode.getOrElse(opcode, Vector.empty)
+  def definitions(opcodeNumber: Int): Col[InstructionDef] =
+    byNumber.getOrElse(opcodeNumber, Col.empty[InstructionDef])
+  def definitions(opcode: Predef.String): Col[InstructionDef] =
+    byOpcode.getOrElse(opcode, Col.empty[InstructionDef])
 
   def decode(raw: RawInstruction): Either[InstructionDecodeError, Instruction] = {
     val candidates = definitions(raw.opcodeNumber)
     candidates match {
-      case Vector() => Left(InstructionDecodeError.UnknownOpcode(raw.opcodeNumber))
-      case Vector(definition) => definition.decoder(raw)
+      case Col() => Left(InstructionDecodeError.UnknownOpcode(raw.opcodeNumber))
+      case Col(definition) => definition.decoder(raw)
       case definitions =>
         val matches = definitions.flatMap(definition =>
           definition.decoder(raw).toOption.map(instruction => definition -> instruction)
         )
         matches match {
-          case Vector((_, instruction)) => Right(instruction)
-          case Vector() =>
+          case Col((_, instruction)) => Right(instruction)
+          case Col() =>
             Left(InstructionDecodeError.NoMatchingDefinition(raw.opcodeNumber, definitions.map(_.opcode)))
           case values =>
             Left(InstructionDecodeError.AmbiguousDefinition(raw.opcodeNumber, values.map(_._1.opcode)))
@@ -28471,7 +28370,7 @@ object Instruction {
   def encode(instruction: Instruction): RawInstruction =
     RawInstruction(instruction.definition.opcodeNumber, instruction.operands.flatMap(_.words))
 
-  def minimumOperandWords(definition: InstructionDef): Vector[Word] =
+  def minimumOperandWords(definition: InstructionDef): Col[Word] =
     OperandDecoder.minimumWords(definition.meta.operands, operandKinds)
 
   private[v1_6] def decoderFor(ordinal: Int): Decoder = decoders(ordinal)

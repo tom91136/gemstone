@@ -1,19 +1,21 @@
 // Generated from the pinned Mesa ACO and AMD machine-readable ISA inputs. Do not edit by hand.
 package net.kurobako.gemstone.isa.amdgpu.common
 
+import net.kurobako.gemstone.Col
+
 private[common] object InstructionDefs22 {
   case object VPkMax3I16 extends InstructionDef(
         "v_pk_max3_i16",
         decoder(form(4)((operands, mods) =>
           Instruction.VPkMax3I16(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VOP3P",
             47,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -27,7 +29,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             47,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -41,7 +43,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             47,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -55,7 +57,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             47,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -69,7 +71,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             47,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -83,7 +85,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             47,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -97,7 +99,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             47,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -111,7 +113,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             47,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -127,13 +129,13 @@ private[common] object InstructionDefs22 {
         decoder(form(4)((operands, mods) =>
           Instruction.VPkMax3NumF16(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VOP3P",
             57,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -147,7 +149,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             57,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -161,7 +163,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             57,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -175,7 +177,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             57,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -189,7 +191,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             57,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -203,7 +205,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             57,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -217,7 +219,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             57,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -231,7 +233,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             57,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -247,13 +249,13 @@ private[common] object InstructionDefs22 {
         decoder(form(4)((operands, mods) =>
           Instruction.VPkMax3U16(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VOP3P",
             48,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -267,7 +269,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             48,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -281,7 +283,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             48,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -295,7 +297,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             48,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -309,7 +311,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             48,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -323,7 +325,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             48,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -337,7 +339,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             48,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -351,7 +353,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             48,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -365,13 +367,13 @@ private[common] object InstructionDefs22 {
   case object VPkMaxF16 extends InstructionDef(
         "v_pk_max_f16",
         decoder(form(3)((operands, mods) => Instruction.VPkMaxF16(operands(0), operands(1), operands(2), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "VOP3P",
             18,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_SIMPLE", 32, true, false, false)
@@ -384,7 +386,7 @@ private[common] object InstructionDefs22 {
             "cdna2",
             "VOP3P",
             18,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_SIMPLE", 32, true, false, false)
@@ -397,7 +399,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP3P",
             18,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_SIMPLE", 32, true, false, false)
@@ -410,7 +412,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP3P",
             18,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_SIMPLE", 32, true, false, false)
@@ -423,7 +425,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3P",
             18,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_NOLDS", 32, true, false, false)
@@ -436,7 +438,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3P_INST_LITERAL",
             18,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_NOLDS", 32, true, false, false)
@@ -449,7 +451,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3P_INST_LITERAL",
             18,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 32, true, false, false)
@@ -462,7 +464,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3P_INST_LITERAL",
             18,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 32, true, false, false)
@@ -475,7 +477,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3P",
             18,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_NOLDS", 32, true, false, false)
@@ -488,7 +490,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3P_INST_LITERAL",
             18,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_NOLDS", 32, true, false, false)
@@ -501,7 +503,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3P_INST_LITERAL",
             18,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 32, true, false, false)
@@ -514,7 +516,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3P_INST_LITERAL",
             18,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 32, true, false, false)
@@ -527,7 +529,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3P",
             18,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -540,7 +542,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3P_INST_LITERAL",
             18,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -553,7 +555,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3P_INST_LITERAL",
             18,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -566,7 +568,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3P_INST_LITERAL",
             18,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -579,7 +581,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3P",
             18,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -592,7 +594,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3P_INST_LITERAL",
             18,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -605,7 +607,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3P_INST_LITERAL",
             18,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -618,7 +620,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3P_INST_LITERAL",
             18,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -631,7 +633,7 @@ private[common] object InstructionDefs22 {
             "gfx9",
             "VOP3P",
             18,
-            Vector(
+            Col(
               OperandInfo(None, "float", 32, false, true, false),
               OperandInfo(None, "float", 32, true, false, false),
               OperandInfo(None, "float", 32, true, false, false)
@@ -644,13 +646,13 @@ private[common] object InstructionDefs22 {
   case object VPkMaxI16 extends InstructionDef(
         "v_pk_max_i16",
         decoder(form(3)((operands, mods) => Instruction.VPkMaxI16(operands(0), operands(1), operands(2), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "VOP3P",
             7,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_SIMPLE", 32, true, false, false)
@@ -663,7 +665,7 @@ private[common] object InstructionDefs22 {
             "cdna2",
             "VOP3P",
             7,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_SIMPLE", 32, true, false, false)
@@ -676,7 +678,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP3P",
             7,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_SIMPLE", 32, true, false, false)
@@ -689,7 +691,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP3P",
             7,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_SIMPLE", 32, true, false, false)
@@ -702,7 +704,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P",
             7,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -715,7 +717,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             7,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -728,7 +730,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             7,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -741,7 +743,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             7,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -754,7 +756,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3P",
             7,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_NOLDS", 32, true, false, false)
@@ -767,7 +769,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3P_INST_LITERAL",
             7,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_NOLDS", 32, true, false, false)
@@ -780,7 +782,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3P_INST_LITERAL",
             7,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 32, true, false, false)
@@ -793,7 +795,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3P_INST_LITERAL",
             7,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 32, true, false, false)
@@ -806,7 +808,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3P",
             7,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_NOLDS", 32, true, false, false)
@@ -819,7 +821,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3P_INST_LITERAL",
             7,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_NOLDS", 32, true, false, false)
@@ -832,7 +834,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3P_INST_LITERAL",
             7,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 32, true, false, false)
@@ -845,7 +847,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3P_INST_LITERAL",
             7,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 32, true, false, false)
@@ -858,7 +860,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3P",
             7,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -871,7 +873,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3P_INST_LITERAL",
             7,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -884,7 +886,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3P_INST_LITERAL",
             7,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -897,7 +899,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3P_INST_LITERAL",
             7,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -910,7 +912,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3P",
             7,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -923,7 +925,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3P_INST_LITERAL",
             7,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -936,7 +938,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3P_INST_LITERAL",
             7,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -949,7 +951,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3P_INST_LITERAL",
             7,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -962,7 +964,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3P",
             7,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -975,7 +977,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3P_INST_LITERAL",
             7,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -988,7 +990,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3P_INST_LITERAL",
             7,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -1001,7 +1003,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3P_INST_LITERAL",
             7,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -1014,7 +1016,7 @@ private[common] object InstructionDefs22 {
             "gfx9",
             "VOP3P",
             7,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, false),
               OperandInfo(None, "uint", 32, true, false, false),
               OperandInfo(None, "uint", 32, true, false, false)
@@ -1027,13 +1029,13 @@ private[common] object InstructionDefs22 {
   case object VPkMaxNumBf16 extends InstructionDef(
         "v_pk_max_num_bf16",
         decoder(form(3)((operands, mods) => Instruction.VPkMaxNumBf16(operands(0), operands(1), operands(2), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VOP3P",
             44,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -1046,7 +1048,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             44,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -1059,7 +1061,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             44,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -1072,7 +1074,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             44,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -1085,13 +1087,13 @@ private[common] object InstructionDefs22 {
   case object VPkMaxNumF16 extends InstructionDef(
         "v_pk_max_num_f16",
         decoder(form(3)((operands, mods) => Instruction.VPkMaxNumF16(operands(0), operands(1), operands(2), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VOP3P",
             28,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -1104,7 +1106,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             28,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -1117,7 +1119,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             28,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -1130,7 +1132,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             28,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -1143,7 +1145,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3P",
             28,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -1156,7 +1158,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3P_INST_LITERAL",
             28,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -1169,7 +1171,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3P_INST_LITERAL",
             28,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -1182,7 +1184,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3P_INST_LITERAL",
             28,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -1195,13 +1197,13 @@ private[common] object InstructionDefs22 {
   case object VPkMaxU16 extends InstructionDef(
         "v_pk_max_u16",
         decoder(form(3)((operands, mods) => Instruction.VPkMaxU16(operands(0), operands(1), operands(2), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "VOP3P",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_SIMPLE", 32, true, false, false)
@@ -1214,7 +1216,7 @@ private[common] object InstructionDefs22 {
             "cdna2",
             "VOP3P",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_SIMPLE", 32, true, false, false)
@@ -1227,7 +1229,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP3P",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_SIMPLE", 32, true, false, false)
@@ -1240,7 +1242,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP3P",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_SIMPLE", 32, true, false, false)
@@ -1253,7 +1255,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -1266,7 +1268,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -1279,7 +1281,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -1292,7 +1294,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -1305,7 +1307,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3P",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_NOLDS", 32, true, false, false)
@@ -1318,7 +1320,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3P_INST_LITERAL",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_NOLDS", 32, true, false, false)
@@ -1331,7 +1333,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3P_INST_LITERAL",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 32, true, false, false)
@@ -1344,7 +1346,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3P_INST_LITERAL",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 32, true, false, false)
@@ -1357,7 +1359,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3P",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_NOLDS", 32, true, false, false)
@@ -1370,7 +1372,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3P_INST_LITERAL",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_NOLDS", 32, true, false, false)
@@ -1383,7 +1385,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3P_INST_LITERAL",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 32, true, false, false)
@@ -1396,7 +1398,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3P_INST_LITERAL",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 32, true, false, false)
@@ -1409,7 +1411,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3P",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -1422,7 +1424,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3P_INST_LITERAL",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -1435,7 +1437,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3P_INST_LITERAL",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -1448,7 +1450,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3P_INST_LITERAL",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -1461,7 +1463,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3P",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -1474,7 +1476,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3P_INST_LITERAL",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -1487,7 +1489,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3P_INST_LITERAL",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -1500,7 +1502,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3P_INST_LITERAL",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -1513,7 +1515,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3P",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -1526,7 +1528,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3P_INST_LITERAL",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -1539,7 +1541,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3P_INST_LITERAL",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -1552,7 +1554,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3P_INST_LITERAL",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -1565,7 +1567,7 @@ private[common] object InstructionDefs22 {
             "gfx9",
             "VOP3P",
             12,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, false),
               OperandInfo(None, "uint", 32, true, false, false),
               OperandInfo(None, "uint", 32, true, false, false)
@@ -1580,13 +1582,13 @@ private[common] object InstructionDefs22 {
         decoder(form(4)((operands, mods) =>
           Instruction.VPkMaximum3F16(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA4,
             "cdna4",
             "VOP3P",
             28,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_SIMPLE", 32, true, false, false),
@@ -1600,7 +1602,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P",
             55,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -1614,7 +1616,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             55,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -1628,7 +1630,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             55,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -1642,7 +1644,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             55,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -1656,7 +1658,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             55,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -1670,7 +1672,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             55,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -1684,7 +1686,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             55,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -1698,7 +1700,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             55,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -1712,13 +1714,13 @@ private[common] object InstructionDefs22 {
   case object VPkMaximumF16 extends InstructionDef(
         "v_pk_maximum_f16",
         decoder(form(3)((operands, mods) => Instruction.VPkMaximumF16(operands(0), operands(1), operands(2), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VOP3P",
             30,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -1731,7 +1733,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             30,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -1744,7 +1746,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             30,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -1757,7 +1759,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             30,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -1770,7 +1772,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3P",
             30,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -1783,7 +1785,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3P_INST_LITERAL",
             30,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -1796,7 +1798,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3P_INST_LITERAL",
             30,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -1809,7 +1811,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3P_INST_LITERAL",
             30,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -1824,13 +1826,13 @@ private[common] object InstructionDefs22 {
         decoder(form(4)((operands, mods) =>
           Instruction.VPkMin3I16(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VOP3P",
             49,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -1844,7 +1846,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             49,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -1858,7 +1860,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             49,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -1872,7 +1874,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             49,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -1886,7 +1888,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             49,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -1900,7 +1902,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             49,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -1914,7 +1916,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             49,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -1928,7 +1930,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             49,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -1944,13 +1946,13 @@ private[common] object InstructionDefs22 {
         decoder(form(4)((operands, mods) =>
           Instruction.VPkMin3NumF16(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VOP3P",
             56,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -1964,7 +1966,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             56,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -1978,7 +1980,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             56,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -1992,7 +1994,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             56,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -2006,7 +2008,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             56,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -2020,7 +2022,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             56,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -2034,7 +2036,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             56,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -2048,7 +2050,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             56,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -2064,13 +2066,13 @@ private[common] object InstructionDefs22 {
         decoder(form(4)((operands, mods) =>
           Instruction.VPkMin3U16(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VOP3P",
             50,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -2084,7 +2086,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             50,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -2098,7 +2100,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             50,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -2112,7 +2114,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             50,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -2126,7 +2128,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             50,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -2140,7 +2142,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             50,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -2154,7 +2156,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             50,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -2168,7 +2170,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             50,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -2182,13 +2184,13 @@ private[common] object InstructionDefs22 {
   case object VPkMinF16 extends InstructionDef(
         "v_pk_min_f16",
         decoder(form(3)((operands, mods) => Instruction.VPkMinF16(operands(0), operands(1), operands(2), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "VOP3P",
             17,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_SIMPLE", 32, true, false, false)
@@ -2201,7 +2203,7 @@ private[common] object InstructionDefs22 {
             "cdna2",
             "VOP3P",
             17,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_SIMPLE", 32, true, false, false)
@@ -2214,7 +2216,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP3P",
             17,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_SIMPLE", 32, true, false, false)
@@ -2227,7 +2229,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP3P",
             17,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_SIMPLE", 32, true, false, false)
@@ -2240,7 +2242,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3P",
             17,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_NOLDS", 32, true, false, false)
@@ -2253,7 +2255,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3P_INST_LITERAL",
             17,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_NOLDS", 32, true, false, false)
@@ -2266,7 +2268,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3P_INST_LITERAL",
             17,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 32, true, false, false)
@@ -2279,7 +2281,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3P_INST_LITERAL",
             17,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 32, true, false, false)
@@ -2292,7 +2294,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3P",
             17,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_NOLDS", 32, true, false, false)
@@ -2305,7 +2307,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3P_INST_LITERAL",
             17,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_NOLDS", 32, true, false, false)
@@ -2318,7 +2320,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3P_INST_LITERAL",
             17,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 32, true, false, false)
@@ -2331,7 +2333,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3P_INST_LITERAL",
             17,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 32, true, false, false)
@@ -2344,7 +2346,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3P",
             17,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -2357,7 +2359,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3P_INST_LITERAL",
             17,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -2370,7 +2372,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3P_INST_LITERAL",
             17,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -2383,7 +2385,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3P_INST_LITERAL",
             17,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -2396,7 +2398,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3P",
             17,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -2409,7 +2411,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3P_INST_LITERAL",
             17,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -2422,7 +2424,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3P_INST_LITERAL",
             17,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -2435,7 +2437,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3P_INST_LITERAL",
             17,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -2448,7 +2450,7 @@ private[common] object InstructionDefs22 {
             "gfx9",
             "VOP3P",
             17,
-            Vector(
+            Col(
               OperandInfo(None, "float", 32, false, true, false),
               OperandInfo(None, "float", 32, true, false, false),
               OperandInfo(None, "float", 32, true, false, false)
@@ -2461,13 +2463,13 @@ private[common] object InstructionDefs22 {
   case object VPkMinI16 extends InstructionDef(
         "v_pk_min_i16",
         decoder(form(3)((operands, mods) => Instruction.VPkMinI16(operands(0), operands(1), operands(2), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "VOP3P",
             8,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_SIMPLE", 32, true, false, false)
@@ -2480,7 +2482,7 @@ private[common] object InstructionDefs22 {
             "cdna2",
             "VOP3P",
             8,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_SIMPLE", 32, true, false, false)
@@ -2493,7 +2495,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP3P",
             8,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_SIMPLE", 32, true, false, false)
@@ -2506,7 +2508,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP3P",
             8,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_SIMPLE", 32, true, false, false)
@@ -2519,7 +2521,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P",
             8,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -2532,7 +2534,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             8,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -2545,7 +2547,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             8,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -2558,7 +2560,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             8,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -2571,7 +2573,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3P",
             8,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_NOLDS", 32, true, false, false)
@@ -2584,7 +2586,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3P_INST_LITERAL",
             8,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_NOLDS", 32, true, false, false)
@@ -2597,7 +2599,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3P_INST_LITERAL",
             8,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 32, true, false, false)
@@ -2610,7 +2612,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3P_INST_LITERAL",
             8,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 32, true, false, false)
@@ -2623,7 +2625,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3P",
             8,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_NOLDS", 32, true, false, false)
@@ -2636,7 +2638,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3P_INST_LITERAL",
             8,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_NOLDS", 32, true, false, false)
@@ -2649,7 +2651,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3P_INST_LITERAL",
             8,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 32, true, false, false)
@@ -2662,7 +2664,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3P_INST_LITERAL",
             8,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 32, true, false, false)
@@ -2675,7 +2677,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3P",
             8,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -2688,7 +2690,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3P_INST_LITERAL",
             8,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -2701,7 +2703,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3P_INST_LITERAL",
             8,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -2714,7 +2716,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3P_INST_LITERAL",
             8,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -2727,7 +2729,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3P",
             8,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -2740,7 +2742,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3P_INST_LITERAL",
             8,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -2753,7 +2755,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3P_INST_LITERAL",
             8,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -2766,7 +2768,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3P_INST_LITERAL",
             8,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -2779,7 +2781,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3P",
             8,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -2792,7 +2794,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3P_INST_LITERAL",
             8,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -2805,7 +2807,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3P_INST_LITERAL",
             8,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -2818,7 +2820,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3P_INST_LITERAL",
             8,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -2831,7 +2833,7 @@ private[common] object InstructionDefs22 {
             "gfx9",
             "VOP3P",
             8,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, false),
               OperandInfo(None, "uint", 32, true, false, false),
               OperandInfo(None, "uint", 32, true, false, false)
@@ -2844,13 +2846,13 @@ private[common] object InstructionDefs22 {
   case object VPkMinNumBf16 extends InstructionDef(
         "v_pk_min_num_bf16",
         decoder(form(3)((operands, mods) => Instruction.VPkMinNumBf16(operands(0), operands(1), operands(2), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VOP3P",
             43,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -2863,7 +2865,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             43,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -2876,7 +2878,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             43,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -2889,7 +2891,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             43,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -2902,13 +2904,13 @@ private[common] object InstructionDefs22 {
   case object VPkMinNumF16 extends InstructionDef(
         "v_pk_min_num_f16",
         decoder(form(3)((operands, mods) => Instruction.VPkMinNumF16(operands(0), operands(1), operands(2), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VOP3P",
             27,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -2921,7 +2923,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             27,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -2934,7 +2936,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             27,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -2947,7 +2949,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             27,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -2960,7 +2962,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3P",
             27,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -2973,7 +2975,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3P_INST_LITERAL",
             27,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -2986,7 +2988,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3P_INST_LITERAL",
             27,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -2999,7 +3001,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3P_INST_LITERAL",
             27,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -3012,13 +3014,13 @@ private[common] object InstructionDefs22 {
   case object VPkMinU16 extends InstructionDef(
         "v_pk_min_u16",
         decoder(form(3)((operands, mods) => Instruction.VPkMinU16(operands(0), operands(1), operands(2), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "VOP3P",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_SIMPLE", 32, true, false, false)
@@ -3031,7 +3033,7 @@ private[common] object InstructionDefs22 {
             "cdna2",
             "VOP3P",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_SIMPLE", 32, true, false, false)
@@ -3044,7 +3046,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP3P",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_SIMPLE", 32, true, false, false)
@@ -3057,7 +3059,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP3P",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_SIMPLE", 32, true, false, false)
@@ -3070,7 +3072,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -3083,7 +3085,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -3096,7 +3098,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -3109,7 +3111,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -3122,7 +3124,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3P",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_NOLDS", 32, true, false, false)
@@ -3135,7 +3137,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3P_INST_LITERAL",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_NOLDS", 32, true, false, false)
@@ -3148,7 +3150,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3P_INST_LITERAL",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 32, true, false, false)
@@ -3161,7 +3163,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3P_INST_LITERAL",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 32, true, false, false)
@@ -3174,7 +3176,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3P",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_NOLDS", 32, true, false, false)
@@ -3187,7 +3189,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3P_INST_LITERAL",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_NOLDS", 32, true, false, false)
@@ -3200,7 +3202,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3P_INST_LITERAL",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 32, true, false, false)
@@ -3213,7 +3215,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3P_INST_LITERAL",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 32, true, false, false)
@@ -3226,7 +3228,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3P",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -3239,7 +3241,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3P_INST_LITERAL",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -3252,7 +3254,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3P_INST_LITERAL",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -3265,7 +3267,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3P_INST_LITERAL",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -3278,7 +3280,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3P",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -3291,7 +3293,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3P_INST_LITERAL",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -3304,7 +3306,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3P_INST_LITERAL",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -3317,7 +3319,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3P_INST_LITERAL",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -3330,7 +3332,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3P",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -3343,7 +3345,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3P_INST_LITERAL",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -3356,7 +3358,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3P_INST_LITERAL",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -3369,7 +3371,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3P_INST_LITERAL",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -3382,7 +3384,7 @@ private[common] object InstructionDefs22 {
             "gfx9",
             "VOP3P",
             13,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, false),
               OperandInfo(None, "uint", 32, true, false, false),
               OperandInfo(None, "uint", 32, true, false, false)
@@ -3397,13 +3399,13 @@ private[common] object InstructionDefs22 {
         decoder(form(4)((operands, mods) =>
           Instruction.VPkMinimum3F16(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA4,
             "cdna4",
             "VOP3P",
             27,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_SIMPLE", 32, true, false, false),
@@ -3417,7 +3419,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P",
             54,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -3431,7 +3433,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             54,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -3445,7 +3447,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             54,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -3459,7 +3461,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             54,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -3473,7 +3475,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             54,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -3487,7 +3489,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             54,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -3501,7 +3503,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             54,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -3515,7 +3517,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             54,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -3529,13 +3531,13 @@ private[common] object InstructionDefs22 {
   case object VPkMinimumF16 extends InstructionDef(
         "v_pk_minimum_f16",
         decoder(form(3)((operands, mods) => Instruction.VPkMinimumF16(operands(0), operands(1), operands(2), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VOP3P",
             29,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -3548,7 +3550,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             29,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -3561,7 +3563,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             29,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -3574,7 +3576,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             29,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -3587,7 +3589,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3P",
             29,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -3600,7 +3602,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3P_INST_LITERAL",
             29,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -3613,7 +3615,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3P_INST_LITERAL",
             29,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -3626,7 +3628,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3P_INST_LITERAL",
             29,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -3639,13 +3641,13 @@ private[common] object InstructionDefs22 {
   case object VPkMovB32 extends InstructionDef(
         "v_pk_mov_b32",
         decoder(form(3)((operands, mods) => Instruction.VPkMovB32(operands(0), operands(1), operands(2), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA2,
             "cdna2",
             "VOP3P",
             51,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 64, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_SIMPLE", 64, true, false, false)
@@ -3658,7 +3660,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP3P",
             51,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 64, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_SIMPLE", 64, true, false, false)
@@ -3671,7 +3673,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP3P",
             51,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 64, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_SIMPLE", 64, true, false, false)
@@ -3684,13 +3686,13 @@ private[common] object InstructionDefs22 {
   case object VPkMulBf16 extends InstructionDef(
         "v_pk_mul_bf16",
         decoder(form(3)((operands, mods) => Instruction.VPkMulBf16(operands(0), operands(1), operands(2), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VOP3P",
             42,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -3703,7 +3705,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             42,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -3716,7 +3718,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             42,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -3729,7 +3731,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             42,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -3742,13 +3744,13 @@ private[common] object InstructionDefs22 {
   case object VPkMulF16 extends InstructionDef(
         "v_pk_mul_f16",
         decoder(form(3)((operands, mods) => Instruction.VPkMulF16(operands(0), operands(1), operands(2), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "VOP3P",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_SIMPLE", 32, true, false, false)
@@ -3761,7 +3763,7 @@ private[common] object InstructionDefs22 {
             "cdna2",
             "VOP3P",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_SIMPLE", 32, true, false, false)
@@ -3774,7 +3776,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP3P",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_SIMPLE", 32, true, false, false)
@@ -3787,7 +3789,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP3P",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_SIMPLE", 32, true, false, false)
@@ -3800,7 +3802,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -3813,7 +3815,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -3826,7 +3828,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -3839,7 +3841,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -3852,7 +3854,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3P",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_NOLDS", 32, true, false, false)
@@ -3865,7 +3867,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3P_INST_LITERAL",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_NOLDS", 32, true, false, false)
@@ -3878,7 +3880,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3P_INST_LITERAL",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 32, true, false, false)
@@ -3891,7 +3893,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3P_INST_LITERAL",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 32, true, false, false)
@@ -3904,7 +3906,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3P",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_NOLDS", 32, true, false, false)
@@ -3917,7 +3919,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3P_INST_LITERAL",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_NOLDS", 32, true, false, false)
@@ -3930,7 +3932,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3P_INST_LITERAL",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 32, true, false, false)
@@ -3943,7 +3945,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3P_INST_LITERAL",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 32, true, false, false)
@@ -3956,7 +3958,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3P",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -3969,7 +3971,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3P_INST_LITERAL",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -3982,7 +3984,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3P_INST_LITERAL",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -3995,7 +3997,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3P_INST_LITERAL",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -4008,7 +4010,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3P",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -4021,7 +4023,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3P_INST_LITERAL",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -4034,7 +4036,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3P_INST_LITERAL",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -4047,7 +4049,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3P_INST_LITERAL",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -4060,7 +4062,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3P",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -4073,7 +4075,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3P_INST_LITERAL",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -4086,7 +4088,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3P_INST_LITERAL",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -4099,7 +4101,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3P_INST_LITERAL",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -4112,7 +4114,7 @@ private[common] object InstructionDefs22 {
             "gfx9",
             "VOP3P",
             16,
-            Vector(
+            Col(
               OperandInfo(None, "float", 32, false, true, false),
               OperandInfo(None, "float", 32, true, false, false),
               OperandInfo(None, "float", 32, true, false, false)
@@ -4125,13 +4127,13 @@ private[common] object InstructionDefs22 {
   case object VPkMulF32 extends InstructionDef(
         "v_pk_mul_f32",
         decoder(form(3)((operands, mods) => Instruction.VPkMulF32(operands(0), operands(1), operands(2), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA2,
             "cdna2",
             "VOP3P",
             49,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 64, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_SIMPLE", 64, true, false, false)
@@ -4144,7 +4146,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP3P",
             49,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 64, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_SIMPLE", 64, true, false, false)
@@ -4157,7 +4159,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP3P",
             49,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 64, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_SIMPLE", 64, true, false, false)
@@ -4170,7 +4172,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P",
             40,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 64, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 64, true, false, false)
@@ -4183,7 +4185,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             40,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 64, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 64, true, false, false)
@@ -4196,7 +4198,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             40,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 64, true, false, false)
@@ -4209,7 +4211,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             40,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 64, true, false, false)
@@ -4222,13 +4224,13 @@ private[common] object InstructionDefs22 {
   case object VPkMulLoU16 extends InstructionDef(
         "v_pk_mul_lo_u16",
         decoder(form(3)((operands, mods) => Instruction.VPkMulLoU16(operands(0), operands(1), operands(2), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "VOP3P",
             1,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_SIMPLE", 32, true, false, false)
@@ -4241,7 +4243,7 @@ private[common] object InstructionDefs22 {
             "cdna2",
             "VOP3P",
             1,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_SIMPLE", 32, true, false, false)
@@ -4254,7 +4256,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP3P",
             1,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_SIMPLE", 32, true, false, false)
@@ -4267,7 +4269,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP3P",
             1,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_SIMPLE", 32, true, false, false)
@@ -4280,7 +4282,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P",
             1,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -4293,7 +4295,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             1,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -4306,7 +4308,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             1,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -4319,7 +4321,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             1,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -4332,7 +4334,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3P",
             1,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_NOLDS", 32, true, false, false)
@@ -4345,7 +4347,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3P_INST_LITERAL",
             1,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_NOLDS", 32, true, false, false)
@@ -4358,7 +4360,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3P_INST_LITERAL",
             1,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 32, true, false, false)
@@ -4371,7 +4373,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3P_INST_LITERAL",
             1,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 32, true, false, false)
@@ -4384,7 +4386,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3P",
             1,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_NOLDS", 32, true, false, false)
@@ -4397,7 +4399,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3P_INST_LITERAL",
             1,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_NOLDS", 32, true, false, false)
@@ -4410,7 +4412,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3P_INST_LITERAL",
             1,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 32, true, false, false)
@@ -4423,7 +4425,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3P_INST_LITERAL",
             1,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 32, true, false, false)
@@ -4436,7 +4438,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3P",
             1,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -4449,7 +4451,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3P_INST_LITERAL",
             1,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -4462,7 +4464,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3P_INST_LITERAL",
             1,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -4475,7 +4477,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3P_INST_LITERAL",
             1,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -4488,7 +4490,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3P",
             1,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -4501,7 +4503,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3P_INST_LITERAL",
             1,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -4514,7 +4516,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3P_INST_LITERAL",
             1,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -4527,7 +4529,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3P_INST_LITERAL",
             1,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -4540,7 +4542,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3P",
             1,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -4553,7 +4555,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3P_INST_LITERAL",
             1,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -4566,7 +4568,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3P_INST_LITERAL",
             1,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -4579,7 +4581,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3P_INST_LITERAL",
             1,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -4592,7 +4594,7 @@ private[common] object InstructionDefs22 {
             "gfx9",
             "VOP3P",
             1,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, false),
               OperandInfo(None, "uint", 32, true, false, false),
               OperandInfo(None, "uint", 32, true, false, false)
@@ -4605,13 +4607,13 @@ private[common] object InstructionDefs22 {
   case object VPkSubI16 extends InstructionDef(
         "v_pk_sub_i16",
         decoder(form(3)((operands, mods) => Instruction.VPkSubI16(operands(0), operands(1), operands(2), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "VOP3P",
             3,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_SIMPLE", 32, true, false, false)
@@ -4624,7 +4626,7 @@ private[common] object InstructionDefs22 {
             "cdna2",
             "VOP3P",
             3,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_SIMPLE", 32, true, false, false)
@@ -4637,7 +4639,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP3P",
             3,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_SIMPLE", 32, true, false, false)
@@ -4650,7 +4652,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP3P",
             3,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_SIMPLE", 32, true, false, false)
@@ -4663,7 +4665,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P",
             3,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -4676,7 +4678,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             3,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -4689,7 +4691,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             3,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -4702,7 +4704,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             3,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -4715,7 +4717,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3P",
             3,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_NOLDS", 32, true, false, false)
@@ -4728,7 +4730,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3P_INST_LITERAL",
             3,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_NOLDS", 32, true, false, false)
@@ -4741,7 +4743,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3P_INST_LITERAL",
             3,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 32, true, false, false)
@@ -4754,7 +4756,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3P_INST_LITERAL",
             3,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 32, true, false, false)
@@ -4767,7 +4769,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3P",
             3,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_NOLDS", 32, true, false, false)
@@ -4780,7 +4782,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3P_INST_LITERAL",
             3,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_NOLDS", 32, true, false, false)
@@ -4793,7 +4795,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3P_INST_LITERAL",
             3,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 32, true, false, false)
@@ -4806,7 +4808,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3P_INST_LITERAL",
             3,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 32, true, false, false)
@@ -4819,7 +4821,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3P",
             3,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -4832,7 +4834,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3P_INST_LITERAL",
             3,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -4845,7 +4847,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3P_INST_LITERAL",
             3,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -4858,7 +4860,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3P_INST_LITERAL",
             3,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -4871,7 +4873,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3P",
             3,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -4884,7 +4886,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3P_INST_LITERAL",
             3,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -4897,7 +4899,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3P_INST_LITERAL",
             3,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -4910,7 +4912,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3P_INST_LITERAL",
             3,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -4923,7 +4925,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3P",
             3,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -4936,7 +4938,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3P_INST_LITERAL",
             3,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -4949,7 +4951,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3P_INST_LITERAL",
             3,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -4962,7 +4964,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3P_INST_LITERAL",
             3,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -4975,7 +4977,7 @@ private[common] object InstructionDefs22 {
             "gfx9",
             "VOP3P",
             3,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, false),
               OperandInfo(None, "uint", 32, true, false, false),
               OperandInfo(None, "uint", 32, true, false, false)
@@ -4988,13 +4990,13 @@ private[common] object InstructionDefs22 {
   case object VPkSubU16 extends InstructionDef(
         "v_pk_sub_u16",
         decoder(form(3)((operands, mods) => Instruction.VPkSubU16(operands(0), operands(1), operands(2), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "VOP3P",
             11,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_SIMPLE", 32, true, false, false)
@@ -5007,7 +5009,7 @@ private[common] object InstructionDefs22 {
             "cdna2",
             "VOP3P",
             11,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_SIMPLE", 32, true, false, false)
@@ -5020,7 +5022,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP3P",
             11,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_SIMPLE", 32, true, false, false)
@@ -5033,7 +5035,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP3P",
             11,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_SIMPLE", 32, true, false, false)
@@ -5046,7 +5048,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P",
             11,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -5059,7 +5061,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             11,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -5072,7 +5074,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             11,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -5085,7 +5087,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3P_INST_LITERAL",
             11,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -5098,7 +5100,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3P",
             11,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_NOLDS", 32, true, false, false)
@@ -5111,7 +5113,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3P_INST_LITERAL",
             11,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_NOLDS", 32, true, false, false)
@@ -5124,7 +5126,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3P_INST_LITERAL",
             11,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 32, true, false, false)
@@ -5137,7 +5139,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3P_INST_LITERAL",
             11,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 32, true, false, false)
@@ -5150,7 +5152,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3P",
             11,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_NOLDS", 32, true, false, false)
@@ -5163,7 +5165,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3P_INST_LITERAL",
             11,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_NOLDS", 32, true, false, false)
@@ -5176,7 +5178,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3P_INST_LITERAL",
             11,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 32, true, false, false)
@@ -5189,7 +5191,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3P_INST_LITERAL",
             11,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 32, true, false, false)
@@ -5202,7 +5204,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3P",
             11,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -5215,7 +5217,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3P_INST_LITERAL",
             11,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -5228,7 +5230,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3P_INST_LITERAL",
             11,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -5241,7 +5243,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3P_INST_LITERAL",
             11,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -5254,7 +5256,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3P",
             11,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -5267,7 +5269,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3P_INST_LITERAL",
             11,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -5280,7 +5282,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3P_INST_LITERAL",
             11,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -5293,7 +5295,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3P_INST_LITERAL",
             11,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -5306,7 +5308,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3P",
             11,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -5319,7 +5321,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3P_INST_LITERAL",
             11,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false)
@@ -5332,7 +5334,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3P_INST_LITERAL",
             11,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -5345,7 +5347,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3P_INST_LITERAL",
             11,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
@@ -5358,7 +5360,7 @@ private[common] object InstructionDefs22 {
             "gfx9",
             "VOP3P",
             11,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, false),
               OperandInfo(None, "uint", 32, true, false, false),
               OperandInfo(None, "uint", 32, true, false, false)
@@ -5371,13 +5373,13 @@ private[common] object InstructionDefs22 {
   case object VPrngB32 extends InstructionDef(
         "v_prng_b32",
         decoder(form(2)((operands, mods) => Instruction.VPrngB32(operands(0), operands(1), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA4,
             "cdna4",
             "VOP1",
             88,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -5389,7 +5391,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP1_INST_LITERAL",
             88,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -5401,7 +5403,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP1_VOP_DPP",
             88,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -5413,7 +5415,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP1_VOP_SDWA",
             88,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "SRC_SIMPLE", 32, true, false, false)
             ),
@@ -5425,7 +5427,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP3",
             408,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false)
             ),
@@ -5437,7 +5439,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1",
             75,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -5449,7 +5451,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1_INST_LITERAL",
             75,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -5461,7 +5463,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1_INST_LITERAL64",
             75,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL64"), "SRC", 32, true, false, false)
             ),
@@ -5473,7 +5475,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1_VOP_DPP16",
             75,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -5485,7 +5487,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1_VOP_DPP8",
             75,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -5497,7 +5499,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3",
             459,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -5509,7 +5511,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_INST_LITERAL",
             459,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -5521,7 +5523,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_VOP_DPP16",
             459,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -5533,7 +5535,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_VOP_DPP8",
             459,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -5547,13 +5549,13 @@ private[common] object InstructionDefs22 {
         decoder(form(4)((operands, mods) =>
           Instruction.VQsadPkU16U8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "VOP3",
             485,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 64, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_SIMPLE", 32, true, false, false),
@@ -5567,7 +5569,7 @@ private[common] object InstructionDefs22 {
             "cdna2",
             "VOP3",
             485,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 64, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_SIMPLE", 32, true, false, false),
@@ -5581,7 +5583,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP3",
             485,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 64, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_SIMPLE", 32, true, false, false),
@@ -5595,7 +5597,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP3",
             485,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 64, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_SIMPLE", 32, true, false, false),
@@ -5609,7 +5611,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3",
             570,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 64, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -5623,7 +5625,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_INST_LITERAL",
             570,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 64, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -5637,7 +5639,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_INST_LITERAL",
             570,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -5651,7 +5653,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_INST_LITERAL",
             570,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -5665,7 +5667,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_INST_LITERAL",
             570,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 64, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -5679,7 +5681,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_INST_LITERAL",
             570,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 64, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -5693,7 +5695,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_INST_LITERAL",
             570,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -5707,7 +5709,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_INST_LITERAL",
             570,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -5721,7 +5723,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3",
             370,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 64, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_NOLDS", 32, true, false, false),
@@ -5735,7 +5737,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3_INST_LITERAL",
             370,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 64, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_NOLDS", 32, true, false, false),
@@ -5749,7 +5751,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3_INST_LITERAL",
             370,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 32, true, false, false),
@@ -5763,7 +5765,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3_INST_LITERAL",
             370,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 32, true, false, false),
@@ -5777,7 +5779,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3_INST_LITERAL",
             370,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 64, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_NOLDS", 32, true, false, false),
@@ -5791,7 +5793,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3_INST_LITERAL",
             370,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 64, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_NOLDS", 32, true, false, false),
@@ -5805,7 +5807,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3_INST_LITERAL",
             370,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 32, true, false, false),
@@ -5819,7 +5821,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3_INST_LITERAL",
             370,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 32, true, false, false),
@@ -5833,7 +5835,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3",
             370,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 64, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_NOLDS", 32, true, false, false),
@@ -5847,7 +5849,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3_INST_LITERAL",
             370,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 64, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_NOLDS", 32, true, false, false),
@@ -5861,7 +5863,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3_INST_LITERAL",
             370,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 32, true, false, false),
@@ -5875,7 +5877,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3_INST_LITERAL",
             370,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 32, true, false, false),
@@ -5889,7 +5891,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3_INST_LITERAL",
             370,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 64, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_NOLDS", 32, true, false, false),
@@ -5903,7 +5905,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3_INST_LITERAL",
             370,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 64, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_NOLDS", 32, true, false, false),
@@ -5917,7 +5919,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3_INST_LITERAL",
             370,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 32, true, false, false),
@@ -5931,7 +5933,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3_INST_LITERAL",
             370,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 32, true, false, false),
@@ -5945,7 +5947,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3",
             570,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 64, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -5959,7 +5961,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3_INST_LITERAL",
             570,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 64, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -5973,7 +5975,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3_INST_LITERAL",
             570,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -5987,7 +5989,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3_INST_LITERAL",
             570,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -6001,7 +6003,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3_INST_LITERAL",
             570,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 64, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -6015,7 +6017,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3_INST_LITERAL",
             570,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 64, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -6029,7 +6031,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3_INST_LITERAL",
             570,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -6043,7 +6045,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3_INST_LITERAL",
             570,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -6057,7 +6059,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3",
             570,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 64, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -6071,7 +6073,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3_INST_LITERAL",
             570,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 64, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -6085,7 +6087,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3_INST_LITERAL",
             570,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -6099,7 +6101,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3_INST_LITERAL",
             570,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -6113,7 +6115,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3_INST_LITERAL",
             570,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 64, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -6127,7 +6129,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3_INST_LITERAL",
             570,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 64, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -6141,7 +6143,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3_INST_LITERAL",
             570,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -6155,7 +6157,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3_INST_LITERAL",
             570,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -6169,7 +6171,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3",
             570,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 64, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -6183,7 +6185,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_INST_LITERAL",
             570,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 64, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -6197,7 +6199,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_INST_LITERAL",
             570,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -6211,7 +6213,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_INST_LITERAL",
             570,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -6225,7 +6227,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_INST_LITERAL",
             570,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 64, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -6239,7 +6241,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_INST_LITERAL",
             570,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 64, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -6253,7 +6255,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_INST_LITERAL",
             570,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -6267,7 +6269,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_INST_LITERAL",
             570,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -6281,7 +6283,7 @@ private[common] object InstructionDefs22 {
             "gfx6",
             "VOP3",
             370,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 64, false, true, false),
               OperandInfo(None, "uint", 64, true, false, false),
               OperandInfo(None, "uint", 32, true, false, false),
@@ -6295,7 +6297,7 @@ private[common] object InstructionDefs22 {
             "gfx7",
             "VOP3",
             370,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 64, false, true, false),
               OperandInfo(None, "uint", 64, true, false, false),
               OperandInfo(None, "uint", 32, true, false, false),
@@ -6309,7 +6311,7 @@ private[common] object InstructionDefs22 {
             "gfx8",
             "VOP3",
             485,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 64, false, true, false),
               OperandInfo(None, "uint", 64, true, false, false),
               OperandInfo(None, "uint", 32, true, false, false),
@@ -6323,7 +6325,7 @@ private[common] object InstructionDefs22 {
             "gfx9",
             "VOP3",
             485,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 64, false, true, false),
               OperandInfo(None, "uint", 64, true, false, false),
               OperandInfo(None, "uint", 32, true, false, false),
@@ -6337,13 +6339,13 @@ private[common] object InstructionDefs22 {
   case object VRcpBf16 extends InstructionDef(
         "v_rcp_bf16",
         decoder(form(2)((operands, mods) => Instruction.VRcpBf16(operands(0), operands(1), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VOP1",
             121,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 16, true, false, false)
             ),
@@ -6355,7 +6357,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1_INST_LITERAL",
             121,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 16, true, false, false)
             ),
@@ -6367,7 +6369,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1_INST_LITERAL64",
             121,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL64"), "SRC", 16, true, false, false)
             ),
@@ -6379,7 +6381,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1_VOP_DPP16",
             121,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -6391,7 +6393,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1_VOP_DPP8",
             121,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -6403,7 +6405,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3",
             505,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 16, true, false, false)
             ),
@@ -6415,7 +6417,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_INST_LITERAL",
             505,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 16, true, false, false)
             ),
@@ -6427,7 +6429,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_VOP_DPP16",
             505,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -6439,7 +6441,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_VOP_DPP8",
             505,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -6451,13 +6453,13 @@ private[common] object InstructionDefs22 {
   case object VRcpClampF32 extends InstructionDef(
         "v_rcp_clamp_f32",
         decoder(form(2)((operands, mods) => Instruction.VRcpClampF32(operands(0), operands(1), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.GFX6,
             "gfx6",
             "VOP1",
             40,
-            Vector(
+            Col(
               OperandInfo(None, "float", 32, false, true, false),
               OperandInfo(None, "float", 32, true, false, false)
             ),
@@ -6469,7 +6471,7 @@ private[common] object InstructionDefs22 {
             "gfx7",
             "VOP1",
             40,
-            Vector(
+            Col(
               OperandInfo(None, "float", 32, false, true, false),
               OperandInfo(None, "float", 32, true, false, false)
             ),
@@ -6481,13 +6483,13 @@ private[common] object InstructionDefs22 {
   case object VRcpClampF64 extends InstructionDef(
         "v_rcp_clamp_f64",
         decoder(form(2)((operands, mods) => Instruction.VRcpClampF64(operands(0), operands(1), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.GFX6,
             "gfx6",
             "VOP1",
             48,
-            Vector(
+            Col(
               OperandInfo(None, "float", 64, false, true, false),
               OperandInfo(None, "float", 64, true, false, false)
             ),
@@ -6499,7 +6501,7 @@ private[common] object InstructionDefs22 {
             "gfx7",
             "VOP1",
             48,
-            Vector(
+            Col(
               OperandInfo(None, "float", 64, false, true, false),
               OperandInfo(None, "float", 64, true, false, false)
             ),
@@ -6511,13 +6513,13 @@ private[common] object InstructionDefs22 {
   case object VRcpF16 extends InstructionDef(
         "v_rcp_f16",
         decoder(form(2)((operands, mods) => Instruction.VRcpF16(operands(0), operands(1), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "VOP1",
             61,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 16, true, false, false)
             ),
@@ -6529,7 +6531,7 @@ private[common] object InstructionDefs22 {
             "cdna1",
             "VOP1_INST_LITERAL",
             61,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 16, true, false, false)
             ),
@@ -6541,7 +6543,7 @@ private[common] object InstructionDefs22 {
             "cdna1",
             "VOP1_VOP_DPP",
             61,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -6553,7 +6555,7 @@ private[common] object InstructionDefs22 {
             "cdna1",
             "VOP1_VOP_SDWA",
             61,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "SRC_SIMPLE", 16, true, false, false)
             ),
@@ -6565,7 +6567,7 @@ private[common] object InstructionDefs22 {
             "cdna1",
             "VOP3",
             381,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 16, true, false, false)
             ),
@@ -6577,7 +6579,7 @@ private[common] object InstructionDefs22 {
             "cdna2",
             "VOP1",
             61,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 16, true, false, false)
             ),
@@ -6589,7 +6591,7 @@ private[common] object InstructionDefs22 {
             "cdna2",
             "VOP1_INST_LITERAL",
             61,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 16, true, false, false)
             ),
@@ -6601,7 +6603,7 @@ private[common] object InstructionDefs22 {
             "cdna2",
             "VOP1_VOP_DPP",
             61,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -6613,7 +6615,7 @@ private[common] object InstructionDefs22 {
             "cdna2",
             "VOP1_VOP_SDWA",
             61,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "SRC_SIMPLE", 16, true, false, false)
             ),
@@ -6625,7 +6627,7 @@ private[common] object InstructionDefs22 {
             "cdna2",
             "VOP3",
             381,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 16, true, false, false)
             ),
@@ -6637,7 +6639,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP1",
             61,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 16, true, false, false)
             ),
@@ -6649,7 +6651,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP1_INST_LITERAL",
             61,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 16, true, false, false)
             ),
@@ -6661,7 +6663,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP1_VOP_DPP",
             61,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -6673,7 +6675,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP1_VOP_SDWA",
             61,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "SRC_SIMPLE", 16, true, false, false)
             ),
@@ -6685,7 +6687,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP3",
             381,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 16, true, false, false)
             ),
@@ -6697,7 +6699,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP1",
             61,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 16, true, false, false)
             ),
@@ -6709,7 +6711,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP1_INST_LITERAL",
             61,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 16, true, false, false)
             ),
@@ -6721,7 +6723,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP1_VOP_DPP",
             61,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -6733,7 +6735,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP1_VOP_SDWA",
             61,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "SRC_SIMPLE", 16, true, false, false)
             ),
@@ -6745,7 +6747,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP3",
             381,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 16, true, false, false)
             ),
@@ -6757,7 +6759,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1",
             84,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 16, true, false, false)
             ),
@@ -6769,7 +6771,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1_INST_LITERAL",
             84,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 16, true, false, false)
             ),
@@ -6781,7 +6783,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1_INST_LITERAL64",
             84,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL64"), "SRC", 16, true, false, false)
             ),
@@ -6793,7 +6795,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1_VOP_DPP16",
             84,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -6805,7 +6807,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1_VOP_DPP8",
             84,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -6817,7 +6819,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3",
             468,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 16, true, false, false)
             ),
@@ -6829,7 +6831,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_INST_LITERAL",
             468,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 16, true, false, false)
             ),
@@ -6841,7 +6843,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_VOP_DPP16",
             468,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -6853,7 +6855,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_VOP_DPP8",
             468,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -6865,7 +6867,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP1",
             84,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 16, true, false, false)
             ),
@@ -6877,7 +6879,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP1_INST_LITERAL",
             84,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 16, true, false, false)
             ),
@@ -6889,7 +6891,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP1_VOP_DPP16",
             84,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -6901,7 +6903,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP1_VOP_DPP8",
             84,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -6913,7 +6915,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP1_VOP_SDWA",
             84,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "SRC_SIMPLE", 16, true, false, false)
             ),
@@ -6925,7 +6927,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3",
             468,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 16, true, false, false)
             ),
@@ -6937,7 +6939,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3_INST_LITERAL",
             468,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 16, true, false, false)
             ),
@@ -6949,7 +6951,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP1",
             84,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 16, true, false, false)
             ),
@@ -6961,7 +6963,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP1_INST_LITERAL",
             84,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 16, true, false, false)
             ),
@@ -6973,7 +6975,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP1_VOP_DPP16",
             84,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -6985,7 +6987,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP1_VOP_DPP8",
             84,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -6997,7 +6999,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP1_VOP_SDWA",
             84,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "SRC_SIMPLE", 16, true, false, false)
             ),
@@ -7009,7 +7011,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3",
             468,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 16, true, false, false)
             ),
@@ -7021,7 +7023,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3_INST_LITERAL",
             468,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 16, true, false, false)
             ),
@@ -7033,7 +7035,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP1",
             84,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 16, true, false, false)
             ),
@@ -7045,7 +7047,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP1_INST_LITERAL",
             84,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 16, true, false, false)
             ),
@@ -7057,7 +7059,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP1_VOP_DPP16",
             84,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -7069,7 +7071,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP1_VOP_DPP8",
             84,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -7081,7 +7083,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3",
             468,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 16, true, false, false)
             ),
@@ -7093,7 +7095,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3_INST_LITERAL",
             468,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 16, true, false, false)
             ),
@@ -7105,7 +7107,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3_VOP_DPP16",
             468,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -7117,7 +7119,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3_VOP_DPP8",
             468,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -7129,7 +7131,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP1",
             84,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 16, true, false, false)
             ),
@@ -7141,7 +7143,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP1_INST_LITERAL",
             84,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 16, true, false, false)
             ),
@@ -7153,7 +7155,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP1_VOP_DPP16",
             84,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -7165,7 +7167,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP1_VOP_DPP8",
             84,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -7177,7 +7179,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3",
             468,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 16, true, false, false)
             ),
@@ -7189,7 +7191,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3_INST_LITERAL",
             468,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 16, true, false, false)
             ),
@@ -7201,7 +7203,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3_VOP_DPP16",
             468,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -7213,7 +7215,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3_VOP_DPP8",
             468,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -7225,7 +7227,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP1",
             84,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 16, true, false, false)
             ),
@@ -7237,7 +7239,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP1_INST_LITERAL",
             84,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 16, true, false, false)
             ),
@@ -7249,7 +7251,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP1_VOP_DPP16",
             84,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -7261,7 +7263,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP1_VOP_DPP8",
             84,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -7273,7 +7275,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3",
             468,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 16, true, false, false)
             ),
@@ -7285,7 +7287,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_INST_LITERAL",
             468,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 16, true, false, false)
             ),
@@ -7297,7 +7299,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_VOP_DPP16",
             468,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -7309,7 +7311,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_VOP_DPP8",
             468,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -7321,7 +7323,7 @@ private[common] object InstructionDefs22 {
             "gfx8",
             "VOP1",
             61,
-            Vector(
+            Col(
               OperandInfo(None, "float", 16, false, true, false),
               OperandInfo(None, "float", 16, true, false, false)
             ),
@@ -7333,7 +7335,7 @@ private[common] object InstructionDefs22 {
             "gfx9",
             "VOP1",
             61,
-            Vector(
+            Col(
               OperandInfo(None, "float", 16, false, true, false),
               OperandInfo(None, "float", 16, true, false, false)
             ),
@@ -7345,13 +7347,13 @@ private[common] object InstructionDefs22 {
   case object VRcpF32 extends InstructionDef(
         "v_rcp_f32",
         decoder(form(2)((operands, mods) => Instruction.VRcpF32(operands(0), operands(1), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "VOP1",
             34,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -7363,7 +7365,7 @@ private[common] object InstructionDefs22 {
             "cdna1",
             "VOP1_INST_LITERAL",
             34,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -7375,7 +7377,7 @@ private[common] object InstructionDefs22 {
             "cdna1",
             "VOP1_VOP_DPP",
             34,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -7387,7 +7389,7 @@ private[common] object InstructionDefs22 {
             "cdna1",
             "VOP1_VOP_SDWA",
             34,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "SRC_SIMPLE", 32, true, false, false)
             ),
@@ -7399,7 +7401,7 @@ private[common] object InstructionDefs22 {
             "cdna1",
             "VOP3",
             354,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false)
             ),
@@ -7411,7 +7413,7 @@ private[common] object InstructionDefs22 {
             "cdna2",
             "VOP1",
             34,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -7423,7 +7425,7 @@ private[common] object InstructionDefs22 {
             "cdna2",
             "VOP1_INST_LITERAL",
             34,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -7435,7 +7437,7 @@ private[common] object InstructionDefs22 {
             "cdna2",
             "VOP1_VOP_DPP",
             34,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -7447,7 +7449,7 @@ private[common] object InstructionDefs22 {
             "cdna2",
             "VOP1_VOP_SDWA",
             34,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "SRC_SIMPLE", 32, true, false, false)
             ),
@@ -7459,7 +7461,7 @@ private[common] object InstructionDefs22 {
             "cdna2",
             "VOP3",
             354,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false)
             ),
@@ -7471,7 +7473,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP1",
             34,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -7483,7 +7485,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP1_INST_LITERAL",
             34,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -7495,7 +7497,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP1_VOP_DPP",
             34,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -7507,7 +7509,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP1_VOP_SDWA",
             34,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "SRC_SIMPLE", 32, true, false, false)
             ),
@@ -7519,7 +7521,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP3",
             354,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false)
             ),
@@ -7531,7 +7533,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP1",
             34,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -7543,7 +7545,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP1_INST_LITERAL",
             34,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -7555,7 +7557,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP1_VOP_DPP",
             34,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -7567,7 +7569,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP1_VOP_SDWA",
             34,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "SRC_SIMPLE", 32, true, false, false)
             ),
@@ -7579,7 +7581,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP3",
             354,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false)
             ),
@@ -7591,7 +7593,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1",
             42,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -7603,7 +7605,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1_INST_LITERAL",
             42,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -7615,7 +7617,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1_INST_LITERAL64",
             42,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL64"), "SRC", 32, true, false, false)
             ),
@@ -7627,7 +7629,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1_VOP_DPP16",
             42,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -7639,7 +7641,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1_VOP_DPP8",
             42,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -7651,7 +7653,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3",
             426,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -7663,7 +7665,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_INST_LITERAL",
             426,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -7675,7 +7677,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_VOP_DPP16",
             426,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -7687,7 +7689,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_VOP_DPP8",
             426,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -7699,7 +7701,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP1",
             42,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -7711,7 +7713,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP1_INST_LITERAL",
             42,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -7723,7 +7725,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP1_VOP_DPP16",
             42,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -7735,7 +7737,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP1_VOP_DPP8",
             42,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -7747,7 +7749,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP1_VOP_SDWA",
             42,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "SRC_SIMPLE", 32, true, false, false)
             ),
@@ -7759,7 +7761,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3",
             426,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -7771,7 +7773,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3_INST_LITERAL",
             426,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -7783,7 +7785,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP1",
             42,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -7795,7 +7797,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP1_INST_LITERAL",
             42,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -7807,7 +7809,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP1_VOP_DPP16",
             42,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -7819,7 +7821,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP1_VOP_DPP8",
             42,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -7831,7 +7833,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP1_VOP_SDWA",
             42,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "SRC_SIMPLE", 32, true, false, false)
             ),
@@ -7843,7 +7845,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3",
             426,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -7855,7 +7857,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3_INST_LITERAL",
             426,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -7867,7 +7869,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP1",
             42,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -7879,7 +7881,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP1_INST_LITERAL",
             42,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -7891,7 +7893,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP1_VOP_DPP16",
             42,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -7903,7 +7905,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP1_VOP_DPP8",
             42,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -7915,7 +7917,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3",
             426,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -7927,7 +7929,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3_INST_LITERAL",
             426,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -7939,7 +7941,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3_VOP_DPP16",
             426,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -7951,7 +7953,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3_VOP_DPP8",
             426,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -7963,7 +7965,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP1",
             42,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -7975,7 +7977,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP1_INST_LITERAL",
             42,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -7987,7 +7989,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP1_VOP_DPP16",
             42,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -7999,7 +8001,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP1_VOP_DPP8",
             42,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -8011,7 +8013,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3",
             426,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -8023,7 +8025,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3_INST_LITERAL",
             426,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -8035,7 +8037,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3_VOP_DPP16",
             426,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -8047,7 +8049,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3_VOP_DPP8",
             426,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -8059,7 +8061,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP1",
             42,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -8071,7 +8073,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP1_INST_LITERAL",
             42,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -8083,7 +8085,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP1_VOP_DPP16",
             42,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -8095,7 +8097,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP1_VOP_DPP8",
             42,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -8107,7 +8109,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3",
             426,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -8119,7 +8121,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_INST_LITERAL",
             426,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -8131,7 +8133,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_VOP_DPP16",
             426,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -8143,7 +8145,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_VOP_DPP8",
             426,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -8155,7 +8157,7 @@ private[common] object InstructionDefs22 {
             "gfx6",
             "VOP1",
             42,
-            Vector(
+            Col(
               OperandInfo(None, "float", 32, false, true, false),
               OperandInfo(None, "float", 32, true, false, false)
             ),
@@ -8167,7 +8169,7 @@ private[common] object InstructionDefs22 {
             "gfx7",
             "VOP1",
             42,
-            Vector(
+            Col(
               OperandInfo(None, "float", 32, false, true, false),
               OperandInfo(None, "float", 32, true, false, false)
             ),
@@ -8179,7 +8181,7 @@ private[common] object InstructionDefs22 {
             "gfx8",
             "VOP1",
             34,
-            Vector(
+            Col(
               OperandInfo(None, "float", 32, false, true, false),
               OperandInfo(None, "float", 32, true, false, false)
             ),
@@ -8191,7 +8193,7 @@ private[common] object InstructionDefs22 {
             "gfx9",
             "VOP1",
             34,
-            Vector(
+            Col(
               OperandInfo(None, "float", 32, false, true, false),
               OperandInfo(None, "float", 32, true, false, false)
             ),
@@ -8203,13 +8205,13 @@ private[common] object InstructionDefs22 {
   case object VRcpF64 extends InstructionDef(
         "v_rcp_f64",
         decoder(form(2)((operands, mods) => Instruction.VRcpF64(operands(0), operands(1), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "VOP1",
             37,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 64, true, false, false)
             ),
@@ -8221,7 +8223,7 @@ private[common] object InstructionDefs22 {
             "cdna1",
             "VOP1_INST_LITERAL",
             37,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 64, true, false, false)
             ),
@@ -8233,7 +8235,7 @@ private[common] object InstructionDefs22 {
             "cdna1",
             "VOP3",
             357,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 64, true, false, false)
             ),
@@ -8245,7 +8247,7 @@ private[common] object InstructionDefs22 {
             "cdna2",
             "VOP1",
             37,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 64, true, false, false)
             ),
@@ -8257,7 +8259,7 @@ private[common] object InstructionDefs22 {
             "cdna2",
             "VOP1_INST_LITERAL",
             37,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 64, true, false, false)
             ),
@@ -8269,7 +8271,7 @@ private[common] object InstructionDefs22 {
             "cdna2",
             "VOP3",
             357,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 64, true, false, false)
             ),
@@ -8281,7 +8283,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP1",
             37,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 64, true, false, false)
             ),
@@ -8293,7 +8295,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP1_INST_LITERAL",
             37,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 64, true, false, false)
             ),
@@ -8305,7 +8307,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP3",
             357,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 64, true, false, false)
             ),
@@ -8317,7 +8319,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP1",
             37,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 64, true, false, false)
             ),
@@ -8329,7 +8331,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP1_INST_LITERAL",
             37,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 64, true, false, false)
             ),
@@ -8341,7 +8343,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP3",
             357,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 64, true, false, false)
             ),
@@ -8353,7 +8355,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1",
             47,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 64, true, false, false)
             ),
@@ -8365,7 +8367,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1_INST_LITERAL",
             47,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 64, true, false, false)
             ),
@@ -8377,7 +8379,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1_INST_LITERAL64",
             47,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("LITERAL64"), "SRC", 64, true, false, false)
             ),
@@ -8389,7 +8391,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3",
             431,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 64, true, false, false)
             ),
@@ -8401,7 +8403,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_INST_LITERAL",
             431,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 64, true, false, false)
             ),
@@ -8413,7 +8415,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP1",
             47,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLDS", 64, true, false, false)
             ),
@@ -8425,7 +8427,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP1_INST_LITERAL",
             47,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 64, true, false, false)
             ),
@@ -8437,7 +8439,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3",
             431,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLDS", 64, true, false, false)
             ),
@@ -8449,7 +8451,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3_INST_LITERAL",
             431,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 64, true, false, false)
             ),
@@ -8461,7 +8463,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP1",
             47,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLDS", 64, true, false, false)
             ),
@@ -8473,7 +8475,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP1_INST_LITERAL",
             47,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 64, true, false, false)
             ),
@@ -8485,7 +8487,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3",
             431,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLDS", 64, true, false, false)
             ),
@@ -8497,7 +8499,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3_INST_LITERAL",
             431,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 64, true, false, false)
             ),
@@ -8509,7 +8511,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP1",
             47,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 64, true, false, false)
             ),
@@ -8521,7 +8523,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP1_INST_LITERAL",
             47,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 64, true, false, false)
             ),
@@ -8533,7 +8535,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3",
             431,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 64, true, false, false)
             ),
@@ -8545,7 +8547,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3_INST_LITERAL",
             431,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 64, true, false, false)
             ),
@@ -8557,7 +8559,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP1",
             47,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 64, true, false, false)
             ),
@@ -8569,7 +8571,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP1_INST_LITERAL",
             47,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 64, true, false, false)
             ),
@@ -8581,7 +8583,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3",
             431,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 64, true, false, false)
             ),
@@ -8593,7 +8595,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3_INST_LITERAL",
             431,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 64, true, false, false)
             ),
@@ -8605,7 +8607,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP1",
             47,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 64, true, false, false)
             ),
@@ -8617,7 +8619,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP1_INST_LITERAL",
             47,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 64, true, false, false)
             ),
@@ -8629,7 +8631,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3",
             431,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 64, true, false, false)
             ),
@@ -8641,7 +8643,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_INST_LITERAL",
             431,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 64, true, false, false)
             ),
@@ -8653,7 +8655,7 @@ private[common] object InstructionDefs22 {
             "gfx6",
             "VOP1",
             47,
-            Vector(
+            Col(
               OperandInfo(None, "float", 64, false, true, false),
               OperandInfo(None, "float", 64, true, false, false)
             ),
@@ -8665,7 +8667,7 @@ private[common] object InstructionDefs22 {
             "gfx7",
             "VOP1",
             47,
-            Vector(
+            Col(
               OperandInfo(None, "float", 64, false, true, false),
               OperandInfo(None, "float", 64, true, false, false)
             ),
@@ -8677,7 +8679,7 @@ private[common] object InstructionDefs22 {
             "gfx8",
             "VOP1",
             37,
-            Vector(
+            Col(
               OperandInfo(None, "float", 64, false, true, false),
               OperandInfo(None, "float", 64, true, false, false)
             ),
@@ -8689,7 +8691,7 @@ private[common] object InstructionDefs22 {
             "gfx9",
             "VOP1",
             37,
-            Vector(
+            Col(
               OperandInfo(None, "float", 64, false, true, false),
               OperandInfo(None, "float", 64, true, false, false)
             ),
@@ -8701,13 +8703,13 @@ private[common] object InstructionDefs22 {
   case object VRcpIflagF32 extends InstructionDef(
         "v_rcp_iflag_f32",
         decoder(form(2)((operands, mods) => Instruction.VRcpIflagF32(operands(0), operands(1), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "VOP1",
             35,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -8719,7 +8721,7 @@ private[common] object InstructionDefs22 {
             "cdna1",
             "VOP1_INST_LITERAL",
             35,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -8731,7 +8733,7 @@ private[common] object InstructionDefs22 {
             "cdna1",
             "VOP1_VOP_DPP",
             35,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -8743,7 +8745,7 @@ private[common] object InstructionDefs22 {
             "cdna1",
             "VOP1_VOP_SDWA",
             35,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "SRC_SIMPLE", 32, true, false, false)
             ),
@@ -8755,7 +8757,7 @@ private[common] object InstructionDefs22 {
             "cdna1",
             "VOP3",
             355,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false)
             ),
@@ -8767,7 +8769,7 @@ private[common] object InstructionDefs22 {
             "cdna2",
             "VOP1",
             35,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -8779,7 +8781,7 @@ private[common] object InstructionDefs22 {
             "cdna2",
             "VOP1_INST_LITERAL",
             35,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -8791,7 +8793,7 @@ private[common] object InstructionDefs22 {
             "cdna2",
             "VOP1_VOP_DPP",
             35,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -8803,7 +8805,7 @@ private[common] object InstructionDefs22 {
             "cdna2",
             "VOP1_VOP_SDWA",
             35,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "SRC_SIMPLE", 32, true, false, false)
             ),
@@ -8815,7 +8817,7 @@ private[common] object InstructionDefs22 {
             "cdna2",
             "VOP3",
             355,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false)
             ),
@@ -8827,7 +8829,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP1",
             35,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -8839,7 +8841,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP1_INST_LITERAL",
             35,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -8851,7 +8853,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP1_VOP_DPP",
             35,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -8863,7 +8865,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP1_VOP_SDWA",
             35,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "SRC_SIMPLE", 32, true, false, false)
             ),
@@ -8875,7 +8877,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP3",
             355,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false)
             ),
@@ -8887,7 +8889,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP1",
             35,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -8899,7 +8901,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP1_INST_LITERAL",
             35,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -8911,7 +8913,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP1_VOP_DPP",
             35,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -8923,7 +8925,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP1_VOP_SDWA",
             35,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "SRC_SIMPLE", 32, true, false, false)
             ),
@@ -8935,7 +8937,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP3",
             355,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false)
             ),
@@ -8947,7 +8949,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1",
             43,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -8959,7 +8961,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1_INST_LITERAL",
             43,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -8971,7 +8973,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1_INST_LITERAL64",
             43,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL64"), "SRC", 32, true, false, false)
             ),
@@ -8983,7 +8985,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1_VOP_DPP16",
             43,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -8995,7 +8997,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1_VOP_DPP8",
             43,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -9007,7 +9009,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3",
             427,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -9019,7 +9021,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_INST_LITERAL",
             427,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -9031,7 +9033,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_VOP_DPP16",
             427,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -9043,7 +9045,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_VOP_DPP8",
             427,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -9055,7 +9057,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP1",
             43,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -9067,7 +9069,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP1_INST_LITERAL",
             43,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -9079,7 +9081,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP1_VOP_DPP16",
             43,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -9091,7 +9093,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP1_VOP_DPP8",
             43,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -9103,7 +9105,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP1_VOP_SDWA",
             43,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "SRC_SIMPLE", 32, true, false, false)
             ),
@@ -9115,7 +9117,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3",
             427,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -9127,7 +9129,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3_INST_LITERAL",
             427,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -9139,7 +9141,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP1",
             43,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -9151,7 +9153,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP1_INST_LITERAL",
             43,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -9163,7 +9165,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP1_VOP_DPP16",
             43,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -9175,7 +9177,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP1_VOP_DPP8",
             43,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -9187,7 +9189,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP1_VOP_SDWA",
             43,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "SRC_SIMPLE", 32, true, false, false)
             ),
@@ -9199,7 +9201,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3",
             427,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -9211,7 +9213,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3_INST_LITERAL",
             427,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -9223,7 +9225,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP1",
             43,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -9235,7 +9237,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP1_INST_LITERAL",
             43,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -9247,7 +9249,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP1_VOP_DPP16",
             43,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -9259,7 +9261,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP1_VOP_DPP8",
             43,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -9271,7 +9273,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3",
             427,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -9283,7 +9285,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3_INST_LITERAL",
             427,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -9295,7 +9297,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3_VOP_DPP16",
             427,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -9307,7 +9309,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3_VOP_DPP8",
             427,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -9319,7 +9321,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP1",
             43,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -9331,7 +9333,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP1_INST_LITERAL",
             43,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -9343,7 +9345,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP1_VOP_DPP16",
             43,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -9355,7 +9357,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP1_VOP_DPP8",
             43,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -9367,7 +9369,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3",
             427,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -9379,7 +9381,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3_INST_LITERAL",
             427,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -9391,7 +9393,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3_VOP_DPP16",
             427,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -9403,7 +9405,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3_VOP_DPP8",
             427,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -9415,7 +9417,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP1",
             43,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -9427,7 +9429,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP1_INST_LITERAL",
             43,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -9439,7 +9441,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP1_VOP_DPP16",
             43,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -9451,7 +9453,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP1_VOP_DPP8",
             43,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -9463,7 +9465,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3",
             427,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -9475,7 +9477,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_INST_LITERAL",
             427,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -9487,7 +9489,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_VOP_DPP16",
             427,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -9499,7 +9501,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_VOP_DPP8",
             427,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -9511,7 +9513,7 @@ private[common] object InstructionDefs22 {
             "gfx6",
             "VOP1",
             43,
-            Vector(
+            Col(
               OperandInfo(None, "float", 32, false, true, false),
               OperandInfo(None, "float", 32, true, false, false)
             ),
@@ -9523,7 +9525,7 @@ private[common] object InstructionDefs22 {
             "gfx7",
             "VOP1",
             43,
-            Vector(
+            Col(
               OperandInfo(None, "float", 32, false, true, false),
               OperandInfo(None, "float", 32, true, false, false)
             ),
@@ -9535,7 +9537,7 @@ private[common] object InstructionDefs22 {
             "gfx8",
             "VOP1",
             35,
-            Vector(
+            Col(
               OperandInfo(None, "float", 32, false, true, false),
               OperandInfo(None, "float", 32, true, false, false)
             ),
@@ -9547,7 +9549,7 @@ private[common] object InstructionDefs22 {
             "gfx9",
             "VOP1",
             35,
-            Vector(
+            Col(
               OperandInfo(None, "float", 32, false, true, false),
               OperandInfo(None, "float", 32, true, false, false)
             ),
@@ -9559,13 +9561,13 @@ private[common] object InstructionDefs22 {
   case object VRcpLegacyF32 extends InstructionDef(
         "v_rcp_legacy_f32",
         decoder(form(2)((operands, mods) => Instruction.VRcpLegacyF32(operands(0), operands(1), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.GFX6,
             "gfx6",
             "VOP1",
             41,
-            Vector(
+            Col(
               OperandInfo(None, "float", 32, false, true, false),
               OperandInfo(None, "float", 32, true, false, false)
             ),
@@ -9577,7 +9579,7 @@ private[common] object InstructionDefs22 {
             "gfx7",
             "VOP1",
             41,
-            Vector(
+            Col(
               OperandInfo(None, "float", 32, false, true, false),
               OperandInfo(None, "float", 32, true, false, false)
             ),
@@ -9589,13 +9591,13 @@ private[common] object InstructionDefs22 {
   case object VReadfirstlaneB32 extends InstructionDef(
         "v_readfirstlane_b32",
         decoder(form(2)((operands, mods) => Instruction.VReadfirstlaneB32(operands(0), operands(1), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "VOP1",
             2,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "SREG_NOVCC", 32, false, true, false),
               OperandInfo(Some("SRC0"), "VGPR_OR_LDS", 32, true, false, false)
             ),
@@ -9607,7 +9609,7 @@ private[common] object InstructionDefs22 {
             "cdna1",
             "VOP3",
             322,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "SREG_NOVCC", 32, false, true, false),
               OperandInfo(Some("SRC0"), "VGPR_OR_LDS", 32, true, false, false)
             ),
@@ -9619,7 +9621,7 @@ private[common] object InstructionDefs22 {
             "cdna2",
             "VOP1",
             2,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "SREG_NOVCC", 32, false, true, false),
               OperandInfo(Some("SRC0"), "VGPR_OR_LDS", 32, true, false, false)
             ),
@@ -9631,7 +9633,7 @@ private[common] object InstructionDefs22 {
             "cdna2",
             "VOP3",
             322,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "SREG_NOVCC", 32, false, true, false),
               OperandInfo(Some("SRC0"), "VGPR_OR_LDS", 32, true, false, false)
             ),
@@ -9643,7 +9645,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP1",
             2,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "SREG_NOVCC", 32, false, true, false),
               OperandInfo(Some("SRC0"), "VGPR_OR_LDS", 32, true, false, false)
             ),
@@ -9655,7 +9657,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP3",
             322,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "SREG_NOVCC", 32, false, true, false),
               OperandInfo(Some("SRC0"), "VGPR_OR_LDS", 32, true, false, false)
             ),
@@ -9667,7 +9669,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP1",
             2,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "SREG_NOVCC", 32, false, true, false),
               OperandInfo(Some("SRC0"), "VGPR_OR_LDS", 32, true, false, false)
             ),
@@ -9679,7 +9681,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP3",
             322,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "SREG_NOVCC", 32, false, true, false),
               OperandInfo(Some("SRC0"), "VGPR_OR_LDS", 32, true, false, false)
             ),
@@ -9691,7 +9693,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1",
             2,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "SREG", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_VGPR", 32, true, false, false)
             ),
@@ -9703,7 +9705,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3",
             386,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "SREG", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_VGPR", 32, true, false, false)
             ),
@@ -9715,7 +9717,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP1",
             2,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "SREG", 32, false, true, false),
               OperandInfo(Some("SRC0"), "VGPR_OR_LDS", 32, true, false, false)
             ),
@@ -9727,7 +9729,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3",
             386,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "SREG", 32, false, true, false),
               OperandInfo(Some("SRC0"), "VGPR_OR_LDS", 32, true, false, false)
             ),
@@ -9739,7 +9741,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP1",
             2,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "SREG", 32, false, true, false),
               OperandInfo(Some("SRC0"), "VGPR_OR_LDS", 32, true, false, false)
             ),
@@ -9751,7 +9753,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3",
             386,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "SREG", 32, false, true, false),
               OperandInfo(Some("SRC0"), "VGPR_OR_LDS", 32, true, false, false)
             ),
@@ -9763,7 +9765,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP1",
             2,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "SREG", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_VGPR", 32, true, false, false)
             ),
@@ -9775,7 +9777,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3",
             386,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "SREG", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_VGPR", 32, true, false, false)
             ),
@@ -9787,7 +9789,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP1",
             2,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "SREG", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_VGPR", 32, true, false, false)
             ),
@@ -9799,7 +9801,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3",
             386,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "SREG", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_VGPR", 32, true, false, false)
             ),
@@ -9811,7 +9813,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP1",
             2,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "SREG", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_VGPR", 32, true, false, false)
             ),
@@ -9823,7 +9825,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3",
             386,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "SREG", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_VGPR", 32, true, false, false)
             ),
@@ -9835,7 +9837,7 @@ private[common] object InstructionDefs22 {
             "gfx6",
             "VOP1",
             2,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, false),
               OperandInfo(None, "uint", 32, true, false, false)
             ),
@@ -9847,7 +9849,7 @@ private[common] object InstructionDefs22 {
             "gfx7",
             "VOP1",
             2,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, false),
               OperandInfo(None, "uint", 32, true, false, false)
             ),
@@ -9859,7 +9861,7 @@ private[common] object InstructionDefs22 {
             "gfx8",
             "VOP1",
             2,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, false),
               OperandInfo(None, "uint", 32, true, false, false)
             ),
@@ -9871,7 +9873,7 @@ private[common] object InstructionDefs22 {
             "gfx9",
             "VOP1",
             2,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, false),
               OperandInfo(None, "uint", 32, true, false, false)
             ),
@@ -9883,13 +9885,13 @@ private[common] object InstructionDefs22 {
   case object VReadlaneB32 extends InstructionDef(
         "v_readlane_b32",
         decoder(form(3)((operands, mods) => Instruction.VReadlaneB32(operands(0), operands(1), operands(2), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "VOP3",
             649,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "SREG_NOVCC", 32, false, true, false),
               OperandInfo(Some("SRC0"), "VGPR_OR_LDS", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SSRC_LANESEL", 32, true, false, false)
@@ -9902,7 +9904,7 @@ private[common] object InstructionDefs22 {
             "cdna2",
             "VOP3",
             649,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "SREG_NOVCC", 32, false, true, false),
               OperandInfo(Some("SRC0"), "VGPR_OR_LDS", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SSRC_LANESEL", 32, true, false, false)
@@ -9915,7 +9917,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP3",
             649,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "SREG_NOVCC", 32, false, true, false),
               OperandInfo(Some("SRC0"), "VGPR_OR_LDS", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SSRC_LANESEL", 32, true, false, false)
@@ -9928,7 +9930,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP3",
             649,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "SREG_NOVCC", 32, false, true, false),
               OperandInfo(Some("SRC0"), "VGPR_OR_LDS", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SSRC_LANESEL", 32, true, false, false)
@@ -9941,7 +9943,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3",
             864,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "SREG", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_VGPR", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SSRC_LANESEL", 32, true, false, false)
@@ -9954,7 +9956,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3",
             864,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "SREG", 32, false, true, false),
               OperandInfo(Some("SRC0"), "VGPR_OR_LDS", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SSRC_LANESEL", 32, true, false, false)
@@ -9967,7 +9969,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3",
             864,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "SREG", 32, false, true, false),
               OperandInfo(Some("SRC0"), "VGPR_OR_LDS", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SSRC_LANESEL", 32, true, false, false)
@@ -9980,7 +9982,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3",
             864,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "SREG", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_VGPR", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SSRC_LANESEL", 32, true, false, false)
@@ -9993,7 +9995,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3",
             864,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "SREG", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_VGPR", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SSRC_LANESEL", 32, true, false, false)
@@ -10006,7 +10008,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3",
             864,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "SREG", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_VGPR", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SSRC_LANESEL", 32, true, false, false)
@@ -10019,7 +10021,7 @@ private[common] object InstructionDefs22 {
             "gfx6",
             "VOP2",
             1,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, false),
               OperandInfo(None, "uint", 32, true, false, false),
               OperandInfo(None, "uint", 32, true, false, false)
@@ -10032,7 +10034,7 @@ private[common] object InstructionDefs22 {
             "gfx7",
             "VOP2",
             1,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, false),
               OperandInfo(None, "uint", 32, true, false, false),
               OperandInfo(None, "uint", 32, true, false, false)
@@ -10045,13 +10047,13 @@ private[common] object InstructionDefs22 {
   case object VReadlaneB32E64 extends InstructionDef(
         "v_readlane_b32_e64",
         decoder(form(3)((operands, mods) => Instruction.VReadlaneB32E64(operands(0), operands(1), operands(2), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.GFX8,
             "gfx8",
             "VOP3",
             649,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, false),
               OperandInfo(None, "uint", 32, true, false, false),
               OperandInfo(None, "uint", 32, true, false, false)
@@ -10064,7 +10066,7 @@ private[common] object InstructionDefs22 {
             "gfx9",
             "VOP3",
             649,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, false),
               OperandInfo(None, "uint", 32, true, false, false),
               OperandInfo(None, "uint", 32, true, false, false)
@@ -10077,13 +10079,13 @@ private[common] object InstructionDefs22 {
   case object VRndneF16 extends InstructionDef(
         "v_rndne_f16",
         decoder(form(2)((operands, mods) => Instruction.VRndneF16(operands(0), operands(1), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "VOP1",
             71,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 16, true, false, false)
             ),
@@ -10095,7 +10097,7 @@ private[common] object InstructionDefs22 {
             "cdna1",
             "VOP1_INST_LITERAL",
             71,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 16, true, false, false)
             ),
@@ -10107,7 +10109,7 @@ private[common] object InstructionDefs22 {
             "cdna1",
             "VOP1_VOP_DPP",
             71,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -10119,7 +10121,7 @@ private[common] object InstructionDefs22 {
             "cdna1",
             "VOP1_VOP_SDWA",
             71,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "SRC_SIMPLE", 16, true, false, false)
             ),
@@ -10131,7 +10133,7 @@ private[common] object InstructionDefs22 {
             "cdna1",
             "VOP3",
             391,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 16, true, false, false)
             ),
@@ -10143,7 +10145,7 @@ private[common] object InstructionDefs22 {
             "cdna2",
             "VOP1",
             71,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 16, true, false, false)
             ),
@@ -10155,7 +10157,7 @@ private[common] object InstructionDefs22 {
             "cdna2",
             "VOP1_INST_LITERAL",
             71,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 16, true, false, false)
             ),
@@ -10167,7 +10169,7 @@ private[common] object InstructionDefs22 {
             "cdna2",
             "VOP1_VOP_DPP",
             71,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -10179,7 +10181,7 @@ private[common] object InstructionDefs22 {
             "cdna2",
             "VOP1_VOP_SDWA",
             71,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "SRC_SIMPLE", 16, true, false, false)
             ),
@@ -10191,7 +10193,7 @@ private[common] object InstructionDefs22 {
             "cdna2",
             "VOP3",
             391,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 16, true, false, false)
             ),
@@ -10203,7 +10205,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP1",
             71,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 16, true, false, false)
             ),
@@ -10215,7 +10217,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP1_INST_LITERAL",
             71,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 16, true, false, false)
             ),
@@ -10227,7 +10229,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP1_VOP_DPP",
             71,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -10239,7 +10241,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP1_VOP_SDWA",
             71,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "SRC_SIMPLE", 16, true, false, false)
             ),
@@ -10251,7 +10253,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP3",
             391,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 16, true, false, false)
             ),
@@ -10263,7 +10265,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP1",
             71,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 16, true, false, false)
             ),
@@ -10275,7 +10277,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP1_INST_LITERAL",
             71,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 16, true, false, false)
             ),
@@ -10287,7 +10289,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP1_VOP_DPP",
             71,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -10299,7 +10301,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP1_VOP_SDWA",
             71,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "SRC_SIMPLE", 16, true, false, false)
             ),
@@ -10311,7 +10313,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP3",
             391,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 16, true, false, false)
             ),
@@ -10323,7 +10325,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1",
             94,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 16, true, false, false)
             ),
@@ -10335,7 +10337,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1_INST_LITERAL",
             94,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 16, true, false, false)
             ),
@@ -10347,7 +10349,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1_INST_LITERAL64",
             94,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL64"), "SRC", 16, true, false, false)
             ),
@@ -10359,7 +10361,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1_VOP_DPP16",
             94,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -10371,7 +10373,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1_VOP_DPP8",
             94,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -10383,7 +10385,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3",
             478,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 16, true, false, false)
             ),
@@ -10395,7 +10397,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_INST_LITERAL",
             478,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 16, true, false, false)
             ),
@@ -10407,7 +10409,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_VOP_DPP16",
             478,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -10419,7 +10421,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_VOP_DPP8",
             478,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -10431,7 +10433,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP1",
             94,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 16, true, false, false)
             ),
@@ -10443,7 +10445,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP1_INST_LITERAL",
             94,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 16, true, false, false)
             ),
@@ -10455,7 +10457,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP1_VOP_DPP16",
             94,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -10467,7 +10469,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP1_VOP_DPP8",
             94,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -10479,7 +10481,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP1_VOP_SDWA",
             94,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "SRC_SIMPLE", 16, true, false, false)
             ),
@@ -10491,7 +10493,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3",
             478,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 16, true, false, false)
             ),
@@ -10503,7 +10505,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3_INST_LITERAL",
             478,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 16, true, false, false)
             ),
@@ -10515,7 +10517,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP1",
             94,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 16, true, false, false)
             ),
@@ -10527,7 +10529,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP1_INST_LITERAL",
             94,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 16, true, false, false)
             ),
@@ -10539,7 +10541,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP1_VOP_DPP16",
             94,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -10551,7 +10553,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP1_VOP_DPP8",
             94,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -10563,7 +10565,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP1_VOP_SDWA",
             94,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "SRC_SIMPLE", 16, true, false, false)
             ),
@@ -10575,7 +10577,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3",
             478,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 16, true, false, false)
             ),
@@ -10587,7 +10589,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3_INST_LITERAL",
             478,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 16, true, false, false)
             ),
@@ -10599,7 +10601,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP1",
             94,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 16, true, false, false)
             ),
@@ -10611,7 +10613,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP1_INST_LITERAL",
             94,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 16, true, false, false)
             ),
@@ -10623,7 +10625,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP1_VOP_DPP16",
             94,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -10635,7 +10637,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP1_VOP_DPP8",
             94,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -10647,7 +10649,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3",
             478,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 16, true, false, false)
             ),
@@ -10659,7 +10661,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3_INST_LITERAL",
             478,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 16, true, false, false)
             ),
@@ -10671,7 +10673,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3_VOP_DPP16",
             478,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -10683,7 +10685,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3_VOP_DPP8",
             478,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -10695,7 +10697,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP1",
             94,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 16, true, false, false)
             ),
@@ -10707,7 +10709,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP1_INST_LITERAL",
             94,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 16, true, false, false)
             ),
@@ -10719,7 +10721,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP1_VOP_DPP16",
             94,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -10731,7 +10733,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP1_VOP_DPP8",
             94,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -10743,7 +10745,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3",
             478,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 16, true, false, false)
             ),
@@ -10755,7 +10757,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3_INST_LITERAL",
             478,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 16, true, false, false)
             ),
@@ -10767,7 +10769,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3_VOP_DPP16",
             478,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -10779,7 +10781,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3_VOP_DPP8",
             478,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -10791,7 +10793,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP1",
             94,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 16, true, false, false)
             ),
@@ -10803,7 +10805,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP1_INST_LITERAL",
             94,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 16, true, false, false)
             ),
@@ -10815,7 +10817,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP1_VOP_DPP16",
             94,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -10827,7 +10829,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP1_VOP_DPP8",
             94,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -10839,7 +10841,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3",
             478,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 16, true, false, false)
             ),
@@ -10851,7 +10853,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_INST_LITERAL",
             478,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 16, true, false, false)
             ),
@@ -10863,7 +10865,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_VOP_DPP16",
             478,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -10875,7 +10877,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_VOP_DPP8",
             478,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -10887,7 +10889,7 @@ private[common] object InstructionDefs22 {
             "gfx8",
             "VOP1",
             71,
-            Vector(
+            Col(
               OperandInfo(None, "float", 16, false, true, false),
               OperandInfo(None, "float", 16, true, false, false)
             ),
@@ -10899,7 +10901,7 @@ private[common] object InstructionDefs22 {
             "gfx9",
             "VOP1",
             71,
-            Vector(
+            Col(
               OperandInfo(None, "float", 16, false, true, false),
               OperandInfo(None, "float", 16, true, false, false)
             ),
@@ -10911,13 +10913,13 @@ private[common] object InstructionDefs22 {
   case object VRndneF32 extends InstructionDef(
         "v_rndne_f32",
         decoder(form(2)((operands, mods) => Instruction.VRndneF32(operands(0), operands(1), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "VOP1",
             30,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -10929,7 +10931,7 @@ private[common] object InstructionDefs22 {
             "cdna1",
             "VOP1_INST_LITERAL",
             30,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -10941,7 +10943,7 @@ private[common] object InstructionDefs22 {
             "cdna1",
             "VOP1_VOP_DPP",
             30,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -10953,7 +10955,7 @@ private[common] object InstructionDefs22 {
             "cdna1",
             "VOP1_VOP_SDWA",
             30,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "SRC_SIMPLE", 32, true, false, false)
             ),
@@ -10965,7 +10967,7 @@ private[common] object InstructionDefs22 {
             "cdna1",
             "VOP3",
             350,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false)
             ),
@@ -10977,7 +10979,7 @@ private[common] object InstructionDefs22 {
             "cdna2",
             "VOP1",
             30,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -10989,7 +10991,7 @@ private[common] object InstructionDefs22 {
             "cdna2",
             "VOP1_INST_LITERAL",
             30,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -11001,7 +11003,7 @@ private[common] object InstructionDefs22 {
             "cdna2",
             "VOP1_VOP_DPP",
             30,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -11013,7 +11015,7 @@ private[common] object InstructionDefs22 {
             "cdna2",
             "VOP1_VOP_SDWA",
             30,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "SRC_SIMPLE", 32, true, false, false)
             ),
@@ -11025,7 +11027,7 @@ private[common] object InstructionDefs22 {
             "cdna2",
             "VOP3",
             350,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false)
             ),
@@ -11037,7 +11039,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP1",
             30,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -11049,7 +11051,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP1_INST_LITERAL",
             30,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -11061,7 +11063,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP1_VOP_DPP",
             30,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -11073,7 +11075,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP1_VOP_SDWA",
             30,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "SRC_SIMPLE", 32, true, false, false)
             ),
@@ -11085,7 +11087,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP3",
             350,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false)
             ),
@@ -11097,7 +11099,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP1",
             30,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -11109,7 +11111,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP1_INST_LITERAL",
             30,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -11121,7 +11123,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP1_VOP_DPP",
             30,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -11133,7 +11135,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP1_VOP_SDWA",
             30,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "SRC_SIMPLE", 32, true, false, false)
             ),
@@ -11145,7 +11147,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP3",
             350,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false)
             ),
@@ -11157,7 +11159,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1",
             35,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -11169,7 +11171,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1_INST_LITERAL",
             35,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -11181,7 +11183,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1_INST_LITERAL64",
             35,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL64"), "SRC", 32, true, false, false)
             ),
@@ -11193,7 +11195,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1_VOP_DPP16",
             35,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -11205,7 +11207,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1_VOP_DPP8",
             35,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -11217,7 +11219,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3",
             419,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -11229,7 +11231,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_INST_LITERAL",
             419,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -11241,7 +11243,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_VOP_DPP16",
             419,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -11253,7 +11255,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_VOP_DPP8",
             419,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -11265,7 +11267,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP1",
             35,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -11277,7 +11279,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP1_INST_LITERAL",
             35,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -11289,7 +11291,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP1_VOP_DPP16",
             35,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -11301,7 +11303,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP1_VOP_DPP8",
             35,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -11313,7 +11315,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP1_VOP_SDWA",
             35,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "SRC_SIMPLE", 32, true, false, false)
             ),
@@ -11325,7 +11327,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3",
             419,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -11337,7 +11339,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3_INST_LITERAL",
             419,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -11349,7 +11351,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP1",
             35,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -11361,7 +11363,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP1_INST_LITERAL",
             35,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -11373,7 +11375,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP1_VOP_DPP16",
             35,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -11385,7 +11387,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP1_VOP_DPP8",
             35,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -11397,7 +11399,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP1_VOP_SDWA",
             35,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "SRC_SIMPLE", 32, true, false, false)
             ),
@@ -11409,7 +11411,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3",
             419,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -11421,7 +11423,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3_INST_LITERAL",
             419,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -11433,7 +11435,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP1",
             35,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -11445,7 +11447,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP1_INST_LITERAL",
             35,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -11457,7 +11459,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP1_VOP_DPP16",
             35,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -11469,7 +11471,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP1_VOP_DPP8",
             35,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -11481,7 +11483,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3",
             419,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -11493,7 +11495,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3_INST_LITERAL",
             419,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -11505,7 +11507,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3_VOP_DPP16",
             419,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -11517,7 +11519,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3_VOP_DPP8",
             419,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -11529,7 +11531,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP1",
             35,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -11541,7 +11543,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP1_INST_LITERAL",
             35,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -11553,7 +11555,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP1_VOP_DPP16",
             35,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -11565,7 +11567,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP1_VOP_DPP8",
             35,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -11577,7 +11579,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3",
             419,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -11589,7 +11591,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3_INST_LITERAL",
             419,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -11601,7 +11603,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3_VOP_DPP16",
             419,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -11613,7 +11615,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3_VOP_DPP8",
             419,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -11625,7 +11627,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP1",
             35,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -11637,7 +11639,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP1_INST_LITERAL",
             35,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -11649,7 +11651,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP1_VOP_DPP16",
             35,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -11661,7 +11663,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP1_VOP_DPP8",
             35,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -11673,7 +11675,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3",
             419,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -11685,7 +11687,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_INST_LITERAL",
             419,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -11697,7 +11699,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_VOP_DPP16",
             419,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -11709,7 +11711,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_VOP_DPP8",
             419,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -11721,7 +11723,7 @@ private[common] object InstructionDefs22 {
             "gfx6",
             "VOP1",
             35,
-            Vector(
+            Col(
               OperandInfo(None, "float", 32, false, true, false),
               OperandInfo(None, "float", 32, true, false, false)
             ),
@@ -11733,7 +11735,7 @@ private[common] object InstructionDefs22 {
             "gfx7",
             "VOP1",
             35,
-            Vector(
+            Col(
               OperandInfo(None, "float", 32, false, true, false),
               OperandInfo(None, "float", 32, true, false, false)
             ),
@@ -11745,7 +11747,7 @@ private[common] object InstructionDefs22 {
             "gfx8",
             "VOP1",
             30,
-            Vector(
+            Col(
               OperandInfo(None, "float", 32, false, true, false),
               OperandInfo(None, "float", 32, true, false, false)
             ),
@@ -11757,7 +11759,7 @@ private[common] object InstructionDefs22 {
             "gfx9",
             "VOP1",
             30,
-            Vector(
+            Col(
               OperandInfo(None, "float", 32, false, true, false),
               OperandInfo(None, "float", 32, true, false, false)
             ),
@@ -11769,13 +11771,13 @@ private[common] object InstructionDefs22 {
   case object VRndneF64 extends InstructionDef(
         "v_rndne_f64",
         decoder(form(2)((operands, mods) => Instruction.VRndneF64(operands(0), operands(1), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "VOP1",
             25,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 64, true, false, false)
             ),
@@ -11787,7 +11789,7 @@ private[common] object InstructionDefs22 {
             "cdna1",
             "VOP1_INST_LITERAL",
             25,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 64, true, false, false)
             ),
@@ -11799,7 +11801,7 @@ private[common] object InstructionDefs22 {
             "cdna1",
             "VOP3",
             345,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 64, true, false, false)
             ),
@@ -11811,7 +11813,7 @@ private[common] object InstructionDefs22 {
             "cdna2",
             "VOP1",
             25,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 64, true, false, false)
             ),
@@ -11823,7 +11825,7 @@ private[common] object InstructionDefs22 {
             "cdna2",
             "VOP1_INST_LITERAL",
             25,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 64, true, false, false)
             ),
@@ -11835,7 +11837,7 @@ private[common] object InstructionDefs22 {
             "cdna2",
             "VOP3",
             345,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 64, true, false, false)
             ),
@@ -11847,7 +11849,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP1",
             25,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 64, true, false, false)
             ),
@@ -11859,7 +11861,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP1_INST_LITERAL",
             25,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 64, true, false, false)
             ),
@@ -11871,7 +11873,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP3",
             345,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 64, true, false, false)
             ),
@@ -11883,7 +11885,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP1",
             25,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 64, true, false, false)
             ),
@@ -11895,7 +11897,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP1_INST_LITERAL",
             25,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 64, true, false, false)
             ),
@@ -11907,7 +11909,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP3",
             345,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 64, true, false, false)
             ),
@@ -11919,7 +11921,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1",
             25,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 64, true, false, false)
             ),
@@ -11931,7 +11933,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1_INST_LITERAL",
             25,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 64, true, false, false)
             ),
@@ -11943,7 +11945,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1_INST_LITERAL64",
             25,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("LITERAL64"), "SRC", 64, true, false, false)
             ),
@@ -11955,7 +11957,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1_VOP_DPP16",
             25,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 64, true, false, false)
             ),
@@ -11967,7 +11969,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3",
             409,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 64, true, false, false)
             ),
@@ -11979,7 +11981,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_INST_LITERAL",
             409,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 64, true, false, false)
             ),
@@ -11991,7 +11993,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_VOP_DPP16",
             409,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 64, true, false, false)
             ),
@@ -12003,7 +12005,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP1",
             25,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLDS", 64, true, false, false)
             ),
@@ -12015,7 +12017,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP1_INST_LITERAL",
             25,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 64, true, false, false)
             ),
@@ -12027,7 +12029,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3",
             409,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLDS", 64, true, false, false)
             ),
@@ -12039,7 +12041,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3_INST_LITERAL",
             409,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 64, true, false, false)
             ),
@@ -12051,7 +12053,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP1",
             25,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLDS", 64, true, false, false)
             ),
@@ -12063,7 +12065,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP1_INST_LITERAL",
             25,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 64, true, false, false)
             ),
@@ -12075,7 +12077,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3",
             409,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLDS", 64, true, false, false)
             ),
@@ -12087,7 +12089,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3_INST_LITERAL",
             409,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 64, true, false, false)
             ),
@@ -12099,7 +12101,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP1",
             25,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 64, true, false, false)
             ),
@@ -12111,7 +12113,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP1_INST_LITERAL",
             25,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 64, true, false, false)
             ),
@@ -12123,7 +12125,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3",
             409,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 64, true, false, false)
             ),
@@ -12135,7 +12137,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3_INST_LITERAL",
             409,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 64, true, false, false)
             ),
@@ -12147,7 +12149,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP1",
             25,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 64, true, false, false)
             ),
@@ -12159,7 +12161,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP1_INST_LITERAL",
             25,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 64, true, false, false)
             ),
@@ -12171,7 +12173,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3",
             409,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 64, true, false, false)
             ),
@@ -12183,7 +12185,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3_INST_LITERAL",
             409,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 64, true, false, false)
             ),
@@ -12195,7 +12197,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP1",
             25,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 64, true, false, false)
             ),
@@ -12207,7 +12209,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP1_INST_LITERAL",
             25,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 64, true, false, false)
             ),
@@ -12219,7 +12221,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3",
             409,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 64, true, false, false)
             ),
@@ -12231,7 +12233,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_INST_LITERAL",
             409,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 64, true, false, false)
             ),
@@ -12243,7 +12245,7 @@ private[common] object InstructionDefs22 {
             "gfx7",
             "VOP1",
             25,
-            Vector(
+            Col(
               OperandInfo(None, "float", 64, false, true, false),
               OperandInfo(None, "float", 64, true, false, false)
             ),
@@ -12255,7 +12257,7 @@ private[common] object InstructionDefs22 {
             "gfx8",
             "VOP1",
             25,
-            Vector(
+            Col(
               OperandInfo(None, "float", 64, false, true, false),
               OperandInfo(None, "float", 64, true, false, false)
             ),
@@ -12267,7 +12269,7 @@ private[common] object InstructionDefs22 {
             "gfx9",
             "VOP1",
             25,
-            Vector(
+            Col(
               OperandInfo(None, "float", 64, false, true, false),
               OperandInfo(None, "float", 64, true, false, false)
             ),
@@ -12279,13 +12281,13 @@ private[common] object InstructionDefs22 {
   case object VRsqBf16 extends InstructionDef(
         "v_rsq_bf16",
         decoder(form(2)((operands, mods) => Instruction.VRsqBf16(operands(0), operands(1), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VOP1",
             123,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 16, true, false, false)
             ),
@@ -12297,7 +12299,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1_INST_LITERAL",
             123,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 16, true, false, false)
             ),
@@ -12309,7 +12311,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1_INST_LITERAL64",
             123,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL64"), "SRC", 16, true, false, false)
             ),
@@ -12321,7 +12323,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1_VOP_DPP16",
             123,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -12333,7 +12335,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1_VOP_DPP8",
             123,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -12345,7 +12347,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3",
             507,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 16, true, false, false)
             ),
@@ -12357,7 +12359,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_INST_LITERAL",
             507,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 16, true, false, false)
             ),
@@ -12369,7 +12371,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_VOP_DPP16",
             507,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -12381,7 +12383,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_VOP_DPP8",
             507,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -12393,13 +12395,13 @@ private[common] object InstructionDefs22 {
   case object VRsqClampF32 extends InstructionDef(
         "v_rsq_clamp_f32",
         decoder(form(2)((operands, mods) => Instruction.VRsqClampF32(operands(0), operands(1), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.GFX6,
             "gfx6",
             "VOP1",
             44,
-            Vector(
+            Col(
               OperandInfo(None, "float", 32, false, true, false),
               OperandInfo(None, "float", 32, true, false, false)
             ),
@@ -12411,7 +12413,7 @@ private[common] object InstructionDefs22 {
             "gfx7",
             "VOP1",
             44,
-            Vector(
+            Col(
               OperandInfo(None, "float", 32, false, true, false),
               OperandInfo(None, "float", 32, true, false, false)
             ),
@@ -12423,13 +12425,13 @@ private[common] object InstructionDefs22 {
   case object VRsqClampF64 extends InstructionDef(
         "v_rsq_clamp_f64",
         decoder(form(2)((operands, mods) => Instruction.VRsqClampF64(operands(0), operands(1), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.GFX6,
             "gfx6",
             "VOP1",
             50,
-            Vector(
+            Col(
               OperandInfo(None, "float", 64, false, true, false),
               OperandInfo(None, "float", 64, true, false, false)
             ),
@@ -12441,7 +12443,7 @@ private[common] object InstructionDefs22 {
             "gfx7",
             "VOP1",
             50,
-            Vector(
+            Col(
               OperandInfo(None, "float", 64, false, true, false),
               OperandInfo(None, "float", 64, true, false, false)
             ),
@@ -12453,13 +12455,13 @@ private[common] object InstructionDefs22 {
   case object VRsqF16 extends InstructionDef(
         "v_rsq_f16",
         decoder(form(2)((operands, mods) => Instruction.VRsqF16(operands(0), operands(1), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "VOP1",
             63,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 16, true, false, false)
             ),
@@ -12471,7 +12473,7 @@ private[common] object InstructionDefs22 {
             "cdna1",
             "VOP1_INST_LITERAL",
             63,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 16, true, false, false)
             ),
@@ -12483,7 +12485,7 @@ private[common] object InstructionDefs22 {
             "cdna1",
             "VOP1_VOP_DPP",
             63,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -12495,7 +12497,7 @@ private[common] object InstructionDefs22 {
             "cdna1",
             "VOP1_VOP_SDWA",
             63,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "SRC_SIMPLE", 16, true, false, false)
             ),
@@ -12507,7 +12509,7 @@ private[common] object InstructionDefs22 {
             "cdna1",
             "VOP3",
             383,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 16, true, false, false)
             ),
@@ -12519,7 +12521,7 @@ private[common] object InstructionDefs22 {
             "cdna2",
             "VOP1",
             63,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 16, true, false, false)
             ),
@@ -12531,7 +12533,7 @@ private[common] object InstructionDefs22 {
             "cdna2",
             "VOP1_INST_LITERAL",
             63,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 16, true, false, false)
             ),
@@ -12543,7 +12545,7 @@ private[common] object InstructionDefs22 {
             "cdna2",
             "VOP1_VOP_DPP",
             63,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -12555,7 +12557,7 @@ private[common] object InstructionDefs22 {
             "cdna2",
             "VOP1_VOP_SDWA",
             63,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "SRC_SIMPLE", 16, true, false, false)
             ),
@@ -12567,7 +12569,7 @@ private[common] object InstructionDefs22 {
             "cdna2",
             "VOP3",
             383,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 16, true, false, false)
             ),
@@ -12579,7 +12581,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP1",
             63,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 16, true, false, false)
             ),
@@ -12591,7 +12593,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP1_INST_LITERAL",
             63,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 16, true, false, false)
             ),
@@ -12603,7 +12605,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP1_VOP_DPP",
             63,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -12615,7 +12617,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP1_VOP_SDWA",
             63,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "SRC_SIMPLE", 16, true, false, false)
             ),
@@ -12627,7 +12629,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP3",
             383,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 16, true, false, false)
             ),
@@ -12639,7 +12641,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP1",
             63,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 16, true, false, false)
             ),
@@ -12651,7 +12653,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP1_INST_LITERAL",
             63,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 16, true, false, false)
             ),
@@ -12663,7 +12665,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP1_VOP_DPP",
             63,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -12675,7 +12677,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP1_VOP_SDWA",
             63,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "SRC_SIMPLE", 16, true, false, false)
             ),
@@ -12687,7 +12689,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP3",
             383,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 16, true, false, false)
             ),
@@ -12699,7 +12701,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1",
             86,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 16, true, false, false)
             ),
@@ -12711,7 +12713,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1_INST_LITERAL",
             86,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 16, true, false, false)
             ),
@@ -12723,7 +12725,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1_INST_LITERAL64",
             86,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL64"), "SRC", 16, true, false, false)
             ),
@@ -12735,7 +12737,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1_VOP_DPP16",
             86,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -12747,7 +12749,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1_VOP_DPP8",
             86,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -12759,7 +12761,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3",
             470,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 16, true, false, false)
             ),
@@ -12771,7 +12773,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_INST_LITERAL",
             470,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 16, true, false, false)
             ),
@@ -12783,7 +12785,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_VOP_DPP16",
             470,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -12795,7 +12797,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_VOP_DPP8",
             470,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -12807,7 +12809,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP1",
             86,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 16, true, false, false)
             ),
@@ -12819,7 +12821,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP1_INST_LITERAL",
             86,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 16, true, false, false)
             ),
@@ -12831,7 +12833,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP1_VOP_DPP16",
             86,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -12843,7 +12845,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP1_VOP_DPP8",
             86,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -12855,7 +12857,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP1_VOP_SDWA",
             86,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "SRC_SIMPLE", 16, true, false, false)
             ),
@@ -12867,7 +12869,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3",
             470,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 16, true, false, false)
             ),
@@ -12879,7 +12881,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3_INST_LITERAL",
             470,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 16, true, false, false)
             ),
@@ -12891,7 +12893,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP1",
             86,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 16, true, false, false)
             ),
@@ -12903,7 +12905,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP1_INST_LITERAL",
             86,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 16, true, false, false)
             ),
@@ -12915,7 +12917,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP1_VOP_DPP16",
             86,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -12927,7 +12929,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP1_VOP_DPP8",
             86,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -12939,7 +12941,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP1_VOP_SDWA",
             86,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "SRC_SIMPLE", 16, true, false, false)
             ),
@@ -12951,7 +12953,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3",
             470,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 16, true, false, false)
             ),
@@ -12963,7 +12965,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3_INST_LITERAL",
             470,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 16, true, false, false)
             ),
@@ -12975,7 +12977,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP1",
             86,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 16, true, false, false)
             ),
@@ -12987,7 +12989,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP1_INST_LITERAL",
             86,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 16, true, false, false)
             ),
@@ -12999,7 +13001,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP1_VOP_DPP16",
             86,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -13011,7 +13013,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP1_VOP_DPP8",
             86,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -13023,7 +13025,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3",
             470,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 16, true, false, false)
             ),
@@ -13035,7 +13037,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3_INST_LITERAL",
             470,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 16, true, false, false)
             ),
@@ -13047,7 +13049,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3_VOP_DPP16",
             470,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -13059,7 +13061,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3_VOP_DPP8",
             470,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -13071,7 +13073,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP1",
             86,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 16, true, false, false)
             ),
@@ -13083,7 +13085,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP1_INST_LITERAL",
             86,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 16, true, false, false)
             ),
@@ -13095,7 +13097,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP1_VOP_DPP16",
             86,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -13107,7 +13109,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP1_VOP_DPP8",
             86,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -13119,7 +13121,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3",
             470,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 16, true, false, false)
             ),
@@ -13131,7 +13133,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3_INST_LITERAL",
             470,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 16, true, false, false)
             ),
@@ -13143,7 +13145,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3_VOP_DPP16",
             470,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -13155,7 +13157,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3_VOP_DPP8",
             470,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -13167,7 +13169,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP1",
             86,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 16, true, false, false)
             ),
@@ -13179,7 +13181,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP1_INST_LITERAL",
             86,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 16, true, false, false)
             ),
@@ -13191,7 +13193,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP1_VOP_DPP16",
             86,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -13203,7 +13205,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP1_VOP_DPP8",
             86,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -13215,7 +13217,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3",
             470,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 16, true, false, false)
             ),
@@ -13227,7 +13229,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_INST_LITERAL",
             470,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 16, true, false, false)
             ),
@@ -13239,7 +13241,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_VOP_DPP16",
             470,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -13251,7 +13253,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_VOP_DPP8",
             470,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -13263,7 +13265,7 @@ private[common] object InstructionDefs22 {
             "gfx8",
             "VOP1",
             63,
-            Vector(
+            Col(
               OperandInfo(None, "float", 16, false, true, false),
               OperandInfo(None, "float", 16, true, false, false)
             ),
@@ -13275,7 +13277,7 @@ private[common] object InstructionDefs22 {
             "gfx9",
             "VOP1",
             63,
-            Vector(
+            Col(
               OperandInfo(None, "float", 16, false, true, false),
               OperandInfo(None, "float", 16, true, false, false)
             ),
@@ -13287,13 +13289,13 @@ private[common] object InstructionDefs22 {
   case object VRsqF32 extends InstructionDef(
         "v_rsq_f32",
         decoder(form(2)((operands, mods) => Instruction.VRsqF32(operands(0), operands(1), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "VOP1",
             36,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -13305,7 +13307,7 @@ private[common] object InstructionDefs22 {
             "cdna1",
             "VOP1_INST_LITERAL",
             36,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -13317,7 +13319,7 @@ private[common] object InstructionDefs22 {
             "cdna1",
             "VOP1_VOP_DPP",
             36,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -13329,7 +13331,7 @@ private[common] object InstructionDefs22 {
             "cdna1",
             "VOP1_VOP_SDWA",
             36,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "SRC_SIMPLE", 32, true, false, false)
             ),
@@ -13341,7 +13343,7 @@ private[common] object InstructionDefs22 {
             "cdna1",
             "VOP3",
             356,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false)
             ),
@@ -13353,7 +13355,7 @@ private[common] object InstructionDefs22 {
             "cdna2",
             "VOP1",
             36,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -13365,7 +13367,7 @@ private[common] object InstructionDefs22 {
             "cdna2",
             "VOP1_INST_LITERAL",
             36,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -13377,7 +13379,7 @@ private[common] object InstructionDefs22 {
             "cdna2",
             "VOP1_VOP_DPP",
             36,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -13389,7 +13391,7 @@ private[common] object InstructionDefs22 {
             "cdna2",
             "VOP1_VOP_SDWA",
             36,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "SRC_SIMPLE", 32, true, false, false)
             ),
@@ -13401,7 +13403,7 @@ private[common] object InstructionDefs22 {
             "cdna2",
             "VOP3",
             356,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false)
             ),
@@ -13413,7 +13415,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP1",
             36,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -13425,7 +13427,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP1_INST_LITERAL",
             36,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -13437,7 +13439,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP1_VOP_DPP",
             36,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -13449,7 +13451,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP1_VOP_SDWA",
             36,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "SRC_SIMPLE", 32, true, false, false)
             ),
@@ -13461,7 +13463,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP3",
             356,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false)
             ),
@@ -13473,7 +13475,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP1",
             36,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -13485,7 +13487,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP1_INST_LITERAL",
             36,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -13497,7 +13499,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP1_VOP_DPP",
             36,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -13509,7 +13511,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP1_VOP_SDWA",
             36,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "SRC_SIMPLE", 32, true, false, false)
             ),
@@ -13521,7 +13523,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP3",
             356,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false)
             ),
@@ -13533,7 +13535,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1",
             46,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -13545,7 +13547,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1_INST_LITERAL",
             46,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -13557,7 +13559,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1_INST_LITERAL64",
             46,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL64"), "SRC", 32, true, false, false)
             ),
@@ -13569,7 +13571,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1_VOP_DPP16",
             46,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -13581,7 +13583,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1_VOP_DPP8",
             46,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -13593,7 +13595,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3",
             430,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -13605,7 +13607,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_INST_LITERAL",
             430,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -13617,7 +13619,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_VOP_DPP16",
             430,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -13629,7 +13631,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_VOP_DPP8",
             430,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -13641,7 +13643,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP1",
             46,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -13653,7 +13655,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP1_INST_LITERAL",
             46,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -13665,7 +13667,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP1_VOP_DPP16",
             46,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -13677,7 +13679,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP1_VOP_DPP8",
             46,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -13689,7 +13691,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP1_VOP_SDWA",
             46,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "SRC_SIMPLE", 32, true, false, false)
             ),
@@ -13701,7 +13703,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3",
             430,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -13713,7 +13715,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3_INST_LITERAL",
             430,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -13725,7 +13727,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP1",
             46,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -13737,7 +13739,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP1_INST_LITERAL",
             46,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -13749,7 +13751,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP1_VOP_DPP16",
             46,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -13761,7 +13763,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP1_VOP_DPP8",
             46,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -13773,7 +13775,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP1_VOP_SDWA",
             46,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "SRC_SIMPLE", 32, true, false, false)
             ),
@@ -13785,7 +13787,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3",
             430,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -13797,7 +13799,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3_INST_LITERAL",
             430,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -13809,7 +13811,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP1",
             46,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -13821,7 +13823,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP1_INST_LITERAL",
             46,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -13833,7 +13835,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP1_VOP_DPP16",
             46,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -13845,7 +13847,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP1_VOP_DPP8",
             46,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -13857,7 +13859,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3",
             430,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -13869,7 +13871,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3_INST_LITERAL",
             430,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -13881,7 +13883,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3_VOP_DPP16",
             430,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -13893,7 +13895,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3_VOP_DPP8",
             430,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -13905,7 +13907,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP1",
             46,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -13917,7 +13919,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP1_INST_LITERAL",
             46,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -13929,7 +13931,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP1_VOP_DPP16",
             46,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -13941,7 +13943,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP1_VOP_DPP8",
             46,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -13953,7 +13955,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3",
             430,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -13965,7 +13967,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3_INST_LITERAL",
             430,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -13977,7 +13979,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3_VOP_DPP16",
             430,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -13989,7 +13991,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3_VOP_DPP8",
             430,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -14001,7 +14003,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP1",
             46,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -14013,7 +14015,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP1_INST_LITERAL",
             46,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -14025,7 +14027,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP1_VOP_DPP16",
             46,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -14037,7 +14039,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP1_VOP_DPP8",
             46,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -14049,7 +14051,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3",
             430,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -14061,7 +14063,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_INST_LITERAL",
             430,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -14073,7 +14075,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_VOP_DPP16",
             430,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -14085,7 +14087,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_VOP_DPP8",
             430,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -14097,7 +14099,7 @@ private[common] object InstructionDefs22 {
             "gfx6",
             "VOP1",
             46,
-            Vector(
+            Col(
               OperandInfo(None, "float", 32, false, true, false),
               OperandInfo(None, "float", 32, true, false, false)
             ),
@@ -14109,7 +14111,7 @@ private[common] object InstructionDefs22 {
             "gfx7",
             "VOP1",
             46,
-            Vector(
+            Col(
               OperandInfo(None, "float", 32, false, true, false),
               OperandInfo(None, "float", 32, true, false, false)
             ),
@@ -14121,7 +14123,7 @@ private[common] object InstructionDefs22 {
             "gfx8",
             "VOP1",
             36,
-            Vector(
+            Col(
               OperandInfo(None, "float", 32, false, true, false),
               OperandInfo(None, "float", 32, true, false, false)
             ),
@@ -14133,7 +14135,7 @@ private[common] object InstructionDefs22 {
             "gfx9",
             "VOP1",
             36,
-            Vector(
+            Col(
               OperandInfo(None, "float", 32, false, true, false),
               OperandInfo(None, "float", 32, true, false, false)
             ),
@@ -14145,13 +14147,13 @@ private[common] object InstructionDefs22 {
   case object VRsqF64 extends InstructionDef(
         "v_rsq_f64",
         decoder(form(2)((operands, mods) => Instruction.VRsqF64(operands(0), operands(1), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "VOP1",
             38,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 64, true, false, false)
             ),
@@ -14163,7 +14165,7 @@ private[common] object InstructionDefs22 {
             "cdna1",
             "VOP1_INST_LITERAL",
             38,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 64, true, false, false)
             ),
@@ -14175,7 +14177,7 @@ private[common] object InstructionDefs22 {
             "cdna1",
             "VOP3",
             358,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 64, true, false, false)
             ),
@@ -14187,7 +14189,7 @@ private[common] object InstructionDefs22 {
             "cdna2",
             "VOP1",
             38,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 64, true, false, false)
             ),
@@ -14199,7 +14201,7 @@ private[common] object InstructionDefs22 {
             "cdna2",
             "VOP1_INST_LITERAL",
             38,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 64, true, false, false)
             ),
@@ -14211,7 +14213,7 @@ private[common] object InstructionDefs22 {
             "cdna2",
             "VOP3",
             358,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 64, true, false, false)
             ),
@@ -14223,7 +14225,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP1",
             38,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 64, true, false, false)
             ),
@@ -14235,7 +14237,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP1_INST_LITERAL",
             38,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 64, true, false, false)
             ),
@@ -14247,7 +14249,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP3",
             358,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 64, true, false, false)
             ),
@@ -14259,7 +14261,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP1",
             38,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 64, true, false, false)
             ),
@@ -14271,7 +14273,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP1_INST_LITERAL",
             38,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 64, true, false, false)
             ),
@@ -14283,7 +14285,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP3",
             358,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 64, true, false, false)
             ),
@@ -14295,7 +14297,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1",
             49,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 64, true, false, false)
             ),
@@ -14307,7 +14309,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1_INST_LITERAL",
             49,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 64, true, false, false)
             ),
@@ -14319,7 +14321,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1_INST_LITERAL64",
             49,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("LITERAL64"), "SRC", 64, true, false, false)
             ),
@@ -14331,7 +14333,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3",
             433,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 64, true, false, false)
             ),
@@ -14343,7 +14345,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_INST_LITERAL",
             433,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 64, true, false, false)
             ),
@@ -14355,7 +14357,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP1",
             49,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLDS", 64, true, false, false)
             ),
@@ -14367,7 +14369,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP1_INST_LITERAL",
             49,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 64, true, false, false)
             ),
@@ -14379,7 +14381,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3",
             433,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLDS", 64, true, false, false)
             ),
@@ -14391,7 +14393,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3_INST_LITERAL",
             433,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 64, true, false, false)
             ),
@@ -14403,7 +14405,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP1",
             49,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLDS", 64, true, false, false)
             ),
@@ -14415,7 +14417,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP1_INST_LITERAL",
             49,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 64, true, false, false)
             ),
@@ -14427,7 +14429,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3",
             433,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLDS", 64, true, false, false)
             ),
@@ -14439,7 +14441,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3_INST_LITERAL",
             433,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 64, true, false, false)
             ),
@@ -14451,7 +14453,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP1",
             49,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 64, true, false, false)
             ),
@@ -14463,7 +14465,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP1_INST_LITERAL",
             49,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 64, true, false, false)
             ),
@@ -14475,7 +14477,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3",
             433,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 64, true, false, false)
             ),
@@ -14487,7 +14489,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3_INST_LITERAL",
             433,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 64, true, false, false)
             ),
@@ -14499,7 +14501,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP1",
             49,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 64, true, false, false)
             ),
@@ -14511,7 +14513,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP1_INST_LITERAL",
             49,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 64, true, false, false)
             ),
@@ -14523,7 +14525,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3",
             433,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 64, true, false, false)
             ),
@@ -14535,7 +14537,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3_INST_LITERAL",
             433,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 64, true, false, false)
             ),
@@ -14547,7 +14549,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP1",
             49,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 64, true, false, false)
             ),
@@ -14559,7 +14561,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP1_INST_LITERAL",
             49,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 64, true, false, false)
             ),
@@ -14571,7 +14573,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3",
             433,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 64, true, false, false)
             ),
@@ -14583,7 +14585,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_INST_LITERAL",
             433,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 64, true, false, false)
             ),
@@ -14595,7 +14597,7 @@ private[common] object InstructionDefs22 {
             "gfx6",
             "VOP1",
             49,
-            Vector(
+            Col(
               OperandInfo(None, "float", 64, false, true, false),
               OperandInfo(None, "float", 64, true, false, false)
             ),
@@ -14607,7 +14609,7 @@ private[common] object InstructionDefs22 {
             "gfx7",
             "VOP1",
             49,
-            Vector(
+            Col(
               OperandInfo(None, "float", 64, false, true, false),
               OperandInfo(None, "float", 64, true, false, false)
             ),
@@ -14619,7 +14621,7 @@ private[common] object InstructionDefs22 {
             "gfx8",
             "VOP1",
             38,
-            Vector(
+            Col(
               OperandInfo(None, "float", 64, false, true, false),
               OperandInfo(None, "float", 64, true, false, false)
             ),
@@ -14631,7 +14633,7 @@ private[common] object InstructionDefs22 {
             "gfx9",
             "VOP1",
             38,
-            Vector(
+            Col(
               OperandInfo(None, "float", 64, false, true, false),
               OperandInfo(None, "float", 64, true, false, false)
             ),
@@ -14643,13 +14645,13 @@ private[common] object InstructionDefs22 {
   case object VRsqLegacyF32 extends InstructionDef(
         "v_rsq_legacy_f32",
         decoder(form(2)((operands, mods) => Instruction.VRsqLegacyF32(operands(0), operands(1), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.GFX6,
             "gfx6",
             "VOP1",
             45,
-            Vector(
+            Col(
               OperandInfo(None, "float", 32, false, true, false),
               OperandInfo(None, "float", 32, true, false, false)
             ),
@@ -14661,7 +14663,7 @@ private[common] object InstructionDefs22 {
             "gfx7",
             "VOP1",
             45,
-            Vector(
+            Col(
               OperandInfo(None, "float", 32, false, true, false),
               OperandInfo(None, "float", 32, true, false, false)
             ),
@@ -14673,13 +14675,13 @@ private[common] object InstructionDefs22 {
   case object VSExpF16 extends InstructionDef(
         "v_s_exp_f16",
         decoder(form(2)((operands, mods) => Instruction.VSExpF16(operands(0), operands(1), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VOP3",
             641,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "SREG", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SSRC", 16, true, false, false)
             ),
@@ -14691,7 +14693,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_INST_LITERAL",
             641,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "SREG", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 16, true, false, false)
             ),
@@ -14703,7 +14705,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3",
             641,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "SREG", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SREG_LITERAL", 16, true, false, false)
             ),
@@ -14715,7 +14717,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_INST_LITERAL",
             641,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "SREG", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SREG_LITERAL", 16, true, false, false)
             ),
@@ -14727,13 +14729,13 @@ private[common] object InstructionDefs22 {
   case object VSExpF32 extends InstructionDef(
         "v_s_exp_f32",
         decoder(form(2)((operands, mods) => Instruction.VSExpF32(operands(0), operands(1), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VOP3",
             640,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "SREG", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SSRC", 32, true, false, false)
             ),
@@ -14745,7 +14747,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_INST_LITERAL",
             640,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "SREG", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
             ),
@@ -14757,7 +14759,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3",
             640,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "SREG", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SSRC", 32, true, false, false)
             ),
@@ -14769,7 +14771,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_INST_LITERAL",
             640,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "SREG", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
             ),
@@ -14781,13 +14783,13 @@ private[common] object InstructionDefs22 {
   case object VSLogF16 extends InstructionDef(
         "v_s_log_f16",
         decoder(form(2)((operands, mods) => Instruction.VSLogF16(operands(0), operands(1), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VOP3",
             643,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "SREG", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SSRC", 16, true, false, false)
             ),
@@ -14799,7 +14801,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_INST_LITERAL",
             643,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "SREG", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 16, true, false, false)
             ),
@@ -14811,7 +14813,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3",
             643,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "SREG", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SREG_LITERAL", 16, true, false, false)
             ),
@@ -14823,7 +14825,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_INST_LITERAL",
             643,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "SREG", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SREG_LITERAL", 16, true, false, false)
             ),
@@ -14835,13 +14837,13 @@ private[common] object InstructionDefs22 {
   case object VSLogF32 extends InstructionDef(
         "v_s_log_f32",
         decoder(form(2)((operands, mods) => Instruction.VSLogF32(operands(0), operands(1), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VOP3",
             642,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "SREG", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SSRC", 32, true, false, false)
             ),
@@ -14853,7 +14855,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_INST_LITERAL",
             642,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "SREG", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
             ),
@@ -14865,7 +14867,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3",
             642,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "SREG", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SSRC", 32, true, false, false)
             ),
@@ -14877,7 +14879,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_INST_LITERAL",
             642,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "SREG", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
             ),
@@ -14889,13 +14891,13 @@ private[common] object InstructionDefs22 {
   case object VSRcpF16 extends InstructionDef(
         "v_s_rcp_f16",
         decoder(form(2)((operands, mods) => Instruction.VSRcpF16(operands(0), operands(1), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VOP3",
             645,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "SREG", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SSRC", 16, true, false, false)
             ),
@@ -14907,7 +14909,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_INST_LITERAL",
             645,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "SREG", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 16, true, false, false)
             ),
@@ -14919,7 +14921,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3",
             645,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "SREG", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SREG_LITERAL", 16, true, false, false)
             ),
@@ -14931,7 +14933,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_INST_LITERAL",
             645,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "SREG", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SREG_LITERAL", 16, true, false, false)
             ),
@@ -14943,13 +14945,13 @@ private[common] object InstructionDefs22 {
   case object VSRcpF32 extends InstructionDef(
         "v_s_rcp_f32",
         decoder(form(2)((operands, mods) => Instruction.VSRcpF32(operands(0), operands(1), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VOP3",
             644,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "SREG", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SSRC", 32, true, false, false)
             ),
@@ -14961,7 +14963,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_INST_LITERAL",
             644,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "SREG", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
             ),
@@ -14973,7 +14975,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3",
             644,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "SREG", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SSRC", 32, true, false, false)
             ),
@@ -14985,7 +14987,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_INST_LITERAL",
             644,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "SREG", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
             ),
@@ -14997,13 +14999,13 @@ private[common] object InstructionDefs22 {
   case object VSRsqF16 extends InstructionDef(
         "v_s_rsq_f16",
         decoder(form(2)((operands, mods) => Instruction.VSRsqF16(operands(0), operands(1), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VOP3",
             647,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "SREG", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SSRC", 16, true, false, false)
             ),
@@ -15015,7 +15017,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_INST_LITERAL",
             647,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "SREG", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 16, true, false, false)
             ),
@@ -15027,7 +15029,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3",
             647,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "SREG", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SREG_LITERAL", 16, true, false, false)
             ),
@@ -15039,7 +15041,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_INST_LITERAL",
             647,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "SREG", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SREG_LITERAL", 16, true, false, false)
             ),
@@ -15051,13 +15053,13 @@ private[common] object InstructionDefs22 {
   case object VSRsqF32 extends InstructionDef(
         "v_s_rsq_f32",
         decoder(form(2)((operands, mods) => Instruction.VSRsqF32(operands(0), operands(1), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VOP3",
             646,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "SREG", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SSRC", 32, true, false, false)
             ),
@@ -15069,7 +15071,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_INST_LITERAL",
             646,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "SREG", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
             ),
@@ -15081,7 +15083,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3",
             646,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "SREG", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SSRC", 32, true, false, false)
             ),
@@ -15093,7 +15095,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_INST_LITERAL",
             646,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "SREG", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
             ),
@@ -15105,13 +15107,13 @@ private[common] object InstructionDefs22 {
   case object VSSqrtF16 extends InstructionDef(
         "v_s_sqrt_f16",
         decoder(form(2)((operands, mods) => Instruction.VSSqrtF16(operands(0), operands(1), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VOP3",
             649,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "SREG", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SSRC", 16, true, false, false)
             ),
@@ -15123,7 +15125,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_INST_LITERAL",
             649,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "SREG", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 16, true, false, false)
             ),
@@ -15135,7 +15137,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3",
             649,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "SREG", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SREG_LITERAL", 16, true, false, false)
             ),
@@ -15147,7 +15149,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_INST_LITERAL",
             649,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "SREG", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SREG_LITERAL", 16, true, false, false)
             ),
@@ -15159,13 +15161,13 @@ private[common] object InstructionDefs22 {
   case object VSSqrtF32 extends InstructionDef(
         "v_s_sqrt_f32",
         decoder(form(2)((operands, mods) => Instruction.VSSqrtF32(operands(0), operands(1), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VOP3",
             648,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "SREG", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SSRC", 32, true, false, false)
             ),
@@ -15177,7 +15179,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_INST_LITERAL",
             648,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "SREG", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
             ),
@@ -15189,7 +15191,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3",
             648,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "SREG", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SSRC", 32, true, false, false)
             ),
@@ -15201,7 +15203,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_INST_LITERAL",
             648,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "SREG", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
             ),
@@ -15215,13 +15217,13 @@ private[common] object InstructionDefs22 {
         decoder(form(4)((operands, mods) =>
           Instruction.VSadHiU8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "VOP3",
             474,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_SIMPLE", 32, true, false, false),
@@ -15235,7 +15237,7 @@ private[common] object InstructionDefs22 {
             "cdna2",
             "VOP3",
             474,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_SIMPLE", 32, true, false, false),
@@ -15249,7 +15251,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP3",
             474,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_SIMPLE", 32, true, false, false),
@@ -15263,7 +15265,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP3",
             474,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_SIMPLE", 32, true, false, false),
@@ -15277,7 +15279,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3",
             547,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -15291,7 +15293,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_INST_LITERAL",
             547,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -15305,7 +15307,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_INST_LITERAL",
             547,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -15319,7 +15321,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_INST_LITERAL",
             547,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -15333,7 +15335,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_INST_LITERAL",
             547,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -15347,7 +15349,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_INST_LITERAL",
             547,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -15361,7 +15363,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_INST_LITERAL",
             547,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -15375,7 +15377,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_INST_LITERAL",
             547,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -15389,7 +15391,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_VOP_DPP16",
             547,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -15403,7 +15405,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_VOP_DPP8",
             547,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -15417,7 +15419,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3",
             347,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_NOLDS", 32, true, false, false),
@@ -15431,7 +15433,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3_INST_LITERAL",
             347,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_NOLDS", 32, true, false, false),
@@ -15445,7 +15447,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3_INST_LITERAL",
             347,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 32, true, false, false),
@@ -15459,7 +15461,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3_INST_LITERAL",
             347,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 32, true, false, false),
@@ -15473,7 +15475,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3_INST_LITERAL",
             347,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_NOLDS", 32, true, false, false),
@@ -15487,7 +15489,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3_INST_LITERAL",
             347,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_NOLDS", 32, true, false, false),
@@ -15501,7 +15503,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3_INST_LITERAL",
             347,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 32, true, false, false),
@@ -15515,7 +15517,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3_INST_LITERAL",
             347,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 32, true, false, false),
@@ -15529,7 +15531,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3",
             347,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_NOLDS", 32, true, false, false),
@@ -15543,7 +15545,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3_INST_LITERAL",
             347,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_NOLDS", 32, true, false, false),
@@ -15557,7 +15559,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3_INST_LITERAL",
             347,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 32, true, false, false),
@@ -15571,7 +15573,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3_INST_LITERAL",
             347,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 32, true, false, false),
@@ -15585,7 +15587,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3_INST_LITERAL",
             347,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_NOLDS", 32, true, false, false),
@@ -15599,7 +15601,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3_INST_LITERAL",
             347,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_NOLDS", 32, true, false, false),
@@ -15613,7 +15615,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3_INST_LITERAL",
             347,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 32, true, false, false),
@@ -15627,7 +15629,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3_INST_LITERAL",
             347,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 32, true, false, false),
@@ -15641,7 +15643,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3",
             547,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -15655,7 +15657,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3_INST_LITERAL",
             547,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -15669,7 +15671,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3_INST_LITERAL",
             547,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -15683,7 +15685,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3_INST_LITERAL",
             547,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -15697,7 +15699,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3_INST_LITERAL",
             547,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -15711,7 +15713,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3_INST_LITERAL",
             547,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -15725,7 +15727,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3_INST_LITERAL",
             547,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -15739,7 +15741,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3_INST_LITERAL",
             547,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -15753,7 +15755,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3_VOP_DPP16",
             547,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_VGPR", 32, true, false, false),
@@ -15767,7 +15769,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3_VOP_DPP8",
             547,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_VGPR", 32, true, false, false),
@@ -15781,7 +15783,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3",
             547,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -15795,7 +15797,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3_INST_LITERAL",
             547,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -15809,7 +15811,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3_INST_LITERAL",
             547,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -15823,7 +15825,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3_INST_LITERAL",
             547,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -15837,7 +15839,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3_INST_LITERAL",
             547,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -15851,7 +15853,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3_INST_LITERAL",
             547,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -15865,7 +15867,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3_INST_LITERAL",
             547,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -15879,7 +15881,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3_INST_LITERAL",
             547,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -15893,7 +15895,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3_VOP_DPP16",
             547,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -15907,7 +15909,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3_VOP_DPP8",
             547,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -15921,7 +15923,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3",
             547,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -15935,7 +15937,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_INST_LITERAL",
             547,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -15949,7 +15951,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_INST_LITERAL",
             547,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -15963,7 +15965,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_INST_LITERAL",
             547,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -15977,7 +15979,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_INST_LITERAL",
             547,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -15991,7 +15993,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_INST_LITERAL",
             547,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -16005,7 +16007,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_INST_LITERAL",
             547,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -16019,7 +16021,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_INST_LITERAL",
             547,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -16033,7 +16035,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_VOP_DPP16",
             547,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -16047,7 +16049,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_VOP_DPP8",
             547,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -16061,7 +16063,7 @@ private[common] object InstructionDefs22 {
             "gfx6",
             "VOP3",
             347,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, false),
               OperandInfo(None, "uint", 32, true, false, false),
               OperandInfo(None, "uint", 32, true, false, false),
@@ -16075,7 +16077,7 @@ private[common] object InstructionDefs22 {
             "gfx7",
             "VOP3",
             347,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, false),
               OperandInfo(None, "uint", 32, true, false, false),
               OperandInfo(None, "uint", 32, true, false, false),
@@ -16089,7 +16091,7 @@ private[common] object InstructionDefs22 {
             "gfx8",
             "VOP3",
             474,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, false),
               OperandInfo(None, "uint", 32, true, false, false),
               OperandInfo(None, "uint", 32, true, false, false),
@@ -16103,7 +16105,7 @@ private[common] object InstructionDefs22 {
             "gfx9",
             "VOP3",
             474,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, false),
               OperandInfo(None, "uint", 32, true, false, false),
               OperandInfo(None, "uint", 32, true, false, false),
@@ -16119,13 +16121,13 @@ private[common] object InstructionDefs22 {
         decoder(form(4)((operands, mods) =>
           Instruction.VSadU16(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "VOP3",
             475,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_SIMPLE", 32, true, false, false),
@@ -16139,7 +16141,7 @@ private[common] object InstructionDefs22 {
             "cdna2",
             "VOP3",
             475,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_SIMPLE", 32, true, false, false),
@@ -16153,7 +16155,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP3",
             475,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_SIMPLE", 32, true, false, false),
@@ -16167,7 +16169,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP3",
             475,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_SIMPLE", 32, true, false, false),
@@ -16181,7 +16183,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3",
             548,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -16195,7 +16197,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_INST_LITERAL",
             548,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -16209,7 +16211,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_INST_LITERAL",
             548,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -16223,7 +16225,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_INST_LITERAL",
             548,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -16237,7 +16239,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_INST_LITERAL",
             548,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -16251,7 +16253,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_INST_LITERAL",
             548,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -16265,7 +16267,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_INST_LITERAL",
             548,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -16279,7 +16281,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_INST_LITERAL",
             548,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -16293,7 +16295,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_VOP_DPP16",
             548,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -16307,7 +16309,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_VOP_DPP8",
             548,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -16321,7 +16323,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3",
             348,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_NOLDS", 32, true, false, false),
@@ -16335,7 +16337,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3_INST_LITERAL",
             348,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_NOLDS", 32, true, false, false),
@@ -16349,7 +16351,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3_INST_LITERAL",
             348,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 32, true, false, false),
@@ -16363,7 +16365,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3_INST_LITERAL",
             348,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 32, true, false, false),
@@ -16377,7 +16379,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3_INST_LITERAL",
             348,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_NOLDS", 32, true, false, false),
@@ -16391,7 +16393,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3_INST_LITERAL",
             348,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_NOLDS", 32, true, false, false),
@@ -16405,7 +16407,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3_INST_LITERAL",
             348,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 32, true, false, false),
@@ -16419,7 +16421,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3_INST_LITERAL",
             348,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 32, true, false, false),
@@ -16433,7 +16435,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3",
             348,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_NOLDS", 32, true, false, false),
@@ -16447,7 +16449,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3_INST_LITERAL",
             348,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_NOLDS", 32, true, false, false),
@@ -16461,7 +16463,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3_INST_LITERAL",
             348,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 32, true, false, false),
@@ -16475,7 +16477,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3_INST_LITERAL",
             348,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 32, true, false, false),
@@ -16489,7 +16491,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3_INST_LITERAL",
             348,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_NOLDS", 32, true, false, false),
@@ -16503,7 +16505,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3_INST_LITERAL",
             348,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_NOLDS", 32, true, false, false),
@@ -16517,7 +16519,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3_INST_LITERAL",
             348,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 32, true, false, false),
@@ -16531,7 +16533,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3_INST_LITERAL",
             348,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 32, true, false, false),
@@ -16545,7 +16547,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3",
             548,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -16559,7 +16561,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3_INST_LITERAL",
             548,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -16573,7 +16575,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3_INST_LITERAL",
             548,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -16587,7 +16589,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3_INST_LITERAL",
             548,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -16601,7 +16603,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3_INST_LITERAL",
             548,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -16615,7 +16617,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3_INST_LITERAL",
             548,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -16629,7 +16631,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3_INST_LITERAL",
             548,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -16643,7 +16645,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3_INST_LITERAL",
             548,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -16657,7 +16659,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3_VOP_DPP16",
             548,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_VGPR", 32, true, false, false),
@@ -16671,7 +16673,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3_VOP_DPP8",
             548,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_VGPR", 32, true, false, false),
@@ -16685,7 +16687,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3",
             548,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -16699,7 +16701,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3_INST_LITERAL",
             548,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -16713,7 +16715,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3_INST_LITERAL",
             548,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -16727,7 +16729,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3_INST_LITERAL",
             548,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -16741,7 +16743,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3_INST_LITERAL",
             548,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -16755,7 +16757,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3_INST_LITERAL",
             548,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -16769,7 +16771,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3_INST_LITERAL",
             548,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -16783,7 +16785,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3_INST_LITERAL",
             548,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -16797,7 +16799,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3_VOP_DPP16",
             548,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -16811,7 +16813,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3_VOP_DPP8",
             548,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -16825,7 +16827,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3",
             548,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -16839,7 +16841,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_INST_LITERAL",
             548,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -16853,7 +16855,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_INST_LITERAL",
             548,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -16867,7 +16869,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_INST_LITERAL",
             548,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -16881,7 +16883,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_INST_LITERAL",
             548,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -16895,7 +16897,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_INST_LITERAL",
             548,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -16909,7 +16911,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_INST_LITERAL",
             548,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -16923,7 +16925,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_INST_LITERAL",
             548,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -16937,7 +16939,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_VOP_DPP16",
             548,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -16951,7 +16953,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_VOP_DPP8",
             548,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -16965,7 +16967,7 @@ private[common] object InstructionDefs22 {
             "gfx6",
             "VOP3",
             348,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, false),
               OperandInfo(None, "uint", 32, true, false, false),
               OperandInfo(None, "uint", 32, true, false, false),
@@ -16979,7 +16981,7 @@ private[common] object InstructionDefs22 {
             "gfx7",
             "VOP3",
             348,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, false),
               OperandInfo(None, "uint", 32, true, false, false),
               OperandInfo(None, "uint", 32, true, false, false),
@@ -16993,7 +16995,7 @@ private[common] object InstructionDefs22 {
             "gfx8",
             "VOP3",
             475,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, false),
               OperandInfo(None, "uint", 32, true, false, false),
               OperandInfo(None, "uint", 32, true, false, false),
@@ -17007,7 +17009,7 @@ private[common] object InstructionDefs22 {
             "gfx9",
             "VOP3",
             475,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, false),
               OperandInfo(None, "uint", 32, true, false, false),
               OperandInfo(None, "uint", 32, true, false, false),
@@ -17023,13 +17025,13 @@ private[common] object InstructionDefs22 {
         decoder(form(4)((operands, mods) =>
           Instruction.VSadU32(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "VOP3",
             476,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_SIMPLE", 32, true, false, false),
@@ -17043,7 +17045,7 @@ private[common] object InstructionDefs22 {
             "cdna2",
             "VOP3",
             476,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_SIMPLE", 32, true, false, false),
@@ -17057,7 +17059,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP3",
             476,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_SIMPLE", 32, true, false, false),
@@ -17071,7 +17073,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP3",
             476,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_SIMPLE", 32, true, false, false),
@@ -17085,7 +17087,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3",
             549,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -17099,7 +17101,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_INST_LITERAL",
             549,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -17113,7 +17115,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_INST_LITERAL",
             549,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -17127,7 +17129,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_INST_LITERAL",
             549,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -17141,7 +17143,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_INST_LITERAL",
             549,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -17155,7 +17157,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_INST_LITERAL",
             549,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -17169,7 +17171,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_INST_LITERAL",
             549,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -17183,7 +17185,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_INST_LITERAL",
             549,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -17197,7 +17199,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_VOP_DPP16",
             549,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -17211,7 +17213,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_VOP_DPP8",
             549,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -17225,7 +17227,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3",
             349,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_NOLDS", 32, true, false, false),
@@ -17239,7 +17241,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3_INST_LITERAL",
             349,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_NOLDS", 32, true, false, false),
@@ -17253,7 +17255,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3_INST_LITERAL",
             349,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 32, true, false, false),
@@ -17267,7 +17269,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3_INST_LITERAL",
             349,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 32, true, false, false),
@@ -17281,7 +17283,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3_INST_LITERAL",
             349,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_NOLDS", 32, true, false, false),
@@ -17295,7 +17297,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3_INST_LITERAL",
             349,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_NOLDS", 32, true, false, false),
@@ -17309,7 +17311,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3_INST_LITERAL",
             349,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 32, true, false, false),
@@ -17323,7 +17325,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3_INST_LITERAL",
             349,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 32, true, false, false),
@@ -17337,7 +17339,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3",
             349,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_NOLDS", 32, true, false, false),
@@ -17351,7 +17353,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3_INST_LITERAL",
             349,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_NOLDS", 32, true, false, false),
@@ -17365,7 +17367,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3_INST_LITERAL",
             349,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 32, true, false, false),
@@ -17379,7 +17381,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3_INST_LITERAL",
             349,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 32, true, false, false),
@@ -17393,7 +17395,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3_INST_LITERAL",
             349,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_NOLDS", 32, true, false, false),
@@ -17407,7 +17409,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3_INST_LITERAL",
             349,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_NOLDS", 32, true, false, false),
@@ -17421,7 +17423,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3_INST_LITERAL",
             349,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 32, true, false, false),
@@ -17435,7 +17437,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3_INST_LITERAL",
             349,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 32, true, false, false),
@@ -17449,7 +17451,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3",
             549,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -17463,7 +17465,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3_INST_LITERAL",
             549,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -17477,7 +17479,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3_INST_LITERAL",
             549,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -17491,7 +17493,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3_INST_LITERAL",
             549,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -17505,7 +17507,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3_INST_LITERAL",
             549,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -17519,7 +17521,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3_INST_LITERAL",
             549,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -17533,7 +17535,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3_INST_LITERAL",
             549,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -17547,7 +17549,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3_INST_LITERAL",
             549,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -17561,7 +17563,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3_VOP_DPP16",
             549,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_VGPR", 32, true, false, false),
@@ -17575,7 +17577,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3_VOP_DPP8",
             549,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_VGPR", 32, true, false, false),
@@ -17589,7 +17591,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3",
             549,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -17603,7 +17605,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3_INST_LITERAL",
             549,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -17617,7 +17619,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3_INST_LITERAL",
             549,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -17631,7 +17633,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3_INST_LITERAL",
             549,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -17645,7 +17647,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3_INST_LITERAL",
             549,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -17659,7 +17661,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3_INST_LITERAL",
             549,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -17673,7 +17675,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3_INST_LITERAL",
             549,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -17687,7 +17689,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3_INST_LITERAL",
             549,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -17701,7 +17703,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3_VOP_DPP16",
             549,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -17715,7 +17717,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3_VOP_DPP8",
             549,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -17729,7 +17731,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3",
             549,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -17743,7 +17745,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_INST_LITERAL",
             549,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -17757,7 +17759,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_INST_LITERAL",
             549,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -17771,7 +17773,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_INST_LITERAL",
             549,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -17785,7 +17787,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_INST_LITERAL",
             549,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -17799,7 +17801,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_INST_LITERAL",
             549,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -17813,7 +17815,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_INST_LITERAL",
             549,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -17827,7 +17829,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_INST_LITERAL",
             549,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -17841,7 +17843,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_VOP_DPP16",
             549,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -17855,7 +17857,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_VOP_DPP8",
             549,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -17869,7 +17871,7 @@ private[common] object InstructionDefs22 {
             "gfx6",
             "VOP3",
             349,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, false),
               OperandInfo(None, "uint", 32, true, false, false),
               OperandInfo(None, "uint", 32, true, false, false),
@@ -17883,7 +17885,7 @@ private[common] object InstructionDefs22 {
             "gfx7",
             "VOP3",
             349,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, false),
               OperandInfo(None, "uint", 32, true, false, false),
               OperandInfo(None, "uint", 32, true, false, false),
@@ -17897,7 +17899,7 @@ private[common] object InstructionDefs22 {
             "gfx8",
             "VOP3",
             476,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, false),
               OperandInfo(None, "uint", 32, true, false, false),
               OperandInfo(None, "uint", 32, true, false, false),
@@ -17911,7 +17913,7 @@ private[common] object InstructionDefs22 {
             "gfx9",
             "VOP3",
             476,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, false),
               OperandInfo(None, "uint", 32, true, false, false),
               OperandInfo(None, "uint", 32, true, false, false),
@@ -17927,13 +17929,13 @@ private[common] object InstructionDefs22 {
         decoder(form(4)((operands, mods) =>
           Instruction.VSadU8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "VOP3",
             473,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_SIMPLE", 32, true, false, false),
@@ -17947,7 +17949,7 @@ private[common] object InstructionDefs22 {
             "cdna2",
             "VOP3",
             473,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_SIMPLE", 32, true, false, false),
@@ -17961,7 +17963,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP3",
             473,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_SIMPLE", 32, true, false, false),
@@ -17975,7 +17977,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP3",
             473,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_SIMPLE", 32, true, false, false),
@@ -17989,7 +17991,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3",
             546,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -18003,7 +18005,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_INST_LITERAL",
             546,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -18017,7 +18019,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_INST_LITERAL",
             546,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -18031,7 +18033,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_INST_LITERAL",
             546,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -18045,7 +18047,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_INST_LITERAL",
             546,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -18059,7 +18061,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_INST_LITERAL",
             546,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -18073,7 +18075,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_INST_LITERAL",
             546,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -18087,7 +18089,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_INST_LITERAL",
             546,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -18101,7 +18103,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_VOP_DPP16",
             546,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -18115,7 +18117,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_VOP_DPP8",
             546,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -18129,7 +18131,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3",
             346,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_NOLDS", 32, true, false, false),
@@ -18143,7 +18145,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3_INST_LITERAL",
             346,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_NOLDS", 32, true, false, false),
@@ -18157,7 +18159,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3_INST_LITERAL",
             346,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 32, true, false, false),
@@ -18171,7 +18173,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3_INST_LITERAL",
             346,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 32, true, false, false),
@@ -18185,7 +18187,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3_INST_LITERAL",
             346,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_NOLDS", 32, true, false, false),
@@ -18199,7 +18201,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3_INST_LITERAL",
             346,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_NOLDS", 32, true, false, false),
@@ -18213,7 +18215,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3_INST_LITERAL",
             346,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 32, true, false, false),
@@ -18227,7 +18229,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3_INST_LITERAL",
             346,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 32, true, false, false),
@@ -18241,7 +18243,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3",
             346,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_NOLDS", 32, true, false, false),
@@ -18255,7 +18257,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3_INST_LITERAL",
             346,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_NOLDS", 32, true, false, false),
@@ -18269,7 +18271,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3_INST_LITERAL",
             346,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 32, true, false, false),
@@ -18283,7 +18285,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3_INST_LITERAL",
             346,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 32, true, false, false),
@@ -18297,7 +18299,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3_INST_LITERAL",
             346,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_NOLDS", 32, true, false, false),
@@ -18311,7 +18313,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3_INST_LITERAL",
             346,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_NOLDS", 32, true, false, false),
@@ -18325,7 +18327,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3_INST_LITERAL",
             346,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 32, true, false, false),
@@ -18339,7 +18341,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3_INST_LITERAL",
             346,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC_NOLDS", 32, true, false, false),
@@ -18353,7 +18355,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3",
             546,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -18367,7 +18369,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3_INST_LITERAL",
             546,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -18381,7 +18383,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3_INST_LITERAL",
             546,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -18395,7 +18397,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3_INST_LITERAL",
             546,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -18409,7 +18411,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3_INST_LITERAL",
             546,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -18423,7 +18425,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3_INST_LITERAL",
             546,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -18437,7 +18439,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3_INST_LITERAL",
             546,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -18451,7 +18453,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3_INST_LITERAL",
             546,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -18465,7 +18467,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3_VOP_DPP16",
             546,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_VGPR", 32, true, false, false),
@@ -18479,7 +18481,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3_VOP_DPP8",
             546,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_VGPR", 32, true, false, false),
@@ -18493,7 +18495,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3",
             546,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -18507,7 +18509,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3_INST_LITERAL",
             546,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -18521,7 +18523,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3_INST_LITERAL",
             546,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -18535,7 +18537,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3_INST_LITERAL",
             546,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -18549,7 +18551,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3_INST_LITERAL",
             546,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -18563,7 +18565,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3_INST_LITERAL",
             546,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -18577,7 +18579,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3_INST_LITERAL",
             546,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -18591,7 +18593,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3_INST_LITERAL",
             546,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -18605,7 +18607,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3_VOP_DPP16",
             546,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -18619,7 +18621,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3_VOP_DPP8",
             546,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -18633,7 +18635,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3",
             546,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -18647,7 +18649,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_INST_LITERAL",
             546,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -18661,7 +18663,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_INST_LITERAL",
             546,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -18675,7 +18677,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_INST_LITERAL",
             546,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -18689,7 +18691,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_INST_LITERAL",
             546,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -18703,7 +18705,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_INST_LITERAL",
             546,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -18717,7 +18719,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_INST_LITERAL",
             546,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -18731,7 +18733,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_INST_LITERAL",
             546,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false),
@@ -18745,7 +18747,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_VOP_DPP16",
             546,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -18759,7 +18761,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_VOP_DPP8",
             546,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false),
               OperandInfo(Some("SRC1"), "SRC", 32, true, false, false),
@@ -18773,7 +18775,7 @@ private[common] object InstructionDefs22 {
             "gfx6",
             "VOP3",
             346,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, false),
               OperandInfo(None, "uint", 32, true, false, false),
               OperandInfo(None, "uint", 32, true, false, false),
@@ -18787,7 +18789,7 @@ private[common] object InstructionDefs22 {
             "gfx7",
             "VOP3",
             346,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, false),
               OperandInfo(None, "uint", 32, true, false, false),
               OperandInfo(None, "uint", 32, true, false, false),
@@ -18801,7 +18803,7 @@ private[common] object InstructionDefs22 {
             "gfx8",
             "VOP3",
             473,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, false),
               OperandInfo(None, "uint", 32, true, false, false),
               OperandInfo(None, "uint", 32, true, false, false),
@@ -18815,7 +18817,7 @@ private[common] object InstructionDefs22 {
             "gfx9",
             "VOP3",
             473,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, false),
               OperandInfo(None, "uint", 32, true, false, false),
               OperandInfo(None, "uint", 32, true, false, false),
@@ -18829,13 +18831,13 @@ private[common] object InstructionDefs22 {
   case object VSatPk4I4I8 extends InstructionDef(
         "v_sat_pk4_i4_i8",
         decoder(form(2)((operands, mods) => Instruction.VSatPk4I4I8(operands(0), operands(1), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VOP1",
             115,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -18847,7 +18849,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1_INST_LITERAL",
             115,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -18859,7 +18861,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1_INST_LITERAL64",
             115,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL64"), "SRC", 32, true, false, false)
             ),
@@ -18871,7 +18873,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1_VOP_DPP16",
             115,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -18883,7 +18885,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1_VOP_DPP8",
             115,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -18895,7 +18897,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3",
             499,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -18907,7 +18909,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_INST_LITERAL",
             499,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -18919,7 +18921,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_VOP_DPP16",
             499,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -18931,7 +18933,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_VOP_DPP8",
             499,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -18943,13 +18945,13 @@ private[common] object InstructionDefs22 {
   case object VSatPk4U4U8 extends InstructionDef(
         "v_sat_pk4_u4_u8",
         decoder(form(2)((operands, mods) => Instruction.VSatPk4U4U8(operands(0), operands(1), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VOP1",
             116,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -18961,7 +18963,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1_INST_LITERAL",
             116,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -18973,7 +18975,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1_INST_LITERAL64",
             116,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL64"), "SRC", 32, true, false, false)
             ),
@@ -18985,7 +18987,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1_VOP_DPP16",
             116,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -18997,7 +18999,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1_VOP_DPP8",
             116,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -19009,7 +19011,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3",
             500,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -19021,7 +19023,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_INST_LITERAL",
             500,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -19033,7 +19035,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_VOP_DPP16",
             500,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -19045,7 +19047,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_VOP_DPP8",
             500,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -19057,13 +19059,13 @@ private[common] object InstructionDefs22 {
   case object VSatPkU8I16 extends InstructionDef(
         "v_sat_pk_u8_i16",
         decoder(form(2)((operands, mods) => Instruction.VSatPkU8I16(operands(0), operands(1), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "VOP1",
             79,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -19075,7 +19077,7 @@ private[common] object InstructionDefs22 {
             "cdna1",
             "VOP1_INST_LITERAL",
             79,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -19087,7 +19089,7 @@ private[common] object InstructionDefs22 {
             "cdna1",
             "VOP1_VOP_DPP",
             79,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -19099,7 +19101,7 @@ private[common] object InstructionDefs22 {
             "cdna1",
             "VOP1_VOP_SDWA",
             79,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "SRC_SIMPLE", 32, true, false, false)
             ),
@@ -19111,7 +19113,7 @@ private[common] object InstructionDefs22 {
             "cdna1",
             "VOP3",
             399,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false)
             ),
@@ -19123,7 +19125,7 @@ private[common] object InstructionDefs22 {
             "cdna2",
             "VOP1",
             79,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -19135,7 +19137,7 @@ private[common] object InstructionDefs22 {
             "cdna2",
             "VOP1_INST_LITERAL",
             79,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -19147,7 +19149,7 @@ private[common] object InstructionDefs22 {
             "cdna2",
             "VOP1_VOP_DPP",
             79,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -19159,7 +19161,7 @@ private[common] object InstructionDefs22 {
             "cdna2",
             "VOP1_VOP_SDWA",
             79,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "SRC_SIMPLE", 32, true, false, false)
             ),
@@ -19171,7 +19173,7 @@ private[common] object InstructionDefs22 {
             "cdna2",
             "VOP3",
             399,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false)
             ),
@@ -19183,7 +19185,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP1",
             79,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -19195,7 +19197,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP1_INST_LITERAL",
             79,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -19207,7 +19209,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP1_VOP_DPP",
             79,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -19219,7 +19221,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP1_VOP_SDWA",
             79,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "SRC_SIMPLE", 32, true, false, false)
             ),
@@ -19231,7 +19233,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP3",
             399,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false)
             ),
@@ -19243,7 +19245,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP1",
             79,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -19255,7 +19257,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP1_INST_LITERAL",
             79,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -19267,7 +19269,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP1_VOP_DPP",
             79,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -19279,7 +19281,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP1_VOP_SDWA",
             79,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "SRC_SIMPLE", 32, true, false, false)
             ),
@@ -19291,7 +19293,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP3",
             399,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false)
             ),
@@ -19303,7 +19305,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1",
             98,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -19315,7 +19317,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1_INST_LITERAL",
             98,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -19327,7 +19329,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1_INST_LITERAL64",
             98,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL64"), "SRC", 32, true, false, false)
             ),
@@ -19339,7 +19341,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1_VOP_DPP16",
             98,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -19351,7 +19353,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1_VOP_DPP8",
             98,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -19363,7 +19365,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3",
             482,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -19375,7 +19377,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_INST_LITERAL",
             482,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -19387,7 +19389,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_VOP_DPP16",
             482,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -19399,7 +19401,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_VOP_DPP8",
             482,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -19411,7 +19413,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP1",
             98,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -19423,7 +19425,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP1_INST_LITERAL",
             98,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -19435,7 +19437,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP1_VOP_DPP16",
             98,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -19447,7 +19449,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP1_VOP_DPP8",
             98,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -19459,7 +19461,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP1_VOP_SDWA",
             98,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "SRC_SIMPLE", 32, true, false, false)
             ),
@@ -19471,7 +19473,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3",
             482,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -19483,7 +19485,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3_INST_LITERAL",
             482,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -19495,7 +19497,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP1",
             98,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -19507,7 +19509,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP1_INST_LITERAL",
             98,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -19519,7 +19521,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP1_VOP_DPP16",
             98,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -19531,7 +19533,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP1_VOP_DPP8",
             98,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -19543,7 +19545,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP1_VOP_SDWA",
             98,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "SRC_SIMPLE", 32, true, false, false)
             ),
@@ -19555,7 +19557,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3",
             482,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -19567,7 +19569,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3_INST_LITERAL",
             482,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -19579,7 +19581,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP1",
             98,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -19591,7 +19593,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP1_INST_LITERAL",
             98,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -19603,7 +19605,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP1_VOP_DPP16",
             98,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -19615,7 +19617,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP1_VOP_DPP8",
             98,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -19627,7 +19629,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3",
             482,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -19639,7 +19641,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3_INST_LITERAL",
             482,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -19651,7 +19653,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3_VOP_DPP16",
             482,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -19663,7 +19665,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3_VOP_DPP8",
             482,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -19675,7 +19677,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP1",
             98,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -19687,7 +19689,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP1_INST_LITERAL",
             98,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -19699,7 +19701,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP1_VOP_DPP16",
             98,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -19711,7 +19713,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP1_VOP_DPP8",
             98,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -19723,7 +19725,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3",
             482,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -19735,7 +19737,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3_INST_LITERAL",
             482,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -19747,7 +19749,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3_VOP_DPP16",
             482,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -19759,7 +19761,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3_VOP_DPP8",
             482,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -19771,7 +19773,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP1",
             98,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -19783,7 +19785,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP1_INST_LITERAL",
             98,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -19795,7 +19797,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP1_VOP_DPP16",
             98,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -19807,7 +19809,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP1_VOP_DPP8",
             98,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -19819,7 +19821,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3",
             482,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -19831,7 +19833,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_INST_LITERAL",
             482,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -19843,7 +19845,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_VOP_DPP16",
             482,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -19855,7 +19857,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_VOP_DPP8",
             482,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -19867,7 +19869,7 @@ private[common] object InstructionDefs22 {
             "gfx9",
             "VOP1",
             79,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 16, false, true, false),
               OperandInfo(None, "uint", 32, true, false, false)
             ),
@@ -19879,13 +19881,13 @@ private[common] object InstructionDefs22 {
   case object VScreenPartition4seB32 extends InstructionDef(
         "v_screen_partition_4se_b32",
         decoder(form(2)((operands, mods) => Instruction.VScreenPartition4seB32(operands(0), operands(1), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "VOP1",
             55,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -19897,7 +19899,7 @@ private[common] object InstructionDefs22 {
             "cdna1",
             "VOP1_INST_LITERAL",
             55,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -19909,7 +19911,7 @@ private[common] object InstructionDefs22 {
             "cdna1",
             "VOP1_VOP_DPP",
             55,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -19921,7 +19923,7 @@ private[common] object InstructionDefs22 {
             "cdna1",
             "VOP1_VOP_SDWA",
             55,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "SRC_SIMPLE", 32, true, false, false)
             ),
@@ -19933,7 +19935,7 @@ private[common] object InstructionDefs22 {
             "cdna1",
             "VOP3",
             375,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false)
             ),
@@ -19945,7 +19947,7 @@ private[common] object InstructionDefs22 {
             "cdna2",
             "VOP1",
             55,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -19957,7 +19959,7 @@ private[common] object InstructionDefs22 {
             "cdna2",
             "VOP1_INST_LITERAL",
             55,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -19969,7 +19971,7 @@ private[common] object InstructionDefs22 {
             "cdna2",
             "VOP1_VOP_DPP",
             55,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -19981,7 +19983,7 @@ private[common] object InstructionDefs22 {
             "cdna2",
             "VOP1_VOP_SDWA",
             55,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "SRC_SIMPLE", 32, true, false, false)
             ),
@@ -19993,7 +19995,7 @@ private[common] object InstructionDefs22 {
             "cdna2",
             "VOP3",
             375,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false)
             ),
@@ -20005,7 +20007,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP1",
             55,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -20017,7 +20019,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP1_INST_LITERAL",
             55,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -20029,7 +20031,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP1_VOP_DPP",
             55,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -20041,7 +20043,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP1_VOP_SDWA",
             55,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "SRC_SIMPLE", 32, true, false, false)
             ),
@@ -20053,7 +20055,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP3",
             375,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false)
             ),
@@ -20065,7 +20067,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP1",
             55,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -20077,7 +20079,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP1_INST_LITERAL",
             55,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -20089,7 +20091,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP1_VOP_DPP",
             55,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -20101,7 +20103,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP1_VOP_SDWA",
             55,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "SRC_SIMPLE", 32, true, false, false)
             ),
@@ -20113,7 +20115,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP3",
             375,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false)
             ),
@@ -20125,7 +20127,7 @@ private[common] object InstructionDefs22 {
             "gfx9",
             "VOP1",
             55,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, false),
               OperandInfo(None, "uint", 32, true, false, false)
             ),
@@ -20137,13 +20139,13 @@ private[common] object InstructionDefs22 {
   case object VSinBf16 extends InstructionDef(
         "v_sin_bf16",
         decoder(form(2)((operands, mods) => Instruction.VSinBf16(operands(0), operands(1), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VOP1",
             126,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 16, true, false, false)
             ),
@@ -20155,7 +20157,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1_INST_LITERAL",
             126,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 16, true, false, false)
             ),
@@ -20167,7 +20169,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1_INST_LITERAL64",
             126,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL64"), "SRC", 16, true, false, false)
             ),
@@ -20179,7 +20181,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1_VOP_DPP16",
             126,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -20191,7 +20193,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1_VOP_DPP8",
             126,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -20203,7 +20205,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3",
             510,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 16, true, false, false)
             ),
@@ -20215,7 +20217,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_INST_LITERAL",
             510,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 16, true, false, false)
             ),
@@ -20227,7 +20229,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_VOP_DPP16",
             510,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -20239,7 +20241,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_VOP_DPP8",
             510,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -20251,13 +20253,13 @@ private[common] object InstructionDefs22 {
   case object VSinF16 extends InstructionDef(
         "v_sin_f16",
         decoder(form(2)((operands, mods) => Instruction.VSinF16(operands(0), operands(1), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "VOP1",
             73,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 16, true, false, false)
             ),
@@ -20269,7 +20271,7 @@ private[common] object InstructionDefs22 {
             "cdna1",
             "VOP1_INST_LITERAL",
             73,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 16, true, false, false)
             ),
@@ -20281,7 +20283,7 @@ private[common] object InstructionDefs22 {
             "cdna1",
             "VOP1_VOP_DPP",
             73,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -20293,7 +20295,7 @@ private[common] object InstructionDefs22 {
             "cdna1",
             "VOP1_VOP_SDWA",
             73,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "SRC_SIMPLE", 16, true, false, false)
             ),
@@ -20305,7 +20307,7 @@ private[common] object InstructionDefs22 {
             "cdna1",
             "VOP3",
             393,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 16, true, false, false)
             ),
@@ -20317,7 +20319,7 @@ private[common] object InstructionDefs22 {
             "cdna2",
             "VOP1",
             73,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 16, true, false, false)
             ),
@@ -20329,7 +20331,7 @@ private[common] object InstructionDefs22 {
             "cdna2",
             "VOP1_INST_LITERAL",
             73,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 16, true, false, false)
             ),
@@ -20341,7 +20343,7 @@ private[common] object InstructionDefs22 {
             "cdna2",
             "VOP1_VOP_DPP",
             73,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -20353,7 +20355,7 @@ private[common] object InstructionDefs22 {
             "cdna2",
             "VOP1_VOP_SDWA",
             73,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "SRC_SIMPLE", 16, true, false, false)
             ),
@@ -20365,7 +20367,7 @@ private[common] object InstructionDefs22 {
             "cdna2",
             "VOP3",
             393,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 16, true, false, false)
             ),
@@ -20377,7 +20379,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP1",
             73,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 16, true, false, false)
             ),
@@ -20389,7 +20391,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP1_INST_LITERAL",
             73,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 16, true, false, false)
             ),
@@ -20401,7 +20403,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP1_VOP_DPP",
             73,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -20413,7 +20415,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP1_VOP_SDWA",
             73,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "SRC_SIMPLE", 16, true, false, false)
             ),
@@ -20425,7 +20427,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP3",
             393,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 16, true, false, false)
             ),
@@ -20437,7 +20439,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP1",
             73,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 16, true, false, false)
             ),
@@ -20449,7 +20451,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP1_INST_LITERAL",
             73,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 16, true, false, false)
             ),
@@ -20461,7 +20463,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP1_VOP_DPP",
             73,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -20473,7 +20475,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP1_VOP_SDWA",
             73,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "SRC_SIMPLE", 16, true, false, false)
             ),
@@ -20485,7 +20487,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP3",
             393,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 16, true, false, false)
             ),
@@ -20497,7 +20499,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1",
             96,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 16, true, false, false)
             ),
@@ -20509,7 +20511,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1_INST_LITERAL",
             96,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 16, true, false, false)
             ),
@@ -20521,7 +20523,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1_INST_LITERAL64",
             96,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL64"), "SRC", 16, true, false, false)
             ),
@@ -20533,7 +20535,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1_VOP_DPP16",
             96,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -20545,7 +20547,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1_VOP_DPP8",
             96,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -20557,7 +20559,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3",
             480,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 16, true, false, false)
             ),
@@ -20569,7 +20571,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_INST_LITERAL",
             480,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 16, true, false, false)
             ),
@@ -20581,7 +20583,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_VOP_DPP16",
             480,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -20593,7 +20595,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_VOP_DPP8",
             480,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -20605,7 +20607,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP1",
             96,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 16, true, false, false)
             ),
@@ -20617,7 +20619,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP1_INST_LITERAL",
             96,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 16, true, false, false)
             ),
@@ -20629,7 +20631,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP1_VOP_DPP16",
             96,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -20641,7 +20643,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP1_VOP_DPP8",
             96,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -20653,7 +20655,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP1_VOP_SDWA",
             96,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "SRC_SIMPLE", 16, true, false, false)
             ),
@@ -20665,7 +20667,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3",
             480,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 16, true, false, false)
             ),
@@ -20677,7 +20679,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3_INST_LITERAL",
             480,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 16, true, false, false)
             ),
@@ -20689,7 +20691,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP1",
             96,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 16, true, false, false)
             ),
@@ -20701,7 +20703,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP1_INST_LITERAL",
             96,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 16, true, false, false)
             ),
@@ -20713,7 +20715,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP1_VOP_DPP16",
             96,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -20725,7 +20727,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP1_VOP_DPP8",
             96,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -20737,7 +20739,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP1_VOP_SDWA",
             96,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "SRC_SIMPLE", 16, true, false, false)
             ),
@@ -20749,7 +20751,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3",
             480,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 16, true, false, false)
             ),
@@ -20761,7 +20763,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3_INST_LITERAL",
             480,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 16, true, false, false)
             ),
@@ -20773,7 +20775,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP1",
             96,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 16, true, false, false)
             ),
@@ -20785,7 +20787,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP1_INST_LITERAL",
             96,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 16, true, false, false)
             ),
@@ -20797,7 +20799,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP1_VOP_DPP16",
             96,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -20809,7 +20811,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP1_VOP_DPP8",
             96,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -20821,7 +20823,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3",
             480,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 16, true, false, false)
             ),
@@ -20833,7 +20835,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3_INST_LITERAL",
             480,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 16, true, false, false)
             ),
@@ -20845,7 +20847,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3_VOP_DPP16",
             480,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -20857,7 +20859,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3_VOP_DPP8",
             480,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -20869,7 +20871,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP1",
             96,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 16, true, false, false)
             ),
@@ -20881,7 +20883,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP1_INST_LITERAL",
             96,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 16, true, false, false)
             ),
@@ -20893,7 +20895,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP1_VOP_DPP16",
             96,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -20905,7 +20907,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP1_VOP_DPP8",
             96,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -20917,7 +20919,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3",
             480,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 16, true, false, false)
             ),
@@ -20929,7 +20931,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3_INST_LITERAL",
             480,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 16, true, false, false)
             ),
@@ -20941,7 +20943,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3_VOP_DPP16",
             480,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -20953,7 +20955,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3_VOP_DPP8",
             480,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -20965,7 +20967,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP1",
             96,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 16, true, false, false)
             ),
@@ -20977,7 +20979,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP1_INST_LITERAL",
             96,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 16, true, false, false)
             ),
@@ -20989,7 +20991,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP1_VOP_DPP16",
             96,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -21001,7 +21003,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP1_VOP_DPP8",
             96,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -21013,7 +21015,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3",
             480,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 16, true, false, false)
             ),
@@ -21025,7 +21027,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_INST_LITERAL",
             480,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 16, true, false, false)
             ),
@@ -21037,7 +21039,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_VOP_DPP16",
             480,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -21049,7 +21051,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_VOP_DPP8",
             480,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -21061,7 +21063,7 @@ private[common] object InstructionDefs22 {
             "gfx8",
             "VOP1",
             73,
-            Vector(
+            Col(
               OperandInfo(None, "float", 16, false, true, false),
               OperandInfo(None, "float", 16, true, false, false)
             ),
@@ -21073,7 +21075,7 @@ private[common] object InstructionDefs22 {
             "gfx9",
             "VOP1",
             73,
-            Vector(
+            Col(
               OperandInfo(None, "float", 16, false, true, false),
               OperandInfo(None, "float", 16, true, false, false)
             ),
@@ -21085,13 +21087,13 @@ private[common] object InstructionDefs22 {
   case object VSinF32 extends InstructionDef(
         "v_sin_f32",
         decoder(form(2)((operands, mods) => Instruction.VSinF32(operands(0), operands(1), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "VOP1",
             41,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -21103,7 +21105,7 @@ private[common] object InstructionDefs22 {
             "cdna1",
             "VOP1_INST_LITERAL",
             41,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -21115,7 +21117,7 @@ private[common] object InstructionDefs22 {
             "cdna1",
             "VOP1_VOP_DPP",
             41,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -21127,7 +21129,7 @@ private[common] object InstructionDefs22 {
             "cdna1",
             "VOP1_VOP_SDWA",
             41,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "SRC_SIMPLE", 32, true, false, false)
             ),
@@ -21139,7 +21141,7 @@ private[common] object InstructionDefs22 {
             "cdna1",
             "VOP3",
             361,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false)
             ),
@@ -21151,7 +21153,7 @@ private[common] object InstructionDefs22 {
             "cdna2",
             "VOP1",
             41,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -21163,7 +21165,7 @@ private[common] object InstructionDefs22 {
             "cdna2",
             "VOP1_INST_LITERAL",
             41,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -21175,7 +21177,7 @@ private[common] object InstructionDefs22 {
             "cdna2",
             "VOP1_VOP_DPP",
             41,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -21187,7 +21189,7 @@ private[common] object InstructionDefs22 {
             "cdna2",
             "VOP1_VOP_SDWA",
             41,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "SRC_SIMPLE", 32, true, false, false)
             ),
@@ -21199,7 +21201,7 @@ private[common] object InstructionDefs22 {
             "cdna2",
             "VOP3",
             361,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false)
             ),
@@ -21211,7 +21213,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP1",
             41,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -21223,7 +21225,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP1_INST_LITERAL",
             41,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -21235,7 +21237,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP1_VOP_DPP",
             41,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -21247,7 +21249,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP1_VOP_SDWA",
             41,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "SRC_SIMPLE", 32, true, false, false)
             ),
@@ -21259,7 +21261,7 @@ private[common] object InstructionDefs22 {
             "cdna3",
             "VOP3",
             361,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false)
             ),
@@ -21271,7 +21273,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP1",
             41,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -21283,7 +21285,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP1_INST_LITERAL",
             41,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -21295,7 +21297,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP1_VOP_DPP",
             41,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -21307,7 +21309,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP1_VOP_SDWA",
             41,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "SRC_SIMPLE", 32, true, false, false)
             ),
@@ -21319,7 +21321,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP3",
             361,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_NOLIT", 32, true, false, false)
             ),
@@ -21331,7 +21333,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1",
             53,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -21343,7 +21345,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1_INST_LITERAL",
             53,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -21355,7 +21357,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1_INST_LITERAL64",
             53,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL64"), "SRC", 32, true, false, false)
             ),
@@ -21367,7 +21369,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1_VOP_DPP16",
             53,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -21379,7 +21381,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1_VOP_DPP8",
             53,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -21391,7 +21393,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3",
             437,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -21403,7 +21405,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_INST_LITERAL",
             437,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -21415,7 +21417,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_VOP_DPP16",
             437,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -21427,7 +21429,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_VOP_DPP8",
             437,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -21439,7 +21441,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP1",
             53,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -21451,7 +21453,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP1_INST_LITERAL",
             53,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -21463,7 +21465,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP1_VOP_DPP16",
             53,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -21475,7 +21477,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP1_VOP_DPP8",
             53,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -21487,7 +21489,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP1_VOP_SDWA",
             53,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "SRC_SIMPLE", 32, true, false, false)
             ),
@@ -21499,7 +21501,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3",
             437,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -21511,7 +21513,7 @@ private[common] object InstructionDefs22 {
             "rdna1",
             "VOP3_INST_LITERAL",
             437,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -21523,7 +21525,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP1",
             53,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -21535,7 +21537,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP1_INST_LITERAL",
             53,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -21547,7 +21549,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP1_VOP_DPP16",
             53,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -21559,7 +21561,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP1_VOP_DPP8",
             53,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -21571,7 +21573,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP1_VOP_SDWA",
             53,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "SRC_SIMPLE", 32, true, false, false)
             ),
@@ -21583,7 +21585,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3",
             437,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -21595,7 +21597,7 @@ private[common] object InstructionDefs22 {
             "rdna2",
             "VOP3_INST_LITERAL",
             437,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -21607,7 +21609,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP1",
             53,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -21619,7 +21621,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP1_INST_LITERAL",
             53,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -21631,7 +21633,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP1_VOP_DPP16",
             53,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -21643,7 +21645,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP1_VOP_DPP8",
             53,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -21655,7 +21657,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3",
             437,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -21667,7 +21669,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3_INST_LITERAL",
             437,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -21679,7 +21681,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3_VOP_DPP16",
             437,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -21691,7 +21693,7 @@ private[common] object InstructionDefs22 {
             "rdna3",
             "VOP3_VOP_DPP8",
             437,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -21703,7 +21705,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP1",
             53,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -21715,7 +21717,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP1_INST_LITERAL",
             53,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -21727,7 +21729,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP1_VOP_DPP16",
             53,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -21739,7 +21741,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP1_VOP_DPP8",
             53,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -21751,7 +21753,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3",
             437,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -21763,7 +21765,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3_INST_LITERAL",
             437,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -21775,7 +21777,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3_VOP_DPP16",
             437,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -21787,7 +21789,7 @@ private[common] object InstructionDefs22 {
             "rdna3_5",
             "VOP3_VOP_DPP8",
             437,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -21799,7 +21801,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP1",
             53,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -21811,7 +21813,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP1_INST_LITERAL",
             53,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -21823,7 +21825,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP1_VOP_DPP16",
             53,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -21835,7 +21837,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP1_VOP_DPP8",
             53,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -21847,7 +21849,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3",
             437,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 32, true, false, false)
             ),
@@ -21859,7 +21861,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_INST_LITERAL",
             437,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 32, true, false, false)
             ),
@@ -21871,7 +21873,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_VOP_DPP16",
             437,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -21883,7 +21885,7 @@ private[common] object InstructionDefs22 {
             "rdna4",
             "VOP3_VOP_DPP8",
             437,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 32, true, false, false)
             ),
@@ -21895,7 +21897,7 @@ private[common] object InstructionDefs22 {
             "gfx6",
             "VOP1",
             53,
-            Vector(
+            Col(
               OperandInfo(None, "float", 32, false, true, false),
               OperandInfo(None, "float", 32, true, false, false)
             ),
@@ -21907,7 +21909,7 @@ private[common] object InstructionDefs22 {
             "gfx7",
             "VOP1",
             53,
-            Vector(
+            Col(
               OperandInfo(None, "float", 32, false, true, false),
               OperandInfo(None, "float", 32, true, false, false)
             ),
@@ -21919,7 +21921,7 @@ private[common] object InstructionDefs22 {
             "gfx8",
             "VOP1",
             41,
-            Vector(
+            Col(
               OperandInfo(None, "float", 32, false, true, false),
               OperandInfo(None, "float", 32, true, false, false)
             ),
@@ -21931,7 +21933,7 @@ private[common] object InstructionDefs22 {
             "gfx9",
             "VOP1",
             41,
-            Vector(
+            Col(
               OperandInfo(None, "float", 32, false, true, false),
               OperandInfo(None, "float", 32, true, false, false)
             ),
@@ -21945,13 +21947,13 @@ private[common] object InstructionDefs22 {
         decoder(form(4)((operands, mods) =>
           Instruction.VSmfmacF3216x16x128Bf8Bf8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA4,
             "cdna4",
             "VOP3P_MFMA",
             59,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 256, true, false, false),
@@ -21967,13 +21969,13 @@ private[common] object InstructionDefs22 {
         decoder(form(4)((operands, mods) =>
           Instruction.VSmfmacF3216x16x128Bf8Fp8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA4,
             "cdna4",
             "VOP3P_MFMA",
             60,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 256, true, false, false),
@@ -21989,13 +21991,13 @@ private[common] object InstructionDefs22 {
         decoder(form(4)((operands, mods) =>
           Instruction.VSmfmacF3216x16x128Fp8Bf8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA4,
             "cdna4",
             "VOP3P_MFMA",
             61,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 256, true, false, false),
@@ -22011,13 +22013,13 @@ private[common] object InstructionDefs22 {
         decoder(form(4)((operands, mods) =>
           Instruction.VSmfmacF3216x16x128Fp8Fp8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA4,
             "cdna4",
             "VOP3P_MFMA",
             67,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 256, true, false, false),
@@ -22033,13 +22035,13 @@ private[common] object InstructionDefs22 {
         decoder(form(4)((operands, mods) =>
           Instruction.VSmfmacF3216x16x32Bf16(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA3,
             "cdna3",
             "VOP3P_MFMA",
             102,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
@@ -22053,7 +22055,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP3P_MFMA",
             102,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
@@ -22069,13 +22071,13 @@ private[common] object InstructionDefs22 {
         decoder(form(4)((operands, mods) =>
           Instruction.VSmfmacF3216x16x32F16(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA3,
             "cdna3",
             "VOP3P_MFMA",
             98,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
@@ -22089,7 +22091,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP3P_MFMA",
             98,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
@@ -22105,13 +22107,13 @@ private[common] object InstructionDefs22 {
         decoder(form(4)((operands, mods) =>
           Instruction.VSmfmacF3216x16x64Bf16(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA4,
             "cdna4",
             "VOP3P_MFMA",
             57,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 256, true, false, false),
@@ -22127,13 +22129,13 @@ private[common] object InstructionDefs22 {
         decoder(form(4)((operands, mods) =>
           Instruction.VSmfmacF3216x16x64Bf8Bf8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA3,
             "cdna3",
             "VOP3P_MFMA",
             120,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
@@ -22147,7 +22149,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP3P_MFMA",
             120,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
@@ -22163,13 +22165,13 @@ private[common] object InstructionDefs22 {
         decoder(form(4)((operands, mods) =>
           Instruction.VSmfmacF3216x16x64Bf8Fp8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA3,
             "cdna3",
             "VOP3P_MFMA",
             121,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
@@ -22183,7 +22185,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP3P_MFMA",
             121,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
@@ -22199,13 +22201,13 @@ private[common] object InstructionDefs22 {
         decoder(form(4)((operands, mods) =>
           Instruction.VSmfmacF3216x16x64F16(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA4,
             "cdna4",
             "VOP3P_MFMA",
             90,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 256, true, false, false),
@@ -22221,13 +22223,13 @@ private[common] object InstructionDefs22 {
         decoder(form(4)((operands, mods) =>
           Instruction.VSmfmacF3216x16x64Fp8Bf8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA3,
             "cdna3",
             "VOP3P_MFMA",
             122,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
@@ -22241,7 +22243,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP3P_MFMA",
             122,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
@@ -22257,13 +22259,13 @@ private[common] object InstructionDefs22 {
         decoder(form(4)((operands, mods) =>
           Instruction.VSmfmacF3216x16x64Fp8Fp8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA3,
             "cdna3",
             "VOP3P_MFMA",
             123,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
@@ -22277,7 +22279,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP3P_MFMA",
             123,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
@@ -22293,13 +22295,13 @@ private[common] object InstructionDefs22 {
         decoder(form(4)((operands, mods) =>
           Instruction.VSmfmacF3232x32x16Bf16(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA3,
             "cdna3",
             "VOP3P_MFMA",
             104,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 512, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
@@ -22313,7 +22315,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP3P_MFMA",
             104,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 512, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
@@ -22329,13 +22331,13 @@ private[common] object InstructionDefs22 {
         decoder(form(4)((operands, mods) =>
           Instruction.VSmfmacF3232x32x16F16(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA3,
             "cdna3",
             "VOP3P_MFMA",
             100,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 512, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
@@ -22349,7 +22351,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP3P_MFMA",
             100,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 512, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
@@ -22365,13 +22367,13 @@ private[common] object InstructionDefs22 {
         decoder(form(4)((operands, mods) =>
           Instruction.VSmfmacF3232x32x32Bf16(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA4,
             "cdna4",
             "VOP3P_MFMA",
             70,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 512, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 256, true, false, false),
@@ -22387,13 +22389,13 @@ private[common] object InstructionDefs22 {
         decoder(form(4)((operands, mods) =>
           Instruction.VSmfmacF3232x32x32Bf8Bf8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA3,
             "cdna3",
             "VOP3P_MFMA",
             124,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 512, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
@@ -22407,7 +22409,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP3P_MFMA",
             124,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 512, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
@@ -22423,13 +22425,13 @@ private[common] object InstructionDefs22 {
         decoder(form(4)((operands, mods) =>
           Instruction.VSmfmacF3232x32x32Bf8Fp8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA3,
             "cdna3",
             "VOP3P_MFMA",
             125,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 512, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
@@ -22443,7 +22445,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP3P_MFMA",
             125,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 512, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
@@ -22459,13 +22461,13 @@ private[common] object InstructionDefs22 {
         decoder(form(4)((operands, mods) =>
           Instruction.VSmfmacF3232x32x32F16(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA4,
             "cdna4",
             "VOP3P_MFMA",
             91,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 512, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 256, true, false, false),
@@ -22481,13 +22483,13 @@ private[common] object InstructionDefs22 {
         decoder(form(4)((operands, mods) =>
           Instruction.VSmfmacF3232x32x32Fp8Bf8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA3,
             "cdna3",
             "VOP3P_MFMA",
             126,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 512, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
@@ -22501,7 +22503,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP3P_MFMA",
             126,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 512, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
@@ -22517,13 +22519,13 @@ private[common] object InstructionDefs22 {
         decoder(form(4)((operands, mods) =>
           Instruction.VSmfmacF3232x32x32Fp8Fp8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA3,
             "cdna3",
             "VOP3P_MFMA",
             127,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 512, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
@@ -22537,7 +22539,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP3P_MFMA",
             127,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 512, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
@@ -22553,13 +22555,13 @@ private[common] object InstructionDefs22 {
         decoder(form(4)((operands, mods) =>
           Instruction.VSmfmacF3232x32x64Bf8Bf8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA4,
             "cdna4",
             "VOP3P_MFMA",
             75,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 512, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 256, true, false, false),
@@ -22575,13 +22577,13 @@ private[common] object InstructionDefs22 {
         decoder(form(4)((operands, mods) =>
           Instruction.VSmfmacF3232x32x64Bf8Fp8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA4,
             "cdna4",
             "VOP3P_MFMA",
             78,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 512, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 256, true, false, false),
@@ -22597,13 +22599,13 @@ private[common] object InstructionDefs22 {
         decoder(form(4)((operands, mods) =>
           Instruction.VSmfmacF3232x32x64Fp8Bf8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA4,
             "cdna4",
             "VOP3P_MFMA",
             79,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 512, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 256, true, false, false),
@@ -22619,13 +22621,13 @@ private[common] object InstructionDefs22 {
         decoder(form(4)((operands, mods) =>
           Instruction.VSmfmacF3232x32x64Fp8Fp8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA4,
             "cdna4",
             "VOP3P_MFMA",
             83,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 512, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 256, true, false, false),
@@ -22641,13 +22643,13 @@ private[common] object InstructionDefs22 {
         decoder(form(4)((operands, mods) =>
           Instruction.VSmfmacI3216x16x128I8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA4,
             "cdna4",
             "VOP3P_MFMA",
             58,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 256, true, false, false),
@@ -22663,13 +22665,13 @@ private[common] object InstructionDefs22 {
         decoder(form(4)((operands, mods) =>
           Instruction.VSmfmacI3216x16x64I8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA3,
             "cdna3",
             "VOP3P_MFMA",
             106,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
@@ -22683,7 +22685,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP3P_MFMA",
             106,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
@@ -22699,13 +22701,13 @@ private[common] object InstructionDefs22 {
         decoder(form(4)((operands, mods) =>
           Instruction.VSmfmacI3232x32x32I8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA3,
             "cdna3",
             "VOP3P_MFMA",
             108,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 512, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
@@ -22719,7 +22721,7 @@ private[common] object InstructionDefs22 {
             "cdna4",
             "VOP3P_MFMA",
             108,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 512, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
@@ -22735,13 +22737,13 @@ private[common] object InstructionDefs22 {
         decoder(form(4)((operands, mods) =>
           Instruction.VSmfmacI3232x32x64I8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA4,
             "cdna4",
             "VOP3P_MFMA",
             71,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 512, false, true, false),
               OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
               OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 256, true, false, false),
@@ -22755,13 +22757,13 @@ private[common] object InstructionDefs22 {
   case object VSqrtBf16 extends InstructionDef(
         "v_sqrt_bf16",
         decoder(form(2)((operands, mods) => Instruction.VSqrtBf16(operands(0), operands(1), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VOP1",
             122,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 16, true, false, false)
             ),
@@ -22773,7 +22775,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1_INST_LITERAL",
             122,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 16, true, false, false)
             ),
@@ -22785,7 +22787,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1_INST_LITERAL64",
             122,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL64"), "SRC", 16, true, false, false)
             ),
@@ -22797,7 +22799,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1_VOP_DPP16",
             122,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -22809,7 +22811,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP1_VOP_DPP8",
             122,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -22821,7 +22823,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3",
             506,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("SRC0"), "SRC", 16, true, false, false)
             ),
@@ -22833,7 +22835,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_INST_LITERAL",
             506,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SRC", 16, true, false, false)
             ),
@@ -22845,7 +22847,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_VOP_DPP16",
             506,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -22857,7 +22859,7 @@ private[common] object InstructionDefs22 {
             "cdna5",
             "VOP3_VOP_DPP8",
             506,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 16, false, true, false),
               OperandInfo(Some("VSRC0"), "VGPR", 16, true, false, false)
             ),
@@ -22867,7 +22869,7 @@ private[common] object InstructionDefs22 {
         ))
       )
 
-  val definitions: Vector[InstructionDef] = Vector(
+  val definitions: Col[InstructionDef] = Col(
     VPkMax3I16,
     VPkMax3NumF16,
     VPkMax3U16,

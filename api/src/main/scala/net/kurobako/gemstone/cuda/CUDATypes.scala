@@ -1,5 +1,7 @@
 package net.kurobako.gemstone.cuda
 
+import net.kurobako.gemstone.Col
+
 opaque type UInt8 = Int
 
 object UInt8 {
@@ -80,13 +82,13 @@ object Stream {
   extension (stream: Stream) def handle: Long = stream
 }
 
-final case class HostInput(bytes: IArray[Byte])
-final case class HostOutput(bytes: IArray[Byte])
+final case class HostInput(bytes: Col[Byte])
+final case class HostOutput(bytes: Col[Byte])
 
 /** A copied CUDA module image. The native boundary currently accepts textual PTX and never retains the caller's
   * pointer.
   */
-final case class ModuleImage(bytes: IArray[Byte])
+final case class ModuleImage(bytes: Col[Byte])
 
 final case class FunctionName(value: String) {
   require(value.nonEmpty, "CUDA function name must not be empty")
@@ -96,10 +98,10 @@ final case class FunctionName(value: String) {
 /** The logical result of `cuModuleGetFunction`. Parameter widths are returned to the C facade so it can safely copy the
   * otherwise untyped `void **kernelParams` array at launch time.
   */
-final case class KernelFunction(handle: CUDAFunction, parameterWidths: IArray[Byte])
+final case class KernelFunction(handle: CUDAFunction, parameterWidths: Col[Byte])
 
-final case class KernelArgument(bytes: IArray[Byte])
-final case class KernelParameters(arguments: IArray[KernelArgument])
+final case class KernelArgument(bytes: Col[Byte])
+final case class KernelParameters(arguments: Col[KernelArgument])
 
 /** Fully copied launch data; no native process pointer crosses the RPC boundary. */
 final case class KernelLaunch(
@@ -110,7 +112,7 @@ final case class KernelLaunch(
     blockY: UInt32,
     blockZ: UInt32,
     sharedMemoryBytes: UInt32,
-    arguments: IArray[KernelArgument]
+    arguments: Col[KernelArgument]
 )
 
 final case class CUDAError(code: Int, message: String)

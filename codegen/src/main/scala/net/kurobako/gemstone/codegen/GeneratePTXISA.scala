@@ -623,7 +623,7 @@ object GeneratePTXISA {
         |    val allModifiers = opcodeParts.drop(1).map(Modifier.apply) ++ mods
         |    val qualified = (name +: allModifiers.map(_.name)).mkString(".")
         |    val modifierNames = allModifiers.map(_.name)
-        |    val candidates = DefinitionsByMnemonic.getOrElse(name, Vector.empty)
+        |    val candidates = DefinitionsByMnemonic.getOrElse(name, Vector.empty[InstructionDef])
         |      .filter(definition => modifierNames.startsWith(definition.fixedMods))
         |    val specificity = candidates.map(_.fixedMods.size).maxOption.getOrElse(0)
         |    val attempts = candidates.filter(_.fixedMods.size == specificity).map { definition =>
@@ -1026,10 +1026,10 @@ object GeneratePTXISA {
         |    val failures = examples.flatMap { case (id, source) =>
         |      Parser.parse(source) match {
         |        case Left(error) => Vector(s"$$id: $$source\\n  $$error")
-        |        case Right(_) => Vector.empty
+        |        case Right(_) => Vector.empty[String]
         |      }
         |    }
-        |    assertEquals(failures, Vector.empty)
+        |    assertEquals(failures.toSeq, Seq.empty)
         |  }
         |
         |  test("all documentation examples round-trip through the canonical printer") {
@@ -1039,13 +1039,13 @@ object GeneratePTXISA {
         |        case Right(first) =>
         |          val printed = Printer.render(first)
         |          Parser.parse(printed) match {
-        |            case Right(second) if second == first => Vector.empty
+        |            case Right(second) if Printer.render(second) == printed => Vector.empty[String]
         |            case Right(second) => Vector(s"$$id: $$source\\n  printed: $$printed\\n  first: $$first\\n  second: $$second")
         |            case Left(error) => Vector(s"$$id: $$source\\n  printed: $$printed\\n  reparse: $$error")
         |          }
         |      }
         |    }
-        |    assertEquals(failures, Vector.empty)
+        |    assertEquals(failures.toSeq, Seq.empty)
         |  }
         |}
         |""".stripMargin
@@ -1057,7 +1057,7 @@ object GeneratePTXISA {
     val operands = form.operands.map(_.constraint).map {
       case "Register" => "OperandConstraint.Register"
       case "Address"  => "OperandConstraint.Address"
-      case "Vector"   => "OperandConstraint.Vector"
+      case "Vector"   => "OperandConstraint.VectorOperand"
       case "Symbol"   => "OperandConstraint.Symbol"
       case "Value"    => "OperandConstraint.Value"
       case _          => "OperandConstraint.Unknown(\"unparsed\")"

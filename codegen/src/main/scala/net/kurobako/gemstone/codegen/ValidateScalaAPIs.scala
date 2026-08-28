@@ -32,11 +32,11 @@ object ValidateScalaAPIs {
   )
 
   private val scalaSurfaces: Vector[(Vector[String], Vector[CFunction], Vector[CFunction])] = Vector(
-    (Vector("cuda-driver", "cuda-runtime"), ABIDerivation.cFunctions[CUDA], legacyCUDA ++ cudaCompilerABI),
-    (Vector("hip"), ABIDerivation.cFunctions[HIP], Vector.empty),
-    (Vector("hsa"), ABIDerivation.cFunctions[HSA], Vector.empty),
-    (Vector("level-zero"), ABIDerivation.cFunctions[LevelZero], Vector.empty),
-    (Vector("opencl"), ABIDerivation.cFunctions[OpenCL], Vector.empty)
+    (Vector("cuda-driver", "cuda-runtime"), ABIDerivation.cFunctions[CUDA].toVector, legacyCUDA ++ cudaCompilerABI),
+    (Vector("hip"), ABIDerivation.cFunctions[HIP].toVector, Vector.empty),
+    (Vector("hsa"), ABIDerivation.cFunctions[HSA].toVector, Vector.empty),
+    (Vector("level-zero"), ABIDerivation.cFunctions[LevelZero].toVector, Vector.empty),
+    (Vector("opencl"), ABIDerivation.cFunctions[OpenCL].toVector, Vector.empty)
   )
 
   def main(arguments: Array[String]): Unit = arguments.toVector match {

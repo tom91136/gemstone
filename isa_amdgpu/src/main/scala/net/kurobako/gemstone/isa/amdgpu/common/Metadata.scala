@@ -1,5 +1,8 @@
 package net.kurobako.gemstone.isa.amdgpu.common
 
+import net.kurobako.gemstone.Col
+import net.kurobako.gemstone.Col.*
+
 enum MetadataSource {
   case MesaACO, AMDXML
 }
@@ -69,30 +72,30 @@ final case class Encoding(
     target: String,
     format: String,
     opcode: Int,
-    operands: Vector[OperandInfo],
+    operands: Col[OperandInfo],
     functionalGroup: Option[String],
     source: MetadataSource
 )
 
-final case class Metadata(encodings: Vector[Encoding]) {
+final case class Metadata(encodings: Col[Encoding]) {
   def supports(generation: Generation): Boolean = encodings.exists(_.generation == generation)
   def supports(target: Target): Boolean         =
     encodings.exists(encoding => encoding.generation == target.generation && encoding.target == target.metadataTarget)
 }
 
-private[amdgpu] def instructionsFor(generation: Generation): Vector[InstructionDef] =
-  Instructions.iterator.filter(_.meta.supports(generation)).toVector
+private[amdgpu] def instructionsFor(generation: Generation): Col[InstructionDef] =
+  Instructions.iterator.filter(_.meta.supports(generation)).toCol
 
-private[amdgpu] def encodingsFor(definition: InstructionDef, generation: Generation): Vector[Encoding] =
+private[amdgpu] def encodingsFor(definition: InstructionDef, generation: Generation): Col[Encoding] =
   definition.meta.encodings.filter(_.generation == generation)
 
-private[amdgpu] def encodingsFor(definition: InstructionDef, target: Target): Vector[Encoding] =
+private[amdgpu] def encodingsFor(definition: InstructionDef, target: Target): Col[Encoding] =
   definition.meta.encodings.filter(encoding =>
     encoding.generation == target.generation && encoding.target == target.metadataTarget
   )
 
-private[amdgpu] def encodingsFor(instruction: Instruction, target: Target): Vector[Encoding] =
+private[amdgpu] def encodingsFor(instruction: Instruction, target: Target): Col[Encoding] =
   encodingsFor(instruction.definition, target)
 
-private[amdgpu] lazy val allEncodings: Vector[Encoding] =
-  Instructions.iterator.map(_.meta).toVector.distinct.flatMap(_.encodings)
+private[amdgpu] lazy val allEncodings: Col[Encoding] =
+  Instructions.iterator.map(_.meta).toCol.distinct.flatMap(_.encodings)

@@ -1,5 +1,7 @@
 package net.kurobako.gemstone.isa.spirv.v1_6
 
+import net.kurobako.gemstone.Col
+
 enum BinaryError {
   case MisalignedByteLength(length: Int)
   case TruncatedHeader(wordCount: Int)
@@ -22,7 +24,7 @@ enum BinaryError {
 object Binary {
   val Magic: Int = 0x07230203
 
-  def parse(bytes: IArray[Byte]): Either[BinaryError, RawModule] = {
+  def parse(bytes: Col[Byte]): Either[BinaryError, RawModule] = {
     if (bytes.length % 4 != 0) return Left(BinaryError.MisalignedByteLength(bytes.length))
     val wordCount = bytes.length / 4
     if (wordCount < 5) return Left(BinaryError.TruncatedHeader(wordCount))
@@ -31,9 +33,9 @@ object Binary {
       if (rawMagic == Magic) Endianness.Little
       else if (java.lang.Integer.reverseBytes(rawMagic) == Magic) Endianness.Big
       else return Left(BinaryError.InvalidMagic(rawMagic.toLong & 0xffffffffL))
-    val words        = Vector.tabulate(wordCount)(index => Word(readInt(bytes, index * 4, endianness)))
+    val words        = Col.tabulate(wordCount)(index => Word(readInt(bytes, index * 4, endianness)))
     val header       = Header(SPIRVVersion.fromWord(words(1)), words(2), words(3), words(4))
-    val instructions = Vector.newBuilder[RawInstruction]
+    val instructions = Col.newBuilder[RawInstruction]
     var offset       = 5
     while (offset < words.size) {
       val first       = words(offset).bits
@@ -49,13 +51,13 @@ object Binary {
     Right(RawModule(header, instructions.result(), endianness))
   }
 
-  def serialize(module: RawModule): Either[BinaryError, IArray[Byte]] = {
+  def serialize(module: RawModule): Either[BinaryError, Col[Byte]] = {
     module.instructions.find(_.wordCount > 0xffff) match {
       case Some(instruction) =>
         return Left(BinaryError.InstructionTooLong(instruction.opcodeNumber, instruction.wordCount))
       case None => ()
     }
-    val words = Vector.newBuilder[Word]
+    val words = Col.newBuilder[Word]
     words += Word(Magic)
     words += module.header.version.word
     words += module.header.generator
@@ -69,10 +71,10 @@ object Binary {
     val encoded = words.result()
     val bytes   = new Array[Byte](encoded.size * 4)
     encoded.zipWithIndex.foreach { case (word, index) => writeInt(bytes, index * 4, word.bits, module.endianness) }
-    Right(IArray.unsafeFromArray(bytes))
+    Right(Col.unsafeFromArray(bytes))
   }
 
-  private def readInt(bytes: IArray[Byte], offset: Int, endianness: Endianness): Int = {
+  private def readInt(bytes: Col[Byte], offset: Int, endianness: Endianness): Int = {
     val a = bytes(offset).toInt & 0xff
     val b = bytes(offset + 1).toInt & 0xff
     val c = bytes(offset + 2).toInt & 0xff
@@ -85,8 +87,8 @@ object Binary {
 
   private def writeInt(bytes: Array[Byte], offset: Int, value: Int, endianness: Endianness): Unit = {
     val shifts = endianness match {
-      case Endianness.Little => Vector(0, 8, 16, 24)
-      case Endianness.Big    => Vector(24, 16, 8, 0)
+      case Endianness.Little => Col(0, 8, 16, 24)
+      case Endianness.Big    => Col(24, 16, 8, 0)
     }
     var index = 0
     while (index < 4) {

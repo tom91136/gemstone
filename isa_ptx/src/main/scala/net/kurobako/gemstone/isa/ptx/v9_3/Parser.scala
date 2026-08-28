@@ -1,7 +1,11 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
+import net.kurobako.gemstone.Col
+import net.kurobako.gemstone.Col.*
+
 import cats.parse.Parser as P
 import cats.parse.Parser0 as P0
+import scala.reflect.ClassTag
 
 /** Parser for PTX modules, declarations, functions, entries, instructions, and structured operands. */
 object Parser {
@@ -46,7 +50,7 @@ object Parser {
     ((P.char('%') *> (segmentPart ~ (P.string(".") *> adjacentSegmentPart).rep0)) ~
       (P.char('<') *> P.charsWhile(_.isDigit) <* P.char('>')).string.backtrack.?).map {
       case ((head, tail), range) =>
-        val segments          = head +: tail.toVector
+        val segments          = (head +: tail).toCol
         val registerPartIndex = segments.indexWhere(looksLikeRegisterPart)
         val (nameParts, part) =
           if (registerPartIndex > 0 && registerPartIndex == segments.size - 1)
@@ -81,15 +85,15 @@ object Parser {
   private val comma: P[Unit]     = lexeme(P.char(','))
   private val semicolon: P[Unit] = lexeme(P.char(';'))
 
-  private def separated0[A](parser: P0[A], separator: P[Unit]): P0[Vector[A]] =
-    (parser ~ (separator *> parser).rep0).map { case (head, tail) => head +: tail.toVector }.backtrack.?
-      .map(_.getOrElse(Vector.empty))
+  private def separated0[A: ClassTag](parser: P0[A], separator: P[Unit]): P0[Col[A]] =
+    (parser ~ (separator *> parser).rep0).map { case (head, tail) => (head +: tail).toCol }.backtrack.?
+      .map(_.getOrElse(Col.empty[A]))
 
-  private def enclosed(open: Char, close: Char, item: P[Operand]): P[Vector[Operand]] =
+  private def enclosed(open: Char, close: Char, item: P[Operand]): P[Col[Operand]] =
     (P.char(open) *> separated0(item.backtrack.?, comma) <* lexeme(P.char(close))).map(_.flatten)
 
   private val qualifier: P[Operand.Qualifier] =
-    (lexeme(P.char('.')) *> segment).map(value => Operand.Qualifier(Vector(value)))
+    (lexeme(P.char('.')) *> segment).map(value => Operand.Qualifier(Col(value)))
 
   val operand: P[Operand] = P.recursive { recursive =>
     lazy val atom: P[Operand] =
@@ -120,12 +124,12 @@ object Parser {
         case Operand.Symbol(_)         => true
         case _                         => false
       }
-      val suffixes = if (canTakePart) partSuffix.rep0 else P.pure(List.empty)
+      val suffixes = if (canTakePart) partSuffix.rep0.map(_.toCol) else P.pure(Col.empty[Operand => Operand])
       suffixes.flatMap { functions =>
         val suffixed = functions.foldLeft(base)((value, function) => function(value))
         enclosed('[', ']', recursive).backtrack.?.map {
-          case Some(Vector(single)) => Operand.Index(suffixed, single)
-          case _                    => suffixed
+          case Some(Col(single)) => Operand.Index(suffixed, single)
+          case _                 => suffixed
         }
       }
     }
@@ -147,30 +151,30 @@ object Parser {
     }
   }
 
-  private val opcode: P[(String, Vector[Modifier])] =
+  private val opcode: P[(String, Col[Modifier])] =
     ((segment ~ (P.char('.') *> adjacentSegment).rep0) <* skipped).map { case (mnemonic, modifiers) =>
-      mnemonic -> modifiers.toVector.map(Modifier.apply)
+      mnemonic -> modifiers.iterator.map(Modifier.apply).toCol
     }
 
-  private val strictOperands: P0[Vector[Operand]] = separated0(operand.backtrack, comma)
+  private val strictOperands: P0[Col[Operand]] = separated0(operand.backtrack, comma)
 
   private val dottedSegment: P[String] =
     (identifierCharacter.rep ~ (P.string("::") *> identifierCharacter.rep).rep0).string.backtrack
 
-  private val dottedPath: P[Vector[String]] =
+  private val dottedPath: P[Col[String]] =
     (lexeme(P.char('.')) *> (dottedSegment ~ (P.char('.') *> dottedSegment).rep0)).map { case (head, tail) =>
-      head +: tail.toVector
+      (head +: tail).toCol
     }
 
   private val parameterDeclaration: P[Parameter] =
-    ((dottedPath.backtrack | number.backtrack.map(Vector(_))).rep ~ (registerToken.map(_._1).backtrack | identifier))
+    ((dottedPath.backtrack | number.backtrack.map(Col(_))).rep ~ (registerToken.map(_._1).backtrack | identifier))
       .flatMap { case (qualifiers, name) =>
         enclosed('[', ']', operand).backtrack.rep0.map { dimensions =>
-          Parameter(qualifiers.toList.toVector.flatten, name, dimensions.toVector.flatten)
+          Parameter(qualifiers.iterator.flatten.toCol, name, dimensions.iterator.flatten.toCol)
         }
       }
 
-  private val parameterList: P[Vector[Parameter]] =
+  private val parameterList: P[Col[Parameter]] =
     P.char('(') *> separated0(parameterDeclaration.backtrack, comma) <* lexeme(P.char(')'))
 
   private val predication: P0[Predication] =
@@ -178,31 +182,32 @@ object Parser {
       case (negated, value) => Predication(negated.getOrElse(false), value)
     }
 
-  private val directiveArguments: P0[Vector[DirectiveArgument]] = {
+  private val directiveArguments: P0[Col[DirectiveArgument]] = {
     val first         = operand.backtrack.map(value => DirectiveArgument(DirectiveSeparator.Space, value))
     val commaArgument = (comma *> operand.backtrack)
       .map(value => DirectiveArgument(DirectiveSeparator.Comma, value))
     val spaceArgument = operand.backtrack
       .map(value => DirectiveArgument(DirectiveSeparator.Space, value))
     val next: P[DirectiveArgument] = commaArgument.backtrack.orElse(spaceArgument)
-    (first ~ next.rep0).map { case (head, tail) => head +: tail.toVector }.backtrack.?
-      .map(_.getOrElse(Vector.empty))
+    (first ~ next.rep0).map { case (head, tail) => (head +: tail).toCol }.backtrack.?
+      .map(_.getOrElse(Col.empty[DirectiveArgument]))
   }
 
   private def fixedLineDirective(name: String): P[Statement] =
-    ((dottedPath.filter(_ == Vector(name)) ~ operand) <* semicolon.backtrack.?).map { case (path, value) =>
-      Statement.Directive(
-        path,
-        Vector(DirectiveArgument(DirectiveSeparator.Space, value)),
-        DirectiveTerminator.Line
-      )
+    ((dottedPath.filter(path => path.size == 1 && path.head == name) ~ operand) <* semicolon.backtrack.?).map {
+      case (path, value) =>
+        Statement.Directive(
+          path,
+          Col(DirectiveArgument(DirectiveSeparator.Space, value)),
+          DirectiveTerminator.Line
+        )
     }
 
   private val targetDirective: P[Statement] =
-    ((dottedPath.filter(_ == Vector("target")) ~
+    ((dottedPath.filter(path => path.size == 1 && path.head == "target") ~
       (identifier.map(Operand.Symbol.apply) ~
         (comma *> identifier.map(Operand.Symbol.apply)).rep0).map { case (head, tail) =>
-        head +: tail.toVector
+        (head +: tail).toCol
       }) <*
       semicolon.backtrack.?).map {
       case (path, values) =>
@@ -240,22 +245,24 @@ object Parser {
 
   private def entryOrFunction(self: P[Statement]): P[Statement] =
     for {
-      _          <- lexeme(P.char('.'))
-      visible    <- (lexeme(P.string("visible")) *> lexeme(P.char('.'))).as(true).backtrack.?
-      isEntry    <- lexeme(P.string("entry")).as(true).backtrack | lexeme(P.string("func")).as(false)
-      returns    <- if (isEntry) P.pure(Vector.empty) else parameterList.backtrack.?.map(_.getOrElse(Vector.empty))
+      _       <- lexeme(P.char('.'))
+      visible <- (lexeme(P.string("visible")) *> lexeme(P.char('.'))).as(true).backtrack.?
+      isEntry <- lexeme(P.string("entry")).as(true).backtrack | lexeme(P.string("func")).as(false)
+      returns <-
+        if (isEntry) P.pure(Col.empty[Parameter])
+        else parameterList.backtrack.?.map(_.getOrElse(Col.empty[Parameter]))
       name       <- identifier
-      parameters <- parameterList.backtrack.?.map(_.getOrElse(Vector.empty))
+      parameters <- parameterList.backtrack.?.map(_.getOrElse(Col.empty[Parameter]))
       _          <- functionDirective.backtrack.rep0
-      body       <- (lexeme(P.char('{')) *> (self.rep0 <* lexeme(P.char('}')))).map(_.toVector).backtrack.?
+      body       <- (lexeme(P.char('{')) *> (self.rep0 <* lexeme(P.char('}')))).map(_.toCol).backtrack.?
       _          <- if (!isEntry && body.isEmpty) semicolon.backtrack.? else P.pure(Option.empty[Unit])
     } yield
-      if (isEntry) Statement.Entry(visible.isDefined, name, parameters, body.getOrElse(Vector.empty))
+      if (isEntry) Statement.Entry(visible.isDefined, name, parameters, body.getOrElse(Col.empty[Statement]))
       else Statement.Function(visible.isDefined, name, returns, parameters, body)
 
   val statement: P[Statement] = P.recursive { self =>
     val block =
-      (lexeme(P.char('{')) *> (self.rep0 <* lexeme(P.char('}')))).map(values => Statement.Block(values.toVector))
+      (lexeme(P.char('{')) *> (self.rep0 <* lexeme(P.char('}')))).map(values => Statement.Block(values.toCol))
     entryOrFunction(self).backtrack
       .orElse(block.backtrack)
       .orElse(label.backtrack)
@@ -264,24 +271,24 @@ object Parser {
       .orElse(instruction)
   }
 
-  private val module: P[Vector[Statement]] = (statement.rep.map(_.toList.toVector) <* skipped) <* P.end
+  private val module: P[Col[Statement]] = (statement.rep.map(_.iterator.toCol) <* skipped) <* P.end
 
   def parse(source: String): Either[ParseError, Program] = {
     val trimmed = source.trim
-    if (trimmed.isEmpty) Right(Program(Vector.empty))
+    if (trimmed.isEmpty) Right(Program(Col.empty))
     else
       module.parseAll(trimmed).map(Program.apply).left.map { error =>
         val offset = error.failedAtOffset
         val prefix = trimmed.take(offset)
         val line   = prefix.count(_ == '\n') + 1
         val column = offset - prefix.lastIndexOf('\n')
-        ParseError(offset, line, column, error.expected.take(12).map(_.toString).toVector)
+        ParseError(offset, line, column, error.expected.iterator.take(12).map(_.toString).toCol)
       }
   }
 
   def parseStatement(source: String): Either[ParseError, Statement] =
     parse(source).flatMap {
-      case Program(Vector(value)) => Right(value)
-      case Program(values)        => Left(ParseError(0, 1, 1, Vector(s"one statement, found ${values.size}")))
+      case Program(Col(value)) => Right(value)
+      case Program(values)     => Left(ParseError(0, 1, 1, Col(s"one statement, found ${values.size}")))
     }
 }

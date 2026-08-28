@@ -1,5 +1,7 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
+import net.kurobako.gemstone.Col
+
 import net.kurobako.gemstone.execution.CancellationToken
 import net.kurobako.gemstone.execution.ExecutionLimits
 import net.kurobako.gemstone.memory.ArrayCheckedMemory
@@ -40,8 +42,8 @@ final class PTXInterpreterSuite extends munit.FunSuite {
     val kernel = PTXParser.parse(vectorAdd).toOption.get
     assertEquals(kernel.name, "vector_add")
     assertEquals(
-      kernel.parameters,
-      Vector(PTXParameter("input_a", 8), PTXParameter("input_b", 8), PTXParameter("output", 8))
+      kernel.parameters.toSeq,
+      Seq(PTXParameter("input_a", 8), PTXParameter("input_b", 8), PTXParameter("output", 8))
     )
 
     val memory = ArrayCheckedMemory.allocate(192, provenance = "vector-add arena")
@@ -49,7 +51,7 @@ final class PTXInterpreterSuite extends munit.FunSuite {
     val a      = base
     val b      = base.offset(64L)
     val output = base.offset(128L)
-    val values = Vector(1, 2, 3, 4)
+    val values = Col(1, 2, 3, 4)
 
     values.indices.foreach { index =>
       memory.writeInt32(a.offset(index.toLong * 4L), values(index)).toOption.get
@@ -71,12 +73,12 @@ final class PTXInterpreterSuite extends munit.FunSuite {
       .get
 
     assertEquals(
-      values.indices.map(index => memory.readInt32(output.offset(index.toLong * 4L)).toOption.get).toVector,
-      Vector(11, 22, 33, 44)
+      values.indices.map(index => memory.readInt32(output.offset(index.toLong * 4L)).toOption.get).toSeq,
+      Seq(11, 22, 33, 44)
     )
     assertEquals(
-      result.trace.events.collect { case event: TraceEvent.OutputWrite => event.value },
-      Vector(11, 22, 33, 44)
+      result.trace.events.collect { case event: TraceEvent.OutputWrite => event.value }.toSeq,
+      Seq(11, 22, 33, 44)
     )
   }
 
@@ -121,8 +123,8 @@ final class PTXInterpreterSuite extends munit.FunSuite {
     )
     assert(result.isRight, result.left.toOption.map(_.message).getOrElse(""))
     assertEquals(
-      Vector.tabulate(4)(index => memory.readInt32(memory.allocation.start.offset(index.toLong * 4L)).toOption.get),
-      Vector(7, 7, 9, 9)
+      Col.tabulate(4)(index => memory.readInt32(memory.allocation.start.offset(index.toLong * 4L)).toOption.get).toSeq,
+      Seq(7, 7, 9, 9)
     )
   }
 

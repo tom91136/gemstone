@@ -1,5 +1,7 @@
 package net.kurobako.gemstone.isa.amdgpu.common
 
+import net.kurobako.gemstone.Col
+
 import scala.collection.mutable
 
 class GoldenCorpusSuite extends munit.FunSuite {
@@ -18,7 +20,11 @@ class GoldenCorpusSuite extends munit.FunSuite {
             error => fail(s"${golden.source}: failed to parse canonical output: $error\n$canonical"),
             identity
           )
-          assertEquals(reparsed, parsed, s"${golden.source}: ${golden.target.name}: ${golden.assembly}")
+          assertEquals(
+            Assembly.print(reparsed),
+            canonical,
+            s"${golden.source}: ${golden.target.name}: ${golden.assembly}"
+          )
           roundTripped += 1
       }
     }
@@ -37,20 +43,24 @@ class GoldenCorpusSuite extends munit.FunSuite {
         case Left(error) if error.message.startsWith("unknown AMDGPU opcode") => recordUnsupported(error, unsupported)
         case Left(error)    => fail(s"${golden.source}: ${golden.target.name}: $error\n${golden.assembly}")
         case Right(program) => program.statements match {
-            case Vector(Statement.Instruction(instruction)) =>
+            case Col(Statement.Instruction(instruction)) =>
               val definitions = encodingsFor(instruction, golden.target)
               val formats     = definitions.map(_.format.toUpperCase).distinct
               Binary.encode(instruction, golden.target) match {
                 case Right(actual) =>
                   assert(formats.contains("SOPP"), s"encoded an unimplemented format at ${golden.source}: $formats")
-                  assertEquals(actual, golden.bytes, s"${golden.source}: ${golden.target.name}: ${golden.assembly}")
+                  assertEquals(
+                    actual.toSeq,
+                    golden.bytes.toSeq,
+                    s"${golden.source}: ${golden.target.name}: ${golden.assembly}"
+                  )
                   encoded += 1
                 case Left(CodecError.UnsupportedFormat(_, _, declared)) =>
                   assert(
                     !formats.contains("SOPP"),
                     s"SOPP case escaped encoding at ${golden.source}: ${golden.assembly}"
                   )
-                  assertEquals(declared, formats.sorted)
+                  assertEquals(declared.toSeq, formats.sorted.toSeq)
                   unsupportedFormat += 1
                 case Left(CodecError.UnsupportedInstruction(_, _)) =>
                   assert(definitions.isEmpty, s"known instruction was classified unknown at ${golden.source}")
@@ -60,7 +70,7 @@ class GoldenCorpusSuite extends munit.FunSuite {
                   unsupportedFormat += 1
                 case Left(error) => fail(s"${golden.source}: unclassified codec result $error\n${golden.assembly}")
               }
-            case Vector(Statement.InstructionPair(_, _)) => paired += 1
+            case Col(Statement.InstructionPair(_, _)) => paired += 1
             case other => fail(s"${golden.source}: expected one instruction or pair, found $other")
           }
       }
@@ -124,5 +134,5 @@ class GoldenCorpusSuite extends munit.FunSuite {
     "v_wmma_ld_scale_paired_b32"   -> 15
   )
 
-  private val EncodingSuffixes = Vector("_dpp8", "_sdwa", "_dpp", "_e64", "_e32")
+  private val EncodingSuffixes = Col("_dpp8", "_sdwa", "_dpp", "_e64", "_e32")
 }

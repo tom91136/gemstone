@@ -265,7 +265,7 @@ object GenerateAMDGPUISA {
         |  private lazy val ByOpcode: Map[String, Vector[InstructionDef]] = Instructions.groupBy(_.opcode)
         |
         |  def forOpcode(opcode: String): Vector[InstructionDef] =
-        |    ByOpcode.getOrElse(normalizeOpcode(opcode), Vector.empty)
+        |    ByOpcode.getOrElse(normalizeOpcode(opcode), Vector.empty[InstructionDef])
         |}
         |
         |enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
@@ -553,6 +553,7 @@ object GenerateAMDGPUISA {
     )
     families.map { case (packageName, generation) =>
       s"""|package net.kurobako.gemstone.isa.amdgpu.$packageName {
+          |  import net.kurobako.gemstone.Col
           |  export net.kurobako.gemstone.isa.amdgpu.common.API.*
           |  val Version: net.kurobako.gemstone.isa.amdgpu.common.Generation =
           |    net.kurobako.gemstone.isa.amdgpu.common.Generation.$generation

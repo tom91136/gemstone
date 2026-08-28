@@ -1,5 +1,7 @@
 package net.kurobako.gemstone.isa.spirv.v1_6
 
+import net.kurobako.gemstone.Col
+
 enum ValidationIssue {
   case InvalidHeader(detail: String)
   case MissingKernelCapability
@@ -19,16 +21,16 @@ enum ValidationIssue {
 
 enum ValidationResult {
   case Valid
-  case Invalid(issues: Vector[ValidationIssue])
-  case Unsupported(issues: Vector[ValidationIssue])
+  case Invalid(issues: Col[ValidationIssue])
+  case Unsupported(issues: Col[ValidationIssue])
 }
 
 object ComputeValidator {
   private val Kernel = 6L
 
   def validate(module: Module): ValidationResult = {
-    val invalid     = Vector.newBuilder[ValidationIssue]
-    val unsupported = Vector.newBuilder[ValidationIssue]
+    val invalid     = Col.newBuilder[ValidationIssue]
+    val unsupported = Col.newBuilder[ValidationIssue]
     if (module.header.bound.toUnsigned == 0L)
       invalid += ValidationIssue.InvalidHeader("id bound must be non-zero")
     if (module.header.schema.toUnsigned != 0L)

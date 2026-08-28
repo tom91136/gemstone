@@ -1,5 +1,6 @@
 package net.kurobako.gemstone.codegen
 
+import net.kurobako.gemstone.Col
 import net.kurobako.gemstone.abi.ABIDeclaration
 import net.kurobako.gemstone.abi.ABIDerivation
 import net.kurobako.gemstone.abi.MethodImplementation
@@ -19,14 +20,14 @@ import java.nio.file.Paths
 object GenerateAPI {
   // C entry-point spelling is protocol identity and must never be acronym-normalized.
   private val cudaRPC: RPCSchema                          = RPCDerivation.schema[CUDA]
-  private val cudaNativeDelegates: Vector[ABIDeclaration] = ABIDerivation.nativeDelegates[CUDA]
+  private val cudaNativeDelegates: Vector[ABIDeclaration] = ABIDerivation.nativeDelegates[CUDA].toVector
   private val cudaDriverSurface                           = RPCDerivation.methodNames[CUDA].filter(name =>
     name.startsWith("cu") && !name.startsWith("cuda")
-  )
-  private val cudaRuntimeSurface   = RPCDerivation.methodNames[CUDA].filter(_.startsWith("cuda"))
+  ).toVector
+  private val cudaRuntimeSurface   = RPCDerivation.methodNames[CUDA].filter(_.startsWith("cuda")).toVector
   private val cudaBootstrapSurface = RPCDerivation.methodNames[CUDA].filter(name =>
     name.startsWith("__cuda") && !name.startsWith("__cudaGemstone")
-  )
+  ).toVector
   def main(arguments: Array[String]): Unit = {
     require(APISourceFingerprint.Value.nonEmpty, "API source fingerprint must be available")
     val (check, output, scalaOutput) = arguments.toVector match {
@@ -150,7 +151,7 @@ object GenerateAPI {
         ABIDeclaration(
           function("name").str,
           function("functionType").str,
-          function("parameters").arr.iterator.map(_("name").str).toVector,
+          Col.from(function("parameters").arr.iterator.map(_("name").str)),
           MethodImplementation.Unsupported
         )
       }
@@ -1302,12 +1303,13 @@ object GenerateAPI {
         if (outputs.isEmpty) "if (outputs.isEmpty) status else CUDAStatus.Unknown"
         else
           s"""|outputs match {
-              |          case Vector(${outputPattern.mkString(", ")}) =>
+              |          case Col(${outputPattern.mkString(", ")}) =>
               |            if (${assignments.mkString(" && ")}) status else CUDAStatus.InvalidValue
               |          case _ => CUDAStatus.Unknown
               |        }""".stripMargin
+      val encodedInputs = if (inputs.isEmpty) "Col.empty[WireValue]" else s"Col(${inputs.mkString(", ")})"
       s"""|  override def ${method.name}(${parameters.mkString(", ")}): CUDAStatus =
-          |    transport.call(RPCRequest(${method.name}Id, "${method.name}", Vector(${inputs.mkString(", ")}))) match {
+          |    transport.call(RPCRequest(${method.name}Id, "${method.name}", $encodedInputs)) match {
           |      case RPCResponse.Success(WireValue.CallResult(status, outputs)) if status.isSuccess =>
           |        ${outputHandling.linesIterator.mkString("\n        ")}
           |      case RPCResponse.Success(WireValue.CallResult(status, _)) => status
@@ -1332,9 +1334,11 @@ object GenerateAPI {
         else declarations.mkString("            ", "\n            ", "\n")
       s"""|      case `${method.name}Id` if request.functionName == "${method.name}" =>
           |        request.arguments match {
-          |          case Vector(${patterns.mkString(", ")}) =>
+          |          case Col(${patterns.mkString(", ")}) =>
           |$declarationsBlock            val status = implementation.${method.name}($arguments)
-          |            val outputs = if (status.isSuccess) Vector(${outputs.mkString(", ")}) else Vector.empty
+          |            val outputs = if (status.isSuccess) ${
+           if (outputs.isEmpty) "Col.empty[WireValue]" else s"Col(${outputs.mkString(", ")})"
+         } else Col.empty[WireValue]
           |            RPCResponse.Success(WireValue.CallResult(status, outputs))
           |          case _ => invalid("invalid arguments for ${method.name}")
           |        }""".stripMargin
@@ -1343,10 +1347,13 @@ object GenerateAPI {
       val parameters = method.parameters.map { parameter =>
         s"RPCParameter(\"${parameter.name}\", WireType.${parameter.wireType}, WireDirection.${parameter.direction}, ${renderWireExtent(parameter.extent)})"
       }
-      s"RPCMethod(\"${method.name}\", ${method.name}Id, Vector(${parameters.mkString(", ")}), WireType.${method.result})"
+      val encodedParameters =
+        if (parameters.isEmpty) "Col.empty[RPCParameter]" else s"Col(${parameters.mkString(", ")})"
+      s"RPCMethod(\"${method.name}\", ${method.name}Id, $encodedParameters, WireType.${method.result})"
     }
     s"""|package net.kurobako.gemstone.generated
         |
+        |import net.kurobako.gemstone.Col
         |import net.kurobako.gemstone.abi.*
         |import net.kurobako.gemstone.cuda.*
         |import net.kurobako.gemstone.rpc.*
@@ -1356,7 +1363,7 @@ object GenerateAPI {
         |
         |${ids.mkString("\n")}
         |
-        |  val Schema: RPCSchema = RPCSchema("${cudaRPC.interfaceName}", SchemaFingerprint, Vector(
+        |  val Schema: RPCSchema = RPCSchema("${cudaRPC.interfaceName}", SchemaFingerprint, Col(
         |    ${schemaMethods.mkString(",\n    ")}
         |  ))
         |
@@ -1386,7 +1393,7 @@ object GenerateAPI {
         |    true
         |  }
         |
-        |  private def writeBytes[Mode <: Access, Size <: Extent](pointer: Pointer[Byte, Mode, Size], value: IArray[Byte])(using CanWrite[Mode], CanDereference[Size]): Boolean = {
+        |  private def writeBytes[Mode <: Access, Size <: Extent](pointer: Pointer[Byte, Mode, Size], value: Col[Byte])(using CanWrite[Mode], CanDereference[Size]): Boolean = {
         |    if (pointer.length != value.length) false
         |    else {
         |      var index = 0
@@ -1442,7 +1449,7 @@ object GenerateAPI {
   private def encodeClientInput(parameter: RPCParameter): String =
     if (parameter.extent == WireExtent.Value) encodeWire(parameter.wireType, parameter.name)
     else if (parameter.wireType == WireType.ByteBuffer)
-      s"WireValue.ByteBufferValue(IArray.from(${parameter.name}.snapshot.getOrElse(Vector.empty)))"
+      s"WireValue.ByteBufferValue(${parameter.name}.snapshot.getOrElse(Col.empty[Byte]))"
     else {
       val value =
         s"${parameter.name}.snapshot.flatMap(_.headOption).getOrElse(throw new IllegalArgumentException(\"${parameter.name} is uninitialized\"))"
@@ -1452,7 +1459,7 @@ object GenerateAPI {
   private def dispatcherArgument(
       parameter: RPCParameter,
       index: Int,
-      parameters: Vector[(RPCParameter, Int)]
+      parameters: Col[(RPCParameter, Int)]
   ): String = parameter.direction match {
     case WireDirection.In if parameter.extent == WireExtent.Value =>
       decodeWireValue(parameter.wireType, s"value$index")
@@ -1466,7 +1473,7 @@ object GenerateAPI {
     case _ => sys.error(s"unsupported generated dispatcher parameter: $parameter")
   }
 
-  private def extentLength(extent: WireExtent, parameters: Vector[(RPCParameter, Int)]): String = extent match {
+  private def extentLength(extent: WireExtent, parameters: Col[(RPCParameter, Int)]): String = extent match {
     case WireExtent.One             => "1"
     case WireExtent.Fixed(count)    => count.toString
     case WireExtent.CountedBy(name) =>
@@ -1485,7 +1492,7 @@ object GenerateAPI {
 
   private def encodeDispatcherOutput(parameter: RPCParameter, index: Int): String =
     if (parameter.wireType == WireType.ByteBuffer)
-      s"WireValue.ByteBufferValue(IArray.from(argument$index.snapshot.getOrElse(throw new IllegalStateException(\"${parameter.name} was not initialized\"))))"
+      s"WireValue.ByteBufferValue(argument$index.snapshot.getOrElse(throw new IllegalStateException(\"${parameter.name} was not initialized\")))"
     else {
       val value =
         s"argument$index.snapshot.flatMap(_.headOption).getOrElse(throw new IllegalStateException(\"${parameter.name} was not initialized\"))"
@@ -1516,7 +1523,7 @@ object GenerateAPI {
     case WireType.KernelFunction        => "KernelFunction"
     case WireType.KernelLaunch          => "KernelLaunch"
     case WireType.Stream                => "Stream"
-    case WireType.ByteBuffer            => "IArray[Byte]"
+    case WireType.ByteBuffer            => "Col[Byte]"
     case WireType.KernelParameters      => "KernelParameters"
     case WireType.NullableOpaquePointer =>
       "Nullable[Pointer[net.kurobako.gemstone.abi.OpaquePointer, ReadWrite, Opaque]]"

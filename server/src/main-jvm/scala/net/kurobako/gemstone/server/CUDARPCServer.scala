@@ -1,5 +1,8 @@
 package net.kurobako.gemstone.server
 
+import net.kurobako.gemstone.Col
+import net.kurobako.gemstone.Col.*
+
 import net.kurobako.gemstone.abi.*
 import net.kurobako.gemstone.cuda.*
 import net.kurobako.gemstone.generated.GeneratedCUDARPC
@@ -47,7 +50,7 @@ object CUDARPCServer {
   }
 
   def main(arguments: Array[String]): Unit = {
-    val options  = parseArguments(arguments.toVector)
+    val options  = parseArguments(arguments.toCol)
     val portFile = Path.of(required(options, "port-file"))
     val token    = required(options, "token")
     require(token.matches("[0-9a-f]{64}"), "--token must contain exactly 64 lowercase hexadecimal characters")
@@ -159,7 +162,7 @@ object CUDARPCServer {
       method: RPCMethod,
       payload: Array[Byte],
       callbacks: CallbackConnection
-  ): Either[CUDAError, Vector[WireValue]] =
+  ): Either[CUDAError, Col[WireValue]] =
     try {
       val buffer    = ByteBuffer.wrap(payload).order(ByteOrder.BIG_ENDIAN)
       val arguments = method.parameters
@@ -186,9 +189,9 @@ object CUDARPCServer {
     case WireType.Context      => WireValue.ContextValue(Context(buffer.getLong()))
     case WireType.CUDAModule   => WireValue.CUDAModuleValue(CUDAModule(buffer.getLong()))
     case WireType.CUDAFunction => WireValue.CUDAFunctionValue(CUDAFunction(buffer.getLong()))
-    case WireType.HostInput    => WireValue.HostInputValue(HostInput(IArray.unsafeFromArray(readByteArray(buffer))))
-    case WireType.HostOutput   => WireValue.HostOutputValue(HostOutput(IArray.unsafeFromArray(readByteArray(buffer))))
-    case WireType.ModuleImage  => WireValue.ModuleImageValue(ModuleImage(IArray.unsafeFromArray(readByteArray(buffer))))
+    case WireType.HostInput    => WireValue.HostInputValue(HostInput(Col.unsafeFromArray(readByteArray(buffer))))
+    case WireType.HostOutput   => WireValue.HostOutputValue(HostOutput(Col.unsafeFromArray(readByteArray(buffer))))
+    case WireType.ModuleImage  => WireValue.ModuleImageValue(ModuleImage(Col.unsafeFromArray(readByteArray(buffer))))
     case WireType.FunctionName =>
       WireValue.FunctionNameValue(FunctionName(new String(readByteArray(buffer), StandardCharsets.UTF_8)))
     case WireType.KernelFunction =>
@@ -203,20 +206,20 @@ object CUDARPCServer {
       val sharedBytes = UInt32(Integer.toUnsignedLong(buffer.getInt()))
       val count       = buffer.getInt()
       if (count < 0 || count > 4096) throw new IllegalArgumentException(s"invalid kernel argument count: $count")
-      val arguments = IArray.unsafeFromArray(Array.tabulate(count) { _ =>
-        KernelArgument(IArray.unsafeFromArray(readByteArray(buffer)))
+      val arguments = Col.unsafeFromArray(Array.tabulate(count) { _ =>
+        KernelArgument(Col.unsafeFromArray(readByteArray(buffer)))
       })
       WireValue.KernelLaunchValue(
         KernelLaunch(gridX, gridY, gridZ, blockX, blockY, blockZ, sharedBytes, arguments)
       )
     case WireType.Stream           => WireValue.StreamValue(Stream(buffer.getLong()))
-    case WireType.ByteBuffer       => WireValue.ByteBufferValue(IArray.unsafeFromArray(readByteArray(buffer)))
+    case WireType.ByteBuffer       => WireValue.ByteBufferValue(Col.unsafeFromArray(readByteArray(buffer)))
     case WireType.KernelParameters =>
       val count = buffer.getInt()
       if (count < 0 || count > 4096) throw new IllegalArgumentException(s"invalid kernel argument count: $count")
       WireValue.KernelParametersValue(
-        KernelParameters(IArray.unsafeFromArray(Array.tabulate(count) { _ =>
-          KernelArgument(IArray.unsafeFromArray(readByteArray(buffer)))
+        KernelParameters(Col.unsafeFromArray(Array.tabulate(count) { _ =>
+          KernelArgument(Col.unsafeFromArray(readByteArray(buffer)))
         }))
       )
     case WireType.NullableOpaquePointer => WireValue.NullableOpaquePointerValue(buffer.get() != 0)
@@ -229,7 +232,7 @@ object CUDARPCServer {
   private def writeResponse(output: DataOutputStream, response: RPCResponse): Unit = {
     val (status, message, payload) = response match {
       case RPCResponse.Success(WireValue.CallResult(status, outputs)) =>
-        (status.code, Array.emptyByteArray, outputs.flatMap(value => encodeValue(value)).toArray)
+        (status.code, Array.emptyByteArray, Col.toArray(outputs.flatMap(value => encodeValue(value))))
       case RPCResponse.Success(value) => (0, Array.emptyByteArray, encodeValue(value))
       case RPCResponse.Failure(error) =>
         val encoded = error.message.getBytes(StandardCharsets.UTF_8)
@@ -263,7 +266,7 @@ object CUDARPCServer {
       case WireValue.HostOutputValue(value)   => writeByteArray(output, value.bytes)
       case WireValue.ModuleImageValue(value)  => writeByteArray(output, value.bytes)
       case WireValue.FunctionNameValue(value) =>
-        writeByteArray(output, IArray.unsafeFromArray(value.value.getBytes(StandardCharsets.UTF_8)))
+        writeByteArray(output, Col.unsafeFromArray(value.value.getBytes(StandardCharsets.UTF_8)))
       case WireValue.KernelFunctionValue(value) =>
         output.writeLong(value.handle.handle)
         output.writeInt(value.parameterWidths.length)
@@ -299,7 +302,7 @@ object CUDARPCServer {
     result
   }
 
-  private def writeByteArray(output: DataOutputStream, value: IArray[Byte]): Unit = {
+  private def writeByteArray(output: DataOutputStream, value: Col[Byte]): Unit = {
     output.writeInt(value.length)
     value.iterator.foreach(byte => output.writeByte(byte.toInt))
   }
@@ -379,9 +382,9 @@ object CUDARPCServer {
     result
   }
 
-  private def parseArguments(arguments: Vector[String]): Map[String, String] = arguments match {
-    case Vector()                                            => Map.empty
-    case Vector(name, value, rest*) if name.startsWith("--") => parseArguments(rest.toVector) + (name.drop(2) -> value)
+  private def parseArguments(arguments: Col[String]): Map[String, String] = arguments match {
+    case Col()                                            => Map.empty
+    case Col(name, value, rest*) if name.startsWith("--") => parseArguments(rest.toCol) + (name.drop(2) -> value)
     case _ => throw new IllegalArgumentException("usage: CUDARPCServer --port-file <path> --token <64-hex>")
   }
 

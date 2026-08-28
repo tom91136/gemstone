@@ -18,7 +18,7 @@ trait CallbackDerivationFixture {
 class ABIDerivationSuite extends munit.FunSuite {
   test("method implementation modes survive TASTy boundaries") {
     assertEquals(
-      ABIDerivation.methods[DerivationFixture],
+      ABIDerivation.methods[DerivationFixture].toVector,
       Vector(
         ABIMethod("abstractCall", MethodImplementation.Remote),
         ABIMethod("delegatedCall", MethodImplementation.NativeDelegate("gemstone_fixture_delegate")),
@@ -29,7 +29,7 @@ class ABIDerivationSuite extends munit.FunSuite {
 
   test("normalized C signatures survive TASTy boundaries") {
     assertEquals(
-      ABIDerivation.cFunctions[DerivationFixture],
+      ABIDerivation.cFunctions[DerivationFixture].toVector,
       Vector(
         CFunction("abstractCall", "int (int)"),
         CFunction("delegatedCall", "int (int)"),
@@ -40,7 +40,7 @@ class ABIDerivationSuite extends munit.FunSuite {
 
   test("normalized C signatures derive from retained Scala ABI types") {
     assertEquals(
-      ABIDerivation.cFunctions[DerivationFixture],
+      ABIDerivation.cFunctions[DerivationFixture].toVector,
       Vector(
         CFunction("abstractCall", "int (int)"),
         CFunction("delegatedCall", "int (int)"),
@@ -50,22 +50,18 @@ class ABIDerivationSuite extends munit.FunSuite {
   }
 
   test("native delegates retain their exact C declaration") {
-    assertEquals(
-      ABIDerivation.nativeDelegates[DerivationFixture],
-      Vector(
-        ABIDeclaration(
-          "delegatedCall",
-          "int (int)",
-          Vector("value"),
-          MethodImplementation.NativeDelegate("gemstone_fixture_delegate")
-        )
-      )
-    )
+    val declarations = ABIDerivation.nativeDelegates[DerivationFixture]
+    assertEquals(declarations.length, 1)
+    val declaration = declarations(0)
+    assertEquals(declaration.name, "delegatedCall")
+    assertEquals(declaration.functionType, "int (int)")
+    assertEquals(declaration.parameterNames.toSeq, Seq("value"))
+    assertEquals(declaration.implementation, MethodImplementation.NativeDelegate("gemstone_fixture_delegate"))
   }
 
   test("callback C signatures derive from typed argument tuples and results") {
     assertEquals(
-      ABIDerivation.cFunctions[CallbackDerivationFixture],
+      ABIDerivation.cFunctions[CallbackDerivationFixture].toVector,
       Vector(
         CFunction(
           "register",

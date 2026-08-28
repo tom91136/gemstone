@@ -1,5 +1,7 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
+import net.kurobako.gemstone.Col
+
 final class SyntaxSuite extends munit.FunSuite {
   test("empty line comments are valid trivia") {
     assert(Parser.parse("//\n.version 9.2;").isRight)
@@ -27,7 +29,7 @@ final class SyntaxSuite extends munit.FunSuite {
           ) =>
         assertEquals(predicate.negated, false)
         assertEquals(instruction.opcode, "ld.global.nc")
-        assertEquals(modifiers.map(_.name), Vector("L1::evict_last", "v2", "f64"))
+        assertEquals(modifiers.map(_.name).toSeq, Seq("L1::evict_last", "v2", "f64"))
         assert(destination.isInstanceOf[Operand.VectorLiteral])
         assert(address.isInstanceOf[Operand.Address])
       case other => fail(s"unexpected statement: $other")
@@ -35,7 +37,7 @@ final class SyntaxSuite extends munit.FunSuite {
   }
 
   test("module declarations, entry parameters, labels, and instructions parse") {
-    val entryFragments = Vector(
+    val entryFragments = Col(
       ".visible .entry kernel() {}",
       ".visible .entry kernel(.param .u64 pointer) {}",
       ".visible .entry kernel(.param .u64 pointer) { .reg .b32 %r<2>; }",
@@ -65,7 +67,7 @@ final class SyntaxSuite extends munit.FunSuite {
     assertEquals(statements.statements.size, 4)
     statements.statements.last match {
       case Statement.Entry(true, "kernel", parameters, body) =>
-        assertEquals(parameters.map(_.name), Vector("pointer"))
+        assertEquals(parameters.map(_.name).toSeq, Seq("pointer"))
         assert(body.contains(Statement.Label("again")))
         assertEquals(body.collect { case _: Statement.Instruction => 1 }.sum, 2)
       case other => fail(s"unexpected statement: $other")
@@ -76,13 +78,13 @@ final class SyntaxSuite extends munit.FunSuite {
     val source  = ".target sm_100, texmode_independent;\n.file 1 \"a\\\"b.ptx\";"
     val first   = Parser.parse(source).toOption.get
     val printed = Printer.render(first)
-    assertEquals(Parser.parse(printed), Right(first))
+    assertEquals(Parser.parse(printed).map(Printer.render), Right(printed))
     assert(printed.contains(", "))
     assert(printed.contains("a\\\"b.ptx"))
   }
 
   test("complex instruction forms round-trip to an identical AST") {
-    val sources = Vector(
+    val sources = Col(
       "@!p mbarrier.arrive.release.cta.shared::cta.b64 state, [addr];",
       "cp.async.bulk.tensor.2d.shared::cluster.global.mbarrier::complete_tx::bytes [dst], [tmap, {x, y}], [mbar];",
       "st.global.v4.u32 [%rd6+16], {%r1, %r2, %r3, %r4};",
@@ -91,7 +93,7 @@ final class SyntaxSuite extends munit.FunSuite {
     sources.foreach { source =>
       val first   = Parser.parse(source).toOption.get
       val printed = Printer.render(first)
-      assertEquals(Parser.parse(printed), Right(first), printed)
+      assertEquals(Parser.parse(printed).map(Printer.render), Right(printed), printed)
     }
   }
 

@@ -1,5 +1,7 @@
 package net.kurobako.gemstone.server
 
+import net.kurobako.gemstone.Col
+
 import net.kurobako.gemstone.cuda.*
 import net.kurobako.gemstone.isa.ptx.v9_3.Parser
 import net.kurobako.gemstone.isa.ptx.v9_3.PTXArgument
@@ -58,7 +60,7 @@ final class PTXCUDAKernelExecution extends CUDAKernelExecution {
                 val handle = nextFunctionHandle
                 nextFunctionHandle = Math.addExact(nextFunctionHandle, 1L)
                 functions(handle) = LoadedFunction(module, kernel)
-                val widths = IArray.unsafeFromArray(kernel.parameters.map(_.widthBytes.toByte).toArray)
+                val widths = kernel.parameters.map(_.widthBytes.toByte)
                 success(KernelFunction(CUDAFunction(handle), widths))
             }
         }
@@ -81,8 +83,8 @@ final class PTXCUDAKernelExecution extends CUDAKernelExecution {
     functions.get(function.handle) match {
       case None         => failure(400, s"invalid CUDA function handle: ${function.handle}")
       case Some(loaded) =>
-        val grid  = Vector(launch.gridX.toLong, launch.gridY.toLong, launch.gridZ.toLong)
-        val block = Vector(launch.blockX.toLong, launch.blockY.toLong, launch.blockZ.toLong)
+        val grid  = Col(launch.gridX.toLong, launch.gridY.toLong, launch.gridZ.toLong)
+        val block = Col(launch.blockX.toLong, launch.blockY.toLong, launch.blockZ.toLong)
         if (grid.exists(_ == 0L) || block.exists(_ == 0L)) failure(1, "CUDA launch dimensions must be non-zero")
         else if (grid(1) != 1L || grid(2) != 1L || block(1) != 1L || block(2) != 1L)
           failure(801, "the initial PTX executor supports one-dimensional launches")
@@ -96,7 +98,7 @@ final class PTXCUDAKernelExecution extends CUDAKernelExecution {
             s"kernel ${loaded.kernel.name} expects ${loaded.kernel.parameters.length} arguments, found ${launch.arguments.length}"
           )
         else {
-          val decoded = loaded.kernel.parameters.zip(launch.arguments.toSeq).map { case (parameter, argument) =>
+          val decoded = loaded.kernel.parameters.zip(launch.arguments).map { case (parameter, argument) =>
             if (argument.bytes.length != parameter.widthBytes)
               Left(
                 s"kernel argument ${parameter.name} expects ${parameter.widthBytes} bytes, found ${argument.bytes.length}"
@@ -121,12 +123,12 @@ final class PTXCUDAKernelExecution extends CUDAKernelExecution {
     }
   }
 
-  private def decodeUtf8(bytes: IArray[Byte]): CUDAResult[String] =
+  private def decodeUtf8(bytes: Col[Byte]): CUDAResult[String] =
     try {
       val decoder = StandardCharsets.UTF_8.newDecoder()
         .onMalformedInput(CodingErrorAction.REPORT)
         .onUnmappableCharacter(CodingErrorAction.REPORT)
-      success(decoder.decode(ByteBuffer.wrap(IArray.genericWrapArray(bytes).toArray)).toString)
+      success(decoder.decode(ByteBuffer.wrap(Col.toArray(bytes))).toString)
     } catch {
       case error: Exception => failure(200, s"module image is not UTF-8 PTX: ${error.getMessage}")
     }

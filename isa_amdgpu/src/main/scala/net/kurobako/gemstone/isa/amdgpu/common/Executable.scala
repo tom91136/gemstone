@@ -1,5 +1,7 @@
 package net.kurobako.gemstone.isa.amdgpu.common
 
+import net.kurobako.gemstone.Col
+
 import net.kurobako.gemstone.execution.CancellationToken
 import net.kurobako.gemstone.execution.Effects
 import net.kurobako.gemstone.execution.ExecutionBudget
@@ -29,7 +31,7 @@ enum AMDExecutable {
   case Barrier(target: Target, barrierId: Int)
   case EndProgram(target: Target)
   case Trap(target: Target, trapId: Int)
-  case Unsupported(target: Target, opcode: String, formats: Vector[String], reason: String)
+  case Unsupported(target: Target, opcode: String, formats: Col[String], reason: String)
 
   def architecture: Target = this match {
     case Nop(target, _)                  => target
@@ -80,7 +82,7 @@ object AMDLowering {
     val definitions = encodingsFor(instruction, target)
     val formats     = definitions.map(_.format.toUpperCase).distinct.sorted
     if (definitions.isEmpty)
-      Right(AMDExecutable.Unsupported(target, opcode, Vector.empty, "no instruction metadata for the exact target"))
+      Right(AMDExecutable.Unsupported(target, opcode, Col.empty, "no instruction metadata for the exact target"))
     else if (!formats.contains("SOPP"))
       Right(AMDExecutable.Unsupported(target, opcode, formats, "semantic lowering is implemented only for SOPP"))
     else instruction match {
@@ -119,23 +121,23 @@ object AMDLowering {
   private def conditional(
       opcode: String,
       operand: Operand,
-      mods: Vector[Modifier],
+      mods: Col[Modifier],
       target: Target,
       condition: BranchCondition
   ): Either[LoweringError, AMDExecutable] =
     branchImmediate(opcode, operand, mods).map(AMDExecutable.ConditionalBranch(target, condition, _))
 
-  private def noOperands(opcode: String, mods: Vector[Modifier]): Either[LoweringError, Unit] =
+  private def noOperands(opcode: String, mods: Col[Modifier]): Either[LoweringError, Unit] =
     if (mods.isEmpty) Right(())
     else invalid(opcode, "instruction takes no operands or modifiers")
 
   private def unsignedImmediate(
       opcode: String,
       operand: Operand,
-      mods: Vector[Modifier]
+      mods: Col[Modifier]
   ): Either[LoweringError, Int] =
     (operand, mods) match {
-      case (Operand.IntegerLiteral(value, _), Vector()) if value >= 0 && value <= 65535 =>
+      case (Operand.IntegerLiteral(value, _), Col()) if value >= 0 && value <= 65535 =>
         Right(value.toInt)
       case _ => invalid(opcode, "instruction requires one unsigned 16-bit immediate and no modifiers")
     }
@@ -143,10 +145,10 @@ object AMDLowering {
   private def branchImmediate(
       opcode: String,
       operand: Operand,
-      mods: Vector[Modifier]
+      mods: Col[Modifier]
   ): Either[LoweringError, Int] =
     (operand, mods) match {
-      case (Operand.IntegerLiteral(value, _), Vector()) if value >= -32768 && value <= 65535 =>
+      case (Operand.IntegerLiteral(value, _), Col()) if value >= -32768 && value <= 65535 =>
         val bits = value.toInt & 0xffff
         Right(if ((bits & 0x8000) == 0) bits else bits - 0x10000)
       case _ => invalid(opcode, "branch requires one signed 16-bit displacement and no modifiers")

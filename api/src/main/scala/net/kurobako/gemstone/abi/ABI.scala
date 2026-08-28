@@ -1,5 +1,9 @@
 package net.kurobako.gemstone.abi
 
+import net.kurobako.gemstone.Col
+
+import scala.reflect.ClassTag
+
 /** C pointer access is part of the API contract rather than an unchecked convention in the generated marshaller. */
 sealed trait Access
 sealed trait Read      extends Access
@@ -37,22 +41,22 @@ object CanDereference {
 
 /** Runtime validation for the storage shape promised by an extent. */
 sealed trait ExtentEvidence[A, Size <: Extent] {
-  private[gemstone] def validateInput(elements: IArray[A]): Unit
+  private[gemstone] def validateInput(elements: Col[A]): Unit
   private[gemstone] def validateOutput(length: Int): Unit
   private[gemstone] def validateSnapshot(elements: Array[Any]): Unit = ()
 }
 
 object ExtentEvidence {
   given [A]: ExtentEvidence[A, One] with {
-    private[gemstone] def validateInput(elements: IArray[A]): Unit =
+    private[gemstone] def validateInput(elements: Col[A]): Unit =
       require(elements.length == 1, s"One requires exactly one element, found ${elements.length}")
     private[gemstone] def validateOutput(length: Int): Unit =
       require(length == 1, s"One requires exactly one element, found $length")
   }
 
   given [A, Name <: String & Singleton]: ExtentEvidence[A, CountedBy[Name]] with {
-    private[gemstone] def validateInput(elements: IArray[A]): Unit = ()
-    private[gemstone] def validateOutput(length: Int): Unit        =
+    private[gemstone] def validateInput(elements: Col[A]): Unit = ()
+    private[gemstone] def validateOutput(length: Int): Unit     =
       require(length >= 0, s"CountedBy requires a non-negative length, found $length")
   }
 
@@ -61,12 +65,12 @@ object ExtentEvidence {
       require(count.value > 0, s"Fixed requires a positive literal extent, found ${count.value}")
       require(length == count.value, s"Fixed[${count.value}] requires exactly ${count.value} elements, found $length")
     }
-    private[gemstone] def validateInput(elements: IArray[A]): Unit = validate(elements.length)
-    private[gemstone] def validateOutput(length: Int): Unit        = validate(length)
+    private[gemstone] def validateInput(elements: Col[A]): Unit = validate(elements.length)
+    private[gemstone] def validateOutput(length: Int): Unit     = validate(length)
   }
 
   given ExtentEvidence[Byte, NulTerminated] with {
-    private[gemstone] def validateInput(elements: IArray[Byte]): Unit = {
+    private[gemstone] def validateInput(elements: Col[Byte]): Unit = {
       require(elements.nonEmpty, "NulTerminated requires at least the terminator")
       require(elements(elements.length - 1) == 0, "NulTerminated input must end in a NUL byte")
     }
@@ -83,7 +87,8 @@ object ExtentEvidence {
 final class Pointer[A, Mode <: Access, Size <: Extent] private[gemstone] (
     private val elements: Array[Any],
     private val initialized: Array[Boolean],
-    private val extent: ExtentEvidence[A, Size]
+    private val extent: ExtentEvidence[A, Size],
+    private val elementTag: ClassTag[A]
 ) {
   def length: Int = elements.length
 
@@ -99,15 +104,15 @@ final class Pointer[A, Mode <: Access, Size <: Extent] private[gemstone] (
     initialized(index) = true
   }
 
-  private[gemstone] def snapshot(using CanDereference[Size]): Option[Vector[A]] =
+  private[gemstone] def snapshot(using CanDereference[Size]): Option[Col[A]] =
     Option.when(initialized.forall(identity)) {
       extent.validateSnapshot(elements)
-      Vector.tabulate(elements.length)(index => elements(index).asInstanceOf[A])
+      Col.tabulate(elements.length)(index => elements(index).asInstanceOf[A])(using elementTag)
     }
 }
 
 object Pointer {
-  private def copy[A](elements: IArray[A]): Array[Any] = {
+  private def copy[A](elements: Col[A]): Array[Any] = {
     val result = new Array[Any](elements.length)
     var index  = 0
     while (index < elements.length) {
@@ -117,25 +122,28 @@ object Pointer {
     result
   }
 
-  private[gemstone] def input[A, Size <: Extent](elements: IArray[A])(using
-      extent: ExtentEvidence[A, Size]
+  private[gemstone] def input[A, Size <: Extent](elements: Col[A])(using
+      extent: ExtentEvidence[A, Size],
+      elementTag: ClassTag[A]
   ): Pointer[A, Read, Size] = {
     extent.validateInput(elements)
-    new Pointer[A, Read, Size](copy(elements), Array.fill(elements.length)(true), extent)
+    new Pointer[A, Read, Size](copy(elements), Array.fill(elements.length)(true), extent, elementTag)
   }
 
   private[gemstone] def output[A, Size <: Extent](length: Int)(using
-      extent: ExtentEvidence[A, Size]
+      extent: ExtentEvidence[A, Size],
+      elementTag: ClassTag[A]
   ): Pointer[A, Write, Size] = {
     extent.validateOutput(length)
-    new Pointer[A, Write, Size](new Array[Any](length), Array.fill(length)(false), extent)
+    new Pointer[A, Write, Size](new Array[Any](length), Array.fill(length)(false), extent, elementTag)
   }
 
-  private[gemstone] def inputOutput[A, Size <: Extent](elements: IArray[A])(using
-      extent: ExtentEvidence[A, Size]
+  private[gemstone] def inputOutput[A, Size <: Extent](elements: Col[A])(using
+      extent: ExtentEvidence[A, Size],
+      elementTag: ClassTag[A]
   ): Pointer[A, ReadWrite, Size] = {
     extent.validateInput(elements)
-    new Pointer[A, ReadWrite, Size](copy(elements), Array.fill(elements.length)(true), extent)
+    new Pointer[A, ReadWrite, Size](copy(elements), Array.fill(elements.length)(true), extent, elementTag)
   }
 }
 

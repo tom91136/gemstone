@@ -13,5 +13,6 @@ object GeneratedScalaFormatter {
   private lazy val formatter =
     Scalafmt.create(getClass.getClassLoader).withRespectProjectFilters(false)
 
-  def apply(path: Path, source: String): String = formatter.format(Config, path.toAbsolutePath.normalize, source)
+  def apply(path: Path, source: String): String =
+    formatter.format(Config, path.toAbsolutePath.normalize, RuntimeCollections(source))
 }

@@ -1,6 +1,8 @@
 // Generated from the pinned Mesa ACO and AMD machine-readable ISA inputs. Do not edit by hand.
 package net.kurobako.gemstone.isa.amdgpu.common
 
+import net.kurobako.gemstone.Col
+
 private[common] object InstructionDefs6 {
   case object GlobalAtomicXorX2 extends InstructionDef(
         "global_atomic_xor_x2",
@@ -10,13 +12,13 @@ private[common] object InstructionDefs6 {
             Instruction.GlobalAtomicXorX2_4(operands(0), operands(1), operands(2), operands(3), mods)
           )
         ),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "FLAT_GLBL",
             106,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("DATA"), "VGPR", 64, true, false, false),
@@ -33,7 +35,7 @@ private[common] object InstructionDefs6 {
             "cdna2",
             "FLAT_GLBL",
             106,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 64, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("DATA"), "VGPR_OR_ACCVGPR", 64, true, false, false),
@@ -50,7 +52,7 @@ private[common] object InstructionDefs6 {
             "cdna3",
             "FLAT_GLBL",
             106,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 64, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("DATA"), "VGPR_OR_ACCVGPR", 64, true, false, false),
@@ -67,7 +69,7 @@ private[common] object InstructionDefs6 {
             "cdna4",
             "FLAT_GLBL",
             106,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 64, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("DATA"), "VGPR_OR_ACCVGPR", 64, true, false, false),
@@ -84,7 +86,7 @@ private[common] object InstructionDefs6 {
             "rdna1",
             "FLAT_GLBL",
             91,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("DATA"), "VGPR", 64, true, false, false),
@@ -101,7 +103,7 @@ private[common] object InstructionDefs6 {
             "rdna2",
             "FLAT_GLBL",
             91,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("DATA"), "VGPR", 64, true, false, false),
@@ -118,7 +120,7 @@ private[common] object InstructionDefs6 {
             "gfx8",
             "GLOBAL",
             106,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -127,7 +129,7 @@ private[common] object InstructionDefs6 {
             "gfx9",
             "GLOBAL",
             106,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           )
@@ -136,13 +138,13 @@ private[common] object InstructionDefs6 {
   case object GlobalInv extends InstructionDef(
         "global_inv",
         decoder(form(0)((_, mods) => Instruction.GlobalInv(mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VGLOBAL",
             43,
-            Vector.empty,
+            Col.empty,
             Some("VMEM"),
             MetadataSource.AMDXML
           ),
@@ -151,7 +153,7 @@ private[common] object InstructionDefs6 {
             "rdna4",
             "VGLOBAL",
             43,
-            Vector.empty,
+            Col.empty,
             Some("VMEM"),
             MetadataSource.AMDXML
           )
@@ -163,13 +165,13 @@ private[common] object InstructionDefs6 {
           form(2)((operands, mods) => Instruction.GlobalLoadAddtidB32_2(operands(0), operands(1), mods)),
           form(3)((operands, mods) => Instruction.GlobalLoadAddtidB32_3(operands(0), operands(1), operands(2), mods))
         ),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VGLOBAL",
             40,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
               OperandInfo(None, "GPUMEM", 32, true, false, true)
@@ -182,7 +184,7 @@ private[common] object InstructionDefs6 {
             "rdna3",
             "FLAT_GLOBAL",
             40,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
               OperandInfo(None, "GPUMEM", 32, true, false, true)
@@ -195,7 +197,7 @@ private[common] object InstructionDefs6 {
             "rdna3",
             "FLAT_GLOBAL",
             40,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
               OperandInfo(None, "GPUMEM", 32, true, false, true)
@@ -208,7 +210,7 @@ private[common] object InstructionDefs6 {
             "rdna3_5",
             "FLAT_GLOBAL",
             40,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
               OperandInfo(None, "GPUMEM", 32, true, false, true)
@@ -221,7 +223,7 @@ private[common] object InstructionDefs6 {
             "rdna4",
             "VGLOBAL",
             40,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
               OperandInfo(None, "GPUMEM", 32, true, false, true)
@@ -239,13 +241,13 @@ private[common] object InstructionDefs6 {
             Instruction.GlobalLoadAsyncToLdsB128_3(operands(0), operands(1), operands(2), mods)
           )
         ),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VGLOBAL",
             98,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, true, false, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -265,13 +267,13 @@ private[common] object InstructionDefs6 {
             Instruction.GlobalLoadAsyncToLdsB32_3(operands(0), operands(1), operands(2), mods)
           )
         ),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VGLOBAL",
             96,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, true, false, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -291,13 +293,13 @@ private[common] object InstructionDefs6 {
             Instruction.GlobalLoadAsyncToLdsB64_3(operands(0), operands(1), operands(2), mods)
           )
         ),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VGLOBAL",
             97,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, true, false, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -315,13 +317,13 @@ private[common] object InstructionDefs6 {
           form(2)((operands, mods) => Instruction.GlobalLoadAsyncToLdsB8_2(operands(0), operands(1), mods)),
           form(3)((operands, mods) => Instruction.GlobalLoadAsyncToLdsB8_3(operands(0), operands(1), operands(2), mods))
         ),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VGLOBAL",
             95,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, true, false, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -339,13 +341,13 @@ private[common] object InstructionDefs6 {
           form(2)((operands, mods) => Instruction.GlobalLoadB128_2(operands(0), operands(1), mods)),
           form(3)((operands, mods) => Instruction.GlobalLoadB128_3(operands(0), operands(1), operands(2), mods))
         ),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VGLOBAL",
             23,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -359,7 +361,7 @@ private[common] object InstructionDefs6 {
             "rdna3",
             "FLAT_GLOBAL",
             23,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 128, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -373,7 +375,7 @@ private[common] object InstructionDefs6 {
             "rdna3",
             "FLAT_GLOBAL",
             23,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 128, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -387,7 +389,7 @@ private[common] object InstructionDefs6 {
             "rdna3_5",
             "FLAT_GLOBAL",
             23,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 128, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -401,7 +403,7 @@ private[common] object InstructionDefs6 {
             "rdna4",
             "VGLOBAL",
             23,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -418,13 +420,13 @@ private[common] object InstructionDefs6 {
           form(2)((operands, mods) => Instruction.GlobalLoadB32_2(operands(0), operands(1), mods)),
           form(3)((operands, mods) => Instruction.GlobalLoadB32_3(operands(0), operands(1), operands(2), mods))
         ),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VGLOBAL",
             20,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -438,7 +440,7 @@ private[common] object InstructionDefs6 {
             "rdna3",
             "FLAT_GLOBAL",
             20,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -452,7 +454,7 @@ private[common] object InstructionDefs6 {
             "rdna3",
             "FLAT_GLOBAL",
             20,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -466,7 +468,7 @@ private[common] object InstructionDefs6 {
             "rdna3_5",
             "FLAT_GLOBAL",
             20,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -480,7 +482,7 @@ private[common] object InstructionDefs6 {
             "rdna4",
             "VGLOBAL",
             20,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -497,13 +499,13 @@ private[common] object InstructionDefs6 {
           form(2)((operands, mods) => Instruction.GlobalLoadB64_2(operands(0), operands(1), mods)),
           form(3)((operands, mods) => Instruction.GlobalLoadB64_3(operands(0), operands(1), operands(2), mods))
         ),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VGLOBAL",
             21,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -517,7 +519,7 @@ private[common] object InstructionDefs6 {
             "rdna3",
             "FLAT_GLOBAL",
             21,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -531,7 +533,7 @@ private[common] object InstructionDefs6 {
             "rdna3",
             "FLAT_GLOBAL",
             21,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -545,7 +547,7 @@ private[common] object InstructionDefs6 {
             "rdna3_5",
             "FLAT_GLOBAL",
             21,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -559,7 +561,7 @@ private[common] object InstructionDefs6 {
             "rdna4",
             "VGLOBAL",
             21,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -576,13 +578,13 @@ private[common] object InstructionDefs6 {
           form(2)((operands, mods) => Instruction.GlobalLoadB96_2(operands(0), operands(1), mods)),
           form(3)((operands, mods) => Instruction.GlobalLoadB96_3(operands(0), operands(1), operands(2), mods))
         ),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VGLOBAL",
             22,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 96, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -596,7 +598,7 @@ private[common] object InstructionDefs6 {
             "rdna3",
             "FLAT_GLOBAL",
             22,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 96, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -610,7 +612,7 @@ private[common] object InstructionDefs6 {
             "rdna3",
             "FLAT_GLOBAL",
             22,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 96, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -624,7 +626,7 @@ private[common] object InstructionDefs6 {
             "rdna3_5",
             "FLAT_GLOBAL",
             22,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 96, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -638,7 +640,7 @@ private[common] object InstructionDefs6 {
             "rdna4",
             "VGLOBAL",
             22,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 96, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -655,13 +657,13 @@ private[common] object InstructionDefs6 {
           form(2)((operands, mods) => Instruction.GlobalLoadBlock_2(operands(0), operands(1), mods)),
           form(3)((operands, mods) => Instruction.GlobalLoadBlock_3(operands(0), operands(1), operands(2), mods))
         ),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VGLOBAL",
             83,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 1024, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -676,7 +678,7 @@ private[common] object InstructionDefs6 {
             "rdna4",
             "VGLOBAL",
             83,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 1024, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -694,13 +696,13 @@ private[common] object InstructionDefs6 {
           form(2)((operands, mods) => Instruction.GlobalLoadD16B16_2(operands(0), operands(1), mods)),
           form(3)((operands, mods) => Instruction.GlobalLoadD16B16_3(operands(0), operands(1), operands(2), mods))
         ),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VGLOBAL",
             32,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -714,7 +716,7 @@ private[common] object InstructionDefs6 {
             "rdna3",
             "FLAT_GLOBAL",
             32,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -728,7 +730,7 @@ private[common] object InstructionDefs6 {
             "rdna3",
             "FLAT_GLOBAL",
             32,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -742,7 +744,7 @@ private[common] object InstructionDefs6 {
             "rdna3_5",
             "FLAT_GLOBAL",
             32,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -756,7 +758,7 @@ private[common] object InstructionDefs6 {
             "rdna4",
             "VGLOBAL",
             32,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -773,13 +775,13 @@ private[common] object InstructionDefs6 {
           form(2)((operands, mods) => Instruction.GlobalLoadD16HiB16_2(operands(0), operands(1), mods)),
           form(3)((operands, mods) => Instruction.GlobalLoadD16HiB16_3(operands(0), operands(1), operands(2), mods))
         ),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VGLOBAL",
             35,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -793,7 +795,7 @@ private[common] object InstructionDefs6 {
             "rdna3",
             "FLAT_GLOBAL",
             35,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -807,7 +809,7 @@ private[common] object InstructionDefs6 {
             "rdna3",
             "FLAT_GLOBAL",
             35,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -821,7 +823,7 @@ private[common] object InstructionDefs6 {
             "rdna3_5",
             "FLAT_GLOBAL",
             35,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -835,7 +837,7 @@ private[common] object InstructionDefs6 {
             "rdna4",
             "VGLOBAL",
             35,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -852,13 +854,13 @@ private[common] object InstructionDefs6 {
           form(2)((operands, mods) => Instruction.GlobalLoadD16HiI8_2(operands(0), operands(1), mods)),
           form(3)((operands, mods) => Instruction.GlobalLoadD16HiI8_3(operands(0), operands(1), operands(2), mods))
         ),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VGLOBAL",
             34,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -872,7 +874,7 @@ private[common] object InstructionDefs6 {
             "rdna3",
             "FLAT_GLOBAL",
             34,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -886,7 +888,7 @@ private[common] object InstructionDefs6 {
             "rdna3",
             "FLAT_GLOBAL",
             34,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -900,7 +902,7 @@ private[common] object InstructionDefs6 {
             "rdna3_5",
             "FLAT_GLOBAL",
             34,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -914,7 +916,7 @@ private[common] object InstructionDefs6 {
             "rdna4",
             "VGLOBAL",
             34,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -931,13 +933,13 @@ private[common] object InstructionDefs6 {
           form(2)((operands, mods) => Instruction.GlobalLoadD16HiU8_2(operands(0), operands(1), mods)),
           form(3)((operands, mods) => Instruction.GlobalLoadD16HiU8_3(operands(0), operands(1), operands(2), mods))
         ),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VGLOBAL",
             33,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -951,7 +953,7 @@ private[common] object InstructionDefs6 {
             "rdna3",
             "FLAT_GLOBAL",
             33,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -965,7 +967,7 @@ private[common] object InstructionDefs6 {
             "rdna3",
             "FLAT_GLOBAL",
             33,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -979,7 +981,7 @@ private[common] object InstructionDefs6 {
             "rdna3_5",
             "FLAT_GLOBAL",
             33,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -993,7 +995,7 @@ private[common] object InstructionDefs6 {
             "rdna4",
             "VGLOBAL",
             33,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -1010,13 +1012,13 @@ private[common] object InstructionDefs6 {
           form(2)((operands, mods) => Instruction.GlobalLoadD16I8_2(operands(0), operands(1), mods)),
           form(3)((operands, mods) => Instruction.GlobalLoadD16I8_3(operands(0), operands(1), operands(2), mods))
         ),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VGLOBAL",
             31,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -1030,7 +1032,7 @@ private[common] object InstructionDefs6 {
             "rdna3",
             "FLAT_GLOBAL",
             31,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -1044,7 +1046,7 @@ private[common] object InstructionDefs6 {
             "rdna3",
             "FLAT_GLOBAL",
             31,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -1058,7 +1060,7 @@ private[common] object InstructionDefs6 {
             "rdna3_5",
             "FLAT_GLOBAL",
             31,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -1072,7 +1074,7 @@ private[common] object InstructionDefs6 {
             "rdna4",
             "VGLOBAL",
             31,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -1089,13 +1091,13 @@ private[common] object InstructionDefs6 {
           form(2)((operands, mods) => Instruction.GlobalLoadD16U8_2(operands(0), operands(1), mods)),
           form(3)((operands, mods) => Instruction.GlobalLoadD16U8_3(operands(0), operands(1), operands(2), mods))
         ),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VGLOBAL",
             30,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -1109,7 +1111,7 @@ private[common] object InstructionDefs6 {
             "rdna3",
             "FLAT_GLOBAL",
             30,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -1123,7 +1125,7 @@ private[common] object InstructionDefs6 {
             "rdna3",
             "FLAT_GLOBAL",
             30,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -1137,7 +1139,7 @@ private[common] object InstructionDefs6 {
             "rdna3_5",
             "FLAT_GLOBAL",
             30,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -1151,7 +1153,7 @@ private[common] object InstructionDefs6 {
             "rdna4",
             "VGLOBAL",
             30,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -1168,13 +1170,13 @@ private[common] object InstructionDefs6 {
           form(2)((operands, mods) => Instruction.GlobalLoadDword_2(operands(0), operands(1), mods)),
           form(3)((operands, mods) => Instruction.GlobalLoadDword_3(operands(0), operands(1), operands(2), mods))
         ),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "FLAT_GLBL",
             20,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -1189,7 +1191,7 @@ private[common] object InstructionDefs6 {
             "cdna2",
             "FLAT_GLBL",
             20,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -1204,7 +1206,7 @@ private[common] object InstructionDefs6 {
             "cdna3",
             "FLAT_GLBL",
             20,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -1219,7 +1221,7 @@ private[common] object InstructionDefs6 {
             "cdna4",
             "FLAT_GLBL",
             20,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -1234,7 +1236,7 @@ private[common] object InstructionDefs6 {
             "rdna1",
             "FLAT_GLBL",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -1249,7 +1251,7 @@ private[common] object InstructionDefs6 {
             "rdna2",
             "FLAT_GLBL",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -1264,7 +1266,7 @@ private[common] object InstructionDefs6 {
             "gfx8",
             "GLOBAL",
             20,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -1273,7 +1275,7 @@ private[common] object InstructionDefs6 {
             "gfx9",
             "GLOBAL",
             20,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           )
@@ -1285,13 +1287,13 @@ private[common] object InstructionDefs6 {
           form(2)((operands, mods) => Instruction.GlobalLoadDwordAddtid_2(operands(0), operands(1), mods)),
           form(3)((operands, mods) => Instruction.GlobalLoadDwordAddtid_3(operands(0), operands(1), operands(2), mods))
         ),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.GFX10,
             "rdna2",
             "FLAT_GLBL",
             22,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
               OperandInfo(None, "SDST_M0", 32, true, false, true)
@@ -1307,13 +1309,13 @@ private[common] object InstructionDefs6 {
           form(2)((operands, mods) => Instruction.GlobalLoadDwordx2_2(operands(0), operands(1), mods)),
           form(3)((operands, mods) => Instruction.GlobalLoadDwordx2_3(operands(0), operands(1), operands(2), mods))
         ),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "FLAT_GLBL",
             21,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -1328,7 +1330,7 @@ private[common] object InstructionDefs6 {
             "cdna2",
             "FLAT_GLBL",
             21,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 64, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -1343,7 +1345,7 @@ private[common] object InstructionDefs6 {
             "cdna3",
             "FLAT_GLBL",
             21,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 64, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -1358,7 +1360,7 @@ private[common] object InstructionDefs6 {
             "cdna4",
             "FLAT_GLBL",
             21,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 64, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -1373,7 +1375,7 @@ private[common] object InstructionDefs6 {
             "rdna1",
             "FLAT_GLBL",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -1388,7 +1390,7 @@ private[common] object InstructionDefs6 {
             "rdna2",
             "FLAT_GLBL",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -1403,7 +1405,7 @@ private[common] object InstructionDefs6 {
             "gfx8",
             "GLOBAL",
             21,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -1412,7 +1414,7 @@ private[common] object InstructionDefs6 {
             "gfx9",
             "GLOBAL",
             21,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           )
@@ -1424,13 +1426,13 @@ private[common] object InstructionDefs6 {
           form(2)((operands, mods) => Instruction.GlobalLoadDwordx3_2(operands(0), operands(1), mods)),
           form(3)((operands, mods) => Instruction.GlobalLoadDwordx3_3(operands(0), operands(1), operands(2), mods))
         ),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "FLAT_GLBL",
             22,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 96, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -1445,7 +1447,7 @@ private[common] object InstructionDefs6 {
             "cdna2",
             "FLAT_GLBL",
             22,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 96, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -1460,7 +1462,7 @@ private[common] object InstructionDefs6 {
             "cdna3",
             "FLAT_GLBL",
             22,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 96, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -1475,7 +1477,7 @@ private[common] object InstructionDefs6 {
             "cdna4",
             "FLAT_GLBL",
             22,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 96, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -1490,7 +1492,7 @@ private[common] object InstructionDefs6 {
             "rdna1",
             "FLAT_GLBL",
             15,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 96, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -1505,7 +1507,7 @@ private[common] object InstructionDefs6 {
             "rdna2",
             "FLAT_GLBL",
             15,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 96, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -1520,7 +1522,7 @@ private[common] object InstructionDefs6 {
             "gfx8",
             "GLOBAL",
             22,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -1529,7 +1531,7 @@ private[common] object InstructionDefs6 {
             "gfx9",
             "GLOBAL",
             22,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           )
@@ -1541,13 +1543,13 @@ private[common] object InstructionDefs6 {
           form(2)((operands, mods) => Instruction.GlobalLoadDwordx4_2(operands(0), operands(1), mods)),
           form(3)((operands, mods) => Instruction.GlobalLoadDwordx4_3(operands(0), operands(1), operands(2), mods))
         ),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "FLAT_GLBL",
             23,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 128, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -1562,7 +1564,7 @@ private[common] object InstructionDefs6 {
             "cdna2",
             "FLAT_GLBL",
             23,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -1577,7 +1579,7 @@ private[common] object InstructionDefs6 {
             "cdna3",
             "FLAT_GLBL",
             23,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -1592,7 +1594,7 @@ private[common] object InstructionDefs6 {
             "cdna4",
             "FLAT_GLBL",
             23,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -1607,7 +1609,7 @@ private[common] object InstructionDefs6 {
             "rdna1",
             "FLAT_GLBL",
             14,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 128, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -1622,7 +1624,7 @@ private[common] object InstructionDefs6 {
             "rdna2",
             "FLAT_GLBL",
             14,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 128, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -1637,7 +1639,7 @@ private[common] object InstructionDefs6 {
             "gfx8",
             "GLOBAL",
             23,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -1646,7 +1648,7 @@ private[common] object InstructionDefs6 {
             "gfx9",
             "GLOBAL",
             23,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           )
@@ -1658,13 +1660,13 @@ private[common] object InstructionDefs6 {
           form(2)((operands, mods) => Instruction.GlobalLoadI16_2(operands(0), operands(1), mods)),
           form(3)((operands, mods) => Instruction.GlobalLoadI16_3(operands(0), operands(1), operands(2), mods))
         ),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VGLOBAL",
             19,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -1678,7 +1680,7 @@ private[common] object InstructionDefs6 {
             "rdna3",
             "FLAT_GLOBAL",
             19,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -1692,7 +1694,7 @@ private[common] object InstructionDefs6 {
             "rdna3",
             "FLAT_GLOBAL",
             19,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -1706,7 +1708,7 @@ private[common] object InstructionDefs6 {
             "rdna3_5",
             "FLAT_GLOBAL",
             19,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -1720,7 +1722,7 @@ private[common] object InstructionDefs6 {
             "rdna4",
             "VGLOBAL",
             19,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -1737,13 +1739,13 @@ private[common] object InstructionDefs6 {
           form(2)((operands, mods) => Instruction.GlobalLoadI8_2(operands(0), operands(1), mods)),
           form(3)((operands, mods) => Instruction.GlobalLoadI8_3(operands(0), operands(1), operands(2), mods))
         ),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VGLOBAL",
             17,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -1757,7 +1759,7 @@ private[common] object InstructionDefs6 {
             "rdna3",
             "FLAT_GLOBAL",
             17,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -1771,7 +1773,7 @@ private[common] object InstructionDefs6 {
             "rdna3",
             "FLAT_GLOBAL",
             17,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -1785,7 +1787,7 @@ private[common] object InstructionDefs6 {
             "rdna3_5",
             "FLAT_GLOBAL",
             17,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -1799,7 +1801,7 @@ private[common] object InstructionDefs6 {
             "rdna4",
             "VGLOBAL",
             17,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -1816,13 +1818,13 @@ private[common] object InstructionDefs6 {
           form(2)((operands, mods) => Instruction.GlobalLoadLdsDword_2(operands(0), operands(1), mods)),
           form(3)((operands, mods) => Instruction.GlobalLoadLdsDword_3(operands(0), operands(1), operands(2), mods))
         ),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA3,
             "cdna3",
             "FLAT_GLBL",
             42,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -1836,7 +1838,7 @@ private[common] object InstructionDefs6 {
             "cdna4",
             "FLAT_GLBL",
             42,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -1853,13 +1855,13 @@ private[common] object InstructionDefs6 {
           form(2)((operands, mods) => Instruction.GlobalLoadLdsDwordx3_2(operands(0), operands(1), mods)),
           form(3)((operands, mods) => Instruction.GlobalLoadLdsDwordx3_3(operands(0), operands(1), operands(2), mods))
         ),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA4,
             "cdna4",
             "FLAT_GLBL",
             126,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 96, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -1876,13 +1878,13 @@ private[common] object InstructionDefs6 {
           form(2)((operands, mods) => Instruction.GlobalLoadLdsDwordx4_2(operands(0), operands(1), mods)),
           form(3)((operands, mods) => Instruction.GlobalLoadLdsDwordx4_3(operands(0), operands(1), operands(2), mods))
         ),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA4,
             "cdna4",
             "FLAT_GLBL",
             125,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -1899,13 +1901,13 @@ private[common] object InstructionDefs6 {
           form(2)((operands, mods) => Instruction.GlobalLoadLdsSbyte_2(operands(0), operands(1), mods)),
           form(3)((operands, mods) => Instruction.GlobalLoadLdsSbyte_3(operands(0), operands(1), operands(2), mods))
         ),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA3,
             "cdna3",
             "FLAT_GLBL",
             39,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -1919,7 +1921,7 @@ private[common] object InstructionDefs6 {
             "cdna4",
             "FLAT_GLBL",
             39,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -1936,13 +1938,13 @@ private[common] object InstructionDefs6 {
           form(2)((operands, mods) => Instruction.GlobalLoadLdsSshort_2(operands(0), operands(1), mods)),
           form(3)((operands, mods) => Instruction.GlobalLoadLdsSshort_3(operands(0), operands(1), operands(2), mods))
         ),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA3,
             "cdna3",
             "FLAT_GLBL",
             41,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -1956,7 +1958,7 @@ private[common] object InstructionDefs6 {
             "cdna4",
             "FLAT_GLBL",
             41,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -1973,13 +1975,13 @@ private[common] object InstructionDefs6 {
           form(2)((operands, mods) => Instruction.GlobalLoadLdsUbyte_2(operands(0), operands(1), mods)),
           form(3)((operands, mods) => Instruction.GlobalLoadLdsUbyte_3(operands(0), operands(1), operands(2), mods))
         ),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA3,
             "cdna3",
             "FLAT_GLBL",
             38,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -1993,7 +1995,7 @@ private[common] object InstructionDefs6 {
             "cdna4",
             "FLAT_GLBL",
             38,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -2010,13 +2012,13 @@ private[common] object InstructionDefs6 {
           form(2)((operands, mods) => Instruction.GlobalLoadLdsUshort_2(operands(0), operands(1), mods)),
           form(3)((operands, mods) => Instruction.GlobalLoadLdsUshort_3(operands(0), operands(1), operands(2), mods))
         ),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA3,
             "cdna3",
             "FLAT_GLBL",
             40,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -2030,7 +2032,7 @@ private[common] object InstructionDefs6 {
             "cdna4",
             "FLAT_GLBL",
             40,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -2047,13 +2049,13 @@ private[common] object InstructionDefs6 {
           form(2)((operands, mods) => Instruction.GlobalLoadMonitorB128_2(operands(0), operands(1), mods)),
           form(3)((operands, mods) => Instruction.GlobalLoadMonitorB128_3(operands(0), operands(1), operands(2), mods))
         ),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VGLOBAL",
             114,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -2070,13 +2072,13 @@ private[common] object InstructionDefs6 {
           form(2)((operands, mods) => Instruction.GlobalLoadMonitorB32_2(operands(0), operands(1), mods)),
           form(3)((operands, mods) => Instruction.GlobalLoadMonitorB32_3(operands(0), operands(1), operands(2), mods))
         ),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VGLOBAL",
             112,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -2093,13 +2095,13 @@ private[common] object InstructionDefs6 {
           form(2)((operands, mods) => Instruction.GlobalLoadMonitorB64_2(operands(0), operands(1), mods)),
           form(3)((operands, mods) => Instruction.GlobalLoadMonitorB64_3(operands(0), operands(1), operands(2), mods))
         ),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VGLOBAL",
             113,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -2116,13 +2118,13 @@ private[common] object InstructionDefs6 {
           form(2)((operands, mods) => Instruction.GlobalLoadSbyte_2(operands(0), operands(1), mods)),
           form(3)((operands, mods) => Instruction.GlobalLoadSbyte_3(operands(0), operands(1), operands(2), mods))
         ),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "FLAT_GLBL",
             17,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -2137,7 +2139,7 @@ private[common] object InstructionDefs6 {
             "cdna2",
             "FLAT_GLBL",
             17,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -2152,7 +2154,7 @@ private[common] object InstructionDefs6 {
             "cdna3",
             "FLAT_GLBL",
             17,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -2167,7 +2169,7 @@ private[common] object InstructionDefs6 {
             "cdna4",
             "FLAT_GLBL",
             17,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -2182,7 +2184,7 @@ private[common] object InstructionDefs6 {
             "rdna1",
             "FLAT_GLBL",
             9,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -2197,7 +2199,7 @@ private[common] object InstructionDefs6 {
             "rdna2",
             "FLAT_GLBL",
             9,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -2212,7 +2214,7 @@ private[common] object InstructionDefs6 {
             "gfx8",
             "GLOBAL",
             17,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -2221,7 +2223,7 @@ private[common] object InstructionDefs6 {
             "gfx9",
             "GLOBAL",
             17,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           )
@@ -2233,13 +2235,13 @@ private[common] object InstructionDefs6 {
           form(2)((operands, mods) => Instruction.GlobalLoadSbyteD16_2(operands(0), operands(1), mods)),
           form(3)((operands, mods) => Instruction.GlobalLoadSbyteD16_3(operands(0), operands(1), operands(2), mods))
         ),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "FLAT_GLBL",
             34,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -2254,7 +2256,7 @@ private[common] object InstructionDefs6 {
             "cdna2",
             "FLAT_GLBL",
             34,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -2269,7 +2271,7 @@ private[common] object InstructionDefs6 {
             "cdna3",
             "FLAT_GLBL",
             34,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -2284,7 +2286,7 @@ private[common] object InstructionDefs6 {
             "cdna4",
             "FLAT_GLBL",
             34,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -2299,7 +2301,7 @@ private[common] object InstructionDefs6 {
             "rdna1",
             "FLAT_GLBL",
             34,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -2314,7 +2316,7 @@ private[common] object InstructionDefs6 {
             "rdna2",
             "FLAT_GLBL",
             34,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -2329,7 +2331,7 @@ private[common] object InstructionDefs6 {
             "gfx8",
             "GLOBAL",
             34,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -2338,7 +2340,7 @@ private[common] object InstructionDefs6 {
             "gfx9",
             "GLOBAL",
             34,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           )
@@ -2350,13 +2352,13 @@ private[common] object InstructionDefs6 {
           form(2)((operands, mods) => Instruction.GlobalLoadSbyteD16Hi_2(operands(0), operands(1), mods)),
           form(3)((operands, mods) => Instruction.GlobalLoadSbyteD16Hi_3(operands(0), operands(1), operands(2), mods))
         ),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "FLAT_GLBL",
             35,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -2371,7 +2373,7 @@ private[common] object InstructionDefs6 {
             "cdna2",
             "FLAT_GLBL",
             35,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -2386,7 +2388,7 @@ private[common] object InstructionDefs6 {
             "cdna3",
             "FLAT_GLBL",
             35,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -2401,7 +2403,7 @@ private[common] object InstructionDefs6 {
             "cdna4",
             "FLAT_GLBL",
             35,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -2416,7 +2418,7 @@ private[common] object InstructionDefs6 {
             "rdna1",
             "FLAT_GLBL",
             35,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -2431,7 +2433,7 @@ private[common] object InstructionDefs6 {
             "rdna2",
             "FLAT_GLBL",
             35,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -2446,7 +2448,7 @@ private[common] object InstructionDefs6 {
             "gfx8",
             "GLOBAL",
             35,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -2455,7 +2457,7 @@ private[common] object InstructionDefs6 {
             "gfx9",
             "GLOBAL",
             35,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           )
@@ -2467,13 +2469,13 @@ private[common] object InstructionDefs6 {
           form(2)((operands, mods) => Instruction.GlobalLoadShortD16_2(operands(0), operands(1), mods)),
           form(3)((operands, mods) => Instruction.GlobalLoadShortD16_3(operands(0), operands(1), operands(2), mods))
         ),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "FLAT_GLBL",
             36,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -2488,7 +2490,7 @@ private[common] object InstructionDefs6 {
             "cdna2",
             "FLAT_GLBL",
             36,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -2503,7 +2505,7 @@ private[common] object InstructionDefs6 {
             "cdna3",
             "FLAT_GLBL",
             36,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -2518,7 +2520,7 @@ private[common] object InstructionDefs6 {
             "cdna4",
             "FLAT_GLBL",
             36,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -2533,7 +2535,7 @@ private[common] object InstructionDefs6 {
             "rdna1",
             "FLAT_GLBL",
             36,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -2548,7 +2550,7 @@ private[common] object InstructionDefs6 {
             "rdna2",
             "FLAT_GLBL",
             36,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -2563,7 +2565,7 @@ private[common] object InstructionDefs6 {
             "gfx8",
             "GLOBAL",
             36,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -2572,7 +2574,7 @@ private[common] object InstructionDefs6 {
             "gfx9",
             "GLOBAL",
             36,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           )
@@ -2584,13 +2586,13 @@ private[common] object InstructionDefs6 {
           form(2)((operands, mods) => Instruction.GlobalLoadShortD16Hi_2(operands(0), operands(1), mods)),
           form(3)((operands, mods) => Instruction.GlobalLoadShortD16Hi_3(operands(0), operands(1), operands(2), mods))
         ),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "FLAT_GLBL",
             37,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -2605,7 +2607,7 @@ private[common] object InstructionDefs6 {
             "cdna2",
             "FLAT_GLBL",
             37,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -2620,7 +2622,7 @@ private[common] object InstructionDefs6 {
             "cdna3",
             "FLAT_GLBL",
             37,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -2635,7 +2637,7 @@ private[common] object InstructionDefs6 {
             "cdna4",
             "FLAT_GLBL",
             37,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -2650,7 +2652,7 @@ private[common] object InstructionDefs6 {
             "rdna1",
             "FLAT_GLBL",
             37,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -2665,7 +2667,7 @@ private[common] object InstructionDefs6 {
             "rdna2",
             "FLAT_GLBL",
             37,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -2680,7 +2682,7 @@ private[common] object InstructionDefs6 {
             "gfx8",
             "GLOBAL",
             37,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -2689,7 +2691,7 @@ private[common] object InstructionDefs6 {
             "gfx9",
             "GLOBAL",
             37,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           )
@@ -2701,13 +2703,13 @@ private[common] object InstructionDefs6 {
           form(2)((operands, mods) => Instruction.GlobalLoadSshort_2(operands(0), operands(1), mods)),
           form(3)((operands, mods) => Instruction.GlobalLoadSshort_3(operands(0), operands(1), operands(2), mods))
         ),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "FLAT_GLBL",
             19,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -2722,7 +2724,7 @@ private[common] object InstructionDefs6 {
             "cdna2",
             "FLAT_GLBL",
             19,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -2737,7 +2739,7 @@ private[common] object InstructionDefs6 {
             "cdna3",
             "FLAT_GLBL",
             19,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -2752,7 +2754,7 @@ private[common] object InstructionDefs6 {
             "cdna4",
             "FLAT_GLBL",
             19,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -2767,7 +2769,7 @@ private[common] object InstructionDefs6 {
             "rdna1",
             "FLAT_GLBL",
             11,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -2782,7 +2784,7 @@ private[common] object InstructionDefs6 {
             "rdna2",
             "FLAT_GLBL",
             11,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -2797,7 +2799,7 @@ private[common] object InstructionDefs6 {
             "gfx8",
             "GLOBAL",
             19,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -2806,7 +2808,7 @@ private[common] object InstructionDefs6 {
             "gfx9",
             "GLOBAL",
             19,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           )
@@ -2818,13 +2820,13 @@ private[common] object InstructionDefs6 {
           form(2)((operands, mods) => Instruction.GlobalLoadTr16B128_2(operands(0), operands(1), mods)),
           form(3)((operands, mods) => Instruction.GlobalLoadTr16B128_3(operands(0), operands(1), operands(2), mods))
         ),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VGLOBAL",
             87,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -2841,13 +2843,13 @@ private[common] object InstructionDefs6 {
           form(2)((operands, mods) => Instruction.GlobalLoadTr4B64_2(operands(0), operands(1), mods)),
           form(3)((operands, mods) => Instruction.GlobalLoadTr4B64_3(operands(0), operands(1), operands(2), mods))
         ),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VGLOBAL",
             115,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -2864,13 +2866,13 @@ private[common] object InstructionDefs6 {
           form(2)((operands, mods) => Instruction.GlobalLoadTr6B96_2(operands(0), operands(1), mods)),
           form(3)((operands, mods) => Instruction.GlobalLoadTr6B96_3(operands(0), operands(1), operands(2), mods))
         ),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VGLOBAL",
             116,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 96, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -2887,13 +2889,13 @@ private[common] object InstructionDefs6 {
           form(2)((operands, mods) => Instruction.GlobalLoadTr8B64_2(operands(0), operands(1), mods)),
           form(3)((operands, mods) => Instruction.GlobalLoadTr8B64_3(operands(0), operands(1), operands(2), mods))
         ),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VGLOBAL",
             88,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -2910,13 +2912,13 @@ private[common] object InstructionDefs6 {
           form(2)((operands, mods) => Instruction.GlobalLoadTrB128_2(operands(0), operands(1), mods)),
           form(3)((operands, mods) => Instruction.GlobalLoadTrB128_3(operands(0), operands(1), operands(2), mods))
         ),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.GFX12,
             "rdna4",
             "VGLOBAL",
             87,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -2933,13 +2935,13 @@ private[common] object InstructionDefs6 {
           form(2)((operands, mods) => Instruction.GlobalLoadTrB64_2(operands(0), operands(1), mods)),
           form(3)((operands, mods) => Instruction.GlobalLoadTrB64_3(operands(0), operands(1), operands(2), mods))
         ),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.GFX12,
             "rdna4",
             "VGLOBAL",
             88,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -2956,13 +2958,13 @@ private[common] object InstructionDefs6 {
           form(2)((operands, mods) => Instruction.GlobalLoadU16_2(operands(0), operands(1), mods)),
           form(3)((operands, mods) => Instruction.GlobalLoadU16_3(operands(0), operands(1), operands(2), mods))
         ),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VGLOBAL",
             18,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -2976,7 +2978,7 @@ private[common] object InstructionDefs6 {
             "rdna3",
             "FLAT_GLOBAL",
             18,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -2990,7 +2992,7 @@ private[common] object InstructionDefs6 {
             "rdna3",
             "FLAT_GLOBAL",
             18,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -3004,7 +3006,7 @@ private[common] object InstructionDefs6 {
             "rdna3_5",
             "FLAT_GLOBAL",
             18,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -3018,7 +3020,7 @@ private[common] object InstructionDefs6 {
             "rdna4",
             "VGLOBAL",
             18,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -3035,13 +3037,13 @@ private[common] object InstructionDefs6 {
           form(2)((operands, mods) => Instruction.GlobalLoadU8_2(operands(0), operands(1), mods)),
           form(3)((operands, mods) => Instruction.GlobalLoadU8_3(operands(0), operands(1), operands(2), mods))
         ),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VGLOBAL",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -3055,7 +3057,7 @@ private[common] object InstructionDefs6 {
             "rdna3",
             "FLAT_GLOBAL",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -3069,7 +3071,7 @@ private[common] object InstructionDefs6 {
             "rdna3",
             "FLAT_GLOBAL",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -3083,7 +3085,7 @@ private[common] object InstructionDefs6 {
             "rdna3_5",
             "FLAT_GLOBAL",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -3097,7 +3099,7 @@ private[common] object InstructionDefs6 {
             "rdna4",
             "VGLOBAL",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -3114,13 +3116,13 @@ private[common] object InstructionDefs6 {
           form(2)((operands, mods) => Instruction.GlobalLoadUbyte_2(operands(0), operands(1), mods)),
           form(3)((operands, mods) => Instruction.GlobalLoadUbyte_3(operands(0), operands(1), operands(2), mods))
         ),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "FLAT_GLBL",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -3135,7 +3137,7 @@ private[common] object InstructionDefs6 {
             "cdna2",
             "FLAT_GLBL",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -3150,7 +3152,7 @@ private[common] object InstructionDefs6 {
             "cdna3",
             "FLAT_GLBL",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -3165,7 +3167,7 @@ private[common] object InstructionDefs6 {
             "cdna4",
             "FLAT_GLBL",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -3180,7 +3182,7 @@ private[common] object InstructionDefs6 {
             "rdna1",
             "FLAT_GLBL",
             8,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -3195,7 +3197,7 @@ private[common] object InstructionDefs6 {
             "rdna2",
             "FLAT_GLBL",
             8,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -3210,7 +3212,7 @@ private[common] object InstructionDefs6 {
             "gfx8",
             "GLOBAL",
             16,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -3219,7 +3221,7 @@ private[common] object InstructionDefs6 {
             "gfx9",
             "GLOBAL",
             16,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           )
@@ -3231,13 +3233,13 @@ private[common] object InstructionDefs6 {
           form(2)((operands, mods) => Instruction.GlobalLoadUbyteD16_2(operands(0), operands(1), mods)),
           form(3)((operands, mods) => Instruction.GlobalLoadUbyteD16_3(operands(0), operands(1), operands(2), mods))
         ),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "FLAT_GLBL",
             32,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -3252,7 +3254,7 @@ private[common] object InstructionDefs6 {
             "cdna2",
             "FLAT_GLBL",
             32,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -3267,7 +3269,7 @@ private[common] object InstructionDefs6 {
             "cdna3",
             "FLAT_GLBL",
             32,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -3282,7 +3284,7 @@ private[common] object InstructionDefs6 {
             "cdna4",
             "FLAT_GLBL",
             32,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -3297,7 +3299,7 @@ private[common] object InstructionDefs6 {
             "rdna1",
             "FLAT_GLBL",
             32,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -3312,7 +3314,7 @@ private[common] object InstructionDefs6 {
             "rdna2",
             "FLAT_GLBL",
             32,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -3327,7 +3329,7 @@ private[common] object InstructionDefs6 {
             "gfx8",
             "GLOBAL",
             32,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -3336,7 +3338,7 @@ private[common] object InstructionDefs6 {
             "gfx9",
             "GLOBAL",
             32,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           )
@@ -3348,13 +3350,13 @@ private[common] object InstructionDefs6 {
           form(2)((operands, mods) => Instruction.GlobalLoadUbyteD16Hi_2(operands(0), operands(1), mods)),
           form(3)((operands, mods) => Instruction.GlobalLoadUbyteD16Hi_3(operands(0), operands(1), operands(2), mods))
         ),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "FLAT_GLBL",
             33,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -3369,7 +3371,7 @@ private[common] object InstructionDefs6 {
             "cdna2",
             "FLAT_GLBL",
             33,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -3384,7 +3386,7 @@ private[common] object InstructionDefs6 {
             "cdna3",
             "FLAT_GLBL",
             33,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -3399,7 +3401,7 @@ private[common] object InstructionDefs6 {
             "cdna4",
             "FLAT_GLBL",
             33,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -3414,7 +3416,7 @@ private[common] object InstructionDefs6 {
             "rdna1",
             "FLAT_GLBL",
             33,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -3429,7 +3431,7 @@ private[common] object InstructionDefs6 {
             "rdna2",
             "FLAT_GLBL",
             33,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -3444,7 +3446,7 @@ private[common] object InstructionDefs6 {
             "gfx8",
             "GLOBAL",
             33,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -3453,7 +3455,7 @@ private[common] object InstructionDefs6 {
             "gfx9",
             "GLOBAL",
             33,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           )
@@ -3465,13 +3467,13 @@ private[common] object InstructionDefs6 {
           form(2)((operands, mods) => Instruction.GlobalLoadUshort_2(operands(0), operands(1), mods)),
           form(3)((operands, mods) => Instruction.GlobalLoadUshort_3(operands(0), operands(1), operands(2), mods))
         ),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "FLAT_GLBL",
             18,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -3486,7 +3488,7 @@ private[common] object InstructionDefs6 {
             "cdna2",
             "FLAT_GLBL",
             18,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -3501,7 +3503,7 @@ private[common] object InstructionDefs6 {
             "cdna3",
             "FLAT_GLBL",
             18,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -3516,7 +3518,7 @@ private[common] object InstructionDefs6 {
             "cdna4",
             "FLAT_GLBL",
             18,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -3531,7 +3533,7 @@ private[common] object InstructionDefs6 {
             "rdna1",
             "FLAT_GLBL",
             10,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -3546,7 +3548,7 @@ private[common] object InstructionDefs6 {
             "rdna2",
             "FLAT_GLBL",
             10,
-            Vector(
+            Col(
               OperandInfo(Some("VDST"), "VGPR", 32, false, true, false),
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -3561,7 +3563,7 @@ private[common] object InstructionDefs6 {
             "gfx8",
             "GLOBAL",
             18,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -3570,7 +3572,7 @@ private[common] object InstructionDefs6 {
             "gfx9",
             "GLOBAL",
             18,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           )
@@ -3579,13 +3581,13 @@ private[common] object InstructionDefs6 {
   case object GlobalPrefetchB8 extends InstructionDef(
         "global_prefetch_b8",
         decoder(form(2)((operands, mods) => Instruction.GlobalPrefetchB8(operands(0), operands(1), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VGLOBAL",
             93,
-            Vector(
+            Col(
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
               OperandInfo(None, "GPUMEM", 8, true, false, true)
@@ -3598,13 +3600,13 @@ private[common] object InstructionDefs6 {
   case object GlobalStoreAddtidB32 extends InstructionDef(
         "global_store_addtid_b32",
         decoder(form(2)((operands, mods) => Instruction.GlobalStoreAddtidB32(operands(0), operands(1), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VGLOBAL",
             41,
-            Vector(
+            Col(
               OperandInfo(Some("VSRC"), "VGPR", 32, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
               OperandInfo(None, "GPUMEM", 32, false, true, true)
@@ -3617,7 +3619,7 @@ private[common] object InstructionDefs6 {
             "rdna3",
             "FLAT_GLOBAL",
             41,
-            Vector(
+            Col(
               OperandInfo(Some("DATA"), "VGPR", 32, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
               OperandInfo(None, "GPUMEM", 32, false, true, true)
@@ -3630,7 +3632,7 @@ private[common] object InstructionDefs6 {
             "rdna3",
             "FLAT_GLOBAL",
             41,
-            Vector(
+            Col(
               OperandInfo(Some("DATA"), "VGPR", 32, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
               OperandInfo(None, "GPUMEM", 32, false, true, true)
@@ -3643,7 +3645,7 @@ private[common] object InstructionDefs6 {
             "rdna3_5",
             "FLAT_GLOBAL",
             41,
-            Vector(
+            Col(
               OperandInfo(Some("DATA"), "VGPR", 32, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
               OperandInfo(None, "GPUMEM", 32, false, true, true)
@@ -3656,7 +3658,7 @@ private[common] object InstructionDefs6 {
             "rdna4",
             "VGLOBAL",
             41,
-            Vector(
+            Col(
               OperandInfo(Some("VSRC"), "VGPR", 32, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
               OperandInfo(None, "GPUMEM", 32, false, true, true)
@@ -3671,13 +3673,13 @@ private[common] object InstructionDefs6 {
         decoder(form(3)((operands, mods) =>
           Instruction.GlobalStoreAsyncFromLdsB128(operands(0), operands(1), operands(2), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VGLOBAL",
             102,
-            Vector(
+            Col(
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("VSRC"), "VGPR", 32, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -3694,13 +3696,13 @@ private[common] object InstructionDefs6 {
         decoder(form(3)((operands, mods) =>
           Instruction.GlobalStoreAsyncFromLdsB32(operands(0), operands(1), operands(2), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VGLOBAL",
             100,
-            Vector(
+            Col(
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("VSRC"), "VGPR", 32, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -3717,13 +3719,13 @@ private[common] object InstructionDefs6 {
         decoder(form(3)((operands, mods) =>
           Instruction.GlobalStoreAsyncFromLdsB64(operands(0), operands(1), operands(2), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VGLOBAL",
             101,
-            Vector(
+            Col(
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("VSRC"), "VGPR", 32, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -3740,13 +3742,13 @@ private[common] object InstructionDefs6 {
         decoder(form(3)((operands, mods) =>
           Instruction.GlobalStoreAsyncFromLdsB8(operands(0), operands(1), operands(2), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VGLOBAL",
             99,
-            Vector(
+            Col(
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("VSRC"), "VGPR", 32, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -3761,13 +3763,13 @@ private[common] object InstructionDefs6 {
   case object GlobalStoreB128 extends InstructionDef(
         "global_store_b128",
         decoder(form(3)((operands, mods) => Instruction.GlobalStoreB128(operands(0), operands(1), operands(2), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VGLOBAL",
             29,
-            Vector(
+            Col(
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("VSRC"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -3781,7 +3783,7 @@ private[common] object InstructionDefs6 {
             "rdna3",
             "FLAT_GLOBAL",
             29,
-            Vector(
+            Col(
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("DATA"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -3795,7 +3797,7 @@ private[common] object InstructionDefs6 {
             "rdna3",
             "FLAT_GLOBAL",
             29,
-            Vector(
+            Col(
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("DATA"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -3809,7 +3811,7 @@ private[common] object InstructionDefs6 {
             "rdna3_5",
             "FLAT_GLOBAL",
             29,
-            Vector(
+            Col(
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("DATA"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -3823,7 +3825,7 @@ private[common] object InstructionDefs6 {
             "rdna4",
             "VGLOBAL",
             29,
-            Vector(
+            Col(
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("VSRC"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -3837,13 +3839,13 @@ private[common] object InstructionDefs6 {
   case object GlobalStoreB16 extends InstructionDef(
         "global_store_b16",
         decoder(form(3)((operands, mods) => Instruction.GlobalStoreB16(operands(0), operands(1), operands(2), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VGLOBAL",
             25,
-            Vector(
+            Col(
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("VSRC"), "VGPR", 32, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -3857,7 +3859,7 @@ private[common] object InstructionDefs6 {
             "rdna3",
             "FLAT_GLOBAL",
             25,
-            Vector(
+            Col(
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("DATA"), "VGPR", 32, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -3871,7 +3873,7 @@ private[common] object InstructionDefs6 {
             "rdna3",
             "FLAT_GLOBAL",
             25,
-            Vector(
+            Col(
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("DATA"), "VGPR", 32, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -3885,7 +3887,7 @@ private[common] object InstructionDefs6 {
             "rdna3_5",
             "FLAT_GLOBAL",
             25,
-            Vector(
+            Col(
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("DATA"), "VGPR", 32, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -3899,7 +3901,7 @@ private[common] object InstructionDefs6 {
             "rdna4",
             "VGLOBAL",
             25,
-            Vector(
+            Col(
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("VSRC"), "VGPR", 32, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -3913,13 +3915,13 @@ private[common] object InstructionDefs6 {
   case object GlobalStoreB32 extends InstructionDef(
         "global_store_b32",
         decoder(form(3)((operands, mods) => Instruction.GlobalStoreB32(operands(0), operands(1), operands(2), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VGLOBAL",
             26,
-            Vector(
+            Col(
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("VSRC"), "VGPR", 32, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -3933,7 +3935,7 @@ private[common] object InstructionDefs6 {
             "rdna3",
             "FLAT_GLOBAL",
             26,
-            Vector(
+            Col(
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("DATA"), "VGPR", 32, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -3947,7 +3949,7 @@ private[common] object InstructionDefs6 {
             "rdna3",
             "FLAT_GLOBAL",
             26,
-            Vector(
+            Col(
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("DATA"), "VGPR", 32, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -3961,7 +3963,7 @@ private[common] object InstructionDefs6 {
             "rdna3_5",
             "FLAT_GLOBAL",
             26,
-            Vector(
+            Col(
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("DATA"), "VGPR", 32, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -3975,7 +3977,7 @@ private[common] object InstructionDefs6 {
             "rdna4",
             "VGLOBAL",
             26,
-            Vector(
+            Col(
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("VSRC"), "VGPR", 32, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -3989,13 +3991,13 @@ private[common] object InstructionDefs6 {
   case object GlobalStoreB64 extends InstructionDef(
         "global_store_b64",
         decoder(form(3)((operands, mods) => Instruction.GlobalStoreB64(operands(0), operands(1), operands(2), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VGLOBAL",
             27,
-            Vector(
+            Col(
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("VSRC"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -4009,7 +4011,7 @@ private[common] object InstructionDefs6 {
             "rdna3",
             "FLAT_GLOBAL",
             27,
-            Vector(
+            Col(
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("DATA"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -4023,7 +4025,7 @@ private[common] object InstructionDefs6 {
             "rdna3",
             "FLAT_GLOBAL",
             27,
-            Vector(
+            Col(
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("DATA"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -4037,7 +4039,7 @@ private[common] object InstructionDefs6 {
             "rdna3_5",
             "FLAT_GLOBAL",
             27,
-            Vector(
+            Col(
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("DATA"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -4051,7 +4053,7 @@ private[common] object InstructionDefs6 {
             "rdna4",
             "VGLOBAL",
             27,
-            Vector(
+            Col(
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("VSRC"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -4065,13 +4067,13 @@ private[common] object InstructionDefs6 {
   case object GlobalStoreB8 extends InstructionDef(
         "global_store_b8",
         decoder(form(3)((operands, mods) => Instruction.GlobalStoreB8(operands(0), operands(1), operands(2), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VGLOBAL",
             24,
-            Vector(
+            Col(
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("VSRC"), "VGPR", 32, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -4085,7 +4087,7 @@ private[common] object InstructionDefs6 {
             "rdna3",
             "FLAT_GLOBAL",
             24,
-            Vector(
+            Col(
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("DATA"), "VGPR", 32, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -4099,7 +4101,7 @@ private[common] object InstructionDefs6 {
             "rdna3",
             "FLAT_GLOBAL",
             24,
-            Vector(
+            Col(
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("DATA"), "VGPR", 32, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -4113,7 +4115,7 @@ private[common] object InstructionDefs6 {
             "rdna3_5",
             "FLAT_GLOBAL",
             24,
-            Vector(
+            Col(
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("DATA"), "VGPR", 32, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -4127,7 +4129,7 @@ private[common] object InstructionDefs6 {
             "rdna4",
             "VGLOBAL",
             24,
-            Vector(
+            Col(
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("VSRC"), "VGPR", 32, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -4141,13 +4143,13 @@ private[common] object InstructionDefs6 {
   case object GlobalStoreB96 extends InstructionDef(
         "global_store_b96",
         decoder(form(3)((operands, mods) => Instruction.GlobalStoreB96(operands(0), operands(1), operands(2), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VGLOBAL",
             28,
-            Vector(
+            Col(
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("VSRC"), "VGPR", 96, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -4161,7 +4163,7 @@ private[common] object InstructionDefs6 {
             "rdna3",
             "FLAT_GLOBAL",
             28,
-            Vector(
+            Col(
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("DATA"), "VGPR", 96, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -4175,7 +4177,7 @@ private[common] object InstructionDefs6 {
             "rdna3",
             "FLAT_GLOBAL",
             28,
-            Vector(
+            Col(
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("DATA"), "VGPR", 96, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -4189,7 +4191,7 @@ private[common] object InstructionDefs6 {
             "rdna3_5",
             "FLAT_GLOBAL",
             28,
-            Vector(
+            Col(
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("DATA"), "VGPR", 96, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -4203,7 +4205,7 @@ private[common] object InstructionDefs6 {
             "rdna4",
             "VGLOBAL",
             28,
-            Vector(
+            Col(
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("VSRC"), "VGPR", 96, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -4217,13 +4219,13 @@ private[common] object InstructionDefs6 {
   case object GlobalStoreBlock extends InstructionDef(
         "global_store_block",
         decoder(form(3)((operands, mods) => Instruction.GlobalStoreBlock(operands(0), operands(1), operands(2), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VGLOBAL",
             84,
-            Vector(
+            Col(
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("VSRC"), "VGPR", 1024, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -4238,7 +4240,7 @@ private[common] object InstructionDefs6 {
             "rdna4",
             "VGLOBAL",
             84,
-            Vector(
+            Col(
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("VSRC"), "VGPR", 1024, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -4253,13 +4255,13 @@ private[common] object InstructionDefs6 {
   case object GlobalStoreByte extends InstructionDef(
         "global_store_byte",
         decoder(form(3)((operands, mods) => Instruction.GlobalStoreByte(operands(0), operands(1), operands(2), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "FLAT_GLBL",
             24,
-            Vector(
+            Col(
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("DATA"), "VGPR", 32, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -4274,7 +4276,7 @@ private[common] object InstructionDefs6 {
             "cdna2",
             "FLAT_GLBL",
             24,
-            Vector(
+            Col(
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("DATA"), "VGPR_OR_ACCVGPR", 32, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -4289,7 +4291,7 @@ private[common] object InstructionDefs6 {
             "cdna3",
             "FLAT_GLBL",
             24,
-            Vector(
+            Col(
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("DATA"), "VGPR_OR_ACCVGPR", 32, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -4304,7 +4306,7 @@ private[common] object InstructionDefs6 {
             "cdna4",
             "FLAT_GLBL",
             24,
-            Vector(
+            Col(
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("DATA"), "VGPR_OR_ACCVGPR", 32, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -4319,7 +4321,7 @@ private[common] object InstructionDefs6 {
             "rdna1",
             "FLAT_GLBL",
             24,
-            Vector(
+            Col(
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("DATA"), "VGPR", 32, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -4334,7 +4336,7 @@ private[common] object InstructionDefs6 {
             "rdna2",
             "FLAT_GLBL",
             24,
-            Vector(
+            Col(
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("DATA"), "VGPR", 32, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -4349,7 +4351,7 @@ private[common] object InstructionDefs6 {
             "gfx8",
             "GLOBAL",
             24,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -4358,7 +4360,7 @@ private[common] object InstructionDefs6 {
             "gfx9",
             "GLOBAL",
             24,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           )
@@ -4369,13 +4371,13 @@ private[common] object InstructionDefs6 {
         decoder(form(3)((operands, mods) =>
           Instruction.GlobalStoreByteD16Hi(operands(0), operands(1), operands(2), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "FLAT_GLBL",
             25,
-            Vector(
+            Col(
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("DATA"), "VGPR", 32, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -4390,7 +4392,7 @@ private[common] object InstructionDefs6 {
             "cdna2",
             "FLAT_GLBL",
             25,
-            Vector(
+            Col(
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("DATA"), "VGPR_OR_ACCVGPR", 32, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -4405,7 +4407,7 @@ private[common] object InstructionDefs6 {
             "cdna3",
             "FLAT_GLBL",
             25,
-            Vector(
+            Col(
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("DATA"), "VGPR_OR_ACCVGPR", 32, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -4420,7 +4422,7 @@ private[common] object InstructionDefs6 {
             "cdna4",
             "FLAT_GLBL",
             25,
-            Vector(
+            Col(
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("DATA"), "VGPR_OR_ACCVGPR", 32, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -4435,7 +4437,7 @@ private[common] object InstructionDefs6 {
             "rdna1",
             "FLAT_GLBL",
             25,
-            Vector(
+            Col(
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("DATA"), "VGPR", 32, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -4450,7 +4452,7 @@ private[common] object InstructionDefs6 {
             "rdna2",
             "FLAT_GLBL",
             25,
-            Vector(
+            Col(
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("DATA"), "VGPR", 32, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -4465,7 +4467,7 @@ private[common] object InstructionDefs6 {
             "gfx8",
             "GLOBAL",
             25,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -4474,7 +4476,7 @@ private[common] object InstructionDefs6 {
             "gfx9",
             "GLOBAL",
             25,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           )
@@ -4485,13 +4487,13 @@ private[common] object InstructionDefs6 {
         decoder(form(3)((operands, mods) =>
           Instruction.GlobalStoreD16HiB16(operands(0), operands(1), operands(2), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VGLOBAL",
             37,
-            Vector(
+            Col(
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("VSRC"), "VGPR", 32, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -4505,7 +4507,7 @@ private[common] object InstructionDefs6 {
             "rdna3",
             "FLAT_GLOBAL",
             37,
-            Vector(
+            Col(
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("DATA"), "VGPR", 32, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -4519,7 +4521,7 @@ private[common] object InstructionDefs6 {
             "rdna3",
             "FLAT_GLOBAL",
             37,
-            Vector(
+            Col(
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("DATA"), "VGPR", 32, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -4533,7 +4535,7 @@ private[common] object InstructionDefs6 {
             "rdna3_5",
             "FLAT_GLOBAL",
             37,
-            Vector(
+            Col(
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("DATA"), "VGPR", 32, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -4547,7 +4549,7 @@ private[common] object InstructionDefs6 {
             "rdna4",
             "VGLOBAL",
             37,
-            Vector(
+            Col(
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("VSRC"), "VGPR", 32, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -4563,13 +4565,13 @@ private[common] object InstructionDefs6 {
         decoder(form(3)((operands, mods) =>
           Instruction.GlobalStoreD16HiB8(operands(0), operands(1), operands(2), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VGLOBAL",
             36,
-            Vector(
+            Col(
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("VSRC"), "VGPR", 32, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -4583,7 +4585,7 @@ private[common] object InstructionDefs6 {
             "rdna3",
             "FLAT_GLOBAL",
             36,
-            Vector(
+            Col(
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("DATA"), "VGPR", 32, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -4597,7 +4599,7 @@ private[common] object InstructionDefs6 {
             "rdna3",
             "FLAT_GLOBAL",
             36,
-            Vector(
+            Col(
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("DATA"), "VGPR", 32, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -4611,7 +4613,7 @@ private[common] object InstructionDefs6 {
             "rdna3_5",
             "FLAT_GLOBAL",
             36,
-            Vector(
+            Col(
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("DATA"), "VGPR", 32, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -4625,7 +4627,7 @@ private[common] object InstructionDefs6 {
             "rdna4",
             "VGLOBAL",
             36,
-            Vector(
+            Col(
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("VSRC"), "VGPR", 32, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -4639,13 +4641,13 @@ private[common] object InstructionDefs6 {
   case object GlobalStoreDword extends InstructionDef(
         "global_store_dword",
         decoder(form(3)((operands, mods) => Instruction.GlobalStoreDword(operands(0), operands(1), operands(2), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "FLAT_GLBL",
             28,
-            Vector(
+            Col(
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("DATA"), "VGPR", 32, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -4660,7 +4662,7 @@ private[common] object InstructionDefs6 {
             "cdna2",
             "FLAT_GLBL",
             28,
-            Vector(
+            Col(
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("DATA"), "VGPR_OR_ACCVGPR", 32, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -4675,7 +4677,7 @@ private[common] object InstructionDefs6 {
             "cdna3",
             "FLAT_GLBL",
             28,
-            Vector(
+            Col(
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("DATA"), "VGPR_OR_ACCVGPR", 32, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -4690,7 +4692,7 @@ private[common] object InstructionDefs6 {
             "cdna4",
             "FLAT_GLBL",
             28,
-            Vector(
+            Col(
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("DATA"), "VGPR_OR_ACCVGPR", 32, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -4705,7 +4707,7 @@ private[common] object InstructionDefs6 {
             "rdna1",
             "FLAT_GLBL",
             28,
-            Vector(
+            Col(
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("DATA"), "VGPR", 32, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -4720,7 +4722,7 @@ private[common] object InstructionDefs6 {
             "rdna2",
             "FLAT_GLBL",
             28,
-            Vector(
+            Col(
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("DATA"), "VGPR", 32, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -4735,7 +4737,7 @@ private[common] object InstructionDefs6 {
             "gfx8",
             "GLOBAL",
             28,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -4744,7 +4746,7 @@ private[common] object InstructionDefs6 {
             "gfx9",
             "GLOBAL",
             28,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           )
@@ -4753,13 +4755,13 @@ private[common] object InstructionDefs6 {
   case object GlobalStoreDwordAddtid extends InstructionDef(
         "global_store_dword_addtid",
         decoder(form(2)((operands, mods) => Instruction.GlobalStoreDwordAddtid(operands(0), operands(1), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.GFX10,
             "rdna2",
             "FLAT_GLBL",
             23,
-            Vector(
+            Col(
               OperandInfo(Some("DATA"), "VGPR", 32, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
               OperandInfo(None, "SDST_M0", 32, true, false, true)
@@ -4774,13 +4776,13 @@ private[common] object InstructionDefs6 {
         decoder(form(3)((operands, mods) =>
           Instruction.GlobalStoreDwordx2(operands(0), operands(1), operands(2), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "FLAT_GLBL",
             29,
-            Vector(
+            Col(
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("DATA"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -4795,7 +4797,7 @@ private[common] object InstructionDefs6 {
             "cdna2",
             "FLAT_GLBL",
             29,
-            Vector(
+            Col(
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("DATA"), "VGPR_OR_ACCVGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -4810,7 +4812,7 @@ private[common] object InstructionDefs6 {
             "cdna3",
             "FLAT_GLBL",
             29,
-            Vector(
+            Col(
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("DATA"), "VGPR_OR_ACCVGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -4825,7 +4827,7 @@ private[common] object InstructionDefs6 {
             "cdna4",
             "FLAT_GLBL",
             29,
-            Vector(
+            Col(
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("DATA"), "VGPR_OR_ACCVGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -4840,7 +4842,7 @@ private[common] object InstructionDefs6 {
             "rdna1",
             "FLAT_GLBL",
             29,
-            Vector(
+            Col(
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("DATA"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -4855,7 +4857,7 @@ private[common] object InstructionDefs6 {
             "rdna2",
             "FLAT_GLBL",
             29,
-            Vector(
+            Col(
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("DATA"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -4870,7 +4872,7 @@ private[common] object InstructionDefs6 {
             "gfx8",
             "GLOBAL",
             29,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -4879,7 +4881,7 @@ private[common] object InstructionDefs6 {
             "gfx9",
             "GLOBAL",
             29,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           )
@@ -4890,13 +4892,13 @@ private[common] object InstructionDefs6 {
         decoder(form(3)((operands, mods) =>
           Instruction.GlobalStoreDwordx3(operands(0), operands(1), operands(2), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "FLAT_GLBL",
             30,
-            Vector(
+            Col(
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("DATA"), "VGPR", 96, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -4911,7 +4913,7 @@ private[common] object InstructionDefs6 {
             "cdna2",
             "FLAT_GLBL",
             30,
-            Vector(
+            Col(
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("DATA"), "VGPR_OR_ACCVGPR", 96, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -4926,7 +4928,7 @@ private[common] object InstructionDefs6 {
             "cdna3",
             "FLAT_GLBL",
             30,
-            Vector(
+            Col(
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("DATA"), "VGPR_OR_ACCVGPR", 96, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -4941,7 +4943,7 @@ private[common] object InstructionDefs6 {
             "cdna4",
             "FLAT_GLBL",
             30,
-            Vector(
+            Col(
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("DATA"), "VGPR_OR_ACCVGPR", 96, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -4956,7 +4958,7 @@ private[common] object InstructionDefs6 {
             "rdna1",
             "FLAT_GLBL",
             31,
-            Vector(
+            Col(
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("DATA"), "VGPR", 96, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -4971,7 +4973,7 @@ private[common] object InstructionDefs6 {
             "rdna2",
             "FLAT_GLBL",
             31,
-            Vector(
+            Col(
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("DATA"), "VGPR", 96, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -4986,7 +4988,7 @@ private[common] object InstructionDefs6 {
             "gfx8",
             "GLOBAL",
             30,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -4995,7 +4997,7 @@ private[common] object InstructionDefs6 {
             "gfx9",
             "GLOBAL",
             30,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           )
@@ -5006,13 +5008,13 @@ private[common] object InstructionDefs6 {
         decoder(form(3)((operands, mods) =>
           Instruction.GlobalStoreDwordx4(operands(0), operands(1), operands(2), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "FLAT_GLBL",
             31,
-            Vector(
+            Col(
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("DATA"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -5027,7 +5029,7 @@ private[common] object InstructionDefs6 {
             "cdna2",
             "FLAT_GLBL",
             31,
-            Vector(
+            Col(
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("DATA"), "VGPR_OR_ACCVGPR", 128, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -5042,7 +5044,7 @@ private[common] object InstructionDefs6 {
             "cdna3",
             "FLAT_GLBL",
             31,
-            Vector(
+            Col(
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("DATA"), "VGPR_OR_ACCVGPR", 128, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -5057,7 +5059,7 @@ private[common] object InstructionDefs6 {
             "cdna4",
             "FLAT_GLBL",
             31,
-            Vector(
+            Col(
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("DATA"), "VGPR_OR_ACCVGPR", 128, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -5072,7 +5074,7 @@ private[common] object InstructionDefs6 {
             "rdna1",
             "FLAT_GLBL",
             30,
-            Vector(
+            Col(
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("DATA"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -5087,7 +5089,7 @@ private[common] object InstructionDefs6 {
             "rdna2",
             "FLAT_GLBL",
             30,
-            Vector(
+            Col(
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("DATA"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -5102,7 +5104,7 @@ private[common] object InstructionDefs6 {
             "gfx8",
             "GLOBAL",
             31,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -5111,7 +5113,7 @@ private[common] object InstructionDefs6 {
             "gfx9",
             "GLOBAL",
             31,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           )
@@ -5120,13 +5122,13 @@ private[common] object InstructionDefs6 {
   case object GlobalStoreShort extends InstructionDef(
         "global_store_short",
         decoder(form(3)((operands, mods) => Instruction.GlobalStoreShort(operands(0), operands(1), operands(2), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "FLAT_GLBL",
             26,
-            Vector(
+            Col(
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("DATA"), "VGPR", 32, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -5141,7 +5143,7 @@ private[common] object InstructionDefs6 {
             "cdna2",
             "FLAT_GLBL",
             26,
-            Vector(
+            Col(
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("DATA"), "VGPR_OR_ACCVGPR", 32, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -5156,7 +5158,7 @@ private[common] object InstructionDefs6 {
             "cdna3",
             "FLAT_GLBL",
             26,
-            Vector(
+            Col(
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("DATA"), "VGPR_OR_ACCVGPR", 32, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -5171,7 +5173,7 @@ private[common] object InstructionDefs6 {
             "cdna4",
             "FLAT_GLBL",
             26,
-            Vector(
+            Col(
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("DATA"), "VGPR_OR_ACCVGPR", 32, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -5186,7 +5188,7 @@ private[common] object InstructionDefs6 {
             "rdna1",
             "FLAT_GLBL",
             26,
-            Vector(
+            Col(
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("DATA"), "VGPR", 32, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -5201,7 +5203,7 @@ private[common] object InstructionDefs6 {
             "rdna2",
             "FLAT_GLBL",
             26,
-            Vector(
+            Col(
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("DATA"), "VGPR", 32, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -5216,7 +5218,7 @@ private[common] object InstructionDefs6 {
             "gfx8",
             "GLOBAL",
             26,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -5225,7 +5227,7 @@ private[common] object InstructionDefs6 {
             "gfx9",
             "GLOBAL",
             26,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           )
@@ -5236,13 +5238,13 @@ private[common] object InstructionDefs6 {
         decoder(form(3)((operands, mods) =>
           Instruction.GlobalStoreShortD16Hi(operands(0), operands(1), operands(2), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "FLAT_GLBL",
             27,
-            Vector(
+            Col(
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("DATA"), "VGPR", 32, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -5257,7 +5259,7 @@ private[common] object InstructionDefs6 {
             "cdna2",
             "FLAT_GLBL",
             27,
-            Vector(
+            Col(
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("DATA"), "VGPR_OR_ACCVGPR", 32, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -5272,7 +5274,7 @@ private[common] object InstructionDefs6 {
             "cdna3",
             "FLAT_GLBL",
             27,
-            Vector(
+            Col(
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("DATA"), "VGPR_OR_ACCVGPR", 32, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -5287,7 +5289,7 @@ private[common] object InstructionDefs6 {
             "cdna4",
             "FLAT_GLBL",
             27,
-            Vector(
+            Col(
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("DATA"), "VGPR_OR_ACCVGPR", 32, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -5302,7 +5304,7 @@ private[common] object InstructionDefs6 {
             "rdna1",
             "FLAT_GLBL",
             27,
-            Vector(
+            Col(
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("DATA"), "VGPR", 32, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -5317,7 +5319,7 @@ private[common] object InstructionDefs6 {
             "rdna2",
             "FLAT_GLBL",
             27,
-            Vector(
+            Col(
               OperandInfo(Some("ADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("DATA"), "VGPR", 32, true, false, false),
               OperandInfo(Some("SADDR"), "SREG", 64, true, false, false),
@@ -5332,7 +5334,7 @@ private[common] object InstructionDefs6 {
             "gfx8",
             "GLOBAL",
             27,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -5341,7 +5343,7 @@ private[common] object InstructionDefs6 {
             "gfx9",
             "GLOBAL",
             27,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           )
@@ -5350,13 +5352,13 @@ private[common] object InstructionDefs6 {
   case object GlobalWb extends InstructionDef(
         "global_wb",
         decoder(form(0)((_, mods) => Instruction.GlobalWb(mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VGLOBAL",
             44,
-            Vector.empty,
+            Col.empty,
             Some("VMEM"),
             MetadataSource.AMDXML
           ),
@@ -5365,7 +5367,7 @@ private[common] object InstructionDefs6 {
             "rdna4",
             "VGLOBAL",
             44,
-            Vector.empty,
+            Col.empty,
             Some("VMEM"),
             MetadataSource.AMDXML
           )
@@ -5374,13 +5376,13 @@ private[common] object InstructionDefs6 {
   case object GlobalWbinv extends InstructionDef(
         "global_wbinv",
         decoder(form(0)((_, mods) => Instruction.GlobalWbinv(mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VGLOBAL",
             79,
-            Vector.empty,
+            Col.empty,
             Some("VMEM"),
             MetadataSource.AMDXML
           ),
@@ -5389,7 +5391,7 @@ private[common] object InstructionDefs6 {
             "rdna4",
             "VGLOBAL",
             79,
-            Vector.empty,
+            Col.empty,
             Some("VMEM"),
             MetadataSource.AMDXML
           )
@@ -5398,13 +5400,13 @@ private[common] object InstructionDefs6 {
   case object ImageAtomicAdd extends InstructionDef(
         "image_atomic_add",
         decoder(form(3)((operands, mods) => Instruction.ImageAtomicAdd(operands(0), operands(1), operands(2), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "MIMG",
             18,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 256, true, false, false),
@@ -5419,7 +5421,7 @@ private[common] object InstructionDefs6 {
             "cdna2",
             "MIMG",
             18,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 256, true, false, false),
@@ -5434,7 +5436,7 @@ private[common] object InstructionDefs6 {
             "rdna1",
             "MIMG",
             17,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 256, true, false, false),
@@ -5449,7 +5451,7 @@ private[common] object InstructionDefs6 {
             "rdna1",
             "MIMG_NSA1",
             17,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 256, true, false, false),
@@ -5464,7 +5466,7 @@ private[common] object InstructionDefs6 {
             "rdna1",
             "MIMG_NSA2",
             17,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 256, true, false, false),
@@ -5479,7 +5481,7 @@ private[common] object InstructionDefs6 {
             "rdna1",
             "MIMG_NSA3",
             17,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 256, true, false, false),
@@ -5494,7 +5496,7 @@ private[common] object InstructionDefs6 {
             "rdna2",
             "MIMG",
             17,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 256, true, false, false),
@@ -5509,7 +5511,7 @@ private[common] object InstructionDefs6 {
             "rdna2",
             "MIMG_NSA1",
             17,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 256, true, false, false),
@@ -5524,7 +5526,7 @@ private[common] object InstructionDefs6 {
             "rdna2",
             "MIMG_NSA2",
             17,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 256, true, false, false),
@@ -5539,7 +5541,7 @@ private[common] object InstructionDefs6 {
             "rdna2",
             "MIMG_NSA3",
             17,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 256, true, false, false),
@@ -5554,7 +5556,7 @@ private[common] object InstructionDefs6 {
             "rdna3",
             "MIMG",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 256, true, false, false),
@@ -5569,7 +5571,7 @@ private[common] object InstructionDefs6 {
             "rdna3",
             "MIMG_NSA1",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 256, true, false, false),
@@ -5584,7 +5586,7 @@ private[common] object InstructionDefs6 {
             "rdna3_5",
             "MIMG",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 256, true, false, false),
@@ -5599,7 +5601,7 @@ private[common] object InstructionDefs6 {
             "rdna3_5",
             "MIMG_NSA1",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 256, true, false, false),
@@ -5614,7 +5616,7 @@ private[common] object InstructionDefs6 {
             "gfx6",
             "MIMG",
             17,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -5623,7 +5625,7 @@ private[common] object InstructionDefs6 {
             "gfx7",
             "MIMG",
             17,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -5632,7 +5634,7 @@ private[common] object InstructionDefs6 {
             "gfx8",
             "MIMG",
             18,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -5641,7 +5643,7 @@ private[common] object InstructionDefs6 {
             "gfx9",
             "MIMG",
             18,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           )
@@ -5652,13 +5654,13 @@ private[common] object InstructionDefs6 {
         decoder(form(3)((operands, mods) =>
           Instruction.ImageAtomicAddFlt(operands(0), operands(1), operands(2), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.GFX12,
             "rdna4",
             "VIMAGE",
             131,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(None, "VGPR", 128, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 256, true, false, false),
@@ -5675,13 +5677,13 @@ private[common] object InstructionDefs6 {
         decoder(form(3)((operands, mods) =>
           Instruction.ImageAtomicAddUint(operands(0), operands(1), operands(2), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.GFX12,
             "rdna4",
             "VIMAGE",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(None, "VGPR", 128, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 256, true, false, false),
@@ -5696,13 +5698,13 @@ private[common] object InstructionDefs6 {
   case object ImageAtomicAnd extends InstructionDef(
         "image_atomic_and",
         decoder(form(3)((operands, mods) => Instruction.ImageAtomicAnd(operands(0), operands(1), operands(2), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "MIMG",
             24,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 256, true, false, false),
@@ -5717,7 +5719,7 @@ private[common] object InstructionDefs6 {
             "cdna2",
             "MIMG",
             24,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 256, true, false, false),
@@ -5732,7 +5734,7 @@ private[common] object InstructionDefs6 {
             "rdna1",
             "MIMG",
             24,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 256, true, false, false),
@@ -5747,7 +5749,7 @@ private[common] object InstructionDefs6 {
             "rdna1",
             "MIMG_NSA1",
             24,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 256, true, false, false),
@@ -5762,7 +5764,7 @@ private[common] object InstructionDefs6 {
             "rdna1",
             "MIMG_NSA2",
             24,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 256, true, false, false),
@@ -5777,7 +5779,7 @@ private[common] object InstructionDefs6 {
             "rdna1",
             "MIMG_NSA3",
             24,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 256, true, false, false),
@@ -5792,7 +5794,7 @@ private[common] object InstructionDefs6 {
             "rdna2",
             "MIMG",
             24,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 256, true, false, false),
@@ -5807,7 +5809,7 @@ private[common] object InstructionDefs6 {
             "rdna2",
             "MIMG_NSA1",
             24,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 256, true, false, false),
@@ -5822,7 +5824,7 @@ private[common] object InstructionDefs6 {
             "rdna2",
             "MIMG_NSA2",
             24,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 256, true, false, false),
@@ -5837,7 +5839,7 @@ private[common] object InstructionDefs6 {
             "rdna2",
             "MIMG_NSA3",
             24,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 256, true, false, false),
@@ -5852,7 +5854,7 @@ private[common] object InstructionDefs6 {
             "rdna3",
             "MIMG",
             18,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 256, true, false, false),
@@ -5867,7 +5869,7 @@ private[common] object InstructionDefs6 {
             "rdna3",
             "MIMG_NSA1",
             18,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 256, true, false, false),
@@ -5882,7 +5884,7 @@ private[common] object InstructionDefs6 {
             "rdna3_5",
             "MIMG",
             18,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 256, true, false, false),
@@ -5897,7 +5899,7 @@ private[common] object InstructionDefs6 {
             "rdna3_5",
             "MIMG_NSA1",
             18,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 256, true, false, false),
@@ -5912,7 +5914,7 @@ private[common] object InstructionDefs6 {
             "rdna4",
             "VIMAGE",
             18,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(None, "VGPR", 128, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 256, true, false, false),
@@ -5927,7 +5929,7 @@ private[common] object InstructionDefs6 {
             "gfx6",
             "MIMG",
             24,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -5936,7 +5938,7 @@ private[common] object InstructionDefs6 {
             "gfx7",
             "MIMG",
             24,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -5945,7 +5947,7 @@ private[common] object InstructionDefs6 {
             "gfx8",
             "MIMG",
             24,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -5954,7 +5956,7 @@ private[common] object InstructionDefs6 {
             "gfx9",
             "MIMG",
             24,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           )
@@ -5965,13 +5967,13 @@ private[common] object InstructionDefs6 {
         decoder(form(3)((operands, mods) =>
           Instruction.ImageAtomicCmpswap(operands(0), operands(1), operands(2), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "MIMG",
             17,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 256, true, false, false),
@@ -5986,7 +5988,7 @@ private[common] object InstructionDefs6 {
             "cdna2",
             "MIMG",
             17,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 256, true, false, false),
@@ -6001,7 +6003,7 @@ private[common] object InstructionDefs6 {
             "rdna1",
             "MIMG",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 256, true, false, false),
@@ -6016,7 +6018,7 @@ private[common] object InstructionDefs6 {
             "rdna1",
             "MIMG_NSA1",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 256, true, false, false),
@@ -6031,7 +6033,7 @@ private[common] object InstructionDefs6 {
             "rdna1",
             "MIMG_NSA2",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 256, true, false, false),
@@ -6046,7 +6048,7 @@ private[common] object InstructionDefs6 {
             "rdna1",
             "MIMG_NSA3",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 256, true, false, false),
@@ -6061,7 +6063,7 @@ private[common] object InstructionDefs6 {
             "rdna2",
             "MIMG",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 256, true, false, false),
@@ -6076,7 +6078,7 @@ private[common] object InstructionDefs6 {
             "rdna2",
             "MIMG_NSA1",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 256, true, false, false),
@@ -6091,7 +6093,7 @@ private[common] object InstructionDefs6 {
             "rdna2",
             "MIMG_NSA2",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 256, true, false, false),
@@ -6106,7 +6108,7 @@ private[common] object InstructionDefs6 {
             "rdna2",
             "MIMG_NSA3",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 256, true, false, false),
@@ -6121,7 +6123,7 @@ private[common] object InstructionDefs6 {
             "rdna3",
             "MIMG",
             11,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 256, true, false, false),
@@ -6136,7 +6138,7 @@ private[common] object InstructionDefs6 {
             "rdna3",
             "MIMG_NSA1",
             11,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 256, true, false, false),
@@ -6151,7 +6153,7 @@ private[common] object InstructionDefs6 {
             "rdna3_5",
             "MIMG",
             11,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 256, true, false, false),
@@ -6166,7 +6168,7 @@ private[common] object InstructionDefs6 {
             "rdna3_5",
             "MIMG_NSA1",
             11,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 256, true, false, false),
@@ -6181,7 +6183,7 @@ private[common] object InstructionDefs6 {
             "rdna4",
             "VIMAGE",
             11,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(None, "VGPR", 128, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 256, true, false, false),
@@ -6196,7 +6198,7 @@ private[common] object InstructionDefs6 {
             "gfx6",
             "MIMG",
             16,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -6205,7 +6207,7 @@ private[common] object InstructionDefs6 {
             "gfx7",
             "MIMG",
             16,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -6214,7 +6216,7 @@ private[common] object InstructionDefs6 {
             "gfx8",
             "MIMG",
             17,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -6223,7 +6225,7 @@ private[common] object InstructionDefs6 {
             "gfx9",
             "MIMG",
             17,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           )
@@ -6232,13 +6234,13 @@ private[common] object InstructionDefs6 {
   case object ImageAtomicDec extends InstructionDef(
         "image_atomic_dec",
         decoder(form(3)((operands, mods) => Instruction.ImageAtomicDec(operands(0), operands(1), operands(2), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "MIMG",
             28,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 256, true, false, false),
@@ -6253,7 +6255,7 @@ private[common] object InstructionDefs6 {
             "cdna2",
             "MIMG",
             28,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 256, true, false, false),
@@ -6268,7 +6270,7 @@ private[common] object InstructionDefs6 {
             "rdna1",
             "MIMG",
             28,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 256, true, false, false),
@@ -6283,7 +6285,7 @@ private[common] object InstructionDefs6 {
             "rdna1",
             "MIMG_NSA1",
             28,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 256, true, false, false),
@@ -6298,7 +6300,7 @@ private[common] object InstructionDefs6 {
             "rdna1",
             "MIMG_NSA2",
             28,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 256, true, false, false),
@@ -6313,7 +6315,7 @@ private[common] object InstructionDefs6 {
             "rdna1",
             "MIMG_NSA3",
             28,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 256, true, false, false),
@@ -6328,7 +6330,7 @@ private[common] object InstructionDefs6 {
             "rdna2",
             "MIMG",
             28,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 256, true, false, false),
@@ -6343,7 +6345,7 @@ private[common] object InstructionDefs6 {
             "rdna2",
             "MIMG_NSA1",
             28,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 256, true, false, false),
@@ -6358,7 +6360,7 @@ private[common] object InstructionDefs6 {
             "rdna2",
             "MIMG_NSA2",
             28,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 256, true, false, false),
@@ -6373,7 +6375,7 @@ private[common] object InstructionDefs6 {
             "rdna2",
             "MIMG_NSA3",
             28,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 256, true, false, false),
@@ -6388,7 +6390,7 @@ private[common] object InstructionDefs6 {
             "rdna3",
             "MIMG",
             22,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 256, true, false, false),
@@ -6403,7 +6405,7 @@ private[common] object InstructionDefs6 {
             "rdna3",
             "MIMG_NSA1",
             22,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 256, true, false, false),
@@ -6418,7 +6420,7 @@ private[common] object InstructionDefs6 {
             "rdna3_5",
             "MIMG",
             22,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 256, true, false, false),
@@ -6433,7 +6435,7 @@ private[common] object InstructionDefs6 {
             "rdna3_5",
             "MIMG_NSA1",
             22,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 256, true, false, false),
@@ -6448,7 +6450,7 @@ private[common] object InstructionDefs6 {
             "gfx6",
             "MIMG",
             28,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -6457,7 +6459,7 @@ private[common] object InstructionDefs6 {
             "gfx7",
             "MIMG",
             28,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -6466,7 +6468,7 @@ private[common] object InstructionDefs6 {
             "gfx8",
             "MIMG",
             28,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -6475,7 +6477,7 @@ private[common] object InstructionDefs6 {
             "gfx9",
             "MIMG",
             28,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           )
@@ -6486,13 +6488,13 @@ private[common] object InstructionDefs6 {
         decoder(form(3)((operands, mods) =>
           Instruction.ImageAtomicDecUint(operands(0), operands(1), operands(2), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.GFX12,
             "rdna4",
             "VIMAGE",
             22,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(None, "VGPR", 128, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 256, true, false, false),
@@ -6509,13 +6511,13 @@ private[common] object InstructionDefs6 {
         decoder(form(3)((operands, mods) =>
           Instruction.ImageAtomicFcmpswap(operands(0), operands(1), operands(2), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.GFX10,
             "rdna1",
             "MIMG",
             29,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 256, true, false, false),
@@ -6530,7 +6532,7 @@ private[common] object InstructionDefs6 {
             "rdna1",
             "MIMG_NSA1",
             29,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 256, true, false, false),
@@ -6545,7 +6547,7 @@ private[common] object InstructionDefs6 {
             "rdna1",
             "MIMG_NSA2",
             29,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 256, true, false, false),
@@ -6560,7 +6562,7 @@ private[common] object InstructionDefs6 {
             "rdna1",
             "MIMG_NSA3",
             29,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 256, true, false, false),
@@ -6575,7 +6577,7 @@ private[common] object InstructionDefs6 {
             "rdna2",
             "MIMG",
             29,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 256, true, false, false),
@@ -6590,7 +6592,7 @@ private[common] object InstructionDefs6 {
             "rdna2",
             "MIMG_NSA1",
             29,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 256, true, false, false),
@@ -6605,7 +6607,7 @@ private[common] object InstructionDefs6 {
             "rdna2",
             "MIMG_NSA2",
             29,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 256, true, false, false),
@@ -6620,7 +6622,7 @@ private[common] object InstructionDefs6 {
             "rdna2",
             "MIMG_NSA3",
             29,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 256, true, false, false),
@@ -6635,7 +6637,7 @@ private[common] object InstructionDefs6 {
             "gfx6",
             "MIMG",
             29,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -6644,7 +6646,7 @@ private[common] object InstructionDefs6 {
             "gfx7",
             "MIMG",
             29,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           )
@@ -6653,13 +6655,13 @@ private[common] object InstructionDefs6 {
   case object ImageAtomicFmax extends InstructionDef(
         "image_atomic_fmax",
         decoder(form(3)((operands, mods) => Instruction.ImageAtomicFmax(operands(0), operands(1), operands(2), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.GFX10,
             "rdna1",
             "MIMG",
             31,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 256, true, false, false),
@@ -6674,7 +6676,7 @@ private[common] object InstructionDefs6 {
             "rdna1",
             "MIMG_NSA1",
             31,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 256, true, false, false),
@@ -6689,7 +6691,7 @@ private[common] object InstructionDefs6 {
             "rdna1",
             "MIMG_NSA2",
             31,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 256, true, false, false),
@@ -6704,7 +6706,7 @@ private[common] object InstructionDefs6 {
             "rdna1",
             "MIMG_NSA3",
             31,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 256, true, false, false),
@@ -6719,7 +6721,7 @@ private[common] object InstructionDefs6 {
             "rdna2",
             "MIMG",
             31,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 256, true, false, false),
@@ -6734,7 +6736,7 @@ private[common] object InstructionDefs6 {
             "rdna2",
             "MIMG_NSA1",
             31,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 256, true, false, false),
@@ -6749,7 +6751,7 @@ private[common] object InstructionDefs6 {
             "rdna2",
             "MIMG_NSA2",
             31,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 256, true, false, false),
@@ -6764,7 +6766,7 @@ private[common] object InstructionDefs6 {
             "rdna2",
             "MIMG_NSA3",
             31,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 256, true, false, false),
@@ -6779,7 +6781,7 @@ private[common] object InstructionDefs6 {
             "gfx6",
             "MIMG",
             31,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -6788,7 +6790,7 @@ private[common] object InstructionDefs6 {
             "gfx7",
             "MIMG",
             31,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           )
@@ -6797,13 +6799,13 @@ private[common] object InstructionDefs6 {
   case object ImageAtomicFmin extends InstructionDef(
         "image_atomic_fmin",
         decoder(form(3)((operands, mods) => Instruction.ImageAtomicFmin(operands(0), operands(1), operands(2), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.GFX10,
             "rdna1",
             "MIMG",
             30,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 256, true, false, false),
@@ -6818,7 +6820,7 @@ private[common] object InstructionDefs6 {
             "rdna1",
             "MIMG_NSA1",
             30,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 256, true, false, false),
@@ -6833,7 +6835,7 @@ private[common] object InstructionDefs6 {
             "rdna1",
             "MIMG_NSA2",
             30,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 256, true, false, false),
@@ -6848,7 +6850,7 @@ private[common] object InstructionDefs6 {
             "rdna1",
             "MIMG_NSA3",
             30,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 256, true, false, false),
@@ -6863,7 +6865,7 @@ private[common] object InstructionDefs6 {
             "rdna2",
             "MIMG",
             30,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 256, true, false, false),
@@ -6878,7 +6880,7 @@ private[common] object InstructionDefs6 {
             "rdna2",
             "MIMG_NSA1",
             30,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 256, true, false, false),
@@ -6893,7 +6895,7 @@ private[common] object InstructionDefs6 {
             "rdna2",
             "MIMG_NSA2",
             30,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 256, true, false, false),
@@ -6908,7 +6910,7 @@ private[common] object InstructionDefs6 {
             "rdna2",
             "MIMG_NSA3",
             30,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 256, true, false, false),
@@ -6923,7 +6925,7 @@ private[common] object InstructionDefs6 {
             "gfx6",
             "MIMG",
             30,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -6932,7 +6934,7 @@ private[common] object InstructionDefs6 {
             "gfx7",
             "MIMG",
             30,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           )
@@ -6941,13 +6943,13 @@ private[common] object InstructionDefs6 {
   case object ImageAtomicInc extends InstructionDef(
         "image_atomic_inc",
         decoder(form(3)((operands, mods) => Instruction.ImageAtomicInc(operands(0), operands(1), operands(2), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "MIMG",
             27,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 256, true, false, false),
@@ -6962,7 +6964,7 @@ private[common] object InstructionDefs6 {
             "cdna2",
             "MIMG",
             27,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 256, true, false, false),
@@ -6977,7 +6979,7 @@ private[common] object InstructionDefs6 {
             "rdna1",
             "MIMG",
             27,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 256, true, false, false),
@@ -6992,7 +6994,7 @@ private[common] object InstructionDefs6 {
             "rdna1",
             "MIMG_NSA1",
             27,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 256, true, false, false),
@@ -7007,7 +7009,7 @@ private[common] object InstructionDefs6 {
             "rdna1",
             "MIMG_NSA2",
             27,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 256, true, false, false),
@@ -7022,7 +7024,7 @@ private[common] object InstructionDefs6 {
             "rdna1",
             "MIMG_NSA3",
             27,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 256, true, false, false),
@@ -7037,7 +7039,7 @@ private[common] object InstructionDefs6 {
             "rdna2",
             "MIMG",
             27,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 256, true, false, false),
@@ -7052,7 +7054,7 @@ private[common] object InstructionDefs6 {
             "rdna2",
             "MIMG_NSA1",
             27,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 256, true, false, false),
@@ -7067,7 +7069,7 @@ private[common] object InstructionDefs6 {
             "rdna2",
             "MIMG_NSA2",
             27,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 256, true, false, false),
@@ -7082,7 +7084,7 @@ private[common] object InstructionDefs6 {
             "rdna2",
             "MIMG_NSA3",
             27,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 256, true, false, false),
@@ -7097,7 +7099,7 @@ private[common] object InstructionDefs6 {
             "rdna3",
             "MIMG",
             21,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 256, true, false, false),
@@ -7112,7 +7114,7 @@ private[common] object InstructionDefs6 {
             "rdna3",
             "MIMG_NSA1",
             21,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 256, true, false, false),
@@ -7127,7 +7129,7 @@ private[common] object InstructionDefs6 {
             "rdna3_5",
             "MIMG",
             21,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 256, true, false, false),
@@ -7142,7 +7144,7 @@ private[common] object InstructionDefs6 {
             "rdna3_5",
             "MIMG_NSA1",
             21,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 256, true, false, false),
@@ -7157,7 +7159,7 @@ private[common] object InstructionDefs6 {
             "gfx6",
             "MIMG",
             27,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -7166,7 +7168,7 @@ private[common] object InstructionDefs6 {
             "gfx7",
             "MIMG",
             27,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -7175,7 +7177,7 @@ private[common] object InstructionDefs6 {
             "gfx8",
             "MIMG",
             27,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -7184,7 +7186,7 @@ private[common] object InstructionDefs6 {
             "gfx9",
             "MIMG",
             27,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           )
@@ -7195,13 +7197,13 @@ private[common] object InstructionDefs6 {
         decoder(form(3)((operands, mods) =>
           Instruction.ImageAtomicIncUint(operands(0), operands(1), operands(2), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.GFX12,
             "rdna4",
             "VIMAGE",
             21,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(None, "VGPR", 128, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 256, true, false, false),
@@ -7218,13 +7220,13 @@ private[common] object InstructionDefs6 {
         decoder(form(3)((operands, mods) =>
           Instruction.ImageAtomicMaxFlt(operands(0), operands(1), operands(2), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.GFX12,
             "rdna4",
             "VIMAGE",
             133,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(None, "VGPR", 128, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 256, true, false, false),
@@ -7241,13 +7243,13 @@ private[common] object InstructionDefs6 {
         decoder(form(3)((operands, mods) =>
           Instruction.ImageAtomicMaxInt(operands(0), operands(1), operands(2), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.GFX12,
             "rdna4",
             "VIMAGE",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(None, "VGPR", 128, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 256, true, false, false),
@@ -7264,13 +7266,13 @@ private[common] object InstructionDefs6 {
         decoder(form(3)((operands, mods) =>
           Instruction.ImageAtomicMaxUint(operands(0), operands(1), operands(2), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.GFX12,
             "rdna4",
             "VIMAGE",
             17,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(None, "VGPR", 128, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 256, true, false, false),
@@ -7287,13 +7289,13 @@ private[common] object InstructionDefs6 {
         decoder(form(3)((operands, mods) =>
           Instruction.ImageAtomicMinFlt(operands(0), operands(1), operands(2), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.GFX12,
             "rdna4",
             "VIMAGE",
             132,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(None, "VGPR", 128, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 256, true, false, false),
@@ -7310,13 +7312,13 @@ private[common] object InstructionDefs6 {
         decoder(form(3)((operands, mods) =>
           Instruction.ImageAtomicMinInt(operands(0), operands(1), operands(2), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.GFX12,
             "rdna4",
             "VIMAGE",
             14,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(None, "VGPR", 128, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 256, true, false, false),
@@ -7333,13 +7335,13 @@ private[common] object InstructionDefs6 {
         decoder(form(3)((operands, mods) =>
           Instruction.ImageAtomicMinUint(operands(0), operands(1), operands(2), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.GFX12,
             "rdna4",
             "VIMAGE",
             15,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(None, "VGPR", 128, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 256, true, false, false),
@@ -7354,13 +7356,13 @@ private[common] object InstructionDefs6 {
   case object ImageAtomicOr extends InstructionDef(
         "image_atomic_or",
         decoder(form(3)((operands, mods) => Instruction.ImageAtomicOr(operands(0), operands(1), operands(2), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "MIMG",
             25,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 256, true, false, false),
@@ -7375,7 +7377,7 @@ private[common] object InstructionDefs6 {
             "cdna2",
             "MIMG",
             25,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 256, true, false, false),
@@ -7390,7 +7392,7 @@ private[common] object InstructionDefs6 {
             "rdna1",
             "MIMG",
             25,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 256, true, false, false),
@@ -7405,7 +7407,7 @@ private[common] object InstructionDefs6 {
             "rdna1",
             "MIMG_NSA1",
             25,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 256, true, false, false),
@@ -7420,7 +7422,7 @@ private[common] object InstructionDefs6 {
             "rdna1",
             "MIMG_NSA2",
             25,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 256, true, false, false),
@@ -7435,7 +7437,7 @@ private[common] object InstructionDefs6 {
             "rdna1",
             "MIMG_NSA3",
             25,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 256, true, false, false),
@@ -7450,7 +7452,7 @@ private[common] object InstructionDefs6 {
             "rdna2",
             "MIMG",
             25,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 256, true, false, false),
@@ -7465,7 +7467,7 @@ private[common] object InstructionDefs6 {
             "rdna2",
             "MIMG_NSA1",
             25,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 256, true, false, false),
@@ -7480,7 +7482,7 @@ private[common] object InstructionDefs6 {
             "rdna2",
             "MIMG_NSA2",
             25,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 256, true, false, false),
@@ -7495,7 +7497,7 @@ private[common] object InstructionDefs6 {
             "rdna2",
             "MIMG_NSA3",
             25,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 256, true, false, false),
@@ -7510,7 +7512,7 @@ private[common] object InstructionDefs6 {
             "rdna3",
             "MIMG",
             19,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 256, true, false, false),
@@ -7525,7 +7527,7 @@ private[common] object InstructionDefs6 {
             "rdna3",
             "MIMG_NSA1",
             19,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 256, true, false, false),
@@ -7540,7 +7542,7 @@ private[common] object InstructionDefs6 {
             "rdna3_5",
             "MIMG",
             19,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 256, true, false, false),
@@ -7555,7 +7557,7 @@ private[common] object InstructionDefs6 {
             "rdna3_5",
             "MIMG_NSA1",
             19,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 128, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 256, true, false, false),
@@ -7570,7 +7572,7 @@ private[common] object InstructionDefs6 {
             "rdna4",
             "VIMAGE",
             19,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(None, "VGPR", 128, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 256, true, false, false),
@@ -7585,7 +7587,7 @@ private[common] object InstructionDefs6 {
             "gfx6",
             "MIMG",
             25,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -7594,7 +7596,7 @@ private[common] object InstructionDefs6 {
             "gfx7",
             "MIMG",
             25,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -7603,7 +7605,7 @@ private[common] object InstructionDefs6 {
             "gfx8",
             "MIMG",
             25,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -7612,7 +7614,7 @@ private[common] object InstructionDefs6 {
             "gfx9",
             "MIMG",
             25,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           )
@@ -7623,13 +7625,13 @@ private[common] object InstructionDefs6 {
         decoder(form(3)((operands, mods) =>
           Instruction.ImageAtomicPkAddBf16(operands(0), operands(1), operands(2), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.GFX12,
             "rdna4",
             "VIMAGE",
             135,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(None, "VGPR", 128, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 256, true, false, false),
@@ -7646,13 +7648,13 @@ private[common] object InstructionDefs6 {
         decoder(form(3)((operands, mods) =>
           Instruction.ImageAtomicPkAddF16(operands(0), operands(1), operands(2), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.GFX12,
             "rdna4",
             "VIMAGE",
             134,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(None, "VGPR", 128, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 256, true, false, false),
@@ -7665,7 +7667,7 @@ private[common] object InstructionDefs6 {
         ))
       )
 
-  val definitions: Vector[InstructionDef] = Vector(
+  val definitions: Col[InstructionDef] = Col(
     GlobalAtomicXorX2,
     GlobalInv,
     GlobalLoadAddtidB32,

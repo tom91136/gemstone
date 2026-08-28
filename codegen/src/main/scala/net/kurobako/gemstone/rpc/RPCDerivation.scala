@@ -1,13 +1,15 @@
 package net.kurobako.gemstone.rpc
 
+import net.kurobako.gemstone.Col
+
 import scala.quoted.Expr
 import scala.quoted.Quotes
 import scala.quoted.Type
 import scala.quoted.Varargs
 
 object RPCDerivation {
-  inline def schema[T]: RPCSchema           = ${ schemaImpl[T] }
-  inline def methodNames[T]: Vector[String] = ${ methodNamesImpl[T] }
+  inline def schema[T]: RPCSchema        = ${ schemaImpl[T] }
+  inline def methodNames[T]: Col[String] = ${ methodNamesImpl[T] }
 
   private final case class DerivedParameter(
       name: String,
@@ -72,7 +74,7 @@ object RPCDerivation {
         RPCMethod(
           ${ Expr(method.name) },
           MessageId(${ Expr(high) }, ${ Expr(low) }),
-          Vector(${ Varargs(parameterExpressions) }*),
+          Col(${ Varargs(parameterExpressions) }*),
           WireType.CUDAStatus
         )
       }
@@ -82,12 +84,12 @@ object RPCDerivation {
       RPCSchema(
         ${ Expr(interfaceSymbol.fullName) },
         ${ Expr(fingerprint) },
-        Vector(${ Varargs(methodExpressions) }*)
+        Col(${ Varargs(methodExpressions) }*)
       )
     }
   }
 
-  private def methodNamesImpl[T: Type](using quotes: Quotes): Expr[Vector[String]] = {
+  private def methodNamesImpl[T: Type](using quotes: Quotes): Expr[Col[String]] = {
     import quotes.reflect.*
     val interfaceSymbol = TypeRepr.of[T].typeSymbol
     if (!interfaceSymbol.flags.is(Flags.Trait))
@@ -98,7 +100,7 @@ object RPCDerivation {
       .distinct
       .sorted
       .map(Expr(_))
-    '{ Vector(${ Varargs(names) }*) }
+    '{ Col(${ Varargs(names) }*) }
   }
 
   private def publicMethods(using quotes: Quotes)(interface: quotes.reflect.Symbol): Vector[quotes.reflect.Symbol] = {

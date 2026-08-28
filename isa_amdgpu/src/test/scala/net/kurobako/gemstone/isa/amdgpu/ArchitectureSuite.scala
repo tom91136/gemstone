@@ -1,5 +1,7 @@
 package net.kurobako.gemstone.isa.amdgpu
 
+import net.kurobako.gemstone.Col
+
 class ArchitectureSuite extends munit.FunSuite {
   test("version packages expose generated family-scoped metadata") {
     val instruction = gfx10.Parser.parseInstruction("s_nop 0").toOption.get
@@ -9,8 +11,10 @@ class ArchitectureSuite extends munit.FunSuite {
     assert(gfx10.Instructions.exists(_.opcode == "s_nop"))
     assert(gfx10.Instructions.forall(_.meta.supports(gfx10.Version)))
     assertEquals(
-      gfx10.Instructions.flatMap(_.meta.encodings).filter(_.generation == gfx10.Version).map(_.target).distinct.sorted,
-      Vector("rdna1", "rdna2")
+      gfx10.Instructions.flatMap(
+        _.meta.encodings
+      ).filter(_.generation == gfx10.Version).map(_.target).distinct.sorted.toSeq,
+      Seq("rdna1", "rdna2")
     )
     assert(gfx10.ISA.encodeSOPP(instruction, gfx10.Target.unsafe("gfx1010")).isRight)
   }

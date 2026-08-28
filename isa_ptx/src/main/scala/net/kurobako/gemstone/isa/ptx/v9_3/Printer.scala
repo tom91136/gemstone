@@ -1,5 +1,7 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
+import net.kurobako.gemstone.Col
+
 /** Deterministic canonical printer. Parsing its output must reproduce the same syntax tree. */
 object Printer {
   def render(operand: Operand): String = operand match {
@@ -29,7 +31,7 @@ object Printer {
       if (qualifier.headOption.exists(_.isDigit)) qualifier else "." + qualifier
     }.mkString(" ")
     val dimensions = parameter.dimensions.map(dimension => s"[${render(dimension)}]").mkString
-    Vector(qualifiers, parameter.name + dimensions).filter(_.nonEmpty).mkString(" ")
+    Col(qualifiers, parameter.name + dimensions).filter(_.nonEmpty).mkString(" ")
   }
 
   def render(instruction: Instruction): String = {
@@ -66,10 +68,10 @@ object Printer {
       }
   }
 
-  def render(statements: Vector[Statement]): String = statements.map(render).mkString("\n")
+  def render(statements: Col[Statement]): String = statements.map(render).mkString("\n")
 
   def render(program: Program): String = render(program.statements)
 
-  private def renderBody(body: Vector[Statement]): String =
+  private def renderBody(body: Col[Statement]): String =
     if (body.isEmpty) "{}" else body.map(render).mkString("{ ", " ", " }")
 }

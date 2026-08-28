@@ -1,12 +1,14 @@
 package net.kurobako.gemstone.execution
 
+import net.kurobako.gemstone.Col
+
 class ExecutionSuite extends munit.FunSuite {
   private enum TestWrite extends Write {
     case Value(value: Int)
   }
 
   test("an executable program is immutable and bounds checked") {
-    val program = ExecutableProgram(Vector("first", "second"))
+    val program = ExecutableProgram(Col("first", "second"))
     assertEquals(program.at(Pc.Entry), Right("first"))
     assert(program.at(Pc.unsafe(2)).left.exists(_.isInstanceOf[ExecutionFault.InvalidProgram]))
   }
@@ -27,7 +29,7 @@ class ExecutionSuite extends munit.FunSuite {
 
   test("effects validate every write before committing any") {
     val effects = new Effects[TestWrite]
-    val applied = Vector.newBuilder[Int]
+    val applied = Col.newBuilder[Int]
     effects.stage(TestWrite.Value(1))
     effects.stage(TestWrite.Value(-1))
     val result = effects.commit(
@@ -38,7 +40,7 @@ class ExecutionSuite extends munit.FunSuite {
       { case TestWrite.Value(value) => applied += value }
     )
     assert(result.isLeft)
-    assertEquals(applied.result(), Vector.empty)
+    assertEquals(applied.result().toSeq, Seq.empty)
     assert(effects.isEmpty)
   }
 

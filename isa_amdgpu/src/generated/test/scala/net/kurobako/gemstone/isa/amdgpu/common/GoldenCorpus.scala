@@ -1,5 +1,8 @@
 package net.kurobako.gemstone.isa.amdgpu.common
 
+import net.kurobako.gemstone.Col
+import net.kurobako.gemstone.Col.*
+
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.nio.charset.StandardCharsets
@@ -10,7 +13,7 @@ import java.util.zip.GZIPInputStream
 import scala.collection.mutable.ArrayBuffer
 
 // Generated exhaustively from pinned LLVM MC/AMDGPU checks. Do not edit.
-final case class AMDGPUGoldenCase(target: Target, assembly: String, bytes: Vector[Byte], source: String)
+final case class AMDGPUGoldenCase(target: Target, assembly: String, bytes: Col[Byte], source: String)
 final case class AMDGPUDiagnosticCase(target: Target, assembly: String, message: String, source: String)
 
 object GoldenCorpus {
@@ -20,22 +23,22 @@ object GoldenCorpus {
   val caseCount: Int = 308161
   val diagnosticCount: Int = 98730
 
-  lazy val cases: Vector[AMDGPUGoldenCase] = load("positive.tsv.gz").map { row =>
+  lazy val cases: Col[AMDGPUGoldenCase] = load("positive.tsv.gz").map { row =>
     val fields = row.split("\t", -1)
     AMDGPUGoldenCase(
       Target.unsafe(fields(0)),
       fields(1),
-      fields(2).split(',').toVector.map(_.toInt.toByte),
+      fields(2).split(',').toCol.map(_.toInt.toByte),
       fields(3)
     )
   }
 
-  lazy val diagnostics: Vector[AMDGPUDiagnosticCase] = load("diagnostics.tsv.gz").map { row =>
+  lazy val diagnostics: Col[AMDGPUDiagnosticCase] = load("diagnostics.tsv.gz").map { row =>
     val fields = row.split("\t", -1)
     AMDGPUDiagnosticCase(Target.unsafe(fields(0)), fields(1), fields(2), fields(3))
   }
 
-  private def load(name: String): Vector[String] = {
+  private def load(name: String): Col[String] = {
     val root = repositoryRoot(Paths.get(sys.props("user.dir")))
     val path = root.resolve(
       "isa_amdgpu/src/generated/test/resources/net/kurobako/gemstone/isa/amdgpu/common"
@@ -50,7 +53,7 @@ object GoldenCorpus {
         line = reader.readLine()
       }
     } finally reader.close()
-    result.toVector
+    result.toCol
   }
 
   private def repositoryRoot(start: Path): Path = {

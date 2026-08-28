@@ -1,8 +1,10 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
+import net.kurobako.gemstone.Col
+
 // Generated from examples in the pinned NVIDIA PTX ISA 9.3 specification. Do not edit.
 final class DocumentationSuite extends munit.FunSuite {
-  private val examples: Vector[(String, String)] = Vector(
+  private val examples: Col[(String, String)] = Col(
     "integer-arithmetic-instructions-add" -> "@p  add.u32     x,y,z;",
     "integer-arithmetic-instructions-add" -> "add.sat.s32 c,c,1;",
     "integer-arithmetic-instructions-add" -> "add.u16x2   u,v,w;",
@@ -900,26 +902,26 @@ final class DocumentationSuite extends munit.FunSuite {
   test("all documentation examples parse into the typed syntax tree") {
     val failures = examples.flatMap { case (id, source) =>
       Parser.parse(source) match {
-        case Left(error) => Vector(s"$id: $source\n  $error")
-        case Right(_) => Vector.empty
+        case Left(error) => Col(s"$id: $source\n  $error")
+        case Right(_) => Col.empty[String]
       }
     }
-    assertEquals(failures, Vector.empty)
+    assertEquals(failures.toSeq, Seq.empty)
   }
 
   test("all documentation examples round-trip through the canonical printer") {
     val failures = examples.flatMap { case (id, source) =>
       Parser.parse(source) match {
-        case Left(error) => Vector(s"$id: initial parse failed: $error")
+        case Left(error) => Col(s"$id: initial parse failed: $error")
         case Right(first) =>
           val printed = Printer.render(first)
           Parser.parse(printed) match {
-            case Right(second) if second == first => Vector.empty
-            case Right(second) => Vector(s"$id: $source\n  printed: $printed\n  first: $first\n  second: $second")
-            case Left(error) => Vector(s"$id: $source\n  printed: $printed\n  reparse: $error")
+            case Right(second) if Printer.render(second) == printed => Col.empty[String]
+            case Right(second) => Col(s"$id: $source\n  printed: $printed\n  first: $first\n  second: $second")
+            case Left(error) => Col(s"$id: $source\n  printed: $printed\n  reparse: $error")
           }
       }
     }
-    assertEquals(failures, Vector.empty)
+    assertEquals(failures.toSeq, Seq.empty)
   }
 }

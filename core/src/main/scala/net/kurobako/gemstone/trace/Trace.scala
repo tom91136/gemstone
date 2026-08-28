@@ -1,12 +1,14 @@
 package net.kurobako.gemstone.trace
 
+import net.kurobako.gemstone.Col
+
 sealed trait TraceEvent extends Product with Serializable {
   def step: Long
   def eventType: String
-  protected def fields: Vector[(String, String)]
+  protected def fields: Col[(String, String)]
 
   final def toJSON: String = {
-    val payload = Vector("event" -> eventType, "step" -> step.toString) ++ fields
+    val payload = Col("event" -> eventType, "step" -> step.toString) ++ fields
     payload.map { case (key, value) => s"\"${TraceEvent.escape(key)}\":\"${TraceEvent.escape(value)}\"" }.mkString(
       "{",
       ",",
@@ -24,8 +26,8 @@ object TraceEvent {
       pc: Int,
       opcode: String
   ) extends TraceEvent {
-    override val eventType: String                          = "instruction"
-    override protected val fields: Vector[(String, String)] = Vector(
+    override val eventType: String                       = "instruction"
+    override protected val fields: Col[(String, String)] = Col(
       "kernel" -> kernel,
       "block"  -> block.toString,
       "lane"   -> lane.toString,
@@ -41,8 +43,8 @@ object TraceEvent {
       address: Long,
       value: Int
   ) extends TraceEvent {
-    override val eventType: String                          = "output-write"
-    override protected val fields: Vector[(String, String)] = Vector(
+    override val eventType: String                       = "output-write"
+    override protected val fields: Col[(String, String)] = Col(
       "block"   -> block.toString,
       "lane"    -> lane.toString,
       "address" -> java.lang.Long.toUnsignedString(address),
@@ -51,8 +53,8 @@ object TraceEvent {
   }
 
   final case class SchedulerDecision(step: Long, block: Int, lane: Int) extends TraceEvent {
-    override val eventType: String                          = "scheduler-decision"
-    override protected val fields: Vector[(String, String)] = Vector(
+    override val eventType: String                       = "scheduler-decision"
+    override protected val fields: Col[(String, String)] = Col(
       "block" -> block.toString,
       "lane"  -> lane.toString
     )
@@ -68,11 +70,11 @@ object TraceEvent {
   }
 }
 
-final case class Trace(events: Vector[TraceEvent]) {
+final case class Trace(events: Col[TraceEvent]) {
   def append(event: TraceEvent): Trace = copy(events = events :+ event)
   def jsonLines: String                = events.map(_.toJSON).mkString("\n")
 }
 
 object Trace {
-  val empty: Trace = Trace(Vector.empty)
+  val empty: Trace = Trace(Col.empty)
 }

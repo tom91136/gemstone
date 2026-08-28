@@ -1,16 +1,18 @@
 package net.kurobako.gemstone.abi
 
+import net.kurobako.gemstone.Col
+
 import scala.quoted.Expr
 import scala.quoted.Quotes
 import scala.quoted.Type
 import scala.quoted.Varargs
 
 object ABIDerivation {
-  inline def methods[T]: Vector[ABIMethod]              = ${ methodsImpl[T] }
-  inline def cFunctions[T]: Vector[CFunction]           = ${ cFunctionsImpl[T] }
-  inline def nativeDelegates[T]: Vector[ABIDeclaration] = ${ nativeDelegatesImpl[T] }
+  inline def methods[T]: Col[ABIMethod]              = ${ methodsImpl[T] }
+  inline def cFunctions[T]: Col[CFunction]           = ${ cFunctionsImpl[T] }
+  inline def nativeDelegates[T]: Col[ABIDeclaration] = ${ nativeDelegatesImpl[T] }
 
-  private def cFunctionsImpl[T: Type](using quotes: Quotes): Expr[Vector[CFunction]] = {
+  private def cFunctionsImpl[T: Type](using quotes: Quotes): Expr[Col[CFunction]] = {
     import quotes.reflect.*
     val interface = TypeRepr.of[T].typeSymbol
     if (!interface.flags.is(Flags.Trait)) report.errorAndAbort(s"ABI interface must be a trait: ${interface.fullName}")
@@ -20,7 +22,7 @@ object ABIDerivation {
       val signature = deriveCFunctionSignature(method)
       '{ CFunction(${ Expr(method.name) }, ${ Expr(signature) }) }
     }
-    '{ Vector(${ Varargs(expressions) }*) }
+    '{ Col(${ Varargs(expressions) }*) }
   }
 
   private def deriveCFunctionSignature(using quotes: Quotes)(method: quotes.reflect.Symbol): String = {
@@ -239,7 +241,7 @@ object ABIDerivation {
     loop(original)
   }
 
-  private def nativeDelegatesImpl[T: Type](using quotes: Quotes): Expr[Vector[ABIDeclaration]] = {
+  private def nativeDelegatesImpl[T: Type](using quotes: Quotes): Expr[Col[ABIDeclaration]] = {
     import quotes.reflect.*
     val interface = TypeRepr.of[T].typeSymbol
     if (!interface.flags.is(Flags.Trait)) report.errorAndAbort(s"ABI interface must be a trait: ${interface.fullName}")
@@ -253,15 +255,15 @@ object ABIDerivation {
         ABIDeclaration(
           ${ Expr(method.name) },
           ${ Expr(signature) },
-          Vector(${ Varargs(parameterNames) }*),
+          Col(${ Varargs(parameterNames) }*),
           MethodImplementation.NativeDelegate(${ Expr(target) })
         )
       }
     }
-    '{ Vector(${ Varargs(expressions) }*) }
+    '{ Col(${ Varargs(expressions) }*) }
   }
 
-  private def methodsImpl[T: Type](using quotes: Quotes): Expr[Vector[ABIMethod]] = {
+  private def methodsImpl[T: Type](using quotes: Quotes): Expr[Col[ABIMethod]] = {
     import quotes.reflect.*
 
     val interface = TypeRepr.of[T].typeSymbol
@@ -277,7 +279,7 @@ object ABIDerivation {
       val implementation = implementationExpression(method)
       '{ ABIMethod(${ Expr(method.name) }, $implementation) }
     }
-    '{ Vector(${ Varargs(expressions) }*) }
+    '{ Col(${ Varargs(expressions) }*) }
   }
 
   private def implementationExpression(using

@@ -1,19 +1,21 @@
 package net.kurobako.gemstone.isa.spirv.v1_6
 
-private[v1_6] final case class DecodedOperands(fields: Vector[Vector[Operand]]) {
+import net.kurobako.gemstone.Col
+
+private[v1_6] final case class DecodedOperands(fields: Col[Col[Operand]]) {
   def required(index: Int): Operand         = fields(index).head
   def optional(index: Int): Option[Operand] = fields(index).headOption
-  def repeated(index: Int): Vector[Operand] = fields(index)
+  def repeated(index: Int): Col[Operand]    = fields(index)
 }
 
 private[v1_6] object OperandDecoder {
   def decode(
       opcode: String,
-      words: Vector[Word],
-      shapes: Vector[OperandShape],
+      words: Col[Word],
+      shapes: Col[OperandShape],
       kinds: Map[String, OperandKindInfo]
   ): Either[InstructionDecodeError, DecodedOperands] = {
-    val fields = Vector.newBuilder[Vector[Operand]]
+    val fields = Col.newBuilder[Col[Operand]]
     var offset = 0
     var index  = 0
     while (index < shapes.size) {
@@ -23,19 +25,19 @@ private[v1_6] object OperandDecoder {
           decodeOne(opcode, shape.kind, words, offset, kinds) match {
             case Left(error)            => return Left(error)
             case Right((operand, next)) =>
-              fields += Vector(operand)
+              fields += Col(operand)
               offset = next
           }
         case OperandQuantifier.Optional =>
-          if (offset == words.size) fields += Vector.empty
+          if (offset == words.size) fields += Col.empty
           else decodeOne(opcode, shape.kind, words, offset, kinds) match {
             case Left(error)            => return Left(error)
             case Right((operand, next)) =>
-              fields += Vector(operand)
+              fields += Col(operand)
               offset = next
           }
         case OperandQuantifier.Repeated =>
-          val operands = Vector.newBuilder[Operand]
+          val operands = Col.newBuilder[Operand]
           while (offset < words.size)
             decodeOne(opcode, shape.kind, words, offset, kinds) match {
               case Left(error)            => return Left(error)
@@ -52,31 +54,31 @@ private[v1_6] object OperandDecoder {
     else Right(DecodedOperands(fields.result()))
   }
 
-  def minimumWords(shapes: Vector[OperandShape], kinds: Map[String, OperandKindInfo]): Vector[Word] =
+  def minimumWords(shapes: Col[OperandShape], kinds: Map[String, OperandKindInfo]): Col[Word] =
     shapes.flatMap { shape =>
       shape.quantifier match {
         case OperandQuantifier.One      => minimumOperand(shape.kind, kinds)
-        case OperandQuantifier.Optional => Vector.empty
-        case OperandQuantifier.Repeated => Vector.empty
+        case OperandQuantifier.Optional => Col.empty[Word]
+        case OperandQuantifier.Repeated => Col.empty[Word]
       }
     }
 
-  private def minimumOperand(kind: String, kinds: Map[String, OperandKindInfo]): Vector[Word] =
-    if (kind == "LiteralString") Vector(Word(0))
-    else if (kind.startsWith("Pair")) Vector(Word(0), Word(0))
+  private def minimumOperand(kind: String, kinds: Map[String, OperandKindInfo]): Col[Word] =
+    if (kind == "LiteralString") Col(Word(0))
+    else if (kind.startsWith("Pair")) Col(Word(0), Word(0))
     else kinds.get(kind) match {
       case Some(info) if info.enumerants.nonEmpty =>
         val selected = info.enumerants.minBy(enumerant => (enumerant.parameterKinds.size, enumerant.value))
-        Vector(Word(selected.value.toInt)) ++ selected.parameterKinds.flatMap(parameter =>
+        Col(Word(selected.value.toInt)) ++ selected.parameterKinds.flatMap(parameter =>
           minimumOperand(parameter, kinds)
         )
-      case _ => Vector(Word(0))
+      case _ => Col(Word(0))
     }
 
   private def decodeOne(
       opcode: String,
       kind: String,
-      words: Vector[Word],
+      words: Col[Word],
       offset: Int,
       kinds: Map[String, OperandKindInfo]
   ): Either[InstructionDecodeError, (Operand, Int)] = {
@@ -91,14 +93,14 @@ private[v1_6] object OperandDecoder {
     } else kinds.get(kind) match {
       case Some(info) if info.category == "ValueEnum" => decodeValueEnum(opcode, info, words, offset, kinds)
       case Some(info) if info.category == "BitEnum"   => decodeBitEnum(opcode, info, words, offset, kinds)
-      case _                                          => Right(Operand(kind, Vector(words(offset))) -> (offset + 1))
+      case _                                          => Right(Operand(kind, Col(words(offset))) -> (offset + 1))
     }
   }
 
   private def decodeString(
       opcode: String,
       kind: String,
-      words: Vector[Word],
+      words: Col[Word],
       offset: Int
   ): Either[InstructionDecodeError, (Operand, Int)] = {
     var end   = offset
@@ -115,7 +117,7 @@ private[v1_6] object OperandDecoder {
   private def decodeValueEnum(
       opcode: String,
       info: OperandKindInfo,
-      words: Vector[Word],
+      words: Col[Word],
       offset: Int,
       kinds: Map[String, OperandKindInfo]
   ): Either[InstructionDecodeError, (Operand, Int)] = {
@@ -129,7 +131,7 @@ private[v1_6] object OperandDecoder {
   private def decodeBitEnum(
       opcode: String,
       info: OperandKindInfo,
-      words: Vector[Word],
+      words: Col[Word],
       offset: Int,
       kinds: Map[String, OperandKindInfo]
   ): Either[InstructionDecodeError, (Operand, Int)] = {
@@ -147,9 +149,9 @@ private[v1_6] object OperandDecoder {
   private def decodeParameters(
       opcode: String,
       outerKind: String,
-      words: Vector[Word],
+      words: Col[Word],
       offset: Int,
-      parameterKinds: Vector[String],
+      parameterKinds: Col[String],
       kinds: Map[String, OperandKindInfo]
   ): Either[InstructionDecodeError, (Operand, Int)] = {
     var next  = offset + 1

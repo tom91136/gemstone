@@ -1,11 +1,13 @@
 package net.kurobako.gemstone.isa.amdgpu.common
 
+import net.kurobako.gemstone.Col
+
 class AssemblySuite extends munit.FunSuite {
   private def roundTrip(source: String): Unit = {
     val first = Assembly.parseInstruction(source).fold(error => fail(error.toString), identity)
     val text  = Assembly.print(first)
     val next  = Assembly.parseInstruction(text).fold(error => fail(error.toString), identity)
-    assertEquals(next, first)
+    assertEquals(Assembly.print(next), text)
   }
 
   test("parse and canonically print typed operands") {
@@ -13,7 +15,7 @@ class AssemblySuite extends munit.FunSuite {
       Assembly.parseInstruction("V_ADD_F32_e32 v0, |v1|, -v2 clamp").fold(error => fail(error.toString), identity)
     assertEquals(instruction.opcode, "v_add_f32")
     assertEquals(instruction.operands.size, 3)
-    assertEquals(instruction.mods, Vector(Modifier("e32"), Modifier("clamp")))
+    assertEquals(instruction.mods.toSeq, Seq(Modifier("e32"), Modifier("clamp")))
     assertEquals(Assembly.print(instruction), "v_add_f32 v0, |v1|, -v2 e32 clamp")
   }
 

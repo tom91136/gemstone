@@ -1,5 +1,8 @@
 package net.kurobako.gemstone.isa.amdgpu.common
 
+import net.kurobako.gemstone.Col
+import net.kurobako.gemstone.Col.*
+
 enum ValidationError {
   case UnsupportedInstruction(opcode: String, target: Target)
   case InvalidInstruction(opcode: String, message: String)
@@ -7,7 +10,7 @@ enum ValidationError {
 
 enum ValidationResult {
   case Valid
-  case Invalid(errors: Vector[ValidationError])
+  case Invalid(errors: Col[ValidationError])
   case Unsupported(reason: String)
 }
 
@@ -38,7 +41,7 @@ object Validator {
   ): ValidationResult = {
     val definitions = encodingsFor(instruction, target)
     if (definitions.isEmpty)
-      ValidationResult.Invalid(Vector(ValidationError.UnsupportedInstruction(instruction.opcode, target)))
+      ValidationResult.Invalid(Col(ValidationError.UnsupportedInstruction(instruction.opcode, target)))
     else {
       val formats = definitions.map(_.format.toUpperCase).distinct
       if (formats.contains("SOPP")) validateSOPP(instruction, target, definitions)
@@ -49,7 +52,7 @@ object Validator {
   private def validateSOPP(
       instruction: Instruction,
       target: Target,
-      definitions: Vector[Encoding]
+      definitions: Col[Encoding]
   ): ValidationResult = {
     val explicitSignatures = definitions.map(_.operands.filter(!_.implicitOperand)).filter(_.nonEmpty).distinct
     if (instruction.mods.nonEmpty)
@@ -67,7 +70,7 @@ object Validator {
         invalid(instruction, s"expected ${signature.size} operands, found ${instruction.operands.size}")
       else {
         val errors = instruction.operands.zip(signature).flatMap { case (operand, info) =>
-          validateSOPPOperand(operand, info).toVector
+          validateSOPPOperand(operand, info).toCol
         }
         if (errors.isEmpty) availabilityUnknown(instruction, target)
         else invalid(instruction, errors.mkString("; "))
@@ -89,7 +92,7 @@ object Validator {
       }
 
   private def invalid(instruction: Instruction, message: String): ValidationResult =
-    ValidationResult.Invalid(Vector(ValidationError.InvalidInstruction(instruction.opcode, message)))
+    ValidationResult.Invalid(Col(ValidationError.InvalidInstruction(instruction.opcode, message)))
 
   private def availabilityUnknown(instruction: Instruction, target: Target): ValidationResult =
     ValidationResult.Unsupported(

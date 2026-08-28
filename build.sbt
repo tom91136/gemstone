@@ -3,6 +3,8 @@ import scala.sys.process.Process
 Global / onChangedBuildSource := ReloadOnSourceChanges
 
 lazy val scala3Version        = "3.8.3"
+// Bump whenever Col's backing type changes so cached JVM/Native products cannot retain the previous ABI.
+lazy val runtimeCollectionABI = "iarray-v1"
 lazy val munitVersion         = "1.3.4"
 lazy val catsParseVersion     = "1.1.0"
 lazy val jsoupVersion         = "1.23.2"
@@ -66,6 +68,8 @@ lazy val prepareISAReferences       = taskKey[Unit]("Download, verify, and selec
 lazy val generateAPIValidationManifest = taskKey[File]("Record normalized declarations from pinned official API headers.")
 lazy val validateAPISurfaces = taskKey[Unit]("Validate checked-in API declarations against pinned official headers.")
 lazy val checkGeneratedAPISources = taskKey[Unit]("Verify checked-in generated ABI and RPC files are current.")
+lazy val checkRuntimeCollections =
+  taskKey[Unit]("Reject direct runtime uses of Vector, List, Seq, or IArray outside Col.")
 @transient lazy val generatePTXSources        = taskKey[Seq[File]]("Update checked-in PTX instruction metadata.")
 @transient lazy val generatePTXReferenceTests =
   taskKey[Seq[File]]("Update checked-in PTX documentation conformance tests.")
@@ -97,12 +101,16 @@ lazy val commonSettings = Seq(
     "-Wnonunit-statement",
     "-Wvalue-discard",
     "-Yretain-trees",
+    s"-Xmacro-settings:gemstone.runtime-collection=$runtimeCollectionABI",
     "-language:noAutoTupling",
     "-source",
     "3.7"
   ),
   Compile / scalacOptions += "-Wunused:all",
   Test / scalacOptions ~= { _.filterNot(_ == "-Wunused:all") },
+  // Keep inter-project classpaths directory-backed. sbt 2's exported JAR cache can
+  // retain products whose package changed, which is especially harmful to Native linking.
+  Compile / exportJars                   := false,
   scalafmtDetailedError                  := true,
   scalafmtFailOnErrors                   := true,
   libraryDependencies += "org.scalameta" %% "munit" % munitVersion % Test
@@ -123,6 +131,7 @@ lazy val skipSharedSourceFormatting = Seq(
 )
 
 lazy val api = projectMatrix
+  .dependsOn(core)
   .settings(
     commonSettings,
     checkedInGeneratedSources("api"),
@@ -324,18 +333,30 @@ lazy val codegen = projectMatrix
         "net.kurobako.gemstone.codegen.GenerateAPI",
         "--check",
         (root / "generated").getAbsolutePath,
-        (root / "core" / "src" / "generated" / "main" / "scala").getAbsolutePath
+        (root / "api" / "src" / "generated" / "main" / "scala").getAbsolutePath
       )).!
       require(exit == 0, s"generated API validation exited with $exit")
+    },
+    checkRuntimeCollections := Def.uncached {
+      val root      = (LocalRootProject / baseDirectory).value
+      val converter = fileConverter.value
+      val classpath = (Compile / fullClasspath).value.map(entry => converter.toPath(entry.data).toString)
+      val java      = file(sys.props("java.home")) / "bin" / "java"
+      val exit      = Process(Seq(
+        java.getAbsolutePath,
+        "-cp",
+        classpath.mkString(sys.props("path.separator")),
+        "net.kurobako.gemstone.codegen.AuditRuntimeCollections",
+        root.getAbsolutePath
+      )).!
+      require(exit == 0, s"runtime collection audit exited with $exit")
     }
   )
   .jvmPlatform(scalaVersions = Seq(scala3Version))
 
 lazy val core = projectMatrix
-  .dependsOn(api)
   .settings(
     commonSettings,
-    checkedInGeneratedSources("core"),
     name := "gemstone-core",
   )
   .jvmPlatform(scalaVersions = Seq(scala3Version))
@@ -590,9 +611,19 @@ lazy val server = projectMatrix
     ThrustTest / resourceDirectory := (LocalRootProject / baseDirectory).value / "server" / "src" / "thrust" / "resources",
     ThrustTest / parallelExecution         := false,
     ThrustTest / test / fork               := false,
-    Test / test := (Test / test).dependsOn(codegen.jvm(scala3Version) / prepareISAReferences).evaluated,
+    Test / test := (Test / test)
+      .dependsOn(
+        codegen.jvm(scala3Version) / prepareISAReferences,
+        codegen.jvm(scala3Version) / checkRuntimeCollections
+      )
+      .evaluated,
     Test / testFull := Def.uncached {
-      (Test / testFull).dependsOn(codegen.jvm(scala3Version) / prepareISAReferences).value
+      (Test / testFull)
+        .dependsOn(
+          codegen.jvm(scala3Version) / prepareISAReferences,
+          codegen.jvm(scala3Version) / checkRuntimeCollections
+        )
+        .value
     },
     ThrustTest / test := (ThrustTest / test)
       .dependsOn(codegen.jvm(scala3Version) / prepareISAReferences)
@@ -613,5 +644,5 @@ lazy val server = projectMatrix
 addCommandAlias("testThrust", "server / Thrust / testOnly net.kurobako.gemstone.server.ThrustConformanceSuite")
 addCommandAlias(
   "check",
-  ";api / test;codegen / test;core / test;apiNative / compile;coreNative / compile;serverNative / compile;server / test"
+  ";codegen / checkRuntimeCollections;api / test;codegen / test;core / test;apiNative / compile;coreNative / compile;serverNative / compile;server / test"
 )

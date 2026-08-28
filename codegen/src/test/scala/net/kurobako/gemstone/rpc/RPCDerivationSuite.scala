@@ -17,23 +17,29 @@ class RPCDerivationSuite extends munit.FunSuite {
 
   test("derives stable identities solely from exact C function names") {
     assertEquals(schema.methods.size, 24)
-    assertEquals(schema.methods.map(_.name), schema.methods.map(_.name).sorted)
+    assertEquals(schema.methods.map(_.name).toSeq, schema.methods.map(_.name).sorted.toSeq)
     assertEquals(schema.methods.map(_.name).distinct.size, schema.methods.size)
     assertEquals(schema.methods.map(_.messageId).distinct.size, schema.methods.size)
     assertEquals(schema.fingerprint.length, 64)
-    assertEquals(schema, RPCDerivation.schema[CUDA])
+    val repeated = RPCDerivation.schema[CUDA]
+    assertEquals(schema.interfaceName, repeated.interfaceName)
+    assertEquals(schema.fingerprint, repeated.fingerprint)
+    def canonical(value: RPCSchema) = value.methods.map { method =>
+      (method.name, method.messageId, method.parameters.toSeq, method.result)
+    }.toSeq
+    assertEquals(canonical(schema), canonical(repeated))
   }
 
   test("derives typed callback capabilities and their native user data") {
     val host = schema.methods.find(_.name == "cuLaunchHostFunc").getOrElse(fail("missing cuLaunchHostFunc"))
     assertEquals(
-      host.parameters.map(parameter => parameter.name -> parameter.wireType),
+      host.parameters.map(parameter => parameter.name -> parameter.wireType).toVector,
       Vector("hStream" -> WireType.Stream, "fn" -> WireType.CUDAHostCallback, "userData" -> WireType.CallbackData)
     )
 
     val stream = schema.methods.find(_.name == "cuStreamAddCallback").getOrElse(fail("missing cuStreamAddCallback"))
     assertEquals(
-      stream.parameters.map(parameter => parameter.name -> parameter.wireType),
+      stream.parameters.map(parameter => parameter.name -> parameter.wireType).toVector,
       Vector(
         "hStream"  -> WireType.Stream,
         "callback" -> WireType.CUDAStreamCallback,

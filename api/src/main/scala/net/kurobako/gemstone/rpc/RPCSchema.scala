@@ -1,5 +1,7 @@
 package net.kurobako.gemstone.rpc
 
+import net.kurobako.gemstone.Col
+
 final case class MessageId(high: Long, low: Long) {
   def hex: String = f"$high%016x$low%016x"
 }
@@ -83,14 +85,14 @@ final case class RPCParameter(
 final case class RPCMethod(
     name: String,
     messageId: MessageId,
-    parameters: Vector[RPCParameter],
+    parameters: Col[RPCParameter],
     result: WireType
 )
 
 final case class RPCSchema(
     interfaceName: String,
     fingerprint: String,
-    methods: Vector[RPCMethod]
+    methods: Col[RPCMethod]
 )
 
 enum WireValue {
@@ -111,20 +113,20 @@ enum WireValue {
   case KernelFunctionValue(value: net.kurobako.gemstone.cuda.KernelFunction)
   case KernelLaunchValue(value: net.kurobako.gemstone.cuda.KernelLaunch)
   case StreamValue(value: net.kurobako.gemstone.cuda.Stream)
-  case ByteBufferValue(value: IArray[Byte])
+  case ByteBufferValue(value: Col[Byte])
   case KernelParametersValue(value: net.kurobako.gemstone.cuda.KernelParameters)
   case NullableOpaquePointerValue(present: Boolean)
   case CallbackDataValue(value: net.kurobako.gemstone.abi.CallbackData)
   case CUDAHostCallbackValue(value: net.kurobako.gemstone.cuda.CUhostFn)
   case CUDAStreamCallbackValue(value: net.kurobako.gemstone.cuda.CUstreamCallback)
   case CUDAStatusValue(value: net.kurobako.gemstone.cuda.CUDAStatus)
-  case CallResult(status: net.kurobako.gemstone.cuda.CUDAStatus, outputs: Vector[WireValue])
+  case CallResult(status: net.kurobako.gemstone.cuda.CUDAStatus, outputs: Col[WireValue])
 }
 
 final case class RPCRequest(
     messageId: MessageId,
     functionName: String,
-    arguments: Vector[WireValue]
+    arguments: Col[WireValue]
 )
 
 enum RPCResponse {

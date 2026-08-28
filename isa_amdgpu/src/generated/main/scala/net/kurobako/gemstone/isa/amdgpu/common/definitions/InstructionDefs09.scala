@@ -1,17 +1,19 @@
 // Generated from the pinned Mesa ACO and AMD machine-readable ISA inputs. Do not edit by hand.
 package net.kurobako.gemstone.isa.amdgpu.common
 
+import net.kurobako.gemstone.Col
+
 private[common] object InstructionDefs9 {
   case object SBarrierSignal extends InstructionDef(
         "s_barrier_signal",
         decoder(form(1)((operands, mods) => Instruction.SBarrierSignal(operands(0), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "SOP1",
             78,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC_BARRIER_ID", 32, true, false, false)
             ),
             Some("MESSAGE"),
@@ -22,7 +24,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOP1",
             78,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC_BARRIER_ID", 32, true, false, false)
             ),
             Some("MESSAGE"),
@@ -33,13 +35,13 @@ private[common] object InstructionDefs9 {
   case object SBarrierSignalIsfirst extends InstructionDef(
         "s_barrier_signal_isfirst",
         decoder(form(1)((operands, mods) => Instruction.SBarrierSignalIsfirst(operands(0), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "SOP1",
             79,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC_BARRIER_ID", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
             ),
@@ -51,7 +53,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOP1",
             79,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC_BARRIER_ID", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
             ),
@@ -63,13 +65,13 @@ private[common] object InstructionDefs9 {
   case object SBarrierWait extends InstructionDef(
         "s_barrier_wait",
         decoder(form(1)((operands, mods) => Instruction.SBarrierWait(operands(0), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "SOPP",
             20,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "SIMM16", 16, true, false, false)
             ),
             Some("WAVE_CONTROL"),
@@ -80,7 +82,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOPP",
             20,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "SIMM16", 16, true, false, false)
             ),
             Some("WAVE_CONTROL"),
@@ -91,13 +93,13 @@ private[common] object InstructionDefs9 {
   case object SBcnt0I32B32 extends InstructionDef(
         "s_bcnt0_i32_b32",
         decoder(form(2)((operands, mods) => Instruction.SBcnt0I32B32(operands(0), operands(1), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "SOP1",
             10,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -110,7 +112,7 @@ private[common] object InstructionDefs9 {
             "cdna1",
             "SOP1_INST_LITERAL",
             10,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -123,7 +125,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOP1",
             10,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -136,7 +138,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOP1_INST_LITERAL",
             10,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -149,7 +151,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOP1",
             10,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -162,7 +164,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOP1_INST_LITERAL",
             10,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -175,7 +177,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOP1",
             10,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -188,7 +190,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOP1_INST_LITERAL",
             10,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -201,7 +203,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP1",
             22,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -214,7 +216,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP1_INST_LITERAL",
             22,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -227,7 +229,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP1_INST_LITERAL64",
             22,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL64"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -240,7 +242,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOP1",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -253,7 +255,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOP1_INST_LITERAL",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -266,7 +268,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOP1",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -279,7 +281,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOP1_INST_LITERAL",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -292,7 +294,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOP1",
             22,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -305,7 +307,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOP1_INST_LITERAL",
             22,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -318,7 +320,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOP1",
             22,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -331,7 +333,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOP1_INST_LITERAL",
             22,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -344,7 +346,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOP1",
             22,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -357,7 +359,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOP1_INST_LITERAL",
             22,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -370,7 +372,7 @@ private[common] object InstructionDefs9 {
             "gfx6",
             "SOP1",
             13,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, false),
               OperandInfo(None, "uint", 32, false, true, true),
               OperandInfo(None, "uint", 32, true, false, false)
@@ -383,7 +385,7 @@ private[common] object InstructionDefs9 {
             "gfx7",
             "SOP1",
             13,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, false),
               OperandInfo(None, "uint", 32, false, true, true),
               OperandInfo(None, "uint", 32, true, false, false)
@@ -396,7 +398,7 @@ private[common] object InstructionDefs9 {
             "gfx8",
             "SOP1",
             10,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, false),
               OperandInfo(None, "uint", 32, false, true, true),
               OperandInfo(None, "uint", 32, true, false, false)
@@ -409,7 +411,7 @@ private[common] object InstructionDefs9 {
             "gfx9",
             "SOP1",
             10,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, false),
               OperandInfo(None, "uint", 32, false, true, true),
               OperandInfo(None, "uint", 32, true, false, false)
@@ -422,13 +424,13 @@ private[common] object InstructionDefs9 {
   case object SBcnt0I32B64 extends InstructionDef(
         "s_bcnt0_i32_b64",
         decoder(form(2)((operands, mods) => Instruction.SBcnt0I32B64(operands(0), operands(1), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "SOP1",
             11,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -441,7 +443,7 @@ private[common] object InstructionDefs9 {
             "cdna1",
             "SOP1_INST_LITERAL",
             11,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -454,7 +456,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOP1",
             11,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -467,7 +469,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOP1_INST_LITERAL",
             11,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -480,7 +482,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOP1",
             11,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -493,7 +495,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOP1_INST_LITERAL",
             11,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -506,7 +508,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOP1",
             11,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -519,7 +521,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOP1_INST_LITERAL",
             11,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -532,7 +534,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP1",
             23,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -545,7 +547,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP1_INST_LITERAL",
             23,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -558,7 +560,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP1_INST_LITERAL64",
             23,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL64"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -571,7 +573,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOP1",
             14,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC_NOLDS", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -584,7 +586,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOP1_INST_LITERAL",
             14,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -597,7 +599,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOP1",
             14,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC_NOLDS", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -610,7 +612,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOP1_INST_LITERAL",
             14,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -623,7 +625,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOP1",
             23,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -636,7 +638,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOP1_INST_LITERAL",
             23,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -649,7 +651,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOP1",
             23,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -662,7 +664,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOP1_INST_LITERAL",
             23,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -675,7 +677,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOP1",
             23,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -688,7 +690,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOP1_INST_LITERAL",
             23,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -701,7 +703,7 @@ private[common] object InstructionDefs9 {
             "gfx6",
             "SOP1",
             14,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, false),
               OperandInfo(None, "uint", 32, false, true, true),
               OperandInfo(None, "uint", 64, true, false, false)
@@ -714,7 +716,7 @@ private[common] object InstructionDefs9 {
             "gfx7",
             "SOP1",
             14,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, false),
               OperandInfo(None, "uint", 32, false, true, true),
               OperandInfo(None, "uint", 64, true, false, false)
@@ -727,7 +729,7 @@ private[common] object InstructionDefs9 {
             "gfx8",
             "SOP1",
             11,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, false),
               OperandInfo(None, "uint", 32, false, true, true),
               OperandInfo(None, "uint", 64, true, false, false)
@@ -740,7 +742,7 @@ private[common] object InstructionDefs9 {
             "gfx9",
             "SOP1",
             11,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, false),
               OperandInfo(None, "uint", 32, false, true, true),
               OperandInfo(None, "uint", 64, true, false, false)
@@ -753,13 +755,13 @@ private[common] object InstructionDefs9 {
   case object SBcnt1I32B32 extends InstructionDef(
         "s_bcnt1_i32_b32",
         decoder(form(2)((operands, mods) => Instruction.SBcnt1I32B32(operands(0), operands(1), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "SOP1",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -772,7 +774,7 @@ private[common] object InstructionDefs9 {
             "cdna1",
             "SOP1_INST_LITERAL",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -785,7 +787,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOP1",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -798,7 +800,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOP1_INST_LITERAL",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -811,7 +813,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOP1",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -824,7 +826,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOP1_INST_LITERAL",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -837,7 +839,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOP1",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -850,7 +852,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOP1_INST_LITERAL",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -863,7 +865,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP1",
             24,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -876,7 +878,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP1_INST_LITERAL",
             24,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -889,7 +891,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP1_INST_LITERAL64",
             24,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL64"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -902,7 +904,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOP1",
             15,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -915,7 +917,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOP1_INST_LITERAL",
             15,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -928,7 +930,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOP1",
             15,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -941,7 +943,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOP1_INST_LITERAL",
             15,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -954,7 +956,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOP1",
             24,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -967,7 +969,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOP1_INST_LITERAL",
             24,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -980,7 +982,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOP1",
             24,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -993,7 +995,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOP1_INST_LITERAL",
             24,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -1006,7 +1008,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOP1",
             24,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -1019,7 +1021,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOP1_INST_LITERAL",
             24,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -1032,7 +1034,7 @@ private[common] object InstructionDefs9 {
             "gfx6",
             "SOP1",
             15,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, false),
               OperandInfo(None, "uint", 32, false, true, true),
               OperandInfo(None, "uint", 32, true, false, false)
@@ -1045,7 +1047,7 @@ private[common] object InstructionDefs9 {
             "gfx7",
             "SOP1",
             15,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, false),
               OperandInfo(None, "uint", 32, false, true, true),
               OperandInfo(None, "uint", 32, true, false, false)
@@ -1058,7 +1060,7 @@ private[common] object InstructionDefs9 {
             "gfx8",
             "SOP1",
             12,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, false),
               OperandInfo(None, "uint", 32, false, true, true),
               OperandInfo(None, "uint", 32, true, false, false)
@@ -1071,7 +1073,7 @@ private[common] object InstructionDefs9 {
             "gfx9",
             "SOP1",
             12,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, false),
               OperandInfo(None, "uint", 32, false, true, true),
               OperandInfo(None, "uint", 32, true, false, false)
@@ -1084,13 +1086,13 @@ private[common] object InstructionDefs9 {
   case object SBcnt1I32B64 extends InstructionDef(
         "s_bcnt1_i32_b64",
         decoder(form(2)((operands, mods) => Instruction.SBcnt1I32B64(operands(0), operands(1), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "SOP1",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -1103,7 +1105,7 @@ private[common] object InstructionDefs9 {
             "cdna1",
             "SOP1_INST_LITERAL",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -1116,7 +1118,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOP1",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -1129,7 +1131,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOP1_INST_LITERAL",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -1142,7 +1144,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOP1",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -1155,7 +1157,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOP1_INST_LITERAL",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -1168,7 +1170,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOP1",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -1181,7 +1183,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOP1_INST_LITERAL",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -1194,7 +1196,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP1",
             25,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -1207,7 +1209,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP1_INST_LITERAL",
             25,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -1220,7 +1222,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP1_INST_LITERAL64",
             25,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL64"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -1233,7 +1235,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOP1",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC_NOLDS", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -1246,7 +1248,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOP1_INST_LITERAL",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -1259,7 +1261,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOP1",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC_NOLDS", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -1272,7 +1274,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOP1_INST_LITERAL",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -1285,7 +1287,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOP1",
             25,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -1298,7 +1300,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOP1_INST_LITERAL",
             25,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -1311,7 +1313,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOP1",
             25,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -1324,7 +1326,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOP1_INST_LITERAL",
             25,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -1337,7 +1339,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOP1",
             25,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -1350,7 +1352,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOP1_INST_LITERAL",
             25,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -1363,7 +1365,7 @@ private[common] object InstructionDefs9 {
             "gfx6",
             "SOP1",
             16,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, false),
               OperandInfo(None, "uint", 32, false, true, true),
               OperandInfo(None, "uint", 64, true, false, false)
@@ -1376,7 +1378,7 @@ private[common] object InstructionDefs9 {
             "gfx7",
             "SOP1",
             16,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, false),
               OperandInfo(None, "uint", 32, false, true, true),
               OperandInfo(None, "uint", 64, true, false, false)
@@ -1389,7 +1391,7 @@ private[common] object InstructionDefs9 {
             "gfx8",
             "SOP1",
             13,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, false),
               OperandInfo(None, "uint", 32, false, true, true),
               OperandInfo(None, "uint", 64, true, false, false)
@@ -1402,7 +1404,7 @@ private[common] object InstructionDefs9 {
             "gfx9",
             "SOP1",
             13,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, false),
               OperandInfo(None, "uint", 32, false, true, true),
               OperandInfo(None, "uint", 64, true, false, false)
@@ -1415,13 +1417,13 @@ private[common] object InstructionDefs9 {
   case object SBfeI32 extends InstructionDef(
         "s_bfe_i32",
         decoder(form(3)((operands, mods) => Instruction.SBfeI32(operands(0), operands(1), operands(2), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "SOP2",
             38,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
@@ -1435,7 +1437,7 @@ private[common] object InstructionDefs9 {
             "cdna1",
             "SOP2_INST_LITERAL",
             38,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
@@ -1449,7 +1451,7 @@ private[common] object InstructionDefs9 {
             "cdna1",
             "SOP2_INST_LITERAL",
             38,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
@@ -1463,7 +1465,7 @@ private[common] object InstructionDefs9 {
             "cdna1",
             "SOP2_INST_LITERAL",
             38,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
@@ -1477,7 +1479,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOP2",
             38,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
@@ -1491,7 +1493,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOP2_INST_LITERAL",
             38,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
@@ -1505,7 +1507,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOP2_INST_LITERAL",
             38,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
@@ -1519,7 +1521,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOP2_INST_LITERAL",
             38,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
@@ -1533,7 +1535,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOP2",
             38,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
@@ -1547,7 +1549,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOP2_INST_LITERAL",
             38,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
@@ -1561,7 +1563,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOP2_INST_LITERAL",
             38,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
@@ -1575,7 +1577,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOP2_INST_LITERAL",
             38,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
@@ -1589,7 +1591,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOP2",
             38,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
@@ -1603,7 +1605,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOP2_INST_LITERAL",
             38,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
@@ -1617,7 +1619,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOP2_INST_LITERAL",
             38,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
@@ -1631,7 +1633,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOP2_INST_LITERAL",
             38,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
@@ -1645,7 +1647,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP2",
             39,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
@@ -1659,7 +1661,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP2_INST_LITERAL",
             39,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
@@ -1673,7 +1675,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP2_INST_LITERAL",
             39,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
@@ -1687,7 +1689,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP2_INST_LITERAL",
             39,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
@@ -1701,7 +1703,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP2_INST_LITERAL64",
             39,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL64"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
@@ -1715,7 +1717,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP2_INST_LITERAL64",
             39,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL64"), "SSRC", 32, true, false, false),
@@ -1729,7 +1731,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP2_INST_LITERAL64",
             39,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL64"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL64"), "SSRC", 32, true, false, false),
@@ -1743,7 +1745,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOP2",
             40,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC_NOLDS", 32, true, false, false),
@@ -1757,7 +1759,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOP2_INST_LITERAL",
             40,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC_NOLDS", 32, true, false, false),
@@ -1771,7 +1773,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOP2_INST_LITERAL",
             40,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false),
@@ -1785,7 +1787,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOP2_INST_LITERAL",
             40,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false),
@@ -1799,7 +1801,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOP2",
             40,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC_NOLDS", 32, true, false, false),
@@ -1813,7 +1815,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOP2_INST_LITERAL",
             40,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC_NOLDS", 32, true, false, false),
@@ -1827,7 +1829,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOP2_INST_LITERAL",
             40,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false),
@@ -1841,7 +1843,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOP2_INST_LITERAL",
             40,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false),
@@ -1855,7 +1857,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOP2",
             39,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
@@ -1869,7 +1871,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOP2_INST_LITERAL",
             39,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
@@ -1883,7 +1885,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOP2_INST_LITERAL",
             39,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
@@ -1897,7 +1899,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOP2_INST_LITERAL",
             39,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
@@ -1911,7 +1913,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOP2",
             39,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
@@ -1925,7 +1927,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOP2_INST_LITERAL",
             39,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
@@ -1939,7 +1941,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOP2_INST_LITERAL",
             39,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
@@ -1953,7 +1955,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOP2_INST_LITERAL",
             39,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
@@ -1967,7 +1969,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOP2",
             39,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
@@ -1981,7 +1983,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOP2_INST_LITERAL",
             39,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
@@ -1995,7 +1997,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOP2_INST_LITERAL",
             39,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
@@ -2009,7 +2011,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOP2_INST_LITERAL",
             39,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
@@ -2023,7 +2025,7 @@ private[common] object InstructionDefs9 {
             "gfx6",
             "SOP2",
             40,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, false),
               OperandInfo(None, "uint", 32, false, true, true),
               OperandInfo(None, "uint", 32, true, false, false),
@@ -2037,7 +2039,7 @@ private[common] object InstructionDefs9 {
             "gfx7",
             "SOP2",
             40,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, false),
               OperandInfo(None, "uint", 32, false, true, true),
               OperandInfo(None, "uint", 32, true, false, false),
@@ -2051,7 +2053,7 @@ private[common] object InstructionDefs9 {
             "gfx8",
             "SOP2",
             38,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, false),
               OperandInfo(None, "uint", 32, false, true, true),
               OperandInfo(None, "uint", 32, true, false, false),
@@ -2065,7 +2067,7 @@ private[common] object InstructionDefs9 {
             "gfx9",
             "SOP2",
             38,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, false),
               OperandInfo(None, "uint", 32, false, true, true),
               OperandInfo(None, "uint", 32, true, false, false),
@@ -2079,13 +2081,13 @@ private[common] object InstructionDefs9 {
   case object SBfeI64 extends InstructionDef(
         "s_bfe_i64",
         decoder(form(3)((operands, mods) => Instruction.SBfeI64(operands(0), operands(1), operands(2), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "SOP2",
             40,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
@@ -2099,7 +2101,7 @@ private[common] object InstructionDefs9 {
             "cdna1",
             "SOP2_INST_LITERAL",
             40,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
@@ -2113,7 +2115,7 @@ private[common] object InstructionDefs9 {
             "cdna1",
             "SOP2_INST_LITERAL",
             40,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
@@ -2127,7 +2129,7 @@ private[common] object InstructionDefs9 {
             "cdna1",
             "SOP2_INST_LITERAL",
             40,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
@@ -2141,7 +2143,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOP2",
             40,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
@@ -2155,7 +2157,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOP2_INST_LITERAL",
             40,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
@@ -2169,7 +2171,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOP2_INST_LITERAL",
             40,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
@@ -2183,7 +2185,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOP2_INST_LITERAL",
             40,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
@@ -2197,7 +2199,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOP2",
             40,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
@@ -2211,7 +2213,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOP2_INST_LITERAL",
             40,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
@@ -2225,7 +2227,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOP2_INST_LITERAL",
             40,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
@@ -2239,7 +2241,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOP2_INST_LITERAL",
             40,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
@@ -2253,7 +2255,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOP2",
             40,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
@@ -2267,7 +2269,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOP2_INST_LITERAL",
             40,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
@@ -2281,7 +2283,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOP2_INST_LITERAL",
             40,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
@@ -2295,7 +2297,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOP2_INST_LITERAL",
             40,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
@@ -2309,7 +2311,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP2",
             41,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
@@ -2323,7 +2325,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP2_INST_LITERAL",
             41,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
@@ -2337,7 +2339,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP2_INST_LITERAL",
             41,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
@@ -2351,7 +2353,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP2_INST_LITERAL",
             41,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
@@ -2365,7 +2367,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP2_INST_LITERAL64",
             41,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL64"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
@@ -2379,7 +2381,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP2_INST_LITERAL64",
             41,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL64"), "SSRC", 32, true, false, false),
@@ -2393,7 +2395,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP2_INST_LITERAL64",
             41,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL64"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL64"), "SSRC", 32, true, false, false),
@@ -2407,7 +2409,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOP2",
             42,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC_NOLDS", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC_NOLDS", 32, true, false, false),
@@ -2421,7 +2423,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOP2_INST_LITERAL",
             42,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC_NOLDS", 32, true, false, false),
@@ -2435,7 +2437,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOP2_INST_LITERAL",
             42,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC_NOLDS", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false),
@@ -2449,7 +2451,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOP2_INST_LITERAL",
             42,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false),
@@ -2463,7 +2465,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOP2",
             42,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC_NOLDS", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC_NOLDS", 32, true, false, false),
@@ -2477,7 +2479,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOP2_INST_LITERAL",
             42,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC_NOLDS", 32, true, false, false),
@@ -2491,7 +2493,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOP2_INST_LITERAL",
             42,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC_NOLDS", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false),
@@ -2505,7 +2507,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOP2_INST_LITERAL",
             42,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false),
@@ -2519,7 +2521,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOP2",
             41,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
@@ -2533,7 +2535,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOP2_INST_LITERAL",
             41,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
@@ -2547,7 +2549,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOP2_INST_LITERAL",
             41,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
@@ -2561,7 +2563,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOP2_INST_LITERAL",
             41,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
@@ -2575,7 +2577,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOP2",
             41,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
@@ -2589,7 +2591,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOP2_INST_LITERAL",
             41,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
@@ -2603,7 +2605,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOP2_INST_LITERAL",
             41,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
@@ -2617,7 +2619,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOP2_INST_LITERAL",
             41,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
@@ -2631,7 +2633,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOP2",
             41,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
@@ -2645,7 +2647,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOP2_INST_LITERAL",
             41,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
@@ -2659,7 +2661,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOP2_INST_LITERAL",
             41,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
@@ -2673,7 +2675,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOP2_INST_LITERAL",
             41,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
@@ -2687,7 +2689,7 @@ private[common] object InstructionDefs9 {
             "gfx6",
             "SOP2",
             42,
-            Vector(
+            Col(
               OperandInfo(None, "int", 64, false, true, false),
               OperandInfo(None, "uint", 32, false, true, true),
               OperandInfo(None, "int", 64, true, false, false),
@@ -2701,7 +2703,7 @@ private[common] object InstructionDefs9 {
             "gfx7",
             "SOP2",
             42,
-            Vector(
+            Col(
               OperandInfo(None, "int", 64, false, true, false),
               OperandInfo(None, "uint", 32, false, true, true),
               OperandInfo(None, "int", 64, true, false, false),
@@ -2715,7 +2717,7 @@ private[common] object InstructionDefs9 {
             "gfx8",
             "SOP2",
             40,
-            Vector(
+            Col(
               OperandInfo(None, "int", 64, false, true, false),
               OperandInfo(None, "uint", 32, false, true, true),
               OperandInfo(None, "int", 64, true, false, false),
@@ -2729,7 +2731,7 @@ private[common] object InstructionDefs9 {
             "gfx9",
             "SOP2",
             40,
-            Vector(
+            Col(
               OperandInfo(None, "int", 64, false, true, false),
               OperandInfo(None, "uint", 32, false, true, true),
               OperandInfo(None, "int", 64, true, false, false),
@@ -2743,13 +2745,13 @@ private[common] object InstructionDefs9 {
   case object SBfeU32 extends InstructionDef(
         "s_bfe_u32",
         decoder(form(3)((operands, mods) => Instruction.SBfeU32(operands(0), operands(1), operands(2), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "SOP2",
             37,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
@@ -2763,7 +2765,7 @@ private[common] object InstructionDefs9 {
             "cdna1",
             "SOP2_INST_LITERAL",
             37,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
@@ -2777,7 +2779,7 @@ private[common] object InstructionDefs9 {
             "cdna1",
             "SOP2_INST_LITERAL",
             37,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
@@ -2791,7 +2793,7 @@ private[common] object InstructionDefs9 {
             "cdna1",
             "SOP2_INST_LITERAL",
             37,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
@@ -2805,7 +2807,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOP2",
             37,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
@@ -2819,7 +2821,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOP2_INST_LITERAL",
             37,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
@@ -2833,7 +2835,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOP2_INST_LITERAL",
             37,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
@@ -2847,7 +2849,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOP2_INST_LITERAL",
             37,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
@@ -2861,7 +2863,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOP2",
             37,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
@@ -2875,7 +2877,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOP2_INST_LITERAL",
             37,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
@@ -2889,7 +2891,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOP2_INST_LITERAL",
             37,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
@@ -2903,7 +2905,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOP2_INST_LITERAL",
             37,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
@@ -2917,7 +2919,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOP2",
             37,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
@@ -2931,7 +2933,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOP2_INST_LITERAL",
             37,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
@@ -2945,7 +2947,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOP2_INST_LITERAL",
             37,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
@@ -2959,7 +2961,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOP2_INST_LITERAL",
             37,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
@@ -2973,7 +2975,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP2",
             38,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
@@ -2987,7 +2989,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP2_INST_LITERAL",
             38,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
@@ -3001,7 +3003,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP2_INST_LITERAL",
             38,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
@@ -3015,7 +3017,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP2_INST_LITERAL",
             38,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
@@ -3029,7 +3031,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP2_INST_LITERAL64",
             38,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL64"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
@@ -3043,7 +3045,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP2_INST_LITERAL64",
             38,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL64"), "SSRC", 32, true, false, false),
@@ -3057,7 +3059,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP2_INST_LITERAL64",
             38,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL64"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL64"), "SSRC", 32, true, false, false),
@@ -3071,7 +3073,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOP2",
             39,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC_NOLDS", 32, true, false, false),
@@ -3085,7 +3087,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOP2_INST_LITERAL",
             39,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC_NOLDS", 32, true, false, false),
@@ -3099,7 +3101,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOP2_INST_LITERAL",
             39,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false),
@@ -3113,7 +3115,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOP2_INST_LITERAL",
             39,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false),
@@ -3127,7 +3129,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOP2",
             39,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC_NOLDS", 32, true, false, false),
@@ -3141,7 +3143,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOP2_INST_LITERAL",
             39,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC_NOLDS", 32, true, false, false),
@@ -3155,7 +3157,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOP2_INST_LITERAL",
             39,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false),
@@ -3169,7 +3171,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOP2_INST_LITERAL",
             39,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false),
@@ -3183,7 +3185,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOP2",
             38,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
@@ -3197,7 +3199,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOP2_INST_LITERAL",
             38,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
@@ -3211,7 +3213,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOP2_INST_LITERAL",
             38,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
@@ -3225,7 +3227,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOP2_INST_LITERAL",
             38,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
@@ -3239,7 +3241,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOP2",
             38,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
@@ -3253,7 +3255,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOP2_INST_LITERAL",
             38,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
@@ -3267,7 +3269,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOP2_INST_LITERAL",
             38,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
@@ -3281,7 +3283,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOP2_INST_LITERAL",
             38,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
@@ -3295,7 +3297,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOP2",
             38,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
@@ -3309,7 +3311,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOP2_INST_LITERAL",
             38,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
@@ -3323,7 +3325,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOP2_INST_LITERAL",
             38,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
@@ -3337,7 +3339,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOP2_INST_LITERAL",
             38,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
@@ -3351,7 +3353,7 @@ private[common] object InstructionDefs9 {
             "gfx6",
             "SOP2",
             39,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, false),
               OperandInfo(None, "uint", 32, false, true, true),
               OperandInfo(None, "uint", 32, true, false, false),
@@ -3365,7 +3367,7 @@ private[common] object InstructionDefs9 {
             "gfx7",
             "SOP2",
             39,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, false),
               OperandInfo(None, "uint", 32, false, true, true),
               OperandInfo(None, "uint", 32, true, false, false),
@@ -3379,7 +3381,7 @@ private[common] object InstructionDefs9 {
             "gfx8",
             "SOP2",
             37,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, false),
               OperandInfo(None, "uint", 32, false, true, true),
               OperandInfo(None, "uint", 32, true, false, false),
@@ -3393,7 +3395,7 @@ private[common] object InstructionDefs9 {
             "gfx9",
             "SOP2",
             37,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, false),
               OperandInfo(None, "uint", 32, false, true, true),
               OperandInfo(None, "uint", 32, true, false, false),
@@ -3407,13 +3409,13 @@ private[common] object InstructionDefs9 {
   case object SBfeU64 extends InstructionDef(
         "s_bfe_u64",
         decoder(form(3)((operands, mods) => Instruction.SBfeU64(operands(0), operands(1), operands(2), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "SOP2",
             39,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
@@ -3427,7 +3429,7 @@ private[common] object InstructionDefs9 {
             "cdna1",
             "SOP2_INST_LITERAL",
             39,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
@@ -3441,7 +3443,7 @@ private[common] object InstructionDefs9 {
             "cdna1",
             "SOP2_INST_LITERAL",
             39,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
@@ -3455,7 +3457,7 @@ private[common] object InstructionDefs9 {
             "cdna1",
             "SOP2_INST_LITERAL",
             39,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
@@ -3469,7 +3471,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOP2",
             39,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
@@ -3483,7 +3485,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOP2_INST_LITERAL",
             39,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
@@ -3497,7 +3499,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOP2_INST_LITERAL",
             39,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
@@ -3511,7 +3513,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOP2_INST_LITERAL",
             39,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
@@ -3525,7 +3527,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOP2",
             39,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
@@ -3539,7 +3541,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOP2_INST_LITERAL",
             39,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
@@ -3553,7 +3555,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOP2_INST_LITERAL",
             39,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
@@ -3567,7 +3569,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOP2_INST_LITERAL",
             39,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
@@ -3581,7 +3583,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOP2",
             39,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
@@ -3595,7 +3597,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOP2_INST_LITERAL",
             39,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
@@ -3609,7 +3611,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOP2_INST_LITERAL",
             39,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
@@ -3623,7 +3625,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOP2_INST_LITERAL",
             39,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
@@ -3637,7 +3639,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP2",
             40,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
@@ -3651,7 +3653,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP2_INST_LITERAL",
             40,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
@@ -3665,7 +3667,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP2_INST_LITERAL",
             40,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
@@ -3679,7 +3681,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP2_INST_LITERAL",
             40,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
@@ -3693,7 +3695,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP2_INST_LITERAL64",
             40,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL64"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
@@ -3707,7 +3709,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP2_INST_LITERAL64",
             40,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL64"), "SSRC", 32, true, false, false),
@@ -3721,7 +3723,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP2_INST_LITERAL64",
             40,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL64"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL64"), "SSRC", 32, true, false, false),
@@ -3735,7 +3737,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOP2",
             41,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC_NOLDS", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC_NOLDS", 32, true, false, false),
@@ -3749,7 +3751,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOP2_INST_LITERAL",
             41,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC_NOLDS", 32, true, false, false),
@@ -3763,7 +3765,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOP2_INST_LITERAL",
             41,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC_NOLDS", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false),
@@ -3777,7 +3779,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOP2_INST_LITERAL",
             41,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false),
@@ -3791,7 +3793,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOP2",
             41,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC_NOLDS", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC_NOLDS", 32, true, false, false),
@@ -3805,7 +3807,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOP2_INST_LITERAL",
             41,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC_NOLDS", 32, true, false, false),
@@ -3819,7 +3821,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOP2_INST_LITERAL",
             41,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC_NOLDS", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false),
@@ -3833,7 +3835,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOP2_INST_LITERAL",
             41,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false),
@@ -3847,7 +3849,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOP2",
             40,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
@@ -3861,7 +3863,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOP2_INST_LITERAL",
             40,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
@@ -3875,7 +3877,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOP2_INST_LITERAL",
             40,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
@@ -3889,7 +3891,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOP2_INST_LITERAL",
             40,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
@@ -3903,7 +3905,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOP2",
             40,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
@@ -3917,7 +3919,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOP2_INST_LITERAL",
             40,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
@@ -3931,7 +3933,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOP2_INST_LITERAL",
             40,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
@@ -3945,7 +3947,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOP2_INST_LITERAL",
             40,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
@@ -3959,7 +3961,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOP2",
             40,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
@@ -3973,7 +3975,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOP2_INST_LITERAL",
             40,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
@@ -3987,7 +3989,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOP2_INST_LITERAL",
             40,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
@@ -4001,7 +4003,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOP2_INST_LITERAL",
             40,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
@@ -4015,7 +4017,7 @@ private[common] object InstructionDefs9 {
             "gfx6",
             "SOP2",
             41,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 64, false, true, false),
               OperandInfo(None, "uint", 32, false, true, true),
               OperandInfo(None, "uint", 64, true, false, false),
@@ -4029,7 +4031,7 @@ private[common] object InstructionDefs9 {
             "gfx7",
             "SOP2",
             41,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 64, false, true, false),
               OperandInfo(None, "uint", 32, false, true, true),
               OperandInfo(None, "uint", 64, true, false, false),
@@ -4043,7 +4045,7 @@ private[common] object InstructionDefs9 {
             "gfx8",
             "SOP2",
             39,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 64, false, true, false),
               OperandInfo(None, "uint", 32, false, true, true),
               OperandInfo(None, "uint", 64, true, false, false),
@@ -4057,7 +4059,7 @@ private[common] object InstructionDefs9 {
             "gfx9",
             "SOP2",
             39,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 64, false, true, false),
               OperandInfo(None, "uint", 32, false, true, true),
               OperandInfo(None, "uint", 64, true, false, false),
@@ -4071,13 +4073,13 @@ private[common] object InstructionDefs9 {
   case object SBfmB32 extends InstructionDef(
         "s_bfm_b32",
         decoder(form(3)((operands, mods) => Instruction.SBfmB32(operands(0), operands(1), operands(2), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "SOP2",
             34,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false)
@@ -4090,7 +4092,7 @@ private[common] object InstructionDefs9 {
             "cdna1",
             "SOP2_INST_LITERAL",
             34,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false)
@@ -4103,7 +4105,7 @@ private[common] object InstructionDefs9 {
             "cdna1",
             "SOP2_INST_LITERAL",
             34,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
@@ -4116,7 +4118,7 @@ private[common] object InstructionDefs9 {
             "cdna1",
             "SOP2_INST_LITERAL",
             34,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
@@ -4129,7 +4131,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOP2",
             34,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false)
@@ -4142,7 +4144,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOP2_INST_LITERAL",
             34,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false)
@@ -4155,7 +4157,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOP2_INST_LITERAL",
             34,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
@@ -4168,7 +4170,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOP2_INST_LITERAL",
             34,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
@@ -4181,7 +4183,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOP2",
             34,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false)
@@ -4194,7 +4196,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOP2_INST_LITERAL",
             34,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false)
@@ -4207,7 +4209,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOP2_INST_LITERAL",
             34,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
@@ -4220,7 +4222,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOP2_INST_LITERAL",
             34,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
@@ -4233,7 +4235,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOP2",
             34,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false)
@@ -4246,7 +4248,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOP2_INST_LITERAL",
             34,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false)
@@ -4259,7 +4261,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOP2_INST_LITERAL",
             34,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
@@ -4272,7 +4274,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOP2_INST_LITERAL",
             34,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
@@ -4285,7 +4287,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP2",
             42,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false)
@@ -4298,7 +4300,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP2_INST_LITERAL",
             42,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false)
@@ -4311,7 +4313,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP2_INST_LITERAL",
             42,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
@@ -4324,7 +4326,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP2_INST_LITERAL",
             42,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
@@ -4337,7 +4339,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP2_INST_LITERAL64",
             42,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL64"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false)
@@ -4350,7 +4352,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP2_INST_LITERAL64",
             42,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL64"), "SSRC", 32, true, false, false)
@@ -4363,7 +4365,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP2_INST_LITERAL64",
             42,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL64"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL64"), "SSRC", 32, true, false, false)
@@ -4376,7 +4378,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOP2",
             36,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC_NOLDS", 32, true, false, false)
@@ -4389,7 +4391,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOP2_INST_LITERAL",
             36,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC_NOLDS", 32, true, false, false)
@@ -4402,7 +4404,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOP2_INST_LITERAL",
             36,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false)
@@ -4415,7 +4417,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOP2_INST_LITERAL",
             36,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false)
@@ -4428,7 +4430,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOP2",
             36,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC_NOLDS", 32, true, false, false)
@@ -4441,7 +4443,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOP2_INST_LITERAL",
             36,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC_NOLDS", 32, true, false, false)
@@ -4454,7 +4456,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOP2_INST_LITERAL",
             36,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false)
@@ -4467,7 +4469,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOP2_INST_LITERAL",
             36,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false)
@@ -4480,7 +4482,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOP2",
             42,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false)
@@ -4493,7 +4495,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOP2_INST_LITERAL",
             42,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false)
@@ -4506,7 +4508,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOP2_INST_LITERAL",
             42,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
@@ -4519,7 +4521,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOP2_INST_LITERAL",
             42,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
@@ -4532,7 +4534,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOP2",
             42,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false)
@@ -4545,7 +4547,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOP2_INST_LITERAL",
             42,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false)
@@ -4558,7 +4560,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOP2_INST_LITERAL",
             42,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
@@ -4571,7 +4573,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOP2_INST_LITERAL",
             42,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
@@ -4584,7 +4586,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOP2",
             42,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false)
@@ -4597,7 +4599,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOP2_INST_LITERAL",
             42,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false)
@@ -4610,7 +4612,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOP2_INST_LITERAL",
             42,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
@@ -4623,7 +4625,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOP2_INST_LITERAL",
             42,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
@@ -4636,7 +4638,7 @@ private[common] object InstructionDefs9 {
             "gfx6",
             "SOP2",
             36,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, false),
               OperandInfo(None, "uint", 32, true, false, false),
               OperandInfo(None, "uint", 32, true, false, false)
@@ -4649,7 +4651,7 @@ private[common] object InstructionDefs9 {
             "gfx7",
             "SOP2",
             36,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, false),
               OperandInfo(None, "uint", 32, true, false, false),
               OperandInfo(None, "uint", 32, true, false, false)
@@ -4662,7 +4664,7 @@ private[common] object InstructionDefs9 {
             "gfx8",
             "SOP2",
             34,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, false),
               OperandInfo(None, "uint", 32, true, false, false),
               OperandInfo(None, "uint", 32, true, false, false)
@@ -4675,7 +4677,7 @@ private[common] object InstructionDefs9 {
             "gfx9",
             "SOP2",
             34,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, false),
               OperandInfo(None, "uint", 32, true, false, false),
               OperandInfo(None, "uint", 32, true, false, false)
@@ -4688,13 +4690,13 @@ private[common] object InstructionDefs9 {
   case object SBfmB64 extends InstructionDef(
         "s_bfm_b64",
         decoder(form(3)((operands, mods) => Instruction.SBfmB64(operands(0), operands(1), operands(2), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "SOP2",
             35,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false)
@@ -4707,7 +4709,7 @@ private[common] object InstructionDefs9 {
             "cdna1",
             "SOP2_INST_LITERAL",
             35,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false)
@@ -4720,7 +4722,7 @@ private[common] object InstructionDefs9 {
             "cdna1",
             "SOP2_INST_LITERAL",
             35,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
@@ -4733,7 +4735,7 @@ private[common] object InstructionDefs9 {
             "cdna1",
             "SOP2_INST_LITERAL",
             35,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
@@ -4746,7 +4748,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOP2",
             35,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false)
@@ -4759,7 +4761,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOP2_INST_LITERAL",
             35,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false)
@@ -4772,7 +4774,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOP2_INST_LITERAL",
             35,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
@@ -4785,7 +4787,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOP2_INST_LITERAL",
             35,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
@@ -4798,7 +4800,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOP2",
             35,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false)
@@ -4811,7 +4813,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOP2_INST_LITERAL",
             35,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false)
@@ -4824,7 +4826,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOP2_INST_LITERAL",
             35,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
@@ -4837,7 +4839,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOP2_INST_LITERAL",
             35,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
@@ -4850,7 +4852,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOP2",
             35,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false)
@@ -4863,7 +4865,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOP2_INST_LITERAL",
             35,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false)
@@ -4876,7 +4878,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOP2_INST_LITERAL",
             35,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
@@ -4889,7 +4891,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOP2_INST_LITERAL",
             35,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
@@ -4902,7 +4904,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP2",
             43,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false)
@@ -4915,7 +4917,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP2_INST_LITERAL",
             43,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false)
@@ -4928,7 +4930,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP2_INST_LITERAL",
             43,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
@@ -4941,7 +4943,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP2_INST_LITERAL",
             43,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
@@ -4954,7 +4956,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP2_INST_LITERAL64",
             43,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL64"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false)
@@ -4967,7 +4969,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP2_INST_LITERAL64",
             43,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL64"), "SSRC", 32, true, false, false)
@@ -4980,7 +4982,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP2_INST_LITERAL64",
             43,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL64"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL64"), "SSRC", 32, true, false, false)
@@ -4993,7 +4995,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOP2",
             37,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC_NOLDS", 32, true, false, false)
@@ -5006,7 +5008,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOP2_INST_LITERAL",
             37,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC_NOLDS", 32, true, false, false)
@@ -5019,7 +5021,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOP2_INST_LITERAL",
             37,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false)
@@ -5032,7 +5034,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOP2_INST_LITERAL",
             37,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false)
@@ -5045,7 +5047,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOP2",
             37,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC_NOLDS", 32, true, false, false)
@@ -5058,7 +5060,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOP2_INST_LITERAL",
             37,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC_NOLDS", 32, true, false, false)
@@ -5071,7 +5073,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOP2_INST_LITERAL",
             37,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false)
@@ -5084,7 +5086,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOP2_INST_LITERAL",
             37,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false)
@@ -5097,7 +5099,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOP2",
             43,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false)
@@ -5110,7 +5112,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOP2_INST_LITERAL",
             43,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false)
@@ -5123,7 +5125,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOP2_INST_LITERAL",
             43,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
@@ -5136,7 +5138,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOP2_INST_LITERAL",
             43,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
@@ -5149,7 +5151,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOP2",
             43,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false)
@@ -5162,7 +5164,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOP2_INST_LITERAL",
             43,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false)
@@ -5175,7 +5177,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOP2_INST_LITERAL",
             43,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
@@ -5188,7 +5190,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOP2_INST_LITERAL",
             43,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
@@ -5201,7 +5203,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOP2",
             43,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false)
@@ -5214,7 +5216,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOP2_INST_LITERAL",
             43,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false)
@@ -5227,7 +5229,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOP2_INST_LITERAL",
             43,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
@@ -5240,7 +5242,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOP2_INST_LITERAL",
             43,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
@@ -5253,7 +5255,7 @@ private[common] object InstructionDefs9 {
             "gfx6",
             "SOP2",
             37,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 64, false, true, false),
               OperandInfo(None, "uint", 32, true, false, false),
               OperandInfo(None, "uint", 32, true, false, false)
@@ -5266,7 +5268,7 @@ private[common] object InstructionDefs9 {
             "gfx7",
             "SOP2",
             37,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 64, false, true, false),
               OperandInfo(None, "uint", 32, true, false, false),
               OperandInfo(None, "uint", 32, true, false, false)
@@ -5279,7 +5281,7 @@ private[common] object InstructionDefs9 {
             "gfx8",
             "SOP2",
             35,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 64, false, true, false),
               OperandInfo(None, "uint", 32, true, false, false),
               OperandInfo(None, "uint", 32, true, false, false)
@@ -5292,7 +5294,7 @@ private[common] object InstructionDefs9 {
             "gfx9",
             "SOP2",
             35,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 64, false, true, false),
               OperandInfo(None, "uint", 32, true, false, false),
               OperandInfo(None, "uint", 32, true, false, false)
@@ -5305,13 +5307,13 @@ private[common] object InstructionDefs9 {
   case object SBitcmp0B32 extends InstructionDef(
         "s_bitcmp0_b32",
         decoder(form(2)((operands, mods) => Instruction.SBitcmp0B32(operands(0), operands(1), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "SOPC",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -5324,7 +5326,7 @@ private[common] object InstructionDefs9 {
             "cdna1",
             "SOPC_INST_LITERAL",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -5337,7 +5339,7 @@ private[common] object InstructionDefs9 {
             "cdna1",
             "SOPC_INST_LITERAL",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -5350,7 +5352,7 @@ private[common] object InstructionDefs9 {
             "cdna1",
             "SOPC_INST_LITERAL",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -5363,7 +5365,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOPC",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -5376,7 +5378,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOPC_INST_LITERAL",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -5389,7 +5391,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOPC_INST_LITERAL",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -5402,7 +5404,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOPC_INST_LITERAL",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -5415,7 +5417,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOPC",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -5428,7 +5430,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOPC_INST_LITERAL",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -5441,7 +5443,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOPC_INST_LITERAL",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -5454,7 +5456,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOPC_INST_LITERAL",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -5467,7 +5469,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOPC",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -5480,7 +5482,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOPC_INST_LITERAL",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -5493,7 +5495,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOPC_INST_LITERAL",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -5506,7 +5508,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOPC_INST_LITERAL",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -5519,7 +5521,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOPC",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -5532,7 +5534,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOPC_INST_LITERAL",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -5545,7 +5547,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOPC_INST_LITERAL",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -5558,7 +5560,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOPC_INST_LITERAL",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -5571,7 +5573,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOPC_INST_LITERAL64",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL64"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -5584,7 +5586,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOPC_INST_LITERAL64",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL64"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -5597,7 +5599,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOPC_INST_LITERAL64",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL64"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL64"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -5610,7 +5612,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOPC",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -5623,7 +5625,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOPC_INST_LITERAL",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -5636,7 +5638,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOPC_INST_LITERAL",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -5649,7 +5651,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOPC_INST_LITERAL",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -5662,7 +5664,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOPC",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -5675,7 +5677,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOPC_INST_LITERAL",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -5688,7 +5690,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOPC_INST_LITERAL",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -5701,7 +5703,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOPC_INST_LITERAL",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -5714,7 +5716,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOPC",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -5727,7 +5729,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOPC_INST_LITERAL",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -5740,7 +5742,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOPC_INST_LITERAL",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -5753,7 +5755,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOPC_INST_LITERAL",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -5766,7 +5768,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOPC",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -5779,7 +5781,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOPC_INST_LITERAL",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -5792,7 +5794,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOPC_INST_LITERAL",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -5805,7 +5807,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOPC_INST_LITERAL",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -5818,7 +5820,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOPC",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -5831,7 +5833,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOPC_INST_LITERAL",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -5844,7 +5846,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOPC_INST_LITERAL",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -5857,7 +5859,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOPC_INST_LITERAL",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -5870,7 +5872,7 @@ private[common] object InstructionDefs9 {
             "gfx6",
             "SOPC",
             12,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, true),
               OperandInfo(None, "uint", 32, true, false, false),
               OperandInfo(None, "uint", 32, true, false, false)
@@ -5883,7 +5885,7 @@ private[common] object InstructionDefs9 {
             "gfx7",
             "SOPC",
             12,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, true),
               OperandInfo(None, "uint", 32, true, false, false),
               OperandInfo(None, "uint", 32, true, false, false)
@@ -5896,7 +5898,7 @@ private[common] object InstructionDefs9 {
             "gfx8",
             "SOPC",
             12,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, true),
               OperandInfo(None, "uint", 32, true, false, false),
               OperandInfo(None, "uint", 32, true, false, false)
@@ -5909,7 +5911,7 @@ private[common] object InstructionDefs9 {
             "gfx9",
             "SOPC",
             12,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, true),
               OperandInfo(None, "uint", 32, true, false, false),
               OperandInfo(None, "uint", 32, true, false, false)
@@ -5922,13 +5924,13 @@ private[common] object InstructionDefs9 {
   case object SBitcmp0B64 extends InstructionDef(
         "s_bitcmp0_b64",
         decoder(form(2)((operands, mods) => Instruction.SBitcmp0B64(operands(0), operands(1), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "SOPC",
             14,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -5941,7 +5943,7 @@ private[common] object InstructionDefs9 {
             "cdna1",
             "SOPC_INST_LITERAL",
             14,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -5954,7 +5956,7 @@ private[common] object InstructionDefs9 {
             "cdna1",
             "SOPC_INST_LITERAL",
             14,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -5967,7 +5969,7 @@ private[common] object InstructionDefs9 {
             "cdna1",
             "SOPC_INST_LITERAL",
             14,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -5980,7 +5982,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOPC",
             14,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -5993,7 +5995,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOPC_INST_LITERAL",
             14,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -6006,7 +6008,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOPC_INST_LITERAL",
             14,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -6019,7 +6021,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOPC_INST_LITERAL",
             14,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -6032,7 +6034,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOPC",
             14,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -6045,7 +6047,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOPC_INST_LITERAL",
             14,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -6058,7 +6060,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOPC_INST_LITERAL",
             14,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -6071,7 +6073,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOPC_INST_LITERAL",
             14,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -6084,7 +6086,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOPC",
             14,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -6097,7 +6099,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOPC_INST_LITERAL",
             14,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -6110,7 +6112,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOPC_INST_LITERAL",
             14,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -6123,7 +6125,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOPC_INST_LITERAL",
             14,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -6136,7 +6138,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOPC",
             14,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -6149,7 +6151,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOPC_INST_LITERAL",
             14,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -6162,7 +6164,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOPC_INST_LITERAL",
             14,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -6175,7 +6177,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOPC_INST_LITERAL",
             14,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -6188,7 +6190,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOPC_INST_LITERAL64",
             14,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL64"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -6201,7 +6203,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOPC_INST_LITERAL64",
             14,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL64"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -6214,7 +6216,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOPC_INST_LITERAL64",
             14,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL64"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL64"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -6227,7 +6229,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOPC",
             14,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC_NOLDS", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -6240,7 +6242,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOPC_INST_LITERAL",
             14,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -6253,7 +6255,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOPC_INST_LITERAL",
             14,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC_NOLDS", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -6266,7 +6268,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOPC_INST_LITERAL",
             14,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -6279,7 +6281,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOPC",
             14,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC_NOLDS", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -6292,7 +6294,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOPC_INST_LITERAL",
             14,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -6305,7 +6307,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOPC_INST_LITERAL",
             14,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC_NOLDS", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -6318,7 +6320,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOPC_INST_LITERAL",
             14,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -6331,7 +6333,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOPC",
             14,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -6344,7 +6346,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOPC_INST_LITERAL",
             14,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -6357,7 +6359,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOPC_INST_LITERAL",
             14,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -6370,7 +6372,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOPC_INST_LITERAL",
             14,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -6383,7 +6385,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOPC",
             14,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -6396,7 +6398,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOPC_INST_LITERAL",
             14,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -6409,7 +6411,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOPC_INST_LITERAL",
             14,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -6422,7 +6424,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOPC_INST_LITERAL",
             14,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -6435,7 +6437,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOPC",
             14,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -6448,7 +6450,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOPC_INST_LITERAL",
             14,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -6461,7 +6463,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOPC_INST_LITERAL",
             14,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -6474,7 +6476,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOPC_INST_LITERAL",
             14,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -6487,7 +6489,7 @@ private[common] object InstructionDefs9 {
             "gfx6",
             "SOPC",
             14,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, true),
               OperandInfo(None, "uint", 64, true, false, false),
               OperandInfo(None, "uint", 32, true, false, false)
@@ -6500,7 +6502,7 @@ private[common] object InstructionDefs9 {
             "gfx7",
             "SOPC",
             14,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, true),
               OperandInfo(None, "uint", 64, true, false, false),
               OperandInfo(None, "uint", 32, true, false, false)
@@ -6513,7 +6515,7 @@ private[common] object InstructionDefs9 {
             "gfx8",
             "SOPC",
             14,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, true),
               OperandInfo(None, "uint", 64, true, false, false),
               OperandInfo(None, "uint", 32, true, false, false)
@@ -6526,7 +6528,7 @@ private[common] object InstructionDefs9 {
             "gfx9",
             "SOPC",
             14,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, true),
               OperandInfo(None, "uint", 64, true, false, false),
               OperandInfo(None, "uint", 32, true, false, false)
@@ -6539,13 +6541,13 @@ private[common] object InstructionDefs9 {
   case object SBitcmp1B32 extends InstructionDef(
         "s_bitcmp1_b32",
         decoder(form(2)((operands, mods) => Instruction.SBitcmp1B32(operands(0), operands(1), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "SOPC",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -6558,7 +6560,7 @@ private[common] object InstructionDefs9 {
             "cdna1",
             "SOPC_INST_LITERAL",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -6571,7 +6573,7 @@ private[common] object InstructionDefs9 {
             "cdna1",
             "SOPC_INST_LITERAL",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -6584,7 +6586,7 @@ private[common] object InstructionDefs9 {
             "cdna1",
             "SOPC_INST_LITERAL",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -6597,7 +6599,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOPC",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -6610,7 +6612,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOPC_INST_LITERAL",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -6623,7 +6625,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOPC_INST_LITERAL",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -6636,7 +6638,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOPC_INST_LITERAL",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -6649,7 +6651,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOPC",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -6662,7 +6664,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOPC_INST_LITERAL",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -6675,7 +6677,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOPC_INST_LITERAL",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -6688,7 +6690,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOPC_INST_LITERAL",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -6701,7 +6703,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOPC",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -6714,7 +6716,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOPC_INST_LITERAL",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -6727,7 +6729,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOPC_INST_LITERAL",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -6740,7 +6742,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOPC_INST_LITERAL",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -6753,7 +6755,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOPC",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -6766,7 +6768,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOPC_INST_LITERAL",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -6779,7 +6781,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOPC_INST_LITERAL",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -6792,7 +6794,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOPC_INST_LITERAL",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -6805,7 +6807,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOPC_INST_LITERAL64",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL64"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -6818,7 +6820,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOPC_INST_LITERAL64",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL64"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -6831,7 +6833,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOPC_INST_LITERAL64",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL64"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL64"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -6844,7 +6846,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOPC",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -6857,7 +6859,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOPC_INST_LITERAL",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -6870,7 +6872,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOPC_INST_LITERAL",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -6883,7 +6885,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOPC_INST_LITERAL",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -6896,7 +6898,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOPC",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -6909,7 +6911,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOPC_INST_LITERAL",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -6922,7 +6924,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOPC_INST_LITERAL",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -6935,7 +6937,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOPC_INST_LITERAL",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -6948,7 +6950,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOPC",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -6961,7 +6963,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOPC_INST_LITERAL",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -6974,7 +6976,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOPC_INST_LITERAL",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -6987,7 +6989,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOPC_INST_LITERAL",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -7000,7 +7002,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOPC",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -7013,7 +7015,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOPC_INST_LITERAL",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -7026,7 +7028,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOPC_INST_LITERAL",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -7039,7 +7041,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOPC_INST_LITERAL",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -7052,7 +7054,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOPC",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -7065,7 +7067,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOPC_INST_LITERAL",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -7078,7 +7080,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOPC_INST_LITERAL",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -7091,7 +7093,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOPC_INST_LITERAL",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -7104,7 +7106,7 @@ private[common] object InstructionDefs9 {
             "gfx6",
             "SOPC",
             13,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, true),
               OperandInfo(None, "uint", 32, true, false, false),
               OperandInfo(None, "uint", 32, true, false, false)
@@ -7117,7 +7119,7 @@ private[common] object InstructionDefs9 {
             "gfx7",
             "SOPC",
             13,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, true),
               OperandInfo(None, "uint", 32, true, false, false),
               OperandInfo(None, "uint", 32, true, false, false)
@@ -7130,7 +7132,7 @@ private[common] object InstructionDefs9 {
             "gfx8",
             "SOPC",
             13,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, true),
               OperandInfo(None, "uint", 32, true, false, false),
               OperandInfo(None, "uint", 32, true, false, false)
@@ -7143,7 +7145,7 @@ private[common] object InstructionDefs9 {
             "gfx9",
             "SOPC",
             13,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, true),
               OperandInfo(None, "uint", 32, true, false, false),
               OperandInfo(None, "uint", 32, true, false, false)
@@ -7156,13 +7158,13 @@ private[common] object InstructionDefs9 {
   case object SBitcmp1B64 extends InstructionDef(
         "s_bitcmp1_b64",
         decoder(form(2)((operands, mods) => Instruction.SBitcmp1B64(operands(0), operands(1), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "SOPC",
             15,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -7175,7 +7177,7 @@ private[common] object InstructionDefs9 {
             "cdna1",
             "SOPC_INST_LITERAL",
             15,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -7188,7 +7190,7 @@ private[common] object InstructionDefs9 {
             "cdna1",
             "SOPC_INST_LITERAL",
             15,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -7201,7 +7203,7 @@ private[common] object InstructionDefs9 {
             "cdna1",
             "SOPC_INST_LITERAL",
             15,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -7214,7 +7216,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOPC",
             15,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -7227,7 +7229,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOPC_INST_LITERAL",
             15,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -7240,7 +7242,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOPC_INST_LITERAL",
             15,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -7253,7 +7255,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOPC_INST_LITERAL",
             15,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -7266,7 +7268,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOPC",
             15,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -7279,7 +7281,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOPC_INST_LITERAL",
             15,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -7292,7 +7294,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOPC_INST_LITERAL",
             15,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -7305,7 +7307,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOPC_INST_LITERAL",
             15,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -7318,7 +7320,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOPC",
             15,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -7331,7 +7333,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOPC_INST_LITERAL",
             15,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -7344,7 +7346,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOPC_INST_LITERAL",
             15,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -7357,7 +7359,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOPC_INST_LITERAL",
             15,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -7370,7 +7372,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOPC",
             15,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -7383,7 +7385,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOPC_INST_LITERAL",
             15,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -7396,7 +7398,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOPC_INST_LITERAL",
             15,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -7409,7 +7411,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOPC_INST_LITERAL",
             15,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -7422,7 +7424,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOPC_INST_LITERAL64",
             15,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL64"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -7435,7 +7437,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOPC_INST_LITERAL64",
             15,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL64"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -7448,7 +7450,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOPC_INST_LITERAL64",
             15,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL64"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL64"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -7461,7 +7463,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOPC",
             15,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC_NOLDS", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -7474,7 +7476,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOPC_INST_LITERAL",
             15,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -7487,7 +7489,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOPC_INST_LITERAL",
             15,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC_NOLDS", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -7500,7 +7502,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOPC_INST_LITERAL",
             15,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -7513,7 +7515,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOPC",
             15,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC_NOLDS", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -7526,7 +7528,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOPC_INST_LITERAL",
             15,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -7539,7 +7541,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOPC_INST_LITERAL",
             15,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC_NOLDS", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -7552,7 +7554,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOPC_INST_LITERAL",
             15,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -7565,7 +7567,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOPC",
             15,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -7578,7 +7580,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOPC_INST_LITERAL",
             15,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -7591,7 +7593,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOPC_INST_LITERAL",
             15,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -7604,7 +7606,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOPC_INST_LITERAL",
             15,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -7617,7 +7619,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOPC",
             15,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -7630,7 +7632,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOPC_INST_LITERAL",
             15,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -7643,7 +7645,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOPC_INST_LITERAL",
             15,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -7656,7 +7658,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOPC_INST_LITERAL",
             15,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -7669,7 +7671,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOPC",
             15,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -7682,7 +7684,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOPC_INST_LITERAL",
             15,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -7695,7 +7697,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOPC_INST_LITERAL",
             15,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -7708,7 +7710,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOPC_INST_LITERAL",
             15,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -7721,7 +7723,7 @@ private[common] object InstructionDefs9 {
             "gfx6",
             "SOPC",
             15,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, true),
               OperandInfo(None, "uint", 64, true, false, false),
               OperandInfo(None, "uint", 32, true, false, false)
@@ -7734,7 +7736,7 @@ private[common] object InstructionDefs9 {
             "gfx7",
             "SOPC",
             15,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, true),
               OperandInfo(None, "uint", 64, true, false, false),
               OperandInfo(None, "uint", 32, true, false, false)
@@ -7747,7 +7749,7 @@ private[common] object InstructionDefs9 {
             "gfx8",
             "SOPC",
             15,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, true),
               OperandInfo(None, "uint", 64, true, false, false),
               OperandInfo(None, "uint", 32, true, false, false)
@@ -7760,7 +7762,7 @@ private[common] object InstructionDefs9 {
             "gfx9",
             "SOPC",
             15,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, true),
               OperandInfo(None, "uint", 64, true, false, false),
               OperandInfo(None, "uint", 32, true, false, false)
@@ -7773,13 +7775,13 @@ private[common] object InstructionDefs9 {
   case object SBitreplicateB64B32 extends InstructionDef(
         "s_bitreplicate_b64_b32",
         decoder(form(2)((operands, mods) => Instruction.SBitreplicateB64B32(operands(0), operands(1), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "SOP1",
             55,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false)
             ),
@@ -7791,7 +7793,7 @@ private[common] object InstructionDefs9 {
             "cdna1",
             "SOP1_INST_LITERAL",
             55,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
             ),
@@ -7803,7 +7805,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOP1",
             55,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false)
             ),
@@ -7815,7 +7817,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOP1_INST_LITERAL",
             55,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
             ),
@@ -7827,7 +7829,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOP1",
             55,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false)
             ),
@@ -7839,7 +7841,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOP1_INST_LITERAL",
             55,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
             ),
@@ -7851,7 +7853,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOP1",
             55,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false)
             ),
@@ -7863,7 +7865,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOP1_INST_LITERAL",
             55,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
             ),
@@ -7875,7 +7877,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP1",
             20,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false)
             ),
@@ -7887,7 +7889,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP1_INST_LITERAL",
             20,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
             ),
@@ -7899,7 +7901,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP1_INST_LITERAL64",
             20,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL64"), "SSRC", 32, true, false, false)
             ),
@@ -7911,7 +7913,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOP1",
             59,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC_NOLDS", 32, true, false, false)
             ),
@@ -7923,7 +7925,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOP1_INST_LITERAL",
             59,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false)
             ),
@@ -7935,7 +7937,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOP1",
             59,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC_NOLDS", 32, true, false, false)
             ),
@@ -7947,7 +7949,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOP1_INST_LITERAL",
             59,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false)
             ),
@@ -7959,7 +7961,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOP1",
             20,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false)
             ),
@@ -7971,7 +7973,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOP1_INST_LITERAL",
             20,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
             ),
@@ -7983,7 +7985,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOP1",
             20,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false)
             ),
@@ -7995,7 +7997,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOP1_INST_LITERAL",
             20,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
             ),
@@ -8007,7 +8009,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOP1",
             20,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false)
             ),
@@ -8019,7 +8021,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOP1_INST_LITERAL",
             20,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
             ),
@@ -8031,7 +8033,7 @@ private[common] object InstructionDefs9 {
             "gfx9",
             "SOP1",
             55,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 64, false, true, false),
               OperandInfo(None, "uint", 32, true, false, false)
             ),
@@ -8046,13 +8048,13 @@ private[common] object InstructionDefs9 {
           form(2)((operands, mods) => Instruction.SBitset0B32_2(operands(0), operands(1), mods)),
           form(3)((operands, mods) => Instruction.SBitset0B32_3(operands(0), operands(1), operands(2), mods))
         ),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "SOP1",
             24,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false)
             ),
@@ -8064,7 +8066,7 @@ private[common] object InstructionDefs9 {
             "cdna1",
             "SOP1_INST_LITERAL",
             24,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
             ),
@@ -8076,7 +8078,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOP1",
             24,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false)
             ),
@@ -8088,7 +8090,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOP1_INST_LITERAL",
             24,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
             ),
@@ -8100,7 +8102,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOP1",
             24,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false)
             ),
@@ -8112,7 +8114,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOP1_INST_LITERAL",
             24,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
             ),
@@ -8124,7 +8126,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOP1",
             24,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false)
             ),
@@ -8136,7 +8138,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOP1_INST_LITERAL",
             24,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
             ),
@@ -8148,7 +8150,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP1",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false)
             ),
@@ -8160,7 +8162,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP1_INST_LITERAL",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
             ),
@@ -8172,7 +8174,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP1_INST_LITERAL64",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL64"), "SSRC", 32, true, false, false)
             ),
@@ -8184,7 +8186,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOP1",
             27,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC_NOLDS", 32, true, false, false)
             ),
@@ -8196,7 +8198,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOP1_INST_LITERAL",
             27,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false)
             ),
@@ -8208,7 +8210,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOP1",
             27,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC_NOLDS", 32, true, false, false)
             ),
@@ -8220,7 +8222,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOP1_INST_LITERAL",
             27,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false)
             ),
@@ -8232,7 +8234,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOP1",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false)
             ),
@@ -8244,7 +8246,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOP1_INST_LITERAL",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
             ),
@@ -8256,7 +8258,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOP1",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false)
             ),
@@ -8268,7 +8270,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOP1_INST_LITERAL",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
             ),
@@ -8280,7 +8282,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOP1",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false)
             ),
@@ -8292,7 +8294,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOP1_INST_LITERAL",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
             ),
@@ -8304,7 +8306,7 @@ private[common] object InstructionDefs9 {
             "gfx6",
             "SOP1",
             27,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, false),
               OperandInfo(None, "uint", 32, true, false, false),
               OperandInfo(None, "uint", 32, true, false, false)
@@ -8317,7 +8319,7 @@ private[common] object InstructionDefs9 {
             "gfx7",
             "SOP1",
             27,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, false),
               OperandInfo(None, "uint", 32, true, false, false),
               OperandInfo(None, "uint", 32, true, false, false)
@@ -8330,7 +8332,7 @@ private[common] object InstructionDefs9 {
             "gfx8",
             "SOP1",
             24,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, false),
               OperandInfo(None, "uint", 32, true, false, false),
               OperandInfo(None, "uint", 32, true, false, false)
@@ -8343,7 +8345,7 @@ private[common] object InstructionDefs9 {
             "gfx9",
             "SOP1",
             24,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, false),
               OperandInfo(None, "uint", 32, true, false, false),
               OperandInfo(None, "uint", 32, true, false, false)
@@ -8359,13 +8361,13 @@ private[common] object InstructionDefs9 {
           form(2)((operands, mods) => Instruction.SBitset0B64_2(operands(0), operands(1), mods)),
           form(3)((operands, mods) => Instruction.SBitset0B64_3(operands(0), operands(1), operands(2), mods))
         ),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "SOP1",
             25,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false)
             ),
@@ -8377,7 +8379,7 @@ private[common] object InstructionDefs9 {
             "cdna1",
             "SOP1_INST_LITERAL",
             25,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
             ),
@@ -8389,7 +8391,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOP1",
             25,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false)
             ),
@@ -8401,7 +8403,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOP1_INST_LITERAL",
             25,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
             ),
@@ -8413,7 +8415,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOP1",
             25,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false)
             ),
@@ -8425,7 +8427,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOP1_INST_LITERAL",
             25,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
             ),
@@ -8437,7 +8439,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOP1",
             25,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false)
             ),
@@ -8449,7 +8451,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOP1_INST_LITERAL",
             25,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
             ),
@@ -8461,7 +8463,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP1",
             17,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false)
             ),
@@ -8473,7 +8475,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP1_INST_LITERAL",
             17,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
             ),
@@ -8485,7 +8487,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP1_INST_LITERAL64",
             17,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL64"), "SSRC", 32, true, false, false)
             ),
@@ -8497,7 +8499,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOP1",
             28,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC_NOLDS", 32, true, false, false)
             ),
@@ -8509,7 +8511,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOP1_INST_LITERAL",
             28,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false)
             ),
@@ -8521,7 +8523,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOP1",
             28,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC_NOLDS", 32, true, false, false)
             ),
@@ -8533,7 +8535,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOP1_INST_LITERAL",
             28,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false)
             ),
@@ -8545,7 +8547,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOP1",
             17,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false)
             ),
@@ -8557,7 +8559,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOP1_INST_LITERAL",
             17,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
             ),
@@ -8569,7 +8571,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOP1",
             17,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false)
             ),
@@ -8581,7 +8583,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOP1_INST_LITERAL",
             17,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
             ),
@@ -8593,7 +8595,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOP1",
             17,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false)
             ),
@@ -8605,7 +8607,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOP1_INST_LITERAL",
             17,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
             ),
@@ -8617,7 +8619,7 @@ private[common] object InstructionDefs9 {
             "gfx6",
             "SOP1",
             28,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 64, false, true, false),
               OperandInfo(None, "uint", 32, true, false, false),
               OperandInfo(None, "uint", 64, true, false, false)
@@ -8630,7 +8632,7 @@ private[common] object InstructionDefs9 {
             "gfx7",
             "SOP1",
             28,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 64, false, true, false),
               OperandInfo(None, "uint", 32, true, false, false),
               OperandInfo(None, "uint", 64, true, false, false)
@@ -8643,7 +8645,7 @@ private[common] object InstructionDefs9 {
             "gfx8",
             "SOP1",
             25,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 64, false, true, false),
               OperandInfo(None, "uint", 32, true, false, false),
               OperandInfo(None, "uint", 64, true, false, false)
@@ -8656,7 +8658,7 @@ private[common] object InstructionDefs9 {
             "gfx9",
             "SOP1",
             25,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 64, false, true, false),
               OperandInfo(None, "uint", 32, true, false, false),
               OperandInfo(None, "uint", 64, true, false, false)
@@ -8672,13 +8674,13 @@ private[common] object InstructionDefs9 {
           form(2)((operands, mods) => Instruction.SBitset1B32_2(operands(0), operands(1), mods)),
           form(3)((operands, mods) => Instruction.SBitset1B32_3(operands(0), operands(1), operands(2), mods))
         ),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "SOP1",
             26,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false)
             ),
@@ -8690,7 +8692,7 @@ private[common] object InstructionDefs9 {
             "cdna1",
             "SOP1_INST_LITERAL",
             26,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
             ),
@@ -8702,7 +8704,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOP1",
             26,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false)
             ),
@@ -8714,7 +8716,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOP1_INST_LITERAL",
             26,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
             ),
@@ -8726,7 +8728,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOP1",
             26,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false)
             ),
@@ -8738,7 +8740,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOP1_INST_LITERAL",
             26,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
             ),
@@ -8750,7 +8752,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOP1",
             26,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false)
             ),
@@ -8762,7 +8764,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOP1_INST_LITERAL",
             26,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
             ),
@@ -8774,7 +8776,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP1",
             18,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false)
             ),
@@ -8786,7 +8788,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP1_INST_LITERAL",
             18,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
             ),
@@ -8798,7 +8800,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP1_INST_LITERAL64",
             18,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL64"), "SSRC", 32, true, false, false)
             ),
@@ -8810,7 +8812,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOP1",
             29,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC_NOLDS", 32, true, false, false)
             ),
@@ -8822,7 +8824,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOP1_INST_LITERAL",
             29,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false)
             ),
@@ -8834,7 +8836,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOP1",
             29,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC_NOLDS", 32, true, false, false)
             ),
@@ -8846,7 +8848,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOP1_INST_LITERAL",
             29,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false)
             ),
@@ -8858,7 +8860,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOP1",
             18,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false)
             ),
@@ -8870,7 +8872,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOP1_INST_LITERAL",
             18,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
             ),
@@ -8882,7 +8884,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOP1",
             18,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false)
             ),
@@ -8894,7 +8896,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOP1_INST_LITERAL",
             18,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
             ),
@@ -8906,7 +8908,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOP1",
             18,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false)
             ),
@@ -8918,7 +8920,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOP1_INST_LITERAL",
             18,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
             ),
@@ -8930,7 +8932,7 @@ private[common] object InstructionDefs9 {
             "gfx6",
             "SOP1",
             29,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, false),
               OperandInfo(None, "uint", 32, true, false, false),
               OperandInfo(None, "uint", 32, true, false, false)
@@ -8943,7 +8945,7 @@ private[common] object InstructionDefs9 {
             "gfx7",
             "SOP1",
             29,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, false),
               OperandInfo(None, "uint", 32, true, false, false),
               OperandInfo(None, "uint", 32, true, false, false)
@@ -8956,7 +8958,7 @@ private[common] object InstructionDefs9 {
             "gfx8",
             "SOP1",
             26,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, false),
               OperandInfo(None, "uint", 32, true, false, false),
               OperandInfo(None, "uint", 32, true, false, false)
@@ -8969,7 +8971,7 @@ private[common] object InstructionDefs9 {
             "gfx9",
             "SOP1",
             26,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, false),
               OperandInfo(None, "uint", 32, true, false, false),
               OperandInfo(None, "uint", 32, true, false, false)
@@ -8985,13 +8987,13 @@ private[common] object InstructionDefs9 {
           form(2)((operands, mods) => Instruction.SBitset1B64_2(operands(0), operands(1), mods)),
           form(3)((operands, mods) => Instruction.SBitset1B64_3(operands(0), operands(1), operands(2), mods))
         ),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "SOP1",
             27,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false)
             ),
@@ -9003,7 +9005,7 @@ private[common] object InstructionDefs9 {
             "cdna1",
             "SOP1_INST_LITERAL",
             27,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
             ),
@@ -9015,7 +9017,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOP1",
             27,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false)
             ),
@@ -9027,7 +9029,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOP1_INST_LITERAL",
             27,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
             ),
@@ -9039,7 +9041,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOP1",
             27,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false)
             ),
@@ -9051,7 +9053,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOP1_INST_LITERAL",
             27,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
             ),
@@ -9063,7 +9065,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOP1",
             27,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false)
             ),
@@ -9075,7 +9077,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOP1_INST_LITERAL",
             27,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
             ),
@@ -9087,7 +9089,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP1",
             19,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false)
             ),
@@ -9099,7 +9101,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP1_INST_LITERAL",
             19,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
             ),
@@ -9111,7 +9113,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP1_INST_LITERAL64",
             19,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL64"), "SSRC", 32, true, false, false)
             ),
@@ -9123,7 +9125,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOP1",
             30,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC_NOLDS", 32, true, false, false)
             ),
@@ -9135,7 +9137,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOP1_INST_LITERAL",
             30,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false)
             ),
@@ -9147,7 +9149,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOP1",
             30,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC_NOLDS", 32, true, false, false)
             ),
@@ -9159,7 +9161,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOP1_INST_LITERAL",
             30,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false)
             ),
@@ -9171,7 +9173,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOP1",
             19,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false)
             ),
@@ -9183,7 +9185,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOP1_INST_LITERAL",
             19,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
             ),
@@ -9195,7 +9197,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOP1",
             19,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false)
             ),
@@ -9207,7 +9209,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOP1_INST_LITERAL",
             19,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
             ),
@@ -9219,7 +9221,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOP1",
             19,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false)
             ),
@@ -9231,7 +9233,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOP1_INST_LITERAL",
             19,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
             ),
@@ -9243,7 +9245,7 @@ private[common] object InstructionDefs9 {
             "gfx6",
             "SOP1",
             30,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 64, false, true, false),
               OperandInfo(None, "uint", 32, true, false, false),
               OperandInfo(None, "uint", 64, true, false, false)
@@ -9256,7 +9258,7 @@ private[common] object InstructionDefs9 {
             "gfx7",
             "SOP1",
             30,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 64, false, true, false),
               OperandInfo(None, "uint", 32, true, false, false),
               OperandInfo(None, "uint", 64, true, false, false)
@@ -9269,7 +9271,7 @@ private[common] object InstructionDefs9 {
             "gfx8",
             "SOP1",
             27,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 64, false, true, false),
               OperandInfo(None, "uint", 32, true, false, false),
               OperandInfo(None, "uint", 64, true, false, false)
@@ -9282,7 +9284,7 @@ private[common] object InstructionDefs9 {
             "gfx9",
             "SOP1",
             27,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 64, false, true, false),
               OperandInfo(None, "uint", 32, true, false, false),
               OperandInfo(None, "uint", 64, true, false, false)
@@ -9295,13 +9297,13 @@ private[common] object InstructionDefs9 {
   case object SBranch extends InstructionDef(
         "s_branch",
         decoder(form(1)((operands, mods) => Instruction.SBranch(operands(0), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "SOPP",
             2,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false)
             ),
             Some("SALU"),
@@ -9312,7 +9314,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOPP",
             2,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false)
             ),
             Some("SALU"),
@@ -9323,7 +9325,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOPP",
             2,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false)
             ),
             Some("SALU"),
@@ -9334,7 +9336,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOPP",
             2,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false)
             ),
             Some("SALU"),
@@ -9345,7 +9347,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOPP",
             32,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false)
             ),
             Some("BRANCH"),
@@ -9356,7 +9358,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOPP",
             2,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false)
             ),
             Some("SALU"),
@@ -9367,7 +9369,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOPP",
             2,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false)
             ),
             Some("SALU"),
@@ -9378,7 +9380,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOPP",
             32,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false)
             ),
             Some("BRANCH"),
@@ -9389,7 +9391,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOPP",
             32,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false)
             ),
             Some("BRANCH"),
@@ -9400,7 +9402,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOPP",
             32,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false)
             ),
             Some("BRANCH"),
@@ -9411,7 +9413,7 @@ private[common] object InstructionDefs9 {
             "gfx6",
             "SOPP",
             2,
-            Vector.empty,
+            Col.empty,
             Some("branch"),
             MetadataSource.MesaACO
           ),
@@ -9420,7 +9422,7 @@ private[common] object InstructionDefs9 {
             "gfx7",
             "SOPP",
             2,
-            Vector.empty,
+            Col.empty,
             Some("branch"),
             MetadataSource.MesaACO
           ),
@@ -9429,7 +9431,7 @@ private[common] object InstructionDefs9 {
             "gfx8",
             "SOPP",
             2,
-            Vector.empty,
+            Col.empty,
             Some("branch"),
             MetadataSource.MesaACO
           ),
@@ -9438,7 +9440,7 @@ private[common] object InstructionDefs9 {
             "gfx9",
             "SOPP",
             2,
-            Vector.empty,
+            Col.empty,
             Some("branch"),
             MetadataSource.MesaACO
           )
@@ -9447,13 +9449,13 @@ private[common] object InstructionDefs9 {
   case object SBrevB32 extends InstructionDef(
         "s_brev_b32",
         decoder(form(2)((operands, mods) => Instruction.SBrevB32(operands(0), operands(1), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "SOP1",
             8,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false)
             ),
@@ -9465,7 +9467,7 @@ private[common] object InstructionDefs9 {
             "cdna1",
             "SOP1_INST_LITERAL",
             8,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
             ),
@@ -9477,7 +9479,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOP1",
             8,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false)
             ),
@@ -9489,7 +9491,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOP1_INST_LITERAL",
             8,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
             ),
@@ -9501,7 +9503,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOP1",
             8,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false)
             ),
@@ -9513,7 +9515,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOP1_INST_LITERAL",
             8,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
             ),
@@ -9525,7 +9527,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOP1",
             8,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false)
             ),
@@ -9537,7 +9539,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOP1_INST_LITERAL",
             8,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
             ),
@@ -9549,7 +9551,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP1",
             4,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false)
             ),
@@ -9561,7 +9563,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP1_INST_LITERAL",
             4,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
             ),
@@ -9573,7 +9575,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP1_INST_LITERAL64",
             4,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL64"), "SSRC", 32, true, false, false)
             ),
@@ -9585,7 +9587,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOP1",
             11,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC_NOLDS", 32, true, false, false)
             ),
@@ -9597,7 +9599,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOP1_INST_LITERAL",
             11,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false)
             ),
@@ -9609,7 +9611,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOP1",
             11,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC_NOLDS", 32, true, false, false)
             ),
@@ -9621,7 +9623,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOP1_INST_LITERAL",
             11,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false)
             ),
@@ -9633,7 +9635,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOP1",
             4,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false)
             ),
@@ -9645,7 +9647,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOP1_INST_LITERAL",
             4,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
             ),
@@ -9657,7 +9659,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOP1",
             4,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false)
             ),
@@ -9669,7 +9671,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOP1_INST_LITERAL",
             4,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
             ),
@@ -9681,7 +9683,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOP1",
             4,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false)
             ),
@@ -9693,7 +9695,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOP1_INST_LITERAL",
             4,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
             ),
@@ -9705,7 +9707,7 @@ private[common] object InstructionDefs9 {
             "gfx6",
             "SOP1",
             11,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, false),
               OperandInfo(None, "uint", 32, true, false, false)
             ),
@@ -9717,7 +9719,7 @@ private[common] object InstructionDefs9 {
             "gfx7",
             "SOP1",
             11,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, false),
               OperandInfo(None, "uint", 32, true, false, false)
             ),
@@ -9729,7 +9731,7 @@ private[common] object InstructionDefs9 {
             "gfx8",
             "SOP1",
             8,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, false),
               OperandInfo(None, "uint", 32, true, false, false)
             ),
@@ -9741,7 +9743,7 @@ private[common] object InstructionDefs9 {
             "gfx9",
             "SOP1",
             8,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, false),
               OperandInfo(None, "uint", 32, true, false, false)
             ),
@@ -9753,13 +9755,13 @@ private[common] object InstructionDefs9 {
   case object SBrevB64 extends InstructionDef(
         "s_brev_b64",
         decoder(form(2)((operands, mods) => Instruction.SBrevB64(operands(0), operands(1), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "SOP1",
             9,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false)
             ),
@@ -9771,7 +9773,7 @@ private[common] object InstructionDefs9 {
             "cdna1",
             "SOP1_INST_LITERAL",
             9,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false)
             ),
@@ -9783,7 +9785,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOP1",
             9,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false)
             ),
@@ -9795,7 +9797,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOP1_INST_LITERAL",
             9,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false)
             ),
@@ -9807,7 +9809,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOP1",
             9,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false)
             ),
@@ -9819,7 +9821,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOP1_INST_LITERAL",
             9,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false)
             ),
@@ -9831,7 +9833,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOP1",
             9,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false)
             ),
@@ -9843,7 +9845,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOP1_INST_LITERAL",
             9,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false)
             ),
@@ -9855,7 +9857,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP1",
             5,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false)
             ),
@@ -9867,7 +9869,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP1_INST_LITERAL",
             5,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false)
             ),
@@ -9879,7 +9881,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP1_INST_LITERAL64",
             5,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL64"), "SSRC", 64, true, false, false)
             ),
@@ -9891,7 +9893,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOP1",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC_NOLDS", 64, true, false, false)
             ),
@@ -9903,7 +9905,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOP1_INST_LITERAL",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 64, true, false, false)
             ),
@@ -9915,7 +9917,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOP1",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC_NOLDS", 64, true, false, false)
             ),
@@ -9927,7 +9929,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOP1_INST_LITERAL",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 64, true, false, false)
             ),
@@ -9939,7 +9941,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOP1",
             5,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false)
             ),
@@ -9951,7 +9953,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOP1_INST_LITERAL",
             5,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false)
             ),
@@ -9963,7 +9965,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOP1",
             5,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false)
             ),
@@ -9975,7 +9977,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOP1_INST_LITERAL",
             5,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false)
             ),
@@ -9987,7 +9989,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOP1",
             5,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false)
             ),
@@ -9999,7 +10001,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOP1_INST_LITERAL",
             5,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false)
             ),
@@ -10011,7 +10013,7 @@ private[common] object InstructionDefs9 {
             "gfx6",
             "SOP1",
             12,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 64, false, true, false),
               OperandInfo(None, "uint", 64, true, false, false)
             ),
@@ -10023,7 +10025,7 @@ private[common] object InstructionDefs9 {
             "gfx7",
             "SOP1",
             12,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 64, false, true, false),
               OperandInfo(None, "uint", 64, true, false, false)
             ),
@@ -10035,7 +10037,7 @@ private[common] object InstructionDefs9 {
             "gfx8",
             "SOP1",
             9,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 64, false, true, false),
               OperandInfo(None, "uint", 64, true, false, false)
             ),
@@ -10047,7 +10049,7 @@ private[common] object InstructionDefs9 {
             "gfx9",
             "SOP1",
             9,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 64, false, true, false),
               OperandInfo(None, "uint", 64, true, false, false)
             ),
@@ -10059,13 +10061,13 @@ private[common] object InstructionDefs9 {
   case object SBufferAtomicAdd extends InstructionDef(
         "s_buffer_atomic_add",
         decoder(form(3)((operands, mods) => Instruction.SBufferAtomicAdd(operands(0), operands(1), operands(2), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "SMEM",
             66,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 32, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -10078,7 +10080,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SMEM",
             66,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 32, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -10091,7 +10093,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SMEM",
             66,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 32, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -10104,7 +10106,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SMEM",
             66,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 32, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -10117,7 +10119,7 @@ private[common] object InstructionDefs9 {
             "gfx9",
             "SMEM",
             66,
-            Vector.empty,
+            Col.empty,
             Some("smem"),
             MetadataSource.MesaACO
           )
@@ -10128,13 +10130,13 @@ private[common] object InstructionDefs9 {
         decoder(form(3)((operands, mods) =>
           Instruction.SBufferAtomicAddX2(operands(0), operands(1), operands(2), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "SMEM",
             98,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 64, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -10147,7 +10149,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SMEM",
             98,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 64, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -10160,7 +10162,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SMEM",
             98,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 64, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -10173,7 +10175,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SMEM",
             98,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 64, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -10186,7 +10188,7 @@ private[common] object InstructionDefs9 {
             "gfx9",
             "SMEM",
             98,
-            Vector.empty,
+            Col.empty,
             Some("smem"),
             MetadataSource.MesaACO
           )
@@ -10195,13 +10197,13 @@ private[common] object InstructionDefs9 {
   case object SBufferAtomicAnd extends InstructionDef(
         "s_buffer_atomic_and",
         decoder(form(3)((operands, mods) => Instruction.SBufferAtomicAnd(operands(0), operands(1), operands(2), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "SMEM",
             72,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 32, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -10214,7 +10216,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SMEM",
             72,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 32, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -10227,7 +10229,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SMEM",
             72,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 32, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -10240,7 +10242,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SMEM",
             72,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 32, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -10253,7 +10255,7 @@ private[common] object InstructionDefs9 {
             "gfx9",
             "SMEM",
             72,
-            Vector.empty,
+            Col.empty,
             Some("smem"),
             MetadataSource.MesaACO
           )
@@ -10264,13 +10266,13 @@ private[common] object InstructionDefs9 {
         decoder(form(3)((operands, mods) =>
           Instruction.SBufferAtomicAndX2(operands(0), operands(1), operands(2), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "SMEM",
             104,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 64, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -10283,7 +10285,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SMEM",
             104,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 64, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -10296,7 +10298,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SMEM",
             104,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 64, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -10309,7 +10311,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SMEM",
             104,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 64, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -10322,7 +10324,7 @@ private[common] object InstructionDefs9 {
             "gfx9",
             "SMEM",
             104,
-            Vector.empty,
+            Col.empty,
             Some("smem"),
             MetadataSource.MesaACO
           )
@@ -10333,13 +10335,13 @@ private[common] object InstructionDefs9 {
         decoder(form(3)((operands, mods) =>
           Instruction.SBufferAtomicCmpswap(operands(0), operands(1), operands(2), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "SMEM",
             65,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 64, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -10352,7 +10354,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SMEM",
             65,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 64, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -10365,7 +10367,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SMEM",
             65,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 64, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -10378,7 +10380,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SMEM",
             65,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 64, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -10391,7 +10393,7 @@ private[common] object InstructionDefs9 {
             "gfx9",
             "SMEM",
             65,
-            Vector.empty,
+            Col.empty,
             Some("smem"),
             MetadataSource.MesaACO
           )
@@ -10402,13 +10404,13 @@ private[common] object InstructionDefs9 {
         decoder(form(3)((operands, mods) =>
           Instruction.SBufferAtomicCmpswapX2(operands(0), operands(1), operands(2), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "SMEM",
             97,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 128, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -10421,7 +10423,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SMEM",
             97,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 128, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -10434,7 +10436,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SMEM",
             97,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 128, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -10447,7 +10449,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SMEM",
             97,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 128, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -10460,7 +10462,7 @@ private[common] object InstructionDefs9 {
             "gfx9",
             "SMEM",
             97,
-            Vector.empty,
+            Col.empty,
             Some("smem"),
             MetadataSource.MesaACO
           )
@@ -10469,13 +10471,13 @@ private[common] object InstructionDefs9 {
   case object SBufferAtomicDec extends InstructionDef(
         "s_buffer_atomic_dec",
         decoder(form(3)((operands, mods) => Instruction.SBufferAtomicDec(operands(0), operands(1), operands(2), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "SMEM",
             76,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 32, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -10488,7 +10490,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SMEM",
             76,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 32, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -10501,7 +10503,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SMEM",
             76,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 32, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -10514,7 +10516,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SMEM",
             76,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 32, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -10527,7 +10529,7 @@ private[common] object InstructionDefs9 {
             "gfx9",
             "SMEM",
             76,
-            Vector.empty,
+            Col.empty,
             Some("smem"),
             MetadataSource.MesaACO
           )
@@ -10538,13 +10540,13 @@ private[common] object InstructionDefs9 {
         decoder(form(3)((operands, mods) =>
           Instruction.SBufferAtomicDecX2(operands(0), operands(1), operands(2), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "SMEM",
             108,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 64, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -10557,7 +10559,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SMEM",
             108,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 64, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -10570,7 +10572,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SMEM",
             108,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 64, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -10583,7 +10585,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SMEM",
             108,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 64, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -10596,7 +10598,7 @@ private[common] object InstructionDefs9 {
             "gfx9",
             "SMEM",
             108,
-            Vector.empty,
+            Col.empty,
             Some("smem"),
             MetadataSource.MesaACO
           )
@@ -10605,13 +10607,13 @@ private[common] object InstructionDefs9 {
   case object SBufferAtomicInc extends InstructionDef(
         "s_buffer_atomic_inc",
         decoder(form(3)((operands, mods) => Instruction.SBufferAtomicInc(operands(0), operands(1), operands(2), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "SMEM",
             75,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 32, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -10624,7 +10626,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SMEM",
             75,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 32, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -10637,7 +10639,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SMEM",
             75,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 32, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -10650,7 +10652,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SMEM",
             75,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 32, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -10663,7 +10665,7 @@ private[common] object InstructionDefs9 {
             "gfx9",
             "SMEM",
             75,
-            Vector.empty,
+            Col.empty,
             Some("smem"),
             MetadataSource.MesaACO
           )
@@ -10674,13 +10676,13 @@ private[common] object InstructionDefs9 {
         decoder(form(3)((operands, mods) =>
           Instruction.SBufferAtomicIncX2(operands(0), operands(1), operands(2), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "SMEM",
             107,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 64, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -10693,7 +10695,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SMEM",
             107,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 64, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -10706,7 +10708,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SMEM",
             107,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 64, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -10719,7 +10721,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SMEM",
             107,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 64, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -10732,7 +10734,7 @@ private[common] object InstructionDefs9 {
             "gfx9",
             "SMEM",
             107,
-            Vector.empty,
+            Col.empty,
             Some("smem"),
             MetadataSource.MesaACO
           )
@@ -10741,13 +10743,13 @@ private[common] object InstructionDefs9 {
   case object SBufferAtomicOr extends InstructionDef(
         "s_buffer_atomic_or",
         decoder(form(3)((operands, mods) => Instruction.SBufferAtomicOr(operands(0), operands(1), operands(2), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "SMEM",
             73,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 32, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -10760,7 +10762,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SMEM",
             73,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 32, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -10773,7 +10775,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SMEM",
             73,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 32, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -10786,7 +10788,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SMEM",
             73,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 32, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -10799,7 +10801,7 @@ private[common] object InstructionDefs9 {
             "gfx9",
             "SMEM",
             73,
-            Vector.empty,
+            Col.empty,
             Some("smem"),
             MetadataSource.MesaACO
           )
@@ -10810,13 +10812,13 @@ private[common] object InstructionDefs9 {
         decoder(form(3)((operands, mods) =>
           Instruction.SBufferAtomicOrX2(operands(0), operands(1), operands(2), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "SMEM",
             105,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 64, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -10829,7 +10831,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SMEM",
             105,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 64, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -10842,7 +10844,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SMEM",
             105,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 64, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -10855,7 +10857,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SMEM",
             105,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 64, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -10868,7 +10870,7 @@ private[common] object InstructionDefs9 {
             "gfx9",
             "SMEM",
             105,
-            Vector.empty,
+            Col.empty,
             Some("smem"),
             MetadataSource.MesaACO
           )
@@ -10879,13 +10881,13 @@ private[common] object InstructionDefs9 {
         decoder(form(3)((operands, mods) =>
           Instruction.SBufferAtomicSmax(operands(0), operands(1), operands(2), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "SMEM",
             70,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 32, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -10898,7 +10900,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SMEM",
             70,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 32, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -10911,7 +10913,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SMEM",
             70,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 32, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -10924,7 +10926,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SMEM",
             70,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 32, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -10937,7 +10939,7 @@ private[common] object InstructionDefs9 {
             "gfx9",
             "SMEM",
             70,
-            Vector.empty,
+            Col.empty,
             Some("smem"),
             MetadataSource.MesaACO
           )
@@ -10948,13 +10950,13 @@ private[common] object InstructionDefs9 {
         decoder(form(3)((operands, mods) =>
           Instruction.SBufferAtomicSmaxX2(operands(0), operands(1), operands(2), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "SMEM",
             102,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 64, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -10967,7 +10969,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SMEM",
             102,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 64, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -10980,7 +10982,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SMEM",
             102,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 64, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -10993,7 +10995,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SMEM",
             102,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 64, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -11006,7 +11008,7 @@ private[common] object InstructionDefs9 {
             "gfx9",
             "SMEM",
             102,
-            Vector.empty,
+            Col.empty,
             Some("smem"),
             MetadataSource.MesaACO
           )
@@ -11017,13 +11019,13 @@ private[common] object InstructionDefs9 {
         decoder(form(3)((operands, mods) =>
           Instruction.SBufferAtomicSmin(operands(0), operands(1), operands(2), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "SMEM",
             68,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 32, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -11036,7 +11038,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SMEM",
             68,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 32, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -11049,7 +11051,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SMEM",
             68,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 32, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -11062,7 +11064,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SMEM",
             68,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 32, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -11075,7 +11077,7 @@ private[common] object InstructionDefs9 {
             "gfx9",
             "SMEM",
             68,
-            Vector.empty,
+            Col.empty,
             Some("smem"),
             MetadataSource.MesaACO
           )
@@ -11086,13 +11088,13 @@ private[common] object InstructionDefs9 {
         decoder(form(3)((operands, mods) =>
           Instruction.SBufferAtomicSminX2(operands(0), operands(1), operands(2), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "SMEM",
             100,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 64, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -11105,7 +11107,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SMEM",
             100,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 64, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -11118,7 +11120,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SMEM",
             100,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 64, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -11131,7 +11133,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SMEM",
             100,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 64, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -11144,7 +11146,7 @@ private[common] object InstructionDefs9 {
             "gfx9",
             "SMEM",
             100,
-            Vector.empty,
+            Col.empty,
             Some("smem"),
             MetadataSource.MesaACO
           )
@@ -11153,13 +11155,13 @@ private[common] object InstructionDefs9 {
   case object SBufferAtomicSub extends InstructionDef(
         "s_buffer_atomic_sub",
         decoder(form(3)((operands, mods) => Instruction.SBufferAtomicSub(operands(0), operands(1), operands(2), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "SMEM",
             67,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 32, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -11172,7 +11174,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SMEM",
             67,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 32, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -11185,7 +11187,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SMEM",
             67,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 32, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -11198,7 +11200,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SMEM",
             67,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 32, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -11211,7 +11213,7 @@ private[common] object InstructionDefs9 {
             "gfx9",
             "SMEM",
             67,
-            Vector.empty,
+            Col.empty,
             Some("smem"),
             MetadataSource.MesaACO
           )
@@ -11222,13 +11224,13 @@ private[common] object InstructionDefs9 {
         decoder(form(3)((operands, mods) =>
           Instruction.SBufferAtomicSubX2(operands(0), operands(1), operands(2), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "SMEM",
             99,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 64, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -11241,7 +11243,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SMEM",
             99,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 64, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -11254,7 +11256,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SMEM",
             99,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 64, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -11267,7 +11269,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SMEM",
             99,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 64, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -11280,7 +11282,7 @@ private[common] object InstructionDefs9 {
             "gfx9",
             "SMEM",
             99,
-            Vector.empty,
+            Col.empty,
             Some("smem"),
             MetadataSource.MesaACO
           )
@@ -11291,13 +11293,13 @@ private[common] object InstructionDefs9 {
         decoder(form(3)((operands, mods) =>
           Instruction.SBufferAtomicSwap(operands(0), operands(1), operands(2), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "SMEM",
             64,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 32, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -11310,7 +11312,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SMEM",
             64,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 32, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -11323,7 +11325,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SMEM",
             64,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 32, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -11336,7 +11338,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SMEM",
             64,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 32, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -11349,7 +11351,7 @@ private[common] object InstructionDefs9 {
             "gfx9",
             "SMEM",
             64,
-            Vector.empty,
+            Col.empty,
             Some("smem"),
             MetadataSource.MesaACO
           )
@@ -11360,13 +11362,13 @@ private[common] object InstructionDefs9 {
         decoder(form(3)((operands, mods) =>
           Instruction.SBufferAtomicSwapX2(operands(0), operands(1), operands(2), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "SMEM",
             96,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 64, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -11379,7 +11381,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SMEM",
             96,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 64, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -11392,7 +11394,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SMEM",
             96,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 64, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -11405,7 +11407,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SMEM",
             96,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 64, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -11418,7 +11420,7 @@ private[common] object InstructionDefs9 {
             "gfx9",
             "SMEM",
             96,
-            Vector.empty,
+            Col.empty,
             Some("smem"),
             MetadataSource.MesaACO
           )
@@ -11429,13 +11431,13 @@ private[common] object InstructionDefs9 {
         decoder(form(3)((operands, mods) =>
           Instruction.SBufferAtomicUmax(operands(0), operands(1), operands(2), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "SMEM",
             71,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 32, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -11448,7 +11450,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SMEM",
             71,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 32, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -11461,7 +11463,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SMEM",
             71,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 32, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -11474,7 +11476,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SMEM",
             71,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 32, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -11487,7 +11489,7 @@ private[common] object InstructionDefs9 {
             "gfx9",
             "SMEM",
             71,
-            Vector.empty,
+            Col.empty,
             Some("smem"),
             MetadataSource.MesaACO
           )
@@ -11498,13 +11500,13 @@ private[common] object InstructionDefs9 {
         decoder(form(3)((operands, mods) =>
           Instruction.SBufferAtomicUmaxX2(operands(0), operands(1), operands(2), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "SMEM",
             103,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 64, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -11517,7 +11519,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SMEM",
             103,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 64, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -11530,7 +11532,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SMEM",
             103,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 64, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -11543,7 +11545,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SMEM",
             103,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 64, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -11556,7 +11558,7 @@ private[common] object InstructionDefs9 {
             "gfx9",
             "SMEM",
             103,
-            Vector.empty,
+            Col.empty,
             Some("smem"),
             MetadataSource.MesaACO
           )
@@ -11567,13 +11569,13 @@ private[common] object InstructionDefs9 {
         decoder(form(3)((operands, mods) =>
           Instruction.SBufferAtomicUmin(operands(0), operands(1), operands(2), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "SMEM",
             69,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 32, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -11586,7 +11588,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SMEM",
             69,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 32, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -11599,7 +11601,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SMEM",
             69,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 32, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -11612,7 +11614,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SMEM",
             69,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 32, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -11625,7 +11627,7 @@ private[common] object InstructionDefs9 {
             "gfx9",
             "SMEM",
             69,
-            Vector.empty,
+            Col.empty,
             Some("smem"),
             MetadataSource.MesaACO
           )
@@ -11636,13 +11638,13 @@ private[common] object InstructionDefs9 {
         decoder(form(3)((operands, mods) =>
           Instruction.SBufferAtomicUminX2(operands(0), operands(1), operands(2), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "SMEM",
             101,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 64, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -11655,7 +11657,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SMEM",
             101,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 64, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -11668,7 +11670,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SMEM",
             101,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 64, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -11681,7 +11683,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SMEM",
             101,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 64, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -11694,7 +11696,7 @@ private[common] object InstructionDefs9 {
             "gfx9",
             "SMEM",
             101,
-            Vector.empty,
+            Col.empty,
             Some("smem"),
             MetadataSource.MesaACO
           )
@@ -11703,13 +11705,13 @@ private[common] object InstructionDefs9 {
   case object SBufferAtomicXor extends InstructionDef(
         "s_buffer_atomic_xor",
         decoder(form(3)((operands, mods) => Instruction.SBufferAtomicXor(operands(0), operands(1), operands(2), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "SMEM",
             74,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 32, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -11722,7 +11724,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SMEM",
             74,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 32, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -11735,7 +11737,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SMEM",
             74,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 32, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -11748,7 +11750,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SMEM",
             74,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 32, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -11761,7 +11763,7 @@ private[common] object InstructionDefs9 {
             "gfx9",
             "SMEM",
             74,
-            Vector.empty,
+            Col.empty,
             Some("smem"),
             MetadataSource.MesaACO
           )
@@ -11772,13 +11774,13 @@ private[common] object InstructionDefs9 {
         decoder(form(3)((operands, mods) =>
           Instruction.SBufferAtomicXorX2(operands(0), operands(1), operands(2), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "SMEM",
             106,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 64, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -11791,7 +11793,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SMEM",
             106,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 64, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -11804,7 +11806,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SMEM",
             106,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 64, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -11817,7 +11819,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SMEM",
             106,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 64, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false)
@@ -11830,7 +11832,7 @@ private[common] object InstructionDefs9 {
             "gfx9",
             "SMEM",
             106,
-            Vector.empty,
+            Col.empty,
             Some("smem"),
             MetadataSource.MesaACO
           )
@@ -11839,13 +11841,13 @@ private[common] object InstructionDefs9 {
   case object SBufferLoadB128 extends InstructionDef(
         "s_buffer_load_b128",
         decoder(form(3)((operands, mods) => Instruction.SBufferLoadB128(operands(0), operands(1), operands(2), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "SMEM",
             18,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 128, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false),
@@ -11859,7 +11861,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SMEM",
             10,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 128, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false),
@@ -11873,7 +11875,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SMEM",
             10,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 128, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false),
@@ -11887,7 +11889,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SMEM",
             18,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 128, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false),
@@ -11901,13 +11903,13 @@ private[common] object InstructionDefs9 {
   case object SBufferLoadB256 extends InstructionDef(
         "s_buffer_load_b256",
         decoder(form(3)((operands, mods) => Instruction.SBufferLoadB256(operands(0), operands(1), operands(2), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "SMEM",
             19,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 256, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false),
@@ -11921,7 +11923,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SMEM",
             11,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 256, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false),
@@ -11935,7 +11937,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SMEM",
             11,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 256, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false),
@@ -11949,7 +11951,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SMEM",
             19,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 256, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false),
@@ -11963,13 +11965,13 @@ private[common] object InstructionDefs9 {
   case object SBufferLoadB32 extends InstructionDef(
         "s_buffer_load_b32",
         decoder(form(3)((operands, mods) => Instruction.SBufferLoadB32(operands(0), operands(1), operands(2), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "SMEM",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 32, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false),
@@ -11983,7 +11985,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SMEM",
             8,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 32, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false),
@@ -11997,7 +11999,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SMEM",
             8,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 32, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false),
@@ -12011,7 +12013,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SMEM",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 32, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false),
@@ -12025,13 +12027,13 @@ private[common] object InstructionDefs9 {
   case object SBufferLoadB512 extends InstructionDef(
         "s_buffer_load_b512",
         decoder(form(3)((operands, mods) => Instruction.SBufferLoadB512(operands(0), operands(1), operands(2), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "SMEM",
             20,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 512, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false),
@@ -12045,7 +12047,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SMEM",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 512, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false),
@@ -12059,7 +12061,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SMEM",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 512, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false),
@@ -12073,7 +12075,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SMEM",
             20,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 512, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false),
@@ -12087,13 +12089,13 @@ private[common] object InstructionDefs9 {
   case object SBufferLoadB64 extends InstructionDef(
         "s_buffer_load_b64",
         decoder(form(3)((operands, mods) => Instruction.SBufferLoadB64(operands(0), operands(1), operands(2), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "SMEM",
             17,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 64, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false),
@@ -12107,7 +12109,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SMEM",
             9,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 64, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false),
@@ -12121,7 +12123,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SMEM",
             9,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 64, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false),
@@ -12135,7 +12137,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SMEM",
             17,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 64, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false),
@@ -12149,13 +12151,13 @@ private[common] object InstructionDefs9 {
   case object SBufferLoadB96 extends InstructionDef(
         "s_buffer_load_b96",
         decoder(form(3)((operands, mods) => Instruction.SBufferLoadB96(operands(0), operands(1), operands(2), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "SMEM",
             21,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 96, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false),
@@ -12169,7 +12171,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SMEM",
             21,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 96, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false),
@@ -12183,13 +12185,13 @@ private[common] object InstructionDefs9 {
   case object SBufferLoadDword extends InstructionDef(
         "s_buffer_load_dword",
         decoder(form(3)((operands, mods) => Instruction.SBufferLoadDword(operands(0), operands(1), operands(2), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "SMEM",
             8,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 32, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false),
@@ -12203,7 +12205,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SMEM",
             8,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 32, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false),
@@ -12217,7 +12219,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SMEM",
             8,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 32, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false),
@@ -12231,7 +12233,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SMEM",
             8,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 32, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false),
@@ -12245,7 +12247,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SMEM",
             8,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 32, false, true, false),
               OperandInfo(Some("SBASE"), "SREG_NONULL", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false),
@@ -12259,7 +12261,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SMEM",
             8,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 32, false, true, false),
               OperandInfo(Some("SBASE"), "SREG_NONULL", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false),
@@ -12273,7 +12275,7 @@ private[common] object InstructionDefs9 {
             "gfx6",
             "SMEM",
             8,
-            Vector.empty,
+            Col.empty,
             Some("smem"),
             MetadataSource.MesaACO
           ),
@@ -12282,7 +12284,7 @@ private[common] object InstructionDefs9 {
             "gfx7",
             "SMEM",
             8,
-            Vector.empty,
+            Col.empty,
             Some("smem"),
             MetadataSource.MesaACO
           ),
@@ -12291,7 +12293,7 @@ private[common] object InstructionDefs9 {
             "gfx8",
             "SMEM",
             8,
-            Vector.empty,
+            Col.empty,
             Some("smem"),
             MetadataSource.MesaACO
           ),
@@ -12300,7 +12302,7 @@ private[common] object InstructionDefs9 {
             "gfx9",
             "SMEM",
             8,
-            Vector.empty,
+            Col.empty,
             Some("smem"),
             MetadataSource.MesaACO
           )
@@ -12311,13 +12313,13 @@ private[common] object InstructionDefs9 {
         decoder(form(3)((operands, mods) =>
           Instruction.SBufferLoadDwordx16(operands(0), operands(1), operands(2), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "SMEM",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 512, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false),
@@ -12331,7 +12333,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SMEM",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 512, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false),
@@ -12345,7 +12347,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SMEM",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 512, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false),
@@ -12359,7 +12361,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SMEM",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 512, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false),
@@ -12373,7 +12375,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SMEM",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 512, false, true, false),
               OperandInfo(Some("SBASE"), "SREG_NONULL", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false),
@@ -12387,7 +12389,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SMEM",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 512, false, true, false),
               OperandInfo(Some("SBASE"), "SREG_NONULL", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false),
@@ -12401,7 +12403,7 @@ private[common] object InstructionDefs9 {
             "gfx6",
             "SMEM",
             12,
-            Vector.empty,
+            Col.empty,
             Some("smem"),
             MetadataSource.MesaACO
           ),
@@ -12410,7 +12412,7 @@ private[common] object InstructionDefs9 {
             "gfx7",
             "SMEM",
             12,
-            Vector.empty,
+            Col.empty,
             Some("smem"),
             MetadataSource.MesaACO
           ),
@@ -12419,7 +12421,7 @@ private[common] object InstructionDefs9 {
             "gfx8",
             "SMEM",
             12,
-            Vector.empty,
+            Col.empty,
             Some("smem"),
             MetadataSource.MesaACO
           ),
@@ -12428,7 +12430,7 @@ private[common] object InstructionDefs9 {
             "gfx9",
             "SMEM",
             12,
-            Vector.empty,
+            Col.empty,
             Some("smem"),
             MetadataSource.MesaACO
           )
@@ -12439,13 +12441,13 @@ private[common] object InstructionDefs9 {
         decoder(form(3)((operands, mods) =>
           Instruction.SBufferLoadDwordx2(operands(0), operands(1), operands(2), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "SMEM",
             9,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 64, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false),
@@ -12459,7 +12461,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SMEM",
             9,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 64, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false),
@@ -12473,7 +12475,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SMEM",
             9,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 64, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false),
@@ -12487,7 +12489,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SMEM",
             9,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 64, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false),
@@ -12501,7 +12503,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SMEM",
             9,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 64, false, true, false),
               OperandInfo(Some("SBASE"), "SREG_NONULL", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false),
@@ -12515,7 +12517,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SMEM",
             9,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 64, false, true, false),
               OperandInfo(Some("SBASE"), "SREG_NONULL", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false),
@@ -12529,7 +12531,7 @@ private[common] object InstructionDefs9 {
             "gfx6",
             "SMEM",
             9,
-            Vector.empty,
+            Col.empty,
             Some("smem"),
             MetadataSource.MesaACO
           ),
@@ -12538,7 +12540,7 @@ private[common] object InstructionDefs9 {
             "gfx7",
             "SMEM",
             9,
-            Vector.empty,
+            Col.empty,
             Some("smem"),
             MetadataSource.MesaACO
           ),
@@ -12547,7 +12549,7 @@ private[common] object InstructionDefs9 {
             "gfx8",
             "SMEM",
             9,
-            Vector.empty,
+            Col.empty,
             Some("smem"),
             MetadataSource.MesaACO
           ),
@@ -12556,7 +12558,7 @@ private[common] object InstructionDefs9 {
             "gfx9",
             "SMEM",
             9,
-            Vector.empty,
+            Col.empty,
             Some("smem"),
             MetadataSource.MesaACO
           )
@@ -12567,13 +12569,13 @@ private[common] object InstructionDefs9 {
         decoder(form(3)((operands, mods) =>
           Instruction.SBufferLoadDwordx4(operands(0), operands(1), operands(2), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "SMEM",
             10,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 128, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false),
@@ -12587,7 +12589,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SMEM",
             10,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 128, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false),
@@ -12601,7 +12603,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SMEM",
             10,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 128, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false),
@@ -12615,7 +12617,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SMEM",
             10,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 128, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false),
@@ -12629,7 +12631,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SMEM",
             10,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 128, false, true, false),
               OperandInfo(Some("SBASE"), "SREG_NONULL", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false),
@@ -12643,7 +12645,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SMEM",
             10,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 128, false, true, false),
               OperandInfo(Some("SBASE"), "SREG_NONULL", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false),
@@ -12657,7 +12659,7 @@ private[common] object InstructionDefs9 {
             "gfx6",
             "SMEM",
             10,
-            Vector.empty,
+            Col.empty,
             Some("smem"),
             MetadataSource.MesaACO
           ),
@@ -12666,7 +12668,7 @@ private[common] object InstructionDefs9 {
             "gfx7",
             "SMEM",
             10,
-            Vector.empty,
+            Col.empty,
             Some("smem"),
             MetadataSource.MesaACO
           ),
@@ -12675,7 +12677,7 @@ private[common] object InstructionDefs9 {
             "gfx8",
             "SMEM",
             10,
-            Vector.empty,
+            Col.empty,
             Some("smem"),
             MetadataSource.MesaACO
           ),
@@ -12684,7 +12686,7 @@ private[common] object InstructionDefs9 {
             "gfx9",
             "SMEM",
             10,
-            Vector.empty,
+            Col.empty,
             Some("smem"),
             MetadataSource.MesaACO
           )
@@ -12695,13 +12697,13 @@ private[common] object InstructionDefs9 {
         decoder(form(3)((operands, mods) =>
           Instruction.SBufferLoadDwordx8(operands(0), operands(1), operands(2), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "SMEM",
             11,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 256, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false),
@@ -12715,7 +12717,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SMEM",
             11,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 256, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false),
@@ -12729,7 +12731,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SMEM",
             11,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 256, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false),
@@ -12743,7 +12745,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SMEM",
             11,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 256, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false),
@@ -12757,7 +12759,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SMEM",
             11,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 256, false, true, false),
               OperandInfo(Some("SBASE"), "SREG_NONULL", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false),
@@ -12771,7 +12773,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SMEM",
             11,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 256, false, true, false),
               OperandInfo(Some("SBASE"), "SREG_NONULL", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false),
@@ -12785,7 +12787,7 @@ private[common] object InstructionDefs9 {
             "gfx6",
             "SMEM",
             11,
-            Vector.empty,
+            Col.empty,
             Some("smem"),
             MetadataSource.MesaACO
           ),
@@ -12794,7 +12796,7 @@ private[common] object InstructionDefs9 {
             "gfx7",
             "SMEM",
             11,
-            Vector.empty,
+            Col.empty,
             Some("smem"),
             MetadataSource.MesaACO
           ),
@@ -12803,7 +12805,7 @@ private[common] object InstructionDefs9 {
             "gfx8",
             "SMEM",
             11,
-            Vector.empty,
+            Col.empty,
             Some("smem"),
             MetadataSource.MesaACO
           ),
@@ -12812,7 +12814,7 @@ private[common] object InstructionDefs9 {
             "gfx9",
             "SMEM",
             11,
-            Vector.empty,
+            Col.empty,
             Some("smem"),
             MetadataSource.MesaACO
           )
@@ -12821,13 +12823,13 @@ private[common] object InstructionDefs9 {
   case object SBufferLoadI16 extends InstructionDef(
         "s_buffer_load_i16",
         decoder(form(3)((operands, mods) => Instruction.SBufferLoadI16(operands(0), operands(1), operands(2), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "SMEM",
             26,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 32, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false),
@@ -12841,7 +12843,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SMEM",
             26,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 32, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false),
@@ -12855,13 +12857,13 @@ private[common] object InstructionDefs9 {
   case object SBufferLoadI8 extends InstructionDef(
         "s_buffer_load_i8",
         decoder(form(3)((operands, mods) => Instruction.SBufferLoadI8(operands(0), operands(1), operands(2), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "SMEM",
             24,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 32, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false),
@@ -12875,7 +12877,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SMEM",
             24,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 32, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false),
@@ -12889,13 +12891,13 @@ private[common] object InstructionDefs9 {
   case object SBufferLoadU16 extends InstructionDef(
         "s_buffer_load_u16",
         decoder(form(3)((operands, mods) => Instruction.SBufferLoadU16(operands(0), operands(1), operands(2), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "SMEM",
             27,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 32, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false),
@@ -12909,7 +12911,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SMEM",
             27,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 32, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false),
@@ -12923,13 +12925,13 @@ private[common] object InstructionDefs9 {
   case object SBufferLoadU8 extends InstructionDef(
         "s_buffer_load_u8",
         decoder(form(3)((operands, mods) => Instruction.SBufferLoadU8(operands(0), operands(1), operands(2), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "SMEM",
             25,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 32, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false),
@@ -12943,7 +12945,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SMEM",
             25,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 32, false, true, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false),
@@ -12959,13 +12961,13 @@ private[common] object InstructionDefs9 {
         decoder(form(4)((operands, mods) =>
           Instruction.SBufferPrefetchData(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "SMEM",
             39,
-            Vector(
+            Col(
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("IOFFSET"), "SIMM24", 32, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET_NOK", 32, true, false, false),
@@ -12979,7 +12981,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SMEM",
             39,
-            Vector(
+            Col(
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("IOFFSET"), "SIMM24", 32, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET_NOK", 32, true, false, false),
@@ -12995,13 +12997,13 @@ private[common] object InstructionDefs9 {
         decoder(form(3)((operands, mods) =>
           Instruction.SBufferStoreDword(operands(0), operands(1), operands(2), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "SMEM",
             24,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 32, true, false, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false),
@@ -13015,7 +13017,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SMEM",
             24,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 32, true, false, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false),
@@ -13029,7 +13031,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SMEM",
             24,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 32, true, false, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false),
@@ -13043,7 +13045,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SMEM",
             24,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 32, true, false, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false),
@@ -13057,7 +13059,7 @@ private[common] object InstructionDefs9 {
             "gfx8",
             "SMEM",
             24,
-            Vector.empty,
+            Col.empty,
             Some("smem"),
             MetadataSource.MesaACO
           ),
@@ -13066,7 +13068,7 @@ private[common] object InstructionDefs9 {
             "gfx9",
             "SMEM",
             24,
-            Vector.empty,
+            Col.empty,
             Some("smem"),
             MetadataSource.MesaACO
           )
@@ -13077,13 +13079,13 @@ private[common] object InstructionDefs9 {
         decoder(form(3)((operands, mods) =>
           Instruction.SBufferStoreDwordx2(operands(0), operands(1), operands(2), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "SMEM",
             25,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 64, true, false, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false),
@@ -13097,7 +13099,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SMEM",
             25,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 64, true, false, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false),
@@ -13111,7 +13113,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SMEM",
             25,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 64, true, false, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false),
@@ -13125,7 +13127,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SMEM",
             25,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 64, true, false, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false),
@@ -13139,7 +13141,7 @@ private[common] object InstructionDefs9 {
             "gfx8",
             "SMEM",
             25,
-            Vector.empty,
+            Col.empty,
             Some("smem"),
             MetadataSource.MesaACO
           ),
@@ -13148,7 +13150,7 @@ private[common] object InstructionDefs9 {
             "gfx9",
             "SMEM",
             25,
-            Vector.empty,
+            Col.empty,
             Some("smem"),
             MetadataSource.MesaACO
           )
@@ -13159,13 +13161,13 @@ private[common] object InstructionDefs9 {
         decoder(form(3)((operands, mods) =>
           Instruction.SBufferStoreDwordx4(operands(0), operands(1), operands(2), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "SMEM",
             26,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 128, true, false, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false),
@@ -13179,7 +13181,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SMEM",
             26,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 128, true, false, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false),
@@ -13193,7 +13195,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SMEM",
             26,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 128, true, false, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false),
@@ -13207,7 +13209,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SMEM",
             26,
-            Vector(
+            Col(
               OperandInfo(Some("SDATA"), "SREG", 128, true, false, false),
               OperandInfo(Some("SBASE"), "SREG", 128, true, false, false),
               OperandInfo(Some("SOFFSET"), "SMEM_OFFSET", 32, true, false, false),
@@ -13221,7 +13223,7 @@ private[common] object InstructionDefs9 {
             "gfx8",
             "SMEM",
             26,
-            Vector.empty,
+            Col.empty,
             Some("smem"),
             MetadataSource.MesaACO
           ),
@@ -13230,7 +13232,7 @@ private[common] object InstructionDefs9 {
             "gfx9",
             "SMEM",
             26,
-            Vector.empty,
+            Col.empty,
             Some("smem"),
             MetadataSource.MesaACO
           )
@@ -13242,13 +13244,13 @@ private[common] object InstructionDefs9 {
           form(1)((operands, mods) => Instruction.SCallB64_1(operands(0), mods)),
           form(2)((operands, mods) => Instruction.SCallB64_2(operands(0), operands(1), mods))
         ),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "SOPK",
             21,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false),
               OperandInfo(None, "PC", 64, false, true, true),
@@ -13262,7 +13264,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOPK",
             21,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false),
               OperandInfo(None, "PC", 64, false, true, true),
@@ -13276,7 +13278,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOPK",
             21,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false),
               OperandInfo(None, "PC", 64, false, true, true),
@@ -13290,7 +13292,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOPK",
             21,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false),
               OperandInfo(None, "PC", 64, false, true, true),
@@ -13304,7 +13306,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOPK",
             22,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false),
               OperandInfo(None, "PC", 64, false, true, true),
@@ -13318,7 +13320,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOPK",
             22,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false),
               OperandInfo(None, "PC", 64, false, true, true),
@@ -13332,7 +13334,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOPK",
             20,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false),
               OperandInfo(None, "PC", 64, false, true, true),
@@ -13346,7 +13348,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOPK",
             20,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false),
               OperandInfo(None, "PC", 64, false, true, true),
@@ -13360,7 +13362,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOPK",
             20,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false),
               OperandInfo(None, "PC", 64, false, true, true),
@@ -13374,7 +13376,7 @@ private[common] object InstructionDefs9 {
             "gfx8",
             "SOPK",
             21,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 64, false, true, false)
             ),
             Some("branch"),
@@ -13385,7 +13387,7 @@ private[common] object InstructionDefs9 {
             "gfx9",
             "SOPK",
             21,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 64, false, true, false)
             ),
             Some("branch"),
@@ -13396,13 +13398,13 @@ private[common] object InstructionDefs9 {
   case object SCallI64 extends InstructionDef(
         "s_call_i64",
         decoder(form(2)((operands, mods) => Instruction.SCallI64(operands(0), operands(1), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "SOPK",
             20,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false),
               OperandInfo(None, "PC", 64, false, true, true),
@@ -13416,13 +13418,13 @@ private[common] object InstructionDefs9 {
   case object SCbranchCdbgsys extends InstructionDef(
         "s_cbranch_cdbgsys",
         decoder(form(1)((operands, mods) => Instruction.SCbranchCdbgsys(operands(0), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "SOPP",
             23,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false)
             ),
             Some("SALU"),
@@ -13433,7 +13435,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOPP",
             23,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false)
             ),
             Some("SALU"),
@@ -13444,7 +13446,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOPP",
             23,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false)
             ),
             Some("SALU"),
@@ -13455,7 +13457,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOPP",
             23,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false)
             ),
             Some("SALU"),
@@ -13466,7 +13468,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOPP",
             23,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false)
             ),
             Some("SALU"),
@@ -13477,7 +13479,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOPP",
             23,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false)
             ),
             Some("SALU"),
@@ -13488,7 +13490,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOPP",
             39,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false)
             ),
             Some("BRANCH"),
@@ -13499,7 +13501,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOPP",
             39,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false)
             ),
             Some("BRANCH"),
@@ -13510,7 +13512,7 @@ private[common] object InstructionDefs9 {
             "gfx7",
             "SOPP",
             23,
-            Vector.empty,
+            Col.empty,
             Some("branch"),
             MetadataSource.MesaACO
           ),
@@ -13519,7 +13521,7 @@ private[common] object InstructionDefs9 {
             "gfx8",
             "SOPP",
             23,
-            Vector.empty,
+            Col.empty,
             Some("branch"),
             MetadataSource.MesaACO
           ),
@@ -13528,7 +13530,7 @@ private[common] object InstructionDefs9 {
             "gfx9",
             "SOPP",
             23,
-            Vector.empty,
+            Col.empty,
             Some("branch"),
             MetadataSource.MesaACO
           )
@@ -13537,13 +13539,13 @@ private[common] object InstructionDefs9 {
   case object SCbranchCdbgsysAndUser extends InstructionDef(
         "s_cbranch_cdbgsys_and_user",
         decoder(form(1)((operands, mods) => Instruction.SCbranchCdbgsysAndUser(operands(0), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "SOPP",
             26,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false)
             ),
             Some("SALU"),
@@ -13554,7 +13556,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOPP",
             26,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false)
             ),
             Some("SALU"),
@@ -13565,7 +13567,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOPP",
             26,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false)
             ),
             Some("SALU"),
@@ -13576,7 +13578,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOPP",
             26,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false)
             ),
             Some("SALU"),
@@ -13587,7 +13589,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOPP",
             26,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false)
             ),
             Some("SALU"),
@@ -13598,7 +13600,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOPP",
             26,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false)
             ),
             Some("SALU"),
@@ -13609,7 +13611,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOPP",
             42,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false)
             ),
             Some("BRANCH"),
@@ -13620,7 +13622,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOPP",
             42,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false)
             ),
             Some("BRANCH"),
@@ -13631,7 +13633,7 @@ private[common] object InstructionDefs9 {
             "gfx7",
             "SOPP",
             26,
-            Vector.empty,
+            Col.empty,
             Some("branch"),
             MetadataSource.MesaACO
           ),
@@ -13640,7 +13642,7 @@ private[common] object InstructionDefs9 {
             "gfx8",
             "SOPP",
             26,
-            Vector.empty,
+            Col.empty,
             Some("branch"),
             MetadataSource.MesaACO
           ),
@@ -13649,7 +13651,7 @@ private[common] object InstructionDefs9 {
             "gfx9",
             "SOPP",
             26,
-            Vector.empty,
+            Col.empty,
             Some("branch"),
             MetadataSource.MesaACO
           )
@@ -13658,13 +13660,13 @@ private[common] object InstructionDefs9 {
   case object SCbranchCdbgsysOrUser extends InstructionDef(
         "s_cbranch_cdbgsys_or_user",
         decoder(form(1)((operands, mods) => Instruction.SCbranchCdbgsysOrUser(operands(0), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "SOPP",
             25,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false)
             ),
             Some("SALU"),
@@ -13675,7 +13677,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOPP",
             25,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false)
             ),
             Some("SALU"),
@@ -13686,7 +13688,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOPP",
             25,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false)
             ),
             Some("SALU"),
@@ -13697,7 +13699,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOPP",
             25,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false)
             ),
             Some("SALU"),
@@ -13708,7 +13710,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOPP",
             25,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false)
             ),
             Some("SALU"),
@@ -13719,7 +13721,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOPP",
             25,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false)
             ),
             Some("SALU"),
@@ -13730,7 +13732,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOPP",
             41,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false)
             ),
             Some("BRANCH"),
@@ -13741,7 +13743,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOPP",
             41,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false)
             ),
             Some("BRANCH"),
@@ -13752,7 +13754,7 @@ private[common] object InstructionDefs9 {
             "gfx7",
             "SOPP",
             25,
-            Vector.empty,
+            Col.empty,
             Some("branch"),
             MetadataSource.MesaACO
           ),
@@ -13761,7 +13763,7 @@ private[common] object InstructionDefs9 {
             "gfx8",
             "SOPP",
             25,
-            Vector.empty,
+            Col.empty,
             Some("branch"),
             MetadataSource.MesaACO
           ),
@@ -13770,7 +13772,7 @@ private[common] object InstructionDefs9 {
             "gfx9",
             "SOPP",
             25,
-            Vector.empty,
+            Col.empty,
             Some("branch"),
             MetadataSource.MesaACO
           )
@@ -13779,13 +13781,13 @@ private[common] object InstructionDefs9 {
   case object SCbranchCdbguser extends InstructionDef(
         "s_cbranch_cdbguser",
         decoder(form(1)((operands, mods) => Instruction.SCbranchCdbguser(operands(0), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "SOPP",
             24,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false)
             ),
             Some("SALU"),
@@ -13796,7 +13798,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOPP",
             24,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false)
             ),
             Some("SALU"),
@@ -13807,7 +13809,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOPP",
             24,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false)
             ),
             Some("SALU"),
@@ -13818,7 +13820,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOPP",
             24,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false)
             ),
             Some("SALU"),
@@ -13829,7 +13831,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOPP",
             24,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false)
             ),
             Some("SALU"),
@@ -13840,7 +13842,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOPP",
             24,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false)
             ),
             Some("SALU"),
@@ -13851,7 +13853,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOPP",
             40,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false)
             ),
             Some("BRANCH"),
@@ -13862,7 +13864,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOPP",
             40,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false)
             ),
             Some("BRANCH"),
@@ -13873,7 +13875,7 @@ private[common] object InstructionDefs9 {
             "gfx7",
             "SOPP",
             24,
-            Vector.empty,
+            Col.empty,
             Some("branch"),
             MetadataSource.MesaACO
           ),
@@ -13882,7 +13884,7 @@ private[common] object InstructionDefs9 {
             "gfx8",
             "SOPP",
             24,
-            Vector.empty,
+            Col.empty,
             Some("branch"),
             MetadataSource.MesaACO
           ),
@@ -13891,7 +13893,7 @@ private[common] object InstructionDefs9 {
             "gfx9",
             "SOPP",
             24,
-            Vector.empty,
+            Col.empty,
             Some("branch"),
             MetadataSource.MesaACO
           )
@@ -13900,13 +13902,13 @@ private[common] object InstructionDefs9 {
   case object SCbranchExecnz extends InstructionDef(
         "s_cbranch_execnz",
         decoder(form(1)((operands, mods) => Instruction.SCbranchExecnz(operands(0), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "SOPP",
             9,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false),
               OperandInfo(None, "SDST_EXEC", 64, true, false, true)
             ),
@@ -13918,7 +13920,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOPP",
             9,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false),
               OperandInfo(None, "SDST_EXEC", 64, true, false, true)
             ),
@@ -13930,7 +13932,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOPP",
             9,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false),
               OperandInfo(None, "SDST_EXEC", 64, true, false, true)
             ),
@@ -13942,7 +13944,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOPP",
             9,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false),
               OperandInfo(None, "SDST_EXEC", 64, true, false, true)
             ),
@@ -13954,7 +13956,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOPP",
             38,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false),
               OperandInfo(None, "SDST_EXEC", 64, true, false, true)
             ),
@@ -13966,7 +13968,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOPP",
             9,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false),
               OperandInfo(None, "SDST_EXEC", 64, true, false, true)
             ),
@@ -13978,7 +13980,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOPP",
             9,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false),
               OperandInfo(None, "SDST_EXEC", 64, true, false, true)
             ),
@@ -13990,7 +13992,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOPP",
             38,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false),
               OperandInfo(None, "SDST_EXEC", 64, true, false, true)
             ),
@@ -14002,7 +14004,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOPP",
             38,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false),
               OperandInfo(None, "SDST_EXEC", 64, true, false, true)
             ),
@@ -14014,7 +14016,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOPP",
             38,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false),
               OperandInfo(None, "SDST_EXEC", 64, true, false, true)
             ),
@@ -14026,7 +14028,7 @@ private[common] object InstructionDefs9 {
             "gfx6",
             "SOPP",
             9,
-            Vector.empty,
+            Col.empty,
             Some("branch"),
             MetadataSource.MesaACO
           ),
@@ -14035,7 +14037,7 @@ private[common] object InstructionDefs9 {
             "gfx7",
             "SOPP",
             9,
-            Vector.empty,
+            Col.empty,
             Some("branch"),
             MetadataSource.MesaACO
           ),
@@ -14044,7 +14046,7 @@ private[common] object InstructionDefs9 {
             "gfx8",
             "SOPP",
             9,
-            Vector.empty,
+            Col.empty,
             Some("branch"),
             MetadataSource.MesaACO
           ),
@@ -14053,7 +14055,7 @@ private[common] object InstructionDefs9 {
             "gfx9",
             "SOPP",
             9,
-            Vector.empty,
+            Col.empty,
             Some("branch"),
             MetadataSource.MesaACO
           )
@@ -14062,13 +14064,13 @@ private[common] object InstructionDefs9 {
   case object SCbranchExecz extends InstructionDef(
         "s_cbranch_execz",
         decoder(form(1)((operands, mods) => Instruction.SCbranchExecz(operands(0), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "SOPP",
             8,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false),
               OperandInfo(None, "SDST_EXEC", 64, true, false, true)
             ),
@@ -14080,7 +14082,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOPP",
             8,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false),
               OperandInfo(None, "SDST_EXEC", 64, true, false, true)
             ),
@@ -14092,7 +14094,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOPP",
             8,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false),
               OperandInfo(None, "SDST_EXEC", 64, true, false, true)
             ),
@@ -14104,7 +14106,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOPP",
             8,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false),
               OperandInfo(None, "SDST_EXEC", 64, true, false, true)
             ),
@@ -14116,7 +14118,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOPP",
             37,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false),
               OperandInfo(None, "SDST_EXEC", 64, true, false, true)
             ),
@@ -14128,7 +14130,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOPP",
             8,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false),
               OperandInfo(None, "SDST_EXEC", 64, true, false, true)
             ),
@@ -14140,7 +14142,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOPP",
             8,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false),
               OperandInfo(None, "SDST_EXEC", 64, true, false, true)
             ),
@@ -14152,7 +14154,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOPP",
             37,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false),
               OperandInfo(None, "SDST_EXEC", 64, true, false, true)
             ),
@@ -14164,7 +14166,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOPP",
             37,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false),
               OperandInfo(None, "SDST_EXEC", 64, true, false, true)
             ),
@@ -14176,7 +14178,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOPP",
             37,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false),
               OperandInfo(None, "SDST_EXEC", 64, true, false, true)
             ),
@@ -14188,7 +14190,7 @@ private[common] object InstructionDefs9 {
             "gfx6",
             "SOPP",
             8,
-            Vector.empty,
+            Col.empty,
             Some("branch"),
             MetadataSource.MesaACO
           ),
@@ -14197,7 +14199,7 @@ private[common] object InstructionDefs9 {
             "gfx7",
             "SOPP",
             8,
-            Vector.empty,
+            Col.empty,
             Some("branch"),
             MetadataSource.MesaACO
           ),
@@ -14206,7 +14208,7 @@ private[common] object InstructionDefs9 {
             "gfx8",
             "SOPP",
             8,
-            Vector.empty,
+            Col.empty,
             Some("branch"),
             MetadataSource.MesaACO
           ),
@@ -14215,7 +14217,7 @@ private[common] object InstructionDefs9 {
             "gfx9",
             "SOPP",
             8,
-            Vector.empty,
+            Col.empty,
             Some("branch"),
             MetadataSource.MesaACO
           )
@@ -14224,13 +14226,13 @@ private[common] object InstructionDefs9 {
   case object SCbranchGFork extends InstructionDef(
         "s_cbranch_g_fork",
         decoder(form(2)((operands, mods) => Instruction.SCbranchGFork(operands(0), operands(1), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "SOP2",
             41,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC_NOLIT", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC_NOLIT", 64, true, false, false),
               OperandInfo(None, "PC", 64, false, true, true)
@@ -14243,7 +14245,7 @@ private[common] object InstructionDefs9 {
             "cdna1",
             "SOP2_INST_LITERAL",
             41,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC_NOLIT", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC_NOLIT", 64, true, false, false),
               OperandInfo(None, "PC", 64, false, true, true)
@@ -14256,7 +14258,7 @@ private[common] object InstructionDefs9 {
             "cdna1",
             "SOP2_INST_LITERAL",
             41,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC_NOLIT", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLIT", 64, true, false, false),
               OperandInfo(None, "PC", 64, false, true, true)
@@ -14269,7 +14271,7 @@ private[common] object InstructionDefs9 {
             "cdna1",
             "SOP2_INST_LITERAL",
             41,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC_NOLIT", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLIT", 64, true, false, false),
               OperandInfo(None, "PC", 64, false, true, true)
@@ -14282,7 +14284,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOP2",
             41,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC_NOLIT", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC_NOLIT", 64, true, false, false),
               OperandInfo(None, "PC", 64, false, true, true)
@@ -14295,7 +14297,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOP2_INST_LITERAL",
             41,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC_NOLIT", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC_NOLIT", 64, true, false, false),
               OperandInfo(None, "PC", 64, false, true, true)
@@ -14308,7 +14310,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOP2_INST_LITERAL",
             41,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC_NOLIT", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLIT", 64, true, false, false),
               OperandInfo(None, "PC", 64, false, true, true)
@@ -14321,7 +14323,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOP2_INST_LITERAL",
             41,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC_NOLIT", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLIT", 64, true, false, false),
               OperandInfo(None, "PC", 64, false, true, true)
@@ -14334,7 +14336,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOP2",
             41,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC_NOLIT", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC_NOLIT", 64, true, false, false),
               OperandInfo(None, "PC", 64, false, true, true)
@@ -14347,7 +14349,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOP2_INST_LITERAL",
             41,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC_NOLIT", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC_NOLIT", 64, true, false, false),
               OperandInfo(None, "PC", 64, false, true, true)
@@ -14360,7 +14362,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOP2_INST_LITERAL",
             41,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC_NOLIT", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLIT", 64, true, false, false),
               OperandInfo(None, "PC", 64, false, true, true)
@@ -14373,7 +14375,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOP2_INST_LITERAL",
             41,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC_NOLIT", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLIT", 64, true, false, false),
               OperandInfo(None, "PC", 64, false, true, true)
@@ -14386,7 +14388,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOP2",
             41,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC_NOLIT", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC_NOLIT", 64, true, false, false),
               OperandInfo(None, "PC", 64, false, true, true)
@@ -14399,7 +14401,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOP2_INST_LITERAL",
             41,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC_NOLIT", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC_NOLIT", 64, true, false, false),
               OperandInfo(None, "PC", 64, false, true, true)
@@ -14412,7 +14414,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOP2_INST_LITERAL",
             41,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC_NOLIT", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLIT", 64, true, false, false),
               OperandInfo(None, "PC", 64, false, true, true)
@@ -14425,7 +14427,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOP2_INST_LITERAL",
             41,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC_NOLIT", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLIT", 64, true, false, false),
               OperandInfo(None, "PC", 64, false, true, true)
@@ -14438,7 +14440,7 @@ private[common] object InstructionDefs9 {
             "gfx6",
             "SOP2",
             43,
-            Vector.empty,
+            Col.empty,
             Some("branch"),
             MetadataSource.MesaACO
           ),
@@ -14447,7 +14449,7 @@ private[common] object InstructionDefs9 {
             "gfx7",
             "SOP2",
             43,
-            Vector.empty,
+            Col.empty,
             Some("branch"),
             MetadataSource.MesaACO
           ),
@@ -14456,7 +14458,7 @@ private[common] object InstructionDefs9 {
             "gfx8",
             "SOP2",
             41,
-            Vector.empty,
+            Col.empty,
             Some("branch"),
             MetadataSource.MesaACO
           ),
@@ -14465,7 +14467,7 @@ private[common] object InstructionDefs9 {
             "gfx9",
             "SOP2",
             41,
-            Vector.empty,
+            Col.empty,
             Some("branch"),
             MetadataSource.MesaACO
           )
@@ -14474,13 +14476,13 @@ private[common] object InstructionDefs9 {
   case object SCbranchIFork extends InstructionDef(
         "s_cbranch_i_fork",
         decoder(form(2)((operands, mods) => Instruction.SCbranchIFork(operands(0), operands(1), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "SOPK",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, true, false, false),
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false)
             ),
@@ -14492,7 +14494,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOPK",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, true, false, false),
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false)
             ),
@@ -14504,7 +14506,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOPK",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, true, false, false),
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false)
             ),
@@ -14516,7 +14518,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOPK",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, true, false, false),
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false)
             ),
@@ -14528,7 +14530,7 @@ private[common] object InstructionDefs9 {
             "gfx6",
             "SOPK",
             17,
-            Vector.empty,
+            Col.empty,
             Some("branch"),
             MetadataSource.MesaACO
           ),
@@ -14537,7 +14539,7 @@ private[common] object InstructionDefs9 {
             "gfx7",
             "SOPK",
             17,
-            Vector.empty,
+            Col.empty,
             Some("branch"),
             MetadataSource.MesaACO
           ),
@@ -14546,7 +14548,7 @@ private[common] object InstructionDefs9 {
             "gfx8",
             "SOPK",
             16,
-            Vector.empty,
+            Col.empty,
             Some("branch"),
             MetadataSource.MesaACO
           ),
@@ -14555,7 +14557,7 @@ private[common] object InstructionDefs9 {
             "gfx9",
             "SOPK",
             16,
-            Vector.empty,
+            Col.empty,
             Some("branch"),
             MetadataSource.MesaACO
           )
@@ -14564,13 +14566,13 @@ private[common] object InstructionDefs9 {
   case object SCbranchJoin extends InstructionDef(
         "s_cbranch_join",
         decoder(form(1)((operands, mods) => Instruction.SCbranchJoin(operands(0), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "SOP1",
             46,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SREG", 32, true, false, false),
               OperandInfo(None, "SDST_EXEC", 64, false, true, true),
               OperandInfo(None, "PC", 64, false, true, true)
@@ -14583,7 +14585,7 @@ private[common] object InstructionDefs9 {
             "cdna1",
             "SOP1_INST_LITERAL",
             46,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SREG", 32, true, false, false),
               OperandInfo(None, "SDST_EXEC", 64, false, true, true),
               OperandInfo(None, "PC", 64, false, true, true)
@@ -14596,7 +14598,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOP1",
             46,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SREG", 32, true, false, false),
               OperandInfo(None, "SDST_EXEC", 64, false, true, true),
               OperandInfo(None, "PC", 64, false, true, true)
@@ -14609,7 +14611,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOP1_INST_LITERAL",
             46,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SREG", 32, true, false, false),
               OperandInfo(None, "SDST_EXEC", 64, false, true, true),
               OperandInfo(None, "PC", 64, false, true, true)
@@ -14622,7 +14624,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOP1",
             46,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SREG", 32, true, false, false),
               OperandInfo(None, "SDST_EXEC", 64, false, true, true),
               OperandInfo(None, "PC", 64, false, true, true)
@@ -14635,7 +14637,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOP1_INST_LITERAL",
             46,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SREG", 32, true, false, false),
               OperandInfo(None, "SDST_EXEC", 64, false, true, true),
               OperandInfo(None, "PC", 64, false, true, true)
@@ -14648,7 +14650,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOP1",
             46,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SREG", 32, true, false, false),
               OperandInfo(None, "SDST_EXEC", 64, false, true, true),
               OperandInfo(None, "PC", 64, false, true, true)
@@ -14661,7 +14663,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOP1_INST_LITERAL",
             46,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SREG", 32, true, false, false),
               OperandInfo(None, "SDST_EXEC", 64, false, true, true),
               OperandInfo(None, "PC", 64, false, true, true)
@@ -14674,7 +14676,7 @@ private[common] object InstructionDefs9 {
             "gfx6",
             "SOP1",
             50,
-            Vector.empty,
+            Col.empty,
             Some("branch"),
             MetadataSource.MesaACO
           ),
@@ -14683,7 +14685,7 @@ private[common] object InstructionDefs9 {
             "gfx7",
             "SOP1",
             50,
-            Vector.empty,
+            Col.empty,
             Some("branch"),
             MetadataSource.MesaACO
           ),
@@ -14692,7 +14694,7 @@ private[common] object InstructionDefs9 {
             "gfx8",
             "SOP1",
             46,
-            Vector.empty,
+            Col.empty,
             Some("branch"),
             MetadataSource.MesaACO
           ),
@@ -14701,7 +14703,7 @@ private[common] object InstructionDefs9 {
             "gfx9",
             "SOP1",
             46,
-            Vector.empty,
+            Col.empty,
             Some("branch"),
             MetadataSource.MesaACO
           )
@@ -14710,13 +14712,13 @@ private[common] object InstructionDefs9 {
   case object SCbranchScc0 extends InstructionDef(
         "s_cbranch_scc0",
         decoder(form(1)((operands, mods) => Instruction.SCbranchScc0(operands(0), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "SOPP",
             4,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, true, false, true)
             ),
@@ -14728,7 +14730,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOPP",
             4,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, true, false, true)
             ),
@@ -14740,7 +14742,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOPP",
             4,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, true, false, true)
             ),
@@ -14752,7 +14754,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOPP",
             4,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, true, false, true)
             ),
@@ -14764,7 +14766,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOPP",
             33,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, true, false, true)
             ),
@@ -14776,7 +14778,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOPP",
             4,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, true, false, true)
             ),
@@ -14788,7 +14790,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOPP",
             4,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, true, false, true)
             ),
@@ -14800,7 +14802,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOPP",
             33,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, true, false, true)
             ),
@@ -14812,7 +14814,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOPP",
             33,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, true, false, true)
             ),
@@ -14824,7 +14826,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOPP",
             33,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, true, false, true)
             ),
@@ -14836,7 +14838,7 @@ private[common] object InstructionDefs9 {
             "gfx6",
             "SOPP",
             4,
-            Vector.empty,
+            Col.empty,
             Some("branch"),
             MetadataSource.MesaACO
           ),
@@ -14845,7 +14847,7 @@ private[common] object InstructionDefs9 {
             "gfx7",
             "SOPP",
             4,
-            Vector.empty,
+            Col.empty,
             Some("branch"),
             MetadataSource.MesaACO
           ),
@@ -14854,7 +14856,7 @@ private[common] object InstructionDefs9 {
             "gfx8",
             "SOPP",
             4,
-            Vector.empty,
+            Col.empty,
             Some("branch"),
             MetadataSource.MesaACO
           ),
@@ -14863,7 +14865,7 @@ private[common] object InstructionDefs9 {
             "gfx9",
             "SOPP",
             4,
-            Vector.empty,
+            Col.empty,
             Some("branch"),
             MetadataSource.MesaACO
           )
@@ -14872,13 +14874,13 @@ private[common] object InstructionDefs9 {
   case object SCbranchScc1 extends InstructionDef(
         "s_cbranch_scc1",
         decoder(form(1)((operands, mods) => Instruction.SCbranchScc1(operands(0), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "SOPP",
             5,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, true, false, true)
             ),
@@ -14890,7 +14892,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOPP",
             5,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, true, false, true)
             ),
@@ -14902,7 +14904,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOPP",
             5,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, true, false, true)
             ),
@@ -14914,7 +14916,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOPP",
             5,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, true, false, true)
             ),
@@ -14926,7 +14928,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOPP",
             34,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, true, false, true)
             ),
@@ -14938,7 +14940,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOPP",
             5,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, true, false, true)
             ),
@@ -14950,7 +14952,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOPP",
             5,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, true, false, true)
             ),
@@ -14962,7 +14964,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOPP",
             34,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, true, false, true)
             ),
@@ -14974,7 +14976,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOPP",
             34,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, true, false, true)
             ),
@@ -14986,7 +14988,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOPP",
             34,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, true, false, true)
             ),
@@ -14998,7 +15000,7 @@ private[common] object InstructionDefs9 {
             "gfx6",
             "SOPP",
             5,
-            Vector.empty,
+            Col.empty,
             Some("branch"),
             MetadataSource.MesaACO
           ),
@@ -15007,7 +15009,7 @@ private[common] object InstructionDefs9 {
             "gfx7",
             "SOPP",
             5,
-            Vector.empty,
+            Col.empty,
             Some("branch"),
             MetadataSource.MesaACO
           ),
@@ -15016,7 +15018,7 @@ private[common] object InstructionDefs9 {
             "gfx8",
             "SOPP",
             5,
-            Vector.empty,
+            Col.empty,
             Some("branch"),
             MetadataSource.MesaACO
           ),
@@ -15025,7 +15027,7 @@ private[common] object InstructionDefs9 {
             "gfx9",
             "SOPP",
             5,
-            Vector.empty,
+            Col.empty,
             Some("branch"),
             MetadataSource.MesaACO
           )
@@ -15034,13 +15036,13 @@ private[common] object InstructionDefs9 {
   case object SCbranchVccnz extends InstructionDef(
         "s_cbranch_vccnz",
         decoder(form(1)((operands, mods) => Instruction.SCbranchVccnz(operands(0), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "SOPP",
             7,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false),
               OperandInfo(None, "VCC", 64, true, false, true)
             ),
@@ -15052,7 +15054,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOPP",
             7,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false),
               OperandInfo(None, "VCC", 64, true, false, true)
             ),
@@ -15064,7 +15066,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOPP",
             7,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false),
               OperandInfo(None, "VCC", 64, true, false, true)
             ),
@@ -15076,7 +15078,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOPP",
             7,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false),
               OperandInfo(None, "VCC", 64, true, false, true)
             ),
@@ -15088,7 +15090,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOPP",
             36,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false),
               OperandInfo(None, "VCC", 64, true, false, true)
             ),
@@ -15100,7 +15102,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOPP",
             7,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false),
               OperandInfo(None, "VCC", 64, true, false, true)
             ),
@@ -15112,7 +15114,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOPP",
             7,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false),
               OperandInfo(None, "VCC", 64, true, false, true)
             ),
@@ -15124,7 +15126,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOPP",
             36,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false),
               OperandInfo(None, "VCC", 64, true, false, true)
             ),
@@ -15136,7 +15138,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOPP",
             36,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false),
               OperandInfo(None, "VCC", 64, true, false, true)
             ),
@@ -15148,7 +15150,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOPP",
             36,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false),
               OperandInfo(None, "VCC", 64, true, false, true)
             ),
@@ -15160,7 +15162,7 @@ private[common] object InstructionDefs9 {
             "gfx6",
             "SOPP",
             7,
-            Vector.empty,
+            Col.empty,
             Some("branch"),
             MetadataSource.MesaACO
           ),
@@ -15169,7 +15171,7 @@ private[common] object InstructionDefs9 {
             "gfx7",
             "SOPP",
             7,
-            Vector.empty,
+            Col.empty,
             Some("branch"),
             MetadataSource.MesaACO
           ),
@@ -15178,7 +15180,7 @@ private[common] object InstructionDefs9 {
             "gfx8",
             "SOPP",
             7,
-            Vector.empty,
+            Col.empty,
             Some("branch"),
             MetadataSource.MesaACO
           ),
@@ -15187,7 +15189,7 @@ private[common] object InstructionDefs9 {
             "gfx9",
             "SOPP",
             7,
-            Vector.empty,
+            Col.empty,
             Some("branch"),
             MetadataSource.MesaACO
           )
@@ -15196,13 +15198,13 @@ private[common] object InstructionDefs9 {
   case object SCbranchVccz extends InstructionDef(
         "s_cbranch_vccz",
         decoder(form(1)((operands, mods) => Instruction.SCbranchVccz(operands(0), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "SOPP",
             6,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false),
               OperandInfo(None, "VCC", 64, true, false, true)
             ),
@@ -15214,7 +15216,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOPP",
             6,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false),
               OperandInfo(None, "VCC", 64, true, false, true)
             ),
@@ -15226,7 +15228,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOPP",
             6,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false),
               OperandInfo(None, "VCC", 64, true, false, true)
             ),
@@ -15238,7 +15240,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOPP",
             6,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false),
               OperandInfo(None, "VCC", 64, true, false, true)
             ),
@@ -15250,7 +15252,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOPP",
             35,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false),
               OperandInfo(None, "VCC", 64, true, false, true)
             ),
@@ -15262,7 +15264,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOPP",
             6,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false),
               OperandInfo(None, "VCC", 64, true, false, true)
             ),
@@ -15274,7 +15276,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOPP",
             6,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false),
               OperandInfo(None, "VCC", 64, true, false, true)
             ),
@@ -15286,7 +15288,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOPP",
             35,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false),
               OperandInfo(None, "VCC", 64, true, false, true)
             ),
@@ -15298,7 +15300,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOPP",
             35,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false),
               OperandInfo(None, "VCC", 64, true, false, true)
             ),
@@ -15310,7 +15312,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOPP",
             35,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "LABEL", 16, true, false, false),
               OperandInfo(None, "VCC", 64, true, false, true)
             ),
@@ -15322,7 +15324,7 @@ private[common] object InstructionDefs9 {
             "gfx6",
             "SOPP",
             6,
-            Vector.empty,
+            Col.empty,
             Some("branch"),
             MetadataSource.MesaACO
           ),
@@ -15331,7 +15333,7 @@ private[common] object InstructionDefs9 {
             "gfx7",
             "SOPP",
             6,
-            Vector.empty,
+            Col.empty,
             Some("branch"),
             MetadataSource.MesaACO
           ),
@@ -15340,7 +15342,7 @@ private[common] object InstructionDefs9 {
             "gfx8",
             "SOPP",
             6,
-            Vector.empty,
+            Col.empty,
             Some("branch"),
             MetadataSource.MesaACO
           ),
@@ -15349,7 +15351,7 @@ private[common] object InstructionDefs9 {
             "gfx9",
             "SOPP",
             6,
-            Vector.empty,
+            Col.empty,
             Some("branch"),
             MetadataSource.MesaACO
           )
@@ -15358,13 +15360,13 @@ private[common] object InstructionDefs9 {
   case object SCeilF16 extends InstructionDef(
         "s_ceil_f16",
         decoder(form(2)((operands, mods) => Instruction.SCeilF16(operands(0), operands(1), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "SOP1",
             107,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 16, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 16, true, false, false)
             ),
@@ -15376,7 +15378,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP1_INST_LITERAL",
             107,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 16, true, false, false)
             ),
@@ -15388,7 +15390,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP1_INST_LITERAL64",
             107,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 16, false, true, false),
               OperandInfo(Some("LITERAL64"), "SSRC", 16, true, false, false)
             ),
@@ -15400,7 +15402,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOP1",
             107,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 16, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 16, true, false, false)
             ),
@@ -15412,7 +15414,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOP1_INST_LITERAL",
             107,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 16, true, false, false)
             ),
@@ -15424,7 +15426,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOP1",
             107,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 16, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 16, true, false, false)
             ),
@@ -15436,7 +15438,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOP1_INST_LITERAL",
             107,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 16, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 16, true, false, false)
             ),
@@ -15448,13 +15450,13 @@ private[common] object InstructionDefs9 {
   case object SCeilF32 extends InstructionDef(
         "s_ceil_f32",
         decoder(form(2)((operands, mods) => Instruction.SCeilF32(operands(0), operands(1), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "SOP1",
             96,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false)
             ),
@@ -15466,7 +15468,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP1_INST_LITERAL",
             96,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
             ),
@@ -15478,7 +15480,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP1_INST_LITERAL64",
             96,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL64"), "SSRC", 32, true, false, false)
             ),
@@ -15490,7 +15492,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOP1",
             96,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false)
             ),
@@ -15502,7 +15504,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOP1_INST_LITERAL",
             96,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
             ),
@@ -15514,7 +15516,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOP1",
             96,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false)
             ),
@@ -15526,7 +15528,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOP1_INST_LITERAL",
             96,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
             ),
@@ -15538,13 +15540,13 @@ private[common] object InstructionDefs9 {
   case object SClause extends InstructionDef(
         "s_clause",
         decoder(form(1)((operands, mods) => Instruction.SClause(operands(0), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "SOPP",
             5,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "CLAUSE", 16, true, false, false)
             ),
             Some("WAVE_CONTROL"),
@@ -15555,7 +15557,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOPP",
             33,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "CLAUSE", 16, true, false, false)
             ),
             Some("WAVE_CONTROL"),
@@ -15566,7 +15568,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOPP",
             33,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "CLAUSE", 16, true, false, false)
             ),
             Some("WAVE_CONTROL"),
@@ -15577,7 +15579,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOPP",
             5,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "CLAUSE", 16, true, false, false)
             ),
             Some("WAVE_CONTROL"),
@@ -15588,7 +15590,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOPP",
             5,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "CLAUSE", 16, true, false, false)
             ),
             Some("WAVE_CONTROL"),
@@ -15599,7 +15601,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOPP",
             5,
-            Vector(
+            Col(
               OperandInfo(Some("SIMM16"), "CLAUSE", 16, true, false, false)
             ),
             Some("WAVE_CONTROL"),
@@ -15610,13 +15612,13 @@ private[common] object InstructionDefs9 {
   case object SClsI32 extends InstructionDef(
         "s_cls_i32",
         decoder(form(2)((operands, mods) => Instruction.SClsI32(operands(0), operands(1), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "SOP1",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false)
             ),
@@ -15628,7 +15630,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP1_INST_LITERAL",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
             ),
@@ -15640,7 +15642,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP1_INST_LITERAL64",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL64"), "SSRC", 32, true, false, false)
             ),
@@ -15652,7 +15654,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOP1",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false)
             ),
@@ -15664,7 +15666,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOP1_INST_LITERAL",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
             ),
@@ -15676,7 +15678,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOP1",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false)
             ),
@@ -15688,7 +15690,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOP1_INST_LITERAL",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
             ),
@@ -15700,7 +15702,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOP1",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false)
             ),
@@ -15712,7 +15714,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOP1_INST_LITERAL",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
             ),
@@ -15724,13 +15726,13 @@ private[common] object InstructionDefs9 {
   case object SClsI32I64 extends InstructionDef(
         "s_cls_i32_i64",
         decoder(form(2)((operands, mods) => Instruction.SClsI32I64(operands(0), operands(1), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "SOP1",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false)
             ),
@@ -15742,7 +15744,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP1_INST_LITERAL",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false)
             ),
@@ -15754,7 +15756,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP1_INST_LITERAL64",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL64"), "SSRC", 64, true, false, false)
             ),
@@ -15766,7 +15768,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOP1",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false)
             ),
@@ -15778,7 +15780,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOP1_INST_LITERAL",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false)
             ),
@@ -15790,7 +15792,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOP1",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false)
             ),
@@ -15802,7 +15804,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOP1_INST_LITERAL",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false)
             ),
@@ -15814,7 +15816,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOP1",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false)
             ),
@@ -15826,7 +15828,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOP1_INST_LITERAL",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false)
             ),
@@ -15838,13 +15840,13 @@ private[common] object InstructionDefs9 {
   case object SClzI32U32 extends InstructionDef(
         "s_clz_i32_u32",
         decoder(form(2)((operands, mods) => Instruction.SClzI32U32(operands(0), operands(1), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "SOP1",
             10,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false)
             ),
@@ -15856,7 +15858,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP1_INST_LITERAL",
             10,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
             ),
@@ -15868,7 +15870,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP1_INST_LITERAL64",
             10,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL64"), "SSRC", 32, true, false, false)
             ),
@@ -15880,7 +15882,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOP1",
             10,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false)
             ),
@@ -15892,7 +15894,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOP1_INST_LITERAL",
             10,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
             ),
@@ -15904,7 +15906,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOP1",
             10,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false)
             ),
@@ -15916,7 +15918,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOP1_INST_LITERAL",
             10,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
             ),
@@ -15928,7 +15930,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOP1",
             10,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false)
             ),
@@ -15940,7 +15942,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOP1_INST_LITERAL",
             10,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false)
             ),
@@ -15952,13 +15954,13 @@ private[common] object InstructionDefs9 {
   case object SClzI32U64 extends InstructionDef(
         "s_clz_i32_u64",
         decoder(form(2)((operands, mods) => Instruction.SClzI32U64(operands(0), operands(1), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "SOP1",
             11,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false)
             ),
@@ -15970,7 +15972,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP1_INST_LITERAL",
             11,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false)
             ),
@@ -15982,7 +15984,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP1_INST_LITERAL64",
             11,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL64"), "SSRC", 64, true, false, false)
             ),
@@ -15994,7 +15996,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOP1",
             11,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false)
             ),
@@ -16006,7 +16008,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOP1_INST_LITERAL",
             11,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false)
             ),
@@ -16018,7 +16020,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOP1",
             11,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false)
             ),
@@ -16030,7 +16032,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOP1_INST_LITERAL",
             11,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false)
             ),
@@ -16042,7 +16044,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOP1",
             11,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false)
             ),
@@ -16054,7 +16056,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOP1_INST_LITERAL",
             11,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false)
             ),
@@ -16069,13 +16071,13 @@ private[common] object InstructionDefs9 {
           form(2)((operands, mods) => Instruction.SCmovB32_2(operands(0), operands(1), mods)),
           form(3)((operands, mods) => Instruction.SCmovB32_3(operands(0), operands(1), operands(2), mods))
         ),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "SOP1",
             2,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, true, false, true)
@@ -16088,7 +16090,7 @@ private[common] object InstructionDefs9 {
             "cdna1",
             "SOP1_INST_LITERAL",
             2,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, true, false, true)
@@ -16101,7 +16103,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOP1",
             2,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, true, false, true)
@@ -16114,7 +16116,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOP1_INST_LITERAL",
             2,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, true, false, true)
@@ -16127,7 +16129,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOP1",
             2,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, true, false, true)
@@ -16140,7 +16142,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOP1_INST_LITERAL",
             2,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, true, false, true)
@@ -16153,7 +16155,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOP1",
             2,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, true, false, true)
@@ -16166,7 +16168,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOP1_INST_LITERAL",
             2,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, true, false, true)
@@ -16179,7 +16181,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP1",
             2,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, true, false, true)
@@ -16192,7 +16194,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP1_INST_LITERAL",
             2,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, true, false, true)
@@ -16205,7 +16207,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP1_INST_LITERAL64",
             2,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL64"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, true, false, true)
@@ -16218,7 +16220,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOP1",
             5,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, true, false, true)
@@ -16231,7 +16233,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOP1_INST_LITERAL",
             5,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, true, false, true)
@@ -16244,7 +16246,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOP1",
             5,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, true, false, true)
@@ -16257,7 +16259,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOP1_INST_LITERAL",
             5,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, true, false, true)
@@ -16270,7 +16272,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOP1",
             2,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, true, false, true)
@@ -16283,7 +16285,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOP1_INST_LITERAL",
             2,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, true, false, true)
@@ -16296,7 +16298,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOP1",
             2,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, true, false, true)
@@ -16309,7 +16311,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOP1_INST_LITERAL",
             2,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, true, false, true)
@@ -16322,7 +16324,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOP1",
             2,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, true, false, true)
@@ -16335,7 +16337,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOP1_INST_LITERAL",
             2,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, true, false, true)
@@ -16348,7 +16350,7 @@ private[common] object InstructionDefs9 {
             "gfx6",
             "SOP1",
             5,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, false),
               OperandInfo(None, "uint", 32, true, false, false),
               OperandInfo(None, "uint", 32, true, false, false),
@@ -16362,7 +16364,7 @@ private[common] object InstructionDefs9 {
             "gfx7",
             "SOP1",
             5,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, false),
               OperandInfo(None, "uint", 32, true, false, false),
               OperandInfo(None, "uint", 32, true, false, false),
@@ -16376,7 +16378,7 @@ private[common] object InstructionDefs9 {
             "gfx8",
             "SOP1",
             2,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, false),
               OperandInfo(None, "uint", 32, true, false, false),
               OperandInfo(None, "uint", 32, true, false, false),
@@ -16390,7 +16392,7 @@ private[common] object InstructionDefs9 {
             "gfx9",
             "SOP1",
             2,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, false),
               OperandInfo(None, "uint", 32, true, false, false),
               OperandInfo(None, "uint", 32, true, false, false),
@@ -16407,13 +16409,13 @@ private[common] object InstructionDefs9 {
           form(2)((operands, mods) => Instruction.SCmovB64_2(operands(0), operands(1), mods)),
           form(3)((operands, mods) => Instruction.SCmovB64_3(operands(0), operands(1), operands(2), mods))
         ),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "SOP1",
             3,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, true, false, true)
@@ -16426,7 +16428,7 @@ private[common] object InstructionDefs9 {
             "cdna1",
             "SOP1_INST_LITERAL",
             3,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, true, false, true)
@@ -16439,7 +16441,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOP1",
             3,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, true, false, true)
@@ -16452,7 +16454,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOP1_INST_LITERAL",
             3,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, true, false, true)
@@ -16465,7 +16467,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOP1",
             3,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, true, false, true)
@@ -16478,7 +16480,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOP1_INST_LITERAL",
             3,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, true, false, true)
@@ -16491,7 +16493,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOP1",
             3,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, true, false, true)
@@ -16504,7 +16506,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOP1_INST_LITERAL",
             3,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, true, false, true)
@@ -16517,7 +16519,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP1",
             3,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, true, false, true)
@@ -16530,7 +16532,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP1_INST_LITERAL",
             3,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, true, false, true)
@@ -16543,7 +16545,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOP1_INST_LITERAL64",
             3,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL64"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, true, false, true)
@@ -16556,7 +16558,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOP1",
             6,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC_NOLDS", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, true, false, true)
@@ -16569,7 +16571,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOP1_INST_LITERAL",
             6,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, true, false, true)
@@ -16582,7 +16584,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOP1",
             6,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC_NOLDS", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, true, false, true)
@@ -16595,7 +16597,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOP1_INST_LITERAL",
             6,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, true, false, true)
@@ -16608,7 +16610,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOP1",
             3,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, true, false, true)
@@ -16621,7 +16623,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOP1_INST_LITERAL",
             3,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, true, false, true)
@@ -16634,7 +16636,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOP1",
             3,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, true, false, true)
@@ -16647,7 +16649,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOP1_INST_LITERAL",
             3,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, true, false, true)
@@ -16660,7 +16662,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOP1",
             3,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, true, false, true)
@@ -16673,7 +16675,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOP1_INST_LITERAL",
             3,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 64, false, true, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, true, false, true)
@@ -16686,7 +16688,7 @@ private[common] object InstructionDefs9 {
             "gfx6",
             "SOP1",
             6,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 64, false, true, false),
               OperandInfo(None, "uint", 64, true, false, false),
               OperandInfo(None, "uint", 64, true, false, false),
@@ -16700,7 +16702,7 @@ private[common] object InstructionDefs9 {
             "gfx7",
             "SOP1",
             6,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 64, false, true, false),
               OperandInfo(None, "uint", 64, true, false, false),
               OperandInfo(None, "uint", 64, true, false, false),
@@ -16714,7 +16716,7 @@ private[common] object InstructionDefs9 {
             "gfx8",
             "SOP1",
             3,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 64, false, true, false),
               OperandInfo(None, "uint", 64, true, false, false),
               OperandInfo(None, "uint", 64, true, false, false),
@@ -16728,7 +16730,7 @@ private[common] object InstructionDefs9 {
             "gfx9",
             "SOP1",
             3,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 64, false, true, false),
               OperandInfo(None, "uint", 64, true, false, false),
               OperandInfo(None, "uint", 64, true, false, false),
@@ -16742,13 +16744,13 @@ private[common] object InstructionDefs9 {
   case object SCmovkI32 extends InstructionDef(
         "s_cmovk_i32",
         decoder(form(2)((operands, mods) => Instruction.SCmovkI32(operands(0), operands(1), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "SOPK",
             1,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SIMM16"), "SIMM16", 16, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, true, false, true)
@@ -16761,7 +16763,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOPK",
             1,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SIMM16"), "SIMM16", 16, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, true, false, true)
@@ -16774,7 +16776,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOPK",
             1,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SIMM16"), "SIMM16", 16, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, true, false, true)
@@ -16787,7 +16789,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOPK",
             1,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SIMM16"), "SIMM16", 16, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, true, false, true)
@@ -16800,7 +16802,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOPK",
             2,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SIMM16"), "SIMM16", 16, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, true, false, true)
@@ -16813,7 +16815,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOPK",
             2,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SIMM16"), "SIMM16", 16, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, true, false, true)
@@ -16826,7 +16828,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOPK",
             2,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SIMM16"), "SIMM16", 16, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, true, false, true)
@@ -16839,7 +16841,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOPK",
             2,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SIMM16"), "SIMM16", 16, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, true, false, true)
@@ -16852,7 +16854,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOPK",
             2,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SIMM16"), "SIMM16", 16, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, true, false, true)
@@ -16865,7 +16867,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOPK",
             2,
-            Vector(
+            Col(
               OperandInfo(Some("SDST"), "SDST", 32, false, true, false),
               OperandInfo(Some("SIMM16"), "SIMM16", 16, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, true, false, true)
@@ -16878,7 +16880,7 @@ private[common] object InstructionDefs9 {
             "gfx6",
             "SOPK",
             2,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, false),
               OperandInfo(None, "uint", 32, true, false, false),
               OperandInfo(None, "uint", 32, true, false, true)
@@ -16891,7 +16893,7 @@ private[common] object InstructionDefs9 {
             "gfx7",
             "SOPK",
             2,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, false),
               OperandInfo(None, "uint", 32, true, false, false),
               OperandInfo(None, "uint", 32, true, false, true)
@@ -16904,7 +16906,7 @@ private[common] object InstructionDefs9 {
             "gfx8",
             "SOPK",
             1,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, false),
               OperandInfo(None, "uint", 32, true, false, false),
               OperandInfo(None, "uint", 32, true, false, true)
@@ -16917,7 +16919,7 @@ private[common] object InstructionDefs9 {
             "gfx9",
             "SOPK",
             1,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, false),
               OperandInfo(None, "uint", 32, true, false, false),
               OperandInfo(None, "uint", 32, true, false, true)
@@ -16930,13 +16932,13 @@ private[common] object InstructionDefs9 {
   case object SCmpEqF16 extends InstructionDef(
         "s_cmp_eq_f16",
         decoder(form(2)((operands, mods) => Instruction.SCmpEqF16(operands(0), operands(1), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "SOPC",
             82,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 16, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 16, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -16949,7 +16951,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOPC_INST_LITERAL",
             82,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 16, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 16, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -16962,7 +16964,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOPC_INST_LITERAL",
             82,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 16, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 16, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -16975,7 +16977,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOPC_INST_LITERAL",
             82,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 16, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 16, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -16988,7 +16990,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOPC_INST_LITERAL64",
             82,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL64"), "SSRC", 16, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 16, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -17001,7 +17003,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOPC_INST_LITERAL64",
             82,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 16, true, false, false),
               OperandInfo(Some("LITERAL64"), "SSRC", 16, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -17014,7 +17016,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOPC_INST_LITERAL64",
             82,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL64"), "SSRC", 16, true, false, false),
               OperandInfo(Some("LITERAL64"), "SSRC", 16, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -17027,7 +17029,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOPC",
             82,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 16, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 16, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -17040,7 +17042,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOPC_INST_LITERAL",
             82,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 16, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 16, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -17053,7 +17055,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOPC_INST_LITERAL",
             82,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 16, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 16, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -17066,7 +17068,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOPC_INST_LITERAL",
             82,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 16, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 16, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -17079,7 +17081,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOPC",
             82,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 16, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 16, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -17092,7 +17094,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOPC_INST_LITERAL",
             82,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 16, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 16, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -17105,7 +17107,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOPC_INST_LITERAL",
             82,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 16, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 16, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -17118,7 +17120,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOPC_INST_LITERAL",
             82,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 16, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 16, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -17131,13 +17133,13 @@ private[common] object InstructionDefs9 {
   case object SCmpEqF32 extends InstructionDef(
         "s_cmp_eq_f32",
         decoder(form(2)((operands, mods) => Instruction.SCmpEqF32(operands(0), operands(1), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "SOPC",
             66,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -17150,7 +17152,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOPC_INST_LITERAL",
             66,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -17163,7 +17165,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOPC_INST_LITERAL",
             66,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -17176,7 +17178,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOPC_INST_LITERAL",
             66,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -17189,7 +17191,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOPC_INST_LITERAL64",
             66,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL64"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -17202,7 +17204,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOPC_INST_LITERAL64",
             66,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL64"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -17215,7 +17217,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOPC_INST_LITERAL64",
             66,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL64"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL64"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -17228,7 +17230,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOPC",
             66,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -17241,7 +17243,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOPC_INST_LITERAL",
             66,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -17254,7 +17256,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOPC_INST_LITERAL",
             66,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -17267,7 +17269,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOPC_INST_LITERAL",
             66,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -17280,7 +17282,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOPC",
             66,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -17293,7 +17295,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOPC_INST_LITERAL",
             66,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -17306,7 +17308,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOPC_INST_LITERAL",
             66,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -17319,7 +17321,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOPC_INST_LITERAL",
             66,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -17332,13 +17334,13 @@ private[common] object InstructionDefs9 {
   case object SCmpEqI32 extends InstructionDef(
         "s_cmp_eq_i32",
         decoder(form(2)((operands, mods) => Instruction.SCmpEqI32(operands(0), operands(1), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "SOPC",
             0,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -17351,7 +17353,7 @@ private[common] object InstructionDefs9 {
             "cdna1",
             "SOPC_INST_LITERAL",
             0,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -17364,7 +17366,7 @@ private[common] object InstructionDefs9 {
             "cdna1",
             "SOPC_INST_LITERAL",
             0,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -17377,7 +17379,7 @@ private[common] object InstructionDefs9 {
             "cdna1",
             "SOPC_INST_LITERAL",
             0,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -17390,7 +17392,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOPC",
             0,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -17403,7 +17405,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOPC_INST_LITERAL",
             0,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -17416,7 +17418,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOPC_INST_LITERAL",
             0,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -17429,7 +17431,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOPC_INST_LITERAL",
             0,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -17442,7 +17444,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOPC",
             0,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -17455,7 +17457,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOPC_INST_LITERAL",
             0,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -17468,7 +17470,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOPC_INST_LITERAL",
             0,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -17481,7 +17483,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOPC_INST_LITERAL",
             0,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -17494,7 +17496,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOPC",
             0,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -17507,7 +17509,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOPC_INST_LITERAL",
             0,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -17520,7 +17522,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOPC_INST_LITERAL",
             0,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -17533,7 +17535,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOPC_INST_LITERAL",
             0,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -17546,7 +17548,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOPC",
             0,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -17559,7 +17561,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOPC_INST_LITERAL",
             0,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -17572,7 +17574,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOPC_INST_LITERAL",
             0,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -17585,7 +17587,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOPC_INST_LITERAL",
             0,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -17598,7 +17600,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOPC_INST_LITERAL64",
             0,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL64"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -17611,7 +17613,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOPC_INST_LITERAL64",
             0,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL64"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -17624,7 +17626,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOPC_INST_LITERAL64",
             0,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL64"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL64"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -17637,7 +17639,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOPC",
             0,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -17650,7 +17652,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOPC_INST_LITERAL",
             0,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -17663,7 +17665,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOPC_INST_LITERAL",
             0,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -17676,7 +17678,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOPC_INST_LITERAL",
             0,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -17689,7 +17691,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOPC",
             0,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -17702,7 +17704,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOPC_INST_LITERAL",
             0,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -17715,7 +17717,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOPC_INST_LITERAL",
             0,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -17728,7 +17730,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOPC_INST_LITERAL",
             0,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -17741,7 +17743,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOPC",
             0,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -17754,7 +17756,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOPC_INST_LITERAL",
             0,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -17767,7 +17769,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOPC_INST_LITERAL",
             0,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -17780,7 +17782,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOPC_INST_LITERAL",
             0,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -17793,7 +17795,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOPC",
             0,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -17806,7 +17808,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOPC_INST_LITERAL",
             0,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -17819,7 +17821,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOPC_INST_LITERAL",
             0,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -17832,7 +17834,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOPC_INST_LITERAL",
             0,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -17845,7 +17847,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOPC",
             0,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -17858,7 +17860,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOPC_INST_LITERAL",
             0,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -17871,7 +17873,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOPC_INST_LITERAL",
             0,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -17884,7 +17886,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOPC_INST_LITERAL",
             0,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -17897,7 +17899,7 @@ private[common] object InstructionDefs9 {
             "gfx6",
             "SOPC",
             0,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, true),
               OperandInfo(None, "uint", 32, true, false, false),
               OperandInfo(None, "uint", 32, true, false, false)
@@ -17910,7 +17912,7 @@ private[common] object InstructionDefs9 {
             "gfx7",
             "SOPC",
             0,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, true),
               OperandInfo(None, "uint", 32, true, false, false),
               OperandInfo(None, "uint", 32, true, false, false)
@@ -17923,7 +17925,7 @@ private[common] object InstructionDefs9 {
             "gfx8",
             "SOPC",
             0,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, true),
               OperandInfo(None, "uint", 32, true, false, false),
               OperandInfo(None, "uint", 32, true, false, false)
@@ -17936,7 +17938,7 @@ private[common] object InstructionDefs9 {
             "gfx9",
             "SOPC",
             0,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, true),
               OperandInfo(None, "uint", 32, true, false, false),
               OperandInfo(None, "uint", 32, true, false, false)
@@ -17949,13 +17951,13 @@ private[common] object InstructionDefs9 {
   case object SCmpEqU32 extends InstructionDef(
         "s_cmp_eq_u32",
         decoder(form(2)((operands, mods) => Instruction.SCmpEqU32(operands(0), operands(1), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "SOPC",
             6,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -17968,7 +17970,7 @@ private[common] object InstructionDefs9 {
             "cdna1",
             "SOPC_INST_LITERAL",
             6,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -17981,7 +17983,7 @@ private[common] object InstructionDefs9 {
             "cdna1",
             "SOPC_INST_LITERAL",
             6,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -17994,7 +17996,7 @@ private[common] object InstructionDefs9 {
             "cdna1",
             "SOPC_INST_LITERAL",
             6,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -18007,7 +18009,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOPC",
             6,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -18020,7 +18022,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOPC_INST_LITERAL",
             6,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -18033,7 +18035,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOPC_INST_LITERAL",
             6,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -18046,7 +18048,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOPC_INST_LITERAL",
             6,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -18059,7 +18061,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOPC",
             6,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -18072,7 +18074,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOPC_INST_LITERAL",
             6,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -18085,7 +18087,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOPC_INST_LITERAL",
             6,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -18098,7 +18100,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOPC_INST_LITERAL",
             6,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -18111,7 +18113,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOPC",
             6,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -18124,7 +18126,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOPC_INST_LITERAL",
             6,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -18137,7 +18139,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOPC_INST_LITERAL",
             6,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -18150,7 +18152,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOPC_INST_LITERAL",
             6,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -18163,7 +18165,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOPC",
             6,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -18176,7 +18178,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOPC_INST_LITERAL",
             6,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -18189,7 +18191,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOPC_INST_LITERAL",
             6,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -18202,7 +18204,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOPC_INST_LITERAL",
             6,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -18215,7 +18217,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOPC_INST_LITERAL64",
             6,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL64"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -18228,7 +18230,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOPC_INST_LITERAL64",
             6,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL64"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -18241,7 +18243,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOPC_INST_LITERAL64",
             6,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL64"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL64"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -18254,7 +18256,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOPC",
             6,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -18267,7 +18269,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOPC_INST_LITERAL",
             6,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -18280,7 +18282,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOPC_INST_LITERAL",
             6,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -18293,7 +18295,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOPC_INST_LITERAL",
             6,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -18306,7 +18308,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOPC",
             6,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -18319,7 +18321,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOPC_INST_LITERAL",
             6,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -18332,7 +18334,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOPC_INST_LITERAL",
             6,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -18345,7 +18347,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOPC_INST_LITERAL",
             6,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -18358,7 +18360,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOPC",
             6,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -18371,7 +18373,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOPC_INST_LITERAL",
             6,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -18384,7 +18386,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOPC_INST_LITERAL",
             6,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -18397,7 +18399,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOPC_INST_LITERAL",
             6,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -18410,7 +18412,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOPC",
             6,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -18423,7 +18425,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOPC_INST_LITERAL",
             6,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -18436,7 +18438,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOPC_INST_LITERAL",
             6,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -18449,7 +18451,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOPC_INST_LITERAL",
             6,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -18462,7 +18464,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOPC",
             6,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -18475,7 +18477,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOPC_INST_LITERAL",
             6,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -18488,7 +18490,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOPC_INST_LITERAL",
             6,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -18501,7 +18503,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOPC_INST_LITERAL",
             6,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 32, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -18514,7 +18516,7 @@ private[common] object InstructionDefs9 {
             "gfx6",
             "SOPC",
             6,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, true),
               OperandInfo(None, "uint", 32, true, false, false),
               OperandInfo(None, "uint", 32, true, false, false)
@@ -18527,7 +18529,7 @@ private[common] object InstructionDefs9 {
             "gfx7",
             "SOPC",
             6,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, true),
               OperandInfo(None, "uint", 32, true, false, false),
               OperandInfo(None, "uint", 32, true, false, false)
@@ -18540,7 +18542,7 @@ private[common] object InstructionDefs9 {
             "gfx8",
             "SOPC",
             6,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, true),
               OperandInfo(None, "uint", 32, true, false, false),
               OperandInfo(None, "uint", 32, true, false, false)
@@ -18553,7 +18555,7 @@ private[common] object InstructionDefs9 {
             "gfx9",
             "SOPC",
             6,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, true),
               OperandInfo(None, "uint", 32, true, false, false),
               OperandInfo(None, "uint", 32, true, false, false)
@@ -18566,13 +18568,13 @@ private[common] object InstructionDefs9 {
   case object SCmpEqU64 extends InstructionDef(
         "s_cmp_eq_u64",
         decoder(form(2)((operands, mods) => Instruction.SCmpEqU64(operands(0), operands(1), mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "SOPC",
             18,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -18585,7 +18587,7 @@ private[common] object InstructionDefs9 {
             "cdna1",
             "SOPC_INST_LITERAL",
             18,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -18598,7 +18600,7 @@ private[common] object InstructionDefs9 {
             "cdna1",
             "SOPC_INST_LITERAL",
             18,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -18611,7 +18613,7 @@ private[common] object InstructionDefs9 {
             "cdna1",
             "SOPC_INST_LITERAL",
             18,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -18624,7 +18626,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOPC",
             18,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -18637,7 +18639,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOPC_INST_LITERAL",
             18,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -18650,7 +18652,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOPC_INST_LITERAL",
             18,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -18663,7 +18665,7 @@ private[common] object InstructionDefs9 {
             "cdna2",
             "SOPC_INST_LITERAL",
             18,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -18676,7 +18678,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOPC",
             18,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -18689,7 +18691,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOPC_INST_LITERAL",
             18,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -18702,7 +18704,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOPC_INST_LITERAL",
             18,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -18715,7 +18717,7 @@ private[common] object InstructionDefs9 {
             "cdna3",
             "SOPC_INST_LITERAL",
             18,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -18728,7 +18730,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOPC",
             18,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -18741,7 +18743,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOPC_INST_LITERAL",
             18,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -18754,7 +18756,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOPC_INST_LITERAL",
             18,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -18767,7 +18769,7 @@ private[common] object InstructionDefs9 {
             "cdna4",
             "SOPC_INST_LITERAL",
             18,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -18780,7 +18782,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOPC",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -18793,7 +18795,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOPC_INST_LITERAL",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -18806,7 +18808,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOPC_INST_LITERAL",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -18819,7 +18821,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOPC_INST_LITERAL",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -18832,7 +18834,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOPC_INST_LITERAL64",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL64"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -18845,7 +18847,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOPC_INST_LITERAL64",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL64"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -18858,7 +18860,7 @@ private[common] object InstructionDefs9 {
             "cdna5",
             "SOPC_INST_LITERAL64",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL64"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL64"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -18871,7 +18873,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOPC",
             18,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC_NOLDS", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC_NOLDS", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -18884,7 +18886,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOPC_INST_LITERAL",
             18,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC_NOLDS", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -18897,7 +18899,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOPC_INST_LITERAL",
             18,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC_NOLDS", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -18910,7 +18912,7 @@ private[common] object InstructionDefs9 {
             "rdna1",
             "SOPC_INST_LITERAL",
             18,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -18923,7 +18925,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOPC",
             18,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC_NOLDS", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC_NOLDS", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -18936,7 +18938,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOPC_INST_LITERAL",
             18,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC_NOLDS", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -18949,7 +18951,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOPC_INST_LITERAL",
             18,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC_NOLDS", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -18962,7 +18964,7 @@ private[common] object InstructionDefs9 {
             "rdna2",
             "SOPC_INST_LITERAL",
             18,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC_NOLDS", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -18975,7 +18977,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOPC",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -18988,7 +18990,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOPC_INST_LITERAL",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -19001,7 +19003,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOPC_INST_LITERAL",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -19014,7 +19016,7 @@ private[common] object InstructionDefs9 {
             "rdna3",
             "SOPC_INST_LITERAL",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -19027,7 +19029,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOPC",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -19040,7 +19042,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOPC_INST_LITERAL",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -19053,7 +19055,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOPC_INST_LITERAL",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -19066,7 +19068,7 @@ private[common] object InstructionDefs9 {
             "rdna3_5",
             "SOPC_INST_LITERAL",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -19079,7 +19081,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOPC",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -19092,7 +19094,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOPC_INST_LITERAL",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(Some("SSRC1"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -19105,7 +19107,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOPC_INST_LITERAL",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("SSRC0"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -19118,7 +19120,7 @@ private[common] object InstructionDefs9 {
             "rdna4",
             "SOPC_INST_LITERAL",
             16,
-            Vector(
+            Col(
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(Some("LITERAL"), "SSRC", 64, true, false, false),
               OperandInfo(None, "SSRC_SPECIAL_SCC", 1, false, true, true)
@@ -19131,7 +19133,7 @@ private[common] object InstructionDefs9 {
             "gfx8",
             "SOPC",
             18,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, true),
               OperandInfo(None, "uint", 64, true, false, false),
               OperandInfo(None, "uint", 64, true, false, false)
@@ -19144,7 +19146,7 @@ private[common] object InstructionDefs9 {
             "gfx9",
             "SOPC",
             18,
-            Vector(
+            Col(
               OperandInfo(None, "uint", 32, false, true, true),
               OperandInfo(None, "uint", 64, true, false, false),
               OperandInfo(None, "uint", 64, true, false, false)
@@ -19155,7 +19157,7 @@ private[common] object InstructionDefs9 {
         ))
       )
 
-  val definitions: Vector[InstructionDef] = Vector(
+  val definitions: Col[InstructionDef] = Col(
     SBarrierSignal,
     SBarrierSignalIsfirst,
     SBarrierWait,

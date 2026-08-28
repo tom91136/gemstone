@@ -1,11 +1,14 @@
 package net.kurobako.gemstone.isa.amdgpu.common
 
+import net.kurobako.gemstone.Col
+import net.kurobako.gemstone.Col.*
+
 import scala.collection.mutable.ArrayBuffer
 
 object Assembly {
   def parse(source: String): Either[ParseError, Program] = {
-    val statements = Vector.newBuilder[Statement]
-    val lines      = source.linesIterator.toVector
+    val statements = Col.newBuilder[Statement]
+    val lines      = source.linesIterator.toCol
     var index      = 0
     while (index < lines.size) {
       parseLine(lines(index), index + 1) match {
@@ -20,8 +23,8 @@ object Assembly {
 
   def parseInstruction(source: String): Either[ParseError, Instruction] =
     parse(source).flatMap {
-      case Program(Vector(Statement.Instruction(instruction))) => Right(instruction)
-      case Program(Vector())                                   => Left(ParseError(1, 1, "expected an instruction"))
+      case Program(Col(Statement.Instruction(instruction))) => Right(instruction)
+      case Program(Col())                                   => Left(ParseError(1, 1, "expected an instruction"))
       case _ => Left(ParseError(1, 1, "expected exactly one instruction"))
     }
 
@@ -77,8 +80,8 @@ object Assembly {
       val opcode = normalizeOpcode(opcodeText)
       val tail   = if (opcodeEnd < 0) "" else text.drop(opcodeEnd).trim
       splitTopLevel(tail, ',', line).flatMap { commaParts =>
-        val operands                   = Vector.newBuilder[Operand]
-        val modifiers                  = Vector.newBuilder[Modifier]
+        val operands                   = Col.newBuilder[Operand]
+        val modifiers                  = Col.newBuilder[Modifier]
         var failed: Option[ParseError] = None
         commaParts.foreach { part =>
           if (failed.isEmpty) {
@@ -129,7 +132,7 @@ object Assembly {
     val Range                              = "(?i)(s|v|a|ttmp)\\[([0-9]+):([0-9]+)\\]".r
     def file(prefix: String): RegisterFile = prefix.toLowerCase match {
       case "s"    => RegisterFile.Scalar
-      case "v"    => RegisterFile.Vector
+      case "v"    => RegisterFile.VectorRegister
       case "a"    => RegisterFile.Accumulator
       case "ttmp" => RegisterFile.TrapTemporary
     }
@@ -166,8 +169,8 @@ object Assembly {
     else None
   }
 
-  private def splitTopLevel(text: String, separator: Char, line: Int): Either[ParseError, Vector[String]] = {
-    if (text.isEmpty) return Right(Vector.empty)
+  private def splitTopLevel(text: String, separator: Char, line: Int): Either[ParseError, Col[String]] = {
+    if (text.isEmpty) return Right(Col.empty)
     val result = ArrayBuffer.empty[String]
     var start  = 0
     var round  = 0
@@ -193,11 +196,11 @@ object Assembly {
     else {
       val last = text.drop(start).trim
       if (last.isEmpty) Left(ParseError(line, text.length, "empty operand"))
-      else Right((result += last).toVector)
+      else Right((result += last).toCol)
     }
   }
 
-  private def splitWhitespace(text: String): Vector[String] = {
+  private def splitWhitespace(text: String): Col[String] = {
     val result = ArrayBuffer.empty[String]
     var start  = -1
     var round  = 0
@@ -221,7 +224,7 @@ object Assembly {
       }
       index += 1
     }
-    result.toVector
+    result.toCol
   }
 
   private def printStatement(statement: Statement): String = statement match {
@@ -235,10 +238,10 @@ object Assembly {
   private def printOperand(operand: Operand): String = operand match {
     case Operand.Register(file, first, last) =>
       val prefix = file match {
-        case RegisterFile.Scalar        => "s"
-        case RegisterFile.Vector        => "v"
-        case RegisterFile.Accumulator   => "a"
-        case RegisterFile.TrapTemporary => "ttmp"
+        case RegisterFile.Scalar         => "s"
+        case RegisterFile.VectorRegister => "v"
+        case RegisterFile.Accumulator    => "a"
+        case RegisterFile.TrapTemporary  => "ttmp"
       }
       if (first == last) s"$prefix$first" else s"$prefix[$first:$last]"
     case Operand.SpecialRegister(name)     => name
@@ -255,7 +258,7 @@ object Assembly {
   private def stripComment(source: String): String = {
     val slash = source.indexOf("//")
     val hash  = source.indexOf('#')
-    val end   = Vector(slash, hash).filter(_ >= 0).minOption.getOrElse(source.length)
+    val end   = Col(slash, hash).filter(_ >= 0).minOption.getOrElse(source.length)
     source.take(end)
   }
 

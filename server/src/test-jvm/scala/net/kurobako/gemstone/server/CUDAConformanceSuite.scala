@@ -1,5 +1,7 @@
 package net.kurobako.gemstone.server
 
+import net.kurobako.gemstone.Col
+
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
@@ -48,7 +50,7 @@ class CUDAConformanceSuite extends munit.FunSuite {
   test("gemstone/rejects-invalid-token") {
     val executable = runRoot.resolve("rpc-auth-smoke")
     runChecked(
-      Vector(
+      Col(
         "cc",
         "-std=c17",
         "-Wall",
@@ -64,7 +66,7 @@ class CUDAConformanceSuite extends munit.FunSuite {
       root,
       gemstoneEnvironment(token = "0" * 64, recording = None)
     )
-    runChecked(Vector(executable.toString), root, gemstoneEnvironment(token = "0" * 64, recording = None))
+    runChecked(Col(executable.toString), root, gemstoneEnvironment(token = "0" * 64, recording = None))
   }
 
   private def runCase(cudaCase: CUDACase, backend: Backend): Unit = {
@@ -101,7 +103,7 @@ class CUDAConformanceSuite extends munit.FunSuite {
       }
       val stdout = caseRoot.resolve(s"stdout.$index")
       val stderr = caseRoot.resolve(s"stderr.$index")
-      val exit   = run(Vector("bash", "-c", expanded), caseRoot, environment, stdout, stderr)
+      val exit   = run(Col("bash", "-c", expanded), caseRoot, environment, stdout, stderr)
       val actual = stripTrailingNewlines(Files.readString(stdout, StandardCharsets.UTF_8))
       val errors = Files.readString(stderr, StandardCharsets.UTF_8)
       assertEquals(
@@ -156,7 +158,7 @@ class CUDAConformanceSuite extends munit.FunSuite {
         identity
       )
     }.toVector
-    assertEquals(actual, semantic.output._2)
+    assert(actual.sameElements(semantic.output._2))
   }
 
   private def gemstoneEnvironment(token: String, recording: Option[Path]): Map[String, String] = {
@@ -176,15 +178,15 @@ object CUDAConformanceSuite {
       source: Path,
       targets: Set[String],
       vendored: Set[String],
-      commands: Vector[Command],
+      commands: Col[Command],
       semantic: Option[SemanticCase]
   )
   private final case class SemanticCase(
       kernel: String,
       blocks: Int,
       threads: Int,
-      inputs: Vector[(String, Vector[Int])],
-      output: (String, Vector[Int])
+      inputs: Col[(String, Col[Int])],
+      output: (String, Col[Int])
   )
 
   private enum Backend(val id: String, val driverDefines: String) {
@@ -202,7 +204,7 @@ object CUDAConformanceSuite {
     }
   }
 
-  private def discoverCases(suiteRoot: Path): Vector[CUDACase] = {
+  private def discoverCases(suiteRoot: Path): Col[CUDACase] = {
     val stream  = Files.walk(suiteRoot)
     val sources =
       try
@@ -219,7 +221,7 @@ object CUDAConformanceSuite {
       names.distinct.size == names.size,
       s"duplicate CUDA case names: ${names.diff(names.distinct).mkString(", ")}"
     )
-    cases
+    Col.from(cases)
   }
 
   private def parseCase(source: Path): CUDACase = {
@@ -235,11 +237,11 @@ object CUDAConformanceSuite {
     var name           = Option.empty[String]
     var targets        = Backend.values.map(_.id).toSet
     var vendored       = Set.empty[String]
-    var commands       = Vector.empty[Command]
+    var commands       = Col.empty[Command]
     var kernel         = Option.empty[String]
     var shape          = Option.empty[(Int, Int)]
-    var inputs         = Vector.empty[(String, Vector[Int])]
-    var output         = Option.empty[(String, Vector[Int])]
+    var inputs         = Col.empty[(String, Col[Int])]
+    var output         = Option.empty[(String, Col[Int])]
 
     Files.readAllLines(source, StandardCharsets.UTF_8).asScala.foreach {
       case line if line.startsWith(CasePrefix) =>
@@ -258,9 +260,9 @@ object CUDAConformanceSuite {
           commands.updated(commands.size - 1, commands.last.copy(expected = Some(line.drop(RequiresPrefix.length))))
       case line if line.startsWith(KernelPrefix) => kernel = Some(line.drop(KernelPrefix.length).trim)
       case line if line.startsWith(ShapePrefix)  =>
-        line.drop(ShapePrefix.length).split(',').map(_.trim.toInt).toVector match {
-          case Vector(blocks, threads) => shape = Some(blocks -> threads)
-          case _                       => throw new IllegalArgumentException(s"$source has invalid PTX shape")
+        line.drop(ShapePrefix.length).split(',').map(_.trim.toInt) match {
+          case Array(blocks, threads) => shape = Some(blocks -> threads)
+          case _                      => throw new IllegalArgumentException(s"$source has invalid PTX shape")
         }
       case line if line.startsWith(InputPrefix) => inputs :+= parseSemanticValues(line.drop(InputPrefix.length), source)
       case line if line.startsWith(OutputPrefix) =>
@@ -273,7 +275,7 @@ object CUDAConformanceSuite {
     )
     require(vendored.subsetOf(Set("thrust", "cub")), s"$source has invalid vendored dependencies: $vendored")
     require(commands.size >= 2, s"$source must declare at least compile and run commands")
-    val semanticFields = Vector(kernel.isDefined, shape.isDefined, inputs.nonEmpty, output.isDefined)
+    val semanticFields = Col(kernel.isDefined, shape.isDefined, inputs.nonEmpty, output.isDefined)
     require(
       semanticFields.forall(identity) || semanticFields.forall(!_),
       s"$source has incomplete PTX semantic metadata"
@@ -292,18 +294,18 @@ object CUDAConformanceSuite {
     )
   }
 
-  private def parseSemanticValues(value: String, source: Path): (String, Vector[Int]) = {
+  private def parseSemanticValues(value: String, source: Path): (String, Col[Int]) = {
     val separator = value.indexOf('=')
     require(separator > 0, s"$source has invalid PTX semantic values: $value")
     val name   = value.take(separator).trim
-    val values = value.drop(separator + 1).split(',').toVector.map(_.trim.toInt)
+    val values = Col.from(value.drop(separator + 1).split(',').iterator.map(_.trim.toInt))
     require(name.nonEmpty && values.nonEmpty, s"$source has invalid PTX semantic values: $value")
     name -> values
   }
 
   private def vendorIncludeFlags(root: Path): String = {
     val vendor = root.resolve("conformance/cuda/vendor")
-    Vector(vendor.resolve("thrust"), vendor.resolve("cub")).map(path => s"-I$path").mkString(" ")
+    Col(vendor.resolve("thrust"), vendor.resolve("cub")).map(path => s"-I$path").mkString(" ")
   }
 
   private def auditVendoredDependencies(cudaCase: CUDACase, dependencyFile: Path, root: Path): Unit =
@@ -338,7 +340,7 @@ object CUDAConformanceSuite {
     val dispatch  = root.resolve("native/dispatch")
     val library   = libraryDir.resolve("libcuda.so.1")
     runChecked(
-      Vector(
+      Col(
         "cc",
         "-std=c17",
         "-fPIC",
@@ -369,7 +371,7 @@ object CUDAConformanceSuite {
   private def verifyGemstoneSurface(root: Path, libraryDir: Path, runRoot: Path): Unit = {
     val executable = runRoot.resolve("surface-smoke")
     runChecked(
-      Vector(
+      Col(
         "c++",
         "-std=c++17",
         "-Wall",
@@ -386,7 +388,7 @@ object CUDAConformanceSuite {
     )
     val inherited = sys.env.get("LD_LIBRARY_PATH").filter(_.nonEmpty).map(value => s":$value").getOrElse("")
     runChecked(
-      Vector(executable.toString),
+      Col(executable.toString),
       root,
       Map("LD_LIBRARY_PATH" -> s"$libraryDir$inherited")
     )
@@ -419,7 +421,7 @@ object CUDAConformanceSuite {
       .map(directory => Path.of(directory).resolve("nvcc"))
       .toVector
     explicit.orElse(cudaHome).orElse {
-      val discovered = Vector(Path.of("/usr/local"), Path.of("/opt/nvidia/hpc_sdk"))
+      val discovered = Col(Path.of("/usr/local"), Path.of("/opt/nvidia/hpc_sdk"))
         .filter(Files.isDirectory(_))
         .flatMap { directory =>
           val stream = Files.walk(directory)
@@ -460,7 +462,7 @@ object CUDAConformanceSuite {
     bytes.iterator.map(byte => f"${byte & 0xff}%02x").mkString
   }
 
-  private def runChecked(command: Vector[String], directory: Path, environment: Map[String, String]): Unit = {
+  private def runChecked(command: Col[String], directory: Path, environment: Map[String, String]): Unit = {
     val stdout = Files.createTempFile(directory, "command-", ".stdout")
     val stderr = Files.createTempFile(directory, "command-", ".stderr")
     val exit   = run(command, directory, environment, stdout, stderr)
@@ -472,7 +474,7 @@ object CUDAConformanceSuite {
   }
 
   private def run(
-      command: Vector[String],
+      command: Col[String],
       directory: Path,
       environment: Map[String, String],
       stdout: Path,

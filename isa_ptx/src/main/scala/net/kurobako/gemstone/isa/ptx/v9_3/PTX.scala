@@ -1,5 +1,7 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
+import net.kurobako.gemstone.Col
+
 import net.kurobako.gemstone.execution.*
 import net.kurobako.gemstone.memory.CheckedMemory
 import net.kurobako.gemstone.memory.GuestAddress
@@ -62,7 +64,7 @@ sealed trait PTXInstruction extends Product with Serializable {
 }
 
 object PTXInstruction {
-  final case class LoadParameter(destinations: Vector[String], parameter: String, offset: Int, elementWidth: Int)
+  final case class LoadParameter(destinations: Col[String], parameter: String, offset: Int, elementWidth: Int)
       extends PTXInstruction {
     override val opcode: String = s"ld.param.u$elementWidth"
   }
@@ -162,15 +164,15 @@ final case class PTXExecutable(instruction: PTXInstruction, predication: Option[
 }
 
 final case class PTXParameter(name: String, widthBytes: Int)
-final case class PTXArgument(bytes: IArray[Byte])
+final case class PTXArgument(bytes: Col[Byte])
 
 object PTXArgument {
   def apply(value: Long): PTXArgument =
-    PTXArgument(IArray.tabulate(8)(index => (value >>> (index * 8)).toByte))
+    PTXArgument(Col.tabulate(8)(index => (value >>> (index * 8)).toByte))
 }
 
-final case class PTXKernel(name: String, parameters: Vector[PTXParameter], program: ExecutableProgram[PTXExecutable]) {
-  def instructions: Vector[PTXInstruction] = program.instructions.map(_.instruction)
+final case class PTXKernel(name: String, parameters: Col[PTXParameter], program: ExecutableProgram[PTXExecutable]) {
+  def instructions: Col[PTXInstruction] = program.instructions.map(_.instruction)
 }
 
 enum PTXLoweringError {
@@ -203,7 +205,7 @@ object PTXLowerer {
       statementIndex += 1
     }
 
-    val lowered = Vector.newBuilder[PTXExecutable]
+    val lowered = Col.newBuilder[PTXExecutable]
     statementIndex = 0
     while (statementIndex < flat.size) {
       flat(statementIndex) match {
@@ -221,8 +223,8 @@ object PTXLowerer {
     )
   }
 
-  private def lowerParameters(parameters: Vector[Parameter]): Either[PTXLoweringError, Vector[PTXParameter]] = {
-    val result = Vector.newBuilder[PTXParameter]
+  private def lowerParameters(parameters: Col[Parameter]): Either[PTXLoweringError, Col[PTXParameter]] = {
+    val result = Col.newBuilder[PTXParameter]
     var index  = 0
     while (index < parameters.length) {
       val parameter = parameters(index)
@@ -254,9 +256,9 @@ object PTXLowerer {
     Right(result.result())
   }
 
-  private def flatten(statements: Vector[Statement]): Vector[Statement] = statements.flatMap {
+  private def flatten(statements: Col[Statement]): Col[Statement] = statements.flatMap {
     case Statement.Block(body) => flatten(body)
-    case value                 => Vector(value)
+    case value                 => Col(value)
   }
 
   private def lowerInstruction(
@@ -449,7 +451,7 @@ object PTXLowerer {
       destination: Operand,
       left: Operand,
       right: Operand,
-      modifiers: Vector[Modifier]
+      modifiers: Col[Modifier]
   ): Either[PTXLoweringError, PTXInstruction] =
     for {
       destinationName <- registerName(destination)
@@ -462,7 +464,7 @@ object PTXLowerer {
       destination: Operand,
       left: Operand,
       right: Operand,
-      instructionModifiers: Vector[Modifier]
+      instructionModifiers: Col[Modifier]
   ): Either[PTXLoweringError, PTXInstruction] = {
     val modifiers   = instructionModifiers.map(_.name)
     val instruction = ("setp" +: modifiers).mkString(".")
@@ -519,25 +521,25 @@ object PTXLowerer {
     case other                        => invalid(s"expected register, found ${Printer.render(other)}")
   }
 
-  private def registerNames(operand: Operand): Either[PTXLoweringError, Vector[String]] = operand match {
+  private def registerNames(operand: Operand): Either[PTXLoweringError, Col[String]] = operand match {
     case Operand.VectorLiteral(items) =>
-      items.foldLeft[Either[PTXLoweringError, Vector[String]]](Right(Vector.empty)) { (current, item) =>
+      items.foldLeft[Either[PTXLoweringError, Col[String]]](Right(Col.empty)) { (current, item) =>
         for {
           names <- current
           name  <- registerName(item)
         } yield names :+ name
       }
-    case other => registerName(other).map(Vector(_))
+    case other => registerName(other).map(Col(_))
   }
 
   private def addressValue(operand: Operand): Either[PTXLoweringError, PTXValue] = operand match {
-    case Operand.Address(Vector(single)) => valueWithOffset(single)
-    case other                           => invalid(s"expected address operand, found ${Printer.render(other)}")
+    case Operand.Address(Col(single)) => valueWithOffset(single)
+    case other                        => invalid(s"expected address operand, found ${Printer.render(other)}")
   }
 
   private def parameterAddress(operand: Operand): Either[PTXLoweringError, (String, Int)] = operand match {
-    case Operand.Address(Vector(Operand.Symbol(name)))                      => Right(name -> 0)
-    case Operand.Address(Vector(Operand.Add(Operand.Symbol(name), offset))) =>
+    case Operand.Address(Col(Operand.Symbol(name)))                      => Right(name -> 0)
+    case Operand.Address(Col(Operand.Add(Operand.Symbol(name), offset))) =>
       immediate(offset).flatMap(value =>
         if (value >= 0L && value <= Int.MaxValue.toLong) Right(name -> value.toInt)
         else invalid(s"parameter offset is outside Int range: $value")
@@ -559,7 +561,7 @@ object PTXLowerer {
     case other => value(other)
   }
 
-  private def integerWidth(modifiers: Vector[Modifier]): Either[PTXLoweringError, Int] =
+  private def integerWidth(modifiers: Col[Modifier]): Either[PTXLoweringError, Int] =
     modifiers.reverseIterator.collectFirst {
       case Modifier(name) if name.matches("[usbf][0-9]+") => name.drop(1).toInt
     }.filter(Set(8, 16, 32, 64).contains).toRight(
@@ -882,7 +884,7 @@ private object PTXSemantics {
     }
   }
 
-  private def decodeLittleEndian(bytes: IArray[Byte], offset: Int, size: Int): Long = {
+  private def decodeLittleEndian(bytes: Col[Byte], offset: Int, size: Int): Long = {
     var result = 0L
     var index  = 0
     while (index < size) {
@@ -992,7 +994,7 @@ object PTXInterpreter {
     def releaseBarrier(key: WaitKey): Either[ExecutionFault, Unit] = {
       val arrived = barrierMasks.getOrElse(key, LaneMask.Empty)
       if (arrived.intersect(state.live) == state.live) {
-        val released = waiting.filter(_.key == key).toVector
+        val released = Col.from(waiting.filter(_.key == key))
         waiting.filterInPlace(_.key != key)
         val _             = barrierMasks.remove(key)
         var releasedIndex = 0
@@ -1119,7 +1121,7 @@ object PTXInterpreter {
                     case Left(fault) => return Left(fault)
                     case Right(())   => ()
                   }
-                  val keys     = barrierMasks.keys.toVector
+                  val keys     = Col.from(barrierMasks.keys)
                   var keyIndex = 0
                   while (keyIndex < keys.size) {
                     releaseBarrier(keys(keyIndex)) match {

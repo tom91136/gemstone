@@ -1,5 +1,7 @@
 package net.kurobako.gemstone.isa.amdgpu.common
 
+import net.kurobako.gemstone.Col
+
 import net.kurobako.gemstone.execution.Effects
 import net.kurobako.gemstone.execution.CancellationToken
 import net.kurobako.gemstone.execution.ExecutionBudget
@@ -95,7 +97,7 @@ class SemanticsSuite extends munit.FunSuite {
   }
 
   test("all selected SOPP metadata lowers to either a declared semantic or explicit Unsupported") {
-    val targets = Vector(
+    val targets = Col(
       "gfx600",
       "gfx700",
       "gfx803",
@@ -136,7 +138,7 @@ class SemanticsSuite extends munit.FunSuite {
     val count = InstructionDef.forOpcode(opcode).flatMap(_.decoder.operandCounts).minOption.getOrElse(
       fail(s"missing generated descriptor for $opcode")
     )
-    val operands = Vector.tabulate(count)(_ => Operand.IntegerLiteral(BigInt(0), 10))
+    val operands = Col.tabulate(count)(_ => Operand.IntegerLiteral(BigInt(0), 10))
     Instruction.decode(opcode, operands).fold(error => fail(error.toString), identity)
   }
 

@@ -1,10 +1,12 @@
 package net.kurobako.gemstone.isa.amdgpu.common
 
+import net.kurobako.gemstone.Col
+
 enum CodecError {
   case WrongGeneration(target: Target, expected: Generation)
   case UnsupportedInstruction(opcode: String, target: Target)
-  case UnsupportedFormat(opcode: String, target: Target, formats: Vector[String])
-  case UnsupportedOperandSyntax(opcode: String, target: Target, operands: Vector[Operand])
+  case UnsupportedFormat(opcode: String, target: Target, formats: Col[String])
+  case UnsupportedOperandSyntax(opcode: String, target: Target, operands: Col[Operand])
   case AmbiguousInstruction(opcode: String, target: Target)
   case InvalidOperand(message: String)
   case InvalidEncoding(message: String)
@@ -20,7 +22,7 @@ object Binary {
   def encode(
       instruction: Instruction,
       target: Target
-  ): Either[CodecError, Vector[Byte]] = {
+  ): Either[CodecError, Col[Byte]] = {
     val definitions = encodingsFor(instruction, target)
     if (definitions.isEmpty) Left(CodecError.UnsupportedInstruction(instruction.opcode, target))
     else {
@@ -40,7 +42,7 @@ object Binary {
   def encodeSOPP(
       instruction: Instruction,
       target: Target
-  ): Either[CodecError, Vector[Byte]] = {
+  ): Either[CodecError, Col[Byte]] = {
     val definitions = encodingsFor(instruction, target).filter(_.format == "SOPP")
     val encodings   = definitions.map(_.opcode).distinct
     if (encodings.size > 1)
@@ -59,7 +61,7 @@ object Binary {
   }
 
   def decodeSOPP(
-      bytes: Seq[Byte],
+      bytes: Col[Byte],
       target: Target
   ): Either[CodecError, Instruction] =
     if (bytes.size != 4) Left(CodecError.InvalidEncoding(s"SOPP is exactly four bytes, found ${bytes.size}"))
@@ -89,8 +91,8 @@ object Binary {
               val value    = BigInt(word & 0xffffL)
               val operands =
                 if (!matches.exists(_.decoder.operandCounts.contains(0)) || value != 0)
-                  Vector(Operand.IntegerLiteral(value, 10))
-                else Vector.empty
+                  Col(Operand.IntegerLiteral(value, 10))
+                else Col.empty[Operand]
               Instruction.decode(definition.opcode, operands).left.map(error =>
                 CodecError.InvalidEncoding(s"generated instruction decoder rejected ${definition.opcode}: $error")
               )
@@ -101,12 +103,12 @@ object Binary {
   private def immediate(instruction: Instruction): Either[CodecError, Long] = instruction.operands match {
     case _ if instruction.mods.nonEmpty =>
       Left(CodecError.InvalidOperand(s"SOPP does not accept modifiers: ${instruction.mods.mkString(", ")}"))
-    case Vector()                                                                      => Right(0L)
-    case Vector(Operand.IntegerLiteral(value, _)) if value >= -32768 && value <= 65535 => Right(value.toLong & 0xffffL)
-    case Vector(operand) => Left(CodecError.InvalidOperand(s"SOPP requires a 16-bit integer, found $operand"))
-    case operands        => Left(CodecError.InvalidOperand(s"SOPP accepts at most one operand, found ${operands.size}"))
+    case Col()                                                                      => Right(0L)
+    case Col(Operand.IntegerLiteral(value, _)) if value >= -32768 && value <= 65535 => Right(value.toLong & 0xffffL)
+    case Col(operand) => Left(CodecError.InvalidOperand(s"SOPP requires a 16-bit integer, found $operand"))
+    case operands     => Left(CodecError.InvalidOperand(s"SOPP accepts at most one operand, found ${operands.size}"))
   }
 
-  private def littleEndian(word: Long): Vector[Byte] =
-    Vector.tabulate(4)(index => ((word >>> (index * 8)) & 0xffL).toByte)
+  private def littleEndian(word: Long): Col[Byte] =
+    Col.tabulate(4)(index => ((word >>> (index * 8)) & 0xffL).toByte)
 }

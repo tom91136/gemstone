@@ -1,5 +1,7 @@
 package net.kurobako.gemstone.isa.spirv.v1_6
 
+import net.kurobako.gemstone.Col
+
 opaque type Word = Int
 
 object Word {
@@ -34,17 +36,17 @@ object SPIRVVersion {
 final case class Header(version: SPIRVVersion, generator: Word, bound: Word, schema: Word)
 
 /** Lossless binary-layer instruction. Opcode numbers unknown to this grammar deliberately live only here. */
-final case class RawInstruction(opcodeNumber: Int, operandWords: Vector[Word]) {
+final case class RawInstruction(opcodeNumber: Int, operandWords: Col[Word]) {
   require(opcodeNumber >= 0 && opcodeNumber <= 0xffff, s"opcode is outside unsigned 16-bit range: $opcodeNumber")
   def wordCount: Int = operandWords.size + 1
 }
 
 /** Lossless binary-layer module used by binary tools and forward-compatible recorders. */
-final case class RawModule(header: Header, instructions: Vector[RawInstruction], endianness: Endianness)
+final case class RawModule(header: Header, instructions: Col[RawInstruction], endianness: Endianness)
 
 /** One grammar operand. Multi-word strings, pairs, masks with parameters, and context-dependent literals stay atomic.
   */
-final case class Operand(kind: String, words: Vector[Word]) {
+final case class Operand(kind: String, words: Col[Word]) {
   require(kind.nonEmpty, "operand kind must be non-empty")
   require(words.nonEmpty, s"$kind operand must contain at least one word")
 
@@ -58,7 +60,7 @@ final case class Operand(kind: String, words: Vector[Word]) {
 }
 
 /** Strict typed module. Every instruction is a generated `Instruction` enum case. */
-final case class Module(header: Header, instructions: Vector[Instruction], endianness: Endianness)
+final case class Module(header: Header, instructions: Col[Instruction], endianness: Endianness)
 
 enum OperandQuantifier {
   case One
@@ -67,14 +69,14 @@ enum OperandQuantifier {
 }
 
 final case class OperandShape(kind: String, name: String, quantifier: OperandQuantifier)
-final case class OperandEnumerant(value: Long, parameterKinds: Vector[String])
-final case class OperandKindInfo(kind: String, category: String, enumerants: Vector[OperandEnumerant])
+final case class OperandEnumerant(value: Long, parameterKinds: Col[String])
+final case class OperandKindInfo(kind: String, category: String, enumerants: Col[OperandEnumerant])
 
 final case class Metadata(
     instructionClass: String,
     since: Option[String],
-    capabilities: Vector[String],
-    operands: Vector[OperandShape]
+    capabilities: Col[String],
+    operands: Col[OperandShape]
 )
 
 enum InstructionDecodeError {
@@ -83,8 +85,8 @@ enum InstructionDecodeError {
   case InvalidEnumerant(kind: String, value: Long)
   case UnterminatedString(opcode: String)
   case DecoderOpcodeMismatch(expected: Int, actual: Int)
-  case NoMatchingDefinition(opcodeNumber: Int, candidates: Vector[String])
-  case AmbiguousDefinition(opcodeNumber: Int, matches: Vector[String])
+  case NoMatchingDefinition(opcodeNumber: Int, candidates: Col[String])
+  case AmbiguousDefinition(opcodeNumber: Int, matches: Col[String])
 
   def message: String = this match {
     case UnknownOpcode(number)                    => s"unknown SPIR-V opcode $number"

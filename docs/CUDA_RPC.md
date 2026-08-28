@@ -23,7 +23,7 @@ The generator emits:
 - `generated/manifest/cuda-rpc-schema.json`: reviewed names, types, IDs, and fingerprint;
 - `generated/c/gemstone_cuda_rpc.inc`: C constants for the same methods and IDs;
 - `generated/c/gemstone_cuda_rpc_client.c`: exact Driver ABI entry points and typed binary marshalling;
-- `core/src/generated/main/scala/.../GeneratedCUDARPC.scala`: a typed `CUDA` client and receiving dispatcher.
+- `api/src/generated/main/scala/.../GeneratedCUDARPC.scala`: a typed `CUDA` client and receiving dispatcher.
 
 `CUDAEmulatorServer` is a normal implementation of `CUDA`. The JVM and Scala Native tests run the generated client
 through the generated dispatcher and exercise device allocation, pointer-offset validation, byte transfer, and free.

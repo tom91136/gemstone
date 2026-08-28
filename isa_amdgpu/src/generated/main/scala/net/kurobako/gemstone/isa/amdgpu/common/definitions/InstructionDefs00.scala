@@ -1,19 +1,21 @@
 // Generated from the pinned Mesa ACO and AMD machine-readable ISA inputs. Do not edit by hand.
 package net.kurobako.gemstone.isa.amdgpu.common
 
+import net.kurobako.gemstone.Col
+
 private[common] object InstructionDefs0 {
   case object BufferAtomicAdd extends InstructionDef(
         "buffer_atomic_add",
         decoder(form(4)((operands, mods) =>
           Instruction.BufferAtomicAdd(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "MUBUF",
             66,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -29,7 +31,7 @@ private[common] object InstructionDefs0 {
             "cdna2",
             "MUBUF",
             66,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -45,7 +47,7 @@ private[common] object InstructionDefs0 {
             "cdna3",
             "MUBUF",
             66,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -61,7 +63,7 @@ private[common] object InstructionDefs0 {
             "cdna4",
             "MUBUF",
             66,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -77,7 +79,7 @@ private[common] object InstructionDefs0 {
             "rdna1",
             "MUBUF",
             50,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 128, true, false, false),
@@ -93,7 +95,7 @@ private[common] object InstructionDefs0 {
             "rdna2",
             "MUBUF",
             50,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 128, true, false, false),
@@ -109,7 +111,7 @@ private[common] object InstructionDefs0 {
             "gfx6",
             "MUBUF",
             50,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -118,7 +120,7 @@ private[common] object InstructionDefs0 {
             "gfx7",
             "MUBUF",
             50,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -127,7 +129,7 @@ private[common] object InstructionDefs0 {
             "gfx8",
             "MUBUF",
             66,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -136,7 +138,7 @@ private[common] object InstructionDefs0 {
             "gfx9",
             "MUBUF",
             66,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           )
@@ -147,13 +149,13 @@ private[common] object InstructionDefs0 {
         decoder(form(4)((operands, mods) =>
           Instruction.BufferAtomicAddF32(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "MUBUF",
             77,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -169,7 +171,7 @@ private[common] object InstructionDefs0 {
             "cdna2",
             "MUBUF",
             77,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -185,7 +187,7 @@ private[common] object InstructionDefs0 {
             "cdna3",
             "MUBUF",
             77,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -201,7 +203,7 @@ private[common] object InstructionDefs0 {
             "cdna4",
             "MUBUF",
             77,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -217,7 +219,7 @@ private[common] object InstructionDefs0 {
             "cdna5",
             "VBUFFER",
             86,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -233,7 +235,7 @@ private[common] object InstructionDefs0 {
             "rdna3",
             "MUBUF",
             86,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -249,7 +251,7 @@ private[common] object InstructionDefs0 {
             "rdna3_5",
             "MUBUF",
             86,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -265,7 +267,7 @@ private[common] object InstructionDefs0 {
             "rdna4",
             "VBUFFER",
             86,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -283,13 +285,13 @@ private[common] object InstructionDefs0 {
         decoder(form(4)((operands, mods) =>
           Instruction.BufferAtomicAddF64(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA2,
             "cdna2",
             "MUBUF",
             79,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -305,7 +307,7 @@ private[common] object InstructionDefs0 {
             "cdna3",
             "MUBUF",
             79,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -321,7 +323,7 @@ private[common] object InstructionDefs0 {
             "cdna4",
             "MUBUF",
             79,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -337,7 +339,7 @@ private[common] object InstructionDefs0 {
             "cdna5",
             "VBUFFER",
             85,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -355,13 +357,13 @@ private[common] object InstructionDefs0 {
         decoder(form(4)((operands, mods) =>
           Instruction.BufferAtomicAddU32(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VBUFFER",
             53,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -377,7 +379,7 @@ private[common] object InstructionDefs0 {
             "rdna3",
             "MUBUF",
             53,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -393,7 +395,7 @@ private[common] object InstructionDefs0 {
             "rdna3_5",
             "MUBUF",
             53,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -409,7 +411,7 @@ private[common] object InstructionDefs0 {
             "rdna4",
             "VBUFFER",
             53,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -427,13 +429,13 @@ private[common] object InstructionDefs0 {
         decoder(form(4)((operands, mods) =>
           Instruction.BufferAtomicAddU64(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VBUFFER",
             67,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -449,7 +451,7 @@ private[common] object InstructionDefs0 {
             "rdna3",
             "MUBUF",
             67,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -465,7 +467,7 @@ private[common] object InstructionDefs0 {
             "rdna3_5",
             "MUBUF",
             67,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -481,7 +483,7 @@ private[common] object InstructionDefs0 {
             "rdna4",
             "VBUFFER",
             67,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -499,13 +501,13 @@ private[common] object InstructionDefs0 {
         decoder(form(4)((operands, mods) =>
           Instruction.BufferAtomicAddX2(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "MUBUF",
             98,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -521,7 +523,7 @@ private[common] object InstructionDefs0 {
             "cdna2",
             "MUBUF",
             98,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -537,7 +539,7 @@ private[common] object InstructionDefs0 {
             "cdna3",
             "MUBUF",
             98,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -553,7 +555,7 @@ private[common] object InstructionDefs0 {
             "cdna4",
             "MUBUF",
             98,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -569,7 +571,7 @@ private[common] object InstructionDefs0 {
             "rdna1",
             "MUBUF",
             82,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 128, true, false, false),
@@ -585,7 +587,7 @@ private[common] object InstructionDefs0 {
             "rdna2",
             "MUBUF",
             82,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 128, true, false, false),
@@ -601,7 +603,7 @@ private[common] object InstructionDefs0 {
             "gfx6",
             "MUBUF",
             82,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -610,7 +612,7 @@ private[common] object InstructionDefs0 {
             "gfx7",
             "MUBUF",
             82,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -619,7 +621,7 @@ private[common] object InstructionDefs0 {
             "gfx8",
             "MUBUF",
             98,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -628,7 +630,7 @@ private[common] object InstructionDefs0 {
             "gfx9",
             "MUBUF",
             98,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           )
@@ -639,13 +641,13 @@ private[common] object InstructionDefs0 {
         decoder(form(4)((operands, mods) =>
           Instruction.BufferAtomicAnd(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "MUBUF",
             72,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -661,7 +663,7 @@ private[common] object InstructionDefs0 {
             "cdna2",
             "MUBUF",
             72,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -677,7 +679,7 @@ private[common] object InstructionDefs0 {
             "cdna3",
             "MUBUF",
             72,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -693,7 +695,7 @@ private[common] object InstructionDefs0 {
             "cdna4",
             "MUBUF",
             72,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -709,7 +711,7 @@ private[common] object InstructionDefs0 {
             "rdna1",
             "MUBUF",
             57,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 128, true, false, false),
@@ -725,7 +727,7 @@ private[common] object InstructionDefs0 {
             "rdna2",
             "MUBUF",
             57,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 128, true, false, false),
@@ -741,7 +743,7 @@ private[common] object InstructionDefs0 {
             "gfx6",
             "MUBUF",
             57,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -750,7 +752,7 @@ private[common] object InstructionDefs0 {
             "gfx7",
             "MUBUF",
             57,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -759,7 +761,7 @@ private[common] object InstructionDefs0 {
             "gfx8",
             "MUBUF",
             72,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -768,7 +770,7 @@ private[common] object InstructionDefs0 {
             "gfx9",
             "MUBUF",
             72,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           )
@@ -779,13 +781,13 @@ private[common] object InstructionDefs0 {
         decoder(form(4)((operands, mods) =>
           Instruction.BufferAtomicAndB32(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VBUFFER",
             60,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -801,7 +803,7 @@ private[common] object InstructionDefs0 {
             "rdna3",
             "MUBUF",
             60,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -817,7 +819,7 @@ private[common] object InstructionDefs0 {
             "rdna3_5",
             "MUBUF",
             60,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -833,7 +835,7 @@ private[common] object InstructionDefs0 {
             "rdna4",
             "VBUFFER",
             60,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -851,13 +853,13 @@ private[common] object InstructionDefs0 {
         decoder(form(4)((operands, mods) =>
           Instruction.BufferAtomicAndB64(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VBUFFER",
             73,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -873,7 +875,7 @@ private[common] object InstructionDefs0 {
             "rdna3",
             "MUBUF",
             73,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -889,7 +891,7 @@ private[common] object InstructionDefs0 {
             "rdna3_5",
             "MUBUF",
             73,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -905,7 +907,7 @@ private[common] object InstructionDefs0 {
             "rdna4",
             "VBUFFER",
             73,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -923,13 +925,13 @@ private[common] object InstructionDefs0 {
         decoder(form(4)((operands, mods) =>
           Instruction.BufferAtomicAndX2(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "MUBUF",
             104,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -945,7 +947,7 @@ private[common] object InstructionDefs0 {
             "cdna2",
             "MUBUF",
             104,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -961,7 +963,7 @@ private[common] object InstructionDefs0 {
             "cdna3",
             "MUBUF",
             104,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -977,7 +979,7 @@ private[common] object InstructionDefs0 {
             "cdna4",
             "MUBUF",
             104,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -993,7 +995,7 @@ private[common] object InstructionDefs0 {
             "rdna1",
             "MUBUF",
             89,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 128, true, false, false),
@@ -1009,7 +1011,7 @@ private[common] object InstructionDefs0 {
             "rdna2",
             "MUBUF",
             89,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 128, true, false, false),
@@ -1025,7 +1027,7 @@ private[common] object InstructionDefs0 {
             "gfx6",
             "MUBUF",
             89,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -1034,7 +1036,7 @@ private[common] object InstructionDefs0 {
             "gfx7",
             "MUBUF",
             89,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -1043,7 +1045,7 @@ private[common] object InstructionDefs0 {
             "gfx8",
             "MUBUF",
             104,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -1052,7 +1054,7 @@ private[common] object InstructionDefs0 {
             "gfx9",
             "MUBUF",
             104,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           )
@@ -1063,13 +1065,13 @@ private[common] object InstructionDefs0 {
         decoder(form(4)((operands, mods) =>
           Instruction.BufferAtomicCmpswap(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "MUBUF",
             65,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -1085,7 +1087,7 @@ private[common] object InstructionDefs0 {
             "cdna2",
             "MUBUF",
             65,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -1101,7 +1103,7 @@ private[common] object InstructionDefs0 {
             "cdna3",
             "MUBUF",
             65,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -1117,7 +1119,7 @@ private[common] object InstructionDefs0 {
             "cdna4",
             "MUBUF",
             65,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -1133,7 +1135,7 @@ private[common] object InstructionDefs0 {
             "rdna1",
             "MUBUF",
             49,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 128, true, false, false),
@@ -1149,7 +1151,7 @@ private[common] object InstructionDefs0 {
             "rdna2",
             "MUBUF",
             49,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 128, true, false, false),
@@ -1165,7 +1167,7 @@ private[common] object InstructionDefs0 {
             "gfx6",
             "MUBUF",
             49,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -1174,7 +1176,7 @@ private[common] object InstructionDefs0 {
             "gfx7",
             "MUBUF",
             49,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -1183,7 +1185,7 @@ private[common] object InstructionDefs0 {
             "gfx8",
             "MUBUF",
             65,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -1192,7 +1194,7 @@ private[common] object InstructionDefs0 {
             "gfx9",
             "MUBUF",
             65,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           )
@@ -1203,13 +1205,13 @@ private[common] object InstructionDefs0 {
         decoder(form(4)((operands, mods) =>
           Instruction.BufferAtomicCmpswapB32(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VBUFFER",
             52,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -1225,7 +1227,7 @@ private[common] object InstructionDefs0 {
             "rdna3",
             "MUBUF",
             52,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -1241,7 +1243,7 @@ private[common] object InstructionDefs0 {
             "rdna3_5",
             "MUBUF",
             52,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -1257,7 +1259,7 @@ private[common] object InstructionDefs0 {
             "rdna4",
             "VBUFFER",
             52,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -1275,13 +1277,13 @@ private[common] object InstructionDefs0 {
         decoder(form(4)((operands, mods) =>
           Instruction.BufferAtomicCmpswapB64(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VBUFFER",
             66,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -1297,7 +1299,7 @@ private[common] object InstructionDefs0 {
             "rdna3",
             "MUBUF",
             66,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -1313,7 +1315,7 @@ private[common] object InstructionDefs0 {
             "rdna3_5",
             "MUBUF",
             66,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -1329,7 +1331,7 @@ private[common] object InstructionDefs0 {
             "rdna4",
             "VBUFFER",
             66,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -1347,13 +1349,13 @@ private[common] object InstructionDefs0 {
         decoder(form(4)((operands, mods) =>
           Instruction.BufferAtomicCmpswapF32(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.GFX11,
             "rdna3",
             "MUBUF",
             80,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -1369,7 +1371,7 @@ private[common] object InstructionDefs0 {
             "rdna3_5",
             "MUBUF",
             80,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -1387,13 +1389,13 @@ private[common] object InstructionDefs0 {
         decoder(form(4)((operands, mods) =>
           Instruction.BufferAtomicCmpswapX2(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "MUBUF",
             97,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -1409,7 +1411,7 @@ private[common] object InstructionDefs0 {
             "cdna2",
             "MUBUF",
             97,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -1425,7 +1427,7 @@ private[common] object InstructionDefs0 {
             "cdna3",
             "MUBUF",
             97,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -1441,7 +1443,7 @@ private[common] object InstructionDefs0 {
             "cdna4",
             "MUBUF",
             97,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -1457,7 +1459,7 @@ private[common] object InstructionDefs0 {
             "rdna1",
             "MUBUF",
             81,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 128, true, false, false),
@@ -1473,7 +1475,7 @@ private[common] object InstructionDefs0 {
             "rdna2",
             "MUBUF",
             81,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 128, true, false, false),
@@ -1489,7 +1491,7 @@ private[common] object InstructionDefs0 {
             "gfx6",
             "MUBUF",
             81,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -1498,7 +1500,7 @@ private[common] object InstructionDefs0 {
             "gfx7",
             "MUBUF",
             81,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -1507,7 +1509,7 @@ private[common] object InstructionDefs0 {
             "gfx8",
             "MUBUF",
             97,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -1516,7 +1518,7 @@ private[common] object InstructionDefs0 {
             "gfx9",
             "MUBUF",
             97,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           )
@@ -1527,13 +1529,13 @@ private[common] object InstructionDefs0 {
         decoder(form(4)((operands, mods) =>
           Instruction.BufferAtomicCondSubU32(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VBUFFER",
             80,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -1549,7 +1551,7 @@ private[common] object InstructionDefs0 {
             "rdna4",
             "VBUFFER",
             80,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -1567,13 +1569,13 @@ private[common] object InstructionDefs0 {
         decoder(form(4)((operands, mods) =>
           Instruction.BufferAtomicCsub(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.GFX10,
             "rdna2",
             "MUBUF",
             52,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 128, true, false, false),
@@ -1591,13 +1593,13 @@ private[common] object InstructionDefs0 {
         decoder(form(4)((operands, mods) =>
           Instruction.BufferAtomicCsubU32(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.GFX11,
             "rdna3",
             "MUBUF",
             55,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -1613,7 +1615,7 @@ private[common] object InstructionDefs0 {
             "rdna3_5",
             "MUBUF",
             55,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -1631,13 +1633,13 @@ private[common] object InstructionDefs0 {
         decoder(form(4)((operands, mods) =>
           Instruction.BufferAtomicDec(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "MUBUF",
             76,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -1653,7 +1655,7 @@ private[common] object InstructionDefs0 {
             "cdna2",
             "MUBUF",
             76,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -1669,7 +1671,7 @@ private[common] object InstructionDefs0 {
             "cdna3",
             "MUBUF",
             76,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -1685,7 +1687,7 @@ private[common] object InstructionDefs0 {
             "cdna4",
             "MUBUF",
             76,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -1701,7 +1703,7 @@ private[common] object InstructionDefs0 {
             "rdna1",
             "MUBUF",
             61,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 128, true, false, false),
@@ -1717,7 +1719,7 @@ private[common] object InstructionDefs0 {
             "rdna2",
             "MUBUF",
             61,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 128, true, false, false),
@@ -1733,7 +1735,7 @@ private[common] object InstructionDefs0 {
             "gfx6",
             "MUBUF",
             61,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -1742,7 +1744,7 @@ private[common] object InstructionDefs0 {
             "gfx7",
             "MUBUF",
             61,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -1751,7 +1753,7 @@ private[common] object InstructionDefs0 {
             "gfx8",
             "MUBUF",
             76,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -1760,7 +1762,7 @@ private[common] object InstructionDefs0 {
             "gfx9",
             "MUBUF",
             76,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           )
@@ -1771,13 +1773,13 @@ private[common] object InstructionDefs0 {
         decoder(form(4)((operands, mods) =>
           Instruction.BufferAtomicDecU32(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VBUFFER",
             64,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -1793,7 +1795,7 @@ private[common] object InstructionDefs0 {
             "rdna3",
             "MUBUF",
             64,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -1809,7 +1811,7 @@ private[common] object InstructionDefs0 {
             "rdna3_5",
             "MUBUF",
             64,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -1825,7 +1827,7 @@ private[common] object InstructionDefs0 {
             "rdna4",
             "VBUFFER",
             64,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -1843,13 +1845,13 @@ private[common] object InstructionDefs0 {
         decoder(form(4)((operands, mods) =>
           Instruction.BufferAtomicDecU64(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VBUFFER",
             77,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -1865,7 +1867,7 @@ private[common] object InstructionDefs0 {
             "rdna3",
             "MUBUF",
             77,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -1881,7 +1883,7 @@ private[common] object InstructionDefs0 {
             "rdna3_5",
             "MUBUF",
             77,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -1897,7 +1899,7 @@ private[common] object InstructionDefs0 {
             "rdna4",
             "VBUFFER",
             77,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -1915,13 +1917,13 @@ private[common] object InstructionDefs0 {
         decoder(form(4)((operands, mods) =>
           Instruction.BufferAtomicDecX2(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "MUBUF",
             108,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -1937,7 +1939,7 @@ private[common] object InstructionDefs0 {
             "cdna2",
             "MUBUF",
             108,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -1953,7 +1955,7 @@ private[common] object InstructionDefs0 {
             "cdna3",
             "MUBUF",
             108,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -1969,7 +1971,7 @@ private[common] object InstructionDefs0 {
             "cdna4",
             "MUBUF",
             108,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -1985,7 +1987,7 @@ private[common] object InstructionDefs0 {
             "rdna1",
             "MUBUF",
             93,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 128, true, false, false),
@@ -2001,7 +2003,7 @@ private[common] object InstructionDefs0 {
             "rdna2",
             "MUBUF",
             93,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 128, true, false, false),
@@ -2017,7 +2019,7 @@ private[common] object InstructionDefs0 {
             "gfx6",
             "MUBUF",
             93,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -2026,7 +2028,7 @@ private[common] object InstructionDefs0 {
             "gfx7",
             "MUBUF",
             93,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -2035,7 +2037,7 @@ private[common] object InstructionDefs0 {
             "gfx8",
             "MUBUF",
             108,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -2044,7 +2046,7 @@ private[common] object InstructionDefs0 {
             "gfx9",
             "MUBUF",
             108,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           )
@@ -2055,13 +2057,13 @@ private[common] object InstructionDefs0 {
         decoder(form(4)((operands, mods) =>
           Instruction.BufferAtomicFcmpswap(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.GFX10,
             "rdna1",
             "MUBUF",
             62,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 128, true, false, false),
@@ -2077,7 +2079,7 @@ private[common] object InstructionDefs0 {
             "rdna2",
             "MUBUF",
             62,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 128, true, false, false),
@@ -2093,7 +2095,7 @@ private[common] object InstructionDefs0 {
             "gfx6",
             "MUBUF",
             62,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -2102,7 +2104,7 @@ private[common] object InstructionDefs0 {
             "gfx7",
             "MUBUF",
             62,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           )
@@ -2113,13 +2115,13 @@ private[common] object InstructionDefs0 {
         decoder(form(4)((operands, mods) =>
           Instruction.BufferAtomicFcmpswapX2(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.GFX10,
             "rdna1",
             "MUBUF",
             94,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 128, true, false, false),
@@ -2135,7 +2137,7 @@ private[common] object InstructionDefs0 {
             "rdna2",
             "MUBUF",
             94,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 128, true, false, false),
@@ -2151,7 +2153,7 @@ private[common] object InstructionDefs0 {
             "gfx6",
             "MUBUF",
             94,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -2160,7 +2162,7 @@ private[common] object InstructionDefs0 {
             "gfx7",
             "MUBUF",
             94,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           )
@@ -2171,13 +2173,13 @@ private[common] object InstructionDefs0 {
         decoder(form(4)((operands, mods) =>
           Instruction.BufferAtomicFmax(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.GFX10,
             "rdna1",
             "MUBUF",
             64,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 128, true, false, false),
@@ -2193,7 +2195,7 @@ private[common] object InstructionDefs0 {
             "rdna2",
             "MUBUF",
             64,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 128, true, false, false),
@@ -2209,7 +2211,7 @@ private[common] object InstructionDefs0 {
             "gfx6",
             "MUBUF",
             64,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -2218,7 +2220,7 @@ private[common] object InstructionDefs0 {
             "gfx7",
             "MUBUF",
             64,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           )
@@ -2229,13 +2231,13 @@ private[common] object InstructionDefs0 {
         decoder(form(4)((operands, mods) =>
           Instruction.BufferAtomicFmaxX2(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.GFX10,
             "rdna1",
             "MUBUF",
             96,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 128, true, false, false),
@@ -2251,7 +2253,7 @@ private[common] object InstructionDefs0 {
             "rdna2",
             "MUBUF",
             96,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 128, true, false, false),
@@ -2267,7 +2269,7 @@ private[common] object InstructionDefs0 {
             "gfx6",
             "MUBUF",
             96,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -2276,7 +2278,7 @@ private[common] object InstructionDefs0 {
             "gfx7",
             "MUBUF",
             96,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           )
@@ -2287,13 +2289,13 @@ private[common] object InstructionDefs0 {
         decoder(form(4)((operands, mods) =>
           Instruction.BufferAtomicFmin(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.GFX10,
             "rdna1",
             "MUBUF",
             63,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 128, true, false, false),
@@ -2309,7 +2311,7 @@ private[common] object InstructionDefs0 {
             "rdna2",
             "MUBUF",
             63,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 128, true, false, false),
@@ -2325,7 +2327,7 @@ private[common] object InstructionDefs0 {
             "gfx6",
             "MUBUF",
             63,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -2334,7 +2336,7 @@ private[common] object InstructionDefs0 {
             "gfx7",
             "MUBUF",
             63,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           )
@@ -2345,13 +2347,13 @@ private[common] object InstructionDefs0 {
         decoder(form(4)((operands, mods) =>
           Instruction.BufferAtomicFminX2(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.GFX10,
             "rdna1",
             "MUBUF",
             95,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 128, true, false, false),
@@ -2367,7 +2369,7 @@ private[common] object InstructionDefs0 {
             "rdna2",
             "MUBUF",
             95,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 128, true, false, false),
@@ -2383,7 +2385,7 @@ private[common] object InstructionDefs0 {
             "gfx6",
             "MUBUF",
             95,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -2392,7 +2394,7 @@ private[common] object InstructionDefs0 {
             "gfx7",
             "MUBUF",
             95,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           )
@@ -2403,13 +2405,13 @@ private[common] object InstructionDefs0 {
         decoder(form(4)((operands, mods) =>
           Instruction.BufferAtomicInc(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "MUBUF",
             75,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -2425,7 +2427,7 @@ private[common] object InstructionDefs0 {
             "cdna2",
             "MUBUF",
             75,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -2441,7 +2443,7 @@ private[common] object InstructionDefs0 {
             "cdna3",
             "MUBUF",
             75,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -2457,7 +2459,7 @@ private[common] object InstructionDefs0 {
             "cdna4",
             "MUBUF",
             75,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -2473,7 +2475,7 @@ private[common] object InstructionDefs0 {
             "rdna1",
             "MUBUF",
             60,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 128, true, false, false),
@@ -2489,7 +2491,7 @@ private[common] object InstructionDefs0 {
             "rdna2",
             "MUBUF",
             60,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 128, true, false, false),
@@ -2505,7 +2507,7 @@ private[common] object InstructionDefs0 {
             "gfx6",
             "MUBUF",
             60,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -2514,7 +2516,7 @@ private[common] object InstructionDefs0 {
             "gfx7",
             "MUBUF",
             60,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -2523,7 +2525,7 @@ private[common] object InstructionDefs0 {
             "gfx8",
             "MUBUF",
             75,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -2532,7 +2534,7 @@ private[common] object InstructionDefs0 {
             "gfx9",
             "MUBUF",
             75,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           )
@@ -2543,13 +2545,13 @@ private[common] object InstructionDefs0 {
         decoder(form(4)((operands, mods) =>
           Instruction.BufferAtomicIncU32(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VBUFFER",
             63,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -2565,7 +2567,7 @@ private[common] object InstructionDefs0 {
             "rdna3",
             "MUBUF",
             63,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -2581,7 +2583,7 @@ private[common] object InstructionDefs0 {
             "rdna3_5",
             "MUBUF",
             63,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -2597,7 +2599,7 @@ private[common] object InstructionDefs0 {
             "rdna4",
             "VBUFFER",
             63,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -2615,13 +2617,13 @@ private[common] object InstructionDefs0 {
         decoder(form(4)((operands, mods) =>
           Instruction.BufferAtomicIncU64(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VBUFFER",
             76,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -2637,7 +2639,7 @@ private[common] object InstructionDefs0 {
             "rdna3",
             "MUBUF",
             76,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -2653,7 +2655,7 @@ private[common] object InstructionDefs0 {
             "rdna3_5",
             "MUBUF",
             76,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -2669,7 +2671,7 @@ private[common] object InstructionDefs0 {
             "rdna4",
             "VBUFFER",
             76,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -2687,13 +2689,13 @@ private[common] object InstructionDefs0 {
         decoder(form(4)((operands, mods) =>
           Instruction.BufferAtomicIncX2(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "MUBUF",
             107,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -2709,7 +2711,7 @@ private[common] object InstructionDefs0 {
             "cdna2",
             "MUBUF",
             107,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -2725,7 +2727,7 @@ private[common] object InstructionDefs0 {
             "cdna3",
             "MUBUF",
             107,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -2741,7 +2743,7 @@ private[common] object InstructionDefs0 {
             "cdna4",
             "MUBUF",
             107,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -2757,7 +2759,7 @@ private[common] object InstructionDefs0 {
             "rdna1",
             "MUBUF",
             92,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 128, true, false, false),
@@ -2773,7 +2775,7 @@ private[common] object InstructionDefs0 {
             "rdna2",
             "MUBUF",
             92,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 128, true, false, false),
@@ -2789,7 +2791,7 @@ private[common] object InstructionDefs0 {
             "gfx6",
             "MUBUF",
             92,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -2798,7 +2800,7 @@ private[common] object InstructionDefs0 {
             "gfx7",
             "MUBUF",
             92,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -2807,7 +2809,7 @@ private[common] object InstructionDefs0 {
             "gfx8",
             "MUBUF",
             107,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -2816,7 +2818,7 @@ private[common] object InstructionDefs0 {
             "gfx9",
             "MUBUF",
             107,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           )
@@ -2827,13 +2829,13 @@ private[common] object InstructionDefs0 {
         decoder(form(4)((operands, mods) =>
           Instruction.BufferAtomicMaxF32(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.GFX11,
             "rdna3",
             "MUBUF",
             82,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -2849,7 +2851,7 @@ private[common] object InstructionDefs0 {
             "rdna3_5",
             "MUBUF",
             82,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -2867,13 +2869,13 @@ private[common] object InstructionDefs0 {
         decoder(form(4)((operands, mods) =>
           Instruction.BufferAtomicMaxF64(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA2,
             "cdna2",
             "MUBUF",
             81,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -2889,7 +2891,7 @@ private[common] object InstructionDefs0 {
             "cdna3",
             "MUBUF",
             81,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -2905,7 +2907,7 @@ private[common] object InstructionDefs0 {
             "cdna4",
             "MUBUF",
             81,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -2923,13 +2925,13 @@ private[common] object InstructionDefs0 {
         decoder(form(4)((operands, mods) =>
           Instruction.BufferAtomicMaxI32(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VBUFFER",
             58,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -2945,7 +2947,7 @@ private[common] object InstructionDefs0 {
             "rdna3",
             "MUBUF",
             58,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -2961,7 +2963,7 @@ private[common] object InstructionDefs0 {
             "rdna3_5",
             "MUBUF",
             58,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -2977,7 +2979,7 @@ private[common] object InstructionDefs0 {
             "rdna4",
             "VBUFFER",
             58,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -2995,13 +2997,13 @@ private[common] object InstructionDefs0 {
         decoder(form(4)((operands, mods) =>
           Instruction.BufferAtomicMaxI64(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VBUFFER",
             71,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -3017,7 +3019,7 @@ private[common] object InstructionDefs0 {
             "rdna3",
             "MUBUF",
             71,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -3033,7 +3035,7 @@ private[common] object InstructionDefs0 {
             "rdna3_5",
             "MUBUF",
             71,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -3049,7 +3051,7 @@ private[common] object InstructionDefs0 {
             "rdna4",
             "VBUFFER",
             71,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -3067,13 +3069,13 @@ private[common] object InstructionDefs0 {
         decoder(form(4)((operands, mods) =>
           Instruction.BufferAtomicMaxNumF32(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VBUFFER",
             82,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -3089,7 +3091,7 @@ private[common] object InstructionDefs0 {
             "rdna4",
             "VBUFFER",
             82,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -3107,13 +3109,13 @@ private[common] object InstructionDefs0 {
         decoder(form(4)((operands, mods) =>
           Instruction.BufferAtomicMaxNumF64(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VBUFFER",
             92,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -3131,13 +3133,13 @@ private[common] object InstructionDefs0 {
         decoder(form(4)((operands, mods) =>
           Instruction.BufferAtomicMaxU32(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VBUFFER",
             59,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -3153,7 +3155,7 @@ private[common] object InstructionDefs0 {
             "rdna3",
             "MUBUF",
             59,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -3169,7 +3171,7 @@ private[common] object InstructionDefs0 {
             "rdna3_5",
             "MUBUF",
             59,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -3185,7 +3187,7 @@ private[common] object InstructionDefs0 {
             "rdna4",
             "VBUFFER",
             59,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -3203,13 +3205,13 @@ private[common] object InstructionDefs0 {
         decoder(form(4)((operands, mods) =>
           Instruction.BufferAtomicMaxU64(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VBUFFER",
             72,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -3225,7 +3227,7 @@ private[common] object InstructionDefs0 {
             "rdna3",
             "MUBUF",
             72,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -3241,7 +3243,7 @@ private[common] object InstructionDefs0 {
             "rdna3_5",
             "MUBUF",
             72,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -3257,7 +3259,7 @@ private[common] object InstructionDefs0 {
             "rdna4",
             "VBUFFER",
             72,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -3275,13 +3277,13 @@ private[common] object InstructionDefs0 {
         decoder(form(4)((operands, mods) =>
           Instruction.BufferAtomicMinF32(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.GFX11,
             "rdna3",
             "MUBUF",
             81,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -3297,7 +3299,7 @@ private[common] object InstructionDefs0 {
             "rdna3_5",
             "MUBUF",
             81,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -3315,13 +3317,13 @@ private[common] object InstructionDefs0 {
         decoder(form(4)((operands, mods) =>
           Instruction.BufferAtomicMinF64(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA2,
             "cdna2",
             "MUBUF",
             80,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -3337,7 +3339,7 @@ private[common] object InstructionDefs0 {
             "cdna3",
             "MUBUF",
             80,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -3353,7 +3355,7 @@ private[common] object InstructionDefs0 {
             "cdna4",
             "MUBUF",
             80,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -3371,13 +3373,13 @@ private[common] object InstructionDefs0 {
         decoder(form(4)((operands, mods) =>
           Instruction.BufferAtomicMinI32(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VBUFFER",
             56,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -3393,7 +3395,7 @@ private[common] object InstructionDefs0 {
             "rdna3",
             "MUBUF",
             56,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -3409,7 +3411,7 @@ private[common] object InstructionDefs0 {
             "rdna3_5",
             "MUBUF",
             56,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -3425,7 +3427,7 @@ private[common] object InstructionDefs0 {
             "rdna4",
             "VBUFFER",
             56,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -3443,13 +3445,13 @@ private[common] object InstructionDefs0 {
         decoder(form(4)((operands, mods) =>
           Instruction.BufferAtomicMinI64(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VBUFFER",
             69,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -3465,7 +3467,7 @@ private[common] object InstructionDefs0 {
             "rdna3",
             "MUBUF",
             69,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -3481,7 +3483,7 @@ private[common] object InstructionDefs0 {
             "rdna3_5",
             "MUBUF",
             69,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -3497,7 +3499,7 @@ private[common] object InstructionDefs0 {
             "rdna4",
             "VBUFFER",
             69,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -3515,13 +3517,13 @@ private[common] object InstructionDefs0 {
         decoder(form(4)((operands, mods) =>
           Instruction.BufferAtomicMinNumF32(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VBUFFER",
             81,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -3537,7 +3539,7 @@ private[common] object InstructionDefs0 {
             "rdna4",
             "VBUFFER",
             81,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -3555,13 +3557,13 @@ private[common] object InstructionDefs0 {
         decoder(form(4)((operands, mods) =>
           Instruction.BufferAtomicMinNumF64(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VBUFFER",
             91,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -3579,13 +3581,13 @@ private[common] object InstructionDefs0 {
         decoder(form(4)((operands, mods) =>
           Instruction.BufferAtomicMinU32(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VBUFFER",
             57,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -3601,7 +3603,7 @@ private[common] object InstructionDefs0 {
             "rdna3",
             "MUBUF",
             57,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -3617,7 +3619,7 @@ private[common] object InstructionDefs0 {
             "rdna3_5",
             "MUBUF",
             57,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -3633,7 +3635,7 @@ private[common] object InstructionDefs0 {
             "rdna4",
             "VBUFFER",
             57,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -3651,13 +3653,13 @@ private[common] object InstructionDefs0 {
         decoder(form(4)((operands, mods) =>
           Instruction.BufferAtomicMinU64(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VBUFFER",
             70,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -3673,7 +3675,7 @@ private[common] object InstructionDefs0 {
             "rdna3",
             "MUBUF",
             70,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -3689,7 +3691,7 @@ private[common] object InstructionDefs0 {
             "rdna3_5",
             "MUBUF",
             70,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -3705,7 +3707,7 @@ private[common] object InstructionDefs0 {
             "rdna4",
             "VBUFFER",
             70,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -3723,13 +3725,13 @@ private[common] object InstructionDefs0 {
         decoder(form(4)((operands, mods) =>
           Instruction.BufferAtomicOr(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "MUBUF",
             73,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -3745,7 +3747,7 @@ private[common] object InstructionDefs0 {
             "cdna2",
             "MUBUF",
             73,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -3761,7 +3763,7 @@ private[common] object InstructionDefs0 {
             "cdna3",
             "MUBUF",
             73,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -3777,7 +3779,7 @@ private[common] object InstructionDefs0 {
             "cdna4",
             "MUBUF",
             73,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -3793,7 +3795,7 @@ private[common] object InstructionDefs0 {
             "rdna1",
             "MUBUF",
             58,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 128, true, false, false),
@@ -3809,7 +3811,7 @@ private[common] object InstructionDefs0 {
             "rdna2",
             "MUBUF",
             58,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 128, true, false, false),
@@ -3825,7 +3827,7 @@ private[common] object InstructionDefs0 {
             "gfx6",
             "MUBUF",
             58,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -3834,7 +3836,7 @@ private[common] object InstructionDefs0 {
             "gfx7",
             "MUBUF",
             58,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -3843,7 +3845,7 @@ private[common] object InstructionDefs0 {
             "gfx8",
             "MUBUF",
             73,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -3852,7 +3854,7 @@ private[common] object InstructionDefs0 {
             "gfx9",
             "MUBUF",
             73,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           )
@@ -3863,13 +3865,13 @@ private[common] object InstructionDefs0 {
         decoder(form(4)((operands, mods) =>
           Instruction.BufferAtomicOrB32(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VBUFFER",
             61,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -3885,7 +3887,7 @@ private[common] object InstructionDefs0 {
             "rdna3",
             "MUBUF",
             61,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -3901,7 +3903,7 @@ private[common] object InstructionDefs0 {
             "rdna3_5",
             "MUBUF",
             61,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -3917,7 +3919,7 @@ private[common] object InstructionDefs0 {
             "rdna4",
             "VBUFFER",
             61,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -3935,13 +3937,13 @@ private[common] object InstructionDefs0 {
         decoder(form(4)((operands, mods) =>
           Instruction.BufferAtomicOrB64(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VBUFFER",
             74,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -3957,7 +3959,7 @@ private[common] object InstructionDefs0 {
             "rdna3",
             "MUBUF",
             74,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -3973,7 +3975,7 @@ private[common] object InstructionDefs0 {
             "rdna3_5",
             "MUBUF",
             74,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -3989,7 +3991,7 @@ private[common] object InstructionDefs0 {
             "rdna4",
             "VBUFFER",
             74,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -4007,13 +4009,13 @@ private[common] object InstructionDefs0 {
         decoder(form(4)((operands, mods) =>
           Instruction.BufferAtomicOrX2(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "MUBUF",
             105,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -4029,7 +4031,7 @@ private[common] object InstructionDefs0 {
             "cdna2",
             "MUBUF",
             105,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -4045,7 +4047,7 @@ private[common] object InstructionDefs0 {
             "cdna3",
             "MUBUF",
             105,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -4061,7 +4063,7 @@ private[common] object InstructionDefs0 {
             "cdna4",
             "MUBUF",
             105,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -4077,7 +4079,7 @@ private[common] object InstructionDefs0 {
             "rdna1",
             "MUBUF",
             90,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 128, true, false, false),
@@ -4093,7 +4095,7 @@ private[common] object InstructionDefs0 {
             "rdna2",
             "MUBUF",
             90,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 128, true, false, false),
@@ -4109,7 +4111,7 @@ private[common] object InstructionDefs0 {
             "gfx6",
             "MUBUF",
             90,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -4118,7 +4120,7 @@ private[common] object InstructionDefs0 {
             "gfx7",
             "MUBUF",
             90,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -4127,7 +4129,7 @@ private[common] object InstructionDefs0 {
             "gfx8",
             "MUBUF",
             105,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -4136,7 +4138,7 @@ private[common] object InstructionDefs0 {
             "gfx9",
             "MUBUF",
             105,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           )
@@ -4147,13 +4149,13 @@ private[common] object InstructionDefs0 {
         decoder(form(4)((operands, mods) =>
           Instruction.BufferAtomicPkAddBf16(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA4,
             "cdna4",
             "MUBUF",
             82,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -4169,7 +4171,7 @@ private[common] object InstructionDefs0 {
             "cdna5",
             "VBUFFER",
             90,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -4185,7 +4187,7 @@ private[common] object InstructionDefs0 {
             "rdna4",
             "VBUFFER",
             90,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -4203,13 +4205,13 @@ private[common] object InstructionDefs0 {
         decoder(form(4)((operands, mods) =>
           Instruction.BufferAtomicPkAddF16(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "MUBUF",
             78,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -4225,7 +4227,7 @@ private[common] object InstructionDefs0 {
             "cdna2",
             "MUBUF",
             78,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -4241,7 +4243,7 @@ private[common] object InstructionDefs0 {
             "cdna3",
             "MUBUF",
             78,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -4257,7 +4259,7 @@ private[common] object InstructionDefs0 {
             "cdna4",
             "MUBUF",
             78,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -4273,7 +4275,7 @@ private[common] object InstructionDefs0 {
             "cdna5",
             "VBUFFER",
             89,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -4289,7 +4291,7 @@ private[common] object InstructionDefs0 {
             "rdna4",
             "VBUFFER",
             89,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -4305,13 +4307,13 @@ private[common] object InstructionDefs0 {
   case object BufferAtomicRsub extends InstructionDef(
         "buffer_atomic_rsub",
         decoder(form(0)((_, mods) => Instruction.BufferAtomicRsub(mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.GFX6,
             "gfx6",
             "MUBUF",
             52,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           )
@@ -4320,13 +4322,13 @@ private[common] object InstructionDefs0 {
   case object BufferAtomicRsubX2 extends InstructionDef(
         "buffer_atomic_rsub_x2",
         decoder(form(0)((_, mods) => Instruction.BufferAtomicRsubX2(mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.GFX6,
             "gfx6",
             "MUBUF",
             84,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           )
@@ -4337,13 +4339,13 @@ private[common] object InstructionDefs0 {
         decoder(form(4)((operands, mods) =>
           Instruction.BufferAtomicSmax(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "MUBUF",
             70,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -4359,7 +4361,7 @@ private[common] object InstructionDefs0 {
             "cdna2",
             "MUBUF",
             70,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -4375,7 +4377,7 @@ private[common] object InstructionDefs0 {
             "cdna3",
             "MUBUF",
             70,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -4391,7 +4393,7 @@ private[common] object InstructionDefs0 {
             "cdna4",
             "MUBUF",
             70,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -4407,7 +4409,7 @@ private[common] object InstructionDefs0 {
             "rdna1",
             "MUBUF",
             55,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 128, true, false, false),
@@ -4423,7 +4425,7 @@ private[common] object InstructionDefs0 {
             "rdna2",
             "MUBUF",
             55,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 128, true, false, false),
@@ -4439,7 +4441,7 @@ private[common] object InstructionDefs0 {
             "gfx6",
             "MUBUF",
             55,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -4448,7 +4450,7 @@ private[common] object InstructionDefs0 {
             "gfx7",
             "MUBUF",
             55,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -4457,7 +4459,7 @@ private[common] object InstructionDefs0 {
             "gfx8",
             "MUBUF",
             70,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -4466,7 +4468,7 @@ private[common] object InstructionDefs0 {
             "gfx9",
             "MUBUF",
             70,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           )
@@ -4477,13 +4479,13 @@ private[common] object InstructionDefs0 {
         decoder(form(4)((operands, mods) =>
           Instruction.BufferAtomicSmaxX2(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "MUBUF",
             102,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -4499,7 +4501,7 @@ private[common] object InstructionDefs0 {
             "cdna2",
             "MUBUF",
             102,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -4515,7 +4517,7 @@ private[common] object InstructionDefs0 {
             "cdna3",
             "MUBUF",
             102,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -4531,7 +4533,7 @@ private[common] object InstructionDefs0 {
             "cdna4",
             "MUBUF",
             102,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -4547,7 +4549,7 @@ private[common] object InstructionDefs0 {
             "rdna1",
             "MUBUF",
             87,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 128, true, false, false),
@@ -4563,7 +4565,7 @@ private[common] object InstructionDefs0 {
             "rdna2",
             "MUBUF",
             87,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 128, true, false, false),
@@ -4579,7 +4581,7 @@ private[common] object InstructionDefs0 {
             "gfx6",
             "MUBUF",
             87,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -4588,7 +4590,7 @@ private[common] object InstructionDefs0 {
             "gfx7",
             "MUBUF",
             87,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -4597,7 +4599,7 @@ private[common] object InstructionDefs0 {
             "gfx8",
             "MUBUF",
             102,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -4606,7 +4608,7 @@ private[common] object InstructionDefs0 {
             "gfx9",
             "MUBUF",
             102,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           )
@@ -4617,13 +4619,13 @@ private[common] object InstructionDefs0 {
         decoder(form(4)((operands, mods) =>
           Instruction.BufferAtomicSmin(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "MUBUF",
             68,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -4639,7 +4641,7 @@ private[common] object InstructionDefs0 {
             "cdna2",
             "MUBUF",
             68,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -4655,7 +4657,7 @@ private[common] object InstructionDefs0 {
             "cdna3",
             "MUBUF",
             68,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -4671,7 +4673,7 @@ private[common] object InstructionDefs0 {
             "cdna4",
             "MUBUF",
             68,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -4687,7 +4689,7 @@ private[common] object InstructionDefs0 {
             "rdna1",
             "MUBUF",
             53,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 128, true, false, false),
@@ -4703,7 +4705,7 @@ private[common] object InstructionDefs0 {
             "rdna2",
             "MUBUF",
             53,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 128, true, false, false),
@@ -4719,7 +4721,7 @@ private[common] object InstructionDefs0 {
             "gfx6",
             "MUBUF",
             53,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -4728,7 +4730,7 @@ private[common] object InstructionDefs0 {
             "gfx7",
             "MUBUF",
             53,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -4737,7 +4739,7 @@ private[common] object InstructionDefs0 {
             "gfx8",
             "MUBUF",
             68,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -4746,7 +4748,7 @@ private[common] object InstructionDefs0 {
             "gfx9",
             "MUBUF",
             68,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           )
@@ -4757,13 +4759,13 @@ private[common] object InstructionDefs0 {
         decoder(form(4)((operands, mods) =>
           Instruction.BufferAtomicSminX2(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "MUBUF",
             100,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -4779,7 +4781,7 @@ private[common] object InstructionDefs0 {
             "cdna2",
             "MUBUF",
             100,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -4795,7 +4797,7 @@ private[common] object InstructionDefs0 {
             "cdna3",
             "MUBUF",
             100,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -4811,7 +4813,7 @@ private[common] object InstructionDefs0 {
             "cdna4",
             "MUBUF",
             100,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -4827,7 +4829,7 @@ private[common] object InstructionDefs0 {
             "rdna1",
             "MUBUF",
             85,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 128, true, false, false),
@@ -4843,7 +4845,7 @@ private[common] object InstructionDefs0 {
             "rdna2",
             "MUBUF",
             85,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 128, true, false, false),
@@ -4859,7 +4861,7 @@ private[common] object InstructionDefs0 {
             "gfx6",
             "MUBUF",
             85,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -4868,7 +4870,7 @@ private[common] object InstructionDefs0 {
             "gfx7",
             "MUBUF",
             85,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -4877,7 +4879,7 @@ private[common] object InstructionDefs0 {
             "gfx8",
             "MUBUF",
             100,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -4886,7 +4888,7 @@ private[common] object InstructionDefs0 {
             "gfx9",
             "MUBUF",
             100,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           )
@@ -4897,13 +4899,13 @@ private[common] object InstructionDefs0 {
         decoder(form(4)((operands, mods) =>
           Instruction.BufferAtomicSub(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "MUBUF",
             67,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -4919,7 +4921,7 @@ private[common] object InstructionDefs0 {
             "cdna2",
             "MUBUF",
             67,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -4935,7 +4937,7 @@ private[common] object InstructionDefs0 {
             "cdna3",
             "MUBUF",
             67,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -4951,7 +4953,7 @@ private[common] object InstructionDefs0 {
             "cdna4",
             "MUBUF",
             67,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -4967,7 +4969,7 @@ private[common] object InstructionDefs0 {
             "rdna1",
             "MUBUF",
             51,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 128, true, false, false),
@@ -4983,7 +4985,7 @@ private[common] object InstructionDefs0 {
             "rdna2",
             "MUBUF",
             51,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 128, true, false, false),
@@ -4999,7 +5001,7 @@ private[common] object InstructionDefs0 {
             "gfx6",
             "MUBUF",
             51,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -5008,7 +5010,7 @@ private[common] object InstructionDefs0 {
             "gfx7",
             "MUBUF",
             51,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -5017,7 +5019,7 @@ private[common] object InstructionDefs0 {
             "gfx8",
             "MUBUF",
             67,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -5026,7 +5028,7 @@ private[common] object InstructionDefs0 {
             "gfx9",
             "MUBUF",
             67,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           )
@@ -5037,13 +5039,13 @@ private[common] object InstructionDefs0 {
         decoder(form(4)((operands, mods) =>
           Instruction.BufferAtomicSubClampU32(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VBUFFER",
             55,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -5059,7 +5061,7 @@ private[common] object InstructionDefs0 {
             "rdna4",
             "VBUFFER",
             55,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -5077,13 +5079,13 @@ private[common] object InstructionDefs0 {
         decoder(form(4)((operands, mods) =>
           Instruction.BufferAtomicSubU32(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VBUFFER",
             54,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -5099,7 +5101,7 @@ private[common] object InstructionDefs0 {
             "rdna3",
             "MUBUF",
             54,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -5115,7 +5117,7 @@ private[common] object InstructionDefs0 {
             "rdna3_5",
             "MUBUF",
             54,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -5131,7 +5133,7 @@ private[common] object InstructionDefs0 {
             "rdna4",
             "VBUFFER",
             54,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -5149,13 +5151,13 @@ private[common] object InstructionDefs0 {
         decoder(form(4)((operands, mods) =>
           Instruction.BufferAtomicSubU64(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VBUFFER",
             68,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -5171,7 +5173,7 @@ private[common] object InstructionDefs0 {
             "rdna3",
             "MUBUF",
             68,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -5187,7 +5189,7 @@ private[common] object InstructionDefs0 {
             "rdna3_5",
             "MUBUF",
             68,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -5203,7 +5205,7 @@ private[common] object InstructionDefs0 {
             "rdna4",
             "VBUFFER",
             68,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -5221,13 +5223,13 @@ private[common] object InstructionDefs0 {
         decoder(form(4)((operands, mods) =>
           Instruction.BufferAtomicSubX2(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "MUBUF",
             99,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -5243,7 +5245,7 @@ private[common] object InstructionDefs0 {
             "cdna2",
             "MUBUF",
             99,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -5259,7 +5261,7 @@ private[common] object InstructionDefs0 {
             "cdna3",
             "MUBUF",
             99,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -5275,7 +5277,7 @@ private[common] object InstructionDefs0 {
             "cdna4",
             "MUBUF",
             99,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -5291,7 +5293,7 @@ private[common] object InstructionDefs0 {
             "rdna1",
             "MUBUF",
             83,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 128, true, false, false),
@@ -5307,7 +5309,7 @@ private[common] object InstructionDefs0 {
             "rdna2",
             "MUBUF",
             83,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 128, true, false, false),
@@ -5323,7 +5325,7 @@ private[common] object InstructionDefs0 {
             "gfx6",
             "MUBUF",
             83,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -5332,7 +5334,7 @@ private[common] object InstructionDefs0 {
             "gfx7",
             "MUBUF",
             83,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -5341,7 +5343,7 @@ private[common] object InstructionDefs0 {
             "gfx8",
             "MUBUF",
             99,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -5350,7 +5352,7 @@ private[common] object InstructionDefs0 {
             "gfx9",
             "MUBUF",
             99,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           )
@@ -5361,13 +5363,13 @@ private[common] object InstructionDefs0 {
         decoder(form(4)((operands, mods) =>
           Instruction.BufferAtomicSwap(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "MUBUF",
             64,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -5383,7 +5385,7 @@ private[common] object InstructionDefs0 {
             "cdna2",
             "MUBUF",
             64,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -5399,7 +5401,7 @@ private[common] object InstructionDefs0 {
             "cdna3",
             "MUBUF",
             64,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -5415,7 +5417,7 @@ private[common] object InstructionDefs0 {
             "cdna4",
             "MUBUF",
             64,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -5431,7 +5433,7 @@ private[common] object InstructionDefs0 {
             "rdna1",
             "MUBUF",
             48,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 128, true, false, false),
@@ -5447,7 +5449,7 @@ private[common] object InstructionDefs0 {
             "rdna2",
             "MUBUF",
             48,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 128, true, false, false),
@@ -5463,7 +5465,7 @@ private[common] object InstructionDefs0 {
             "gfx6",
             "MUBUF",
             48,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -5472,7 +5474,7 @@ private[common] object InstructionDefs0 {
             "gfx7",
             "MUBUF",
             48,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -5481,7 +5483,7 @@ private[common] object InstructionDefs0 {
             "gfx8",
             "MUBUF",
             64,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -5490,7 +5492,7 @@ private[common] object InstructionDefs0 {
             "gfx9",
             "MUBUF",
             64,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           )
@@ -5501,13 +5503,13 @@ private[common] object InstructionDefs0 {
         decoder(form(4)((operands, mods) =>
           Instruction.BufferAtomicSwapB32(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VBUFFER",
             51,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -5523,7 +5525,7 @@ private[common] object InstructionDefs0 {
             "rdna3",
             "MUBUF",
             51,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -5539,7 +5541,7 @@ private[common] object InstructionDefs0 {
             "rdna3_5",
             "MUBUF",
             51,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -5555,7 +5557,7 @@ private[common] object InstructionDefs0 {
             "rdna4",
             "VBUFFER",
             51,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -5573,13 +5575,13 @@ private[common] object InstructionDefs0 {
         decoder(form(4)((operands, mods) =>
           Instruction.BufferAtomicSwapB64(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VBUFFER",
             65,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -5595,7 +5597,7 @@ private[common] object InstructionDefs0 {
             "rdna3",
             "MUBUF",
             65,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -5611,7 +5613,7 @@ private[common] object InstructionDefs0 {
             "rdna3_5",
             "MUBUF",
             65,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -5627,7 +5629,7 @@ private[common] object InstructionDefs0 {
             "rdna4",
             "VBUFFER",
             65,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -5645,13 +5647,13 @@ private[common] object InstructionDefs0 {
         decoder(form(4)((operands, mods) =>
           Instruction.BufferAtomicSwapX2(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "MUBUF",
             96,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -5667,7 +5669,7 @@ private[common] object InstructionDefs0 {
             "cdna2",
             "MUBUF",
             96,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -5683,7 +5685,7 @@ private[common] object InstructionDefs0 {
             "cdna3",
             "MUBUF",
             96,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -5699,7 +5701,7 @@ private[common] object InstructionDefs0 {
             "cdna4",
             "MUBUF",
             96,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -5715,7 +5717,7 @@ private[common] object InstructionDefs0 {
             "rdna1",
             "MUBUF",
             80,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 128, true, false, false),
@@ -5731,7 +5733,7 @@ private[common] object InstructionDefs0 {
             "rdna2",
             "MUBUF",
             80,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 128, true, false, false),
@@ -5747,7 +5749,7 @@ private[common] object InstructionDefs0 {
             "gfx6",
             "MUBUF",
             80,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -5756,7 +5758,7 @@ private[common] object InstructionDefs0 {
             "gfx7",
             "MUBUF",
             80,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -5765,7 +5767,7 @@ private[common] object InstructionDefs0 {
             "gfx8",
             "MUBUF",
             96,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -5774,7 +5776,7 @@ private[common] object InstructionDefs0 {
             "gfx9",
             "MUBUF",
             96,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           )
@@ -5785,13 +5787,13 @@ private[common] object InstructionDefs0 {
         decoder(form(4)((operands, mods) =>
           Instruction.BufferAtomicUmax(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "MUBUF",
             71,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -5807,7 +5809,7 @@ private[common] object InstructionDefs0 {
             "cdna2",
             "MUBUF",
             71,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -5823,7 +5825,7 @@ private[common] object InstructionDefs0 {
             "cdna3",
             "MUBUF",
             71,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -5839,7 +5841,7 @@ private[common] object InstructionDefs0 {
             "cdna4",
             "MUBUF",
             71,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -5855,7 +5857,7 @@ private[common] object InstructionDefs0 {
             "rdna1",
             "MUBUF",
             56,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 128, true, false, false),
@@ -5871,7 +5873,7 @@ private[common] object InstructionDefs0 {
             "rdna2",
             "MUBUF",
             56,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 128, true, false, false),
@@ -5887,7 +5889,7 @@ private[common] object InstructionDefs0 {
             "gfx6",
             "MUBUF",
             56,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -5896,7 +5898,7 @@ private[common] object InstructionDefs0 {
             "gfx7",
             "MUBUF",
             56,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -5905,7 +5907,7 @@ private[common] object InstructionDefs0 {
             "gfx8",
             "MUBUF",
             71,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -5914,7 +5916,7 @@ private[common] object InstructionDefs0 {
             "gfx9",
             "MUBUF",
             71,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           )
@@ -5925,13 +5927,13 @@ private[common] object InstructionDefs0 {
         decoder(form(4)((operands, mods) =>
           Instruction.BufferAtomicUmaxX2(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "MUBUF",
             103,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -5947,7 +5949,7 @@ private[common] object InstructionDefs0 {
             "cdna2",
             "MUBUF",
             103,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -5963,7 +5965,7 @@ private[common] object InstructionDefs0 {
             "cdna3",
             "MUBUF",
             103,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -5979,7 +5981,7 @@ private[common] object InstructionDefs0 {
             "cdna4",
             "MUBUF",
             103,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -5995,7 +5997,7 @@ private[common] object InstructionDefs0 {
             "rdna1",
             "MUBUF",
             88,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 128, true, false, false),
@@ -6011,7 +6013,7 @@ private[common] object InstructionDefs0 {
             "rdna2",
             "MUBUF",
             88,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 128, true, false, false),
@@ -6027,7 +6029,7 @@ private[common] object InstructionDefs0 {
             "gfx6",
             "MUBUF",
             88,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -6036,7 +6038,7 @@ private[common] object InstructionDefs0 {
             "gfx7",
             "MUBUF",
             88,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -6045,7 +6047,7 @@ private[common] object InstructionDefs0 {
             "gfx8",
             "MUBUF",
             103,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -6054,7 +6056,7 @@ private[common] object InstructionDefs0 {
             "gfx9",
             "MUBUF",
             103,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           )
@@ -6065,13 +6067,13 @@ private[common] object InstructionDefs0 {
         decoder(form(4)((operands, mods) =>
           Instruction.BufferAtomicUmin(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "MUBUF",
             69,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -6087,7 +6089,7 @@ private[common] object InstructionDefs0 {
             "cdna2",
             "MUBUF",
             69,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -6103,7 +6105,7 @@ private[common] object InstructionDefs0 {
             "cdna3",
             "MUBUF",
             69,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -6119,7 +6121,7 @@ private[common] object InstructionDefs0 {
             "cdna4",
             "MUBUF",
             69,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -6135,7 +6137,7 @@ private[common] object InstructionDefs0 {
             "rdna1",
             "MUBUF",
             54,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 128, true, false, false),
@@ -6151,7 +6153,7 @@ private[common] object InstructionDefs0 {
             "rdna2",
             "MUBUF",
             54,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 128, true, false, false),
@@ -6167,7 +6169,7 @@ private[common] object InstructionDefs0 {
             "gfx6",
             "MUBUF",
             54,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -6176,7 +6178,7 @@ private[common] object InstructionDefs0 {
             "gfx7",
             "MUBUF",
             54,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -6185,7 +6187,7 @@ private[common] object InstructionDefs0 {
             "gfx8",
             "MUBUF",
             69,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -6194,7 +6196,7 @@ private[common] object InstructionDefs0 {
             "gfx9",
             "MUBUF",
             69,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           )
@@ -6205,13 +6207,13 @@ private[common] object InstructionDefs0 {
         decoder(form(4)((operands, mods) =>
           Instruction.BufferAtomicUminX2(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "MUBUF",
             101,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -6227,7 +6229,7 @@ private[common] object InstructionDefs0 {
             "cdna2",
             "MUBUF",
             101,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -6243,7 +6245,7 @@ private[common] object InstructionDefs0 {
             "cdna3",
             "MUBUF",
             101,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -6259,7 +6261,7 @@ private[common] object InstructionDefs0 {
             "cdna4",
             "MUBUF",
             101,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -6275,7 +6277,7 @@ private[common] object InstructionDefs0 {
             "rdna1",
             "MUBUF",
             86,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 128, true, false, false),
@@ -6291,7 +6293,7 @@ private[common] object InstructionDefs0 {
             "rdna2",
             "MUBUF",
             86,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 128, true, false, false),
@@ -6307,7 +6309,7 @@ private[common] object InstructionDefs0 {
             "gfx6",
             "MUBUF",
             86,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -6316,7 +6318,7 @@ private[common] object InstructionDefs0 {
             "gfx7",
             "MUBUF",
             86,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -6325,7 +6327,7 @@ private[common] object InstructionDefs0 {
             "gfx8",
             "MUBUF",
             101,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -6334,7 +6336,7 @@ private[common] object InstructionDefs0 {
             "gfx9",
             "MUBUF",
             101,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           )
@@ -6345,13 +6347,13 @@ private[common] object InstructionDefs0 {
         decoder(form(4)((operands, mods) =>
           Instruction.BufferAtomicXor(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "MUBUF",
             74,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -6367,7 +6369,7 @@ private[common] object InstructionDefs0 {
             "cdna2",
             "MUBUF",
             74,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -6383,7 +6385,7 @@ private[common] object InstructionDefs0 {
             "cdna3",
             "MUBUF",
             74,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -6399,7 +6401,7 @@ private[common] object InstructionDefs0 {
             "cdna4",
             "MUBUF",
             74,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -6415,7 +6417,7 @@ private[common] object InstructionDefs0 {
             "rdna1",
             "MUBUF",
             59,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 128, true, false, false),
@@ -6431,7 +6433,7 @@ private[common] object InstructionDefs0 {
             "rdna2",
             "MUBUF",
             59,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 128, true, false, false),
@@ -6447,7 +6449,7 @@ private[common] object InstructionDefs0 {
             "gfx6",
             "MUBUF",
             59,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -6456,7 +6458,7 @@ private[common] object InstructionDefs0 {
             "gfx7",
             "MUBUF",
             59,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -6465,7 +6467,7 @@ private[common] object InstructionDefs0 {
             "gfx8",
             "MUBUF",
             74,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -6474,7 +6476,7 @@ private[common] object InstructionDefs0 {
             "gfx9",
             "MUBUF",
             74,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           )
@@ -6485,13 +6487,13 @@ private[common] object InstructionDefs0 {
         decoder(form(4)((operands, mods) =>
           Instruction.BufferAtomicXorB32(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VBUFFER",
             62,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -6507,7 +6509,7 @@ private[common] object InstructionDefs0 {
             "rdna3",
             "MUBUF",
             62,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -6523,7 +6525,7 @@ private[common] object InstructionDefs0 {
             "rdna3_5",
             "MUBUF",
             62,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -6539,7 +6541,7 @@ private[common] object InstructionDefs0 {
             "rdna4",
             "VBUFFER",
             62,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -6557,13 +6559,13 @@ private[common] object InstructionDefs0 {
         decoder(form(4)((operands, mods) =>
           Instruction.BufferAtomicXorB64(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VBUFFER",
             75,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -6579,7 +6581,7 @@ private[common] object InstructionDefs0 {
             "rdna3",
             "MUBUF",
             75,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -6595,7 +6597,7 @@ private[common] object InstructionDefs0 {
             "rdna3_5",
             "MUBUF",
             75,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -6611,7 +6613,7 @@ private[common] object InstructionDefs0 {
             "rdna4",
             "VBUFFER",
             75,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -6629,13 +6631,13 @@ private[common] object InstructionDefs0 {
         decoder(form(4)((operands, mods) =>
           Instruction.BufferAtomicXorX2(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "MUBUF",
             106,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -6651,7 +6653,7 @@ private[common] object InstructionDefs0 {
             "cdna2",
             "MUBUF",
             106,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -6667,7 +6669,7 @@ private[common] object InstructionDefs0 {
             "cdna3",
             "MUBUF",
             106,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -6683,7 +6685,7 @@ private[common] object InstructionDefs0 {
             "cdna4",
             "MUBUF",
             106,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -6699,7 +6701,7 @@ private[common] object InstructionDefs0 {
             "rdna1",
             "MUBUF",
             91,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 128, true, false, false),
@@ -6715,7 +6717,7 @@ private[common] object InstructionDefs0 {
             "rdna2",
             "MUBUF",
             91,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 128, true, false, false),
@@ -6731,7 +6733,7 @@ private[common] object InstructionDefs0 {
             "gfx6",
             "MUBUF",
             91,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -6740,7 +6742,7 @@ private[common] object InstructionDefs0 {
             "gfx7",
             "MUBUF",
             91,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -6749,7 +6751,7 @@ private[common] object InstructionDefs0 {
             "gfx8",
             "MUBUF",
             106,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -6758,7 +6760,7 @@ private[common] object InstructionDefs0 {
             "gfx9",
             "MUBUF",
             106,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           )
@@ -6767,13 +6769,13 @@ private[common] object InstructionDefs0 {
   case object BufferGl0Inv extends InstructionDef(
         "buffer_gl0_inv",
         decoder(form(0)((_, mods) => Instruction.BufferGl0Inv(mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.GFX10,
             "rdna1",
             "MUBUF",
             113,
-            Vector.empty,
+            Col.empty,
             Some("VMEM"),
             MetadataSource.AMDXML
           ),
@@ -6782,7 +6784,7 @@ private[common] object InstructionDefs0 {
             "rdna2",
             "MUBUF",
             113,
-            Vector.empty,
+            Col.empty,
             Some("VMEM"),
             MetadataSource.AMDXML
           ),
@@ -6791,7 +6793,7 @@ private[common] object InstructionDefs0 {
             "rdna3",
             "MUBUF",
             43,
-            Vector.empty,
+            Col.empty,
             Some("VMEM"),
             MetadataSource.AMDXML
           ),
@@ -6800,7 +6802,7 @@ private[common] object InstructionDefs0 {
             "rdna3_5",
             "MUBUF",
             43,
-            Vector.empty,
+            Col.empty,
             Some("VMEM"),
             MetadataSource.AMDXML
           )
@@ -6809,13 +6811,13 @@ private[common] object InstructionDefs0 {
   case object BufferGl1Inv extends InstructionDef(
         "buffer_gl1_inv",
         decoder(form(0)((_, mods) => Instruction.BufferGl1Inv(mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.GFX10,
             "rdna1",
             "MUBUF",
             114,
-            Vector.empty,
+            Col.empty,
             Some("VMEM"),
             MetadataSource.AMDXML
           ),
@@ -6824,7 +6826,7 @@ private[common] object InstructionDefs0 {
             "rdna2",
             "MUBUF",
             114,
-            Vector.empty,
+            Col.empty,
             Some("VMEM"),
             MetadataSource.AMDXML
           ),
@@ -6833,7 +6835,7 @@ private[common] object InstructionDefs0 {
             "rdna3",
             "MUBUF",
             44,
-            Vector.empty,
+            Col.empty,
             Some("VMEM"),
             MetadataSource.AMDXML
           ),
@@ -6842,7 +6844,7 @@ private[common] object InstructionDefs0 {
             "rdna3_5",
             "MUBUF",
             44,
-            Vector.empty,
+            Col.empty,
             Some("VMEM"),
             MetadataSource.AMDXML
           )
@@ -6851,13 +6853,13 @@ private[common] object InstructionDefs0 {
   case object BufferInv extends InstructionDef(
         "buffer_inv",
         decoder(form(0)((_, mods) => Instruction.BufferInv(mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA3,
             "cdna3",
             "MUBUF",
             41,
-            Vector.empty,
+            Col.empty,
             Some("VMEM"),
             MetadataSource.AMDXML
           ),
@@ -6866,7 +6868,7 @@ private[common] object InstructionDefs0 {
             "cdna4",
             "MUBUF",
             41,
-            Vector.empty,
+            Col.empty,
             Some("VMEM"),
             MetadataSource.AMDXML
           )
@@ -6875,13 +6877,13 @@ private[common] object InstructionDefs0 {
   case object BufferInvl2 extends InstructionDef(
         "buffer_invl2",
         decoder(form(0)((_, mods) => Instruction.BufferInvl2(mods))),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA2,
             "cdna2",
             "MUBUF",
             41,
-            Vector.empty,
+            Col.empty,
             Some("VMEM"),
             MetadataSource.AMDXML
           )
@@ -6895,13 +6897,13 @@ private[common] object InstructionDefs0 {
             Instruction.BufferLoadB128_4(operands(0), operands(1), operands(2), operands(3), mods)
           )
         ),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VBUFFER",
             23,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -6916,7 +6918,7 @@ private[common] object InstructionDefs0 {
             "rdna3",
             "MUBUF",
             23,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -6931,7 +6933,7 @@ private[common] object InstructionDefs0 {
             "rdna3_5",
             "MUBUF",
             23,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -6946,7 +6948,7 @@ private[common] object InstructionDefs0 {
             "rdna4",
             "VBUFFER",
             23,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -6966,13 +6968,13 @@ private[common] object InstructionDefs0 {
             Instruction.BufferLoadB32_4(operands(0), operands(1), operands(2), operands(3), mods)
           )
         ),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VBUFFER",
             20,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -6987,7 +6989,7 @@ private[common] object InstructionDefs0 {
             "rdna3",
             "MUBUF",
             20,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -7002,7 +7004,7 @@ private[common] object InstructionDefs0 {
             "rdna3_5",
             "MUBUF",
             20,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -7017,7 +7019,7 @@ private[common] object InstructionDefs0 {
             "rdna4",
             "VBUFFER",
             20,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -7037,13 +7039,13 @@ private[common] object InstructionDefs0 {
             Instruction.BufferLoadB64_4(operands(0), operands(1), operands(2), operands(3), mods)
           )
         ),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VBUFFER",
             21,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -7058,7 +7060,7 @@ private[common] object InstructionDefs0 {
             "rdna3",
             "MUBUF",
             21,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -7073,7 +7075,7 @@ private[common] object InstructionDefs0 {
             "rdna3_5",
             "MUBUF",
             21,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -7088,7 +7090,7 @@ private[common] object InstructionDefs0 {
             "rdna4",
             "VBUFFER",
             21,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -7108,13 +7110,13 @@ private[common] object InstructionDefs0 {
             Instruction.BufferLoadB96_4(operands(0), operands(1), operands(2), operands(3), mods)
           )
         ),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VBUFFER",
             22,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 96, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -7129,7 +7131,7 @@ private[common] object InstructionDefs0 {
             "rdna3",
             "MUBUF",
             22,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 96, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -7144,7 +7146,7 @@ private[common] object InstructionDefs0 {
             "rdna3_5",
             "MUBUF",
             22,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 96, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -7159,7 +7161,7 @@ private[common] object InstructionDefs0 {
             "rdna4",
             "VBUFFER",
             22,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 96, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -7179,13 +7181,13 @@ private[common] object InstructionDefs0 {
             Instruction.BufferLoadD16B16_4(operands(0), operands(1), operands(2), operands(3), mods)
           )
         ),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VBUFFER",
             32,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -7200,7 +7202,7 @@ private[common] object InstructionDefs0 {
             "rdna3",
             "MUBUF",
             32,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -7215,7 +7217,7 @@ private[common] object InstructionDefs0 {
             "rdna3_5",
             "MUBUF",
             32,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -7230,7 +7232,7 @@ private[common] object InstructionDefs0 {
             "rdna4",
             "VBUFFER",
             32,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -7250,13 +7252,13 @@ private[common] object InstructionDefs0 {
             Instruction.BufferLoadD16FormatX_4(operands(0), operands(1), operands(2), operands(3), mods)
           )
         ),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.GFX11,
             "rdna3",
             "MUBUF",
             8,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -7271,7 +7273,7 @@ private[common] object InstructionDefs0 {
             "rdna3_5",
             "MUBUF",
             8,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -7286,7 +7288,7 @@ private[common] object InstructionDefs0 {
             "rdna4",
             "VBUFFER",
             8,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -7306,13 +7308,13 @@ private[common] object InstructionDefs0 {
             Instruction.BufferLoadD16FormatXy_4(operands(0), operands(1), operands(2), operands(3), mods)
           )
         ),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.GFX11,
             "rdna3",
             "MUBUF",
             9,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -7327,7 +7329,7 @@ private[common] object InstructionDefs0 {
             "rdna3_5",
             "MUBUF",
             9,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -7342,7 +7344,7 @@ private[common] object InstructionDefs0 {
             "rdna4",
             "VBUFFER",
             9,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -7364,13 +7366,13 @@ private[common] object InstructionDefs0 {
             Instruction.BufferLoadD16FormatXyz_4(operands(0), operands(1), operands(2), operands(3), mods)
           )
         ),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.GFX11,
             "rdna3",
             "MUBUF",
             10,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -7385,7 +7387,7 @@ private[common] object InstructionDefs0 {
             "rdna3_5",
             "MUBUF",
             10,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -7400,7 +7402,7 @@ private[common] object InstructionDefs0 {
             "rdna4",
             "VBUFFER",
             10,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -7422,13 +7424,13 @@ private[common] object InstructionDefs0 {
             Instruction.BufferLoadD16FormatXyzw_4(operands(0), operands(1), operands(2), operands(3), mods)
           )
         ),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.GFX11,
             "rdna3",
             "MUBUF",
             11,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -7443,7 +7445,7 @@ private[common] object InstructionDefs0 {
             "rdna3_5",
             "MUBUF",
             11,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -7458,7 +7460,7 @@ private[common] object InstructionDefs0 {
             "rdna4",
             "VBUFFER",
             11,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -7478,13 +7480,13 @@ private[common] object InstructionDefs0 {
             Instruction.BufferLoadD16HiB16_4(operands(0), operands(1), operands(2), operands(3), mods)
           )
         ),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VBUFFER",
             35,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -7499,7 +7501,7 @@ private[common] object InstructionDefs0 {
             "rdna3",
             "MUBUF",
             35,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -7514,7 +7516,7 @@ private[common] object InstructionDefs0 {
             "rdna3_5",
             "MUBUF",
             35,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -7529,7 +7531,7 @@ private[common] object InstructionDefs0 {
             "rdna4",
             "VBUFFER",
             35,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -7551,13 +7553,13 @@ private[common] object InstructionDefs0 {
             Instruction.BufferLoadD16HiFormatX_4(operands(0), operands(1), operands(2), operands(3), mods)
           )
         ),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.GFX11,
             "rdna3",
             "MUBUF",
             38,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -7572,7 +7574,7 @@ private[common] object InstructionDefs0 {
             "rdna3_5",
             "MUBUF",
             38,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -7587,7 +7589,7 @@ private[common] object InstructionDefs0 {
             "rdna4",
             "VBUFFER",
             38,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -7607,13 +7609,13 @@ private[common] object InstructionDefs0 {
             Instruction.BufferLoadD16HiI8_4(operands(0), operands(1), operands(2), operands(3), mods)
           )
         ),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VBUFFER",
             34,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -7628,7 +7630,7 @@ private[common] object InstructionDefs0 {
             "rdna3",
             "MUBUF",
             34,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -7643,7 +7645,7 @@ private[common] object InstructionDefs0 {
             "rdna3_5",
             "MUBUF",
             34,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -7658,7 +7660,7 @@ private[common] object InstructionDefs0 {
             "rdna4",
             "VBUFFER",
             34,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -7678,13 +7680,13 @@ private[common] object InstructionDefs0 {
             Instruction.BufferLoadD16HiU8_4(operands(0), operands(1), operands(2), operands(3), mods)
           )
         ),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VBUFFER",
             33,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -7699,7 +7701,7 @@ private[common] object InstructionDefs0 {
             "rdna3",
             "MUBUF",
             33,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -7714,7 +7716,7 @@ private[common] object InstructionDefs0 {
             "rdna3_5",
             "MUBUF",
             33,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -7729,7 +7731,7 @@ private[common] object InstructionDefs0 {
             "rdna4",
             "VBUFFER",
             33,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -7749,13 +7751,13 @@ private[common] object InstructionDefs0 {
             Instruction.BufferLoadD16I8_4(operands(0), operands(1), operands(2), operands(3), mods)
           )
         ),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VBUFFER",
             31,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -7770,7 +7772,7 @@ private[common] object InstructionDefs0 {
             "rdna3",
             "MUBUF",
             31,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -7785,7 +7787,7 @@ private[common] object InstructionDefs0 {
             "rdna3_5",
             "MUBUF",
             31,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -7800,7 +7802,7 @@ private[common] object InstructionDefs0 {
             "rdna4",
             "VBUFFER",
             31,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -7820,13 +7822,13 @@ private[common] object InstructionDefs0 {
             Instruction.BufferLoadD16U8_4(operands(0), operands(1), operands(2), operands(3), mods)
           )
         ),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA5,
             "cdna5",
             "VBUFFER",
             30,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -7841,7 +7843,7 @@ private[common] object InstructionDefs0 {
             "rdna3",
             "MUBUF",
             30,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -7856,7 +7858,7 @@ private[common] object InstructionDefs0 {
             "rdna3_5",
             "MUBUF",
             30,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -7871,7 +7873,7 @@ private[common] object InstructionDefs0 {
             "rdna4",
             "VBUFFER",
             30,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("RSRC"), "SREG", 128, true, false, false),
@@ -7891,13 +7893,13 @@ private[common] object InstructionDefs0 {
             Instruction.BufferLoadDword_4(operands(0), operands(1), operands(2), operands(3), mods)
           )
         ),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "MUBUF",
             20,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -7912,7 +7914,7 @@ private[common] object InstructionDefs0 {
             "cdna2",
             "MUBUF",
             20,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -7927,7 +7929,7 @@ private[common] object InstructionDefs0 {
             "cdna3",
             "MUBUF",
             20,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -7942,7 +7944,7 @@ private[common] object InstructionDefs0 {
             "cdna4",
             "MUBUF",
             20,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -7957,7 +7959,7 @@ private[common] object InstructionDefs0 {
             "rdna1",
             "MUBUF",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 128, true, false, false),
@@ -7972,7 +7974,7 @@ private[common] object InstructionDefs0 {
             "rdna2",
             "MUBUF",
             12,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 32, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 128, true, false, false),
@@ -7987,7 +7989,7 @@ private[common] object InstructionDefs0 {
             "gfx6",
             "MUBUF",
             12,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -7996,7 +7998,7 @@ private[common] object InstructionDefs0 {
             "gfx7",
             "MUBUF",
             12,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -8005,7 +8007,7 @@ private[common] object InstructionDefs0 {
             "gfx8",
             "MUBUF",
             20,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -8014,7 +8016,7 @@ private[common] object InstructionDefs0 {
             "gfx9",
             "MUBUF",
             20,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           )
@@ -8028,13 +8030,13 @@ private[common] object InstructionDefs0 {
             Instruction.BufferLoadDwordx2_4(operands(0), operands(1), operands(2), operands(3), mods)
           )
         ),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "MUBUF",
             21,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -8049,7 +8051,7 @@ private[common] object InstructionDefs0 {
             "cdna2",
             "MUBUF",
             21,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -8064,7 +8066,7 @@ private[common] object InstructionDefs0 {
             "cdna3",
             "MUBUF",
             21,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -8079,7 +8081,7 @@ private[common] object InstructionDefs0 {
             "cdna4",
             "MUBUF",
             21,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -8094,7 +8096,7 @@ private[common] object InstructionDefs0 {
             "rdna1",
             "MUBUF",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 128, true, false, false),
@@ -8109,7 +8111,7 @@ private[common] object InstructionDefs0 {
             "rdna2",
             "MUBUF",
             13,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 64, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 128, true, false, false),
@@ -8124,7 +8126,7 @@ private[common] object InstructionDefs0 {
             "gfx6",
             "MUBUF",
             13,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -8133,7 +8135,7 @@ private[common] object InstructionDefs0 {
             "gfx7",
             "MUBUF",
             13,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -8142,7 +8144,7 @@ private[common] object InstructionDefs0 {
             "gfx8",
             "MUBUF",
             21,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -8151,7 +8153,7 @@ private[common] object InstructionDefs0 {
             "gfx9",
             "MUBUF",
             21,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           )
@@ -8165,13 +8167,13 @@ private[common] object InstructionDefs0 {
             Instruction.BufferLoadDwordx3_4(operands(0), operands(1), operands(2), operands(3), mods)
           )
         ),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "MUBUF",
             22,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 96, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -8186,7 +8188,7 @@ private[common] object InstructionDefs0 {
             "cdna2",
             "MUBUF",
             22,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 96, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -8201,7 +8203,7 @@ private[common] object InstructionDefs0 {
             "cdna3",
             "MUBUF",
             22,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 96, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -8216,7 +8218,7 @@ private[common] object InstructionDefs0 {
             "cdna4",
             "MUBUF",
             22,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 96, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -8231,7 +8233,7 @@ private[common] object InstructionDefs0 {
             "rdna1",
             "MUBUF",
             15,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 96, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 128, true, false, false),
@@ -8246,7 +8248,7 @@ private[common] object InstructionDefs0 {
             "rdna2",
             "MUBUF",
             15,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 96, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 128, true, false, false),
@@ -8261,7 +8263,7 @@ private[common] object InstructionDefs0 {
             "gfx7",
             "MUBUF",
             15,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -8270,7 +8272,7 @@ private[common] object InstructionDefs0 {
             "gfx8",
             "MUBUF",
             22,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -8279,7 +8281,7 @@ private[common] object InstructionDefs0 {
             "gfx9",
             "MUBUF",
             22,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           )
@@ -8293,13 +8295,13 @@ private[common] object InstructionDefs0 {
             Instruction.BufferLoadDwordx4_4(operands(0), operands(1), operands(2), operands(3), mods)
           )
         ),
-        Metadata(Vector(
+        Metadata(Col(
           Encoding(
             Generation.CDNA1,
             "cdna1",
             "MUBUF",
             23,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -8314,7 +8316,7 @@ private[common] object InstructionDefs0 {
             "cdna2",
             "MUBUF",
             23,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -8329,7 +8331,7 @@ private[common] object InstructionDefs0 {
             "cdna3",
             "MUBUF",
             23,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -8344,7 +8346,7 @@ private[common] object InstructionDefs0 {
             "cdna4",
             "MUBUF",
             23,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR_OR_ACCVGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG", 128, true, false, false),
@@ -8359,7 +8361,7 @@ private[common] object InstructionDefs0 {
             "rdna1",
             "MUBUF",
             14,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 128, true, false, false),
@@ -8374,7 +8376,7 @@ private[common] object InstructionDefs0 {
             "rdna2",
             "MUBUF",
             14,
-            Vector(
+            Col(
               OperandInfo(Some("VDATA"), "VGPR", 128, false, true, false),
               OperandInfo(Some("VADDR"), "VGPR", 64, true, false, false),
               OperandInfo(Some("SRSRC"), "SREG_NONULL", 128, true, false, false),
@@ -8389,7 +8391,7 @@ private[common] object InstructionDefs0 {
             "gfx6",
             "MUBUF",
             14,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -8398,7 +8400,7 @@ private[common] object InstructionDefs0 {
             "gfx7",
             "MUBUF",
             14,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -8407,7 +8409,7 @@ private[common] object InstructionDefs0 {
             "gfx8",
             "MUBUF",
             23,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           ),
@@ -8416,14 +8418,14 @@ private[common] object InstructionDefs0 {
             "gfx9",
             "MUBUF",
             23,
-            Vector.empty,
+            Col.empty,
             Some("vmem"),
             MetadataSource.MesaACO
           )
         ))
       )
 
-  val definitions: Vector[InstructionDef] = Vector(
+  val definitions: Col[InstructionDef] = Col(
     BufferAtomicAdd,
     BufferAtomicAddF32,
     BufferAtomicAddF64,

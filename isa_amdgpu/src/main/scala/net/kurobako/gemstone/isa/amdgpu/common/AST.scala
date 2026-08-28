@@ -1,10 +1,12 @@
 package net.kurobako.gemstone.isa.amdgpu.common
 
+import net.kurobako.gemstone.Col
+
 private[common] def normalizeOpcode(value: String): String =
   value.map(character => if (character >= 'A' && character <= 'Z') (character + ('a' - 'A')).toChar else character)
 
 /** A parsed AMDGPU assembly program. Source locations are deliberately kept out of the semantic tree. */
-final case class Program(statements: Vector[Statement])
+final case class Program(statements: Col[Statement])
 
 enum Statement {
   case Instruction(value: net.kurobako.gemstone.isa.amdgpu.common.Instruction)
@@ -17,7 +19,7 @@ enum Statement {
 }
 
 enum RegisterFile {
-  case Scalar, Vector, Accumulator, TrapTemporary
+  case Scalar, VectorRegister, Accumulator, TrapTemporary
 }
 
 enum Operand {

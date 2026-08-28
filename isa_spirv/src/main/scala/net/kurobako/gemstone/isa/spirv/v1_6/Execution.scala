@@ -1,5 +1,7 @@
 package net.kurobako.gemstone.isa.spirv.v1_6
 
+import net.kurobako.gemstone.Col
+
 import net.kurobako.gemstone.execution.*
 import scala.collection.mutable
 
@@ -89,7 +91,7 @@ object Lowering {
     val labels = module.instructions.zipWithIndex.collect {
       case (Instruction.Label(dest), index) => dest.bits -> Pc.unsafe(index)
     }.toMap
-    val lowered = Vector.newBuilder[ExecutableInstruction]
+    val lowered = Col.newBuilder[ExecutableInstruction]
     var index   = 0
     while (index < module.instructions.size) {
       val instruction = module.instructions(index)
@@ -241,8 +243,8 @@ object Lowering {
   }
   private def word(name: String, operand: Operand): Either[LoweringError, Int] =
     operand.words match {
-      case Vector(value) => Right(value.bits)
-      case values        => Left(LoweringError.Malformed(name, s"${operand.kind} has ${values.size} words"))
+      case Col(value) => Right(value.bits)
+      case values     => Left(LoweringError.Malformed(name, s"${operand.kind} has ${values.size} words"))
     }
 
 }

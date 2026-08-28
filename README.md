@@ -29,17 +29,25 @@ The build has seven module boundaries: `api`, `codegen`, `core`, `isa_ptx`, `isa
 Each bare `projectMatrix` uses its matching repository directory directly; there are no manual source mappings or
 redundant `.in(file(...))` declarations.
 
+`core` is the dependency root and owns execution, memory, tracing, and the runtime collection boundary. `api` and each
+ISA module depend on `core`; `codegen` depends on `api`; `server` composes `api`, `core`, and all three ISAs. Runtime
+models use `Col[A]`, currently backed by `IArray[A]`, so collection representation experiments are isolated to
+`core/src/main/scala/net/kurobako/gemstone/Col.scala`. `codegen/checkRuntimeCollections` rejects direct `Vector`,
+`List`, `Seq`, or `IArray` use in handwritten and generated runtime sources.
+
 ## Build
 
 ```console
 sbt scalafmtCheckAll
-sbt 'codegen/run --check generated core/src/generated/main/scala'
+sbt codegen/checkRuntimeCollections
+sbt 'codegen/run --check generated api/src/generated/main/scala'
 sbt 'isa_ptx / generatePTXSources; isa_ptx / generatePTXReferenceTests'
 sbt 'isa_amdgpu / generateAMDGPUSources; isa_amdgpu / generateAMDGPUGoldenTests'
 sbt 'codegen / generateAPISources; isa_spirv / generateSPIRVSources; isa_spirv / generateSPIRVReferenceTests'
 sbt test
 sbt testFull
 sbt serverNative/compile
+sbt check
 ```
 
 `test` is incremental in sbt 2. Use `testFull` when every JVM and Native suite must be executed regardless of the

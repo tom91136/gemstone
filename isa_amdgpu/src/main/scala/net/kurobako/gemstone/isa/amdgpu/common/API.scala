@@ -1,5 +1,7 @@
 package net.kurobako.gemstone.isa.amdgpu.common
 
+import net.kurobako.gemstone.Col
+
 /** Text parser vocabulary shared by every AMD architectural family package. */
 object Parser {
   def parse(source: String): Either[ParseError, Program]                = Assembly.parse(source)
@@ -14,11 +16,11 @@ object Printer {
 
 /** A package-level AMD ISA family. Syntax is shared; validity, metadata, and binary encoding are family-bound. */
 abstract class Architecture private[amdgpu] (private[amdgpu] val generation: Generation) {
-  final def encodeSOPP(instruction: Instruction, target: Target): Either[CodecError, Vector[Byte]] =
+  final def encodeSOPP(instruction: Instruction, target: Target): Either[CodecError, Col[Byte]] =
     if (target.generation != generation) Left(CodecError.WrongGeneration(target, generation))
     else Binary.encodeSOPP(instruction, target)
 
-  final def decodeSOPP(bytes: Seq[Byte], target: Target): Either[CodecError, Instruction] =
+  final def decodeSOPP(bytes: Col[Byte], target: Target): Either[CodecError, Instruction] =
     if (target.generation != generation) Left(CodecError.WrongGeneration(target, generation))
     else Binary.decodeSOPP(bytes, target)
 

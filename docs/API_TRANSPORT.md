@@ -16,9 +16,9 @@ macro derives the export inventory plus typed schemas, IDs, proxies, dispatch, a
 - `cuda-driver-surface.json`: the 484-method Driver inventory derived from the Scala `CUDA` trait and each method's implementation status.
 
 Generated C outputs and manifests are checked into `generated/`; generated Scala is owned by
-`core/src/generated/main/scala` so native C consumers and Scala builds use the same reviewed protocol.
-Run the generator with `sbt 'codegen/run generated core/src/generated/main/scala'` and verify it with
-`sbt 'codegen/run --check generated core/src/generated/main/scala'`.
+`api/src/generated/main/scala` so native C consumers and Scala builds use the same reviewed protocol.
+Run the generator with `sbt 'codegen/run generated api/src/generated/main/scala'` and verify it with
+`sbt 'codegen/run --check generated api/src/generated/main/scala'`.
 
 ## IPC transport
 

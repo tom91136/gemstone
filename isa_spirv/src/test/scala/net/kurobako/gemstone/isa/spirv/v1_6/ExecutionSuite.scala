@@ -1,5 +1,7 @@
 package net.kurobako.gemstone.isa.spirv.v1_6
 
+import net.kurobako.gemstone.Col
+
 import net.kurobako.gemstone.execution.ExecutionFault
 import net.kurobako.gemstone.execution.ExecutionLimits
 
@@ -8,7 +10,7 @@ final class ExecutionSuite extends munit.FunSuite {
     val resultType = operand("IdResultType", 1)
     val module     = Module(
       Header(Version, Word(0), Word(20), Word(0)),
-      Vector(
+      Col(
         Instruction.Constant(resultType, operand("IdResult", 2), operand("LiteralContextDependentNumber", 40)),
         Instruction.Constant(resultType, operand("IdResult", 3), operand("LiteralContextDependentNumber", 2)),
         Instruction.IAdd(resultType, operand("IdResult", 4), operand("IdRef", 2), operand("IdRef", 3)),
@@ -32,7 +34,7 @@ final class ExecutionSuite extends munit.FunSuite {
   test("unsupported typed semantic family traps explicitly") {
     val module = Module(
       Header(Version, Word(0), Word(5), Word(0)),
-      Vector(
+      Col(
         Instruction.ControlBarrier(operand("IdScope", 1), operand("IdScope", 2), operand("MemorySemantics", 3)),
         Instruction.Return
       ),
@@ -48,7 +50,7 @@ final class ExecutionSuite extends munit.FunSuite {
   test("instruction budget stops typed branch loops") {
     val module = Module(
       Header(Version, Word(0), Word(5), Word(0)),
-      Vector(Instruction.Label(operand("IdResult", 1)), Instruction.Branch(operand("IdRef", 1))),
+      Col(Instruction.Label(operand("IdResult", 1)), Instruction.Branch(operand("IdRef", 1))),
       Endianness.Little
     )
     val executable = Lowering.lower(module).fold(error => fail(error.message), identity)
@@ -58,5 +60,5 @@ final class ExecutionSuite extends munit.FunSuite {
     }
   }
 
-  private def operand(kind: String, value: Int): Operand = Operand(kind, Vector(Word(value)))
+  private def operand(kind: String, value: Int): Operand = Operand(kind, Col(Word(value)))
 }

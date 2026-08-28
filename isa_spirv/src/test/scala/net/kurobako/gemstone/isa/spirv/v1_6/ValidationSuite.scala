@@ -1,17 +1,19 @@
 package net.kurobako.gemstone.isa.spirv.v1_6
 
+import net.kurobako.gemstone.Col
+
 final class ValidationSuite extends munit.FunSuite {
   test("OpenCL compute environment is accepted") {
     val module = Module(
       Header(Version, Word(0), Word(10), Word(0)),
-      Vector(
+      Col(
         Instruction.Capability(operand("Capability", 6)),
         Instruction.MemoryModel(operand("AddressingModel", 2), operand("MemoryModel", 2)),
         Instruction.EntryPoint(
           operand("ExecutionModel", 6),
           operand("IdRef", 1),
           operand("LiteralString", 0),
-          Vector.empty
+          Col.empty
         )
       ),
       Endianness.Little
@@ -20,7 +22,7 @@ final class ValidationSuite extends munit.FunSuite {
   }
 
   test("non-compute module fails closed") {
-    val module = Module(Header(Version, Word(0), Word(1), Word(0)), Vector.empty, Endianness.Little)
+    val module = Module(Header(Version, Word(0), Word(1), Word(0)), Col.empty, Endianness.Little)
     ComputeValidator.validate(module) match {
       case ValidationResult.Invalid(issues) => assertEquals(issues.size, 3)
       case other                            => fail(s"expected invalid, found $other")
@@ -30,7 +32,7 @@ final class ValidationSuite extends munit.FunSuite {
   test("unknown raw opcode fails before validation") {
     val raw = RawModule(
       Header(Version, Word(0), Word(10), Word(0)),
-      Vector(RawInstruction(65535, Vector.empty)),
+      Col(RawInstruction(65535, Col.empty)),
       Endianness.Little
     )
     assertEquals(
@@ -39,5 +41,5 @@ final class ValidationSuite extends munit.FunSuite {
     )
   }
 
-  private def operand(kind: String, value: Int): Operand = Operand(kind, Vector(Word(value)))
+  private def operand(kind: String, value: Int): Operand = Operand(kind, Col(Word(value)))
 }

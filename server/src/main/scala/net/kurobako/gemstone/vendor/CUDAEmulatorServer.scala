@@ -1,5 +1,7 @@
 package net.kurobako.gemstone.vendor
 
+import net.kurobako.gemstone.Col
+
 import net.kurobako.gemstone.abi.InOut
 import net.kurobako.gemstone.abi.CallbackData
 import net.kurobako.gemstone.abi.CallbackFailure
@@ -170,10 +172,14 @@ final class CUDAEmulatorServer(kernelExecution: CUDAKernelExecution = CUDAKernel
       source: InputBuffer[Byte, "ByteCount"],
       byteCount: SizeT
   ): CUDAStatus = synchronized {
-    val bytes = source.snapshot.getOrElse(Vector.empty)
+    val bytes = source.snapshot.getOrElse(Col.empty[Byte])
     if (bytes.length.toLong != byteCount.toLong) CUDAStatus.InvalidValue
     else status(resolve(destination, bytes.length).map { case (allocation, offset) =>
-      bytes.iterator.zipWithIndex.foreach { case (byte, index) => allocation(offset + index) = byte }
+      var index = 0
+      while (index < bytes.length) {
+        allocation(offset + index) = bytes(index)
+        index += 1
+      }
     })
   }
 

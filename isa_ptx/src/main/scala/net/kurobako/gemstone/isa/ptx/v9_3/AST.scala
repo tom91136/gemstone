@@ -1,5 +1,7 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
+import net.kurobako.gemstone.Col
+
 private[v9_3] def normalizeOpcode(value: String): String =
   value.map(character => if (character >= 'A' && character <= 'Z') (character + ('a' - 'A')).toChar else character)
 
@@ -9,10 +11,10 @@ enum Operand {
   case Register(name: String, part: Option[String])
   case Symbol(name: String)
   case StringLiteral(rawContents: String)
-  case Qualifier(path: Vector[String])
-  case VectorLiteral(items: Vector[Operand])
-  case Parenthesized(items: Vector[Operand])
-  case Address(items: Vector[Operand])
+  case Qualifier(path: Col[String])
+  case VectorLiteral(items: Col[Operand])
+  case Parenthesized(items: Col[Operand])
+  case Address(items: Col[Operand])
   case Index(base: Operand, index: Operand)
   case Add(left: Operand, right: Operand)
   case Subtract(left: Operand, right: Operand)
@@ -20,7 +22,7 @@ enum Operand {
   case Negate(operand: Operand)
 }
 
-final case class Program(statements: Vector[Statement])
+final case class Program(statements: Col[Statement])
 
 final case class Predication(negated: Boolean, operand: Operand)
 
@@ -38,28 +40,28 @@ enum DirectiveTerminator {
 
 final case class DirectiveArgument(separator: DirectiveSeparator, operand: Operand)
 
-final case class Parameter(qualifiers: Vector[String], name: String, dimensions: Vector[Operand])
+final case class Parameter(qualifiers: Col[String], name: String, dimensions: Col[Operand])
 
 enum Statement {
   case Label(name: String)
   case Directive(
-      path: Vector[String],
-      arguments: Vector[DirectiveArgument],
+      path: Col[String],
+      arguments: Col[DirectiveArgument],
       terminator: DirectiveTerminator
   )
   case Instruction(value: net.kurobako.gemstone.isa.ptx.v9_3.Instruction)
-  case Block(body: Vector[Statement])
-  case Entry(visible: Boolean, name: String, parameters: Vector[Parameter], body: Vector[Statement])
+  case Block(body: Col[Statement])
+  case Entry(visible: Boolean, name: String, parameters: Col[Parameter], body: Col[Statement])
   case Function(
       visible: Boolean,
       name: String,
-      returnParameters: Vector[Parameter],
-      parameters: Vector[Parameter],
-      body: Option[Vector[Statement]]
+      returnParameters: Col[Parameter],
+      parameters: Col[Parameter],
+      body: Option[Col[Statement]]
   )
 }
 
-final case class ParseError(offset: Int, line: Int, column: Int, expected: Vector[String]) {
+final case class ParseError(offset: Int, line: Int, column: Int, expected: Col[String]) {
   override def toString: String = {
     val expectation = if (expected.isEmpty) "valid PTX syntax" else expected.mkString("; ")
     s"$line:$column (offset $offset): expected $expectation"
@@ -67,7 +69,7 @@ final case class ParseError(offset: Int, line: Int, column: Int, expected: Vecto
 }
 
 /** Specification metadata attached to one generated instruction definition. */
-final case class Metadata(entries: Vector[Metadata.Entry]) {
+final case class Metadata(entries: Col[Metadata.Entry]) {
   require(entries.nonEmpty, "instruction metadata must contain at least one specification entry")
 }
 
@@ -79,9 +81,9 @@ object Metadata {
       heading: String,
       title: String,
       category: String,
-      syntax: Vector[String],
+      syntax: Col[String],
       introduced: PTXVersion,
       minimumTarget: SMTarget,
-      forms: Vector[InstructionForm]
+      forms: Col[InstructionForm]
   )
 }

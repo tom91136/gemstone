@@ -1,5 +1,7 @@
 package net.kurobako.gemstone.abi
 
+import net.kurobako.gemstone.Col
+
 enum MethodImplementation {
   case Remote
   case NativeDelegate(target: String)
@@ -13,6 +15,6 @@ final case class CFunction(name: String, functionType: String)
 final case class ABIDeclaration(
     name: String,
     functionType: String,
-    parameterNames: Vector[String],
+    parameterNames: Col[String],
     implementation: MethodImplementation
 )

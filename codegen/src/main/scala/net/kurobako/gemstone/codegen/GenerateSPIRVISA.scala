@@ -164,8 +164,10 @@ object GenerateSPIRVISA {
         |  private val byOpcode: Map[Predef.String, Vector[InstructionDef]] =
         |    Instructions.groupMap(_.opcode)(identity)
         |
-        |  def definitions(opcodeNumber: Int): Vector[InstructionDef] = byNumber.getOrElse(opcodeNumber, Vector.empty)
-        |  def definitions(opcode: Predef.String): Vector[InstructionDef] = byOpcode.getOrElse(opcode, Vector.empty)
+        |  def definitions(opcodeNumber: Int): Vector[InstructionDef] =
+        |    byNumber.getOrElse(opcodeNumber, Vector.empty[InstructionDef])
+        |  def definitions(opcode: Predef.String): Vector[InstructionDef] =
+        |    byOpcode.getOrElse(opcode, Vector.empty[InstructionDef])
         |
         |  def decode(raw: RawInstruction): Either[InstructionDecodeError, Instruction] = {
         |    val candidates = definitions(raw.opcodeNumber)
@@ -384,20 +386,30 @@ object GenerateSPIRVISA {
         |$sourceRows
         |  )
         |
+        |  private def same(left: RawInstruction, right: RawInstruction): Boolean =
+        |    left.opcodeNumber == right.opcodeNumber && left.operandWords.sameElements(right.operandWords)
+        |
+        |  private def same(left: RawModule, right: RawModule): Boolean =
+        |    left.header == right.header && left.endianness == right.endianness &&
+        |      left.instructions.size == right.instructions.size &&
+        |      left.instructions.zip(right.instructions).forall { case (leftInstruction, rightInstruction) =>
+        |        same(leftInstruction, rightInstruction)
+        |      }
+        |
         |  test("every grammar opcode decodes to a typed case and round-trips little endian") {
         |    assertEquals(Instructions.size, $opcodeCount)
         |    Instructions.foreach { definition =>
         |      val rawInstruction = RawInstruction(definition.opcodeNumber, Instruction.minimumOperandWords(definition))
         |      val instruction = Instruction.decode(rawInstruction).fold(error => fail(s"$${definition.opcode}: $${error.message}"), identity)
         |      assertEquals(instruction.definition, definition, definition.opcode)
-        |      assertEquals(Instruction.encode(instruction), rawInstruction, definition.opcode)
+        |      assert(same(Instruction.encode(instruction), rawInstruction), definition.opcode)
         |      val rawModule = RawModule(
         |        Header(Version, Word(0), Word(1), Word(0)),
         |        Vector(rawInstruction),
         |        Endianness.Little
         |      )
         |      val bytes = Binary.serialize(rawModule).fold(error => fail(error.message), identity)
-        |      assertEquals(Binary.parse(bytes), Right(rawModule), definition.opcode)
+        |      assert(Binary.parse(bytes).exists(same(_, rawModule)), definition.opcode)
         |    }
         |  }
         |
@@ -405,7 +417,7 @@ object GenerateSPIRVISA {
         |    assert(upstreamTestCounts("binary_endianness_test.cpp") > 0)
         |    val module = RawModule(Header(Version, Word(7), Word(2), Word(0)), Vector.empty, Endianness.Big)
         |    val bytes = Binary.serialize(module).fold(error => fail(error.message), identity)
-        |    assertEquals(Binary.parse(bytes), Right(module))
+        |    assert(Binary.parse(bytes).exists(same(_, module)))
         |  }
         |
         |  test("SPIRV-Tools parser negative classes are fail-closed") {
@@ -425,7 +437,7 @@ object GenerateSPIRVISA {
         |    assertEquals(Instruction.decode(raw), Left(InstructionDecodeError.UnknownOpcode(65535)))
         |    val module = RawModule(Header(Version, Word(0), Word(1), Word(0)), Vector(raw), Endianness.Little)
         |    val bytes = Binary.serialize(module).fold(error => fail(error.message), identity)
-        |    assertEquals(Binary.parse(bytes), Right(module))
+        |    assert(Binary.parse(bytes).exists(same(_, module)))
         |  }
         |
         |  test("known opcodes with malformed grammar operands fail typed decode") {

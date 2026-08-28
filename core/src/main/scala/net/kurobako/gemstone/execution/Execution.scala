@@ -1,7 +1,10 @@
 package net.kurobako.gemstone.execution
 
+import net.kurobako.gemstone.Col
+
 import scala.collection.mutable.ArrayBuffer
 import scala.collection.immutable.BitSet
+import scala.reflect.ClassTag
 
 opaque type Pc = Int
 
@@ -57,7 +60,7 @@ object LaneMask {
 }
 
 /** Immutable code shared by all lanes or waves. Architectural state owns the program counter. */
-final case class ExecutableProgram[+Instruction](instructions: Vector[Instruction]) {
+final case class ExecutableProgram[Instruction](instructions: Col[Instruction]) {
   def size: Int = instructions.size
 
   def at(pc: Pc): Either[ExecutionFault, Instruction] =
@@ -116,13 +119,13 @@ enum Step {
 trait Write extends Product with Serializable
 
 /** Reusable two-phase write buffer. Every write is validated before any write is applied. */
-final class Effects[W <: Write] {
+final class Effects[W <: Write: ClassTag] {
   private val pending = ArrayBuffer.empty[W]
 
   def stage(write: W): Unit = pending += write
   def isEmpty: Boolean      = pending.isEmpty
   def size: Int             = pending.size
-  def snapshot: Vector[W]   = pending.toVector
+  def snapshot: Col[W]      = Col.from(pending)
   def clear(): Unit         = pending.clear()
 
   def commit(

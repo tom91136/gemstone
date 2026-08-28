@@ -1,5 +1,7 @@
 package net.kurobako.gemstone.vendor
 
+import net.kurobako.gemstone.Col
+
 import net.kurobako.gemstone.abi.CountedBy
 import net.kurobako.gemstone.abi.One
 import net.kurobako.gemstone.abi.Pointer
@@ -17,7 +19,7 @@ class CUDAEmulatorServerSuite extends munit.FunSuite {
   test("unimplemented Driver methods return CUDA_ERROR_NOT_SUPPORTED locally") {
     val module = Pointer.output[CUDAModule, One](1)
     assertEquals(
-      new CUDAEmulatorServer().cuModuleLoadData(module, ModuleImage(IArray.empty[Byte])),
+      new CUDAEmulatorServer().cuModuleLoadData(module, ModuleImage(Col.empty[Byte])),
       CUDAStatus.NotSupported
     )
     assertEquals(module.snapshot, None)
@@ -35,14 +37,14 @@ class CUDAEmulatorServerSuite extends munit.FunSuite {
     assertEquals(client.cudaMalloc(allocated, SizeT(4L)), CUDAStatus.Success)
     val pointer = allocated.snapshot.flatMap(_.headOption).getOrElse(fail("cudaMalloc did not initialize its output"))
     assert(pointer.address != DevicePtr.Null.address, "cudaMalloc returned the null pointer")
-    val input = Pointer.input[Byte, CountedBy["ByteCount"]](IArray[Byte](10, 20, 30, 40))
+    val input = Pointer.input[Byte, CountedBy["ByteCount"]](Col[Byte](10, 20, 30, 40))
     assertEquals(
       client.cuMemcpyHtoD_v2(pointer, input, SizeT(4L)),
       CUDAStatus.Success
     )
     val output = Pointer.output[Byte, CountedBy["ByteCount"]](4)
     assertEquals(client.cuMemcpyDtoH_v2(output, pointer, SizeT(4L)), CUDAStatus.Success)
-    assertEquals(output.snapshot.getOrElse(Vector.empty), Vector[Byte](10, 20, 30, 40))
+    assertEquals(output.snapshot.map(_.toSeq).getOrElse(Seq.empty), Seq[Byte](10, 20, 30, 40))
     assertEquals(client.cudaFree(pointer), CUDAStatus.Success)
   }
 

@@ -1,5 +1,6 @@
 package net.kurobako.gemstone.generated
 
+import net.kurobako.gemstone.Col
 import net.kurobako.gemstone.abi.*
 import net.kurobako.gemstone.cuda.*
 import net.kurobako.gemstone.rpc.*
@@ -35,11 +36,11 @@ object GeneratedCUDARPC {
   val Schema: RPCSchema = RPCSchema(
     "net.kurobako.gemstone.cuda.CUDA",
     SchemaFingerprint,
-    Vector(
+    Col(
       RPCMethod(
         "__cudaGemstoneManagedRegister",
         __cudaGemstoneManagedRegisterId,
-        Vector(
+        Col(
           RPCParameter("pointer", WireType.DevicePtr, WireDirection.In, WireExtent.Value),
           RPCParameter("bytesize", WireType.SizeT, WireDirection.In, WireExtent.Value)
         ),
@@ -48,13 +49,13 @@ object GeneratedCUDARPC {
       RPCMethod(
         "__cudaGemstoneManagedUnregister",
         __cudaGemstoneManagedUnregisterId,
-        Vector(RPCParameter("pointer", WireType.DevicePtr, WireDirection.In, WireExtent.Value)),
+        Col(RPCParameter("pointer", WireType.DevicePtr, WireDirection.In, WireExtent.Value)),
         WireType.CUDAStatus
       ),
       RPCMethod(
         "cuCtxCreate_v2",
         cuCtxCreate_v2Id,
-        Vector(
+        Col(
           RPCParameter("pctx", WireType.Context, WireDirection.Out, WireExtent.One),
           RPCParameter("flags", WireType.UInt32, WireDirection.In, WireExtent.Value),
           RPCParameter("dev", WireType.Device, WireDirection.In, WireExtent.Value)
@@ -64,14 +65,14 @@ object GeneratedCUDARPC {
       RPCMethod(
         "cuCtxDestroy_v2",
         cuCtxDestroy_v2Id,
-        Vector(RPCParameter("ctx", WireType.Context, WireDirection.In, WireExtent.Value)),
+        Col(RPCParameter("ctx", WireType.Context, WireDirection.In, WireExtent.Value)),
         WireType.CUDAStatus
       ),
-      RPCMethod("cuCtxSynchronize", cuCtxSynchronizeId, Vector(), WireType.CUDAStatus),
+      RPCMethod("cuCtxSynchronize", cuCtxSynchronizeId, Col.empty[RPCParameter], WireType.CUDAStatus),
       RPCMethod(
         "cuDeviceGet",
         cuDeviceGetId,
-        Vector(
+        Col(
           RPCParameter("device", WireType.Device, WireDirection.Out, WireExtent.One),
           RPCParameter("ordinal", WireType.Int32, WireDirection.In, WireExtent.Value)
         ),
@@ -80,25 +81,25 @@ object GeneratedCUDARPC {
       RPCMethod(
         "cuDeviceGetCount",
         cuDeviceGetCountId,
-        Vector(RPCParameter("count", WireType.Int32, WireDirection.Out, WireExtent.One)),
+        Col(RPCParameter("count", WireType.Int32, WireDirection.Out, WireExtent.One)),
         WireType.CUDAStatus
       ),
       RPCMethod(
         "cuDriverGetVersion",
         cuDriverGetVersionId,
-        Vector(RPCParameter("driverVersion", WireType.Int32, WireDirection.Out, WireExtent.One)),
+        Col(RPCParameter("driverVersion", WireType.Int32, WireDirection.Out, WireExtent.One)),
         WireType.CUDAStatus
       ),
       RPCMethod(
         "cuInit",
         cuInitId,
-        Vector(RPCParameter("Flags", WireType.UInt32, WireDirection.In, WireExtent.Value)),
+        Col(RPCParameter("Flags", WireType.UInt32, WireDirection.In, WireExtent.Value)),
         WireType.CUDAStatus
       ),
       RPCMethod(
         "cuLaunchHostFunc",
         cuLaunchHostFuncId,
-        Vector(
+        Col(
           RPCParameter("hStream", WireType.Stream, WireDirection.In, WireExtent.Value),
           RPCParameter("fn", WireType.CUDAHostCallback, WireDirection.In, WireExtent.Value),
           RPCParameter("userData", WireType.CallbackData, WireDirection.In, WireExtent.Value)
@@ -108,7 +109,7 @@ object GeneratedCUDARPC {
       RPCMethod(
         "cuLaunchKernel",
         cuLaunchKernelId,
-        Vector(
+        Col(
           RPCParameter("f", WireType.CUDAFunction, WireDirection.In, WireExtent.Value),
           RPCParameter("gridDimX", WireType.UInt32, WireDirection.In, WireExtent.Value),
           RPCParameter("gridDimY", WireType.UInt32, WireDirection.In, WireExtent.Value),
@@ -126,7 +127,7 @@ object GeneratedCUDARPC {
       RPCMethod(
         "cuMemAlloc_v2",
         cuMemAlloc_v2Id,
-        Vector(
+        Col(
           RPCParameter("dptr", WireType.DevicePtr, WireDirection.Out, WireExtent.One),
           RPCParameter("bytesize", WireType.SizeT, WireDirection.In, WireExtent.Value)
         ),
@@ -135,13 +136,13 @@ object GeneratedCUDARPC {
       RPCMethod(
         "cuMemFree_v2",
         cuMemFree_v2Id,
-        Vector(RPCParameter("dptr", WireType.DevicePtr, WireDirection.In, WireExtent.Value)),
+        Col(RPCParameter("dptr", WireType.DevicePtr, WireDirection.In, WireExtent.Value)),
         WireType.CUDAStatus
       ),
       RPCMethod(
         "cuMemcpyDtoD_v2",
         cuMemcpyDtoD_v2Id,
-        Vector(
+        Col(
           RPCParameter("dstDevice", WireType.DevicePtr, WireDirection.In, WireExtent.Value),
           RPCParameter("srcDevice", WireType.DevicePtr, WireDirection.In, WireExtent.Value),
           RPCParameter("ByteCount", WireType.SizeT, WireDirection.In, WireExtent.Value)
@@ -151,7 +152,7 @@ object GeneratedCUDARPC {
       RPCMethod(
         "cuMemcpyDtoH_v2",
         cuMemcpyDtoH_v2Id,
-        Vector(
+        Col(
           RPCParameter("dstHost", WireType.ByteBuffer, WireDirection.Out, WireExtent.CountedBy("ByteCount")),
           RPCParameter("srcDevice", WireType.DevicePtr, WireDirection.In, WireExtent.Value),
           RPCParameter("ByteCount", WireType.SizeT, WireDirection.In, WireExtent.Value)
@@ -161,7 +162,7 @@ object GeneratedCUDARPC {
       RPCMethod(
         "cuMemcpyHtoD_v2",
         cuMemcpyHtoD_v2Id,
-        Vector(
+        Col(
           RPCParameter("dstDevice", WireType.DevicePtr, WireDirection.In, WireExtent.Value),
           RPCParameter("srcHost", WireType.ByteBuffer, WireDirection.In, WireExtent.CountedBy("ByteCount")),
           RPCParameter("ByteCount", WireType.SizeT, WireDirection.In, WireExtent.Value)
@@ -171,7 +172,7 @@ object GeneratedCUDARPC {
       RPCMethod(
         "cuMemsetD8_v2",
         cuMemsetD8_v2Id,
-        Vector(
+        Col(
           RPCParameter("dstDevice", WireType.DevicePtr, WireDirection.In, WireExtent.Value),
           RPCParameter("uc", WireType.UInt8, WireDirection.In, WireExtent.Value),
           RPCParameter("N", WireType.SizeT, WireDirection.In, WireExtent.Value)
@@ -181,7 +182,7 @@ object GeneratedCUDARPC {
       RPCMethod(
         "cuModuleGetFunction",
         cuModuleGetFunctionId,
-        Vector(
+        Col(
           RPCParameter("hfunc", WireType.KernelFunction, WireDirection.Out, WireExtent.One),
           RPCParameter("hmod", WireType.CUDAModule, WireDirection.In, WireExtent.Value),
           RPCParameter("name", WireType.FunctionName, WireDirection.In, WireExtent.Value)
@@ -191,7 +192,7 @@ object GeneratedCUDARPC {
       RPCMethod(
         "cuModuleLoadData",
         cuModuleLoadDataId,
-        Vector(
+        Col(
           RPCParameter("module", WireType.CUDAModule, WireDirection.Out, WireExtent.One),
           RPCParameter("image", WireType.ModuleImage, WireDirection.In, WireExtent.Value)
         ),
@@ -200,13 +201,13 @@ object GeneratedCUDARPC {
       RPCMethod(
         "cuModuleUnload",
         cuModuleUnloadId,
-        Vector(RPCParameter("hmod", WireType.CUDAModule, WireDirection.In, WireExtent.Value)),
+        Col(RPCParameter("hmod", WireType.CUDAModule, WireDirection.In, WireExtent.Value)),
         WireType.CUDAStatus
       ),
       RPCMethod(
         "cuStreamAddCallback",
         cuStreamAddCallbackId,
-        Vector(
+        Col(
           RPCParameter("hStream", WireType.Stream, WireDirection.In, WireExtent.Value),
           RPCParameter("callback", WireType.CUDAStreamCallback, WireDirection.In, WireExtent.Value),
           RPCParameter("userData", WireType.CallbackData, WireDirection.In, WireExtent.Value),
@@ -217,19 +218,19 @@ object GeneratedCUDARPC {
       RPCMethod(
         "cudaFree",
         cudaFreeId,
-        Vector(RPCParameter("devPtr", WireType.DevicePtr, WireDirection.In, WireExtent.Value)),
+        Col(RPCParameter("devPtr", WireType.DevicePtr, WireDirection.In, WireExtent.Value)),
         WireType.CUDAStatus
       ),
       RPCMethod(
         "cudaGetDeviceCount",
         cudaGetDeviceCountId,
-        Vector(RPCParameter("count", WireType.Int32, WireDirection.Out, WireExtent.One)),
+        Col(RPCParameter("count", WireType.Int32, WireDirection.Out, WireExtent.One)),
         WireType.CUDAStatus
       ),
       RPCMethod(
         "cudaMalloc",
         cudaMallocId,
-        Vector(
+        Col(
           RPCParameter("devPtr", WireType.DevicePtr, WireDirection.Out, WireExtent.One),
           RPCParameter("size", WireType.SizeT, WireDirection.In, WireExtent.Value)
         ),
@@ -248,7 +249,7 @@ object GeneratedCUDARPC {
       transport.call(RPCRequest(
         __cudaGemstoneManagedRegisterId,
         "__cudaGemstoneManagedRegister",
-        Vector(WireValue.DevicePtrValue(pointer), WireValue.SizeTValue(bytesize))
+        Col(WireValue.DevicePtrValue(pointer), WireValue.SizeTValue(bytesize))
       )) match {
         case RPCResponse.Success(WireValue.CallResult(status, outputs)) if status.isSuccess =>
           if (outputs.isEmpty) status else CUDAStatus.Unknown
@@ -260,7 +261,7 @@ object GeneratedCUDARPC {
       transport.call(RPCRequest(
         __cudaGemstoneManagedUnregisterId,
         "__cudaGemstoneManagedUnregister",
-        Vector(WireValue.DevicePtrValue(pointer))
+        Col(WireValue.DevicePtrValue(pointer))
       )) match {
         case RPCResponse.Success(WireValue.CallResult(status, outputs)) if status.isSuccess =>
           if (outputs.isEmpty) status else CUDAStatus.Unknown
@@ -272,11 +273,11 @@ object GeneratedCUDARPC {
       transport.call(RPCRequest(
         cuCtxCreate_v2Id,
         "cuCtxCreate_v2",
-        Vector(WireValue.UInt32Value(flags), WireValue.DeviceValue(dev))
+        Col(WireValue.UInt32Value(flags), WireValue.DeviceValue(dev))
       )) match {
         case RPCResponse.Success(WireValue.CallResult(status, outputs)) if status.isSuccess =>
           outputs match {
-            case Vector(WireValue.ContextValue(output0)) =>
+            case Col(WireValue.ContextValue(output0)) =>
               if (writeOne(pctx, output0)) status else CUDAStatus.InvalidValue
             case _ => CUDAStatus.Unknown
           }
@@ -285,7 +286,7 @@ object GeneratedCUDARPC {
       }
 
     override def cuCtxDestroy_v2(ctx: Context): CUDAStatus =
-      transport.call(RPCRequest(cuCtxDestroy_v2Id, "cuCtxDestroy_v2", Vector(WireValue.ContextValue(ctx)))) match {
+      transport.call(RPCRequest(cuCtxDestroy_v2Id, "cuCtxDestroy_v2", Col(WireValue.ContextValue(ctx)))) match {
         case RPCResponse.Success(WireValue.CallResult(status, outputs)) if status.isSuccess =>
           if (outputs.isEmpty) status else CUDAStatus.Unknown
         case RPCResponse.Success(WireValue.CallResult(status, _)) => status
@@ -293,7 +294,7 @@ object GeneratedCUDARPC {
       }
 
     override def cuCtxSynchronize(): CUDAStatus =
-      transport.call(RPCRequest(cuCtxSynchronizeId, "cuCtxSynchronize", Vector())) match {
+      transport.call(RPCRequest(cuCtxSynchronizeId, "cuCtxSynchronize", Col.empty[WireValue])) match {
         case RPCResponse.Success(WireValue.CallResult(status, outputs)) if status.isSuccess =>
           if (outputs.isEmpty) status else CUDAStatus.Unknown
         case RPCResponse.Success(WireValue.CallResult(status, _)) => status
@@ -301,10 +302,10 @@ object GeneratedCUDARPC {
       }
 
     override def cuDeviceGet(device: Out[Device], ordinal: Int): CUDAStatus =
-      transport.call(RPCRequest(cuDeviceGetId, "cuDeviceGet", Vector(WireValue.Int32Value(ordinal)))) match {
+      transport.call(RPCRequest(cuDeviceGetId, "cuDeviceGet", Col(WireValue.Int32Value(ordinal)))) match {
         case RPCResponse.Success(WireValue.CallResult(status, outputs)) if status.isSuccess =>
           outputs match {
-            case Vector(WireValue.DeviceValue(output0)) =>
+            case Col(WireValue.DeviceValue(output0)) =>
               if (writeOne(device, output0)) status else CUDAStatus.InvalidValue
             case _ => CUDAStatus.Unknown
           }
@@ -313,10 +314,10 @@ object GeneratedCUDARPC {
       }
 
     override def cuDeviceGetCount(count: Out[Int]): CUDAStatus =
-      transport.call(RPCRequest(cuDeviceGetCountId, "cuDeviceGetCount", Vector())) match {
+      transport.call(RPCRequest(cuDeviceGetCountId, "cuDeviceGetCount", Col.empty[WireValue])) match {
         case RPCResponse.Success(WireValue.CallResult(status, outputs)) if status.isSuccess =>
           outputs match {
-            case Vector(WireValue.Int32Value(output0)) =>
+            case Col(WireValue.Int32Value(output0)) =>
               if (writeOne(count, output0)) status else CUDAStatus.InvalidValue
             case _ => CUDAStatus.Unknown
           }
@@ -325,10 +326,10 @@ object GeneratedCUDARPC {
       }
 
     override def cuDriverGetVersion(driverVersion: Out[Int]): CUDAStatus =
-      transport.call(RPCRequest(cuDriverGetVersionId, "cuDriverGetVersion", Vector())) match {
+      transport.call(RPCRequest(cuDriverGetVersionId, "cuDriverGetVersion", Col.empty[WireValue])) match {
         case RPCResponse.Success(WireValue.CallResult(status, outputs)) if status.isSuccess =>
           outputs match {
-            case Vector(WireValue.Int32Value(output0)) =>
+            case Col(WireValue.Int32Value(output0)) =>
               if (writeOne(driverVersion, output0)) status else CUDAStatus.InvalidValue
             case _ => CUDAStatus.Unknown
           }
@@ -337,7 +338,7 @@ object GeneratedCUDARPC {
       }
 
     override def cuInit(Flags: UInt32): CUDAStatus =
-      transport.call(RPCRequest(cuInitId, "cuInit", Vector(WireValue.UInt32Value(Flags)))) match {
+      transport.call(RPCRequest(cuInitId, "cuInit", Col(WireValue.UInt32Value(Flags)))) match {
         case RPCResponse.Success(WireValue.CallResult(status, outputs)) if status.isSuccess =>
           if (outputs.isEmpty) status else CUDAStatus.Unknown
         case RPCResponse.Success(WireValue.CallResult(status, _)) => status
@@ -348,11 +349,7 @@ object GeneratedCUDARPC {
       transport.call(RPCRequest(
         cuLaunchHostFuncId,
         "cuLaunchHostFunc",
-        Vector(
-          WireValue.StreamValue(hStream),
-          WireValue.CUDAHostCallbackValue(fn),
-          WireValue.CallbackDataValue(userData)
-        )
+        Col(WireValue.StreamValue(hStream), WireValue.CUDAHostCallbackValue(fn), WireValue.CallbackDataValue(userData))
       )) match {
         case RPCResponse.Success(WireValue.CallResult(status, outputs)) if status.isSuccess =>
           if (outputs.isEmpty) status else CUDAStatus.Unknown
@@ -376,7 +373,7 @@ object GeneratedCUDARPC {
       transport.call(RPCRequest(
         cuLaunchKernelId,
         "cuLaunchKernel",
-        Vector(
+        Col(
           WireValue.CUDAFunctionValue(f),
           WireValue.UInt32Value(gridDimX),
           WireValue.UInt32Value(gridDimY),
@@ -397,10 +394,10 @@ object GeneratedCUDARPC {
       }
 
     override def cuMemAlloc_v2(dptr: Out[DevicePtr], bytesize: SizeT): CUDAStatus =
-      transport.call(RPCRequest(cuMemAlloc_v2Id, "cuMemAlloc_v2", Vector(WireValue.SizeTValue(bytesize)))) match {
+      transport.call(RPCRequest(cuMemAlloc_v2Id, "cuMemAlloc_v2", Col(WireValue.SizeTValue(bytesize)))) match {
         case RPCResponse.Success(WireValue.CallResult(status, outputs)) if status.isSuccess =>
           outputs match {
-            case Vector(WireValue.DevicePtrValue(output0)) =>
+            case Col(WireValue.DevicePtrValue(output0)) =>
               if (writeOne(dptr, output0)) status else CUDAStatus.InvalidValue
             case _ => CUDAStatus.Unknown
           }
@@ -409,7 +406,7 @@ object GeneratedCUDARPC {
       }
 
     override def cuMemFree_v2(dptr: DevicePtr): CUDAStatus =
-      transport.call(RPCRequest(cuMemFree_v2Id, "cuMemFree_v2", Vector(WireValue.DevicePtrValue(dptr)))) match {
+      transport.call(RPCRequest(cuMemFree_v2Id, "cuMemFree_v2", Col(WireValue.DevicePtrValue(dptr)))) match {
         case RPCResponse.Success(WireValue.CallResult(status, outputs)) if status.isSuccess =>
           if (outputs.isEmpty) status else CUDAStatus.Unknown
         case RPCResponse.Success(WireValue.CallResult(status, _)) => status
@@ -420,11 +417,7 @@ object GeneratedCUDARPC {
       transport.call(RPCRequest(
         cuMemcpyDtoD_v2Id,
         "cuMemcpyDtoD_v2",
-        Vector(
-          WireValue.DevicePtrValue(dstDevice),
-          WireValue.DevicePtrValue(srcDevice),
-          WireValue.SizeTValue(ByteCount)
-        )
+        Col(WireValue.DevicePtrValue(dstDevice), WireValue.DevicePtrValue(srcDevice), WireValue.SizeTValue(ByteCount))
       )) match {
         case RPCResponse.Success(WireValue.CallResult(status, outputs)) if status.isSuccess =>
           if (outputs.isEmpty) status else CUDAStatus.Unknown
@@ -440,11 +433,11 @@ object GeneratedCUDARPC {
       transport.call(RPCRequest(
         cuMemcpyDtoH_v2Id,
         "cuMemcpyDtoH_v2",
-        Vector(WireValue.DevicePtrValue(srcDevice), WireValue.SizeTValue(ByteCount))
+        Col(WireValue.DevicePtrValue(srcDevice), WireValue.SizeTValue(ByteCount))
       )) match {
         case RPCResponse.Success(WireValue.CallResult(status, outputs)) if status.isSuccess =>
           outputs match {
-            case Vector(WireValue.ByteBufferValue(output0)) =>
+            case Col(WireValue.ByteBufferValue(output0)) =>
               if (writeBytes(dstHost, output0)) status else CUDAStatus.InvalidValue
             case _ => CUDAStatus.Unknown
           }
@@ -460,9 +453,9 @@ object GeneratedCUDARPC {
       transport.call(RPCRequest(
         cuMemcpyHtoD_v2Id,
         "cuMemcpyHtoD_v2",
-        Vector(
+        Col(
           WireValue.DevicePtrValue(dstDevice),
-          WireValue.ByteBufferValue(IArray.from(srcHost.snapshot.getOrElse(Vector.empty))),
+          WireValue.ByteBufferValue(srcHost.snapshot.getOrElse(Col.empty[Byte])),
           WireValue.SizeTValue(ByteCount)
         )
       )) match {
@@ -476,7 +469,7 @@ object GeneratedCUDARPC {
       transport.call(RPCRequest(
         cuMemsetD8_v2Id,
         "cuMemsetD8_v2",
-        Vector(WireValue.DevicePtrValue(dstDevice), WireValue.UInt8Value(uc), WireValue.SizeTValue(N))
+        Col(WireValue.DevicePtrValue(dstDevice), WireValue.UInt8Value(uc), WireValue.SizeTValue(N))
       )) match {
         case RPCResponse.Success(WireValue.CallResult(status, outputs)) if status.isSuccess =>
           if (outputs.isEmpty) status else CUDAStatus.Unknown
@@ -488,11 +481,11 @@ object GeneratedCUDARPC {
       transport.call(RPCRequest(
         cuModuleGetFunctionId,
         "cuModuleGetFunction",
-        Vector(WireValue.CUDAModuleValue(hmod), WireValue.FunctionNameValue(name))
+        Col(WireValue.CUDAModuleValue(hmod), WireValue.FunctionNameValue(name))
       )) match {
         case RPCResponse.Success(WireValue.CallResult(status, outputs)) if status.isSuccess =>
           outputs match {
-            case Vector(WireValue.KernelFunctionValue(output0)) =>
+            case Col(WireValue.KernelFunctionValue(output0)) =>
               if (writeOne(hfunc, output0)) status else CUDAStatus.InvalidValue
             case _ => CUDAStatus.Unknown
           }
@@ -501,14 +494,10 @@ object GeneratedCUDARPC {
       }
 
     override def cuModuleLoadData(module: Out[CUDAModule], image: ModuleImage): CUDAStatus =
-      transport.call(RPCRequest(
-        cuModuleLoadDataId,
-        "cuModuleLoadData",
-        Vector(WireValue.ModuleImageValue(image))
-      )) match {
+      transport.call(RPCRequest(cuModuleLoadDataId, "cuModuleLoadData", Col(WireValue.ModuleImageValue(image)))) match {
         case RPCResponse.Success(WireValue.CallResult(status, outputs)) if status.isSuccess =>
           outputs match {
-            case Vector(WireValue.CUDAModuleValue(output0)) =>
+            case Col(WireValue.CUDAModuleValue(output0)) =>
               if (writeOne(module, output0)) status else CUDAStatus.InvalidValue
             case _ => CUDAStatus.Unknown
           }
@@ -517,7 +506,7 @@ object GeneratedCUDARPC {
       }
 
     override def cuModuleUnload(hmod: CUDAModule): CUDAStatus =
-      transport.call(RPCRequest(cuModuleUnloadId, "cuModuleUnload", Vector(WireValue.CUDAModuleValue(hmod)))) match {
+      transport.call(RPCRequest(cuModuleUnloadId, "cuModuleUnload", Col(WireValue.CUDAModuleValue(hmod)))) match {
         case RPCResponse.Success(WireValue.CallResult(status, outputs)) if status.isSuccess =>
           if (outputs.isEmpty) status else CUDAStatus.Unknown
         case RPCResponse.Success(WireValue.CallResult(status, _)) => status
@@ -533,7 +522,7 @@ object GeneratedCUDARPC {
       transport.call(RPCRequest(
         cuStreamAddCallbackId,
         "cuStreamAddCallback",
-        Vector(
+        Col(
           WireValue.StreamValue(hStream),
           WireValue.CUDAStreamCallbackValue(callback),
           WireValue.CallbackDataValue(userData),
@@ -547,7 +536,7 @@ object GeneratedCUDARPC {
       }
 
     override def cudaFree(devPtr: DevicePtr): CUDAStatus =
-      transport.call(RPCRequest(cudaFreeId, "cudaFree", Vector(WireValue.DevicePtrValue(devPtr)))) match {
+      transport.call(RPCRequest(cudaFreeId, "cudaFree", Col(WireValue.DevicePtrValue(devPtr)))) match {
         case RPCResponse.Success(WireValue.CallResult(status, outputs)) if status.isSuccess =>
           if (outputs.isEmpty) status else CUDAStatus.Unknown
         case RPCResponse.Success(WireValue.CallResult(status, _)) => status
@@ -555,10 +544,10 @@ object GeneratedCUDARPC {
       }
 
     override def cudaGetDeviceCount(count: Out[Int]): CUDAStatus =
-      transport.call(RPCRequest(cudaGetDeviceCountId, "cudaGetDeviceCount", Vector())) match {
+      transport.call(RPCRequest(cudaGetDeviceCountId, "cudaGetDeviceCount", Col.empty[WireValue])) match {
         case RPCResponse.Success(WireValue.CallResult(status, outputs)) if status.isSuccess =>
           outputs match {
-            case Vector(WireValue.Int32Value(output0)) =>
+            case Col(WireValue.Int32Value(output0)) =>
               if (writeOne(count, output0)) status else CUDAStatus.InvalidValue
             case _ => CUDAStatus.Unknown
           }
@@ -567,10 +556,10 @@ object GeneratedCUDARPC {
       }
 
     override def cudaMalloc(devPtr: Out[DevicePtr], size: SizeT): CUDAStatus =
-      transport.call(RPCRequest(cudaMallocId, "cudaMalloc", Vector(WireValue.SizeTValue(size)))) match {
+      transport.call(RPCRequest(cudaMallocId, "cudaMalloc", Col(WireValue.SizeTValue(size)))) match {
         case RPCResponse.Success(WireValue.CallResult(status, outputs)) if status.isSuccess =>
           outputs match {
-            case Vector(WireValue.DevicePtrValue(output0)) =>
+            case Col(WireValue.DevicePtrValue(output0)) =>
               if (writeOne(devPtr, output0)) status else CUDAStatus.InvalidValue
             case _ => CUDAStatus.Unknown
           }
@@ -586,103 +575,103 @@ object GeneratedCUDARPC {
       request.messageId match {
         case `__cudaGemstoneManagedRegisterId` if request.functionName == "__cudaGemstoneManagedRegister" =>
           request.arguments match {
-            case Vector(WireValue.DevicePtrValue(value0), WireValue.SizeTValue(value1)) =>
+            case Col(WireValue.DevicePtrValue(value0), WireValue.SizeTValue(value1)) =>
               val argument0 = value0
               val argument1 = value1
               val status = implementation.__cudaGemstoneManagedRegister(argument0, argument1)
-              val outputs = if (status.isSuccess) Vector() else Vector.empty
+              val outputs = if (status.isSuccess) Col.empty[WireValue] else Col.empty[WireValue]
               RPCResponse.Success(WireValue.CallResult(status, outputs))
             case _ => invalid("invalid arguments for __cudaGemstoneManagedRegister")
           }
         case `__cudaGemstoneManagedUnregisterId` if request.functionName == "__cudaGemstoneManagedUnregister" =>
           request.arguments match {
-            case Vector(WireValue.DevicePtrValue(value0)) =>
+            case Col(WireValue.DevicePtrValue(value0)) =>
               val argument0 = value0
               val status = implementation.__cudaGemstoneManagedUnregister(argument0)
-              val outputs = if (status.isSuccess) Vector() else Vector.empty
+              val outputs = if (status.isSuccess) Col.empty[WireValue] else Col.empty[WireValue]
               RPCResponse.Success(WireValue.CallResult(status, outputs))
             case _ => invalid("invalid arguments for __cudaGemstoneManagedUnregister")
           }
         case `cuCtxCreate_v2Id` if request.functionName == "cuCtxCreate_v2" =>
           request.arguments match {
-            case Vector(WireValue.UInt32Value(value1), WireValue.DeviceValue(value2)) =>
+            case Col(WireValue.UInt32Value(value1), WireValue.DeviceValue(value2)) =>
               val argument0 = Pointer.output[Context, One](1)
               val argument1 = value1
               val argument2 = value2
               val status = implementation.cuCtxCreate_v2(argument0, argument1, argument2)
-              val outputs = if (status.isSuccess) Vector(WireValue.ContextValue(argument0.snapshot.flatMap(
+              val outputs = if (status.isSuccess) Col(WireValue.ContextValue(argument0.snapshot.flatMap(
                 _.headOption
               ).getOrElse(throw new IllegalStateException("pctx was not initialized"))))
-              else Vector.empty
+              else Col.empty[WireValue]
               RPCResponse.Success(WireValue.CallResult(status, outputs))
             case _ => invalid("invalid arguments for cuCtxCreate_v2")
           }
         case `cuCtxDestroy_v2Id` if request.functionName == "cuCtxDestroy_v2" =>
           request.arguments match {
-            case Vector(WireValue.ContextValue(value0)) =>
+            case Col(WireValue.ContextValue(value0)) =>
               val argument0 = value0
               val status = implementation.cuCtxDestroy_v2(argument0)
-              val outputs = if (status.isSuccess) Vector() else Vector.empty
+              val outputs = if (status.isSuccess) Col.empty[WireValue] else Col.empty[WireValue]
               RPCResponse.Success(WireValue.CallResult(status, outputs))
             case _ => invalid("invalid arguments for cuCtxDestroy_v2")
           }
         case `cuCtxSynchronizeId` if request.functionName == "cuCtxSynchronize" =>
           request.arguments match {
-            case Vector() =>
+            case Col() =>
               val status = implementation.cuCtxSynchronize()
-              val outputs = if (status.isSuccess) Vector() else Vector.empty
+              val outputs = if (status.isSuccess) Col.empty[WireValue] else Col.empty[WireValue]
               RPCResponse.Success(WireValue.CallResult(status, outputs))
             case _ => invalid("invalid arguments for cuCtxSynchronize")
           }
         case `cuDeviceGetId` if request.functionName == "cuDeviceGet" =>
           request.arguments match {
-            case Vector(WireValue.Int32Value(value1)) =>
+            case Col(WireValue.Int32Value(value1)) =>
               val argument0 = Pointer.output[Device, One](1)
               val argument1 = value1
               val status = implementation.cuDeviceGet(argument0, argument1)
-              val outputs = if (status.isSuccess) Vector(WireValue.DeviceValue(argument0.snapshot.flatMap(
+              val outputs = if (status.isSuccess) Col(WireValue.DeviceValue(argument0.snapshot.flatMap(
                 _.headOption
               ).getOrElse(throw new IllegalStateException("device was not initialized"))))
-              else Vector.empty
+              else Col.empty[WireValue]
               RPCResponse.Success(WireValue.CallResult(status, outputs))
             case _ => invalid("invalid arguments for cuDeviceGet")
           }
         case `cuDeviceGetCountId` if request.functionName == "cuDeviceGetCount" =>
           request.arguments match {
-            case Vector() =>
+            case Col() =>
               val argument0 = Pointer.output[Int, One](1)
               val status = implementation.cuDeviceGetCount(argument0)
-              val outputs = if (status.isSuccess) Vector(WireValue.Int32Value(argument0.snapshot.flatMap(
+              val outputs = if (status.isSuccess) Col(WireValue.Int32Value(argument0.snapshot.flatMap(
                 _.headOption
               ).getOrElse(throw new IllegalStateException("count was not initialized"))))
-              else Vector.empty
+              else Col.empty[WireValue]
               RPCResponse.Success(WireValue.CallResult(status, outputs))
             case _ => invalid("invalid arguments for cuDeviceGetCount")
           }
         case `cuDriverGetVersionId` if request.functionName == "cuDriverGetVersion" =>
           request.arguments match {
-            case Vector() =>
+            case Col() =>
               val argument0 = Pointer.output[Int, One](1)
               val status = implementation.cuDriverGetVersion(argument0)
-              val outputs = if (status.isSuccess) Vector(WireValue.Int32Value(argument0.snapshot.flatMap(
+              val outputs = if (status.isSuccess) Col(WireValue.Int32Value(argument0.snapshot.flatMap(
                 _.headOption
               ).getOrElse(throw new IllegalStateException("driverVersion was not initialized"))))
-              else Vector.empty
+              else Col.empty[WireValue]
               RPCResponse.Success(WireValue.CallResult(status, outputs))
             case _ => invalid("invalid arguments for cuDriverGetVersion")
           }
         case `cuInitId` if request.functionName == "cuInit" =>
           request.arguments match {
-            case Vector(WireValue.UInt32Value(value0)) =>
+            case Col(WireValue.UInt32Value(value0)) =>
               val argument0 = value0
               val status = implementation.cuInit(argument0)
-              val outputs = if (status.isSuccess) Vector() else Vector.empty
+              val outputs = if (status.isSuccess) Col.empty[WireValue] else Col.empty[WireValue]
               RPCResponse.Success(WireValue.CallResult(status, outputs))
             case _ => invalid("invalid arguments for cuInit")
           }
         case `cuLaunchHostFuncId` if request.functionName == "cuLaunchHostFunc" =>
           request.arguments match {
-            case Vector(
+            case Col(
                   WireValue.StreamValue(value0),
                   WireValue.CUDAHostCallbackValue(value1),
                   WireValue.CallbackDataValue(value2)
@@ -691,13 +680,13 @@ object GeneratedCUDARPC {
               val argument1 = value1
               val argument2 = value2
               val status = implementation.cuLaunchHostFunc(argument0, argument1, argument2)
-              val outputs = if (status.isSuccess) Vector() else Vector.empty
+              val outputs = if (status.isSuccess) Col.empty[WireValue] else Col.empty[WireValue]
               RPCResponse.Success(WireValue.CallResult(status, outputs))
             case _ => invalid("invalid arguments for cuLaunchHostFunc")
           }
         case `cuLaunchKernelId` if request.functionName == "cuLaunchKernel" =>
           request.arguments match {
-            case Vector(
+            case Col(
                   WireValue.CUDAFunctionValue(value0),
                   WireValue.UInt32Value(value1),
                   WireValue.UInt32Value(value2),
@@ -736,35 +725,35 @@ object GeneratedCUDARPC {
                 argument9,
                 argument10
               )
-              val outputs = if (status.isSuccess) Vector() else Vector.empty
+              val outputs = if (status.isSuccess) Col.empty[WireValue] else Col.empty[WireValue]
               RPCResponse.Success(WireValue.CallResult(status, outputs))
             case _ => invalid("invalid arguments for cuLaunchKernel")
           }
         case `cuMemAlloc_v2Id` if request.functionName == "cuMemAlloc_v2" =>
           request.arguments match {
-            case Vector(WireValue.SizeTValue(value1)) =>
+            case Col(WireValue.SizeTValue(value1)) =>
               val argument0 = Pointer.output[DevicePtr, One](1)
               val argument1 = value1
               val status = implementation.cuMemAlloc_v2(argument0, argument1)
-              val outputs = if (status.isSuccess) Vector(WireValue.DevicePtrValue(argument0.snapshot.flatMap(
+              val outputs = if (status.isSuccess) Col(WireValue.DevicePtrValue(argument0.snapshot.flatMap(
                 _.headOption
               ).getOrElse(throw new IllegalStateException("dptr was not initialized"))))
-              else Vector.empty
+              else Col.empty[WireValue]
               RPCResponse.Success(WireValue.CallResult(status, outputs))
             case _ => invalid("invalid arguments for cuMemAlloc_v2")
           }
         case `cuMemFree_v2Id` if request.functionName == "cuMemFree_v2" =>
           request.arguments match {
-            case Vector(WireValue.DevicePtrValue(value0)) =>
+            case Col(WireValue.DevicePtrValue(value0)) =>
               val argument0 = value0
               val status = implementation.cuMemFree_v2(argument0)
-              val outputs = if (status.isSuccess) Vector() else Vector.empty
+              val outputs = if (status.isSuccess) Col.empty[WireValue] else Col.empty[WireValue]
               RPCResponse.Success(WireValue.CallResult(status, outputs))
             case _ => invalid("invalid arguments for cuMemFree_v2")
           }
         case `cuMemcpyDtoD_v2Id` if request.functionName == "cuMemcpyDtoD_v2" =>
           request.arguments match {
-            case Vector(
+            case Col(
                   WireValue.DevicePtrValue(value0),
                   WireValue.DevicePtrValue(value1),
                   WireValue.SizeTValue(value2)
@@ -773,27 +762,27 @@ object GeneratedCUDARPC {
               val argument1 = value1
               val argument2 = value2
               val status = implementation.cuMemcpyDtoD_v2(argument0, argument1, argument2)
-              val outputs = if (status.isSuccess) Vector() else Vector.empty
+              val outputs = if (status.isSuccess) Col.empty[WireValue] else Col.empty[WireValue]
               RPCResponse.Success(WireValue.CallResult(status, outputs))
             case _ => invalid("invalid arguments for cuMemcpyDtoD_v2")
           }
         case `cuMemcpyDtoH_v2Id` if request.functionName == "cuMemcpyDtoH_v2" =>
           request.arguments match {
-            case Vector(WireValue.DevicePtrValue(value1), WireValue.SizeTValue(value2)) =>
+            case Col(WireValue.DevicePtrValue(value1), WireValue.SizeTValue(value2)) =>
               val argument0 = Pointer.output[Byte, CountedBy["ByteCount"]](value2.toLong.toInt)
               val argument1 = value1
               val argument2 = value2
               val status = implementation.cuMemcpyDtoH_v2(argument0, argument1, argument2)
-              val outputs = if (status.isSuccess) Vector(WireValue.ByteBufferValue(IArray.from(
+              val outputs = if (status.isSuccess) Col(WireValue.ByteBufferValue(
                 argument0.snapshot.getOrElse(throw new IllegalStateException("dstHost was not initialized"))
-              )))
-              else Vector.empty
+              ))
+              else Col.empty[WireValue]
               RPCResponse.Success(WireValue.CallResult(status, outputs))
             case _ => invalid("invalid arguments for cuMemcpyDtoH_v2")
           }
         case `cuMemcpyHtoD_v2Id` if request.functionName == "cuMemcpyHtoD_v2" =>
           request.arguments match {
-            case Vector(
+            case Col(
                   WireValue.DevicePtrValue(value0),
                   WireValue.ByteBufferValue(value1),
                   WireValue.SizeTValue(value2)
@@ -802,60 +791,60 @@ object GeneratedCUDARPC {
               val argument1 = Pointer.input[Byte, CountedBy["ByteCount"]](value1)
               val argument2 = value2
               val status = implementation.cuMemcpyHtoD_v2(argument0, argument1, argument2)
-              val outputs = if (status.isSuccess) Vector() else Vector.empty
+              val outputs = if (status.isSuccess) Col.empty[WireValue] else Col.empty[WireValue]
               RPCResponse.Success(WireValue.CallResult(status, outputs))
             case _ => invalid("invalid arguments for cuMemcpyHtoD_v2")
           }
         case `cuMemsetD8_v2Id` if request.functionName == "cuMemsetD8_v2" =>
           request.arguments match {
-            case Vector(WireValue.DevicePtrValue(value0), WireValue.UInt8Value(value1), WireValue.SizeTValue(value2)) =>
+            case Col(WireValue.DevicePtrValue(value0), WireValue.UInt8Value(value1), WireValue.SizeTValue(value2)) =>
               val argument0 = value0
               val argument1 = value1
               val argument2 = value2
               val status = implementation.cuMemsetD8_v2(argument0, argument1, argument2)
-              val outputs = if (status.isSuccess) Vector() else Vector.empty
+              val outputs = if (status.isSuccess) Col.empty[WireValue] else Col.empty[WireValue]
               RPCResponse.Success(WireValue.CallResult(status, outputs))
             case _ => invalid("invalid arguments for cuMemsetD8_v2")
           }
         case `cuModuleGetFunctionId` if request.functionName == "cuModuleGetFunction" =>
           request.arguments match {
-            case Vector(WireValue.CUDAModuleValue(value1), WireValue.FunctionNameValue(value2)) =>
+            case Col(WireValue.CUDAModuleValue(value1), WireValue.FunctionNameValue(value2)) =>
               val argument0 = Pointer.output[KernelFunction, One](1)
               val argument1 = value1
               val argument2 = value2
               val status = implementation.cuModuleGetFunction(argument0, argument1, argument2)
-              val outputs = if (status.isSuccess) Vector(WireValue.KernelFunctionValue(argument0.snapshot.flatMap(
+              val outputs = if (status.isSuccess) Col(WireValue.KernelFunctionValue(argument0.snapshot.flatMap(
                 _.headOption
               ).getOrElse(throw new IllegalStateException("hfunc was not initialized"))))
-              else Vector.empty
+              else Col.empty[WireValue]
               RPCResponse.Success(WireValue.CallResult(status, outputs))
             case _ => invalid("invalid arguments for cuModuleGetFunction")
           }
         case `cuModuleLoadDataId` if request.functionName == "cuModuleLoadData" =>
           request.arguments match {
-            case Vector(WireValue.ModuleImageValue(value1)) =>
+            case Col(WireValue.ModuleImageValue(value1)) =>
               val argument0 = Pointer.output[CUDAModule, One](1)
               val argument1 = value1
               val status = implementation.cuModuleLoadData(argument0, argument1)
-              val outputs = if (status.isSuccess) Vector(WireValue.CUDAModuleValue(argument0.snapshot.flatMap(
+              val outputs = if (status.isSuccess) Col(WireValue.CUDAModuleValue(argument0.snapshot.flatMap(
                 _.headOption
               ).getOrElse(throw new IllegalStateException("module was not initialized"))))
-              else Vector.empty
+              else Col.empty[WireValue]
               RPCResponse.Success(WireValue.CallResult(status, outputs))
             case _ => invalid("invalid arguments for cuModuleLoadData")
           }
         case `cuModuleUnloadId` if request.functionName == "cuModuleUnload" =>
           request.arguments match {
-            case Vector(WireValue.CUDAModuleValue(value0)) =>
+            case Col(WireValue.CUDAModuleValue(value0)) =>
               val argument0 = value0
               val status = implementation.cuModuleUnload(argument0)
-              val outputs = if (status.isSuccess) Vector() else Vector.empty
+              val outputs = if (status.isSuccess) Col.empty[WireValue] else Col.empty[WireValue]
               RPCResponse.Success(WireValue.CallResult(status, outputs))
             case _ => invalid("invalid arguments for cuModuleUnload")
           }
         case `cuStreamAddCallbackId` if request.functionName == "cuStreamAddCallback" =>
           request.arguments match {
-            case Vector(
+            case Col(
                   WireValue.StreamValue(value0),
                   WireValue.CUDAStreamCallbackValue(value1),
                   WireValue.CallbackDataValue(value2),
@@ -866,41 +855,41 @@ object GeneratedCUDARPC {
               val argument2 = value2
               val argument3 = value3
               val status = implementation.cuStreamAddCallback(argument0, argument1, argument2, argument3)
-              val outputs = if (status.isSuccess) Vector() else Vector.empty
+              val outputs = if (status.isSuccess) Col.empty[WireValue] else Col.empty[WireValue]
               RPCResponse.Success(WireValue.CallResult(status, outputs))
             case _ => invalid("invalid arguments for cuStreamAddCallback")
           }
         case `cudaFreeId` if request.functionName == "cudaFree" =>
           request.arguments match {
-            case Vector(WireValue.DevicePtrValue(value0)) =>
+            case Col(WireValue.DevicePtrValue(value0)) =>
               val argument0 = value0
               val status = implementation.cudaFree(argument0)
-              val outputs = if (status.isSuccess) Vector() else Vector.empty
+              val outputs = if (status.isSuccess) Col.empty[WireValue] else Col.empty[WireValue]
               RPCResponse.Success(WireValue.CallResult(status, outputs))
             case _ => invalid("invalid arguments for cudaFree")
           }
         case `cudaGetDeviceCountId` if request.functionName == "cudaGetDeviceCount" =>
           request.arguments match {
-            case Vector() =>
+            case Col() =>
               val argument0 = Pointer.output[Int, One](1)
               val status = implementation.cudaGetDeviceCount(argument0)
-              val outputs = if (status.isSuccess) Vector(WireValue.Int32Value(argument0.snapshot.flatMap(
+              val outputs = if (status.isSuccess) Col(WireValue.Int32Value(argument0.snapshot.flatMap(
                 _.headOption
               ).getOrElse(throw new IllegalStateException("count was not initialized"))))
-              else Vector.empty
+              else Col.empty[WireValue]
               RPCResponse.Success(WireValue.CallResult(status, outputs))
             case _ => invalid("invalid arguments for cudaGetDeviceCount")
           }
         case `cudaMallocId` if request.functionName == "cudaMalloc" =>
           request.arguments match {
-            case Vector(WireValue.SizeTValue(value1)) =>
+            case Col(WireValue.SizeTValue(value1)) =>
               val argument0 = Pointer.output[DevicePtr, One](1)
               val argument1 = value1
               val status = implementation.cudaMalloc(argument0, argument1)
-              val outputs = if (status.isSuccess) Vector(WireValue.DevicePtrValue(argument0.snapshot.flatMap(
+              val outputs = if (status.isSuccess) Col(WireValue.DevicePtrValue(argument0.snapshot.flatMap(
                 _.headOption
               ).getOrElse(throw new IllegalStateException("devPtr was not initialized"))))
-              else Vector.empty
+              else Col.empty[WireValue]
               RPCResponse.Success(WireValue.CallResult(status, outputs))
             case _ => invalid("invalid arguments for cudaMalloc")
           }
@@ -918,7 +907,7 @@ object GeneratedCUDARPC {
     true
   }
 
-  private def writeBytes[Mode <: Access, Size <: Extent](pointer: Pointer[Byte, Mode, Size], value: IArray[Byte])(using
+  private def writeBytes[Mode <: Access, Size <: Extent](pointer: Pointer[Byte, Mode, Size], value: Col[Byte])(using
       CanWrite[Mode],
       CanDereference[Size]
   ): Boolean = {

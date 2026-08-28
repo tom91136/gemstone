@@ -1,5 +1,7 @@
 package net.kurobako.gemstone.isa.spirv.v1_6
 
+import net.kurobako.gemstone.Col
+
 final class InstructionSuite extends munit.FunSuite {
   test("every grammar opcode decodes to exactly one typed enum case") {
     assertEquals(Instructions.size, 875)
@@ -11,25 +13,27 @@ final class InstructionSuite extends munit.FunSuite {
       assertEquals(instruction.opcodeNumber, definition.opcodeNumber)
       assert(instruction.decoder eq definition.decoder)
       assertEquals(instruction.meta, definition.meta)
-      assertEquals(Instruction.encode(instruction), raw)
+      val encoded = Instruction.encode(instruction)
+      assertEquals(encoded.opcodeNumber, raw.opcodeNumber)
+      assert(encoded.operandWords.sameElements(raw.operandWords))
     }
   }
 
   test("top-level definitions are singleton, complete, and uniquely keyed") {
-    assertEquals(Instructions, InstructionDef.values.toVector)
+    assert(Instructions.sameElements(InstructionDef.values))
     assertEquals(Instructions.map(_.opcodeNumber).distinct.size, Instructions.size)
     assertEquals(Instructions.map(_.opcode).distinct.size, Instructions.size)
   }
 
   test("a per-form decoder rejects a raw instruction for another definition") {
     assertEquals(
-      InstructionDef.Nop.decoder(RawInstruction(1, Vector.empty)),
+      InstructionDef.Nop.decoder(RawInstruction(1, Col.empty)),
       Left(InstructionDecodeError.DecoderOpcodeMismatch(0, 1))
     )
   }
 
   test("unknown opcode is valid raw data but cannot inhabit the typed enum") {
-    val raw = RawInstruction(65535, Vector(Word(1), Word(2)))
+    val raw = RawInstruction(65535, Col(Word(1), Word(2)))
     assertEquals(Instruction.decode(raw), Left(InstructionDecodeError.UnknownOpcode(65535)))
   }
 
@@ -40,8 +44,8 @@ final class InstructionSuite extends munit.FunSuite {
     val srcB        = operand("IdRef", 4)
     val instruction = Instruction.IAdd(resultType, dest, srcA, srcB)
     assertEquals(instruction.opcode, "OpIAdd")
-    assertEquals(instruction.operands, Vector(resultType, dest, srcA, srcB))
+    assertEquals(instruction.operands.toSeq, Seq(resultType, dest, srcA, srcB))
   }
 
-  private def operand(kind: String, value: Int): Operand = Operand(kind, Vector(Word(value)))
+  private def operand(kind: String, value: Int): Operand = Operand(kind, Col(Word(value)))
 }

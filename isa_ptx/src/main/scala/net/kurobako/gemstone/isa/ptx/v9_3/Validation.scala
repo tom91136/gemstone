@@ -1,13 +1,16 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
+import net.kurobako.gemstone.Col
+import net.kurobako.gemstone.Col.*
+
 final case class PTXVersion(major: Int, minor: Int) extends Ordered[PTXVersion] {
   override def compare(that: PTXVersion): Int = Ordering[(Int, Int)].compare((major, minor), (that.major, that.minor))
   override def toString: String               = s"$major.$minor"
 }
 
 object PTXVersion {
-  def parse(value: String): Either[String, PTXVersion] = value.split('.').toVector match {
-    case Vector(major, minor) =>
+  def parse(value: String): Either[String, PTXVersion] = value.split('.').toCol match {
+    case Col(major, minor) =>
       for {
         majorValue <- major.toIntOption.toRight(s"invalid PTX version '$value'")
         minorValue <- minor.toIntOption.toRight(s"invalid PTX version '$value'")
@@ -31,7 +34,7 @@ object SMTarget {
 enum OperandConstraint {
   case Register
   case Address
-  case Vector
+  case VectorOperand
   case Symbol
   case Value
   case Unknown(sourceName: String)
@@ -42,8 +45,8 @@ enum OperandConstraint {
   */
 final case class InstructionForm(
     opcode: String,
-    operands: Vector[OperandConstraint],
-    requiredModifierGroups: Vector[Set[String]],
+    operands: Col[OperandConstraint],
+    requiredModifierGroups: Col[Set[String]],
     optionalModifiers: Set[String],
     complete: Boolean
 )
@@ -57,7 +60,7 @@ enum ValidationError {
 
 enum ValidationResult {
   case Valid
-  case Invalid(errors: Vector[ValidationError])
+  case Invalid(errors: Col[ValidationError])
   case Unsupported(reason: String)
 }
 
@@ -92,13 +95,13 @@ object Validator {
     else results.collectFirst { case value: ValidationResult.Unsupported => value }.getOrElse(ValidationResult.Valid)
   }
 
-  private def validateForms(instruction: Instruction, forms: Vector[InstructionForm]): ValidationResult = {
+  private def validateForms(instruction: Instruction, forms: Col[InstructionForm]): ValidationResult = {
     if (forms.isEmpty)
       return ValidationResult.Unsupported(s"no normalized syntax form for ${instruction.qualifiedOpcode}")
     val sameCount = forms.filter(_.operands.size == instruction.operands.size)
     if (sameCount.isEmpty)
       return ValidationResult.Invalid(
-        Vector(
+        Col(
           ValidationError.InvalidOperands(
             instruction.opcode,
             s"expected ${forms.map(_.operands.size).distinct.sorted.mkString(" or ")} operands, found ${instruction.operands.size}"
@@ -110,9 +113,9 @@ object Validator {
     val matchingMods = sameCount.filter(form => modifiersMatch(modifiers, form))
     if (matchingMods.isEmpty)
       return ValidationResult.Invalid(
-        Vector(ValidationError.InvalidModifiers(
+        Col(ValidationError.InvalidModifiers(
           instruction.opcode,
-          s"unsupported modifier set: ${modifiers.toVector.sorted.mkString(".")}"
+          s"unsupported modifier set: ${modifiers.toArray.sorted.mkString(".")}"
         ))
       )
 
@@ -121,7 +124,7 @@ object Validator {
       case Some(_)                   => ValidationResult.Valid
       case None if complete.nonEmpty =>
         ValidationResult.Invalid(
-          Vector(ValidationError.InvalidOperands(
+          Col(ValidationError.InvalidOperands(
             instruction.opcode,
             "operand kinds do not match the syntax form"
           ))
@@ -137,24 +140,24 @@ object Validator {
     required && actual.subsetOf(allowed)
   }
 
-  private def operandsMatch(actual: Vector[Operand], expected: Vector[OperandConstraint]): Boolean =
+  private def operandsMatch(actual: Col[Operand], expected: Col[OperandConstraint]): Boolean =
     actual.zip(expected).forall {
       case (Operand.Register(_, _), OperandConstraint.Register)                 => true
       case (Operand.WithPredicate(_, _), OperandConstraint.Register)            => true
       case (_: Operand.Address, OperandConstraint.Address)                      => true
-      case (_: Operand.VectorLiteral, OperandConstraint.Vector)                 => true
+      case (_: Operand.VectorLiteral, OperandConstraint.VectorOperand)          => true
       case (_: Operand.Symbol | _: Operand.Qualifier, OperandConstraint.Symbol) => true
       case (_, OperandConstraint.Value)                                         => true
       case (_, OperandConstraint.Unknown(_))                                    => false
       case _                                                                    => false
     }
 
-  private def collectInstructions(statements: Vector[Statement]): Vector[Instruction] =
+  private def collectInstructions(statements: Col[Statement]): Col[Instruction] =
     statements.flatMap {
-      case Statement.Instruction(value)         => Vector(value)
+      case Statement.Instruction(value)         => Col(value)
       case Statement.Block(body)                => collectInstructions(body)
       case Statement.Entry(_, _, _, body)       => collectInstructions(body)
-      case Statement.Function(_, _, _, _, body) => body.toVector.flatMap(collectInstructions)
-      case _                                    => Vector.empty
+      case Statement.Function(_, _, _, _, body) => body.iterator.flatMap(collectInstructions).toCol
+      case _                                    => Col.empty[Instruction]
     }
 }
