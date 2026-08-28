@@ -371,7 +371,7 @@ object GeneratedCUDARPC {
         sharedMemBytes: UInt32,
         hStream: Stream,
         kernelParams: KernelParameters,
-        extra: Option[Pointer[net.kurobako.gemstone.abi.OpaquePointer, ReadWrite, Opaque]]
+        extra: Nullable[Pointer[net.kurobako.gemstone.abi.OpaquePointer, ReadWrite, Opaque]]
     ): CUDAStatus =
       transport.call(RPCRequest(
         cuLaunchKernelId,
@@ -387,7 +387,7 @@ object GeneratedCUDARPC {
           WireValue.UInt32Value(sharedMemBytes),
           WireValue.StreamValue(hStream),
           WireValue.KernelParametersValue(kernelParams),
-          WireValue.NullableOpaquePointerValue(extra.nonEmpty)
+          WireValue.NullableOpaquePointerValue(extra.toOption.nonEmpty)
         )
       )) match {
         case RPCResponse.Success(WireValue.CallResult(status, outputs)) if status.isSuccess =>
@@ -722,7 +722,7 @@ object GeneratedCUDARPC {
               val argument9 = value9
               val argument10 = if (value10)
                 throw new IllegalArgumentException("non-null opaque RPC pointers are unsupported")
-              else None
+              else Nullable.Null
               val status = implementation.cuLaunchKernel(
                 argument0,
                 argument1,
@@ -911,14 +911,16 @@ object GeneratedCUDARPC {
   private def invalid(message: String): RPCResponse = RPCResponse.Failure(CUDAError(999, message))
 
   private def writeOne[A, Mode <: Access, Size <: Extent](pointer: Pointer[A, Mode, Size], value: A)(using
-      CanWrite[Mode]
+      CanWrite[Mode],
+      CanDereference[Size]
   ): Boolean = {
     pointer.write(value)
     true
   }
 
   private def writeBytes[Mode <: Access, Size <: Extent](pointer: Pointer[Byte, Mode, Size], value: IArray[Byte])(using
-      CanWrite[Mode]
+      CanWrite[Mode],
+      CanDereference[Size]
   ): Boolean = {
     if (pointer.length != value.length) false
     else {

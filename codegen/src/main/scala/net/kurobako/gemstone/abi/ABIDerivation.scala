@@ -29,16 +29,66 @@ object ABIDerivation {
       case value: DefDef => value
       case _             => abortAt(method, s"ABI method ${method.name} has no retained definition tree")
     }
-    val parameters = method.paramSymss.flatten.map { parameter =>
+    val rawParameters = method.paramSymss.flatten.map { parameter =>
       val parameterType = parameter.tree match {
         case value: ValDef => value.tpt.tpe
         case _             => abortAt(method, s"ABI parameter ${parameter.name} has no retained type tree")
       }
+      parameter -> parameterType
+    }
+    validateParameterExtents(rawParameters, method)
+    val parameters = rawParameters.map { case (parameter, parameterType) =>
       deriveCType(parameterType, method.name, parameter.name, result = false)
     }
     val resultType = deriveCType(definition.returnTpt.tpe, method.name, "<result>", result = true)
     val separator  = if (resultType.endsWith("*")) "" else " "
     s"$resultType$separator(${if (parameters.isEmpty) "void" else parameters.mkString(", ")})"
+  }
+
+  private def validateParameterExtents(using
+      quotes: Quotes
+  )(
+      parameters: List[(quotes.reflect.Symbol, quotes.reflect.TypeRepr)],
+      method: quotes.reflect.Symbol
+  ): Unit = {
+    import net.kurobako.gemstone.cuda
+    import quotes.reflect.*
+
+    def isIntegral(tpe: TypeRepr): Boolean = {
+      val value = tpe.dealias.simplified
+      value =:= TypeRepr.of[Byte] || value =:= TypeRepr.of[Short] || value =:= TypeRepr.of[Int] ||
+      value =:= TypeRepr.of[Long] || value =:= TypeRepr.of[cuda.UInt8] || value =:= TypeRepr.of[cuda.UInt32] ||
+      value =:= TypeRepr.of[cuda.SizeT]
+    }
+
+    parameters.foreach { case (parameter, rawType) =>
+      rawType.dealias.simplified match {
+        case AppliedType(pointer, List(_, _, extent))
+            if pointer.typeSymbol.fullName == "net.kurobako.gemstone.abi.Pointer" =>
+          extent.dealias.simplified match {
+            case AppliedType(constructor, List(ConstantType(StringConstant(countName))))
+                if constructor.typeSymbol.fullName == "net.kurobako.gemstone.abi.CountedBy" =>
+              parameters.find(_._1.name == countName) match {
+                case None =>
+                  abortAt(
+                    method,
+                    s"${method.name}.${parameter.name} is CountedBy[$countName], but that parameter is absent"
+                  )
+                case Some((_, countType)) if !isIntegral(countType) =>
+                  abortAt(
+                    method,
+                    s"${method.name} count parameter $countName must have an integral ABI type; found ${countType.show} (${countType.typeSymbol.fullName})"
+                  )
+                case Some(_) => ()
+              }
+            case AppliedType(constructor, List(ConstantType(IntConstant(count))))
+                if constructor.typeSymbol.fullName == "net.kurobako.gemstone.abi.Fixed" && count <= 0 =>
+              abortAt(method, s"Fixed extent in ${method.name}.${parameter.name} must be positive, found $count")
+            case _ => ()
+          }
+        case _ => ()
+      }
+    }
   }
 
   private def deriveCType(using
@@ -61,6 +111,31 @@ object ABIDerivation {
         if (base.endsWith("*")) s"const $base*" else s"const $base *"
       } else if (base.endsWith("*")) s"$base*"
       else s"$base *"
+
+    def requireCTypeSpelling(value: String, description: String): String = {
+      val cType = "[A-Za-z_][A-Za-z0-9_ *]*"
+      if (!value.matches(cType))
+        report.errorAndAbort(s"$description in $methodName has invalid C type spelling: $value")
+      value
+    }
+
+    def requireCIdentifier(value: String, description: String): String = {
+      if (!value.matches("[A-Za-z_][A-Za-z0-9_]*"))
+        report.errorAndAbort(s"$description in $methodName is not a C identifier: $value")
+      value
+    }
+
+    def pointerShaped(tpe: TypeRepr): Boolean = tpe.dealias.simplified match {
+      case AppliedType(constructor, _)
+          if Set(
+            "net.kurobako.gemstone.abi.Pointer",
+            "net.kurobako.gemstone.abi.Callback",
+            "net.kurobako.gemstone.abi.CallbackTypedef"
+          )(constructor.typeSymbol.fullName) =>
+        true
+      case value if value.typeSymbol.fullName == "net.kurobako.gemstone.abi.CallbackData" => true
+      case _                                                                              => false
+    }
 
     def loop(tpe0: TypeRepr): String = {
       val tpe      = tpe0.dealias.simplified
@@ -86,7 +161,10 @@ object ABIDerivation {
           tpe match {
             case AppliedType(constructor, List(name))
                 if constructor.typeSymbol.fullName == "net.kurobako.gemstone.abi.CValue" =>
-              literalArgument(name).getOrElse(report.errorAndAbort(s"CValue in $methodName has no literal C name"))
+              requireCTypeSpelling(
+                literalArgument(name).getOrElse(report.errorAndAbort(s"CValue in $methodName has no literal C name")),
+                "CValue"
+              )
             case AppliedType(constructor, List(arguments, callbackResult))
                 if constructor.typeSymbol.fullName == "net.kurobako.gemstone.abi.Callback" =>
               val parameterTypes     = tupleElements(arguments).map(loop)
@@ -97,8 +175,11 @@ object ABIDerivation {
                 })"
             case AppliedType(constructor, List(name, _, _))
                 if constructor.typeSymbol.fullName == "net.kurobako.gemstone.abi.CallbackTypedef" =>
-              literalArgument(name)
-                .getOrElse(report.errorAndAbort(s"CallbackTypedef in $methodName has no literal C name"))
+              requireCIdentifier(
+                literalArgument(name)
+                  .getOrElse(report.errorAndAbort(s"CallbackTypedef in $methodName has no literal C name")),
+                "CallbackTypedef"
+              )
             case _ if tpe.typeSymbol.fullName == "net.kurobako.gemstone.abi.CallbackData" => "void *"
             case AppliedType(constructor, List(element, count))
                 if constructor.typeSymbol.fullName == "net.kurobako.gemstone.abi.CArray" =>
@@ -106,6 +187,7 @@ object ABIDerivation {
                 case ConstantType(IntConstant(value)) => value
                 case _ => report.errorAndAbort(s"CArray in $methodName has no literal size")
               }
+              if (size <= 0) report.errorAndAbort(s"CArray in $methodName must have a positive size, found $size")
               s"${loop(element)}[$size]"
             case AppliedType(constructor, List(element, mode, extent))
                 if constructor.typeSymbol.fullName == "net.kurobako.gemstone.abi.Pointer" =>
@@ -114,7 +196,12 @@ object ABIDerivation {
                   "net.kurobako.gemstone.abi.CountedBy"
               pointer(if (countedBytes) "void" else loop(element), mode.dealias =:= TypeRepr.of[Read])
             case AppliedType(constructor, List(value))
-                if constructor.typeSymbol.fullName == "scala.Option" => loop(value)
+                if constructor.typeSymbol.fullName == "net.kurobako.gemstone.abi.Nullable" =>
+              if (!pointerShaped(value))
+                report.errorAndAbort(
+                  s"Nullable in $methodName/$parameterName requires a pointer-shaped ABI value, found ${value.show}"
+                )
+              loop(value)
             case _ if tpe =:= TypeRepr.of[Unit]                                    => "void"
             case _ if tpe =:= TypeRepr.of[Boolean]                                 => "bool"
             case _ if tpe =:= TypeRepr.of[Byte]                                    => "char"
@@ -199,10 +286,15 @@ object ABIDerivation {
       method: quotes.reflect.Symbol
   ): Expr[MethodImplementation] =
     if (method.flags.is(quotes.reflect.Flags.Deferred)) '{ MethodImplementation.Remote }
-    else
-      nativeDelegate(method).fold[Expr[MethodImplementation]]('{ MethodImplementation.Unsupported }) { target =>
-        '{ MethodImplementation.NativeDelegate(${ Expr(target) }) }
-      }
+    else nativeDelegate(method) match {
+      case Some(target)                        => '{ MethodImplementation.NativeDelegate(${ Expr(target) }) }
+      case None if retainedUnsupported(method) => '{ MethodImplementation.Unsupported }
+      case None                                =>
+        abortAt(
+          method,
+          s"concrete ABI method ${method.name} must consist solely of delegate[\"target\"](...) or unsupported"
+        )
+    }
 
   private def publicMethods(using quotes: Quotes)(interface: quotes.reflect.Symbol): Vector[quotes.reflect.Symbol] = {
     import quotes.reflect.*
@@ -277,7 +369,7 @@ object ABIDerivation {
         targetOf(function).map(target => validateForwarding(target, arguments)).orElse(loop(function))
       case Inlined(Some(call), _, expansion) => loop(call).orElse(loop(expansion))
       case Inlined(None, _, expansion)       => loop(expansion)
-      case Block(_, expression)              => loop(expression)
+      case Block(Nil, expression)            => loop(expression)
       case Typed(expression, _)              => loop(expression)
       case _                                 => None
     }
@@ -285,6 +377,28 @@ object ABIDerivation {
     method.tree match {
       case DefDef(_, _, _, Some(body)) => loop(body)
       case _                           => None
+    }
+  }
+
+  private def retainedUnsupported(using quotes: Quotes)(method: quotes.reflect.Symbol): Boolean = {
+    import quotes.reflect.*
+
+    def marker(tree: Tree): Boolean =
+      tree.symbol.fullName == "net.kurobako.gemstone.abi.ABI$package$.unsupported"
+
+    def loop(tree: Tree): Boolean = tree match {
+      case Apply(function, Nil)                   => marker(function) || loop(function)
+      case expression: Term if marker(expression) => true
+      case Inlined(Some(call), _, expansion)      => loop(call) || loop(expansion)
+      case Inlined(None, _, expansion)            => loop(expansion)
+      case Block(Nil, expression)                 => loop(expression)
+      case Typed(expression, _)                   => loop(expression)
+      case _                                      => false
+    }
+
+    method.tree match {
+      case DefDef(_, _, _, Some(body)) => loop(body)
+      case _                           => false
     }
   }
 

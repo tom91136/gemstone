@@ -79,4 +79,39 @@ class RPCDerivationSuite extends munit.FunSuite {
     """)
     assert(errors.exists(_.message.contains("unsupported RPC wire type")))
   }
+
+  test("rejects invalid pointer extent relationships") {
+    val missingCount = typeCheckErrors("""
+      import net.kurobako.gemstone.abi.*
+      import net.kurobako.gemstone.cuda.CUDAStatus
+      import net.kurobako.gemstone.rpc.RPCDerivation
+      trait MissingCount {
+        def cuMissing(buffer: InputBuffer[Byte, "count"]): CUDAStatus
+      }
+      RPCDerivation.schema[MissingCount]
+    """)
+    assert(missingCount.exists(_.message.contains("parameter is absent")))
+
+    val nonIntegralCount = typeCheckErrors("""
+      import net.kurobako.gemstone.abi.*
+      import net.kurobako.gemstone.cuda.*
+      import net.kurobako.gemstone.rpc.RPCDerivation
+      trait NonIntegralCount {
+        def cuNonIntegral(buffer: InputBuffer[Byte, "count"], count: Stream): CUDAStatus
+      }
+      RPCDerivation.schema[NonIntegralCount]
+    """)
+    assert(nonIntegralCount.exists(_.message.contains("must have an integral ABI type")))
+
+    val invalidFixed = typeCheckErrors("""
+      import net.kurobako.gemstone.abi.*
+      import net.kurobako.gemstone.cuda.CUDAStatus
+      import net.kurobako.gemstone.rpc.RPCDerivation
+      trait InvalidFixed {
+        def cuInvalid(buffer: Pointer[Byte, Read, Fixed[0]]): CUDAStatus
+      }
+      RPCDerivation.schema[InvalidFixed]
+    """)
+    assert(invalidFixed.exists(_.message.contains("must be positive")))
+  }
 }

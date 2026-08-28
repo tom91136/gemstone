@@ -36,7 +36,8 @@ object RPCDerivation {
       val (rawParameters, resultType) = methodShape(interfaceType.memberType(method), method)
       requireCUDAStatus(resultType, method)
       val parameters = rawParameters.map { case (name, parameterType) => deriveParameter(name, parameterType, method) }
-      val messageId  = hashName(method.name)
+      validateExtents(parameters, method)
+      val messageId = hashName(method.name)
       (method, parameters, messageId)
     }
 
@@ -188,9 +189,32 @@ object RPCDerivation {
           WireExtent.CountedBy(parameter)
         case AppliedType(constructor, List(ConstantType(IntConstant(count))))
             if constructor.typeSymbol.fullName == "net.kurobako.gemstone.abi.Fixed" =>
+          if (count <= 0) abortAt(method, s"Fixed extent in ${method.name} must be positive, found $count")
           WireExtent.Fixed(count)
         case _ => abortAt(method, s"unsupported pointer extent ${value.show} in ${method.name}")
       }
+  }
+
+  private def validateExtents(using
+      quotes: Quotes
+  )(
+      parameters: Vector[DerivedParameter],
+      method: quotes.reflect.Symbol
+  ): Unit = {
+    val integralCounts = Set(WireType.Int32, WireType.UInt8, WireType.UInt32, WireType.SizeT)
+    parameters.foreach {
+      case parameter @ DerivedParameter(_, _, _, WireExtent.CountedBy(countName)) =>
+        parameters.find(_.name == countName) match {
+          case None =>
+            abortAt(method, s"${method.name}.${parameter.name} is CountedBy[$countName], but that parameter is absent")
+          case Some(count) if count.direction != WireDirection.In || count.extent != WireExtent.Value =>
+            abortAt(method, s"${method.name} count parameter $countName must be an input scalar")
+          case Some(count) if !integralCounts(count.wireType) =>
+            abortAt(method, s"${method.name} count parameter $countName must have an integral ABI type")
+          case Some(_) => ()
+        }
+      case _ => ()
+    }
   }
 
   private def wireType(using
@@ -231,7 +255,7 @@ object RPCDerivation {
             case _                  => abortAt(method, s"unsupported CUDA callback typedef $name in ${method.name}")
           }
         case AppliedType(option, List(element))
-            if option.typeSymbol.fullName == "scala.Option" && (
+            if option.typeSymbol.fullName == "net.kurobako.gemstone.abi.Nullable" && (
               element.dealias =:= TypeRepr.of[OpaquePointer] || (element.dealias match {
                 case AppliedType(pointer, List(nested, _, _)) =>
                   pointer.typeSymbol.fullName == "net.kurobako.gemstone.abi.Pointer" &&

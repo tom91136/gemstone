@@ -87,4 +87,66 @@ class ABIDerivationSuite extends munit.FunSuite {
     """)
     assert(errors.exists(_.message.contains("must forward every parameter exactly once")))
   }
+
+  test("concrete API methods must use a declarative implementation marker") {
+    val errors = typeCheckErrors("""
+      import net.kurobako.gemstone.abi.*
+      trait InvalidImplementation {
+        def accidentalLogic(value: Int): Int = value + 1
+      }
+      ABIDerivation.methods[InvalidImplementation]
+    """)
+    assert(errors.exists(_.message.contains("must consist solely")))
+  }
+
+  test("nullable ABI values must be pointer-shaped") {
+    val errors = typeCheckErrors("""
+      import net.kurobako.gemstone.abi.*
+      trait InvalidNullable {
+        def invalidNullable(value: Nullable[Int]): Unit
+      }
+      ABIDerivation.cFunctions[InvalidNullable]
+    """)
+    assert(errors.exists(_.message.contains("requires a pointer-shaped ABI value")))
+  }
+
+  test("literal ABI declarations reject malformed C spellings and array extents") {
+    val badType = typeCheckErrors("""
+      import net.kurobako.gemstone.abi.*
+      trait InvalidCValue {
+        def invalidType(value: CValue["int); injected("]): Unit
+      }
+      ABIDerivation.cFunctions[InvalidCValue]
+    """)
+    assert(badType.exists(_.message.contains("invalid C type spelling")))
+
+    val badArray = typeCheckErrors("""
+      import net.kurobako.gemstone.abi.*
+      trait InvalidArray {
+        def invalidArray(value: CArray[Int, 0]): Unit
+      }
+      ABIDerivation.cFunctions[InvalidArray]
+    """)
+    assert(badArray.exists(_.message.contains("must have a positive size")))
+  }
+
+  test("ABI pointer counts must name an integral parameter") {
+    val missing = typeCheckErrors("""
+      import net.kurobako.gemstone.abi.*
+      trait MissingCount {
+        def copy(buffer: InputBuffer[Byte, "count"]): Unit
+      }
+      ABIDerivation.cFunctions[MissingCount]
+    """)
+    assert(missing.exists(_.message.contains("parameter is absent")))
+
+    val nonIntegral = typeCheckErrors("""
+      import net.kurobako.gemstone.abi.*
+      trait NonIntegralCount {
+        def copy(buffer: InputBuffer[Byte, "count"], count: Double): Unit
+      }
+      ABIDerivation.cFunctions[NonIntegralCount]
+    """)
+    assert(nonIntegral.exists(_.message.contains("must have an integral ABI type")))
+  }
 }

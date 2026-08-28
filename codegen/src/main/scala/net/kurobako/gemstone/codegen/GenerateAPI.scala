@@ -1381,12 +1381,12 @@ object GenerateAPI {
         |
         |  private def invalid(message: String): RPCResponse = RPCResponse.Failure(CUDAError(999, message))
         |
-        |  private def writeOne[A, Mode <: Access, Size <: Extent](pointer: Pointer[A, Mode, Size], value: A)(using CanWrite[Mode]): Boolean = {
+        |  private def writeOne[A, Mode <: Access, Size <: Extent](pointer: Pointer[A, Mode, Size], value: A)(using CanWrite[Mode], CanDereference[Size]): Boolean = {
         |    pointer.write(value)
         |    true
         |  }
         |
-        |  private def writeBytes[Mode <: Access, Size <: Extent](pointer: Pointer[Byte, Mode, Size], value: IArray[Byte])(using CanWrite[Mode]): Boolean = {
+        |  private def writeBytes[Mode <: Access, Size <: Extent](pointer: Pointer[Byte, Mode, Size], value: IArray[Byte])(using CanWrite[Mode], CanDereference[Size]): Boolean = {
         |    if (pointer.length != value.length) false
         |    else {
         |      var index = 0
@@ -1494,7 +1494,7 @@ object GenerateAPI {
 
   private def decodeWireValue(wireType: WireType, value: String): String = wireType match {
     case WireType.NullableOpaquePointer =>
-      s"if ($value) throw new IllegalArgumentException(\"non-null opaque RPC pointers are unsupported\") else None"
+      s"if ($value) throw new IllegalArgumentException(\"non-null opaque RPC pointers are unsupported\") else Nullable.Null"
     case _ => value
   }
 
@@ -1519,7 +1519,7 @@ object GenerateAPI {
     case WireType.ByteBuffer            => "IArray[Byte]"
     case WireType.KernelParameters      => "KernelParameters"
     case WireType.NullableOpaquePointer =>
-      "Option[Pointer[net.kurobako.gemstone.abi.OpaquePointer, ReadWrite, Opaque]]"
+      "Nullable[Pointer[net.kurobako.gemstone.abi.OpaquePointer, ReadWrite, Opaque]]"
     case WireType.CallbackData       => "CallbackData"
     case WireType.CUDAHostCallback   => "CUhostFn"
     case WireType.CUDAStreamCallback => "CUstreamCallback"
@@ -1546,11 +1546,12 @@ object GenerateAPI {
     case WireType.Stream                => s"WireValue.StreamValue($value)"
     case WireType.ByteBuffer            => s"WireValue.ByteBufferValue($value)"
     case WireType.KernelParameters      => s"WireValue.KernelParametersValue($value)"
-    case WireType.NullableOpaquePointer => s"WireValue.NullableOpaquePointerValue($value.nonEmpty)"
-    case WireType.CallbackData          => s"WireValue.CallbackDataValue($value)"
-    case WireType.CUDAHostCallback      => s"WireValue.CUDAHostCallbackValue($value)"
-    case WireType.CUDAStreamCallback    => s"WireValue.CUDAStreamCallbackValue($value)"
-    case WireType.CUDAStatus            => s"WireValue.CUDAStatusValue($value)"
+    case WireType.NullableOpaquePointer =>
+      s"WireValue.NullableOpaquePointerValue($value.toOption.nonEmpty)"
+    case WireType.CallbackData       => s"WireValue.CallbackDataValue($value)"
+    case WireType.CUDAHostCallback   => s"WireValue.CUDAHostCallbackValue($value)"
+    case WireType.CUDAStreamCallback => s"WireValue.CUDAStreamCallbackValue($value)"
+    case WireType.CUDAStatus         => s"WireValue.CUDAStatusValue($value)"
   }
 
   private def decodePattern(wireType: WireType, binding: String): String = wireType match {
