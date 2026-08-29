@@ -1,0 +1,169 @@
+package net.kurobako.gemstone.isa.ptx.v9_3
+
+import net.kurobako.gemstone.Col
+import net.kurobako.gemstone.Col.*
+import net.kurobako.gemstone.isa.ValidationResult
+
+final case class PTXVersion(major: Int, minor: Int) extends Ordered[PTXVersion] {
+  override def compare(that: PTXVersion): Int = Ordering[(Int, Int)].compare((major, minor), (that.major, that.minor))
+  override def toString: String               = s"$major.$minor"
+}
+
+object PTXVersion {
+  def parse(value: String): Either[String, PTXVersion] = value match {
+    case s"$major.$minor" =>
+      for {
+        majorValue <- major.toIntOption.toRight(s"invalid PTX version '$value'")
+        minorValue <- minor.toIntOption.toRight(s"invalid PTX version '$value'")
+      } yield PTXVersion(majorValue, minorValue)
+    case _ => Left(s"invalid PTX version '$value'")
+  }
+}
+
+final case class SMTarget(computeCapability: Int) extends Ordered[SMTarget] {
+  override def compare(that: SMTarget): Int = computeCapability.compare(that.computeCapability)
+  override def toString: String             = s"sm_$computeCapability"
+}
+
+object SMTarget {
+  def parse(value: String): Either[String, SMTarget] = {
+    val normalized = value.toLowerCase.stripPrefix("sm_").stripSuffix("a").stripSuffix("f")
+    normalized.toIntOption.filter(_ >= 10).map(SMTarget.apply).toRight(s"invalid SM target '$value'")
+  }
+}
+
+enum OperandConstraint {
+  case Register
+  case Address
+  case VectorOperand
+  case Symbol
+  case Value
+  case Unknown(sourceName: String)
+}
+
+/** One normalized alternative from an instruction's Syntax rubric. Each required modifier group contributes exactly one
+  * member; optional modifiers may appear independently.
+  */
+final case class InstructionForm(
+    opcode: String,
+    operands: Col[OperandConstraint],
+    requiredModifierGroups: Col[Set[String]],
+    optionalModifiers: Set[String],
+    complete: Boolean
+)
+
+enum ValidationIssue {
+  case VersionTooOld(opcode: String, required: PTXVersion, selected: PTXVersion)
+  case TargetTooOld(opcode: String, required: SMTarget, selected: SMTarget)
+  case InvalidOperands(opcode: String, message: String)
+  case InvalidModifiers(opcode: String, message: String)
+  case Incomplete(detail: String)
+}
+
+object Validator {
+  def validate(
+      instruction: Instruction,
+      version: PTXVersion,
+      target: SMTarget
+  ): ValidationResult[ValidationIssue] = {
+    val candidates = instruction.meta.entries
+    val available  = candidates.filter(info => version >= info.introduced && target >= info.minimumTarget)
+    if (available.isEmpty) {
+      val versionErrors = candidates.filter(_.introduced > version).map(info =>
+        ValidationIssue.VersionTooOld(instruction.opcode, info.introduced, version)
+      )
+      val targetErrors = candidates.filter(_.minimumTarget > target).map(info =>
+        ValidationIssue.TargetTooOld(instruction.opcode, info.minimumTarget, target)
+      )
+      ValidationResult.Invalid((versionErrors ++ targetErrors).distinct)
+    } else validateForms(instruction, available.flatMap(_.forms))
+  }
+
+  def validate(
+      program: Program,
+      version: PTXVersion,
+      target: SMTarget
+  ): ValidationResult[ValidationIssue] = {
+    val instructions = collectInstructions(program.statements)
+    val results      = instructions.map(validate(_, version, target))
+    val errors       = results.collect { case ValidationResult.Invalid(values) => values }.flatten
+    if (errors.nonEmpty) ValidationResult.Invalid(errors)
+    else
+      results.collectFirst { case value @ ValidationResult.Unsupported(_) => value }.getOrElse(ValidationResult.Valid)
+  }
+
+  private def validateForms(
+      instruction: Instruction,
+      forms: Col[InstructionForm]
+  ): ValidationResult[ValidationIssue] =
+    if (forms.isEmpty)
+      unsupported(s"no normalized syntax form for ${instruction.qualifiedOpcode}")
+    else {
+      val sameCount = forms.filter(_.operands.size == instruction.operands.size)
+      if (sameCount.isEmpty)
+        ValidationResult.Invalid(
+          Col(
+            ValidationIssue.InvalidOperands(
+              instruction.opcode,
+              s"expected ${forms.map(_.operands.size).distinct.sorted.mkString(" or ")} operands, found ${instruction.operands.size}"
+            )
+          )
+        )
+      else {
+        val modifiers    = instruction.mods.map(_.name).toSet
+        val matchingMods = sameCount.filter(form => modifiersMatch(modifiers, form))
+        if (matchingMods.isEmpty)
+          ValidationResult.Invalid(
+            Col(ValidationIssue.InvalidModifiers(
+              instruction.opcode,
+              s"unsupported modifier set: ${modifiers.toArray.sorted.mkString(".")}"
+            ))
+          )
+        else {
+          val complete = matchingMods.filter(_.complete)
+          complete.find(form => operandsMatch(instruction.operands, form.operands)) match {
+            case Some(_)                   => ValidationResult.Valid
+            case None if complete.nonEmpty =>
+              ValidationResult.Invalid(
+                Col(ValidationIssue.InvalidOperands(
+                  instruction.opcode,
+                  "operand kinds do not match the syntax form"
+                ))
+              )
+            case None =>
+              unsupported(s"syntax form for ${instruction.qualifiedOpcode} is not fully normalized")
+          }
+        }
+      }
+    }
+
+  private def modifiersMatch(actual: Set[String], form: InstructionForm): Boolean = {
+    val allowed  = form.requiredModifierGroups.flatten.toSet ++ form.optionalModifiers
+    val required = form.requiredModifierGroups.forall(group => actual.count(group.contains) == 1)
+    required && actual.subsetOf(allowed)
+  }
+
+  private def unsupported(detail: String): ValidationResult[ValidationIssue] =
+    ValidationResult.Unsupported(Col(ValidationIssue.Incomplete(detail)))
+
+  private def operandsMatch(actual: Col[Operand], expected: Col[OperandConstraint]): Boolean =
+    actual.zip(expected).forall {
+      case (Operand.Register(_, _), OperandConstraint.Register)                 => true
+      case (Operand.WithPredicate(_, _), OperandConstraint.Register)            => true
+      case (_: Operand.Address, OperandConstraint.Address)                      => true
+      case (_: Operand.VectorLiteral, OperandConstraint.VectorOperand)          => true
+      case (_: Operand.Symbol | _: Operand.Qualifier, OperandConstraint.Symbol) => true
+      case (_, OperandConstraint.Value)                                         => true
+      case (_, OperandConstraint.Unknown(_))                                    => false
+      case _                                                                    => false
+    }
+
+  private def collectInstructions(statements: Col[Statement]): Col[Instruction] =
+    statements.flatMap {
+      case Statement.Instruction(value)         => Col(value)
+      case Statement.Block(body)                => collectInstructions(body)
+      case Statement.Entry(_, _, _, body)       => collectInstructions(body)
+      case Statement.Function(_, _, _, _, body) => body.iterator.flatMap(collectInstructions).toCol
+      case _                                    => Col.empty[Instruction]
+    }
+}

@@ -1095,6 +1095,6 @@ trait HSASurface {
 }
 
 object HSASurface {
-  val HeaderVersion: String = "7.2.3"
+  val HeaderVersion: String = "7.2.4"
   val SurfaceSize: Int = 256
 }

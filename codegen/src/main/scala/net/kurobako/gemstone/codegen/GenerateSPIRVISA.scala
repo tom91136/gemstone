@@ -4,18 +4,9 @@ import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
-import scala.collection.mutable
+import ujson.Value
 
 object GenerateSPIRVISA {
-  private enum JSON {
-    case Object(fields: Map[Predef.String, JSON])
-    case Array(values: Vector[JSON])
-    case String(value: Predef.String)
-    case Number(value: BigDecimal)
-    case Bool(value: Boolean)
-    case Null
-  }
-
   private final case class Operand(kind: String, name: Option[String], quantifier: Option[String])
   private final case class Enumerant(value: Long, parameters: Vector[String])
   private final case class OperandKind(kind: String, category: String, enumerants: Vector[Enumerant])
@@ -52,18 +43,18 @@ object GenerateSPIRVISA {
         s"generated SPIR-V reference suite for ${grammar.entries.size} opcodes and ${upstream.map(_._2.size).sum} upstream tests"
       )
     case _ =>
-      throw new IllegalArgumentException(
+      throw IllegalArgumentException(
         "usage: GenerateSPIRVISA instructions <grammar> <output> <package> | tests <grammar> <tests> <output> <package>"
       )
   }
 
   private def readGrammar(path: Path): Grammar = {
-    val root = new JSONParser(Files.readString(path, StandardCharsets.UTF_8)).parse() match {
-      case value: JSON.Object => value
-      case _                  => throw new IllegalArgumentException("SPIR-V grammar root is not an object")
+    val root = ujson.read(Files.readString(path, StandardCharsets.UTF_8)) match {
+      case value: ujson.Obj => value
+      case _                => throw IllegalArgumentException("SPIR-V grammar root is not an object")
     }
     val entries = arrayField(root, "instructions").map {
-      case obj: JSON.Object =>
+      case obj: ujson.Obj =>
         Entry(
           opcode = numberField(obj, "opcode"),
           name = stringField(obj, "opname"),
@@ -78,10 +69,10 @@ object GenerateSPIRVISA {
             )
           }
         )
-      case _ => throw new IllegalArgumentException("instruction entry is not an object")
+      case _ => throw IllegalArgumentException("instruction entry is not an object")
     }.sortBy(_.opcode)
     val kinds = arrayField(root, "operand_kinds").map {
-      case obj: JSON.Object =>
+      case obj: ujson.Obj =>
         OperandKind(
           kind = stringField(obj, "kind"),
           category = stringField(obj, "category"),
@@ -92,7 +83,7 @@ object GenerateSPIRVISA {
             )
           }.groupBy(_.value).values.map(_.head).toVector.sortBy(_.value)
         )
-      case _ => throw new IllegalArgumentException("operand kind is not an object")
+      case _ => throw IllegalArgumentException("operand kind is not an object")
     }
     Grammar(
       major = numberField(root, "major_version"),
@@ -107,80 +98,73 @@ object GenerateSPIRVISA {
     val entriesWithFields = grammar.entries.map(entry => entry -> fields(entry))
     val definitions       = entriesWithFields.map { case (entry, entryFields) => renderDefinition(entry, entryFields) }
     val cases             = entriesWithFields.map { case (entry, entryFields) => renderCase(entry, entryFields) }
-    val decoderValues     = entriesWithFields.zipWithIndex.map { case ((entry, entryFields), index) =>
-      renderDecoder(index, entry, entryFields)
-    }
-    val decoderChunks = decoderValues.grouped(40).zipWithIndex.map { case (values, index) =>
-      s"  private def decoders$index: Vector[Decoder] = Vector(\n${values.mkString(",\n")}\n  )"
-    }.toVector
-    val decoderExpression = decoderChunks.indices.map(index => s"decoders$index").mkString("Vector(", ", ", ").flatten")
     val kindValues        =
       grammar.kinds.filter(kind => kind.category == "ValueEnum" || kind.category == "BitEnum").map(renderKind)
     val kindChunks = kindValues.grouped(8).zipWithIndex.map { case (values, index) =>
-      s"  private def operandKinds$index: Vector[OperandKindInfo] = Vector(\n${values.mkString(",\n")}\n  )"
+      s"  private def operandKinds$index: Col[OperandKindInfo] = Col(\n${values.mkString(",\n")}\n  )"
     }.toVector
-    val kindExpression = kindChunks.indices.map(index => s"operandKinds$index").mkString("Vector(", ", ", ").flatten")
+    val kindExpression = kindChunks.indices.map(index => s"operandKinds$index").mkString("Col(", ", ", ").flatten")
     s"""|// Generated from the pinned Khronos SPIR-V core grammar. Do not edit by hand.
         |package net.kurobako.gemstone.isa.spirv.$packageVersion
+        |
+        |import net.kurobako.gemstone.Col
+        |import net.kurobako.gemstone.Col.*
         |
         |type Decoder = RawInstruction => Either[InstructionDecodeError, Instruction]
         |
         |enum InstructionDef(
         |    val opcode: Predef.String,
         |    val opcodeNumber: Int,
+        |    decode: InstructionDef => Decoder,
         |    val meta: Metadata
         |) {
         |${definitions.mkString("\n")}
         |
-        |  final lazy val decoder: Decoder = Instruction.decoderFor(ordinal)
+        |  final lazy val decoder: Decoder = decode(this)
         |}
         |
         |enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
         |${cases.mkString("\n")}
         |
-        |  final val operands: Vector[Operand] = operandValues.toVector
+        |  final val operands: Col[Operand] = operandValues.toCol
         |  final def opcode: Predef.String = definition.opcode
         |  final def opcodeNumber: Int = definition.opcodeNumber
         |  final def decoder: Decoder = definition.decoder
         |  final def meta: Metadata = definition.meta
         |}
         |
-        |val Version: SPIRVVersion = SPIRVVersion(${grammar.major}, ${grammar.minor})
-        |val GrammarRevision: Int = ${grammar.revision}
-        |val Instructions: Vector[InstructionDef] = InstructionDef.values.toVector
-        |
         |object Instruction {
-        |${decoderChunks.mkString("\n\n")}
+        |  val version: SPIRVVersion = SPIRVVersion(${grammar.major}, ${grammar.minor})
+        |  val grammarRevision: Int = ${grammar.revision}
+        |  val definitions: Col[InstructionDef] = InstructionDef.values.toCol
         |
         |${kindChunks.mkString("\n\n")}
-        |
-        |  private val decoders: Vector[Decoder] = $decoderExpression
         |
         |  private val operandKinds: Map[Predef.String, OperandKindInfo] =
         |    $kindExpression.iterator.map(value => value.kind -> value).toMap
         |
-        |  private val byNumber: Map[Int, Vector[InstructionDef]] =
-        |    Instructions.groupMap(_.opcodeNumber)(identity)
-        |  private val byOpcode: Map[Predef.String, Vector[InstructionDef]] =
-        |    Instructions.groupMap(_.opcode)(identity)
+        |  private val byNumber: Map[Int, Col[InstructionDef]] =
+        |    definitions.groupMap(_.opcodeNumber)(identity)
+        |  private val byOpcode: Map[Predef.String, Col[InstructionDef]] =
+        |    definitions.groupMap(_.opcode)(identity)
         |
-        |  def definitions(opcodeNumber: Int): Vector[InstructionDef] =
-        |    byNumber.getOrElse(opcodeNumber, Vector.empty[InstructionDef])
-        |  def definitions(opcode: Predef.String): Vector[InstructionDef] =
-        |    byOpcode.getOrElse(opcode, Vector.empty[InstructionDef])
+        |  def definitionsFor(opcodeNumber: Int): Col[InstructionDef] =
+        |    byNumber.getOrElse(opcodeNumber, Col.empty[InstructionDef])
+        |  def definitionsFor(opcode: Predef.String): Col[InstructionDef] =
+        |    byOpcode.getOrElse(opcode, Col.empty[InstructionDef])
         |
         |  def decode(raw: RawInstruction): Either[InstructionDecodeError, Instruction] = {
-        |    val candidates = definitions(raw.opcodeNumber)
+        |    val candidates = definitionsFor(raw.opcodeNumber)
         |    candidates match {
-        |      case Vector() => Left(InstructionDecodeError.UnknownOpcode(raw.opcodeNumber))
-        |      case Vector(definition) => definition.decoder(raw)
+        |      case Col() => Left(InstructionDecodeError.UnknownOpcode(raw.opcodeNumber))
+        |      case Col(definition) => definition.decoder(raw)
         |      case definitions =>
         |        val matches = definitions.flatMap(definition =>
         |          definition.decoder(raw).toOption.map(instruction => definition -> instruction)
         |        )
         |        matches match {
-        |          case Vector((_, instruction)) => Right(instruction)
-        |          case Vector() =>
+        |          case Col((_, instruction)) => Right(instruction)
+        |          case Col() =>
         |            Left(InstructionDecodeError.NoMatchingDefinition(raw.opcodeNumber, definitions.map(_.opcode)))
         |          case values =>
         |            Left(InstructionDecodeError.AmbiguousDefinition(raw.opcodeNumber, values.map(_._1.opcode)))
@@ -191,10 +175,8 @@ object GenerateSPIRVISA {
         |  def encode(instruction: Instruction): RawInstruction =
         |    RawInstruction(instruction.definition.opcodeNumber, instruction.operands.flatMap(_.words))
         |
-        |  def minimumOperandWords(definition: InstructionDef): Vector[Word] =
+        |  def minimumOperandWords(definition: InstructionDef): Col[Word] =
         |    OperandDecoder.minimumWords(definition.meta.operands, operandKinds)
-        |
-        |  private[v1_6] def decoderFor(ordinal: Int): Decoder = decoders(ordinal)
         |
         |  private[v1_6] def decodeDefinition(
         |      definition: InstructionDef,
@@ -212,23 +194,21 @@ object GenerateSPIRVISA {
   }
 
   private def renderDefinition(entry: Entry, fields: Vector[Field]): String = {
-    val caseName = normalizeCase(entry.name.stripPrefix("Op"))
-    s"  case $caseName extends InstructionDef(\"${escape(entry.name)}\", ${entry.opcode}, ${renderMetadata(entry, fields)})"
-  }
-
-  private def renderDecoder(index: Int, entry: Entry, fields: Vector[Field]): String = {
+    val caseName  = normalizeCase(entry.name.stripPrefix("Op"))
     val parameter = if (fields.isEmpty) "_" else "values"
-    s"    raw => Instruction.decodeDefinition(InstructionDef.fromOrdinal($index), raw, $parameter => ${construct(entry, fields)})"
+    val decoder   =
+      s"definition => raw => Instruction.decodeDefinition(definition, raw, $parameter => ${construct(entry, fields)})"
+    s"  case $caseName extends InstructionDef(\"${escape(entry.name)}\", ${entry.opcode}, $decoder, ${renderMetadata(entry, fields)})"
   }
 
   private def renderCase(entry: Entry, fields: Vector[Field]): String = {
     val caseName = normalizeCase(entry.name.stripPrefix("Op"))
-    if (fields.isEmpty) s"  case $caseName extends Instruction(InstructionDef.$caseName)"
+    if (fields.isEmpty) s"  case $caseName() extends Instruction(InstructionDef.$caseName)"
     else {
       val parameters = fields.map { field =>
         val fieldType = field.operand.quantifier match {
           case Some("?") => "Option[Operand]"
-          case Some("*") => "Vector[Operand]"
+          case Some("*") => "Col[Operand]"
           case _         => "Operand"
         }
         s"${field.name}: $fieldType"
@@ -237,26 +217,19 @@ object GenerateSPIRVISA {
         val operands = fields.map(_.name).mkString(", ")
         s"  case $caseName($parameters) extends Instruction(InstructionDef.$caseName, $operands)"
       } else {
-        val parts                 = Vector.newBuilder[String]
-        val required              = mutable.ArrayBuffer.empty[String]
-        def flushRequired(): Unit =
-          if (required.nonEmpty) {
-            parts += required.mkString("Vector(", ", ", ")")
-            required.clear()
-          }
-        fields.foreach { field =>
-          field.operand.quantifier match {
-            case Some("?") =>
-              flushRequired()
-              parts += s"${field.name}.toVector"
-            case Some("*") =>
-              flushRequired()
-              parts += field.name
-            case _ => required += field.name
-          }
+        def flush(parts: Vector[String], required: Vector[String]): Vector[String] =
+          if (required.isEmpty) parts else parts :+ required.mkString("Col(", ", ", ")")
+        val (parts, required) = fields.foldLeft((Vector.empty[String], Vector.empty[String])) {
+          case ((parts, required), field) =>
+            field.operand.quantifier match {
+              case Some("?") =>
+                (flush(parts, required) :+ s"${field.name}.toCol", Vector.empty)
+              case Some("*") =>
+                (flush(parts, required) :+ field.name, Vector.empty)
+              case _ => (parts, required :+ field.name)
+            }
         }
-        flushRequired()
-        val operands = parts.result().mkString(" ++ ")
+        val operands = flush(parts, required).mkString(" ++ ")
         s"  case $caseName($parameters) extends Instruction(InstructionDef.$caseName, ($operands)*)"
       }
     }
@@ -264,7 +237,7 @@ object GenerateSPIRVISA {
 
   private def renderMetadata(entry: Entry, fields: Vector[Field]): String = {
     val since        = entry.version.map(value => s"Some(\"${escape(value)}\")").getOrElse("None")
-    val capabilities = entry.capabilities.map(value => s"\"${escape(value)}\"").mkString("Vector(", ", ", ")")
+    val capabilities = entry.capabilities.map(value => s"\"${escape(value)}\"").mkString("Col(", ", ", ")")
     val operands     = fields.map { field =>
       val quantifier = field.operand.quantifier match {
         case Some("?") => "OperandQuantifier.Optional"
@@ -272,15 +245,15 @@ object GenerateSPIRVISA {
         case _         => "OperandQuantifier.One"
       }
       s"OperandShape(\"${escape(field.operand.kind)}\", \"${escape(field.name)}\", $quantifier)"
-    }.mkString("Vector(", ", ", ")")
+    }.mkString("Col(", ", ", ")")
     s"Metadata(\"${escape(entry.instructionClass)}\", $since, $capabilities, $operands)"
   }
 
   private def renderKind(kind: OperandKind): String = {
     val enumerants = kind.enumerants.map { enumerant =>
-      val parameters = enumerant.parameters.map(value => s"\"${escape(value)}\"").mkString("Vector(", ", ", ")")
+      val parameters = enumerant.parameters.map(value => s"\"${escape(value)}\"").mkString("Col(", ", ", ")")
       s"OperandEnumerant(${enumerant.value}L, $parameters)"
-    }.mkString("Vector(", ", ", ")")
+    }.mkString("Col(", ", ", ")")
     s"    OperandKindInfo(\"${escape(kind.kind)}\", \"${escape(kind.category)}\", $enumerants)"
   }
 
@@ -293,7 +266,7 @@ object GenerateSPIRVISA {
         case _         => s"values.required($index)"
       }
     }
-    if (arguments.isEmpty) s"Instruction.$caseName"
+    if (arguments.isEmpty) s"Instruction.$caseName()"
     else s"Instruction.$caseName(${arguments.mkString(", ")})"
   }
 
@@ -321,13 +294,13 @@ object GenerateSPIRVISA {
       name
     }
     val counts = bases.groupMapReduce(identity)(_ => 1)(_ + _)
-    val seen   = mutable.HashMap.empty[String, Int].withDefaultValue(0)
-    entry.operands.zip(bases).map { case (operand, base) =>
-      val occurrence = seen(base)
-      seen.update(base, occurrence + 1)
-      val name = if (counts(base) == 1) base else s"$base${letter(occurrence)}"
-      Field(name, operand)
-    }
+    entry.operands.zip(bases).foldLeft((Map.empty[String, Int], Vector.empty[Field])) {
+      case ((seen, fields), (operand, base)) =>
+        val occurrence = seen.getOrElse(base, 0)
+        val name       = if (counts(base) == 1) base else s"$base${letter(occurrence)}"
+        val next       = (seen.updated(base, occurrence + 1), fields :+ Field(name, operand))
+        next
+    }._2
   }
 
   private def normalizeCase(value: String): String = {
@@ -381,6 +354,8 @@ object GenerateSPIRVISA {
     s"""|// Generated from pinned Khronos grammar and SPIRV-Tools tests. Do not edit by hand.
         |package net.kurobako.gemstone.isa.spirv.$packageVersion
         |
+        |import net.kurobako.gemstone.Col
+        |
         |final class ReferenceSuite extends munit.FunSuite {
         |  private val upstreamTestCounts: Map[String, Int] = Map(
         |$sourceRows
@@ -397,59 +372,59 @@ object GenerateSPIRVISA {
         |      }
         |
         |  test("every grammar opcode decodes to a typed case and round-trips little endian") {
-        |    assertEquals(Instructions.size, $opcodeCount)
-        |    Instructions.foreach { definition =>
+        |    assertEquals(Instruction.definitions.size, $opcodeCount)
+        |    Instruction.definitions.foreach { definition =>
         |      val rawInstruction = RawInstruction(definition.opcodeNumber, Instruction.minimumOperandWords(definition))
         |      val instruction = Instruction.decode(rawInstruction).fold(error => fail(s"$${definition.opcode}: $${error.message}"), identity)
         |      assertEquals(instruction.definition, definition, definition.opcode)
         |      assert(same(Instruction.encode(instruction), rawInstruction), definition.opcode)
         |      val rawModule = RawModule(
-        |        Header(Version, Word(0), Word(1), Word(0)),
-        |        Vector(rawInstruction),
+        |        Header(ISA.version, Word(0), Word(1), Word(0)),
+        |        Col(rawInstruction),
         |        Endianness.Little
         |      )
-        |      val bytes = Binary.serialize(rawModule).fold(error => fail(error.message), identity)
-        |      assert(Binary.parse(bytes).exists(same(_, rawModule)), definition.opcode)
+        |      val bytes = Binary.encode(rawModule).fold(error => fail(error.message), identity)
+        |      assert(Binary.decode(bytes).exists(same(_, rawModule)), definition.opcode)
         |    }
         |  }
         |
         |  test("SPIRV-Tools endian oracle is represented") {
         |    assert(upstreamTestCounts("binary_endianness_test.cpp") > 0)
-        |    val module = RawModule(Header(Version, Word(7), Word(2), Word(0)), Vector.empty, Endianness.Big)
-        |    val bytes = Binary.serialize(module).fold(error => fail(error.message), identity)
-        |    assert(Binary.parse(bytes).exists(same(_, module)))
+        |    val module = RawModule(Header(ISA.version, Word(7), Word(2), Word(0)), Col.empty, Endianness.Big)
+        |    val bytes = Binary.encode(module).fold(error => fail(error.message), identity)
+        |    assert(Binary.decode(bytes).exists(same(_, module)))
         |  }
         |
         |  test("SPIRV-Tools parser negative classes are fail-closed") {
         |    assert(upstreamTestCounts("binary_parse_test.cpp") >= 20)
-        |    val malformed = Vector(
-        |      IArray[Byte](1, 2, 3),
+        |    val malformed = Col(
+        |      Col[Byte](1, 2, 3),
         |      words(0x07230203, 0x00010600, 0, 1),
         |      words(0xdeadbeef, 0x00010600, 0, 1, 0),
         |      words(0x07230203, 0x00010600, 0, 1, 0, 0),
         |      words(0x07230203, 0x00010600, 0, 1, 0, (3 << 16) | 17, 6)
         |    )
-        |    malformed.foreach(bytes => assert(Binary.parse(bytes).isLeft))
+        |    malformed.foreach(bytes => assert(Binary.decode(bytes).isLeft))
         |  }
         |
         |  test("unknown binary opcodes round-trip raw but fail typed decode") {
-        |    val raw = RawInstruction(65535, Vector(Word(7)))
+        |    val raw = RawInstruction(65535, Col(Word(7)))
         |    assertEquals(Instruction.decode(raw), Left(InstructionDecodeError.UnknownOpcode(65535)))
-        |    val module = RawModule(Header(Version, Word(0), Word(1), Word(0)), Vector(raw), Endianness.Little)
-        |    val bytes = Binary.serialize(module).fold(error => fail(error.message), identity)
-        |    assert(Binary.parse(bytes).exists(same(_, module)))
+        |    val module = RawModule(Header(ISA.version, Word(0), Word(1), Word(0)), Col(raw), Endianness.Little)
+        |    val bytes = Binary.encode(module).fold(error => fail(error.message), identity)
+        |    assert(Binary.decode(bytes).exists(same(_, module)))
         |  }
         |
         |  test("known opcodes with malformed grammar operands fail typed decode") {
-        |    Instruction.decode(RawInstruction(17, Vector.empty)) match {
+        |    Instruction.decode(RawInstruction(17, Col.empty)) match {
         |      case Left(InstructionDecodeError.InvalidOperandCount("OpCapability", _)) => ()
         |      case other => fail(s"expected missing-operand failure, found $$other")
         |    }
-        |    Instruction.decode(RawInstruction(17, Vector(Word(-1)))) match {
+        |    Instruction.decode(RawInstruction(17, Col(Word(-1)))) match {
         |      case Left(InstructionDecodeError.InvalidEnumerant("Capability", 0xffffffffL)) => ()
         |      case other => fail(s"expected invalid-enumerant failure, found $$other")
         |    }
-        |    Instruction.decode(RawInstruction(5, Vector(Word(1), Word(-1)))) match {
+        |    Instruction.decode(RawInstruction(5, Col(Word(1), Word(-1)))) match {
         |      case Left(InstructionDecodeError.UnterminatedString("OpName")) => ()
         |      case other => fail(s"expected unterminated-string failure, found $$other")
         |    }
@@ -459,60 +434,53 @@ object GenerateSPIRVISA {
         |    assert(upstreamTestCounts("val/val_opencl_test.cpp") >= 10)
         |  }
         |
-        |  private def words(values: Int*): IArray[Byte] = {
-        |    val bytes = new Array[Byte](values.size * 4)
-        |    values.zipWithIndex.foreach { case (value, index) =>
-        |      bytes(index * 4) = value.toByte
-        |      bytes(index * 4 + 1) = (value >>> 8).toByte
-        |      bytes(index * 4 + 2) = (value >>> 16).toByte
-        |      bytes(index * 4 + 3) = (value >>> 24).toByte
-        |    }
-        |    IArray.unsafeFromArray(bytes)
+        |  private def words(values: Int*): Col[Byte] = Col.from(values).flatMap { value =>
+        |    Col(value.toByte, (value >>> 8).toByte, (value >>> 16).toByte, (value >>> 24).toByte)
         |  }
         |}
         |""".stripMargin
   }
 
-  private def field(obj: JSON.Object, name: String): JSON =
-    obj.fields.getOrElse(name, throw new IllegalArgumentException(s"missing JSON field $name"))
-  private def valueField(obj: JSON.Object, name: String): JSON         = field(obj, name)
-  private def arrayField(obj: JSON.Object, name: String): Vector[JSON] = field(obj, name) match {
-    case JSON.Array(values) => values
-    case _                  => throw new IllegalArgumentException(s"JSON field $name is not an array")
+  private def field(obj: ujson.Obj, name: String): Value =
+    obj.value.getOrElse(name, throw IllegalArgumentException(s"missing JSON field $name"))
+  private def valueField(obj: ujson.Obj, name: String): Value         = field(obj, name)
+  private def arrayField(obj: ujson.Obj, name: String): Vector[Value] = field(obj, name) match {
+    case ujson.Arr(values) => values.toVector
+    case _                 => throw IllegalArgumentException(s"JSON field $name is not an array")
   }
-  private def optionalObjectArray(obj: JSON.Object, name: String): Vector[JSON.Object] = obj.fields.get(name).toVector
+  private def optionalObjectArray(obj: ujson.Obj, name: String): Vector[ujson.Obj] = obj.value.get(name).toVector
     .flatMap {
-      case JSON.Array(values) => values.map {
-          case value: JSON.Object => value
-          case _                  => throw new IllegalArgumentException(s"JSON field $name contains a non-object")
+      case ujson.Arr(values) => values.toVector.map {
+          case value: ujson.Obj => value
+          case _                => throw IllegalArgumentException(s"JSON field $name contains a non-object")
         }
-      case _ => throw new IllegalArgumentException(s"JSON field $name is not an array")
+      case _ => throw IllegalArgumentException(s"JSON field $name is not an array")
     }
-  private def optionalStringArray(obj: JSON.Object, name: String): Vector[String] = obj.fields.get(name).toVector
+  private def optionalStringArray(obj: ujson.Obj, name: String): Vector[String] = obj.value.get(name).toVector
     .flatMap {
-      case JSON.Array(values) => values.map {
-          case JSON.String(value) => value
-          case _                  => throw new IllegalArgumentException(s"JSON field $name contains a non-string")
+      case ujson.Arr(values) => values.toVector.map {
+          case ujson.Str(value) => value
+          case _                => throw IllegalArgumentException(s"JSON field $name contains a non-string")
         }
-      case _ => throw new IllegalArgumentException(s"JSON field $name is not an array")
+      case _ => throw IllegalArgumentException(s"JSON field $name is not an array")
     }
-  private def stringField(obj: JSON.Object, name: String): String = field(obj, name) match {
-    case JSON.String(value) => value
-    case _                  => throw new IllegalArgumentException(s"JSON field $name is not a string")
+  private def stringField(obj: ujson.Obj, name: String): String = field(obj, name) match {
+    case ujson.Str(value) => value
+    case _                => throw IllegalArgumentException(s"JSON field $name is not a string")
   }
-  private def optionalString(obj: JSON.Object, name: String): Option[String] = obj.fields.get(name).map {
-    case JSON.String(value) => value
-    case _                  => throw new IllegalArgumentException(s"JSON field $name is not a string")
+  private def optionalString(obj: ujson.Obj, name: String): Option[String] = obj.value.get(name).map {
+    case ujson.Str(value) => value
+    case _                => throw IllegalArgumentException(s"JSON field $name is not a string")
   }
-  private def numberField(obj: JSON.Object, name: String): Int = field(obj, name) match {
-    case JSON.Number(value) if value.isValidInt => value.toInt
-    case _                                      => throw new IllegalArgumentException(s"JSON field $name is not an int")
+  private def numberField(obj: ujson.Obj, name: String): Int = field(obj, name) match {
+    case ujson.Num(value) if value.isValidInt => value.toInt
+    case _                                    => throw IllegalArgumentException(s"JSON field $name is not an int")
   }
-  private def parseUnsigned(value: JSON): Long = value match {
-    case JSON.String(text) if text.startsWith("0x") => java.lang.Long.parseUnsignedLong(text.drop(2), 16)
-    case JSON.String(text)                          => java.lang.Long.parseLong(text)
-    case JSON.Number(number) if number.isValidLong  => number.toLong
-    case _ => throw new IllegalArgumentException("enumerant value is not an integer")
+  private def parseUnsigned(value: Value): Long = value match {
+    case ujson.Str(text) if text.startsWith("0x") => java.lang.Long.parseUnsignedLong(text.drop(2), 16)
+    case ujson.Str(text)                          => java.lang.Long.parseLong(text)
+    case ujson.Num(number) if number.isWhole && number >= Long.MinValue && number <= Long.MaxValue => number.toLong
+    case _ => throw IllegalArgumentException("enumerant value is not an integer")
   }
   private def escape(value: String): String = value.flatMap {
     case '\\' => "\\\\"
@@ -526,111 +494,7 @@ object GenerateSPIRVISA {
   private def write(path: Path, content: String): Unit = {
     val formatted = GeneratedScalaFormatter(path, content)
     val _         = Files.createDirectories(path.getParent)
-    val _         = Files.writeString(path, formatted, StandardCharsets.UTF_8)
+    val _         = GeneratedFiles.write(path, formatted)
   }
 
-  private final class JSONParser(source: String) {
-    private var index = 0
-    def parse(): JSON = {
-      val value = parseValue()
-      whitespace()
-      require(index == source.length, s"trailing JSON at offset $index")
-      value
-    }
-    private def parseValue(): JSON = {
-      whitespace()
-      if (index >= source.length) fail("unexpected end of JSON")
-      source.charAt(index) match {
-        case '{'                                 => parseObject()
-        case '['                                 => parseArray()
-        case '"'                                 => JSON.String(parseString())
-        case 't'                                 => literal("true", JSON.Bool(true))
-        case 'f'                                 => literal("false", JSON.Bool(false))
-        case 'n'                                 => literal("null", JSON.Null)
-        case char if char == '-' || char.isDigit => parseNumber()
-        case char                                => fail(s"unexpected JSON character '$char'")
-      }
-    }
-    private def parseObject(): JSON.Object = {
-      index += 1
-      whitespace()
-      val fields = Map.newBuilder[String, JSON]
-      if (consume('}')) return JSON.Object(fields.result())
-      var done = false
-      while (!done) {
-        whitespace()
-        if (index >= source.length || source.charAt(index) != '"') fail("expected object key")
-        val name = parseString()
-        whitespace()
-        expect(':')
-        fields += name -> parseValue()
-        whitespace()
-        if (consume('}')) done = true else expect(',')
-      }
-      JSON.Object(fields.result())
-    }
-    private def parseArray(): JSON.Array = {
-      index += 1
-      whitespace()
-      val values = Vector.newBuilder[JSON]
-      if (consume(']')) return JSON.Array(values.result())
-      var done = false
-      while (!done) {
-        values += parseValue()
-        whitespace()
-        if (consume(']')) done = true else expect(',')
-      }
-      JSON.Array(values.result())
-    }
-    private def parseString(): String = {
-      expect('"')
-      val result = new StringBuilder
-      var done   = false
-      while (!done && index < source.length) {
-        val char = source.charAt(index)
-        index += 1
-        char match {
-          case '"'  => done = true
-          case '\\' =>
-            if (index >= source.length) fail("unterminated escape")
-            val escaped = source.charAt(index)
-            index += 1
-            escaped match {
-              case '"'  => result += '"'
-              case '\\' => result += '\\'
-              case '/'  => result += '/'
-              case 'b'  => result += '\b'
-              case 'f'  => result += '\f'
-              case 'n'  => result += '\n'
-              case 'r'  => result += '\r'
-              case 't'  => result += '\t'
-              case 'u'  =>
-                if (index + 4 > source.length) fail("short unicode escape")
-                result += Integer.parseInt(source.substring(index, index + 4), 16).toChar
-                index += 4
-              case other => fail(s"invalid escape '$other'")
-            }
-          case other => result += other
-        }
-      }
-      if (!done) fail("unterminated string")
-      result.result()
-    }
-    private def parseNumber(): JSON.Number = {
-      val start = index
-      while (index < source.length && "-+0123456789.eE".contains(source.charAt(index))) index += 1
-      JSON.Number(BigDecimal(source.substring(start, index)))
-    }
-    private def literal(value: String, result: JSON): JSON = {
-      if (!source.startsWith(value, index)) fail(s"expected $value")
-      index += value.length
-      result
-    }
-    private def whitespace(): Unit = while (index < source.length && source.charAt(index).isWhitespace) index += 1
-    private def consume(char: Char): Boolean =
-      if (index < source.length && source.charAt(index) == char) { index += 1; true }
-      else false
-    private def expect(char: Char): Unit       = if (!consume(char)) fail(s"expected '$char'")
-    private def fail(message: String): Nothing = throw new IllegalArgumentException(s"$message at JSON offset $index")
-  }
 }

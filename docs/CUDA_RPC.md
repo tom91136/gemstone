@@ -20,9 +20,11 @@ allowing a hash collision, stale client, or corrupt mapping to silently invoke a
 
 The generator emits:
 
-- `generated/manifest/cuda-rpc-schema.json`: reviewed names, types, IDs, and fingerprint;
-- `generated/c/gemstone_cuda_rpc.inc`: C constants for the same methods and IDs;
-- `generated/c/gemstone_cuda_rpc_client.c`: exact Driver ABI entry points and typed binary marshalling;
+- `runtime/cuda/generated/manifest/cuda-rpc-schema.json`: reviewed names, types, IDs, and fingerprint;
+- `api/src/generated/manifest/official-api-headers.json`: normalized declarations from the pinned vendor headers used
+  to validate every API surface;
+- `runtime/cuda/generated/c/gemstone_cuda_rpc.inc`: C constants for the same methods and IDs;
+- `runtime/cuda/generated/c/gemstone_cuda_rpc_client.c`: exact Driver ABI entry points and typed binary marshalling;
 - `api/src/generated/main/scala/.../GeneratedCUDARPC.scala`: a typed `CUDA` client and receiving dispatcher.
 
 `CUDAEmulatorServer` is a normal implementation of `CUDA`. The JVM and Scala Native tests run the generated client
@@ -37,15 +39,15 @@ returns a checked parameter-width signature to the native facade. At launch, tha
 each value behind CUDA's otherwise untyped `void **kernelParams` array into the request. The JVM therefore receives
 owned argument bytes, dimensions, and opaque handles rather than process addresses.
 
-`CUDAConformanceSuite` is the external-language path. It discovers the pragma-described CUDA translation units,
-compiles each enabled backend with `nvcc`, and runs them against either NVIDIA CUDA or the generated Gemstone
-`libcuda.so.1`. The GPUOcelot-derived memory and module-launch Driver cases now run on both backends. The PTX vector
-addition case additionally runs through the same external ABI/RPC path and through the direct Scala semantic oracle.
-JSON-lines recordings include exact names, IDs, payload sizes, statuses, and response sizes.
+`CUDAConformanceSuite` is the external-language path. It compiles every pragma-described translation unit exactly once
+with the normal `nvcc` command and stock CUDA libraries. The same executable first runs against NVIDIA as the oracle,
+then unchanged through the generated Gemstone `libcuda.so.1`. Runtime-API tests retain stock `libcudart`; interception
+happens at the downstream Driver boundary. The PTX vector-addition case additionally runs through the direct Scala
+semantic oracle.
 
-For Runtime tests that contain no device code, the generated facade also provides local `cudaMalloc`, `cudaFree`, and
-`cudaMemcpy` compatibility wrappers composed from the typed Driver RPC methods. Minimal fat-binary registration hooks
-allow current `nvcc --cudart=none` host objects to link, but do not claim Runtime kernel-registration support.
+Every Gemstone execution receives a fresh authenticated endpoint. A successful process with no observed CUDA request
+is rejected, so a loader mistake or vendor-only execution cannot appear green. The source has no Gemstone ABI define,
+alternate link line, or `--cudart=none` mode.
 
 The pinned CUDA 13.3 Driver inventory is expressed directly by the generated base trait and checked to contain 484
 unique symbols, including the retained compatibility entry point. A call moves from a concrete not-supported method

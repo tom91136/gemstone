@@ -1,0 +1,78 @@
+package net.kurobako.gemstone.binary
+
+/** Raw IEEE-754 interchange encodings used by ISA registers and memory. */
+object IEEE754 {
+  inline def binary32ToFloat(bits: Long): Float = java.lang.Float.intBitsToFloat(bits.toInt)
+
+  inline def floatToBinary32(value: Float): Long = Bits.unsigned32(java.lang.Float.floatToRawIntBits(value))
+
+  inline def binary64ToDouble(bits: Long): Double = java.lang.Double.longBitsToDouble(bits)
+
+  inline def doubleToBinary64(value: Double): Long = java.lang.Double.doubleToRawLongBits(value)
+
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+  def binary16ToFloat(value: Long): Float = {
+    val bits16   = value.toInt
+    val sign     = (bits16 & 0x8000) << 16
+    val exponent = (bits16 >>> 10) & 0x1f
+    val fraction = bits16 & 0x3ff
+    val bits32   =
+      if (exponent == 0) {
+        if (fraction == 0) sign
+        else {
+          var mantissa = fraction
+          var shift    = 0
+          while ((mantissa & 0x400) == 0) {
+            mantissa <<= 1
+            shift += 1
+          }
+          sign | ((127 - 14 - shift) << 23) | ((mantissa & 0x3ff) << 13)
+        }
+      } else if (exponent == 0x1f) sign | 0x7f800000 | (fraction << 13)
+      else sign | ((exponent - 15 + 127) << 23) | (fraction << 13)
+    java.lang.Float.intBitsToFloat(bits32)
+  }
+
+  def floatToBinary16(value: Float): Long = {
+    val bits     = java.lang.Float.floatToRawIntBits(value)
+    val sign     = (bits >>> 16) & 0x8000
+    val exponent = (bits >>> 23) & 0xff
+    val fraction = bits & 0x7fffff
+    val encoded  =
+      if (exponent == 0xff) sign | (if (fraction == 0) 0x7c00 else 0x7e00)
+      else {
+        val halfExponent = exponent - 127 + 15
+        if (halfExponent >= 0x1f) sign | 0x7c00
+        else if (halfExponent <= 0) {
+          if (halfExponent < -10) sign
+          else {
+            val mantissa = fraction | 0x800000
+            val shift    = 14 - halfExponent
+            val rounded  = (mantissa + (1 << (shift - 1)) - 1 + ((mantissa >>> shift) & 1)) >>> shift
+            sign | rounded
+          }
+        } else {
+          val rounded = fraction + 0xfff + ((fraction >>> 13) & 1)
+          if ((rounded & 0x800000) != 0) {
+            val nextExponent = halfExponent + 1
+            if (nextExponent >= 0x1f) sign | 0x7c00 else sign | (nextExponent << 10)
+          } else sign | (halfExponent << 10) | (rounded >>> 13)
+        }
+      }
+    encoded.toLong & Bits.Mask16
+  }
+
+  def toDouble(bits: Long, width: Int): Double = width match {
+    case 16 => binary16ToFloat(bits).toDouble
+    case 32 => binary32ToFloat(bits).toDouble
+    case 64 => binary64ToDouble(bits)
+    case _  => throw IllegalArgumentException(s"floating-point width must be 16, 32, or 64, found $width")
+  }
+
+  def fromDouble(value: Double, width: Int): Long = width match {
+    case 16 => floatToBinary16(value.toFloat)
+    case 32 => floatToBinary32(value.toFloat)
+    case 64 => doubleToBinary64(value)
+    case _  => throw IllegalArgumentException(s"floating-point width must be 16, 32, or 64, found $width")
+  }
+}

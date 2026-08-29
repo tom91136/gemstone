@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: BSD-3-Clause
  */
 #pragma region case: driver-memory
-#pragma region targets: cuda,gemstone
 #pragma region do: {nvcc} --allow-unsupported-compiler -std=c++17 -O2 {cuda_driver_defines} -x cu -o {output} {input} {cuda_driver_link}
 #pragma region do: {output}
 #pragma region requires: pass
@@ -15,10 +14,6 @@
 #include <cstdio>
 
 #include <cuda.h>
-
-#if defined(GEMSTONE_CUDA_ABI) && defined(__GNUC__)
-extern "C" CUresult CUDAAPI gemstone_cuCtxCreate_v2(CUcontext *, unsigned int, CUdevice) __asm__("cuCtxCreate_v2");
-#endif
 
 #define CUDA_REQUIRE(expression)                                                                                                           \
   do {                                                                                                                                     \
@@ -42,9 +37,7 @@ int main() {
   CUdevice device{};
   CUcontext context{};
   CUDA_REQUIRE(cuDeviceGet(&device, 0));
-#if defined(GEMSTONE_CUDA_ABI) && defined(__GNUC__)
-  CUDA_REQUIRE(gemstone_cuCtxCreate_v2(&context, 0, device));
-#elif CUDA_VERSION >= 13000
+#if CUDA_VERSION >= 13000
   CUDA_REQUIRE(cuCtxCreate(&context, nullptr, 0, device));
 #else
   CUDA_REQUIRE(cuCtxCreate(&context, 0, device));

@@ -17,5 +17,5 @@ final class CUDAServer(implementation: CUDA) {
 }
 
 object CUDAServer {
-  def emulated: CUDAServer = new CUDAServer(new CUDAEmulatorServer(new PTXCUDAKernelExecution))
+  def emulated: CUDAServer = CUDAServer(CUDAEmulatorServer(PTXCUDAKernelExecution()))
 }

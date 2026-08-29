@@ -16,22 +16,29 @@ import net.kurobako.gemstone.rpc.RPCResponse
 import net.kurobako.gemstone.rpc.RPCTransport
 
 class CUDAEmulatorServerSuite extends munit.FunSuite {
+  private final class TestTransport(
+      override val schemaFingerprint: String,
+      invocation: RPCRequest => RPCResponse
+  ) extends RPCTransport {
+    override def call(request: RPCRequest): RPCResponse = invocation(request)
+  }
+
   test("unimplemented Driver methods return CUDA_ERROR_NOT_SUPPORTED locally") {
     val module = Pointer.output[CUDAModule, One](1)
     assertEquals(
-      new CUDAEmulatorServer().cuModuleLoadData(module, ModuleImage(Col.empty[Byte])),
+      CUDAEmulatorServer().cuModuleLoadData(module, ModuleImage(Col.empty[Byte])),
       CUDAStatus.NotSupported
     )
     assertEquals(module.snapshot, None)
   }
 
   test("generated client and dispatcher round-trip allocation and bytes") {
-    val implementation = new CUDAEmulatorServer
-    val transport      = new RPCTransport {
-      override val schemaFingerprint: String = GeneratedCUDARPC.Dispatcher.schemaFingerprint
-      override def call(request: RPCRequest) = GeneratedCUDARPC.Dispatcher.dispatch(request, implementation)
-    }
-    val client = new GeneratedCUDARPC.Client(transport)
+    val implementation = CUDAEmulatorServer()
+    val transport      = TestTransport(
+      GeneratedCUDARPC.Dispatcher.schemaFingerprint,
+      GeneratedCUDARPC.Dispatcher.dispatch(_, implementation)
+    )
+    val client = GeneratedCUDARPC.Client(transport)
 
     val allocated = Pointer.output[DevicePtr, One](1)
     assertEquals(client.cudaMalloc(allocated, SizeT(4L)), CUDAStatus.Success)
@@ -49,17 +56,17 @@ class CUDAEmulatorServerSuite extends munit.FunSuite {
   }
 
   test("generated dispatcher rejects a correct ID paired with the wrong name") {
-    val server       = new CUDAEmulatorServer
-    val validRequest = new scala.collection.mutable.ArrayBuffer[RPCRequest]
-    val capture      = new RPCTransport {
-      override val schemaFingerprint: String = GeneratedCUDARPC.SchemaFingerprint
-      override def call(request: RPCRequest) = {
+    val server       = CUDAEmulatorServer()
+    val validRequest = scala.collection.mutable.ArrayBuffer[RPCRequest]()
+    val capture      = TestTransport(
+      GeneratedCUDARPC.SchemaFingerprint,
+      request => {
         validRequest += request
         GeneratedCUDARPC.Dispatcher.dispatch(request, server)
       }
-    }
+    )
     val count = Pointer.output[Int, One](1)
-    assertEquals(new GeneratedCUDARPC.Client(capture).cudaGetDeviceCount(count), CUDAStatus.Success)
+    assertEquals(GeneratedCUDARPC.Client(capture).cudaGetDeviceCount(count), CUDAStatus.Success)
     assertEquals(count.snapshot.flatMap(_.headOption), Some(1))
     val request = validRequest.head.copy(functionName = "cuDeviceGetCount")
     GeneratedCUDARPC.Dispatcher.dispatch(request, server) match {
@@ -69,10 +76,7 @@ class CUDAEmulatorServerSuite extends munit.FunSuite {
   }
 
   test("generated client rejects a schema mismatch before making a call") {
-    val transport = new RPCTransport {
-      override val schemaFingerprint: String = "wrong"
-      override def call(request: RPCRequest) = fail(s"unexpected call: $request")
-    }
-    intercept[IllegalArgumentException](new GeneratedCUDARPC.Client(transport))
+    val transport = TestTransport("wrong", request => fail(s"unexpected call: $request"))
+    intercept[IllegalArgumentException](GeneratedCUDARPC.Client(transport))
   }
 }

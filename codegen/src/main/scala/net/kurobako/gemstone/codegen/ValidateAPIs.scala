@@ -6,7 +6,6 @@ import java.nio.file.Path
 import java.nio.file.Paths
 import scala.jdk.CollectionConverters.*
 import scala.sys.process.Process
-import scala.sys.process.ProcessLogger
 import upickle.default.ReadWriter
 import upickle.default.read
 import upickle.default.write
@@ -40,7 +39,7 @@ object ValidateAPIs {
     val (check, references, output) = arguments.toVector match {
       case Vector(referenceRoot, outputPath)            => (false, Paths.get(referenceRoot), Paths.get(outputPath))
       case Vector("--check", referenceRoot, outputPath) => (true, Paths.get(referenceRoot), Paths.get(outputPath))
-      case _ => throw new IllegalArgumentException("usage: ValidateAPIs [--check] <references> <manifest>")
+      case _ => throw IllegalArgumentException("usage: ValidateAPIs [--check] <references> <manifest>")
     }
     val manifest = Manifest(format = 1, surfaces = configurations(references).map(probe))
     val rendered = write(manifest, indent = 2) + "\n"
@@ -53,7 +52,7 @@ object ValidateAPIs {
       println(s"validated ${manifest.surfaces.map(_.functions.size).sum} official API declarations")
     } else {
       val _ = Files.createDirectories(output.getParent)
-      val _ = Files.writeString(output, rendered, StandardCharsets.UTF_8)
+      val _ = GeneratedFiles.write(output, rendered)
       manifest.surfaces.foreach(surface => println(s"probed ${surface.functions.size} ${surface.name} declarations"))
     }
   }
@@ -67,7 +66,7 @@ object ValidateAPIs {
         Vector("cuda.h"),
         Vector(cudaInclude),
         Vector.empty,
-        name => name.matches("cu[A-Z][A-Za-z0-9_]*")
+        Identifiers.isUpperCamelAfter(_, "cu")
       ),
       Config(
         "cuda-runtime",
@@ -75,7 +74,7 @@ object ValidateAPIs {
         Vector("cuda_runtime_api.h"),
         Vector(cudaInclude),
         Vector.empty,
-        name => name.matches("cuda[A-Z][A-Za-z0-9_]*")
+        Identifiers.isUpperCamelAfter(_, "cuda")
       ),
       Config(
         "hip",
@@ -83,7 +82,7 @@ object ValidateAPIs {
         Vector("hip/hip_runtime_api.h"),
         Vector(root.resolve("amd/hip/include")),
         Vector("__HIP_PLATFORM_AMD__=1"),
-        name => name.matches("hip[A-Z][A-Za-z0-9_]*")
+        Identifiers.isUpperCamelAfter(_, "hip")
       ),
       Config(
         "hsa",
@@ -91,7 +90,7 @@ object ValidateAPIs {
         Vector("hsa.h", "hsa_ext_amd.h"),
         Vector(root.resolve("amd/hsa/runtime/hsa-runtime/inc")),
         Vector.empty,
-        name => name.matches("hsa_[a-z0-9_]+")
+        Identifiers.isLowerSnake(_, "hsa_")
       ),
       Config(
         "level-zero",
@@ -99,7 +98,7 @@ object ValidateAPIs {
         Vector("ze_api.h", "zes_api.h", "zet_api.h"),
         Vector(root.resolve("oneapi/level-zero/include")),
         Vector.empty,
-        name => name.matches("(?:ze|zes|zet)[A-Z][A-Za-z0-9_]*")
+        name => Vector("ze", "zes", "zet").exists(Identifiers.isUpperCamelAfter(name, _))
       ),
       Config(
         "opencl",
@@ -107,7 +106,7 @@ object ValidateAPIs {
         Vector("CL/cl.h", "CL/cl_ext.h", "CL/cl_gl.h"),
         Vector(root.resolve("khronos/opencl")),
         Vector("CL_TARGET_OPENCL_VERSION=300"),
-        name => name.matches("cl[A-Z][A-Za-z0-9_]*")
+        Identifiers.isUpperCamelAfter(_, "cl")
       )
     )
   }
@@ -117,7 +116,7 @@ object ValidateAPIs {
     try
       stream.iterator().asScala.find(path => Files.isRegularFile(path) && path.getFileName.toString == name)
         .map(_.getParent)
-        .getOrElse(throw new IllegalArgumentException(s"$name is absent below $root"))
+        .getOrElse(throw IllegalArgumentException(s"$name is absent below $root"))
     finally stream.close()
   }
 
@@ -127,14 +126,8 @@ object ValidateAPIs {
       config.includeDirectories.map(directory => s"-I$directory") ++
       config.defines.map(define => s"-D$define") ++
       config.headers.flatMap(header => Vector("-include", header)) ++ Vector("/dev/null")
-    val output = new StringBuilder
-    val errors = new StringBuilder
-    val exit   = Process(command) ! ProcessLogger(
-      line => { val _ = output.append(line).append('\n') },
-      line => { val _ = errors.append(line).append('\n') }
-    )
-    require(exit == 0, s"${config.name}: clang failed ($exit):\n$errors")
-    val root = read[Node](output.result())
+    val output = Process(command).!!
+    val root   = read[Node](output)
     validateCallbackTypedefs(config.name, root)
     val functions = collect(root).filter(function => config.acceptedName(function.name))
     val conflicts = functions.groupBy(_.name).collect {

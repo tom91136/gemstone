@@ -1,6 +1,7 @@
 package net.kurobako.gemstone.abi
 
 import net.kurobako.gemstone.Col
+import net.kurobako.gemstone.binary.LittleEndian
 
 import scala.reflect.ClassTag
 
@@ -20,23 +21,23 @@ sealed trait Fixed[Count <: Int & Singleton]       extends Extent
 
 sealed trait CanRead[Mode <: Access]
 object CanRead {
-  given CanRead[Read]      = new CanRead[Read] {}
-  given CanRead[ReadWrite] = new CanRead[ReadWrite] {}
+  given CanRead[Read] with      {}
+  given CanRead[ReadWrite] with {}
 }
 
 sealed trait CanWrite[Mode <: Access]
 object CanWrite {
-  given CanWrite[Write]     = new CanWrite[Write] {}
-  given CanWrite[ReadWrite] = new CanWrite[ReadWrite] {}
+  given CanWrite[Write] with     {}
+  given CanWrite[ReadWrite] with {}
 }
 
 /** Evidence that an extent describes addressable storage. Opaque pointers deliberately have no instance. */
 sealed trait CanDereference[Size <: Extent]
 object CanDereference {
-  given CanDereference[One]                                           = new CanDereference[One] {}
-  given CanDereference[NulTerminated]                                 = new CanDereference[NulTerminated] {}
-  given [Name <: String & Singleton]: CanDereference[CountedBy[Name]] = new CanDereference[CountedBy[Name]] {}
-  given [Count <: Int & Singleton]: CanDereference[Fixed[Count]]      = new CanDereference[Fixed[Count]] {}
+  given CanDereference[One] with                                           {}
+  given CanDereference[NulTerminated] with                                 {}
+  given [Name <: String & Singleton]: CanDereference[CountedBy[Name]] with {}
+  given [Count <: Int & Singleton]: CanDereference[Fixed[Count]] with      {}
 }
 
 /** Runtime validation for the storage shape promised by an extent. */
@@ -112,22 +113,15 @@ final class Pointer[A, Mode <: Access, Size <: Extent] private[gemstone] (
 }
 
 object Pointer {
-  private def copy[A](elements: Col[A]): Array[Any] = {
-    val result = new Array[Any](elements.length)
-    var index  = 0
-    while (index < elements.length) {
-      result(index) = elements(index)
-      index += 1
-    }
-    result
-  }
+  private def copy[A](elements: Col[A]): Array[Any] =
+    Array.tabulate[Any](elements.length)(elements(_))
 
   private[gemstone] def input[A, Size <: Extent](elements: Col[A])(using
       extent: ExtentEvidence[A, Size],
       elementTag: ClassTag[A]
   ): Pointer[A, Read, Size] = {
     extent.validateInput(elements)
-    new Pointer[A, Read, Size](copy(elements), Array.fill(elements.length)(true), extent, elementTag)
+    Pointer[A, Read, Size](copy(elements), Array.fill(elements.length)(true), extent, elementTag)
   }
 
   private[gemstone] def output[A, Size <: Extent](length: Int)(using
@@ -135,7 +129,7 @@ object Pointer {
       elementTag: ClassTag[A]
   ): Pointer[A, Write, Size] = {
     extent.validateOutput(length)
-    new Pointer[A, Write, Size](new Array[Any](length), Array.fill(length)(false), extent, elementTag)
+    Pointer[A, Write, Size](Array.ofDim[Any](length), Array.fill(length)(false), extent, elementTag)
   }
 
   private[gemstone] def inputOutput[A, Size <: Extent](elements: Col[A])(using
@@ -143,7 +137,7 @@ object Pointer {
       elementTag: ClassTag[A]
   ): Pointer[A, ReadWrite, Size] = {
     extent.validateInput(elements)
-    new Pointer[A, ReadWrite, Size](copy(elements), Array.fill(elements.length)(true), extent, elementTag)
+    Pointer[A, ReadWrite, Size](copy(elements), Array.fill(elements.length)(true), extent, elementTag)
   }
 }
 
@@ -171,10 +165,43 @@ enum Nullable[+A] {
 sealed trait CVoid
 type OpaquePointer = Pointer[CVoid, ReadWrite, Opaque]
 
-/** Nominal representation of a C typedef, enum, record, or other by-value ABI type. The literal C spelling keeps
+/** Process-neutral bytes for a C typedef, enum, record, or other by-value ABI type. The literal C spelling keeps
   * unrelated vendor types distinct even when they have the same machine representation.
+  *
+  * The representation is deliberately opaque to API implementations except at an ABI codec boundary. This makes
+  * generated surfaces executable on the JVM and Scala Native without pretending that every vendor record is a machine
+  * word.
   */
-sealed trait CValue[Name <: String & Singleton]
+final class CValue[Name <: String & Singleton] private (val bytes: Col[Byte]) {
+  def byteSize: Int = bytes.length
+
+  /** Decode scalar enum, flag, and handle-shaped values. Records larger than a machine word remain byte-oriented. */
+  def toUnsignedLong: Long = {
+    require(byteSize <= 8, s"a $byteSize-byte C value cannot be decoded as a machine word")
+    LittleEndian.decode(bytes, 0, byteSize)
+  }
+
+  override def equals(other: Any): Boolean = other match {
+    case value: CValue[?] => Col.sameElements(bytes, value.bytes)
+    case _                => false
+  }
+
+  override def hashCode(): Int = bytes.hashCode()
+
+  override def toString: String = s"CValue(${bytes.length} bytes)"
+}
+
+object CValue {
+  def fromBytes[Name <: String & Singleton](bytes: Col[Byte]): CValue[Name] = {
+    require(bytes.nonEmpty, "a by-value C representation cannot be empty")
+    CValue(Col.from(bytes))
+  }
+
+  def fromUnsignedLong[Name <: String & Singleton](value: Long, byteSize: Int): CValue[Name] = {
+    require(byteSize >= 1 && byteSize <= 8, s"scalar C value size must be in [1, 8], found $byteSize")
+    CValue(LittleEndian.toCol(value, byteSize))
+  }
+}
 
 /** Why an invocation of a native callback could not complete. Exceptions and transport details never cross the API
   * boundary directly.
@@ -193,7 +220,7 @@ final class CallbackData private[gemstone] (private[gemstone] val capabilityId: 
 object CallbackData {
   private[gemstone] def remote(capabilityId: Long): CallbackData = {
     require(capabilityId != 0L, "callback capability ID must be non-zero")
-    new CallbackData(capabilityId)
+    CallbackData(capabilityId)
   }
 }
 
@@ -208,11 +235,15 @@ trait Callback[-Args <: Tuple, +Result] extends (Args => Either[CallbackFailure,
 trait CallbackTypedef[Name <: String & Singleton, -Args <: Tuple, +Result] extends Callback[Args, Result]
 
 object CallbackTypedef {
-  private[gemstone] def remote[Name <: String & Singleton, Args <: Tuple, Result](
+  private final class Remote[Name <: String & Singleton, Args <: Tuple, Result](
       invocation: Args => Either[CallbackFailure, Result]
-  ): CallbackTypedef[Name, Args, Result] = new CallbackTypedef[Name, Args, Result] {
+  ) extends CallbackTypedef[Name, Args, Result] {
     override def apply(arguments: Args): Either[CallbackFailure, Result] = invocation(arguments)
   }
+
+  private[gemstone] def remote[Name <: String & Singleton, Args <: Tuple, Result](
+      invocation: Args => Either[CallbackFailure, Result]
+  ): CallbackTypedef[Name, Args, Result] = Remote(invocation)
 }
 
 /** A fixed-size C array embedded in an ABI declaration. */
@@ -222,7 +253,7 @@ sealed trait CArray[Element, Count <: Int & Singleton]
   * wrapper. Reaching it as ordinary JVM code is always a programming error.
   */
 inline def delegate[Name <: String & Singleton](arguments: Any*): Nothing =
-  throw new UnsupportedOperationException("a native delegate cannot execute on the JVM")
+  throw UnsupportedOperationException("a native delegate cannot execute on the JVM")
 
 /** Declarative, correctly typed native stub body. ABI derivation rejects every other concrete method body. */
-inline def unsupported: Nothing = throw new UnsupportedOperationException("API operation is not implemented")
+inline def unsupported: Nothing = throw UnsupportedOperationException("API operation is not implemented")

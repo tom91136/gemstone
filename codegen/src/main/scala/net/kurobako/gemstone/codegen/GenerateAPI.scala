@@ -29,39 +29,39 @@ object GenerateAPI {
     name.startsWith("__cuda") && !name.startsWith("__cudaGemstone")
   ).toVector
   def main(arguments: Array[String]): Unit = {
-    require(APISourceFingerprint.Value.nonEmpty, "API source fingerprint must be available")
-    val (check, output, scalaOutput) = arguments.toVector match {
-      case Vector(path, scalaPath)            => (false, Paths.get(path), Paths.get(scalaPath))
-      case Vector("--check", path, scalaPath) => (true, Paths.get(path), Paths.get(scalaPath))
-      case _                                  =>
-        throw new IllegalArgumentException(
-          "usage: GenerateAPI [--check] <output-directory> <scala-output-directory>"
+    val (check, output, scalaOutput, officialManifest) = arguments.toVector match {
+      case Vector(path, scalaPath, manifest) =>
+        (false, Paths.get(path), Paths.get(scalaPath), Paths.get(manifest))
+      case Vector("--check", path, scalaPath, manifest) =>
+        (true, Paths.get(path), Paths.get(scalaPath), Paths.get(manifest))
+      case _ =>
+        throw IllegalArgumentException(
+          "usage: GenerateAPI [--check] <output-directory> <scala-output-directory> <official-header-manifest>"
         )
     }
 
-    val generated = files(output, scalaOutput).map { case (path, content) =>
+    val generated = files(output, scalaOutput, officialManifest).map { case (path, content) =>
       path -> (if (path.getFileName.toString.endsWith(".scala")) GeneratedScalaFormatter(path, content) else content)
     }
     if (check) verify(generated)
     else write(generated)
   }
 
-  private def files(output: Path, scalaOutput: Path): Vector[(Path, String)] =
+  private def files(output: Path, scalaOutput: Path, officialManifest: Path): Vector[(Path, String)] =
     Vector(
-      output.resolve("c/gemstone_status.h")                                         -> renderStatus,
-      output.resolve("c/gemstone_cuda_driver_stubs.c")                              -> renderCUDADriverStubs(output),
-      output.resolve("c/gemstone_cuda.map")                                         -> renderVersionMap,
-      output.resolve("c/gemstone_cuda_driver_surface.inc")                          -> renderCUDASurfaceInclude,
-      output.resolve("c/gemstone_cuda_rpc.inc")                                     -> renderCUDARPCInclude,
-      output.resolve("c/gemstone_cuda_rpc_client.c")                                -> renderCUDARPCClient,
+      output.resolve("c/gemstone_status.h")                -> renderStatus,
+      output.resolve("c/gemstone_cuda_driver_stubs.c")     -> renderCUDADriverStubs(officialManifest),
+      output.resolve("c/gemstone_cuda.map")                -> renderVersionMap,
+      output.resolve("c/gemstone_cuda_driver_surface.inc") -> renderCUDASurfaceInclude,
+      output.resolve("c/gemstone_cuda_rpc.inc")            -> renderCUDARPCInclude,
+      output.resolve("c/gemstone_cuda_rpc_client.c")       -> renderCUDARPCClient,
       scalaOutput.resolve("net/kurobako/gemstone/generated/GeneratedCUDARPC.scala") -> renderCUDARPCScala,
       output.resolve("manifest/cuda-rpc-schema.json")                               -> renderCUDARPCManifest,
       output.resolve("manifest/cuda-driver-surface.json")                           -> renderCUDASurfaceManifest
     )
 
   private def write(files: Vector[(Path, String)]): Unit = files.foreach { case (path, content) =>
-    Files.createDirectories(path.getParent)
-    Files.writeString(path, content, StandardCharsets.UTF_8)
+    val _ = GeneratedFiles.write(path, content)
     println(s"generated $path")
   }
 
@@ -70,7 +70,7 @@ object GenerateAPI {
       case (path, content) if !Files.exists(path) || Files.readString(path, StandardCharsets.UTF_8) != content => path
     }
     if (stale.nonEmpty) {
-      throw new IllegalStateException(s"generated API files are stale: ${stale.mkString(", ")}")
+      throw IllegalStateException(s"generated API files are stale: ${stale.mkString(", ")}")
     }
     println(s"verified ${files.size} generated API files")
   }
@@ -102,9 +102,9 @@ object GenerateAPI {
         |""".stripMargin
   }
 
-  private def renderCUDADriverStubs(output: Path): String = {
+  private def renderCUDADriverStubs(officialManifest: Path): String = {
     val wired              = cudaRPC.methods.map(_.name).filterNot(_.startsWith("cuda")).toSet
-    val driverDeclarations = officialCUDADeclarations(output)
+    val driverDeclarations = officialCUDADeclarations(officialManifest)
     val delegatedNames     = cudaNativeDelegates.map(_.name).toSet
     val stubs              = driverDeclarations.collect {
       case declaration
@@ -137,13 +137,12 @@ object GenerateAPI {
         |""".stripMargin
   }
 
-  private def officialCUDADeclarations(output: Path): Vector[ABIDeclaration] = {
-    val manifest = output.resolve("manifest/official-api-headers.json")
+  private def officialCUDADeclarations(manifest: Path): Vector[ABIDeclaration] = {
     require(Files.isRegularFile(manifest), s"official API header manifest is absent: $manifest")
     val document = ujson.read(Files.readString(manifest, StandardCharsets.UTF_8))
     document("surfaces").arr.iterator
       .find(_("name").str == "cuda-driver")
-      .getOrElse(throw new IllegalStateException("cuda-driver is absent from the official API header manifest"))
+      .getOrElse(throw IllegalStateException("cuda-driver is absent from the official API header manifest"))
       .apply("functions")
       .arr
       .iterator
@@ -185,23 +184,16 @@ object GenerateAPI {
   }
 
   private def splitCParameters(parameters: String): Vector[String] = {
-    val result   = Vector.newBuilder[String]
-    var start    = 0
-    var depth    = 0
-    var position = 0
-    while (position < parameters.length) {
-      parameters.charAt(position) match {
-        case '('               => depth += 1
-        case ')'               => depth -= 1
-        case ',' if depth == 0 =>
-          result += parameters.substring(start, position).trim
-          start = position + 1
-        case _ => ()
-      }
-      position += 1
+    val (start, _, result) = parameters.indices.foldLeft((0, 0, Vector.empty[String])) {
+      case ((start, depth, result), position) =>
+        parameters.charAt(position) match {
+          case '('               => (start, depth + 1, result)
+          case ')'               => (start, depth - 1, result)
+          case ',' if depth == 0 => (position + 1, depth, result :+ parameters.substring(start, position).trim)
+          case _                 => (start, depth, result)
+        }
     }
-    result += parameters.substring(start).trim
-    result.result()
+    result :+ parameters.substring(start).trim
   }
 
   private def renderCUDASurfaceInclude: String = {
@@ -1396,11 +1388,7 @@ object GenerateAPI {
         |  private def writeBytes[Mode <: Access, Size <: Extent](pointer: Pointer[Byte, Mode, Size], value: Col[Byte])(using CanWrite[Mode], CanDereference[Size]): Boolean = {
         |    if (pointer.length != value.length) false
         |    else {
-        |      var index = 0
-        |      while (index < value.length) {
-        |        pointer.write(value(index), index)
-        |        index += 1
-        |      }
+        |      value.indices.foreach(index => pointer.write(value(index), index))
         |      true
         |    }
         |  }
@@ -1452,7 +1440,7 @@ object GenerateAPI {
       s"WireValue.ByteBufferValue(${parameter.name}.snapshot.getOrElse(Col.empty[Byte]))"
     else {
       val value =
-        s"${parameter.name}.snapshot.flatMap(_.headOption).getOrElse(throw new IllegalArgumentException(\"${parameter.name} is uninitialized\"))"
+        s"${parameter.name}.snapshot.flatMap(_.headOption).getOrElse(throw IllegalArgumentException(\"${parameter.name} is uninitialized\"))"
       encodeWire(parameter.wireType, value)
     }
 
@@ -1492,16 +1480,16 @@ object GenerateAPI {
 
   private def encodeDispatcherOutput(parameter: RPCParameter, index: Int): String =
     if (parameter.wireType == WireType.ByteBuffer)
-      s"WireValue.ByteBufferValue(argument$index.snapshot.getOrElse(throw new IllegalStateException(\"${parameter.name} was not initialized\")))"
+      s"WireValue.ByteBufferValue(argument$index.snapshot.getOrElse(throw IllegalStateException(\"${parameter.name} was not initialized\")))"
     else {
       val value =
-        s"argument$index.snapshot.flatMap(_.headOption).getOrElse(throw new IllegalStateException(\"${parameter.name} was not initialized\"))"
+        s"argument$index.snapshot.flatMap(_.headOption).getOrElse(throw IllegalStateException(\"${parameter.name} was not initialized\"))"
       encodeWire(parameter.wireType, value)
     }
 
   private def decodeWireValue(wireType: WireType, value: String): String = wireType match {
     case WireType.NullableOpaquePointer =>
-      s"if ($value) throw new IllegalArgumentException(\"non-null opaque RPC pointers are unsupported\") else Nullable.Null"
+      s"if ($value) throw IllegalArgumentException(\"non-null opaque RPC pointers are unsupported\") else Nullable.Null"
     case _ => value
   }
 

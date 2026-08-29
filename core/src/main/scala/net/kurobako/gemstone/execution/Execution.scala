@@ -2,7 +2,7 @@ package net.kurobako.gemstone.execution
 
 import net.kurobako.gemstone.Col
 
-import scala.collection.mutable.ArrayBuffer
+import scala.collection.mutable.ArrayBuffer // scalafix:ok GemstoneRuntimeCollections.mutable-collection; hot write buffer
 import scala.collection.immutable.BitSet
 import scala.reflect.ClassTag
 
@@ -16,7 +16,7 @@ object Pc {
     else Left(ExecutionFault.InvalidProgram(s"negative program counter: $value"))
 
   def unsafe(value: Int): Pc =
-    fromInt(value).fold(fault => throw new IllegalArgumentException(fault.message), identity)
+    fromInt(value).fold(fault => throw IllegalArgumentException(fault.message), identity)
 
   extension (pc: Pc) {
     def value: Int = pc
@@ -51,9 +51,10 @@ object LaneMask {
     def nonEmpty: Boolean            = mask.nonEmpty
     def size: Int                    = mask.size
     def contains(lane: Int): Boolean = mask.contains(lane)
-    def intersect(other: LaneMask): LaneMask = mask & other
-    def union(other: LaneMask): LaneMask     = mask | other
-    def subtract(other: LaneMask): LaneMask  = mask -- other
+    def intersect(other: LaneMask): LaneMask             = mask & other
+    def union(other: LaneMask): LaneMask                 = mask | other
+    def subtract(other: LaneMask): LaneMask              = mask -- other
+    def filterLanes(predicate: Int => Boolean): LaneMask = mask.filter(predicate)
 
     def foreachLane(function: Int => Unit): Unit = mask.foreach(function)
   }
@@ -119,6 +120,13 @@ enum Step {
 trait Write extends Product with Serializable
 
 /** Reusable two-phase write buffer. Every write is validated before any write is applied. */
+@SuppressWarnings(
+  Array(
+    "scalafix:DisableSyntax.var",
+    "scalafix:DisableSyntax.return",
+    "scalafix:GemstoneRuntimeCollections.mutable-collection"
+  )
+)
 final class Effects[W <: Write: ClassTag] {
   private val pending = ArrayBuffer.empty[W]
 
@@ -164,23 +172,25 @@ object ExecutionLimits {
 }
 
 final class ExecutionBudget private (val limit: Long) {
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private var usedValue = 0L
 
   def used: Long      = usedValue
   def remaining: Long = limit - usedValue
 
-  def consume(): Either[ExecutionFault, Unit] =
-    if (usedValue >= limit) Left(ExecutionFault.BudgetExceeded(limit))
+  def consume(cost: Int = 1): Either[ExecutionFault, Unit] =
+    if (cost <= 0) Left(ExecutionFault.InvalidState(s"instruction cost must be positive: $cost"))
+    else if (cost.toLong > remaining) Left(ExecutionFault.BudgetExceeded(limit))
     else {
-      usedValue += 1L
+      usedValue += cost.toLong
       Right(())
     }
 }
 
 object ExecutionBudget {
-  def apply(limit: Long): Either[String, ExecutionBudget] =
+  def fromLong(limit: Long): Either[String, ExecutionBudget] =
     if (limit <= 0L) Left(s"instruction budget must be positive: $limit")
-    else Right(new ExecutionBudget(limit))
+    else Right(ExecutionBudget(limit))
 }
 
 trait CancellationToken {
@@ -193,9 +203,47 @@ object CancellationToken {
   }
 
   final class Source extends CancellationToken {
+    @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
     @volatile private var cancelled = false
 
     override def isCancelled: Boolean = cancelled
     def cancel(): Unit                = cancelled = true
   }
+}
+
+/** Per-dispatch progress control shared by every ISA executor. A control instance must belong to exactly one launch so
+  * its budget cannot leak across independent submissions.
+  */
+final class ExecutionControl private (
+    val limits: ExecutionLimits,
+    val cancellation: CancellationToken,
+    private val budget: ExecutionBudget
+) {
+  def checkpoint(cost: Int = 1): Either[ExecutionFault, Unit] =
+    if (cancellation.isCancelled) Left(ExecutionFault.Cancelled)
+    else budget.consume(cost)
+
+  def usedInstructions: Long = budget.used
+
+  private[gemstone] def cancel(): Unit = cancellation match {
+    case source: CancellationToken.Source => source.cancel()
+    case _                                => ()
+  }
+}
+
+object ExecutionControl {
+  def create(
+      limits: ExecutionLimits = ExecutionLimits.Default,
+      cancellation: CancellationToken = CancellationToken.Never
+  ): ExecutionControl =
+    ExecutionControl(
+      limits,
+      cancellation,
+      ExecutionBudget.fromLong(limits.maxInstructions).fold(
+        message => throw IllegalArgumentException(message),
+        identity
+      )
+    )
+
+  def default: ExecutionControl = create()
 }

@@ -57,11 +57,22 @@ class ABISuite extends munit.FunSuite {
   }
 
   test("callbacks are typed functions with explicit failure") {
-    val callback = new Callback[(Int, String), String] {
-      override def apply(arguments: (Int, String)): Either[CallbackFailure, String] =
-        Right(arguments._2 * arguments._1)
-    }
+    val callback: Callback[(Int, String), String] = arguments => Right(arguments._2 * arguments._1)
 
     assertEquals(callback((3, "go")), Right("gogogo"))
+  }
+
+  test("nominal C values are constructible without losing their C type identity") {
+    val flags = CValue.fromUnsignedLong["ze_init_flags_t"](3L, 4)
+
+    assertEquals(flags.byteSize, 4)
+    assertEquals(flags.toUnsignedLong, 3L)
+    assertEquals(flags.bytes.toSeq, Seq[Byte](3, 0, 0, 0))
+
+    val errors = typeCheckErrors("""
+      import net.kurobako.gemstone.abi.*
+      val flags: CValue["ze_init_flags_t"] = CValue.fromUnsignedLong["other_flags_t"](1L, 4)
+    """)
+    assert(errors.nonEmpty)
   }
 }

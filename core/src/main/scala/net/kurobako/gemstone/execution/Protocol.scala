@@ -1,0 +1,238 @@
+package net.kurobako.gemstone.execution
+
+import net.kurobako.gemstone.Col
+
+opaque type AllocationId = Long
+
+object AllocationId {
+  def fromLong(value: Long): Either[String, AllocationId] =
+    Either.cond(value > 0L, value, s"allocation ID must be positive: $value")
+
+  private[gemstone] def unsafe(value: Long): AllocationId = value
+
+  extension (value: AllocationId) def toLong: Long = value
+}
+
+opaque type ProgramId = Long
+
+object ProgramId {
+  def fromLong(value: Long): Either[String, ProgramId] =
+    Either.cond(value > 0L, value, s"program ID must be positive: $value")
+
+  private[gemstone] def unsafe(value: Long): ProgramId = value
+
+  extension (value: ProgramId) def toLong: Long = value
+}
+
+opaque type CompletionId = Long
+
+object CompletionId {
+  def fromLong(value: Long): Either[String, CompletionId] =
+    Either.cond(value > 0L, value, s"completion ID must be positive: $value")
+
+  private[gemstone] def unsafe(value: Long): CompletionId = value
+
+  extension (value: CompletionId) def toLong: Long = value
+}
+
+enum ProgramFormat {
+  case PTX
+  case AMDGPUCodeObject
+  case AMDGPURawKernel
+  case SPIRV
+}
+
+final case class Dimensions private (x: Int, y: Int, z: Int)
+
+extension (value: Dimensions) {
+  def volume: Either[String, Long] =
+    try Right(Math.multiplyExact(Math.multiplyExact(value.x.toLong, value.y.toLong), value.z.toLong))
+    catch {
+      case _: ArithmeticException => Left(s"dimension volume overflows 64 bits: (${value.x}, ${value.y}, ${value.z})")
+    }
+
+  def volumeInt: Either[String, Int] =
+    value.volume.flatMap(size =>
+      Either.cond(size <= Int.MaxValue.toLong, size.toInt, s"dimension volume exceeds Int range: $size")
+    )
+
+  def multiply(other: Dimensions): Either[String, Dimensions] =
+    try
+      Dimensions.create(
+        Math.multiplyExact(value.x, other.x),
+        Math.multiplyExact(value.y, other.y),
+        Math.multiplyExact(value.z, other.z)
+      )
+    catch {
+      case _: ArithmeticException =>
+        Left(s"dimension product overflows Int range: $value * $other")
+    }
+}
+
+object Dimensions {
+  val One: Dimensions = Dimensions(1, 1, 1)
+
+  def create(x: Int, y: Int, z: Int): Either[String, Dimensions] =
+    Either.cond(x > 0 && y > 0 && z > 0, Dimensions(x, y, z), s"dimensions must be positive: ($x, $y, $z)")
+}
+
+final case class Coordinates(x: Int, y: Int, z: Int)
+
+enum Axis {
+  case X, Y, Z
+
+  def select(value: Coordinates): Int = this match {
+    case X => value.x
+    case Y => value.y
+    case Z => value.z
+  }
+
+  def select(value: Dimensions): Int = this match {
+    case X => value.x
+    case Y => value.y
+    case Z => value.z
+  }
+}
+
+final case class LaunchGeometry private (
+    groupSize: Dimensions,
+    groupCount: Dimensions,
+    globalSize: Dimensions
+) {
+  def localCoordinates(index: Int): Coordinates = coordinates(index.toLong, groupSize)
+
+  def groupCoordinates(index: Long): Coordinates = coordinates(index, groupCount)
+
+  def globalCoordinates(group: Coordinates, local: Coordinates): Coordinates =
+    Coordinates(
+      Math.addExact(Math.multiplyExact(group.x, groupSize.x), local.x),
+      Math.addExact(Math.multiplyExact(group.y, groupSize.y), local.y),
+      Math.addExact(Math.multiplyExact(group.z, groupSize.z), local.z)
+    )
+
+  def containsGlobal(coordinates: Coordinates): Boolean =
+    coordinates.x < globalSize.x && coordinates.y < globalSize.y && coordinates.z < globalSize.z
+
+  private def coordinates(index: Long, dimensions: Dimensions): Coordinates = {
+    val volume = dimensions.volume.fold(message => throw IllegalArgumentException(message), identity)
+    require(index >= 0L && index < volume, s"linear index $index is outside dimensions $dimensions")
+    val x  = (index % dimensions.x.toLong).toInt
+    val yz = index / dimensions.x.toLong
+    val y  = (yz    % dimensions.y.toLong).toInt
+    val z  = (yz / dimensions.y.toLong).toInt
+    Coordinates(x, y, z)
+  }
+}
+
+object LaunchGeometry {
+  def create(
+      groupSize: Dimensions,
+      groupCount: Dimensions,
+      globalSize: Option[Dimensions] = None
+  ): Either[String, LaunchGeometry] = for {
+    padded <- groupSize.multiply(groupCount)
+    exact = globalSize.getOrElse(padded)
+    _ <- Either.cond(
+      exact.x <= padded.x && exact.y <= padded.y && exact.z <= padded.z,
+      (),
+      s"global size $exact exceeds padded dispatch size $padded"
+    )
+  } yield LaunchGeometry(groupSize, groupCount, exact)
+}
+
+enum KernelArgument {
+  case Scalar(bytes: Col[Byte])
+  case Allocation(id: AllocationId, offset: Long)
+  case Local(size: Long)
+}
+
+final case class KernelDispatch private (
+    program: ProgramId,
+    kernelName: String,
+    geometry: LaunchGeometry,
+    privateSegmentBytes: Int,
+    groupSegmentBytes: Int,
+    arguments: Col[KernelArgument]
+)
+
+object KernelDispatch {
+  def create(
+      program: ProgramId,
+      kernelName: String,
+      groupSize: Dimensions,
+      groupCount: Dimensions,
+      arguments: Col[KernelArgument],
+      globalSize: Option[Dimensions] = None,
+      privateSegmentBytes: Int = 0,
+      groupSegmentBytes: Int = 0
+  ): Either[String, KernelDispatch] = for {
+    _ <- Either.cond(
+      kernelName.nonEmpty && !kernelName.contains('\u0000'),
+      (),
+      "kernel name must be non-empty and contain no NUL"
+    )
+    geometry <- LaunchGeometry.create(groupSize, groupCount, globalSize)
+    _        <- Either.cond(
+      privateSegmentBytes >= 0 && groupSegmentBytes >= 0,
+      (),
+      s"segment sizes must be non-negative: private=$privateSegmentBytes, group=$groupSegmentBytes"
+    )
+  } yield KernelDispatch(
+    program,
+    kernelName,
+    geometry,
+    privateSegmentBytes,
+    groupSegmentBytes,
+    arguments
+  )
+}
+
+enum ExecutionFailure {
+  case InvalidRequest(detail: String)
+  case NotFound(detail: String)
+  case Unsupported(detail: String)
+  case Failed(detail: String)
+
+  def message: String = this match {
+    case InvalidRequest(value) => value
+    case NotFound(value)       => value
+    case Unsupported(value)    => value
+    case Failed(value)         => value
+  }
+}
+
+enum CompletionStatus {
+  case Pending
+  case Succeeded
+  case Failed(error: ExecutionFailure)
+}
+
+final case class DirtyRange(allocation: AllocationId, offset: Long, size: Int)
+
+trait ExecutionMemory {
+  def read(id: AllocationId, offset: Long, size: Int): Either[ExecutionFailure, Col[Byte]]
+  def write(id: AllocationId, offset: Long, bytes: Col[Byte]): Either[ExecutionFailure, Unit]
+}
+
+trait LoadedProgram {
+  def launch(
+      dispatch: KernelDispatch,
+      memory: ExecutionMemory,
+      control: ExecutionControl
+  ): Either[ExecutionFailure, Unit]
+}
+
+trait ProgramLoader {
+  def format: ProgramFormat
+  def load(image: Col[Byte]): Either[ExecutionFailure, LoadedProgram]
+}
+
+trait ProgramExecutor {
+  def load(id: ProgramId, format: ProgramFormat, image: Col[Byte]): Either[ExecutionFailure, Unit]
+  def unload(id: ProgramId): Either[ExecutionFailure, Unit]
+  def launch(
+      dispatch: KernelDispatch,
+      memory: ExecutionMemory,
+      control: ExecutionControl
+  ): Either[ExecutionFailure, Unit]
+}

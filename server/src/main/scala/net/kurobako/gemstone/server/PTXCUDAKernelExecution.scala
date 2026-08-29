@@ -3,32 +3,36 @@ package net.kurobako.gemstone.server
 import net.kurobako.gemstone.Col
 
 import net.kurobako.gemstone.cuda.*
+import net.kurobako.gemstone.execution.Dimensions
+import net.kurobako.gemstone.execution.LaunchGeometry
 import net.kurobako.gemstone.isa.ptx.v9_3.Parser
-import net.kurobako.gemstone.isa.ptx.v9_3.PTXArgument
-import net.kurobako.gemstone.isa.ptx.v9_3.PTXInterpreter
-import net.kurobako.gemstone.isa.ptx.v9_3.PTXKernel
-import net.kurobako.gemstone.isa.ptx.v9_3.PTXLowerer
+import net.kurobako.gemstone.isa.ptx.v9_3.Argument
+import net.kurobako.gemstone.isa.ptx.v9_3.Interpreter
+import net.kurobako.gemstone.isa.ptx.v9_3.Kernel
+import net.kurobako.gemstone.isa.ptx.v9_3.Lowering
 import net.kurobako.gemstone.isa.ptx.v9_3.Statement
 import net.kurobako.gemstone.memory.CheckedMemory
-import net.kurobako.gemstone.scheduler.LaunchShape
 import net.kurobako.gemstone.vendor.CUDAKernelExecution
 
 import java.nio.ByteBuffer
 import java.nio.charset.CodingErrorAction
 import java.nio.charset.StandardCharsets
-import scala.collection.mutable
+import java.util.concurrent.atomic.AtomicReference
 
 /** Textual-PTX CUDA module backend. Images and launch arguments have already been copied out of the native process when
   * they reach this class.
   */
 final class PTXCUDAKernelExecution extends CUDAKernelExecution {
   private final case class LoadedModule(entries: Map[String, Statement.Entry])
-  private final case class LoadedFunction(module: CUDAModule, kernel: PTXKernel)
+  private final case class LoadedFunction(module: CUDAModule, kernel: Kernel)
+  private final case class State(
+      modules: Map[Long, LoadedModule],
+      functions: Map[Long, LoadedFunction],
+      nextModuleHandle: Long,
+      nextFunctionHandle: Long
+  )
 
-  private val modules            = mutable.Map.empty[Long, LoadedModule]
-  private val functions          = mutable.Map.empty[Long, LoadedFunction]
-  private var nextModuleHandle   = 1L
-  private var nextFunctionHandle = 1L
+  private val state = AtomicReference(State(Map.empty, Map.empty, 1L, 1L))
 
   override def cuModuleLoadData(image: ModuleImage): CUDAResult[CUDAModule] = synchronized {
     decodeUtf8(image.bytes).flatMap { source =>
@@ -38,9 +42,14 @@ final class PTXCUDAKernelExecution extends CUDAKernelExecution {
           val entries = program.statements.collect { case entry: Statement.Entry => entry.name -> entry }.toMap
           if (entries.isEmpty) failure(200, "PTX module contains no entry points")
           else {
-            val handle = nextModuleHandle
-            nextModuleHandle = Math.addExact(nextModuleHandle, 1L)
-            modules(handle) = LoadedModule(entries)
+            val current = state.get()
+            val handle  = current.nextModuleHandle
+            state.set(
+              current.copy(
+                modules = current.modules.updated(handle, LoadedModule(entries)),
+                nextModuleHandle = Math.addExact(handle, 1L)
+              )
+            )
             success(CUDAModule(handle))
           }
       }
@@ -48,18 +57,23 @@ final class PTXCUDAKernelExecution extends CUDAKernelExecution {
   }
 
   override def cuModuleGetFunction(module: CUDAModule, name: FunctionName): CUDAResult[KernelFunction] = synchronized {
-    modules.get(module.handle) match {
+    val current = state.get()
+    current.modules.get(module.handle) match {
       case None         => failure(201, s"invalid CUDA module handle: ${module.handle}")
       case Some(loaded) =>
         loaded.entries.get(name.value) match {
           case None        => failure(500, s"PTX entry point not found: ${name.value}")
           case Some(entry) =>
-            PTXLowerer.lower(entry) match {
+            Lowering.lower(entry) match {
               case Left(error)   => failure(801, error.message)
               case Right(kernel) =>
-                val handle = nextFunctionHandle
-                nextFunctionHandle = Math.addExact(nextFunctionHandle, 1L)
-                functions(handle) = LoadedFunction(module, kernel)
+                val handle = current.nextFunctionHandle
+                state.set(
+                  current.copy(
+                    functions = current.functions.updated(handle, LoadedFunction(module, kernel)),
+                    nextFunctionHandle = Math.addExact(handle, 1L)
+                  )
+                )
                 val widths = kernel.parameters.map(_.widthBytes.toByte)
                 success(KernelFunction(CUDAFunction(handle), widths))
             }
@@ -68,9 +82,15 @@ final class PTXCUDAKernelExecution extends CUDAKernelExecution {
   }
 
   override def cuModuleUnload(module: CUDAModule): CUDAResult[Unit] = synchronized {
-    if (modules.remove(module.handle).isEmpty) failure(201, s"invalid CUDA module handle: ${module.handle}")
+    val current = state.get()
+    if (!current.modules.contains(module.handle)) failure(201, s"invalid CUDA module handle: ${module.handle}")
     else {
-      functions.filterInPlace((_, loaded) => loaded.module != module)
+      state.set(
+        current.copy(
+          modules = current.modules.removed(module.handle),
+          functions = current.functions.filter { case (_, loaded) => loaded.module != module }
+        )
+      )
       success(())
     }
   }
@@ -80,17 +100,15 @@ final class PTXCUDAKernelExecution extends CUDAKernelExecution {
       launch: KernelLaunch,
       memory: CheckedMemory
   ): CUDAResult[Unit] = synchronized {
-    functions.get(function.handle) match {
+    state.get().functions.get(function.handle) match {
       case None         => failure(400, s"invalid CUDA function handle: ${function.handle}")
       case Some(loaded) =>
         val grid  = Col(launch.gridX.toLong, launch.gridY.toLong, launch.gridZ.toLong)
         val block = Col(launch.blockX.toLong, launch.blockY.toLong, launch.blockZ.toLong)
         if (grid.exists(_ == 0L) || block.exists(_ == 0L)) failure(1, "CUDA launch dimensions must be non-zero")
-        else if (grid(1) != 1L || grid(2) != 1L || block(1) != 1L || block(2) != 1L)
-          failure(801, "the initial PTX executor supports one-dimensional launches")
         else if (launch.sharedMemoryBytes.toLong != 0L)
           failure(801, "dynamic shared memory is not implemented")
-        else if (grid.head > Int.MaxValue.toLong || block.head > Int.MaxValue.toLong)
+        else if (grid.exists(_ > Int.MaxValue.toLong) || block.exists(_ > Int.MaxValue.toLong))
           failure(1, "CUDA launch dimensions exceed the emulator limit")
         else if (launch.arguments.length != loaded.kernel.parameters.length)
           failure(
@@ -103,17 +121,21 @@ final class PTXCUDAKernelExecution extends CUDAKernelExecution {
               Left(
                 s"kernel argument ${parameter.name} expects ${parameter.widthBytes} bytes, found ${argument.bytes.length}"
               )
-            else Right(parameter.name -> PTXArgument(argument.bytes))
+            else Right(parameter.name -> Argument(argument.bytes))
           }
           decoded.collectFirst { case Left(error) => error } match {
             case Some(error) => failure(1, error)
             case None        =>
               val arguments = decoded.collect { case Right(value) => value }.toMap
-              val shape     = LaunchShape.create(grid.head.toInt, block.head.toInt)
-              shape match {
+              val geometry  = for {
+                groupCount <- Dimensions.create(grid(0).toInt, grid(1).toInt, grid(2).toInt)
+                groupSize  <- Dimensions.create(block(0).toInt, block(1).toInt, block(2).toInt)
+                launch     <- LaunchGeometry.create(groupSize, groupCount)
+              } yield launch
+              geometry match {
                 case Left(error)  => failure(1, error)
                 case Right(value) =>
-                  PTXInterpreter.execute(loaded.kernel, value, arguments, memory, captureTrace = false) match {
+                  Interpreter.execute(loaded.kernel, value, arguments, memory, captureTrace = false) match {
                     case Left(error) => failure(700, error.message)
                     case Right(_)    => success(())
                   }

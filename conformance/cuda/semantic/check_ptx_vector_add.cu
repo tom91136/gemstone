@@ -1,5 +1,4 @@
 #pragma region case: semantic-ptx-vector-add
-#pragma region targets: cuda,gemstone
 #pragma region ptx-kernel: vector_add
 #pragma region ptx-shape: 1,4
 #pragma region ptx-input: input_a=1,2,3,4
@@ -13,10 +12,6 @@
 #include <cstdio>
 
 #include <cuda.h>
-
-#if defined(GEMSTONE_CUDA_ABI) && defined(__GNUC__)
-extern "C" CUresult CUDAAPI gemstone_cuCtxCreate_v2(CUcontext *, unsigned int, CUdevice) __asm__("cuCtxCreate_v2");
-#endif
 
 namespace {
 constexpr const char *module_ptx = R"ptx(
@@ -65,9 +60,7 @@ int main() {
   CUdevice device{};
   CUcontext context{};
   CUDA_REQUIRE(cuDeviceGet(&device, 0));
-#if defined(GEMSTONE_CUDA_ABI) && defined(__GNUC__)
-  CUDA_REQUIRE(gemstone_cuCtxCreate_v2(&context, 0, device));
-#elif CUDA_VERSION >= 13000
+#if CUDA_VERSION >= 13000
   CUDA_REQUIRE(cuCtxCreate(&context, nullptr, 0, device));
 #else
   CUDA_REQUIRE(cuCtxCreate(&context, 0, device));

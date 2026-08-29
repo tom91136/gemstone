@@ -6,38 +6,40 @@ The commands and expected output are source metadata using the same durable form
 
 ```cpp
 #pragma region case: runtime-malloc-copy
-#pragma region targets: cuda,gemstone
 #pragma region do: {nvcc} --allow-unsupported-compiler -std=c++17 -O2 -o {output} {input}
 #pragma region do: {output}
 #pragma region requires: pass
 ```
 
-`CUDAConformanceSuite` discovers every `check_*.cu` recursively and registers one MUnit test for each enabled backend.
-Run it directly, or as part of `testFull`, with:
+`CUDAConformanceSuite` discovers every `check_*.cu` recursively and registers one MUnit test per translation unit.
+Run the complete CUDA lane with:
 
 ```console
-sbt server/test
+sbt testCUDAConformance
 ```
 
-No Scala registry needs updating when a translation unit is added. With no `targets:` pragma a new test runs against
-both `cuda` and `gemstone`; an explicit target list narrows it. Cases whose APIs or instructions are not implemented
-yet are marked `targets: cuda`. All three Driver cases, the compact PTX semantic case, and the allocation/copy plus
-interior-pointer Runtime cases currently run on Gemstone.
+No Scala registry needs updating when a translation unit is added. Every case is compiled once through the normal
+vendor command, then that exact executable runs once as the NVIDIA oracle and once through Gemstone. Unsupported
+Gemstone behavior is a named red result; there is no local backend allowlist.
 
 The Driver callback case mixes `cuLaunchHostFunc` and `cuStreamAddCallback` on one stream, checks ordered shared-state
-transitions and callback-local TLS, and verifies that Gemstone services reverse RPC on the native thread blocked in
-`cuCtxSynchronize`.
+transitions and callback-local TLS, and detects overlapping or misrouted callback execution without assuming a
+vendor-specific worker-thread identity.
 
-The suite builds the facade, starts a loopback-only JVM server with a random authentication token, substitutes
-backend-specific link variables into the same pragma commands, executes each case in an isolated directory, and
-compares stdout exactly with `requires:`. It also records Gemstone RPC calls and rejects failed statuses. `NVCC` or
-`CUDA_HOME` can select a compiler explicitly; otherwise the newest detected CUDA release is used.
+The suite builds the Driver facade, executes each case in an isolated directory, and compares stdout exactly with
+`requires:`. Each Gemstone child has a fresh random authentication token and must make an authenticated Driver RPC;
+otherwise it fails even if the process returned zero. `NVCC` or `CUDA_HOME` selects a compiler explicitly; otherwise
+the newest detected CUDA release is used. There are no Gemstone compile defines, alternate link lines, or private
+CUDA Runtime replacement: Runtime cases use stock `libcudart` and are intercepted at its Driver calls.
 
 Semantic cases additionally declare `ptx-kernel`, `ptx-shape`, `ptx-input`, and `ptx-output` pragmas and embed their
 module in an `R"ptx(...)ptx"` literal. The CUDA test loads that literal through NVIDIA's Driver API. The same Scala
 suite discovers and extracts the identical PTX, runs it through Gemstone, and compares the declared output, so adding
 a semantic case does not require a Scala registry edit. Enabled semantic cases also run end to end through Gemstone's
 generated `libcuda.so.1`, RPC server, module registry, and PTX executor.
+
+Independent cases execute concurrently in isolated directories. `GEMSTONE_TEST_JOBS` sets the bounded worker count
+(1-32); it defaults to the smaller of eight and the available processor count.
 
 More substantial reference cases live under `samples/` and `thrust/`. Their implementation sources and licences are
 vendored under `vendor/`; the system toolkit supplies only the CUDA compiler, ABI/runtime headers, and reference
@@ -58,28 +60,28 @@ in a dedicated SBT configuration because compiling 237 CUDA executables is inten
 the compact conformance corpus:
 
 ```console
-sbt testThrust
+sbt testCUDAConformance
 ```
 
 The Scala suite discovers the same 160 common, 16 async, and 61 CUDA-specific translation units selected by Thrust's
 own CPP/CUDA CMake configuration. Each executable links the official two-file unittest framework and runs at the
 `tiny` size tier by default. Successful compilation is cached under `target/conformance/thrust-1.15.0`; source,
-compiler, architecture, backend, and compile-command changes invalidate it.
+compiler, architecture, and compile-command changes invalidate it.
 
 Useful controls are:
 
 ```console
-GEMSTONE_THRUST_FILTER='^(transform|cuda\\.transform)$' sbt testThrust
-GEMSTONE_THRUST_SIZES=default sbt testThrust
-GEMSTONE_THRUST_ARCH=sm_89 sbt testThrust
-GEMSTONE_THRUST_INCLUDE_DISABLED=1 sbt testThrust
-GEMSTONE_THRUST_BACKENDS=cuda,gemstone sbt testThrust
+GEMSTONE_THRUST_FILTER='^(transform|cuda\\.transform)$' sbt testCUDAConformance
+GEMSTONE_THRUST_SIZES=default sbt testCUDAConformance
+GEMSTONE_THRUST_ARCH=sm_89 sbt testCUDAConformance
+GEMSTONE_THRUST_JOBS=8 sbt testCUDAConformance
+GEMSTONE_THRUST_INCLUDE_DISABLED=1 sbt testCUDAConformance
 ```
 
-`GEMSTONE_THRUST_FILTER` is a Scala regular expression over upstream-relative names. The default backend is the
-NVIDIA reference runtime. The Gemstone backend uses the exact same discovered sources and compiler path; it is an
-explicit opt-in while CUDA Runtime fatbinary registration and the broader PTX semantics required by Thrust are being
-implemented. Dependency files are audited to ensure Thrust and CUB never fall back to toolkit copies.
+`GEMSTONE_THRUST_FILTER` is a Scala regular expression over upstream-relative names. `GEMSTONE_THRUST_JOBS` bounds
+compilation and execution concurrency from 1 to 32 and defaults to the smaller of four and the available processor
+count. Each vendor-standard executable runs first against NVIDIA and then unchanged through Gemstone. Dependency
+files are audited to ensure Thrust and CUB never fall back to toolkit copies.
 
 ## Provenance and licence boundary
 

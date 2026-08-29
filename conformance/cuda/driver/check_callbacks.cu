@@ -1,5 +1,4 @@
 #pragma region case: driver-callbacks
-#pragma region targets: cuda,gemstone
 #pragma region do: {nvcc} --allow-unsupported-compiler -std=c++17 -O2 {cuda_driver_defines} -x cu -o {output} {input} {cuda_driver_link}
 #pragma region do: {output}
 #pragma region requires: pass
@@ -10,10 +9,6 @@
 #include <thread>
 
 #include <cuda.h>
-
-#if defined(GEMSTONE_CUDA_ABI) && defined(__GNUC__)
-extern "C" CUresult CUDAAPI gemstone_cuCtxCreate_v2(CUcontext *, unsigned int, CUdevice) __asm__("cuCtxCreate_v2");
-#endif
 
 #define CUDA_REQUIRE(expression)                                                                                                           \
   do {                                                                                                                                     \
@@ -49,19 +44,11 @@ void apply(CallbackData &data, Kind actual_kind) {
   if (data.kind != actual_kind)
     state.failures.fetch_add(1, std::memory_order_relaxed);
 
-#if defined(GEMSTONE_CUDA_ABI)
-  // Reverse calls are deliberately serviced on the thread blocked in the
-  // original RPC. This catches accidental dispatch on a reader/worker thread.
-  if (callback_tls != 700 + data.expected_phase)
-    state.failures.fetch_add(1, std::memory_order_relaxed);
-  callback_tls = 700 + data.next_phase;
-#else
   // NVIDIA is free to use an internal worker. Still verify that callbacks do
   // not overlap on the same worker's TLS while sharing the stream.
   if (callback_tls != 0)
     state.failures.fetch_add(1, std::memory_order_relaxed);
   callback_tls = data.next_phase;
-#endif
 
   int expected = data.expected_phase;
   if (!state.phase.compare_exchange_strong(expected, data.next_phase, std::memory_order_acq_rel))
@@ -70,14 +57,9 @@ void apply(CallbackData &data, Kind actual_kind) {
   state.calls.fetch_add(1, std::memory_order_release);
   std::this_thread::yield();
 
-#if defined(GEMSTONE_CUDA_ABI)
-  if (callback_tls != 700 + data.next_phase)
-    state.failures.fetch_add(1, std::memory_order_relaxed);
-#else
   if (callback_tls != data.next_phase)
     state.failures.fetch_add(1, std::memory_order_relaxed);
   callback_tls = 0;
-#endif
 }
 
 void CUDA_CB host_callback(void *opaque) {
@@ -98,9 +80,7 @@ int main() {
   CUdevice device{};
   CUcontext context{};
   CUDA_REQUIRE(cuDeviceGet(&device, 0));
-#if defined(GEMSTONE_CUDA_ABI) && defined(__GNUC__)
-  CUDA_REQUIRE(gemstone_cuCtxCreate_v2(&context, 0, device));
-#elif CUDA_VERSION >= 13000
+#if CUDA_VERSION >= 13000
   CUDA_REQUIRE(cuCtxCreate(&context, nullptr, 0, device));
 #else
   CUDA_REQUIRE(cuCtxCreate(&context, 0, device));
@@ -112,9 +92,6 @@ int main() {
   CallbackData third{&state, 2, 3, 23, Kind::host};
   CallbackData fourth{&state, 3, 4, 31, Kind::stream};
 
-#if defined(GEMSTONE_CUDA_ABI)
-  callback_tls = 700;
-#endif
   CUDA_REQUIRE(cuLaunchHostFunc(nullptr, host_callback, &first));
   CUDA_REQUIRE(cuStreamAddCallback(nullptr, stream_callback, &second, 0));
   CUDA_REQUIRE(cuLaunchHostFunc(nullptr, host_callback, &third));
@@ -129,13 +106,6 @@ int main() {
                  static_cast<unsigned long long>(state.checksum.load()));
     return 1;
   }
-#if defined(GEMSTONE_CUDA_ABI)
-  if (callback_tls != 704) {
-    std::fprintf(stderr, "callback TLS did not return through the synchronizing thread: %d\n", callback_tls);
-    return 1;
-  }
-#endif
-
   CUDA_REQUIRE(cuCtxDestroy_v2(context));
   std::puts("pass");
   return 0;

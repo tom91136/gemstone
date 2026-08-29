@@ -39,7 +39,36 @@ object GenerateAMDGPUISA {
       fields: Vector[Field],
       operandCount: Int
   )
+  private enum DefinitionDomain(val directory: String, val stem: String) {
+    case SOP1          extends DefinitionDomain("scalar", "SOP1")
+    case SOP2          extends DefinitionDomain("scalar", "SOP2")
+    case SOPC          extends DefinitionDomain("scalar", "SOPC")
+    case SOPK          extends DefinitionDomain("scalar", "SOPK")
+    case SOPP          extends DefinitionDomain("scalar", "SOPP")
+    case ScalarMemory  extends DefinitionDomain("scalar", "ScalarMemory")
+    case VOP1          extends DefinitionDomain("vector", "VOP1")
+    case VOP2          extends DefinitionDomain("vector", "VOP2")
+    case VOP3          extends DefinitionDomain("vector", "VOP3")
+    case PackedVector  extends DefinitionDomain("vector", "PackedVector")
+    case VectorCompare extends DefinitionDomain("vector", "VectorCompare")
+    case DualVector    extends DefinitionDomain("vector", "DualVector")
+    case Interpolation extends DefinitionDomain("vector", "Interpolation")
+    case Matrix        extends DefinitionDomain("vector", "Matrix")
+    case DataShare     extends DefinitionDomain("memory", "DataShare")
+    case Buffer        extends DefinitionDomain("memory", "Buffer")
+    case Flat          extends DefinitionDomain("memory", "Flat")
+    case Image         extends DefinitionDomain("memory", "Image")
+    case Export        extends DefinitionDomain("system", "Export")
+    case LDSDirect     extends DefinitionDomain("system", "LDSDirect")
+  }
+  private final case class DefinitionChunk(
+      fileName: String,
+      objectName: String,
+      groups: Vector[Vector[InstructionForm]]
+  )
   private final case class InstructionSources(main: String, definitions: Vector[(String, String)])
+
+  private val MaximumDefinitionSourceCharacters = 750000
 
   def main(arguments: Array[String]): Unit = arguments.toVector match {
     case Vector(references, exporter, output) =>
@@ -48,13 +77,13 @@ object GenerateAMDGPUISA {
       write(catalog, render(result.records, result.acoCount, result.xmlCount, result.sopp))
       val instructions    = renderInstructions(result.records)
       val instructionRoot = catalog.getParent
-      write(instructionRoot.resolve("Instructions.scala"), instructions.main)
+      write(instructionRoot.resolve("Instruction.scala"), instructions.main)
       val definitionsRoot = instructionRoot.resolve("definitions")
       deleteScalaFiles(definitionsRoot)
       instructions.definitions.foreach { case (name, content) => write(definitionsRoot.resolve(name), content) }
-      write(instructionRoot.getParent.resolve("Architectures.scala"), renderArchitectures())
+      write(instructionRoot.resolve("Architectures.scala"), renderArchitectures())
     case _ =>
-      throw new IllegalArgumentException(
+      throw IllegalArgumentException(
         "usage: GenerateAMDGPUISA <prepared-references> <aco-exporter.py> <output.scala>"
       )
   }
@@ -128,7 +157,7 @@ object GenerateAMDGPUISA {
   private def parseACO(source: Path, exporter: Path): Vector[Instruction] = {
     require(Files.isRegularFile(source), s"missing Mesa ACO opcode source: $source")
     require(Files.isRegularFile(exporter), s"missing ACO exporter: $exporter")
-    val process = new ProcessBuilder("python3", exporter.toString, source.toString)
+    val process = ProcessBuilder("python3", exporter.toString, source.toString)
       .redirectError(ProcessBuilder.Redirect.INHERIT)
       .start()
     val lines = scala.io.Source.fromInputStream(process.getInputStream, "UTF-8")
@@ -176,27 +205,26 @@ object GenerateAMDGPUISA {
     val Opcode    = raw"encoding\s*\|=\s*opcode\s*<<\s*([0-9]+)".r
     val Immediate = raw"encoding\s*\|=\s*\(uint([0-9]+)_t\)sopp\.imm".r
     val body      = SOPPBody.findFirstIn(assembler).getOrElse {
-      throw new IllegalArgumentException("Mesa ACO assembler no longer contains emit_sopp_instruction")
+      throw IllegalArgumentException("Mesa ACO assembler no longer contains emit_sopp_instruction")
     }
     val (prefixBits, prefixShift) = Prefix.findFirstMatchIn(body)
       .map(value => value.group(1) -> value.group(2).toInt)
-      .getOrElse(throw new IllegalArgumentException("unrecognized Mesa ACO SOPP prefix rule"))
+      .getOrElse(throw IllegalArgumentException("unrecognized Mesa ACO SOPP prefix rule"))
     val opcodeShift = Opcode.findFirstMatchIn(body).map(_.group(1).toInt)
-      .getOrElse(throw new IllegalArgumentException("unrecognized Mesa ACO SOPP opcode rule"))
+      .getOrElse(throw IllegalArgumentException("unrecognized Mesa ACO SOPP opcode rule"))
     val immediateBits = Immediate.findFirstMatchIn(body).map(_.group(1).toInt)
-      .getOrElse(throw new IllegalArgumentException("unrecognized Mesa ACO SOPP immediate rule"))
-    require(
-      ir.matches("(?s).*struct SALU_instruction.*?uint32_t imm;.*"),
-      "Mesa ACO IR no longer has the SALU immediate field"
-    )
+      .getOrElse(throw IllegalArgumentException("unrecognized Mesa ACO SOPP immediate rule"))
+    val salu = ir.indexOf("struct SALU_instruction")
+    val imm  = ir.indexOf("uint32_t imm;", salu.max(0))
+    require(salu >= 0 && imm > salu, "Mesa ACO IR no longer has the SALU immediate field")
     SOPPRule(java.lang.Long.parseLong(prefixBits, 2) << prefixShift, opcodeShift, immediateBits)
   }
 
   private def render(records: Vector[Instruction], acoCount: Int, xmlCount: Int, sopp: SOPPRule): String =
-    s"""|package net.kurobako.gemstone.isa.amdgpu.common
+    s"""|package net.kurobako.gemstone.isa.amdgpu
         |
         |// Generated encoding constants from pinned Mesa ACO inputs. Instruction metadata is attached
-        |// directly to generated InstructionDef cases in Instructions.scala. Do not edit.
+        |// directly to generated InstructionDef cases in Instruction.scala. Do not edit.
         |private[amdgpu] val MesaACORecordCount: Int = $acoCount
         |private[amdgpu] val AMDXMLRecordCount: Int = $xmlCount
         |private[amdgpu] val MetadataRecordCount: Int = ${records.size}
@@ -213,87 +241,116 @@ object GenerateAMDGPUISA {
       .toVector
       .sortBy(_._1)
       .map { case (_, opcodeForms) => opcodeForms.sortBy(_.operandCount) }
-    val definitionReferences = definitionGroups.grouped(100).zipWithIndex.flatMap { case (groups, chunkIndex) =>
-      groups.map(forms => forms.head.opcode -> s"InstructionDefs$chunkIndex.${forms.head.definitionName}")
+    val definitionChunks = DefinitionDomain.values.toVector.flatMap { domain =>
+      val domainGroups =
+        definitionGroups.filter(group => definitionDomain(group.head.opcode, metadataByOpcode) == domain)
+      val shards = weightedChunks(domainGroups)(group =>
+        renderDefinitionCase(group, metadataByOpcode(group.head.opcode)).length
+      )
+      shards.map { groups =>
+        val range      = Option.when(shards.size > 1)(definitionRange(domain, groups)).getOrElse("")
+        val name       = s"${domain.stem}$range"
+        val objectName = s"${name}InstructionDefs"
+        DefinitionChunk(s"${domain.directory}/$objectName.scala", objectName, groups)
+      }
+    }
+    require(
+      definitionChunks.flatMap(_.groups).size == definitionGroups.size,
+      "definition-domain partition lost an AMDGPU opcode"
+    )
+    require(
+      definitionChunks.map(_.fileName).distinct.size == definitionChunks.size &&
+        definitionChunks.map(_.objectName).distinct.size == definitionChunks.size,
+      "definition-domain partition produced a duplicate source or object name"
+    )
+    val definitionReferences = definitionChunks.flatMap { chunk =>
+      chunk.groups.map(forms => forms.head.opcode -> s"${chunk.objectName}.${forms.head.definitionName}")
     }.toMap
-    val definitionChunks = definitionGroups.grouped(100).zipWithIndex.map { case (groups, chunkIndex) =>
-      f"InstructionDefs$chunkIndex%02d.scala" -> renderDefinitionChunkFile(chunkIndex, groups, metadataByOpcode)
-    }.toVector
-    val definitionChunkNames =
-      definitionChunks.indices.map(index => s"InstructionDefs$index.definitions").mkString(", ")
-    val instructionCases = forms.map(form => renderInstructionCase(form, definitionReferences(form.opcode)))
-    val main             = s"""|// Generated from the pinned Mesa ACO and AMD machine-readable ISA inputs. Do not edit by hand.
-        |package net.kurobako.gemstone.isa.amdgpu.common
+    val definitionSources = definitionChunks.map { chunk =>
+      chunk.fileName -> renderDefinitionChunkFile(chunk.objectName, chunk.groups, metadataByOpcode)
+    }
+    val definitionChunkNames = definitionChunks.map(chunk => s"${chunk.objectName}.definitions").mkString(", ")
+    val instructionCases     = forms.map(form => renderInstructionCase(form, definitionReferences(form.opcode)))
+    val main                 = s"""|// Generated from the pinned Mesa ACO and AMD machine-readable ISA inputs. Do not edit by hand.
+        |package net.kurobako.gemstone.isa.amdgpu
+        |
+        |import net.kurobako.gemstone.Col
+        |import net.kurobako.gemstone.Col.*
         |
         |enum InstructionDecodeError {
         |  case UnknownOpcode(opcode: String)
-        |  case InvalidOperandCount(opcode: String, expected: Vector[Int], actual: Int)
-        |  case AmbiguousForms(opcode: String, definitions: Vector[InstructionDef])
+        |  case InvalidOperandCount(opcode: String, expected: Col[Int], actual: Int)
+        |  case AmbiguousForms(opcode: String, definitions: Col[InstructionDef])
         |}
         |
-        |private[common] final case class InstructionFormDecoder(
+        |private[amdgpu] final case class InstructionFormDecoder(
         |    val operandCount: Int,
-        |    construct: (Vector[Operand], Vector[Modifier]) => Instruction
+        |    construct: (Col[Operand], Col[Modifier]) => Instruction
         |) {
-        |  def decode(operands: Vector[Operand], mods: Vector[Modifier]): Option[Instruction] =
+        |  def decode(operands: Col[Operand], mods: Col[Modifier]): Option[Instruction] =
         |    Option.when(operands.size == operandCount)(construct(operands, mods))
         |}
         |
-        |final class Decoder private[common] (forms: Vector[InstructionFormDecoder]) {
-        |  val operandCounts: Vector[Int] = forms.map(_.operandCount).distinct.sorted
+        |private[amdgpu] final class InstructionDecoder(forms: Col[InstructionFormDecoder]) {
+        |  val operandCounts: Col[Int] = forms.map(_.operandCount).distinct.sorted
         |
-        |  def apply(operands: Vector[Operand], mods: Vector[Modifier]): Vector[Instruction] =
+        |  def apply(operands: Col[Operand], mods: Col[Modifier]): Col[Instruction] =
         |    forms.flatMap(_.decode(operands, mods))
         |}
         |
-        |private[common] def form(
+        |private[amdgpu] def form(
         |    operandCount: Int
-        |)(construct: (Vector[Operand], Vector[Modifier]) => Instruction): InstructionFormDecoder =
+        |)(construct: (Col[Operand], Col[Modifier]) => Instruction): InstructionFormDecoder =
         |  InstructionFormDecoder(operandCount, construct)
-        |private[common] def decoder(forms: InstructionFormDecoder*): Decoder = new Decoder(forms.toVector)
+        |private[amdgpu] def decoder(forms: InstructionFormDecoder*): InstructionDecoder =
+        |  InstructionDecoder(forms.toCol)
         |
-        |abstract class InstructionDef private[common] (
+        |abstract class InstructionDef private[amdgpu] (
         |    val opcode: String,
-        |    val decoder: Decoder,
+        |    private[amdgpu] val decoder: InstructionDecoder,
         |    val meta: Metadata
-        |)
+        |) {
+        |  final def decode(operands: Col[Operand], mods: Col[Modifier]): Col[Instruction] =
+        |    decoder(operands, mods)
+        |}
         |
-        |val Instructions: Vector[InstructionDef] =
-        |  Vector($definitionChunkNames).flatten
+        |private[amdgpu] val AllInstructionDefinitions: Col[InstructionDef] =
+        |  Col($definitionChunkNames).flatten
         |
         |object InstructionDef {
-        |  private lazy val ByOpcode: Map[String, Vector[InstructionDef]] = Instructions.groupBy(_.opcode)
+        |  private lazy val ByOpcode: Map[String, Col[InstructionDef]] = AllInstructionDefinitions.groupBy(_.opcode)
         |
-        |  def forOpcode(opcode: String): Vector[InstructionDef] =
-        |    ByOpcode.getOrElse(normalizeOpcode(opcode), Vector.empty[InstructionDef])
+        |  def forOpcode(opcode: String): Col[InstructionDef] =
+        |    ByOpcode.getOrElse(normalizeOpcode(opcode), Col.empty[InstructionDef])
         |}
         |
         |enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
         |${instructionCases.mkString("\n")}
         |
-        |  def mods: Vector[Modifier]
+        |  def mods: Col[Modifier]
         |  final val opcode: String = definition.opcode
-        |  final val decoder: Decoder = definition.decoder
         |  final val meta: Metadata = definition.meta
-        |  final val operands: Vector[Operand] = operandValues.toVector
+        |  final val operands: Col[Operand] = operandValues.toCol
         |}
         |
         |object Instruction {
+        |  val definitions: Col[InstructionDef] = AllInstructionDefinitions
+        |
         |  def decode(
         |      opcode: String,
-        |      operands: Vector[Operand],
-        |      mods: Vector[Modifier] = Vector.empty
+        |      operands: Col[Operand],
+        |      mods: Col[Modifier] = Col.empty
         |  ): Either[InstructionDecodeError, Instruction] = {
         |    val name = normalizeOpcode(opcode)
-        |    decodeCompatible(name, operands, mods, name)
+        |    decodeWithSuffixes(name, operands, mods, name)
         |  }
         |
-        |  private val EncodingSuffixes: Vector[String] = Vector("_dpp8", "_sdwa", "_dpp", "_e64", "_e32")
+        |  private val EncodingSuffixes: Col[String] = Col("_dpp8", "_sdwa", "_dpp", "_e64", "_e32")
         |
-        |  private def decodeCompatible(
+        |  private def decodeWithSuffixes(
         |      name: String,
-        |      operands: Vector[Operand],
-        |      mods: Vector[Modifier],
+        |      operands: Col[Operand],
+        |      mods: Col[Modifier],
         |      original: String
         |  ): Either[InstructionDecodeError, Instruction] =
         |    decodeCanonical(name, operands, mods) match {
@@ -301,42 +358,24 @@ object GenerateAMDGPUISA {
         |        EncodingSuffixes.collectFirst {
         |          case suffix if name.endsWith(suffix) => name.dropRight(suffix.length) -> Modifier(suffix.drop(1))
         |        } match {
-        |          case Some((canonical, modifier)) => decodeCompatible(canonical, operands, modifier +: mods, original)
-        |          case None => compatibilityAlias(name) match {
-        |            case Some(canonical) => decodeCanonical(canonical, operands, mods)
-        |            case None            => Left(InstructionDecodeError.UnknownOpcode(original))
-        |          }
+        |          case Some((canonical, modifier)) => decodeWithSuffixes(canonical, operands, modifier +: mods, original)
+        |          case None                        => Left(InstructionDecodeError.UnknownOpcode(original))
         |        }
         |      case result => result
         |    }
         |
-        |  // Reviewed aliases accepted by older AMD assemblers; the enum retains current canonical names.
-        |  private def compatibilityAlias(name: String): Option[String] = name match {
-        |    case value if value.startsWith("v_cmpsx_") => Some("v_cmpx_" + value.drop(8))
-        |    case value if value.startsWith("v_cmps_")  => Some("v_cmp_" + value.drop(7))
-        |    case "buffer_wbinvl1_sc"                    => Some("buffer_wbinvl1")
-        |    case "export"                               => Some("exp")
-        |    case "v_accvgpr_read_b32"                   => Some("v_accvgpr_read")
-        |    case "v_accvgpr_write_b32"                  => Some("v_accvgpr_write")
-        |    case "v_addc_u32"                           => Some("v_add_co_ci_u32")
-        |    case "v_subb_u32"                           => Some("v_sub_co_ci_u32")
-        |    case "v_subbrev_u32"                        => Some("v_subrev_co_ci_u32")
-        |    case "v_subrev_i32"                         => Some("v_subrev_u32")
-        |    case _                                        => None
-        |  }
-        |
         |  private def decodeCanonical(
         |      name: String,
-        |      operands: Vector[Operand],
-        |      mods: Vector[Modifier]
+        |      operands: Col[Operand],
+        |      mods: Col[Modifier]
         |  ): Either[InstructionDecodeError, Instruction] =
         |    InstructionDef.forOpcode(name) match {
-        |      case Vector() => Left(InstructionDecodeError.UnknownOpcode(name))
+        |      case Col() => Left(InstructionDecodeError.UnknownOpcode(name))
         |      case candidates =>
-        |        val matches = candidates.flatMap(definition => definition.decoder(operands, mods))
+        |        val matches = candidates.flatMap(_.decode(operands, mods))
         |        matches match {
-        |          case Vector(instruction) => Right(instruction)
-        |          case Vector() => Left(
+        |          case Col(instruction) => Right(instruction)
+        |          case Col() => Left(
         |            InstructionDecodeError.InvalidOperandCount(
         |              name, candidates.flatMap(_.decoder.operandCounts).distinct.sorted, operands.size
         |            )
@@ -346,19 +385,93 @@ object GenerateAMDGPUISA {
         |    }
         |}
         |""".stripMargin
-    InstructionSources(main, definitionChunks)
+    InstructionSources(main, definitionSources)
   }
 
   private def renderDefinitionChunkFile(
-      index: Int,
+      objectName: String,
       groups: Vector[Vector[InstructionForm]],
       metadataByOpcode: Map[String, Vector[Instruction]]
   ): String =
     s"""|// Generated from the pinned Mesa ACO and AMD machine-readable ISA inputs. Do not edit by hand.
-        |package net.kurobako.gemstone.isa.amdgpu.common
+        |package net.kurobako.gemstone.isa.amdgpu
         |
-        |${renderDefinitionChunk(index, groups, metadataByOpcode)}
+        |import net.kurobako.gemstone.Col
+        |
+        |${renderDefinitionChunk(objectName, groups, metadataByOpcode)}
         |""".stripMargin
+
+  private def definitionDomain(
+      opcode: String,
+      metadataByOpcode: Map[String, Vector[Instruction]]
+  ): DefinitionDomain = {
+    val formats                               = metadataByOpcode(opcode).iterator.map(_.format).toSet
+    def hasPrefix(prefixes: String*): Boolean = formats.exists(format => prefixes.exists(format.startsWith))
+
+    if (
+      formats.contains("VOP3P_MFMA") ||
+      Vector("mfma", "wmma", "swmma", "tensor").exists(opcode.contains)
+    ) DefinitionDomain.Matrix
+    else if (hasPrefix("VOPD")) DefinitionDomain.DualVector
+    else if (hasPrefix("VOPC")) DefinitionDomain.VectorCompare
+    else if (hasPrefix("VOP1")) DefinitionDomain.VOP1
+    else if (hasPrefix("VOP2")) DefinitionDomain.VOP2
+    else if (hasPrefix("VOP3P")) DefinitionDomain.PackedVector
+    else if (hasPrefix("VOP3")) DefinitionDomain.VOP3
+    else if (hasPrefix("VINTERP", "VINTRP")) DefinitionDomain.Interpolation
+    else if (hasPrefix("SOP1")) DefinitionDomain.SOP1
+    else if (hasPrefix("SOP2")) DefinitionDomain.SOP2
+    else if (hasPrefix("SOPC")) DefinitionDomain.SOPC
+    else if (hasPrefix("SOPK")) DefinitionDomain.SOPK
+    else if (hasPrefix("SOPP")) DefinitionDomain.SOPP
+    else if (formats.contains("SMEM")) DefinitionDomain.ScalarMemory
+    else if (hasPrefix("DS", "VDS")) DefinitionDomain.DataShare
+    else if (hasPrefix("MUBUF", "MTBUF", "VBUFFER")) DefinitionDomain.Buffer
+    else if (hasPrefix("FLAT", "GLOBAL", "SCRATCH", "VFLAT", "VGLOBAL", "VSCRATCH")) DefinitionDomain.Flat
+    else if (hasPrefix("MIMG", "VIMAGE", "VSAMPLE")) DefinitionDomain.Image
+    else if (hasPrefix("EXP", "VEXPORT")) DefinitionDomain.Export
+    else if (formats.contains("LDSDIR")) DefinitionDomain.LDSDirect
+    else
+      throw IllegalArgumentException(
+        s"AMDGPU opcode '$opcode' has no definition domain for formats ${formats.toVector.sorted.mkString(", ")}"
+      )
+  }
+
+  private def weightedChunks[A](values: Vector[A])(weight: A => Int): Vector[Vector[A]] =
+    values.foldLeft(Vector.empty[(Int, Vector[A])]) { (chunks, value) =>
+      val valueWeight = weight(value)
+      chunks.lastOption match {
+        case Some((currentWeight, current))
+            if current.nonEmpty && currentWeight + valueWeight <= MaximumDefinitionSourceCharacters =>
+          chunks.updated(chunks.size - 1, (currentWeight + valueWeight, current :+ value))
+        case _ => chunks :+ (valueWeight -> Vector(value))
+      }
+    }.map(_._2)
+
+  private def definitionRange(
+      domain: DefinitionDomain,
+      groups: Vector[Vector[InstructionForm]]
+  ): String = {
+    val first = rangeEndpoint(domain, groups.head.head.definitionName)
+    val last  = rangeEndpoint(domain, groups.last.head.definitionName)
+    if (first == last) first else s"${first}To$last"
+  }
+
+  private def rangeEndpoint(domain: DefinitionDomain, name: String): String = {
+    val prefixes = domain match {
+      case DefinitionDomain.SOP1 | DefinitionDomain.SOP2 | DefinitionDomain.SOPC | DefinitionDomain.SOPK |
+          DefinitionDomain.SOPP => Vector("S")
+      case DefinitionDomain.VOP1 | DefinitionDomain.VOP2 | DefinitionDomain.VOP3 |
+          DefinitionDomain.PackedVector | DefinitionDomain.DualVector | DefinitionDomain.Interpolation |
+          DefinitionDomain.Matrix => Vector("V")
+      case DefinitionDomain.VectorCompare => Vector("VCmpx", "VCmp")
+      case DefinitionDomain.DataShare     => Vector("Vds", "Ds")
+      case DefinitionDomain.Image         => Vector("Image")
+      case DefinitionDomain.Export        => Vector("VExport", "Exp")
+      case _                              => Vector.empty
+    }
+    prefixes.collectFirst { case prefix if name.startsWith(prefix) => name.drop(prefix.length) }.getOrElse(name)
+  }
 
   private def instructionForms(records: Vector[Instruction]): Vector[InstructionForm] = {
     val grouped = records.groupBy(_.name).toVector.sortBy(_._1)
@@ -366,7 +479,7 @@ object GenerateAMDGPUISA {
     grouped.flatMap { case (opcode, definitions) =>
       val rawSignatures = definitions.map(_.operands.filter(!_.implicitOperand)).distinct
       val nonEmpty      = rawSignatures.filter(_.nonEmpty)
-      val counts        = (nonEmpty.map(_.size) ++ compatibilityOperandCounts(opcode)).distinct.sorted match {
+      val counts        = (nonEmpty.map(_.size) ++ syntaxOperandCounts(opcode)).distinct.sorted match {
         case Vector() => Vector(0)
         case values   => values
       }
@@ -386,7 +499,7 @@ object GenerateAMDGPUISA {
     * that AMD XML marks as present in every encoding. LLVM remains an independent oracle and is deliberately not read
     * by this production generator.
     */
-  private def compatibilityOperandCounts(opcode: String): Vector[Int] = opcode match {
+  private def syntaxOperandCounts(opcode: String): Vector[Int] = opcode match {
     case value if value.startsWith("ds_") && value.contains("_src2_")           => Vector(1)
     case "s_endpgm"                                                             => Vector(0, 1)
     case "image_atomic_rsub"                                                    => Vector(3)
@@ -408,16 +521,16 @@ object GenerateAMDGPUISA {
   }
 
   private def renderDefinitionChunk(
-      index: Int,
+      objectName: String,
       groups: Vector[Vector[InstructionForm]],
       metadataByOpcode: Map[String, Vector[Instruction]]
   ): String = {
     val cases      = groups.map(forms => renderDefinitionCase(forms, metadataByOpcode(forms.head.opcode)))
     val references = groups.map(_.head.definitionName).mkString(", ")
-    s"""|private[common] object InstructionDefs$index {
+    s"""|private[amdgpu] object $objectName {
         |${cases.mkString("\n")}
         |
-        |  val definitions: Vector[InstructionDef] = Vector($references)
+        |  val definitions: Col[InstructionDef] = Col($references)
         |}""".stripMargin
   }
 
@@ -442,11 +555,11 @@ object GenerateAMDGPUISA {
         s"          OperandInfo($field, ${literal(operand.kind)}, ${operand.bits}, ${operand.input}, ${operand.output}, ${operand.implicitOperand})"
       }
       val operandVector =
-        if (operands.isEmpty) "Vector.empty"
-        else s"Vector(\n${operands.mkString(",\n")}\n        )"
+        if (operands.isEmpty) "Col.empty"
+        else s"Col(\n${operands.mkString(",\n")}\n        )"
       val group = Option.when(record.group.nonEmpty)(s"Some(${literal(record.group)})").getOrElse("None")
       s"""|      Encoding(
-          |        Generation.${record.generation},
+          |        Family.${record.generation},
           |        ${literal(record.target)},
           |        ${literal(record.format)},
           |        ${record.opcode},
@@ -455,13 +568,13 @@ object GenerateAMDGPUISA {
           |        MetadataSource.${record.source}
           |      )""".stripMargin
     }
-    s"""|Metadata(Vector(
+    s"""|Metadata(Col(
         |${encodings.mkString(",\n")}
         |    ))""".stripMargin
   }
 
   private def renderInstructionCase(form: InstructionForm, definitionReference: String): String = {
-    val fields          = form.fields.map(field => s"${field.name}: Operand") :+ "mods: Vector[Modifier]"
+    val fields          = form.fields.map(field => s"${field.name}: Operand") :+ "mods: Col[Modifier]"
     val parentArguments = form.fields.map(_.name)
     val parent          =
       if (parentArguments.isEmpty) s"Instruction($definitionReference)"
@@ -512,14 +625,14 @@ object GenerateAMDGPUISA {
     }
   }
 
-  private def uniqueFields(fields: Vector[Field]): Vector[Field] = {
-    val seen = scala.collection.mutable.Map.empty[String, Int]
-    fields.map { field =>
+  private def uniqueFields(fields: Vector[Field]): Vector[Field] =
+    fields.foldLeft((Map.empty[String, Int], Vector.empty[Field])) { case ((seen, result), field) =>
       val count = seen.getOrElse(field.name, 0) + 1
-      seen(field.name) = count
-      field.copy(name = if (count == 1) field.name else s"${field.name}$count")
-    }
-  }
+      (
+        seen.updated(field.name, count),
+        result :+ field.copy(name = if (count == 1) field.name else s"${field.name}$count")
+      )
+    }._2
 
   private def uniqueCaseNames(opcodes: Vector[String]): Map[String, String] = {
     val bases      = opcodes.map(opcode => opcode -> scalaCaseName(opcode))
@@ -553,13 +666,10 @@ object GenerateAMDGPUISA {
     )
     families.map { case (packageName, generation) =>
       s"""|package net.kurobako.gemstone.isa.amdgpu.$packageName {
-          |  import net.kurobako.gemstone.Col
-          |  export net.kurobako.gemstone.isa.amdgpu.common.API.*
-          |  val Version: net.kurobako.gemstone.isa.amdgpu.common.Generation =
-          |    net.kurobako.gemstone.isa.amdgpu.common.Generation.$generation
-          |  val Instructions: Vector[net.kurobako.gemstone.isa.amdgpu.common.InstructionDef] =
-          |    net.kurobako.gemstone.isa.amdgpu.common.instructionsFor(Version)
-          |  object ISA extends net.kurobako.gemstone.isa.amdgpu.common.Architecture(Version)
+          |  val family: net.kurobako.gemstone.isa.amdgpu.Family =
+          |    net.kurobako.gemstone.isa.amdgpu.Family.$generation
+          |  val isa: net.kurobako.gemstone.isa.amdgpu.ISA =
+          |    net.kurobako.gemstone.isa.amdgpu.ISA(family)
           |}""".stripMargin
     }.mkString("// Generated from the normalized AMDGPU generation set. Do not edit by hand.\n", "\n\n", "\n")
   }
@@ -587,7 +697,7 @@ object GenerateAMDGPUISA {
     case "amdgpu_isa_cdna3.xml"   => "CDNA3"
     case "amdgpu_isa_cdna4.xml"   => "CDNA4"
     case "amdgpu_isa_cdna5.xml"   => "CDNA5"
-    case other                    => throw new IllegalArgumentException(s"unknown AMD ISA XML: $other")
+    case other                    => throw IllegalArgumentException(s"unknown AMD ISA XML: $other")
   }
 
   private def parseRadix(element: Element): Int = {
@@ -598,11 +708,11 @@ object GenerateAMDGPUISA {
   private def booleanAttribute(element: Element, name: String): Boolean = element.getAttribute(name).toLowerCase match {
     case "true"  => true
     case "false" => false
-    case other   => throw new IllegalArgumentException(s"invalid $name '$other'")
+    case other   => throw IllegalArgumentException(s"invalid $name '$other'")
   }
 
   private def requiredText(element: Element, name: String): String =
-    optionalText(element, name).getOrElse(throw new IllegalArgumentException(s"missing <$name>"))
+    optionalText(element, name).getOrElse(throw IllegalArgumentException(s"missing <$name>"))
 
   private def optionalText(element: Element, name: String): Option[String] = {
     val nodes = element.getElementsByTagName(name)
@@ -610,7 +720,7 @@ object GenerateAMDGPUISA {
   }
 
   private def requiredDirect(element: Element, name: String): Element =
-    optionalDirect(element, name).getOrElse(throw new IllegalArgumentException(s"missing direct <$name>"))
+    optionalDirect(element, name).getOrElse(throw IllegalArgumentException(s"missing direct <$name>"))
 
   private def optionalDirect(element: Element, name: String): Option[Element] = directChildren(element, name).headOption
 
@@ -629,14 +739,25 @@ object GenerateAMDGPUISA {
     val current   = if (Files.isRegularFile(output)) Some(Files.readString(output, StandardCharsets.UTF_8)) else None
     if (!current.contains(formatted)) {
       val _ = Files.createDirectories(output.getParent)
-      val _ = Files.writeString(output, formatted, StandardCharsets.UTF_8)
+      val _ = GeneratedFiles.write(output, formatted)
     }
   }
 
   private def deleteScalaFiles(directory: Path): Unit =
     if (Files.isDirectory(directory)) {
-      val files = Files.list(directory)
-      try files.iterator().asScala.filter(path => path.getFileName.toString.endsWith(".scala")).foreach(Files.delete)
-      finally files.close()
+      val paths = Files.walk(directory)
+      val found =
+        try paths.iterator().asScala.toVector.sortBy(_.getNameCount).reverse
+        finally paths.close()
+      found.filter(path => Files.isRegularFile(path) && path.getFileName.toString.endsWith(".scala"))
+        .foreach(path => Files.delete(path))
+      found.filter(path => path != directory && Files.isDirectory(path) && isEmptyDirectory(path))
+        .foreach(path => Files.delete(path))
     }
+
+  private def isEmptyDirectory(directory: Path): Boolean = {
+    val entries = Files.list(directory)
+    try !entries.findAny().isPresent
+    finally entries.close()
+  }
 }

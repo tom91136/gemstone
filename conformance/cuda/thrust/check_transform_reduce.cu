@@ -5,7 +5,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 #pragma region case: thrust-transform-reduce
-#pragma region targets: cuda
 #pragma region vendored: thrust,cub
 #pragma region do: {nvcc} --allow-unsupported-compiler -std=c++17 -O2 -include {cuda_host_compat} {cuda_vendor_includes} -MD -MF {dependencies} -o {output} {input}
 #pragma region do: {output}

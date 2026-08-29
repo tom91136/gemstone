@@ -25,10 +25,16 @@ class ExecutionSuite extends munit.FunSuite {
     assertEquals(mask.size, 256)
     assert(mask.contains(0))
     assert(mask.contains(255))
+
+    val selected = mask.filterLanes(_ % 32 == 0)
+    assertEquals(selected.size, 8)
+    assert(selected.contains(0))
+    assert(selected.contains(224))
+    assert(!selected.contains(255))
   }
 
   test("effects validate every write before committing any") {
-    val effects = new Effects[TestWrite]
+    val effects = Effects[TestWrite]
     val applied = Col.newBuilder[Int]
     effects.stage(TestWrite.Value(1))
     effects.stage(TestWrite.Value(-1))
@@ -44,15 +50,16 @@ class ExecutionSuite extends munit.FunSuite {
     assert(effects.isEmpty)
   }
 
-  test("budgets and cancellation are explicit") {
-    val budget = ExecutionBudget(2).toOption.get
-    assertEquals(budget.consume(), Right(()))
-    assertEquals(budget.consume(), Right(()))
-    assertEquals(budget.consume(), Left(ExecutionFault.BudgetExceeded(2)))
+  test("execution control owns one bounded, cancellable dispatch budget") {
+    val cancellation = CancellationToken.Source()
+    val limits       = ExecutionLimits.create(2, 1).toOption.get
+    val control      = ExecutionControl.create(limits, cancellation)
+    assertEquals(control.checkpoint(), Right(()))
+    assertEquals(control.checkpoint(), Right(()))
+    assertEquals(control.checkpoint(), Left(ExecutionFault.BudgetExceeded(2)))
 
-    val cancellation = new CancellationToken.Source
-    assert(!cancellation.isCancelled)
+    val cancelled = ExecutionControl.create(limits, cancellation)
     cancellation.cancel()
-    assert(cancellation.isCancelled)
+    assertEquals(cancelled.checkpoint(), Left(ExecutionFault.Cancelled))
   }
 }

@@ -1,0 +1,114 @@
+package net.kurobako.gemstone.isa.amdgpu
+
+import net.kurobako.gemstone.Col
+import net.kurobako.gemstone.binary.Bits
+import net.kurobako.gemstone.binary.LittleEndian
+
+import cats.syntax.all.*
+
+enum CodecError {
+  case WrongFamily(target: Target, expected: Family)
+  case UnsupportedInstruction(opcode: String, target: Target)
+  case UnsupportedFormat(opcode: String, target: Target, formats: Col[String])
+  case UnsupportedOperandSyntax(opcode: String, target: Target, operands: Col[Operand])
+  case AmbiguousInstruction(opcode: String, target: Target)
+  case InvalidOperand(message: String)
+  case InvalidEncoding(message: String)
+}
+
+/** Binary support starts with SOPP, whose fixed 32-bit layout is common from GFX6 through GFX12. Other formats are
+  * rejected explicitly until their conditional layouts are normalized from the vendor XML/ACO rules.
+  */
+object Binary {
+  private val SOPPMask = 0xff800000L
+
+  /** Encode every currently implemented format and classify every other known format explicitly. */
+  def encode(
+      instruction: Instruction,
+      target: Target
+  ): Either[CodecError, Col[Byte]] = {
+    val definitions = encodingsFor(instruction, target)
+    if (definitions.isEmpty) Left(CodecError.UnsupportedInstruction(instruction.opcode, target))
+    else {
+      val formats = definitions.map(_.format.toUpperCase).distinct.sorted
+      if (formats.contains("SOPP"))
+        encodeSOPP(instruction, target).leftMap {
+          case CodecError.InvalidOperand(_)
+              if instruction.mods.nonEmpty ||
+                instruction.operands.exists(!_.isInstanceOf[Operand.IntegerLiteral]) =>
+            CodecError.UnsupportedOperandSyntax(instruction.opcode, target, instruction.operands)
+          case error => error
+        }
+      else Left(CodecError.UnsupportedFormat(instruction.opcode, target, formats))
+    }
+  }
+
+  def encodeSOPP(
+      instruction: Instruction,
+      target: Target
+  ): Either[CodecError, Col[Byte]] = {
+    val definitions = encodingsFor(instruction, target).filter(_.format == "SOPP")
+    val encodings   = definitions.map(_.opcode).distinct
+    if (encodings.size > 1)
+      Left(CodecError.AmbiguousInstruction(instruction.opcode, target))
+    else
+      definitions.headOption.toRight(CodecError.UnsupportedInstruction(instruction.opcode, target)).flatMap {
+        definition =>
+          immediate(instruction).map { value =>
+            val immediateMask = (1L << SOPPImmediateBits) - 1L
+            val word          = SOPPEncodingPrefix |
+              ((definition.opcode.toLong & 0x7fL) << SOPPOpcodeShift) |
+              (value & immediateMask)
+            LittleEndian.toCol(word, 4)
+          }
+      }
+  }
+
+  def decodeSOPP(
+      bytes: Col[Byte],
+      target: Target
+  ): Either[CodecError, Instruction] =
+    if (bytes.size != 4) Left(CodecError.InvalidEncoding(s"SOPP is exactly four bytes, found ${bytes.size}"))
+    else {
+      val word = LittleEndian.decode(bytes, 0, 4)
+      if ((word & SOPPMask) != SOPPEncodingPrefix)
+        Left(CodecError.InvalidEncoding(f"not a SOPP word: 0x$word%08x"))
+      else {
+        val opcode  = ((word >>> SOPPOpcodeShift) & 0x7fL).toInt
+        val matches = Instruction.definitions.filter(definition =>
+          encodingsFor(definition, target).exists(info => info.format == "SOPP" && info.opcode == opcode)
+        )
+        val names = matches.map(_.opcode).distinct
+        if (names.size > 1)
+          Left(
+            CodecError.InvalidEncoding(
+              s"ambiguous SOPP opcode $opcode for ${target.name}: ${names.mkString(", ")}"
+            )
+          )
+        else
+          matches.headOption.toRight(
+            CodecError.InvalidEncoding(s"unknown SOPP opcode $opcode for ${target.name}")
+          )
+            .flatMap { definition =>
+              val value    = BigInt(Bits.low16(word))
+              val operands =
+                if (!matches.exists(_.decoder.operandCounts.contains(0)) || value != 0)
+                  Col(Operand.IntegerLiteral(value, 10))
+                else Col.empty[Operand]
+              Instruction.decode(definition.opcode, operands).leftMap(error =>
+                CodecError.InvalidEncoding(s"generated instruction decoder rejected ${definition.opcode}: $error")
+              )
+            }
+      }
+    }
+
+  private def immediate(instruction: Instruction): Either[CodecError, Long] = instruction.operands match {
+    case _ if instruction.mods.nonEmpty =>
+      Left(CodecError.InvalidOperand(s"SOPP does not accept modifiers: ${instruction.mods.mkString(", ")}"))
+    case Col()                                                                      => Right(0L)
+    case Col(Operand.IntegerLiteral(value, _)) if value >= -32768 && value <= 65535 =>
+      Right(Bits.low16(value.toLong))
+    case Col(operand) => Left(CodecError.InvalidOperand(s"SOPP requires a 16-bit integer, found $operand"))
+    case operands     => Left(CodecError.InvalidOperand(s"SOPP accepts at most one operand, found ${operands.size}"))
+  }
+}

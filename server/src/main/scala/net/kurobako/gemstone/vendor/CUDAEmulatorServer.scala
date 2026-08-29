@@ -13,6 +13,8 @@ import net.kurobako.gemstone.abi.Pointer
 import net.kurobako.gemstone.abi.ReadWrite
 import net.kurobako.gemstone.abi.InputBuffer
 import net.kurobako.gemstone.abi.OutputBuffer
+import net.kurobako.gemstone.binary.ByteRange
+import net.kurobako.gemstone.binary.LittleEndian
 import net.kurobako.gemstone.cuda.CUDA
 import net.kurobako.gemstone.cuda.Context
 import net.kurobako.gemstone.cuda.CUDAFunction
@@ -40,7 +42,9 @@ import net.kurobako.gemstone.memory.CheckedMemory
 import net.kurobako.gemstone.memory.GuestAddress
 import net.kurobako.gemstone.memory.MemoryError
 
-import scala.collection.mutable
+import java.util.concurrent.atomic.AtomicReference
+import scala.annotation.tailrec
+import scala.collection.immutable.Queue
 
 /** JVM/Native logical CUDA server used by both in-process tests and the future isolated transport. */
 trait CUDAKernelExecution {
@@ -51,7 +55,7 @@ trait CUDAKernelExecution {
 }
 
 object CUDAKernelExecution {
-  val Unsupported: CUDAKernelExecution = new CUDAKernelExecution {
+  private object UnsupportedExecution extends CUDAKernelExecution {
     override def cuModuleLoadData(image: ModuleImage): CUDAResult[CUDAModule] = failure("cuModuleLoadData")
     override def cuModuleGetFunction(module: CUDAModule, name: FunctionName): CUDAResult[KernelFunction] =
       failure("cuModuleGetFunction")
@@ -65,14 +69,27 @@ object CUDAKernelExecution {
     private def failure[A](name: String): CUDAResult[A] =
       CUDAResult.Failure(RPCCUDAError(801, s"$name is not implemented"))
   }
+
+  val Unsupported: CUDAKernelExecution = UnsupportedExecution
 }
 
 final class CUDAEmulatorServer(kernelExecution: CUDAKernelExecution = CUDAKernelExecution.Unsupported)
     extends CUDA {
-  private val allocations      = mutable.Map.empty[Long, Array[Byte]]
-  private var nextAddress      = 0x100000000L
-  private var contextLive      = false
-  private val pendingCallbacks = mutable.ArrayDeque.empty[() => Either[CallbackFailure, Unit]]
+  private type PendingCallback = () => Either[CallbackFailure, Unit]
+  private final case class State(
+      allocations: Map[Long, Array[Byte]],
+      nextAddress: Long,
+      contextLive: Boolean,
+      pendingCallbacks: Queue[PendingCallback]
+  )
+
+  private val state = AtomicReference(State(Map.empty, 0x100000000L, false, Queue.empty))
+
+  private def update[A](transition: State => (State, A)): A = synchronized {
+    val (next, result) = transition(state.get())
+    state.set(next)
+    result
+  }
 
   override def cuInit(flags: UInt32): CUDAStatus = CUDAStatus.Success
 
@@ -102,12 +119,11 @@ final class CUDAEmulatorServer(kernelExecution: CUDAKernelExecution = CUDAKernel
   override def cuCtxCreate_v2(context: Out[Context], flags: UInt32, device: Device): CUDAStatus =
     createContext(context, device)
 
-  private def createContext(context: Out[Context], device: Device): CUDAStatus = synchronized {
-    if (device.ordinal != 0) CUDAStatus.InvalidDevice
+  private def createContext(context: Out[Context], device: Device): CUDAStatus = update { current =>
+    if (device.ordinal != 0) current -> CUDAStatus.InvalidDevice
     else {
-      contextLive = true
       context.write(Context(1L))
-      CUDAStatus.Success
+      current.copy(contextLive = true) -> CUDAStatus.Success
     }
   }
 
@@ -115,22 +131,20 @@ final class CUDAEmulatorServer(kernelExecution: CUDAKernelExecution = CUDAKernel
     val callbacks = drainCallbacks()
     if (!callbacks.isSuccess) callbacks
     else
-      synchronized {
-        if (!contextLive || context.handle != 1L) CUDAStatus.InvalidContext
-        else {
-          contextLive = false
-          CUDAStatus.Success
-        }
+      update { current =>
+        if (!current.contextLive || context.handle != 1L) current -> CUDAStatus.InvalidContext
+        else current.copy(contextLive = false)                    -> CUDAStatus.Success
       }
   }
 
   override def cuCtxSynchronize(): CUDAStatus = drainCallbacks()
 
   override def cuLaunchHostFunc(hStream: Stream, fn: CUhostFn, userData: CallbackData): CUDAStatus = synchronized {
-    if (!contextLive) CUDAStatus.InvalidContext
+    val current = state.get()
+    if (!current.contextLive) CUDAStatus.InvalidContext
     else if (hStream != Stream.Default) CUDAStatus.InvalidValue
     else {
-      pendingCallbacks.append(() => fn(Tuple1(userData)))
+      state.set(current.copy(pendingCallbacks = current.pendingCallbacks.enqueue(() => fn(Tuple1(userData)))))
       CUDAStatus.Success
     }
   }
@@ -141,25 +155,36 @@ final class CUDAEmulatorServer(kernelExecution: CUDAKernelExecution = CUDAKernel
       userData: CallbackData,
       flags: UInt32
   ): CUDAStatus = synchronized {
-    if (!contextLive) CUDAStatus.InvalidContext
+    val current = state.get()
+    if (!current.contextLive) CUDAStatus.InvalidContext
     else if (hStream != Stream.Default || flags.toLong != 0L) CUDAStatus.InvalidValue
     else {
-      pendingCallbacks.append(() => callback((hStream, CUDAStatus.Success, userData)))
+      state.set(
+        current.copy(pendingCallbacks =
+          current.pendingCallbacks.enqueue(() => callback((hStream, CUDAStatus.Success, userData)))
+        )
+      )
       CUDAStatus.Success
     }
   }
 
   private def drainCallbacks(): CUDAStatus = {
-    var result = CUDAStatus.Success
-    var next   = synchronized(pendingCallbacks.removeHeadOption())
-    while (result.isSuccess && next.nonEmpty) {
-      result = next.get() match {
-        case Right(()) => CUDAStatus.Success
-        case Left(_)   => CUDAStatus.Unknown
+    def take(): Option[PendingCallback] = update { current =>
+      current.pendingCallbacks.dequeueOption match {
+        case Some((callback, remaining)) => current.copy(pendingCallbacks = remaining) -> Some(callback)
+        case None                        => current                                    -> None
       }
-      next = synchronized(pendingCallbacks.removeHeadOption())
     }
-    result
+    @tailrec
+    def loop(): CUDAStatus = take() match {
+      case None           => CUDAStatus.Success
+      case Some(callback) =>
+        callback() match {
+          case Right(()) => loop()
+          case Left(_)   => CUDAStatus.Unknown
+        }
+    }
+    loop()
   }
 
   override def cuMemAlloc_v2(pointer: Out[DevicePtr], bytesize: SizeT): CUDAStatus =
@@ -175,11 +200,7 @@ final class CUDAEmulatorServer(kernelExecution: CUDAKernelExecution = CUDAKernel
     val bytes = source.snapshot.getOrElse(Col.empty[Byte])
     if (bytes.length.toLong != byteCount.toLong) CUDAStatus.InvalidValue
     else status(resolve(destination, bytes.length).map { case (allocation, offset) =>
-      var index = 0
-      while (index < bytes.length) {
-        allocation(offset + index) = bytes(index)
-        index += 1
-      }
+      bytes.indices.foreach(index => allocation(offset + index) = bytes(index))
     })
   }
 
@@ -190,11 +211,7 @@ final class CUDAEmulatorServer(kernelExecution: CUDAKernelExecution = CUDAKernel
   ): CUDAStatus = synchronized {
     if (destination.length.toLong != byteCount.toLong) CUDAStatus.InvalidValue
     else status(checkedSize(byteCount).flatMap(size => resolve(source, size)).map { case (allocation, offset) =>
-      var index = 0
-      while (index < byteCount.toLong.toInt) {
-        destination.write(allocation(offset + index), index)
-        index += 1
-      }
+      (0 until byteCount.toLong.toInt).foreach(index => destination.write(allocation(offset + index), index))
     })
   }
 
@@ -260,7 +277,8 @@ final class CUDAEmulatorServer(kernelExecution: CUDAKernelExecution = CUDAKernel
 
   override def __cudaGemstoneManagedRegister(pointer: DevicePtr, bytesize: SizeT): CUDAStatus = synchronized {
     status(checkedSize(bytesize).flatMap { size =>
-      val overlaps = allocations.exists { case (base, allocation) =>
+      val current  = state.get()
+      val overlaps = current.allocations.exists { case (base, allocation) =>
         val end        = Math.addExact(pointer.address, size.toLong)
         val currentEnd = Math.addExact(base, allocation.length.toLong)
         pointer.address < currentEnd && base < end
@@ -268,7 +286,7 @@ final class CUDAEmulatorServer(kernelExecution: CUDAKernelExecution = CUDAKernel
       if (size == 0 || overlaps)
         failure(1, s"invalid managed allocation at 0x${java.lang.Long.toUnsignedString(pointer.address, 16)}")
       else {
-        allocations(pointer.address) = new Array[Byte](size)
+        state.set(current.copy(allocations = current.allocations.updated(pointer.address, Array.ofDim[Byte](size))))
         success(())
       }
     })
@@ -287,18 +305,26 @@ final class CUDAEmulatorServer(kernelExecution: CUDAKernelExecution = CUDAKernel
     checkedSize(bytesize).flatMap { size =>
       if (size == 0) failure(1, "zero-byte allocation")
       else {
-        val base = nextAddress
-        val span = (size.toLong + 0xfffL) & ~0xfffL
-        nextAddress = Math.addExact(nextAddress, span.max(0x1000L))
-        allocations(base) = new Array[Byte](size)
+        val current = state.get()
+        val base    = current.nextAddress
+        val span    = (size.toLong + 0xfffL) & ~0xfffL
+        state.set(
+          current.copy(
+            nextAddress = Math.addExact(current.nextAddress, span.max(0x1000L)),
+            allocations = current.allocations.updated(base, Array.ofDim[Byte](size))
+          )
+        )
         success(DevicePtr(base))
       }
     }
   }
 
   private def free(pointer: DevicePtr): CUDAResult[Unit] = synchronized {
-    if (allocations.remove(pointer.address).isDefined) success(())
-    else failure(1, s"invalid device pointer: 0x${java.lang.Long.toUnsignedString(pointer.address, 16)}")
+    val current = state.get()
+    if (current.allocations.contains(pointer.address)) {
+      state.set(current.copy(allocations = current.allocations.removed(pointer.address)))
+      success(())
+    } else failure(1, s"invalid device pointer: 0x${java.lang.Long.toUnsignedString(pointer.address, 16)}")
   }
 
   private def checkedSize(size: SizeT): CUDAResult[Int] =
@@ -307,9 +333,9 @@ final class CUDAEmulatorServer(kernelExecution: CUDAKernelExecution = CUDAKernel
 
   private def resolve(pointer: DevicePtr, size: Int): CUDAResult[(Array[Byte], Int)] = {
     val address = pointer.address
-    allocations.iterator.collectFirst {
+    state.get().allocations.iterator.collectFirst {
       case (base, allocation)
-          if address >= base && address - base <= allocation.length.toLong && size.toLong <= allocation.length.toLong - (address - base) =>
+          if address >= base && ByteRange.contains(allocation.length, address - base, size.toLong) =>
         allocation -> (address - base).toInt
     } match {
       case Some(resolved) => success(resolved)
@@ -317,7 +343,7 @@ final class CUDAEmulatorServer(kernelExecution: CUDAKernelExecution = CUDAKernel
     }
   }
 
-  private val deviceMemory: CheckedMemory = new CheckedMemory {
+  private final class DeviceMemory extends CheckedMemory {
     override val allocation: Allocation =
       Allocation(GuestAddress(0L), Int.MaxValue, AllocationKind.Device, "CUDA allocation registry")
 
@@ -330,10 +356,7 @@ final class CUDAEmulatorServer(kernelExecution: CUDAKernelExecution = CUDAKernel
 
     override def readInt32(address: GuestAddress): Either[MemoryError, Int] = CUDAEmulatorServer.this.synchronized {
       resolve(DevicePtr(address.value), 4).map { case (bytes, offset) =>
-        (bytes(offset) & 0xff) |
-          ((bytes(offset + 1) & 0xff) << 8) |
-          ((bytes(offset + 2) & 0xff) << 16) |
-          ((bytes(offset + 3) & 0xff) << 24)
+        LittleEndian.decode(bytes, offset, 4).toInt
       } match {
         case CUDAResult.Success(value) => Right(value)
         case CUDAResult.Failure(error) => Left(MemoryError.InvalidAddress(address, 4, error.message))
@@ -343,10 +366,7 @@ final class CUDAEmulatorServer(kernelExecution: CUDAKernelExecution = CUDAKernel
     override def writeInt32(address: GuestAddress, value: Int): Either[MemoryError, Unit] =
       CUDAEmulatorServer.this.synchronized {
         resolve(DevicePtr(address.value), 4).map { case (bytes, offset) =>
-          bytes(offset) = value.toByte
-          bytes(offset + 1) = (value >>> 8).toByte
-          bytes(offset + 2) = (value >>> 16).toByte
-          bytes(offset + 3) = (value >>> 24).toByte
+          LittleEndian.write(value.toLong, bytes, offset, 4)
         } match {
           case CUDAResult.Success(())    => Right(())
           case CUDAResult.Failure(error) => Left(MemoryError.InvalidAddress(address, 4, error.message))
@@ -363,6 +383,8 @@ final class CUDAEmulatorServer(kernelExecution: CUDAKernelExecution = CUDAKernel
 
     override def free(): Unit = ()
   }
+
+  private val deviceMemory: CheckedMemory = DeviceMemory()
 
   private def status[A](result: CUDAResult[A]): CUDAStatus = result match {
     case CUDAResult.Success(_)     => CUDAStatus.Success

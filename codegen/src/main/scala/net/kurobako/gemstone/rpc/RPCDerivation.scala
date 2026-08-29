@@ -1,6 +1,7 @@
 package net.kurobako.gemstone.rpc
 
 import net.kurobako.gemstone.Col
+import net.kurobako.gemstone.codegen.Identifiers
 
 import scala.quoted.Expr
 import scala.quoted.Quotes
@@ -33,7 +34,7 @@ object RPCDerivation {
       report.errorAndAbort(s"RPC methods may not be overloaded: ${duplicateNames.sorted.mkString(", ")}")
 
     val derived = methods.map { method =>
-      if (!method.name.matches("(?:cu|cuda|__cuda)[A-Za-z0-9_]*"))
+      if (!Identifiers.startsWithOneOf(method.name, "cu", "cuda", "__cuda"))
         abortAt(method, s"CUDA RPC method name must be its exact C symbol: ${method.name}")
       val (rawParameters, resultType) = methodShape(interfaceType.memberType(method), method)
       requireCUDAStatus(resultType, method)
@@ -96,7 +97,7 @@ object RPCDerivation {
       report.errorAndAbort(s"API surface must be a trait: ${interfaceSymbol.fullName}")
     val names = publicMethods(interfaceSymbol)
       .map(_.name)
-      .filter(_.matches("(?:cu|cuda|__cuda)[A-Za-z0-9_]*"))
+      .filter(Identifiers.startsWithOneOf(_, "cu", "cuda", "__cuda"))
       .distinct
       .sorted
       .map(Expr(_))
@@ -105,16 +106,17 @@ object RPCDerivation {
 
   private def publicMethods(using quotes: Quotes)(interface: quotes.reflect.Symbol): Vector[quotes.reflect.Symbol] = {
     import quotes.reflect.*
-    val seen = scala.collection.mutable.Set.empty[String]
-    interface.typeRef.baseClasses.iterator.filter(_.flags.is(Flags.Trait)).foldLeft(Vector.empty[Symbol]) {
-      case (methods, owner) =>
+    interface.typeRef.baseClasses.iterator.filter(_.flags.is(Flags.Trait)).foldLeft((
+      Vector.empty[Symbol],
+      Set.empty[String]
+    )) {
+      case ((methods, seen), owner) =>
         val declared = owner.declaredMethods
           .filterNot(method => method.flags.is(Flags.Synthetic) || method.flags.is(Flags.Private))
           .filterNot(_.name == "<init>")
         val visible = declared.filterNot(method => seen(method.name))
-        seen ++= declared.map(_.name)
-        methods ++ visible
-    }
+        (methods ++ visible, seen ++ declared.map(_.name))
+    }._1
   }
 
   private def methodShape(using
@@ -258,12 +260,13 @@ object RPCDerivation {
           }
         case AppliedType(option, List(element))
             if option.typeSymbol.fullName == "net.kurobako.gemstone.abi.Nullable" && (
-              element.dealias =:= TypeRepr.of[OpaquePointer] || (element.dealias match {
-                case AppliedType(pointer, List(nested, _, _)) =>
-                  pointer.typeSymbol.fullName == "net.kurobako.gemstone.abi.Pointer" &&
-                  nested.dealias =:= TypeRepr.of[OpaquePointer]
-                case _ => false
-              })
+              element.dealias =:= TypeRepr.of[OpaquePointer] ||
+                (element.dealias match {
+                  case AppliedType(pointer, List(nested, _, _)) =>
+                    pointer.typeSymbol.fullName == "net.kurobako.gemstone.abi.Pointer" &&
+                    nested.dealias =:= TypeRepr.of[OpaquePointer]
+                  case _ => false
+                })
             ) =>
           WireType.NullableOpaquePointer
         case _ => abortAt(method, s"unsupported RPC wire type ${value.show} in ${method.name}")

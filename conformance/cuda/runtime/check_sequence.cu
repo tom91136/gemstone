@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: BSD-3-Clause
  */
 #pragma region case: runtime-sequence
-#pragma region targets: cuda
 #pragma region do: {nvcc} --allow-unsupported-compiler -std=c++17 -O2 -o {output} {input}
 #pragma region do: {output}
 #pragma region requires: pass

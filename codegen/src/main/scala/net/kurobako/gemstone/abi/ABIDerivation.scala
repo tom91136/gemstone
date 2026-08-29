@@ -1,6 +1,7 @@
 package net.kurobako.gemstone.abi
 
 import net.kurobako.gemstone.Col
+import net.kurobako.gemstone.codegen.Identifiers
 
 import scala.quoted.Expr
 import scala.quoted.Quotes
@@ -122,7 +123,7 @@ object ABIDerivation {
     }
 
     def requireCIdentifier(value: String, description: String): String = {
-      if (!value.matches("[A-Za-z_][A-Za-z0-9_]*"))
+      if (!Identifiers.isC(value))
         report.errorAndAbort(s"$description in $methodName is not a C identifier: $value")
       value
     }
@@ -229,7 +230,10 @@ object ABIDerivation {
             if constructor.typeSymbol.fullName == "scala.*:" =>
           head :: tupleElements(tail)
         case AppliedType(constructor, elements)
-            if constructor.typeSymbol.fullName.matches("scala\\.Tuple[1-9][0-9]*") =>
+            if constructor.typeSymbol.fullName match {
+              case s"scala.Tuple$arity" => arity.nonEmpty && arity.head != '0' && arity.forall(_.isDigit)
+              case _                    => false
+            } =>
           elements
         case _ =>
           report.errorAndAbort(
@@ -245,12 +249,11 @@ object ABIDerivation {
     import quotes.reflect.*
     val interface = TypeRepr.of[T].typeSymbol
     if (!interface.flags.is(Flags.Trait)) report.errorAndAbort(s"ABI interface must be a trait: ${interface.fullName}")
-    val methods = publicMethods(interface).filter(method => nativeDelegate(method).nonEmpty)
-    rejectOverloads(methods)
-    val expressions = methods.map { method =>
+    val methods = publicMethods(interface).flatMap(method => nativeDelegate(method).map(method -> _))
+    rejectOverloads(methods.map(_._1))
+    val expressions = methods.map { case (method, target) =>
       val signature      = deriveCFunctionSignature(method)
       val parameterNames = method.paramSymss.flatten.map(parameter => Expr(parameter.name))
-      val target         = nativeDelegate(method).get
       '{
         ABIDeclaration(
           ${ Expr(method.name) },
@@ -273,7 +276,7 @@ object ABIDerivation {
     rejectOverloads(methods)
 
     val expressions = methods.map { method =>
-      if (!method.name.matches("[A-Za-z_][A-Za-z0-9_]*"))
+      if (!Identifiers.isC(method.name))
         abortAt(method, s"ABI method name must be its exact C identifier: ${method.name}")
 
       val implementation = implementationExpression(method)
@@ -300,16 +303,17 @@ object ABIDerivation {
 
   private def publicMethods(using quotes: Quotes)(interface: quotes.reflect.Symbol): Vector[quotes.reflect.Symbol] = {
     import quotes.reflect.*
-    val seen = scala.collection.mutable.Set.empty[String]
-    interface.typeRef.baseClasses.iterator.filter(_.flags.is(Flags.Trait)).foldLeft(Vector.empty[Symbol]) {
-      case (methods, owner) =>
+    interface.typeRef.baseClasses.iterator.filter(_.flags.is(Flags.Trait)).foldLeft((
+      Vector.empty[Symbol],
+      Set.empty[String]
+    )) {
+      case ((methods, seen), owner) =>
         val declared = owner.declaredMethods
           .filterNot(method => method.flags.is(Flags.Synthetic) || method.flags.is(Flags.Private))
           .filterNot(_.name == "<init>")
         val visible = declared.filterNot(method => seen(method.name))
-        seen ++= declared.map(_.name)
-        methods ++ visible
-    }.sortBy(_.name)
+        (methods ++ visible, seen ++ declared.map(_.name))
+    }._1.sortBy(_.name)
   }
 
   private def rejectOverloads(using quotes: Quotes)(methods: Vector[quotes.reflect.Symbol]): Unit = {
@@ -321,7 +325,7 @@ object ABIDerivation {
 
   private def nativeDelegate(using quotes: Quotes)(method: quotes.reflect.Symbol): Option[String] =
     retainedDelegateTarget(method).map { target =>
-      if (!target.matches("[A-Za-z_][A-Za-z0-9_]*"))
+      if (!Identifiers.isC(target))
         abortAt(method, s"native delegate target is not a C identifier: $target")
       target
     }

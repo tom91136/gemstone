@@ -7,7 +7,8 @@ import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
-import scala.collection.mutable
+import cats.data.State
+import cats.syntax.all.*
 import upickle.default.read
 
 /** Materializes the pinned Clang declarations as checked-in Scala API surface bases. The generated source is
@@ -15,6 +16,18 @@ import upickle.default.read
   * selected methods as RPC endpoints or native delegates without editing this output.
   */
 object GenerateAPISurfaces {
+  private final case class Aliases(entries: Vector[(String, String)]) {
+    def get(name: String): Option[String] = entries.collectFirst { case (`name`, definition) => definition }
+    def put(name: String, definition: String): Aliases =
+      if (get(name).nonEmpty) this else copy(entries = entries :+ (name -> definition))
+  }
+
+  private object Aliases {
+    val empty: Aliases = Aliases(Vector.empty)
+  }
+
+  private type Render[A] = State[Aliases, A]
+
   private final case class Target(
       manifestNames: Vector[String],
       packageName: String,
@@ -26,14 +39,13 @@ object GenerateAPISurfaces {
   )
 
   def main(arguments: Array[String]): Unit = {
-    require(APISourceFingerprint.Value.nonEmpty, "API source fingerprint must be available")
     val (check, manifestPath, sourceRoot, versions) = arguments.toVector match {
       case Vector(manifest, root, cuda, hip, hsa, levelZero, openCL) =>
         (false, Paths.get(manifest), Paths.get(root), Vector(cuda, hip, hsa, levelZero, openCL))
       case Vector("--check", manifest, root, cuda, hip, hsa, levelZero, openCL) =>
         (true, Paths.get(manifest), Paths.get(root), Vector(cuda, hip, hsa, levelZero, openCL))
       case _ =>
-        throw new IllegalArgumentException(
+        throw IllegalArgumentException(
           "usage: GenerateAPISurfaces [--check] <manifest> <api-source-root> <cuda> <hip> <hsa> <level-zero> <opencl>"
         )
     }
@@ -94,27 +106,33 @@ object GenerateAPISurfaces {
         println(s"validated ${functions.size} ${target.traitName} declarations")
       } else {
         val _ = Files.createDirectories(target.output.getParent)
-        val _ = Files.writeString(target.output, content, StandardCharsets.UTF_8)
+        val _ = GeneratedFiles.write(target.output, content)
         println(s"generated ${functions.size} ${target.traitName} declarations at ${target.output}")
       }
     }
   }
 
-  private def missing(name: String): Nothing = throw new IllegalArgumentException(s"manifest surface is absent: $name")
+  private def missing(name: String): Nothing = throw IllegalArgumentException(s"manifest surface is absent: $name")
 
   private def render(target: Target, functions: Vector[ValidateAPIs.Function], surfaceSize: Int): String = {
-    val aliases                          = mutable.LinkedHashMap.empty[String, String]
-    def scalaType(cType: String): String = mapType(cType.trim, aliases, target.traitName.stripSuffix("Surface"))
-    val declarations                     = functions.map { function =>
-      val used       = mutable.Set.empty[String]
-      val parameters = function.parameters.zipWithIndex.map { case (parameter, index) =>
+    val api      = target.traitName.stripSuffix("Surface")
+    val rendered = functions.traverse { function =>
+      val (_, namedParameters) = function.parameters.zipWithIndex.foldLeft(
+        (Set.empty[String], Vector.empty[(String, String)])
+      ) { case ((used, result), (parameter, index)) =>
         val base = identifier(Option(parameter.name).filter(_.nonEmpty).getOrElse(s"arg$index"))
-        val name = Iterator.from(1).map(i => if (i == 1) base else s"${base}_$i").find(used.add).get
-        s"$name: ${scalaType(parameter.cType)}"
+        val name = Iterator.from(1).map(i => if (i == 1) base else s"${base}_$i").find(!used(_)).get
+        (used + name, result :+ (name -> parameter.cType))
       }
-      s"  def ${identifier(function.name)}(${parameters.mkString(", ")}): ${scalaType(function.returnType)} = unsupported"
+      for {
+        parameters <- namedParameters.traverse { case (name, cType) =>
+          mapType(cType.trim, api).map(scalaType => s"$name: $scalaType")
+        }
+        returnType <- mapType(function.returnType.trim, api)
+      } yield s"  def ${identifier(function.name)}(${parameters.mkString(", ")}): $returnType = unsupported"
     }
-    val aliasLines = aliases.toVector.filterNot(entry => target.excludedTypes(entry._1)).sortBy(_._1).map {
+    val (aliases, declarations) = rendered.run(Aliases.empty).value
+    val aliasLines              = aliases.entries.filterNot(entry => target.excludedTypes(entry._1)).sortBy(_._1).map {
       case (name, definition) =>
         s"type ${identifier(name)} = $definition"
     }
@@ -137,35 +155,40 @@ object GenerateAPISurfaces {
         |""".stripMargin
   }
 
-  private def mapType(raw: String, aliases: mutable.LinkedHashMap[String, String], api: String): String = {
+  private def mapType(raw: String, api: String): Render[String] = {
     val value = raw.replaceAll("\\s+", " ").trim
     functionPointer(value) match {
       case Some((result, parameters)) =>
-        val arguments = callbackArguments(parameters.map(mapType(_, aliases, api)))
-        s"Callback[$arguments, ${mapType(result, aliases, api)}]"
+        for {
+          parameterTypes <- parameters.traverse(mapType(_, api))
+          resultType     <- mapType(result, api)
+        } yield s"Callback[${callbackArguments(parameterTypes)}, $resultType]"
       case None if value.endsWith("*") =>
         val pointee0 = value.dropRight(1).trim
         val readOnly = pointee0.startsWith("const ") || pointee0.endsWith(" const")
         val pointee  = pointee0.stripPrefix("const ").stripSuffix(" const").trim
-        if (readOnly && pointee == "char") "CString"
-        else if (!readOnly && pointee == "void") "OpaquePointer"
+        if (readOnly && pointee == "char") State.pure("CString")
+        else if (!readOnly && pointee == "void") State.pure("OpaquePointer")
         else {
           val access  = if (readOnly) "Read" else "ReadWrite"
-          val element = if (pointee == "void") "CVoid" else mapType(pointee, aliases, api)
-          s"Pointer[$element, $access, Opaque]"
+          val element = if (pointee == "void") State.pure[Aliases, String]("CVoid") else mapType(pointee, api)
+          element.map(value => s"Pointer[$value, $access, Opaque]")
         }
       case None =>
         CallbackTypedefCatalog.find(api, value) match {
           case Some(signature) =>
             val (result, parameters) = functionPointer(signature)
-              .getOrElse(throw new IllegalStateException(s"invalid callback typedef signature: $value = $signature"))
-            val arguments = callbackArguments(parameters.map(mapType(_, aliases, api)))
-            aliases(value) = s"CallbackTypedef[${literal(value)}, $arguments, ${mapType(result, aliases, api)}]"
-            typeIdentifier(value)
+              .getOrElse(throw IllegalStateException(s"invalid callback typedef signature: $value = $signature"))
+            for {
+              parameterTypes <- parameters.traverse(mapType(_, api))
+              resultType     <- mapType(result, api)
+              definition = s"CallbackTypedef[${literal(value)}, ${callbackArguments(parameterTypes)}, $resultType]"
+              _ <- State.modify[Aliases](_.put(value, definition))
+            } yield typeIdentifier(value)
           case None =>
             fixedArray(value) match {
-              case Some((element, count)) => s"CArray[${mapType(element, aliases, api)}, $count]"
-              case None                   => mapValue(value, aliases, api)
+              case Some((element, count)) => mapType(element, api).map(value => s"CArray[$value, $count]")
+              case None                   => mapValue(value, api)
             }
         }
     }
@@ -177,32 +200,28 @@ object GenerateAPISurfaces {
     case values        => values.mkString("(", ", ", ")")
   }
 
-  private def mapValue(raw: String, aliases: mutable.LinkedHashMap[String, String], api: String): String =
+  private def mapValue(raw: String, api: String): Render[String] =
     (api, raw) match {
-      case ("CUDA", "CUresult" | "cudaError_t")                             => "CUDAStatus"
-      case ("CUDA", "CUdevice")                                             => "Device"
-      case ("CUDA", "CUdeviceptr")                                          => "DevicePtr"
-      case ("CUDA", "CUcontext")                                            => "Context"
-      case ("CUDA", "CUmodule")                                             => "CUDAModule"
-      case ("CUDA", "CUfunction")                                           => "CUDAFunction"
-      case ("CUDA", "size_t")                                               => "SizeT"
-      case ("CUDA", "unsigned int")                                         => "UInt32"
-      case ("CUDA", "unsigned char")                                        => "UInt8"
-      case (_, "void")                                                      => "Unit"
-      case (_, "bool")                                                      => "Boolean"
-      case (_, "char")                                                      => "Byte"
-      case (_, "signed char")                                               => "Byte"
-      case (_, "short" | "short int" | "signed short" | "signed short int") => "Short"
-      case (_, "int" | "signed" | "signed int")                             => "Int"
-      case (_, "float")                                                     => "Float"
-      case (_, "double")                                                    => "Double"
+      case ("CUDA", "CUresult" | "cudaError_t")                             => State.pure("CUDAStatus")
+      case ("CUDA", "CUdevice")                                             => State.pure("Device")
+      case ("CUDA", "CUdeviceptr")                                          => State.pure("DevicePtr")
+      case ("CUDA", "CUcontext")                                            => State.pure("Context")
+      case ("CUDA", "CUmodule")                                             => State.pure("CUDAModule")
+      case ("CUDA", "CUfunction")                                           => State.pure("CUDAFunction")
+      case ("CUDA", "size_t")                                               => State.pure("SizeT")
+      case ("CUDA", "unsigned int")                                         => State.pure("UInt32")
+      case ("CUDA", "unsigned char")                                        => State.pure("UInt8")
+      case (_, "void")                                                      => State.pure("Unit")
+      case (_, "bool")                                                      => State.pure("Boolean")
+      case (_, "char")                                                      => State.pure("Byte")
+      case (_, "signed char")                                               => State.pure("Byte")
+      case (_, "short" | "short int" | "signed short" | "signed short int") => State.pure("Short")
+      case (_, "int" | "signed" | "signed int")                             => State.pure("Int")
+      case (_, "float")                                                     => State.pure("Float")
+      case (_, "double")                                                    => State.pure("Double")
       case (_, other)                                                       =>
         val name = identifierName(other)
-        aliases.get(name) match {
-          case Some(_) => ()
-          case None    => aliases(name) = s"CValue[${literal(other)}]"
-        }
-        identifier(name)
+        State.modify[Aliases](_.put(name, s"CValue[${literal(other)}]")).as(identifier(name))
     }
 
   private def functionPointer(value: String): Option[(String, Vector[String])] = {
@@ -216,31 +235,25 @@ object GenerateAPISurfaces {
   }
 
   private def splitParameters(value: String): Vector[String] = {
-    val result = Vector.newBuilder[String]
-    var depth  = 0
-    var start  = 0
-    value.indices.foreach { index =>
-      value(index) match {
-        case '(' | '['         => depth += 1
-        case ')' | ']'         => depth -= 1
-        case ',' if depth == 0 =>
-          result += value.substring(start, index).trim
-          start = index + 1
-        case _ => ()
-      }
+    val (start, _, result) = value.indices.foldLeft((0, 0, Vector.empty[String])) {
+      case ((start, depth, result), index) =>
+        value(index) match {
+          case '(' | '['         => (start, depth + 1, result)
+          case ')' | ']'         => (start, depth - 1, result)
+          case ',' if depth == 0 => (index + 1, depth, result :+ value.substring(start, index).trim)
+          case _                 => (start, depth, result)
+        }
     }
     val finalValue = value.substring(start).trim
-    if (finalValue.nonEmpty) result += finalValue
-    result.result()
+    if (finalValue.nonEmpty) result :+ finalValue else result
   }
 
-  private def fixedArray(value: String): Option[(String, Int)] = {
-    val pattern = raw"(.+)\[([0-9]+)\]".r
+  private def fixedArray(value: String): Option[(String, Int)] =
     value match {
-      case pattern(element, count) => Some(element.trim -> count.toInt)
-      case _                       => None
+      case s"$element[$count]" if element.nonEmpty && count.nonEmpty && count.forall(_.isDigit) =>
+        Some(element.trim -> count.toInt)
+      case _ => None
     }
-  }
 
   private def identifierName(cType: String): String = {
     val cleaned = cType.replaceAll("[^A-Za-z0-9_]", "_").replaceAll("_+", "_").stripSuffix("_")

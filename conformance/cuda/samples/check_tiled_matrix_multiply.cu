@@ -30,7 +30,6 @@
  * self-checks, and bounds handling was added for partial tiles.
  */
 #pragma region case: sample-tiled-matrix-multiply
-#pragma region targets: cuda
 #pragma region do: {nvcc} --allow-unsupported-compiler -std=c++17 -O2 -MD -MF {dependencies} -o {output} {input}
 #pragma region do: {output}
 #pragma region requires: pass

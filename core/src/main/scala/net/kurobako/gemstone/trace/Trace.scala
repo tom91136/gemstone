@@ -2,10 +2,54 @@ package net.kurobako.gemstone.trace
 
 import net.kurobako.gemstone.Col
 
-sealed trait TraceEvent extends Product with Serializable {
-  def step: Long
-  def eventType: String
-  protected def fields: Col[(String, String)]
+import cats.data.Chain
+
+enum TraceEvent(val step: Long, val eventType: String, fields: Col[(String, String)]) {
+  case Instruction(
+      override val step: Long,
+      kernel: String,
+      block: Int,
+      lane: Int,
+      pc: Int,
+      opcode: String
+  ) extends TraceEvent(
+        step,
+        "instruction",
+        Col(
+          "kernel" -> kernel,
+          "block"  -> block.toString,
+          "lane"   -> lane.toString,
+          "pc"     -> pc.toString,
+          "opcode" -> opcode
+        )
+      )
+
+  case OutputWrite(
+      override val step: Long,
+      block: Int,
+      lane: Int,
+      address: Long,
+      value: Int
+  ) extends TraceEvent(
+        step,
+        "output-write",
+        Col(
+          "block"   -> block.toString,
+          "lane"    -> lane.toString,
+          "address" -> java.lang.Long.toUnsignedString(address),
+          "value"   -> value.toString
+        )
+      )
+
+  case SchedulerDecision(override val step: Long, block: Int, lane: Int)
+      extends TraceEvent(
+        step,
+        "scheduler-decision",
+        Col(
+          "block" -> block.toString,
+          "lane"  -> lane.toString
+        )
+      )
 
   final def toJSON: String = {
     val payload = Col("event" -> eventType, "step" -> step.toString) ++ fields
@@ -18,48 +62,6 @@ sealed trait TraceEvent extends Product with Serializable {
 }
 
 object TraceEvent {
-  final case class Instruction(
-      step: Long,
-      kernel: String,
-      block: Int,
-      lane: Int,
-      pc: Int,
-      opcode: String
-  ) extends TraceEvent {
-    override val eventType: String                       = "instruction"
-    override protected val fields: Col[(String, String)] = Col(
-      "kernel" -> kernel,
-      "block"  -> block.toString,
-      "lane"   -> lane.toString,
-      "pc"     -> pc.toString,
-      "opcode" -> opcode
-    )
-  }
-
-  final case class OutputWrite(
-      step: Long,
-      block: Int,
-      lane: Int,
-      address: Long,
-      value: Int
-  ) extends TraceEvent {
-    override val eventType: String                       = "output-write"
-    override protected val fields: Col[(String, String)] = Col(
-      "block"   -> block.toString,
-      "lane"    -> lane.toString,
-      "address" -> java.lang.Long.toUnsignedString(address),
-      "value"   -> value.toString
-    )
-  }
-
-  final case class SchedulerDecision(step: Long, block: Int, lane: Int) extends TraceEvent {
-    override val eventType: String                       = "scheduler-decision"
-    override protected val fields: Col[(String, String)] = Col(
-      "block" -> block.toString,
-      "lane"  -> lane.toString
-    )
-  }
-
   private def escape(value: String): String = value.flatMap {
     case '"'  => "\\\""
     case '\\' => "\\\\"
@@ -70,11 +72,12 @@ object TraceEvent {
   }
 }
 
-final case class Trace(events: Col[TraceEvent]) {
-  def append(event: TraceEvent): Trace = copy(events = events :+ event)
-  def jsonLines: String                = events.map(_.toJSON).mkString("\n")
+final case class Trace private (private val eventChain: Chain[TraceEvent]) {
+  def events: Col[TraceEvent]          = Col.from(eventChain.iterator)
+  def append(event: TraceEvent): Trace = Trace(eventChain.append(event))
+  def jsonLines: String                = eventChain.iterator.map(_.toJSON).mkString("\n")
 }
 
 object Trace {
-  val empty: Trace = Trace(Col.empty)
+  val empty: Trace = Trace(Chain.empty)
 }

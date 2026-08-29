@@ -8,14 +8,17 @@ import net.kurobako.gemstone.rpc.RPCRequest
 import net.kurobako.gemstone.rpc.RPCTransport
 
 class CUDAServerSuite extends munit.FunSuite {
+  private final class TestTransport(invocation: RPCRequest => net.kurobako.gemstone.rpc.RPCResponse)
+      extends RPCTransport {
+    override val schemaFingerprint: String = GeneratedCUDARPC.SchemaFingerprint
+    override def call(request: RPCRequest) = invocation(request)
+  }
+
   test("transport-independent server dispatches generated CUDA requests") {
     val server    = CUDAServer.emulated
-    val transport = new RPCTransport {
-      override val schemaFingerprint: String = GeneratedCUDARPC.SchemaFingerprint
-      override def call(request: RPCRequest) = server.dispatch(request)
-    }
-    val count = Pointer.output[Int, One](1)
-    assertEquals(new GeneratedCUDARPC.Client(transport).cuDeviceGetCount(count), CUDAStatus.Success)
+    val transport = TestTransport(server.dispatch)
+    val count     = Pointer.output[Int, One](1)
+    assertEquals(GeneratedCUDARPC.Client(transport).cuDeviceGetCount(count), CUDAStatus.Success)
     assertEquals(count.snapshot.flatMap(_.headOption), Some(1))
   }
 }

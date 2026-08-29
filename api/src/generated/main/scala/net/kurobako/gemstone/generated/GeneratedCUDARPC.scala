@@ -601,7 +601,7 @@ object GeneratedCUDARPC {
               val status = implementation.cuCtxCreate_v2(argument0, argument1, argument2)
               val outputs = if (status.isSuccess) Col(WireValue.ContextValue(argument0.snapshot.flatMap(
                 _.headOption
-              ).getOrElse(throw new IllegalStateException("pctx was not initialized"))))
+              ).getOrElse(throw IllegalStateException("pctx was not initialized"))))
               else Col.empty[WireValue]
               RPCResponse.Success(WireValue.CallResult(status, outputs))
             case _ => invalid("invalid arguments for cuCtxCreate_v2")
@@ -631,7 +631,7 @@ object GeneratedCUDARPC {
               val status = implementation.cuDeviceGet(argument0, argument1)
               val outputs = if (status.isSuccess) Col(WireValue.DeviceValue(argument0.snapshot.flatMap(
                 _.headOption
-              ).getOrElse(throw new IllegalStateException("device was not initialized"))))
+              ).getOrElse(throw IllegalStateException("device was not initialized"))))
               else Col.empty[WireValue]
               RPCResponse.Success(WireValue.CallResult(status, outputs))
             case _ => invalid("invalid arguments for cuDeviceGet")
@@ -643,7 +643,7 @@ object GeneratedCUDARPC {
               val status = implementation.cuDeviceGetCount(argument0)
               val outputs = if (status.isSuccess) Col(WireValue.Int32Value(argument0.snapshot.flatMap(
                 _.headOption
-              ).getOrElse(throw new IllegalStateException("count was not initialized"))))
+              ).getOrElse(throw IllegalStateException("count was not initialized"))))
               else Col.empty[WireValue]
               RPCResponse.Success(WireValue.CallResult(status, outputs))
             case _ => invalid("invalid arguments for cuDeviceGetCount")
@@ -655,7 +655,7 @@ object GeneratedCUDARPC {
               val status = implementation.cuDriverGetVersion(argument0)
               val outputs = if (status.isSuccess) Col(WireValue.Int32Value(argument0.snapshot.flatMap(
                 _.headOption
-              ).getOrElse(throw new IllegalStateException("driverVersion was not initialized"))))
+              ).getOrElse(throw IllegalStateException("driverVersion was not initialized"))))
               else Col.empty[WireValue]
               RPCResponse.Success(WireValue.CallResult(status, outputs))
             case _ => invalid("invalid arguments for cuDriverGetVersion")
@@ -710,7 +710,7 @@ object GeneratedCUDARPC {
               val argument8 = value8
               val argument9 = value9
               val argument10 = if (value10)
-                throw new IllegalArgumentException("non-null opaque RPC pointers are unsupported")
+                throw IllegalArgumentException("non-null opaque RPC pointers are unsupported")
               else Nullable.Null
               val status = implementation.cuLaunchKernel(
                 argument0,
@@ -737,7 +737,7 @@ object GeneratedCUDARPC {
               val status = implementation.cuMemAlloc_v2(argument0, argument1)
               val outputs = if (status.isSuccess) Col(WireValue.DevicePtrValue(argument0.snapshot.flatMap(
                 _.headOption
-              ).getOrElse(throw new IllegalStateException("dptr was not initialized"))))
+              ).getOrElse(throw IllegalStateException("dptr was not initialized"))))
               else Col.empty[WireValue]
               RPCResponse.Success(WireValue.CallResult(status, outputs))
             case _ => invalid("invalid arguments for cuMemAlloc_v2")
@@ -774,7 +774,7 @@ object GeneratedCUDARPC {
               val argument2 = value2
               val status = implementation.cuMemcpyDtoH_v2(argument0, argument1, argument2)
               val outputs = if (status.isSuccess) Col(WireValue.ByteBufferValue(
-                argument0.snapshot.getOrElse(throw new IllegalStateException("dstHost was not initialized"))
+                argument0.snapshot.getOrElse(throw IllegalStateException("dstHost was not initialized"))
               ))
               else Col.empty[WireValue]
               RPCResponse.Success(WireValue.CallResult(status, outputs))
@@ -815,7 +815,7 @@ object GeneratedCUDARPC {
               val status = implementation.cuModuleGetFunction(argument0, argument1, argument2)
               val outputs = if (status.isSuccess) Col(WireValue.KernelFunctionValue(argument0.snapshot.flatMap(
                 _.headOption
-              ).getOrElse(throw new IllegalStateException("hfunc was not initialized"))))
+              ).getOrElse(throw IllegalStateException("hfunc was not initialized"))))
               else Col.empty[WireValue]
               RPCResponse.Success(WireValue.CallResult(status, outputs))
             case _ => invalid("invalid arguments for cuModuleGetFunction")
@@ -828,7 +828,7 @@ object GeneratedCUDARPC {
               val status = implementation.cuModuleLoadData(argument0, argument1)
               val outputs = if (status.isSuccess) Col(WireValue.CUDAModuleValue(argument0.snapshot.flatMap(
                 _.headOption
-              ).getOrElse(throw new IllegalStateException("module was not initialized"))))
+              ).getOrElse(throw IllegalStateException("module was not initialized"))))
               else Col.empty[WireValue]
               RPCResponse.Success(WireValue.CallResult(status, outputs))
             case _ => invalid("invalid arguments for cuModuleLoadData")
@@ -875,7 +875,7 @@ object GeneratedCUDARPC {
               val status = implementation.cudaGetDeviceCount(argument0)
               val outputs = if (status.isSuccess) Col(WireValue.Int32Value(argument0.snapshot.flatMap(
                 _.headOption
-              ).getOrElse(throw new IllegalStateException("count was not initialized"))))
+              ).getOrElse(throw IllegalStateException("count was not initialized"))))
               else Col.empty[WireValue]
               RPCResponse.Success(WireValue.CallResult(status, outputs))
             case _ => invalid("invalid arguments for cudaGetDeviceCount")
@@ -888,7 +888,7 @@ object GeneratedCUDARPC {
               val status = implementation.cudaMalloc(argument0, argument1)
               val outputs = if (status.isSuccess) Col(WireValue.DevicePtrValue(argument0.snapshot.flatMap(
                 _.headOption
-              ).getOrElse(throw new IllegalStateException("devPtr was not initialized"))))
+              ).getOrElse(throw IllegalStateException("devPtr was not initialized"))))
               else Col.empty[WireValue]
               RPCResponse.Success(WireValue.CallResult(status, outputs))
             case _ => invalid("invalid arguments for cudaMalloc")
@@ -913,11 +913,7 @@ object GeneratedCUDARPC {
   ): Boolean = {
     if (pointer.length != value.length) false
     else {
-      var index = 0
-      while (index < value.length) {
-        pointer.write(value(index), index)
-        index += 1
-      }
+      value.indices.foreach(index => pointer.write(value(index), index))
       true
     }
   }

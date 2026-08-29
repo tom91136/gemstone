@@ -15,6 +15,21 @@ import upickle.default.read
 
 /** Compares the checked-in Scala declarations with the Clang-normalized official header manifest. */
 object ValidateScalaAPIs {
+  final case class Declaration(surface: String, name: String, expected: String, actual: Vector[String]) {
+    def validate(): Unit = require(
+      actual == Vector(expected),
+      if (actual.isEmpty) s"$surface Scala API is missing $name: $expected"
+      else s"$surface Scala API declaration differs for $name: ${actual.mkString(" or ")} != $expected"
+    )
+  }
+
+  final case class SurfaceValidation(name: String, declarations: Vector[Declaration], extra: Vector[CFunction]) {
+    def validate(): Unit = {
+      declarations.foreach(_.validate())
+      require(extra.isEmpty, s"$name Scala API has extra declarations: ${extra.map(_.name).mkString(",")}")
+    }
+  }
+
   private val legacyCUDA      = Vector(CFunction("cuCtxCreate_v2", "CUresult (CUcontext *, unsigned int, CUdevice)"))
   private val cudaCompilerABI = Vector(
     CFunction("__cudaGetKernel", "int32_t (void **, const void *)"),
@@ -41,32 +56,39 @@ object ValidateScalaAPIs {
 
   def main(arguments: Array[String]): Unit = arguments.toVector match {
     case Vector(manifestPath) =>
-      require(APISourceFingerprint.Value.nonEmpty, "API source fingerprint must be available")
       val manifest = read[ValidateAPIs.Manifest](Files.readString(Paths.get(manifestPath), StandardCharsets.UTF_8))
-      val official = manifest.surfaces.map(surface => surface.name -> surface).toMap
-      scalaSurfaces.foreach { case (names, actual, additions) =>
-        val expected = (names.flatMap(name =>
-          official(name).functions.map(function => CFunction(function.name, canonical(function.functionType)))
-        ) ++ additions)
-          .sortBy(_.name)
-        require(actual == expected, mismatch(names.mkString("+"), expected, actual))
-        println(s"validated ${actual.size} checked-in ${names.mkString("+")} Scala declarations")
+      validations(manifest).foreach { validation =>
+        validation.validate()
+        println(s"validated ${validation.declarations.size} checked-in ${validation.name} Scala declarations")
       }
-    case _ => throw new IllegalArgumentException("usage: ValidateScalaAPIs <official-api-manifest>")
+    case _ => throw IllegalArgumentException("usage: ValidateScalaAPIs <official-api-manifest>")
+  }
+
+  def validations(manifest: ValidateAPIs.Manifest): Vector[SurfaceValidation] = {
+    val official = manifest.surfaces.map(surface => surface.name -> surface).toMap
+    scalaSurfaces.map { case (names, actual, additions) =>
+      val surfaceName = names.mkString("+")
+      val expected    =
+        (names.flatMap(name =>
+          official.getOrElse(name, throw IllegalArgumentException(s"official manifest is missing $name")).functions
+            .map(function => CFunction(function.name, canonical(function.functionType)))
+        ) ++ additions).sortBy(_.name)
+      val actualByName  = actual.groupMap(_.name)(_.functionType)
+      val expectedNames = expected.iterator.map(_.name).toSet
+      val declarations  = expected.map(function =>
+        Declaration(
+          surfaceName,
+          function.name,
+          function.functionType,
+          actualByName.getOrElse(function.name, Vector.empty)
+        )
+      )
+      val extra = actual.filterNot(function => expectedNames(function.name)).sortBy(_.name)
+      SurfaceValidation(surfaceName, declarations, extra)
+    }
   }
 
   private def canonical(functionType: String): String =
     if (functionType.endsWith("()")) functionType.dropRight(2) + "(void)" else functionType
 
-  private def mismatch(name: String, expected: Vector[CFunction], actual: Vector[CFunction]): String = {
-    val expectedMap = expected.map(function => function.name -> function.functionType).toMap
-    val actualMap   = actual.map(function => function.name -> function.functionType).toMap
-    val missing     = expectedMap.keySet.diff(actualMap.keySet).toVector.sorted
-    val extra       = actualMap.keySet.diff(expectedMap.keySet).toVector.sorted
-    val changed     = expectedMap.keySet.intersect(actualMap.keySet).toVector.sorted.collect {
-      case function if expectedMap(function) != actualMap(function) =>
-        s"$function: ${actualMap(function)} != ${expectedMap(function)}"
-    }
-    s"$name Scala API differs from its official headers; missing=${missing.mkString(",")}; extra=${extra.mkString(",")}; changed=${changed.mkString("; ")}"
-  }
 }

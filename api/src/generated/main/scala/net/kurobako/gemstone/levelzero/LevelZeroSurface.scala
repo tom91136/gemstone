@@ -2479,6 +2479,6 @@ trait LevelZeroSurface {
 }
 
 object LevelZeroSurface {
-  val HeaderVersion: String = "1.33.0"
+  val HeaderVersion: String = "1.33.1"
   val SurfaceSize: Int = 485
 }
