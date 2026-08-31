@@ -219,17 +219,6 @@ static int gemstone_append_ptx(const char *source, size_t source_size, size_t *c
   return 1;
 }
 
-static int gemstone_contains_ptx_directive(
-    const char *text,
-    size_t text_size,
-    const char *directive,
-    size_t directive_size) {
-  for (size_t index = 0; index + directive_size <= text_size; ++index) {
-    if (memcmp(text + index, directive, directive_size) == 0) return 1;
-  }
-  return 0;
-}
-
 static int gemstone_find_ptx_text(
     const char *payload,
     size_t payload_size,
@@ -243,14 +232,10 @@ static int gemstone_find_ptx_text(
         payload[prefix + 8] != '\r' && payload[prefix + 8] != '\n') continue;
     size_t length = prefix;
     while (length < payload_size && payload[length] != '\0') ++length;
-    const char *text = payload + prefix;
     const size_t text_size = length - prefix;
-    const int has_module_content =
-        gemstone_contains_ptx_directive(text, text_size, ".entry", sizeof(".entry") - 1) ||
-        gemstone_contains_ptx_directive(text, text_size, ".func", sizeof(".func") - 1) ||
-        gemstone_contains_ptx_directive(text, text_size, ".global", sizeof(".global") - 1) ||
-        gemstone_contains_ptx_directive(text, text_size, ".const", sizeof(".const") - 1);
-    if (!has_module_content) return 0;
+    /* libcudart submits header-only PTX fatbins during lazy initialization.
+     * Preserve them as valid empty modules; requiring an entry or global here
+     * would make an ordinary runtime allocation fail before user code loads. */
     *source = payload + prefix;
     *source_size = text_size;
     return 1;

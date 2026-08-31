@@ -434,7 +434,10 @@ object CUDAConformanceSuite {
   }
 
   private def cudaHeaderInclude(root: Path): Path = {
-    val target = root.resolve("target/out")
+    // ISA references are prepared by the JVM codegen project. Restricting the
+    // walk to that stable subtree avoids racing concurrent Scala Native links,
+    // which atomically replace executables elsewhere under target/out.
+    val target = root.resolve("target/out/jvm")
     require(Files.isDirectory(target), s"prepared API reference root is absent: $target")
     val stream = Files.find(
       target,

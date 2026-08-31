@@ -16,7 +16,8 @@ Completion means all of these are green:
 3. all 348 enabled rocThrust tests, five HIP/HSA samples, and the pinned rocBLAS smoke dataset;
 4. all 57 compute-applicable Khronos OpenCL CTS quick entries;
 5. all 902 enabled oneDPL tests plus three samples through both Level Zero and OpenCL;
-6. no unsupported operation silently succeeds and no Gemstone run reaches a physical GPU.
+6. the portable `conformance/unified` algorithm, BLAS, edge-case, and bounded-stress matrices;
+7. no unsupported operation silently succeeds and no Gemstone run reaches a physical GPU.
 
 Upstream-disabled tests remain disabled. Do not add a Gemstone skip/pass allowlist.
 
@@ -74,9 +75,10 @@ authenticated Driver request; execution providers send an authenticated executio
 that exits zero without the required evidence becomes failure 86. This detects failed injection and vendor-only
 execution. Provider isolation must continue to ensure a process cannot use Gemstone and hardware in the same run.
 
-## Current state on 2026-08-29
+## Current state on 2026-08-31
 
-Branch: `main`. The worktree is a large intentional staged/WIP change set; do not reset or discard unrelated files.
+Branch: `main`. CUDA/PTX, AMDGPU/HIP/HSA, and SPIR-V/OpenCL/Level Zero were integrated as separate commits so further
+vendor work remains bisectable.
 
 Implemented foundation:
 
@@ -87,20 +89,21 @@ Implemented foundation:
 - per-process usage counters and fail-closed attestation;
 - PTX, AMDGPU, and SPIR-V loaders/interpreters with shared checked memory, geometry, budget, and cancellation;
 - Level Zero provider and focused native tests;
-- HSA AQL, doorbell, code-object, and execution mechanics;
+- public HIP and HSA runtime providers plus HSA AQL, doorbell, code-object, and execution mechanics;
+- public OpenCL ICD and Level Zero providers with focused native tests;
 - compile-once paired Conformance runners for CUDA, Thrust, rocThrust/HIP/HSA samples, OpenCL CTS, and oneDPL;
 - pristine rocThrust setup with separately pinned GoogleTest;
 - a pinned rocBLAS build of the vendor-neutral bounded BLAS harness shared with cuBLAS and oneMKL;
 - pinned official OpenCL CTS quick inventory;
 - oneDPL Level Zero and OpenCL backend lanes.
+- a separate header-only unified C++ workload catalog under `conformance/unified`, with host, CUDA, HIP, and SYCL
+  runners and CTest sharding.
 
 Important incompleteness:
 
 - CUDA Driver/PTX supports only an early subset of the full test surface;
-- a public Gemstone HIP Runtime is not yet built;
-- a public Gemstone `libhsa-runtime64` is not yet built—the existing hsakmt-shaped code is implementation material,
-  not a deployment interface;
-- the Gemstone OpenCL ICD is not yet built;
+- the public HIP, HSA, OpenCL, and Level Zero surfaces are intentionally incomplete and will expose named vendor-suite
+  reds until their API and execution behavior is filled out;
 - Level Zero and SPIR-V semantics are far from full oneDPL coverage;
 - AMDGPU semantics are far from full rocThrust coverage;
 - the launcher is not yet packaged as a standalone installed command;
@@ -119,7 +122,7 @@ core
 └── isa/spirv
 
 api + core + all ISA modules -> server
-server protocol -> runtime/cuda, runtime/hsa, runtime/levelzero, future runtime/hip and runtime/opencl
+server protocol -> runtime/cuda, runtime/hip, runtime/hsa, runtime/opencl, runtime/levelzero
 api -> codegen
 ```
 
@@ -153,6 +156,10 @@ sbt testROCmConformance
 sbt testOpenCLConformance
 sbt testSYCLConformance
 sbt testConformance
+
+cmake -S conformance/unified -B target/unified-conformance
+cmake --build target/unified-conformance --parallel
+ctest --test-dir target/unified-conformance --output-on-failure --parallel
 ```
 
 Focused examples:
@@ -160,8 +167,8 @@ Focused examples:
 ```console
 GEMSTONE_THRUST_FILTER='^transform$' GEMSTONE_THRUST_JOBS=1 sbt testCUDAConformance
 GEMSTONE_ROCTHRUST_FILTER='^samples/' GEMSTONE_ROCTHRUST_JOBS=1 sbt testROCmConformance
-GEMSTONE_OPENCL_FILTER='^(Basic|API)$' sbt testOpenCLConformance
-GEMSTONE_ONEDPL_FILTER='^levelzero/samples/' GEMSTONE_ONEDPL_JOBS=1 sbt testSYCLConformance
+GEMSTONE_OPENCL_FILTER='^gfx900/(Basic|API)$' sbt testOpenCLConformance
+GEMSTONE_ONEDPL_FILTER='^gfx900/levelzero/samples/' GEMSTONE_ONEDPL_JOBS=1 sbt testSYCLConformance
 ```
 
 All external filters are Scala regular expressions. `GEMSTONE_<SUITE>_SHARD=index/count` provides deterministic
@@ -206,15 +213,11 @@ Useful first triage:
 
 ## Recommended next order
 
-1. Package and exercise `gemstone run` with the existing CUDA and Level Zero providers.
-2. Generate/implement the public HSA facade over the existing queue, signal, memory, code-object, and doorbell
-   mechanics; make the five direct-HSA samples the first acceptance gate.
-3. Implement the public HIP facade and compiler registration path; start with HIP SAXPY, then the smallest rocThrust
-   cases.
-4. Implement the OpenCL ICD platform/device/context/memory/program/kernel/queue surface; start with CTS Basic and API,
-   then the SYCL OpenCL samples.
-5. Advance each ISA from the smallest paired reds, preserving shared execution contracts.
-6. Add a stronger Linux physical-device guard if provider isolation plus attestation is insufficient to prove that a
+1. Package and exercise `gemstone run` across all five provider libraries.
+2. Advance each public runtime from the smallest named vendor-suite red, preserving shared execution contracts.
+3. Advance each ISA from the smallest paired reds; use `conformance/unified` for compact cross-vendor semantic
+   comparisons before returning to the exhaustive upstream lane.
+4. Add a stronger Linux physical-device guard if provider isolation plus attestation is insufficient to prove that a
    child cannot access `/dev/nvidia*`, `/dev/kfd`, or DRM render nodes after it has also contacted Gemstone.
 
 ## Files to read first
@@ -230,6 +233,7 @@ Useful first triage:
 - `conformance/rocthrust/README.md`
 - `conformance/opencl/README.md`
 - `conformance/onedpl/README.md`
+- `conformance/unified/README.md`
 
 Generated sources are checked in. Change the owning generator, regenerate, format, and review generator plus output;
 never hand-edit generated API or instruction definitions.

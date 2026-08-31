@@ -33,12 +33,12 @@ import java.util.regex.Pattern
   */
 final class PTXCUDAKernelExecution extends CUDAKernelExecution {
   private val ignoredFunctionDirectives = Pattern.compile(
-    "(?m)\\.(?:maxntid|reqntid|minnctapersm|maxnreg|maxclusterrank|explicitcluster|noreturn)" +
-      "[^\\r\\n\\{;]*(?:\\r?\\n|(?=\\{|;))"
+    "\\.(?:maxntid|reqntid|minnctapersm|maxnreg|maxclusterrank|explicitcluster|noreturn)" +
+      "[^\\r\\n\\{;]*(\\r?\\n|[\\{;])"
   )
 
   private def stripIgnoredFunctionDirectives(source: String): String =
-    ignoredFunctionDirectives.matcher(source).replaceAll("")
+    ignoredFunctionDirectives.matcher(source).replaceAll("$1")
 
   private object UnmappedMemory extends AddressMemory {
     private def unavailable[A](address: GuestAddress, width: Int): Either[MemoryError, A] =

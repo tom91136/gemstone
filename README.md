@@ -27,7 +27,7 @@ See [docs/API_TRANSPORT.md](docs/API_TRANSPORT.md). The hand-written semantics b
 described in [docs/ISA_EXECUTION.md](docs/ISA_EXECUTION.md).
 
 The build separates reusable ISA models from native runtime frontends. `isa/{ptx,amdgpu,spirv}` contains the three
-JVM/Scala Native project matrices; `runtime/{cuda,hsa,levelzero}` contains the vendor-facing native libraries and
+JVM/Scala Native project matrices; `runtime/{cuda,hip,hsa,opencl,levelzero}` contains the vendor-facing native libraries and
 their CTest suites. The aggregate `isa` and `runtime` projects provide grouped commands without owning sources.
 
 `core` is the dependency root and owns execution, memory, tracing, and the runtime collection boundary. `api` and each
@@ -55,6 +55,10 @@ sbt testSYCLConformance
 sbt testConformance
 sbt serverNative/compile
 sbt check
+
+cmake -S conformance/unified -B target/unified-conformance
+cmake --build target/unified-conformance --parallel
+ctest --test-dir target/unified-conformance --output-on-failure --parallel
 ```
 
 `test` is incremental in sbt 2. Use `testFull` when every JVM and Native suite must be executed regardless of the
@@ -81,6 +85,11 @@ and Level Zero native CTest cases, and all three exhaustive vendor-library/sampl
 part of `check`; it requires NVCC, HIP/AMDGPU Clang, and DPC++ and is expected to expose unsupported Gemstone behavior
 as named test failures while the implementation is being expanded. Filters, deterministic shards, and bounded worker
 controls are documented in each conformance directory.
+
+`conformance/unified` is an additional header-only C++20 workload suite; it does not replace the Scala/vendor
+dashboards above. Its common catalog runs deterministic algorithm, BLAS, edge-case, and bounded-stress workloads
+through host, CUDA/Thrust/cuBLAS, HIP/rocThrust/rocBLAS, or SYCL/oneDPL/oneMKL adapters. The supplied CMake runners are
+split by suite and scalar type for practical vendor-compiler memory use while the reusable API remains header-only.
 
 The AMDGPU-facing executable conformance suites share `GEMSTONE_AMDGPU_TARGETS`,
 a comma-separated GFX matrix defaulting to `gfx900`, and
