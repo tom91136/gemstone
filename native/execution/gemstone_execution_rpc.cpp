@@ -43,7 +43,11 @@ enum Operation : uint32_t {
   Launch = 7,
   QueryCompletion = 8,
   ReleaseCompletion = 9,
-  CompletionDirtyRanges = 10
+  CompletionDirtyRanges = 10,
+  LaunchWithRelocations = 11,
+  LaunchWithGeometry = 12,
+  LaunchWithGeometryAndRelocations = 13,
+  CompletionPointerRelocations = 14
 };
 
 void put_u32(std::vector<uint8_t> &output, uint32_t value) {
@@ -222,7 +226,8 @@ int exchange(gemstone_execution_client *client, Operation operation,
     return fail(client, "execution response body is truncated");
   }
   if (status != 0) {
-    return fail(client, message.empty() ? "execution request failed" : std::string(message.begin(), message.end()));
+    const std::string detail = message.empty() ? "execution request failed" : std::string(message.begin(), message.end());
+    return fail(client, detail);
   }
   return 0;
 }
@@ -232,6 +237,82 @@ std::vector<uint8_t> identity_payload(uint64_t id) {
   result.reserve(8);
   put_u64(result, id);
   return result;
+}
+
+void append_dimensions(std::vector<uint8_t> &payload, gemstone_dimensions dimensions) {
+  put_u32(payload, dimensions.x);
+  put_u32(payload, dimensions.y);
+  put_u32(payload, dimensions.z);
+}
+
+bool append_kernel_argument(std::vector<uint8_t> &payload, const gemstone_kernel_argument &argument) {
+  put_u32(payload, static_cast<uint32_t>(argument.kind));
+  if (argument.kind == GEMSTONE_ARGUMENT_SCALAR) {
+    if (argument.scalar_size != 0 && argument.scalar_bytes == nullptr) return false;
+    put_u32(payload, argument.scalar_size);
+    if (argument.scalar_size != 0)
+      payload.insert(payload.end(), argument.scalar_bytes, argument.scalar_bytes + argument.scalar_size);
+  } else if (argument.kind == GEMSTONE_ARGUMENT_ALLOCATION) {
+    if (argument.allocation_id == 0) return false;
+    put_u64(payload, argument.allocation_id);
+    put_u64(payload, argument.allocation_offset);
+  } else if (argument.kind == GEMSTONE_ARGUMENT_LOCAL) {
+    put_u64(payload, argument.local_size);
+  } else return false;
+  return true;
+}
+
+int launch_request(gemstone_execution_client *client, Operation operation, uint64_t program_id,
+                   const char *kernel_name, gemstone_dimensions group_size, gemstone_dimensions group_count,
+                   gemstone_dimensions global_size, uint32_t work_dim, gemstone_dimensions global_offset,
+                   uint32_t private_segment_bytes, uint32_t group_segment_bytes,
+                   const gemstone_kernel_argument *arguments, uint32_t argument_count,
+                   const gemstone_pointer_relocation *relocations, uint32_t relocation_count,
+                   uint64_t *completion_id) {
+  const bool has_geometry = operation == LaunchWithGeometry || operation == LaunchWithGeometryAndRelocations;
+  const bool has_relocations = operation == LaunchWithRelocations || operation == LaunchWithGeometryAndRelocations;
+  if (client == nullptr || program_id == 0 || kernel_name == nullptr || kernel_name[0] == '\0' ||
+      completion_id == nullptr || (argument_count != 0 && arguments == nullptr) ||
+      (relocation_count != 0 && relocations == nullptr) || (has_geometry && (work_dim < 1 || work_dim > 3))) return -1;
+  const size_t name_size = strlen(kernel_name);
+  if (name_size > 4096 || name_size > std::numeric_limits<uint32_t>::max()) return -1;
+  std::vector<uint8_t> payload = identity_payload(program_id);
+  put_u32(payload, static_cast<uint32_t>(name_size));
+  payload.insert(payload.end(), kernel_name, kernel_name + name_size);
+  append_dimensions(payload, group_size);
+  append_dimensions(payload, group_count);
+  append_dimensions(payload, global_size);
+  if (has_geometry) {
+    put_u32(payload, work_dim);
+    append_dimensions(payload, global_offset);
+  }
+  put_u32(payload, private_segment_bytes);
+  put_u32(payload, group_segment_bytes);
+  if (has_relocations) {
+    put_u32(payload, relocation_count);
+    for (uint32_t index = 0; index < relocation_count; ++index) {
+      const auto &relocation = relocations[index];
+      if ((relocation.source_allocation_id == 0 &&
+           relocation.source_argument_index == std::numeric_limits<uint32_t>::max()) ||
+          (relocation.source_allocation_id != 0 &&
+           relocation.source_argument_index != std::numeric_limits<uint32_t>::max()) ||
+          relocation.target_allocation_id == 0) return -1;
+      put_u64(payload, relocation.source_allocation_id);
+      put_u32(payload, relocation.source_argument_index);
+      put_u32(payload, 0);
+      put_u64(payload, relocation.source_offset);
+      put_u64(payload, relocation.target_allocation_id);
+      put_u64(payload, relocation.target_offset);
+    }
+  }
+  put_u32(payload, argument_count);
+  for (uint32_t index = 0; index < argument_count; ++index)
+    if (!append_kernel_argument(payload, arguments[index])) return -1;
+  std::vector<uint8_t> response;
+  if (exchange(client, operation, payload, response) != 0) return -1;
+  if (response.size() != 8) return fail(client, "launch returned an invalid completion identity");
+  *completion_id = get_u64(response.data());
+  return *completion_id == 0 ? fail(client, "launch returned the sentinel completion identity") : 0;
 }
 
 } // namespace
@@ -338,39 +419,46 @@ extern "C" int gemstone_execution_launch(gemstone_execution_client *client, uint
                                            uint32_t private_segment_bytes, uint32_t group_segment_bytes,
                                            const gemstone_kernel_argument *arguments, uint32_t argument_count,
                                            uint64_t *completion_id) {
-  if (client == nullptr || program_id == 0 || kernel_name == nullptr || kernel_name[0] == '\0' ||
-      completion_id == nullptr || (argument_count != 0 && arguments == nullptr)) return -1;
-  const size_t name_size = strlen(kernel_name);
-  if (name_size > 4096 || name_size > std::numeric_limits<uint32_t>::max()) return -1;
-  std::vector<uint8_t> payload = identity_payload(program_id);
-  put_u32(payload, static_cast<uint32_t>(name_size));
-  payload.insert(payload.end(), kernel_name, kernel_name + name_size);
-  put_u32(payload, group_size.x); put_u32(payload, group_size.y); put_u32(payload, group_size.z);
-  put_u32(payload, group_count.x); put_u32(payload, group_count.y); put_u32(payload, group_count.z);
-  put_u32(payload, global_size.x); put_u32(payload, global_size.y); put_u32(payload, global_size.z);
-  put_u32(payload, private_segment_bytes); put_u32(payload, group_segment_bytes);
-  put_u32(payload, argument_count);
-  for (uint32_t index = 0; index < argument_count; ++index) {
-    const auto &argument = arguments[index];
-    put_u32(payload, static_cast<uint32_t>(argument.kind));
-    if (argument.kind == GEMSTONE_ARGUMENT_SCALAR) {
-      if (argument.scalar_size != 0 && argument.scalar_bytes == nullptr) return -1;
-      put_u32(payload, argument.scalar_size);
-      if (argument.scalar_size != 0)
-        payload.insert(payload.end(), argument.scalar_bytes, argument.scalar_bytes + argument.scalar_size);
-    } else if (argument.kind == GEMSTONE_ARGUMENT_ALLOCATION) {
-      if (argument.allocation_id == 0) return -1;
-      put_u64(payload, argument.allocation_id);
-      put_u64(payload, argument.allocation_offset);
-    } else if (argument.kind == GEMSTONE_ARGUMENT_LOCAL) {
-      put_u64(payload, argument.local_size);
-    } else return -1;
-  }
-  std::vector<uint8_t> response;
-  if (exchange(client, Launch, payload, response) != 0) return -1;
-  if (response.size() != 8) return fail(client, "launch returned an invalid completion identity");
-  *completion_id = get_u64(response.data());
-  return *completion_id == 0 ? fail(client, "launch returned the sentinel completion identity") : 0;
+  return launch_request(client, Launch, program_id, kernel_name, group_size, group_count, global_size,
+                        3, gemstone_dimensions{0, 0, 0}, private_segment_bytes, group_segment_bytes,
+                        arguments, argument_count, nullptr, 0, completion_id);
+}
+
+extern "C" int gemstone_execution_launch_with_geometry(
+    gemstone_execution_client *client, uint64_t program_id, const char *kernel_name,
+    gemstone_dimensions group_size, gemstone_dimensions group_count, gemstone_dimensions global_size,
+    uint32_t work_dim, gemstone_dimensions global_offset,
+    uint32_t private_segment_bytes, uint32_t group_segment_bytes,
+    const gemstone_kernel_argument *arguments, uint32_t argument_count,
+    uint64_t *completion_id) {
+  return launch_request(client, LaunchWithGeometry, program_id, kernel_name, group_size, group_count, global_size,
+                        work_dim, global_offset, private_segment_bytes, group_segment_bytes,
+                        arguments, argument_count, nullptr, 0, completion_id);
+}
+
+extern "C" int gemstone_execution_launch_with_relocations(
+    gemstone_execution_client *client, uint64_t program_id, const char *kernel_name,
+    gemstone_dimensions group_size, gemstone_dimensions group_count, gemstone_dimensions global_size,
+    uint32_t private_segment_bytes, uint32_t group_segment_bytes,
+    const gemstone_kernel_argument *arguments, uint32_t argument_count,
+    const gemstone_pointer_relocation *relocations, uint32_t relocation_count,
+    uint64_t *completion_id) {
+  return launch_request(client, LaunchWithRelocations, program_id, kernel_name, group_size, group_count, global_size,
+                        3, gemstone_dimensions{0, 0, 0}, private_segment_bytes, group_segment_bytes,
+                        arguments, argument_count, relocations, relocation_count, completion_id);
+}
+
+extern "C" int gemstone_execution_launch_with_geometry_and_relocations(
+    gemstone_execution_client *client, uint64_t program_id, const char *kernel_name,
+    gemstone_dimensions group_size, gemstone_dimensions group_count, gemstone_dimensions global_size,
+    uint32_t work_dim, gemstone_dimensions global_offset,
+    uint32_t private_segment_bytes, uint32_t group_segment_bytes,
+    const gemstone_kernel_argument *arguments, uint32_t argument_count,
+    const gemstone_pointer_relocation *relocations, uint32_t relocation_count,
+    uint64_t *completion_id) {
+  return launch_request(client, LaunchWithGeometryAndRelocations, program_id, kernel_name, group_size, group_count,
+                        global_size, work_dim, global_offset, private_segment_bytes, group_segment_bytes,
+                        arguments, argument_count, relocations, relocation_count, completion_id);
 }
 
 extern "C" int gemstone_execution_query_completion(gemstone_execution_client *client, uint64_t completion_id) {
@@ -404,6 +492,34 @@ extern "C" int gemstone_execution_completion_dirty_ranges(gemstone_execution_cli
     ranges[index].size = get_u32(entry + 16);
     if (ranges[index].allocation_id == 0 || ranges[index].size == 0)
       return fail(client, "dirty-range response contains an invalid entry");
+  }
+  return 0;
+}
+
+extern "C" int gemstone_execution_completion_pointer_relocations(
+    gemstone_execution_client *client, uint64_t completion_id,
+    gemstone_pointer_relocation *relocations, uint32_t capacity, uint32_t *count) {
+  if (client == nullptr || completion_id == 0 || count == nullptr ||
+      (capacity != 0 && relocations == nullptr)) return -1;
+  std::vector<uint8_t> response;
+  if (exchange(client, CompletionPointerRelocations, identity_payload(completion_id), response) != 0) return -1;
+  if (response.size() < 4) return fail(client, "pointer-relocation response is truncated");
+  const uint32_t required = get_u32(response.data());
+  if (required > (kMaximumPayload - 4U) / 32U ||
+      response.size() != 4ULL + static_cast<uint64_t>(required) * 32ULL)
+    return fail(client, "pointer-relocation response has an invalid size");
+  *count = required;
+  if (capacity == 0) return 0;
+  if (capacity < required) return fail(client, "pointer-relocation capacity is insufficient");
+  for (uint32_t index = 0; index < required; ++index) {
+    const uint8_t *entry = response.data() + 4ULL + static_cast<uint64_t>(index) * 32ULL;
+    relocations[index].source_allocation_id = get_u64(entry);
+    relocations[index].source_argument_index = UINT32_MAX;
+    relocations[index].source_offset = get_u64(entry + 8);
+    relocations[index].target_allocation_id = get_u64(entry + 16);
+    relocations[index].target_offset = get_u64(entry + 24);
+    if (relocations[index].source_allocation_id == 0 || relocations[index].target_allocation_id == 0)
+      return fail(client, "pointer-relocation response contains an invalid allocation");
   }
   return 0;
 }

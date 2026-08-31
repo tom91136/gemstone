@@ -16,8 +16,7 @@ final class ExecutionService(
     executor: ProgramExecutor,
     schedule: Runnable => Unit = runnable => ExecutionContext.global.execute(runnable),
     executionLimits: ExecutionLimits = ExecutionLimits.Default
-) extends ExecutionMemory,
-      AutoCloseable {
+) extends AutoCloseable {
   private val DirtyChunkSize = 64 * 1024L
 
   /** Mutable byte storage is deliberately confined behind this service's monitor. Allocation traffic is the simulator's
@@ -29,6 +28,7 @@ final class ExecutionService(
       status: CompletionStatus,
       program: ProgramId,
       allocations: Set[AllocationId],
+      pointerRelocations: Col[PointerRelocation],
       control: ExecutionControl
   )
   private final case class State(
@@ -153,7 +153,7 @@ final class ExecutionService(
       else if (!current.programs.contains(dispatch.program))
         Left(ExecutionFailure.NotFound(s"program ${dispatch.program.toLong} is not loaded"))
       else
-        validateArguments(dispatch.arguments, current).map { _ =>
+        validateDispatch(dispatch, current).map { _ =>
           val id      = CompletionId.unsafe(current.nextCompletion)
           val control = ExecutionControl.create(executionLimits, CancellationToken.Source())
           state.set(
@@ -163,7 +163,13 @@ final class ExecutionService(
                 CompletionRecord(
                   CompletionStatus.Pending,
                   dispatch.program,
-                  dispatch.arguments.collect { case KernelArgument.Allocation(allocation, _) => allocation }.toSet,
+                  dispatch.arguments.collect { case KernelArgument.Allocation(allocation, _) => allocation }.toSet ++
+                    dispatch.pointerRelocations.foldLeft(Set.empty[AllocationId]) { (allocations, relocation) =>
+                      relocation.sourceAllocation.fold(allocations + relocation.target)(source =>
+                        allocations + relocation.target + source
+                      )
+                    },
+                  Col.empty,
                   control
                 )
               ),
@@ -316,6 +322,18 @@ final class ExecutionService(
     }
   }
 
+  def completionPointerRelocations(id: CompletionId): Either[ExecutionFailure, Col[PointerRelocation]] = synchronized {
+    val current = state.get()
+    current.completions.get(id).map(record => record.status -> record.pointerRelocations).toRight(
+      ExecutionFailure.NotFound(s"completion ${id.toLong} does not exist")
+    ).flatMap {
+      case (CompletionStatus.Pending, _) =>
+        Left(ExecutionFailure.InvalidRequest(s"completion ${id.toLong} is still pending"))
+      case (CompletionStatus.Failed(error), _) => Left(error)
+      case (CompletionStatus.Succeeded, value) => Right(value)
+    }
+  }
+
   def releaseCompletion(id: CompletionId): Either[ExecutionFailure, Unit] = synchronized {
     val current = state.get()
     current.completions.get(id) match {
@@ -329,7 +347,7 @@ final class ExecutionService(
     }
   }
 
-  override def read(id: AllocationId, offset: Long, size: Int): Either[ExecutionFailure, Col[Byte]] = synchronized {
+  def read(id: AllocationId, offset: Long, size: Int): Either[ExecutionFailure, Col[Byte]] = synchronized {
     state.get().allocations.get(id).toRight(
       ExecutionFailure.NotFound(s"allocation ${id.toLong} is not registered")
     ).flatMap { allocation =>
@@ -341,7 +359,7 @@ final class ExecutionService(
     }
   }
 
-  override def readValue(id: AllocationId, offset: Long, size: Int): Either[ExecutionFailure, Long] = synchronized {
+  def readValue(id: AllocationId, offset: Long, size: Int): Either[ExecutionFailure, Long] = synchronized {
     state.get().allocations.get(id).toRight(
       ExecutionFailure.NotFound(s"allocation ${id.toLong} is not registered")
     ).flatMap { allocation =>
@@ -351,10 +369,10 @@ final class ExecutionService(
     }
   }
 
-  override def write(id: AllocationId, offset: Long, bytes: Col[Byte]): Either[ExecutionFailure, Unit] =
+  def write(id: AllocationId, offset: Long, bytes: Col[Byte]): Either[ExecutionFailure, Unit] =
     write(id, offset, bytes, null)
 
-  override def writeValue(
+  def writeValue(
       id: AllocationId,
       offset: Long,
       value: Long,
@@ -380,9 +398,33 @@ final class ExecutionService(
         value: Long,
         size: Int
     ): Either[ExecutionFailure, Unit] = ExecutionService.this.writeValue(id, offset, value, size, completion.toLong)
+
+    override def recordPointerRelocation(relocation: PointerRelocation): Unit =
+      ExecutionService.this.recordPointerRelocation(completion, relocation)
   }
 
   private def completionMemory(completion: CompletionId): ExecutionMemory = CompletionMemory(completion)
+
+  private def recordPointerRelocation(completion: CompletionId, relocation: PointerRelocation): Unit = synchronized {
+    val current = state.get()
+    current.completions.get(completion).foreach { record =>
+      state.set(
+        current.copy(
+          completions = current.completions.updated(
+            completion,
+            record.copy(
+              pointerRelocations = record.pointerRelocations
+                .filterNot(existing =>
+                  existing.sourceAllocation == relocation.sourceAllocation &&
+                    existing.sourceArgument == relocation.sourceArgument &&
+                    existing.sourceOffset == relocation.sourceOffset
+                ) :+ relocation
+            )
+          )
+        )
+      )
+    }
+  }
 
   private def write(
       id: AllocationId,
@@ -441,8 +483,8 @@ final class ExecutionService(
       }
     }
 
-  private def validateArguments(arguments: Col[KernelArgument], current: State): Either[ExecutionFailure, Unit] =
-    arguments.collectFirst {
+  private def validateDispatch(dispatch: KernelDispatch, current: State): Either[ExecutionFailure, Unit] =
+    dispatch.arguments.collectFirst {
       case KernelArgument.Allocation(id, _) if !current.allocations.contains(id) =>
         ExecutionFailure.NotFound(s"kernel argument refers to unregistered allocation ${id.toLong}")
       case KernelArgument.Allocation(id, offset)
@@ -450,7 +492,33 @@ final class ExecutionService(
         ExecutionFailure.InvalidRequest(s"kernel argument offset $offset is outside allocation ${id.toLong}")
       case KernelArgument.Local(size) if size < 0L =>
         ExecutionFailure.InvalidRequest(s"local-memory argument size must be non-negative: $size")
-    }.toLeft(())
+    }.toLeft(()).flatMap { _ =>
+      dispatch.pointerRelocations.collectFirst {
+        case PointerRelocation(Some(source), None, sourceOffset, target, targetOffset)
+            if !current.allocations.contains(source) =>
+          ExecutionFailure.NotFound(s"pointer relocation refers to unregistered source allocation ${source.toLong}")
+        case PointerRelocation(_, _, _, target, _)
+            if !current.allocations.contains(target) =>
+          ExecutionFailure.NotFound(s"pointer relocation refers to unregistered target allocation ${target.toLong}")
+        case PointerRelocation(Some(source), None, sourceOffset, _, _)
+            if sourceOffset > current.allocations(source).bytes.length.toLong - 8L =>
+          ExecutionFailure.InvalidRequest(
+            s"pointer relocation source offset $sourceOffset exceeds allocation ${source.toLong}"
+          )
+        case PointerRelocation(_, _, _, target, targetOffset)
+            if targetOffset > current.allocations(target).bytes.length.toLong =>
+          ExecutionFailure.InvalidRequest(
+            s"pointer relocation target offset $targetOffset exceeds allocation ${target.toLong}"
+          )
+        case PointerRelocation(None, Some(index), sourceOffset, _, _)
+            if sourceOffset >
+              (dispatch.arguments(index) match {
+                case KernelArgument.Scalar(bytes) => bytes.length.toLong - 8L
+                case _                            => -1L
+              }) =>
+          ExecutionFailure.InvalidRequest(s"pointer relocation source offset $sourceOffset exceeds argument $index")
+      }.toLeft(())
+    }
 
   private def checkedRange(length: Int, offset: Long, size: Int): Either[ExecutionFailure, Int] =
     ByteRange

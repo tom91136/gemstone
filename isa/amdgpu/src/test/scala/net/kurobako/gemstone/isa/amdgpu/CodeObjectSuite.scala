@@ -1389,6 +1389,8 @@ class CodeObjectSuite extends munit.FunSuite {
           ExecutionFailure.InvalidRequest("test write range")
         )
       }
+
+    override def recordPointerRelocation(relocation: PointerRelocation): Unit = ()
   }
 
   private def minimalCodeObject(): Array[Byte] = {

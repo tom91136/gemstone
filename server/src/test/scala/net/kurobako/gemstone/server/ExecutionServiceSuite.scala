@@ -259,6 +259,41 @@ class ExecutionServiceSuite extends munit.FunSuite {
     assertEquals(service.releaseAllocation(allocation), Right(()))
   }
 
+  test("accepted dispatch retains allocations referenced only by pointer relocations") {
+    val scheduled = AtomicReference(Option.empty[Runnable])
+    val source    = AllocationId.fromLong(18L).toOption.get
+    val target    = AllocationId.fromLong(19L).toOption.get
+    val backend   = TestExecutor(
+      (_, _, _) => Right(()),
+      _ => Right(()),
+      (_, memory, _) => {
+        memory.recordPointerRelocation(PointerRelocation(Some(source), None, 0L, target, 0L))
+        Right(())
+      }
+    )
+    val service = ExecutionService(backend, runnable => scheduled.set(Some(runnable)))
+    assertEquals(service.registerAllocation(source, 8L, AllocationKind.Shared), Right(()))
+    assertEquals(service.registerAllocation(target, 8L, AllocationKind.Shared), Right(()))
+    val program    = service.load(ProgramFormat.SPIRV, Col.empty).toOption.get
+    val relocation = PointerRelocation(Some(source), None, 0L, target, 0L)
+    val dispatch   = KernelDispatch
+      .create(program, "relocate", Dimensions.One, Dimensions.One, Col.empty, pointerRelocations = Col(relocation))
+      .toOption
+      .get
+    val completion = service.launch(dispatch).toOption.get
+
+    assert(service.releaseAllocation(source).isLeft)
+    assert(service.releaseAllocation(target).isLeft)
+    scheduled.get().get.run()
+    assertEquals(
+      service.completionPointerRelocations(completion),
+      Right(Col(PointerRelocation(Some(source), None, 0L, target, 0L)))
+    )
+    assertEquals(service.releaseCompletion(completion), Right(()))
+    assertEquals(service.releaseAllocation(source), Right(()))
+    assertEquals(service.releaseAllocation(target), Right(()))
+  }
+
   test("dispatches in one execution session run in submission order") {
     val scheduled = mutable.ArrayBuffer.empty[Runnable]
     val launched  = mutable.ArrayBuffer.empty[String]

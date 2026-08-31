@@ -15,6 +15,36 @@ import net.kurobako.gemstone.memory.AllocationKind
 import scala.annotation.tailrec
 
 final class SPIRVProgramExecutorSuite extends munit.FunSuite {
+  test("the external SPIR-V load boundary does not treat non-kernel entry points as libraries") {
+    val voidType     = operand("IdResult", 1)
+    val functionType = operand("IdResult", 2)
+    val function     = operand("IdResult", 3)
+    val module       = Module(
+      Header(SPIRV.version, Word(0), Word(5), Word(0)),
+      Col(
+        Instruction.Capability(operand("Capability", 6)),
+        Instruction.MemoryModel(operand("AddressingModel", 2), operand("MemoryModel", 2)),
+        Instruction.TypeVoid(voidType),
+        Instruction.TypeFunction(functionType, voidType, Col.empty),
+        Instruction.EntryPoint(operand("ExecutionModel", 0), function, stringOperand("vertex"), Col.empty),
+        Instruction.Function(voidType, function, operand("FunctionControl", 0), functionType),
+        Instruction.Label(operand("IdResult", 4)),
+        Instruction.Return(),
+        Instruction.FunctionEnd()
+      ),
+      Endianness.Little
+    )
+
+    ISATypedProgramExecutor.default.load(
+      ProgramId.fromLong(54L).toOption.get,
+      ProgramFormat.SPIRV,
+      SPIRV.encode(module).toOption.get
+    ) match {
+      case Left(ExecutionFailure.InvalidRequest(detail)) => assert(detail.contains("OpEntryPoint Kernel"))
+      case result => fail(s"expected kernel entry-point validation failure, found $result")
+    }
+  }
+
   test("the external SPIR-V load boundary rejects modules outside the OpenCL compute environment") {
     val voidType     = operand("IdResult", 1)
     val functionType = operand("IdResult", 2)

@@ -45,6 +45,14 @@ typedef struct gemstone_kernel_argument {
   uint64_t local_size;
 } gemstone_kernel_argument;
 
+typedef struct gemstone_pointer_relocation {
+  uint64_t source_allocation_id;
+  uint32_t source_argument_index;
+  uint64_t source_offset;
+  uint64_t target_allocation_id;
+  uint64_t target_offset;
+} gemstone_pointer_relocation;
+
 typedef struct gemstone_dirty_range {
   uint64_t allocation_id;
   uint64_t offset;
@@ -73,6 +81,28 @@ int gemstone_execution_launch(gemstone_execution_client *client, uint64_t progra
                                uint32_t private_segment_bytes, uint32_t group_segment_bytes,
                                const gemstone_kernel_argument *arguments, uint32_t argument_count,
                                uint64_t *completion_id);
+int gemstone_execution_launch_with_geometry(gemstone_execution_client *client, uint64_t program_id,
+                                             const char *kernel_name, gemstone_dimensions group_size,
+                                             gemstone_dimensions group_count, gemstone_dimensions global_size,
+                                             uint32_t work_dim, gemstone_dimensions global_offset,
+                                             uint32_t private_segment_bytes, uint32_t group_segment_bytes,
+                                             const gemstone_kernel_argument *arguments, uint32_t argument_count,
+                                             uint64_t *completion_id);
+int gemstone_execution_launch_with_relocations(
+    gemstone_execution_client *client, uint64_t program_id, const char *kernel_name,
+    gemstone_dimensions group_size, gemstone_dimensions group_count, gemstone_dimensions global_size,
+    uint32_t private_segment_bytes, uint32_t group_segment_bytes,
+    const gemstone_kernel_argument *arguments, uint32_t argument_count,
+    const gemstone_pointer_relocation *relocations, uint32_t relocation_count,
+    uint64_t *completion_id);
+int gemstone_execution_launch_with_geometry_and_relocations(
+    gemstone_execution_client *client, uint64_t program_id, const char *kernel_name,
+    gemstone_dimensions group_size, gemstone_dimensions group_count, gemstone_dimensions global_size,
+    uint32_t work_dim, gemstone_dimensions global_offset,
+    uint32_t private_segment_bytes, uint32_t group_segment_bytes,
+    const gemstone_kernel_argument *arguments, uint32_t argument_count,
+    const gemstone_pointer_relocation *relocations, uint32_t relocation_count,
+    uint64_t *completion_id);
 
 // Returns 0 when complete, 1 while pending, and -1 on execution or protocol failure.
 int gemstone_execution_query_completion(gemstone_execution_client *client, uint64_t completion_id);
@@ -80,6 +110,11 @@ int gemstone_execution_query_completion(gemstone_execution_client *client, uint6
 // Ranges remain available until the completion is released.
 int gemstone_execution_completion_dirty_ranges(gemstone_execution_client *client, uint64_t completion_id,
                                                 gemstone_dirty_range *ranges, uint32_t capacity, uint32_t *count);
+// A zero-capacity call reports the required relocation count without writing records.
+// Records remain available until the completion is released.
+int gemstone_execution_completion_pointer_relocations(
+    gemstone_execution_client *client, uint64_t completion_id,
+    gemstone_pointer_relocation *relocations, uint32_t capacity, uint32_t *count);
 int gemstone_execution_release_completion(gemstone_execution_client *client, uint64_t completion_id);
 
 #ifdef __cplusplus

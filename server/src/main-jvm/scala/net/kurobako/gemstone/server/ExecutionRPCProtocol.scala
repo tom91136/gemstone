@@ -13,6 +13,8 @@ import java.nio.ByteOrder
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 
+import scala.reflect.ClassTag
+
 private[server] object ExecutionRPCProtocol {
   val RequestMagic = 0x474d4531
 
@@ -30,17 +32,21 @@ private[server] object ExecutionRPCProtocol {
   }
 
   private enum Operation(val code: Int) {
-    case Attest                extends Operation(0)
-    case RegisterAllocation    extends Operation(1)
-    case ReleaseAllocation     extends Operation(2)
-    case WriteAllocation       extends Operation(3)
-    case ReadAllocation        extends Operation(4)
-    case LoadProgram           extends Operation(5)
-    case UnloadProgram         extends Operation(6)
-    case Launch                extends Operation(7)
-    case QueryCompletion       extends Operation(8)
-    case ReleaseCompletion     extends Operation(9)
-    case CompletionDirtyRanges extends Operation(10)
+    case Attest                           extends Operation(0)
+    case RegisterAllocation               extends Operation(1)
+    case ReleaseAllocation                extends Operation(2)
+    case WriteAllocation                  extends Operation(3)
+    case ReadAllocation                   extends Operation(4)
+    case LoadProgram                      extends Operation(5)
+    case UnloadProgram                    extends Operation(6)
+    case Launch                           extends Operation(7)
+    case QueryCompletion                  extends Operation(8)
+    case ReleaseCompletion                extends Operation(9)
+    case CompletionDirtyRanges            extends Operation(10)
+    case LaunchWithRelocations            extends Operation(11)
+    case LaunchWithGeometry               extends Operation(12)
+    case LaunchWithGeometryAndRelocations extends Operation(13)
+    case CompletionPointerRelocations     extends Operation(14)
   }
 
   def exchange(
@@ -135,7 +141,22 @@ private[server] object ExecutionRPCProtocol {
       } yield longBytes(id.toLong)
     case Operation.UnloadProgram =>
       programId(payload.getLong()).flatMap(service.unload).map(_ => Col.empty)
-    case Operation.Launch          => decodeDispatch(payload).flatMap(service.launch).map(id => longBytes(id.toLong))
+    case Operation.Launch =>
+      decodeDispatch(payload, includeRelocations = false, includeGeometry = false).flatMap(service.launch).map(id =>
+        longBytes(id.toLong)
+      )
+    case Operation.LaunchWithRelocations =>
+      decodeDispatch(payload, includeRelocations = true, includeGeometry = false).flatMap(service.launch).map(id =>
+        longBytes(id.toLong)
+      )
+    case Operation.LaunchWithGeometry =>
+      decodeDispatch(payload, includeRelocations = false, includeGeometry = true).flatMap(service.launch).map(id =>
+        longBytes(id.toLong)
+      )
+    case Operation.LaunchWithGeometryAndRelocations =>
+      decodeDispatch(payload, includeRelocations = true, includeGeometry = true).flatMap(service.launch).map(id =>
+        longBytes(id.toLong)
+      )
     case Operation.QueryCompletion =>
       completionId(payload.getLong()).flatMap(service.completion).flatMap {
         case CompletionStatus.Pending       => Right(intBytes(1))
@@ -146,23 +167,32 @@ private[server] object ExecutionRPCProtocol {
       completionId(payload.getLong()).flatMap(service.releaseCompletion).map(_ => Col.empty)
     case Operation.CompletionDirtyRanges =>
       completionId(payload.getLong()).flatMap(service.completionDirtyRanges).flatMap(dirtyRangeBytes)
+    case Operation.CompletionPointerRelocations =>
+      completionId(payload.getLong()).flatMap(service.completionPointerRelocations).flatMap(pointerRelocationBytes)
   }
 
-  private def decodeDispatch(payload: ByteBuffer): Either[ExecutionFailure, KernelDispatch] = for {
+  private def decodeDispatch(
+      payload: ByteBuffer,
+      includeRelocations: Boolean,
+      includeGeometry: Boolean
+  ): Either[ExecutionFailure, KernelDispatch] = for {
     program    <- programId(payload.getLong())
     name       <- string(payload)
     groupSize  <- dimensions(payload)
     groupCount <- dimensions(payload)
     globalSize <- dimensions(payload)
+    workDim      = if (includeGeometry) payload.getInt() else 3
+    globalOffset =
+      if (includeGeometry) Coordinates(payload.getInt(), payload.getInt(), payload.getInt())
+      else Coordinates(0, 0, 0)
     privateSegmentBytes = payload.getInt()
     groupSegmentBytes   = payload.getInt()
-    count               = payload.getInt()
-    _ <- Either.cond(
-      count >= 0 && count <= MaximumArguments,
-      (),
-      ExecutionFailure.InvalidRequest(s"invalid kernel argument count: $count")
-    )
-    arguments <- decodeArguments(payload, count, Col.empty)
+    pointerRelocations <-
+      if (includeRelocations)
+        decodeCollection(payload.getInt(), "pointer relocation")(decodeRelocation(payload))
+      else Right(Col.empty[PointerRelocation])
+    count = payload.getInt()
+    arguments <- decodeCollection(count, "kernel argument")(decodeArgument(payload))
     dispatch  <- KernelDispatch.create(
       program,
       name,
@@ -171,19 +201,54 @@ private[server] object ExecutionRPCProtocol {
       arguments,
       Some(globalSize),
       privateSegmentBytes,
-      groupSegmentBytes
+      groupSegmentBytes,
+      pointerRelocations,
+      workDim,
+      globalOffset
     )
       .leftMap(ExecutionFailure.InvalidRequest.apply)
   } yield dispatch
 
-  private def decodeArguments(
-      payload: ByteBuffer,
-      remaining: Int,
-      result: Col[KernelArgument]
-  ): Either[ExecutionFailure, Col[KernelArgument]] =
-    if (remaining == 0) Right(result)
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+  private def decodeCollection[A: ClassTag](
+      count: Int,
+      description: String
+  )(decode: => Either[ExecutionFailure, A]): Either[ExecutionFailure, Col[A]] =
+    if (count < 0 || count > MaximumArguments)
+      Left(ExecutionFailure.InvalidRequest(s"invalid $description count: $count"))
+    else {
+      val result = Col.newBuilder[A]
+      var index  = 0
+      var error  = Option.empty[ExecutionFailure]
+      while (index < count && error.isEmpty) {
+        decode match {
+          case Right(value) => result += value
+          case Left(value)  => error = Some(value)
+        }
+        index += 1
+      }
+      error.toLeft(result.result())
+    }
+
+  private def decodeRelocation(payload: ByteBuffer): Either[ExecutionFailure, PointerRelocation] = for {
+    sourceAllocation = payload.getLong()
+    sourceArgument   = payload.getInt()
+    _                = payload.getInt()
+    sourceOffset     = payload.getLong()
+    target <- allocationId(payload.getLong())
+    targetOffset = payload.getLong()
+    source <- if (sourceAllocation != 0L && sourceArgument == -1)
+      allocationId(sourceAllocation).map(value => (Some(value), None))
+    else if (sourceAllocation == 0L && sourceArgument >= 0)
+      Right((None, Some(sourceArgument)))
     else
-      decodeArgument(payload).flatMap(argument => decodeArguments(payload, remaining - 1, result :+ argument))
+      Left(ExecutionFailure.InvalidRequest("pointer relocation must have exactly one source"))
+    _ <- Either.cond(
+      sourceOffset >= 0L && targetOffset >= 0L,
+      (),
+      ExecutionFailure.InvalidRequest("pointer relocation offsets must be non-negative")
+    )
+  } yield PointerRelocation(source._1, source._2, sourceOffset, target, targetOffset)
 
   private def decodeArgument(payload: ByteBuffer): Either[ExecutionFailure, KernelArgument] = payload.getInt() match {
     case 1 => byteArray(payload).map(KernelArgument.Scalar.apply)
@@ -265,6 +330,24 @@ private[server] object ExecutionRPCProtocol {
         Col.unsafeFromArray(output.array())
       },
       ExecutionFailure.Failed(s"completion has too many dirty ranges: ${ranges.length}")
+    )
+
+  private def pointerRelocationBytes(relocations: Col[PointerRelocation]): Either[ExecutionFailure, Col[Byte]] =
+    Either.cond(
+      relocations.length <= (MaximumPayload - 4) / 32 && relocations.forall(relocation =>
+        relocation.sourceAllocation.isDefined && relocation.sourceArgument.isEmpty
+      ), {
+        val output = ByteBuffer.allocate(4 + relocations.length * 32).order(ByteOrder.BIG_ENDIAN)
+        output.putInt(relocations.length)
+        relocations.foreach { relocation =>
+          output.putLong(relocation.sourceAllocation.get.toLong)
+          output.putLong(relocation.sourceOffset)
+          output.putLong(relocation.target.toLong)
+          output.putLong(relocation.targetOffset)
+        }
+        Col.unsafeFromArray(output.array())
+      },
+      ExecutionFailure.Failed("completion contains a non-allocation pointer relocation")
     )
 
   private def write(output: DataOutputStream, result: Either[ExecutionFailure, Col[Byte]]): Unit = {

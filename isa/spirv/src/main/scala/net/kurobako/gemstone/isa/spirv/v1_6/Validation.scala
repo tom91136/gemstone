@@ -24,6 +24,7 @@ enum ValidationIssue {
 
 enum Environment {
   case OpenCLCompute
+  case OpenCLLibrary
 }
 
 object Validator {
@@ -34,10 +35,11 @@ object Validator {
     if (condition) Chain.one(issue) else Chain.empty
 
   def validate(module: Module, environment: Environment): ValidationResult[ValidationIssue] = environment match {
-    case Environment.OpenCLCompute => validateOpenCLCompute(module)
+    case Environment.OpenCLCompute => validateOpenCL(module, requireKernelEntry = true)
+    case Environment.OpenCLLibrary => validateOpenCL(module, requireKernelEntry = false)
   }
 
-  private def validateOpenCLCompute(module: Module): ValidationResult[ValidationIssue] = {
+  private def validateOpenCL(module: Module, requireKernelEntry: Boolean): ValidationResult[ValidationIssue] = {
     val headerIssues =
       issueWhen(module.header.bound.toUnsigned == 0L)(
         ValidationIssue.InvalidHeader("id bound must be non-zero")
@@ -66,7 +68,7 @@ object Validator {
     val invalidIssues = Col.from(
       (headerIssues ++
         issueWhen(!facts.kernelCapability)(ValidationIssue.MissingKernelCapability) ++
-        issueWhen(!facts.kernelEntry)(ValidationIssue.MissingKernelEntryPoint) ++
+        issueWhen(requireKernelEntry && !facts.kernelEntry)(ValidationIssue.MissingKernelEntryPoint) ++
         issueWhen(!facts.openCLMemory)(ValidationIssue.MissingOpenCLMemoryModel)).iterator
     )
     val unsupportedIssues = Col.from(unsupported.iterator)

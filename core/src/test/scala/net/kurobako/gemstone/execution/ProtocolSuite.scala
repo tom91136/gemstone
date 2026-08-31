@@ -29,4 +29,49 @@ class ProtocolSuite extends munit.FunSuite {
       Coordinates(3, 5, 1)
     )
   }
+
+  test("launch geometry carries the OpenCL work dimension and global offset") {
+    val groupSize  = Dimensions.create(4, 1, 1).toOption.get
+    val groupCount = Dimensions.create(2, 1, 1).toOption.get
+    val geometry   = LaunchGeometry.create(
+      groupSize,
+      groupCount,
+      Some(Dimensions.create(7, 1, 1).toOption.get),
+      1,
+      Coordinates(11, 0, 0)
+    ).toOption.get
+    assertEquals(geometry.workDim, 1)
+    assertEquals(geometry.globalOffset, Coordinates(11, 0, 0))
+    assertEquals(geometry.globalCoordinates(Coordinates(1, 0, 0), Coordinates(0, 0, 0)), Coordinates(15, 0, 0))
+    assert(geometry.containsGlobal(Coordinates(11, 0, 0)))
+    assert(geometry.containsGlobal(Coordinates(17, 0, 0)))
+    assert(!geometry.containsGlobal(Coordinates(10, 0, 0)))
+    assert(!geometry.containsGlobal(Coordinates(18, 0, 0)))
+    assert(LaunchGeometry.create(groupSize, groupCount, workDim = 0).isLeft)
+  }
+
+  test("pointer relocations cannot refer to an absent kernel argument") {
+    val program    = ProgramId.fromLong(1L).toOption.get
+    val target     = AllocationId.fromLong(2L).toOption.get
+    val relocation = PointerRelocation(
+      sourceAllocation = None,
+      sourceArgument = Some(1),
+      sourceOffset = 0L,
+      target = target,
+      targetOffset = 0L
+    )
+    assert(
+      KernelDispatch
+        .create(
+          program,
+          "kernel",
+          Dimensions.One,
+          Dimensions.One,
+          Col(KernelArgument.Scalar(Col.empty)),
+          pointerRelocations = Col(relocation)
+        )
+        .left
+        .exists(_.contains("in-range source argument"))
+    )
+  }
 }

@@ -30,6 +30,18 @@ final class ValidationSuite extends munit.FunSuite {
     }
   }
 
+  test("OpenCL libraries may omit an entry point but still require the OpenCL environment") {
+    val module = Module(
+      Header(ISA.version, Word(0), Word(1), Word(0)),
+      Col(
+        Instruction.Capability(operand("Capability", 6)),
+        Instruction.MemoryModel(operand("AddressingModel", 2), operand("MemoryModel", 2))
+      ),
+      Endianness.Little
+    )
+    assertEquals(Validator.validate(module, Environment.OpenCLLibrary), ValidationResult.Valid)
+  }
+
   test("unknown raw opcode fails before validation") {
     val raw = RawModule(
       Header(ISA.version, Word(0), Word(10), Word(0)),

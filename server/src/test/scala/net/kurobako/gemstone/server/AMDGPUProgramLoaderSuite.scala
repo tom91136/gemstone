@@ -9,6 +9,7 @@ final class AMDGPUProgramLoaderSuite extends munit.FunSuite {
   private object EmptyMemory extends ExecutionMemory {
     override def read(id: AllocationId, offset: Long, size: Int)         = Right(Col.empty)
     override def write(id: AllocationId, offset: Long, bytes: Col[Byte]) = Right(())
+    override def recordPointerRelocation(relocation: PointerRelocation)  = ()
   }
 
   test("AMDGPU kernel aliases select the indexed implementation matching the code-object target") {

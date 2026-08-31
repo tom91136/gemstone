@@ -1,5 +1,6 @@
 package net.kurobako.gemstone.launcher
 
+import java.io.File
 import java.nio.file.Path
 
 final class LaunchSuite extends munit.FunSuite {
@@ -10,6 +11,7 @@ final class LaunchSuite extends munit.FunSuite {
     hipRuntime = Some(root.resolve("hip/libamdhip64.so")),
     hsaRuntime = Some(root.resolve("hsa/libhsa-runtime64.so.1")),
     openCLICD = Some(root.resolve("opencl/icd")),
+    openCLLoader = Some(root.resolve("opencl/libOpenCL.so.1")),
     levelZeroDriver = Some(root.resolve("levelzero/libze_gemstone.so.1"))
   )
 
@@ -43,8 +45,9 @@ final class LaunchSuite extends munit.FunSuite {
     val level0 =
       Launch.plan(ComputeAPI.LevelZero, layout, endpoint, Map.empty).fold(error => fail(error.message), identity)
 
-    assertEquals(opencl.environment.set("OCL_ICD_VENDORS"), root.resolve("opencl/icd").toString)
-    assert(!opencl.environment.set.contains("LD_PRELOAD"))
+    assertEquals(opencl.environment.set("OCL_ICD_VENDORS"), root.resolve("opencl/icd").toString + File.separator)
+    assertEquals(opencl.environment.set("LD_PRELOAD"), root.resolve("opencl/libOpenCL.so.1").toString)
+    assertEquals(opencl.environment.set("LD_LIBRARY_PATH"), root.resolve("opencl").toString)
     assertEquals(
       level0.environment.set("ZE_ENABLE_ALT_DRIVERS"),
       root.resolve("levelzero/libze_gemstone.so.1").toString
@@ -71,7 +74,7 @@ final class LaunchSuite extends munit.FunSuite {
       root.resolve("levelzero/libze_gemstone.so.1").toString
     )
     assertEquals(openCL.environment.set("ONEAPI_DEVICE_SELECTOR"), "opencl:gpu")
-    assertEquals(openCL.environment.set("OCL_ICD_VENDORS"), root.resolve("opencl/icd").toString)
+    assertEquals(openCL.environment.set("OCL_ICD_VENDORS"), root.resolve("opencl/icd").toString + File.separator)
     assert(Launch.plan(ComputeAPI.SYCL, layout, endpoint, Map.empty).isLeft)
   }
 

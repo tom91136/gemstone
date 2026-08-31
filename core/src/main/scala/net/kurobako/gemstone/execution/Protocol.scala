@@ -98,7 +98,9 @@ enum Axis {
 final case class LaunchGeometry private (
     groupSize: Dimensions,
     groupCount: Dimensions,
-    globalSize: Dimensions
+    globalSize: Dimensions,
+    workDim: Int,
+    globalOffset: Coordinates
 ) {
   def localCoordinates(index: Int): Coordinates = coordinates(index.toLong, groupSize)
 
@@ -106,13 +108,15 @@ final case class LaunchGeometry private (
 
   def globalCoordinates(group: Coordinates, local: Coordinates): Coordinates =
     Coordinates(
-      Math.addExact(Math.multiplyExact(group.x, groupSize.x), local.x),
-      Math.addExact(Math.multiplyExact(group.y, groupSize.y), local.y),
-      Math.addExact(Math.multiplyExact(group.z, groupSize.z), local.z)
+      Math.addExact(globalOffset.x, Math.addExact(Math.multiplyExact(group.x, groupSize.x), local.x)),
+      Math.addExact(globalOffset.y, Math.addExact(Math.multiplyExact(group.y, groupSize.y), local.y)),
+      Math.addExact(globalOffset.z, Math.addExact(Math.multiplyExact(group.z, groupSize.z), local.z))
     )
 
   def containsGlobal(coordinates: Coordinates): Boolean =
-    coordinates.x < globalSize.x && coordinates.y < globalSize.y && coordinates.z < globalSize.z
+    coordinates.x >= globalOffset.x && coordinates.x - globalOffset.x < globalSize.x &&
+      coordinates.y >= globalOffset.y && coordinates.y - globalOffset.y < globalSize.y &&
+      coordinates.z >= globalOffset.z && coordinates.z - globalOffset.z < globalSize.z
 
   private def coordinates(index: Long, dimensions: Dimensions): Coordinates = {
     val volume = dimensions.volume.fold(message => throw IllegalArgumentException(message), identity)
@@ -129,16 +133,24 @@ object LaunchGeometry {
   def create(
       groupSize: Dimensions,
       groupCount: Dimensions,
-      globalSize: Option[Dimensions] = None
+      globalSize: Option[Dimensions] = None,
+      workDim: Int = 3,
+      globalOffset: Coordinates = Coordinates(0, 0, 0)
   ): Either[String, LaunchGeometry] = for {
     padded <- groupSize.multiply(groupCount)
     exact = globalSize.getOrElse(padded)
+    _ <- Either.cond(workDim >= 1 && workDim <= 3, (), s"work dimension must be between 1 and 3: $workDim")
+    _ <- Either.cond(
+      globalOffset.x >= 0 && globalOffset.y >= 0 && globalOffset.z >= 0,
+      (),
+      s"global offset must be non-negative: $globalOffset"
+    )
     _ <- Either.cond(
       exact.x <= padded.x && exact.y <= padded.y && exact.z <= padded.z,
       (),
       s"global size $exact exceeds padded dispatch size $padded"
     )
-  } yield LaunchGeometry(groupSize, groupCount, exact)
+  } yield LaunchGeometry(groupSize, groupCount, exact, workDim, globalOffset)
 }
 
 enum KernelArgument {
@@ -147,13 +159,23 @@ enum KernelArgument {
   case Local(size: Long)
 }
 
+/** A pointer-sized word in mirrored allocation memory that must be interpreted as an allocation pointer. */
+final case class PointerRelocation(
+    sourceAllocation: Option[AllocationId],
+    sourceArgument: Option[Int],
+    sourceOffset: Long,
+    target: AllocationId,
+    targetOffset: Long
+)
+
 final case class KernelDispatch private (
     program: ProgramId,
     kernelName: String,
     geometry: LaunchGeometry,
     privateSegmentBytes: Int,
     groupSegmentBytes: Int,
-    arguments: Col[KernelArgument]
+    arguments: Col[KernelArgument],
+    pointerRelocations: Col[PointerRelocation]
 )
 
 object KernelDispatch {
@@ -165,18 +187,30 @@ object KernelDispatch {
       arguments: Col[KernelArgument],
       globalSize: Option[Dimensions] = None,
       privateSegmentBytes: Int = 0,
-      groupSegmentBytes: Int = 0
+      groupSegmentBytes: Int = 0,
+      pointerRelocations: Col[PointerRelocation] = Col.empty,
+      workDim: Int = 3,
+      globalOffset: Coordinates = Coordinates(0, 0, 0)
   ): Either[String, KernelDispatch] = for {
     _ <- Either.cond(
       kernelName.nonEmpty && !kernelName.contains('\u0000'),
       (),
       "kernel name must be non-empty and contain no NUL"
     )
-    geometry <- LaunchGeometry.create(groupSize, groupCount, globalSize)
+    geometry <- LaunchGeometry.create(groupSize, groupCount, globalSize, workDim, globalOffset)
     _        <- Either.cond(
       privateSegmentBytes >= 0 && groupSegmentBytes >= 0,
       (),
       s"segment sizes must be non-negative: private=$privateSegmentBytes, group=$groupSegmentBytes"
+    )
+    _ <- Either.cond(
+      pointerRelocations.forall(relocation =>
+        (relocation.sourceAllocation.isDefined ^ relocation.sourceArgument.isDefined) &&
+          relocation.sourceArgument.forall(index => index >= 0 && index < arguments.size) &&
+          relocation.sourceOffset >= 0L && relocation.targetOffset >= 0L
+      ),
+      (),
+      "pointer relocations must have one valid source, an in-range source argument, and non-negative offsets"
     )
   } yield KernelDispatch(
     program,
@@ -184,7 +218,8 @@ object KernelDispatch {
     geometry,
     privateSegmentBytes,
     groupSegmentBytes,
-    arguments
+    arguments,
+    pointerRelocations
   )
 }
 
@@ -225,6 +260,9 @@ trait ExecutionMemory {
     require(size >= 1 && size <= 8, s"memory value size must be in [1, 8], found $size")
     write(id, offset, LittleEndian.toCol(value, size))
   }
+
+  /** Records a process-neutral pointer written into mirrored allocation memory. */
+  def recordPointerRelocation(relocation: PointerRelocation): Unit
 }
 
 trait LoadedProgram {

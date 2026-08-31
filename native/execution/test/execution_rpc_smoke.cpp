@@ -43,6 +43,11 @@ int main(void) {
   }
   assert(completion_status == 0);
 
+  uint32_t relocation_count = 123;
+  assert(gemstone_execution_completion_pointer_relocations(
+             execution_client, completion, nullptr, 0, &relocation_count) == 0);
+  assert(relocation_count == 0);
+
   uint32_t dirty_count = 0;
   assert(gemstone_execution_completion_dirty_ranges(memory_client, completion, nullptr, 0, &dirty_count) == 0);
   assert(dirty_count == 1);

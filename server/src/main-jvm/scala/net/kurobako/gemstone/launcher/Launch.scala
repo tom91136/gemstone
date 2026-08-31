@@ -2,6 +2,7 @@ package net.kurobako.gemstone.launcher
 
 import net.kurobako.gemstone.Col.*
 
+import java.io.File
 import java.nio.file.Path
 
 enum ComputeAPI(val id: String) {
@@ -31,6 +32,7 @@ final case class RuntimeLayout(
     hipRuntime: Option[Path] = None,
     hsaRuntime: Option[Path] = None,
     openCLICD: Option[Path] = None,
+    openCLLoader: Option[Path] = None,
     levelZeroDriver: Option[Path] = None
 )
 
@@ -94,13 +96,13 @@ object Launch {
       case ComputeAPI.HSA =>
         preload("HSA Runtime", api, layout.hsaRuntime, base, inherited, RequiredEvidence.Execution)
       case ComputeAPI.OpenCL =>
-        openCL(api, layout, base)
+        openCL(api, layout, base, inherited)
       case ComputeAPI.LevelZero =>
         levelZero(api, layout, base)
       case ComputeAPI.SYCL =>
         (layout.levelZeroDriver, layout.openCLICD) match {
           case (Some(_), None)    => levelZero(api, layout, base).map(withSYCLSelector(_, "level_zero:gpu"))
-          case (None, Some(_))    => openCL(api, layout, base).map(withSYCLSelector(_, "opencl:gpu"))
+          case (None, Some(_))    => openCL(api, layout, base, inherited).map(withSYCLSelector(_, "opencl:gpu"))
           case (Some(_), Some(_)) => Left(LaunchError("SYCL requires exactly one Gemstone backend provider"))
           case (None, None)       => Left(LaunchError("SYCL backend provider is absent"))
         }
@@ -128,12 +130,14 @@ object Launch {
   private def openCL(
       api: ComputeAPI,
       layout: RuntimeLayout,
-      base: Environment
+      base: Environment,
+      inherited: Map[String, String]
   ): Either[LaunchError, LaunchPlan] =
     provider("OpenCL ICD", layout.openCLICD).map { directory =>
+      val environment = layout.openCLLoader.fold(base)(withPreloadedLibrary(base, _, inherited))
       LaunchPlan(
         api,
-        base.copy(set = base.set.updated("OCL_ICD_VENDORS", directory.toString)),
+        environment.copy(set = environment.set.updated("OCL_ICD_VENDORS", directory.toString + File.separator)),
         RequiredEvidence.Execution
       )
     }
@@ -157,17 +161,9 @@ object Launch {
       evidence: RequiredEvidence
   ): Either[LaunchError, LaunchPlan] =
     provider(name, path).map { library =>
-      val directory   = Option(library.getParent).getOrElse(Path.of("."))
-      val libraryPath = inherited.get("LD_LIBRARY_PATH").filter(_.nonEmpty)
-        .fold(directory.toString)(value => s"$directory:$value")
       LaunchPlan(
         api,
-        base.copy(set =
-          base.set ++ Map(
-            "LD_PRELOAD"      -> library.toString,
-            "LD_LIBRARY_PATH" -> libraryPath
-          )
-        ),
+        withPreloadedLibrary(base, library, inherited),
         evidence
       )
     }
@@ -194,6 +190,22 @@ object Launch {
         RequiredEvidence.Execution
       )
     }
+
+  private def withPreloadedLibrary(
+      base: Environment,
+      library: Path,
+      inherited: Map[String, String]
+  ): Environment = {
+    val directory   = Option(library.getParent).getOrElse(Path.of("."))
+    val libraryPath = inherited.get("LD_LIBRARY_PATH").filter(_.nonEmpty)
+      .fold(directory.toString)(value => s"$directory:$value")
+    base.copy(set =
+      base.set ++ Map(
+        "LD_PRELOAD"      -> library.toString,
+        "LD_LIBRARY_PATH" -> libraryPath
+      )
+    )
+  }
 
   private def provider(name: String, path: Option[Path]): Either[LaunchError, Path] =
     path.toRight(LaunchError(s"$name provider is absent"))

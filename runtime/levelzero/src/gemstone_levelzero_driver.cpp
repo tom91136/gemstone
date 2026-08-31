@@ -14,11 +14,13 @@
 #include <cstring>
 #include <functional>
 #include <limits>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -127,6 +129,12 @@ struct Module final : Handle {
   ModuleBackend backend;
 };
 
+struct KernelParameterMetadata {
+  bool pointer_aggregate = false;
+  bool local = false;
+  bool contains_pointer = false;
+};
+
 struct Kernel final : Handle {
   Kernel(Module *module_value, std::string name_value)
       : Handle(Kind::Kernel), module(module_value), name(std::move(name_value)) {
@@ -145,6 +153,7 @@ struct Kernel final : Handle {
     std::vector<uint8_t> bytes;
   };
   std::vector<Argument> arguments;
+  std::vector<KernelParameterMetadata> parameters;
 };
 
 struct Allocation;
@@ -157,7 +166,9 @@ struct KernelLaunch {
   uint32_t group_x;
   uint32_t group_y;
   uint32_t group_z;
+  bool indirect;
   std::vector<Kernel::Argument> arguments;
+  std::vector<KernelParameterMetadata> parameters;
   std::vector<AllocationRef> allocations;
 };
 
@@ -166,6 +177,8 @@ struct Allocation {
   size_t size;
   ze_memory_type_t type;
   uint64_t id;
+  bool remote_synchronized = false;
+  std::vector<uint64_t> synchronized_page_hashes;
 };
 
 Driver global_driver;
@@ -188,6 +201,13 @@ struct RemoteExecution {
 };
 
 RemoteExecution remote;
+
+struct LaunchPerformance {
+  uint64_t uploaded_bytes = 0;
+  uint64_t downloaded_bytes = 0;
+  uint64_t relocation_scan_bytes = 0;
+  uint64_t relocation_count = 0;
+};
 
 uint64_t next_allocation_id() {
   // Allocation identity is global to the shared JVM execution service, while
@@ -254,42 +274,106 @@ gemstone_allocation_kind rpc_kind(ze_memory_type_t kind) {
 // Large oneDPL buffers otherwise create long GC-sensitive gaps inside a single
 // response body and can exceed the native transport's progress timeout.
 constexpr size_t kMirrorChunkSize = 1U * 1024U * 1024U;
+constexpr size_t kMirrorPageSize = 4096U;
 
-int mirror_allocations_to_server(RemoteExecution &state) {
+uint64_t mirror_page_hash(const uint8_t *bytes, size_t size) {
+  uint64_t result = UINT64_C(1469598103934665603);
+  for (size_t index = 0; index < size; ++index) {
+    result ^= bytes[index];
+    result *= UINT64_C(1099511628211);
+  }
+  return result;
+}
+
+void update_synchronized_hashes(const AllocationRef &allocation, size_t offset, size_t size) {
+  if (size == 0) return;
+  const size_t page_count = (allocation->size + kMirrorPageSize - 1U) / kMirrorPageSize;
+  allocation->synchronized_page_hashes.resize(page_count);
+  const size_t first_page = offset / kMirrorPageSize;
+  const size_t last_page = (offset + size - 1U) / kMirrorPageSize;
+  const auto *bytes = static_cast<const uint8_t *>(allocation->base);
+  for (size_t page = first_page; page <= last_page; ++page) {
+    const size_t start = page * kMirrorPageSize;
+    allocation->synchronized_page_hashes[page] =
+        mirror_page_hash(bytes + start, std::min(kMirrorPageSize, allocation->size - start));
+  }
+  allocation->remote_synchronized = true;
+}
+
+int mirror_allocations_to_server(RemoteExecution &state, const KernelLaunch &kernel,
+                                 const std::vector<gemstone_pointer_relocation> &relocations,
+                                 LaunchPerformance &performance) {
+  std::unordered_set<uint64_t> reachable;
+  if (!kernel.indirect)
+    for (const auto &relocation : relocations) reachable.insert(relocation.target_allocation_id);
   std::lock_guard lock(allocations_mutex);
   for (const auto &[base, allocation] : allocations) {
+    if (!kernel.indirect && !reachable.contains(allocation->id)) continue;
     const auto *bytes = static_cast<const uint8_t *>(base);
-    size_t offset = 0;
-    while (offset < allocation->size) {
-      const auto count = static_cast<uint32_t>(std::min(kMirrorChunkSize, allocation->size - offset));
-      if (gemstone_execution_write_allocation(state.client, allocation->id, offset, bytes + offset, count) != 0)
-        return -1;
-      offset += count;
+    const size_t page_count = (allocation->size + kMirrorPageSize - 1U) / kMirrorPageSize;
+    std::vector<uint64_t> hashes(page_count);
+    std::vector<bool> changed(page_count);
+    for (size_t page = 0; page < page_count; ++page) {
+      const size_t offset = page * kMirrorPageSize;
+      hashes[page] = mirror_page_hash(bytes + offset, std::min(kMirrorPageSize, allocation->size - offset));
+      changed[page] = !allocation->remote_synchronized ||
+                      page >= allocation->synchronized_page_hashes.size() ||
+                      hashes[page] != allocation->synchronized_page_hashes[page];
     }
+    allocation->synchronized_page_hashes.resize(page_count);
+    size_t page = 0;
+    while (page < page_count) {
+      while (page < page_count && !changed[page]) ++page;
+      if (page == page_count) break;
+      const size_t first = page;
+      size_t bytes_in_range = 0;
+      while (page < page_count && changed[page] && bytes_in_range < kMirrorChunkSize) {
+        bytes_in_range += std::min(kMirrorPageSize, allocation->size - page * kMirrorPageSize);
+        ++page;
+      }
+      const size_t offset = first * kMirrorPageSize;
+      const auto count = static_cast<uint32_t>(bytes_in_range);
+      if (gemstone_execution_write_allocation(state.client, allocation->id, offset, bytes + offset, count) != 0) {
+        allocation->remote_synchronized = false;
+        return -1;
+      }
+      performance.uploaded_bytes += count;
+      for (size_t updated = first; updated < page; ++updated)
+        allocation->synchronized_page_hashes[updated] = hashes[updated];
+    }
+    allocation->remote_synchronized = true;
   }
   return 0;
 }
 
-int mirror_allocations_from_server(RemoteExecution &state) {
+int mirror_dirty_ranges_from_server(RemoteExecution &state, const std::vector<gemstone_dirty_range> &ranges,
+                                    LaunchPerformance &performance) {
   std::lock_guard lock(allocations_mutex);
-  for (const auto &[base, allocation] : allocations) {
-    auto *bytes = static_cast<uint8_t *>(base);
-    size_t offset = 0;
-    while (offset < allocation->size) {
-      const auto count = static_cast<uint32_t>(std::min(kMirrorChunkSize, allocation->size - offset));
-      if (gemstone_execution_read_allocation(state.client, allocation->id, offset, bytes + offset, count) != 0)
-        return -1;
-      offset += count;
-    }
+  for (const auto &range : ranges) {
+    const auto found = std::find_if(allocations.begin(), allocations.end(), [&](const auto &entry) {
+      return entry.second->id == range.allocation_id;
+    });
+    if (found == allocations.end() || range.offset > found->second->size ||
+        range.size > found->second->size - range.offset)
+      return -1;
+    auto *bytes = static_cast<uint8_t *>(found->first);
+    if (gemstone_execution_read_allocation(state.client, range.allocation_id, range.offset,
+                                            bytes + range.offset, range.size) != 0)
+      return -1;
+    performance.downloaded_bytes += range.size;
+    update_synchronized_hashes(found->second, range.offset, range.size);
   }
   return 0;
 }
 
-bool classify_pointer_argument(const std::vector<uint8_t> &bytes, uint64_t &allocation_id, uint64_t &offset) {
-  if (bytes.size() != sizeof(void *)) return false;
-  uintptr_t pointer = 0;
-  std::memcpy(&pointer, bytes.data(), sizeof(pointer));
+AllocationRef find_allocation_by_id(uint64_t id) {
   std::lock_guard lock(allocations_mutex);
+  for (const auto &[_, allocation] : allocations)
+    if (allocation->id == id) return allocation;
+  return {};
+}
+
+bool classify_pointer_value_locked(uintptr_t pointer, uint64_t &allocation_id, uint64_t &offset) {
   for (const auto &[base, allocation] : allocations) {
     const auto start = reinterpret_cast<uintptr_t>(base);
     if (pointer >= start && pointer < start + allocation->size) {
@@ -298,7 +382,139 @@ bool classify_pointer_argument(const std::vector<uint8_t> &bytes, uint64_t &allo
       return true;
     }
   }
+  for (const auto &[base, allocation] : allocations) {
+    const auto start = reinterpret_cast<uintptr_t>(base);
+    if (pointer >= start && pointer - start == allocation->size) {
+      allocation_id = allocation->id;
+      offset = allocation->size;
+      return true;
+    }
+  }
   return false;
+}
+
+std::vector<gemstone_pointer_relocation> collect_pointer_relocations(const KernelLaunch &kernel,
+                                                                     LaunchPerformance &performance) {
+  std::vector<gemstone_pointer_relocation> result;
+  if (kernel.indirect) {
+    std::lock_guard lock(allocations_mutex);
+    for (const auto &[base, source] : allocations) {
+      if (source->size < sizeof(uintptr_t)) continue;
+      performance.relocation_scan_bytes += source->size;
+      const auto *bytes = static_cast<const uint8_t *>(base);
+      for (size_t offset = 0; offset <= source->size - sizeof(uintptr_t); offset += sizeof(uint32_t)) {
+        uintptr_t pointer = 0;
+        std::memcpy(&pointer, bytes + offset, sizeof(pointer));
+        uint64_t target_id = 0;
+        uint64_t target_offset = 0;
+        if (classify_pointer_value_locked(pointer, target_id, target_offset)) {
+          result.push_back({source->id, std::numeric_limits<uint32_t>::max(), offset, target_id, target_offset});
+        }
+      }
+    }
+  }
+  {
+    std::lock_guard lock(allocations_mutex);
+    for (size_t argument = 0; argument < kernel.arguments.size(); ++argument) {
+      const auto &input = kernel.arguments[argument];
+      if (input.local || input.bytes.size() < sizeof(uintptr_t)) continue;
+      if (argument < kernel.parameters.size() && !kernel.parameters[argument].contains_pointer) continue;
+      performance.relocation_scan_bytes += input.bytes.size();
+      for (size_t offset = 0; offset <= input.bytes.size() - sizeof(uintptr_t); offset += sizeof(uint32_t)) {
+        uintptr_t pointer = 0;
+        std::memcpy(&pointer, input.bytes.data() + offset, sizeof(pointer));
+        uint64_t target_id = 0;
+        uint64_t target_offset = 0;
+        if (classify_pointer_value_locked(pointer, target_id, target_offset)) {
+          result.push_back({0, static_cast<uint32_t>(argument), offset, target_id, target_offset});
+        }
+      }
+    }
+  }
+  performance.relocation_count = result.size();
+  return result;
+}
+
+// Level Zero presents every kernel argument as an opaque byte blob.  The
+// server ABI can represent a direct pointer as an allocation argument, while
+// a pointer-containing aggregate must remain a scalar blob with relocations.
+// The same metadata also distinguishes Workgroup pointers from DPC++'s
+// nullptr marker for zero-valued ABI fields.
+std::vector<KernelParameterMetadata> kernel_parameter_metadata(const std::vector<uint8_t> &il,
+                                                               const std::string &name) {
+  struct TypeInfo {
+    enum class Kind { Aggregate, Pointer } kind = Kind::Aggregate;
+    uint32_t pointee = 0;
+    uint32_t storage = 0;
+    std::vector<uint32_t> members;
+  };
+  if (il.size() < 5 * sizeof(uint32_t) || il.size() % sizeof(uint32_t) != 0) return {};
+  auto word = [&il](size_t offset) {
+    uint32_t value = 0;
+    std::memcpy(&value, il.data() + offset, sizeof(value));
+    return value;
+  };
+  std::map<uint32_t, TypeInfo> types;
+  uint32_t entry = 0;
+  for (size_t offset = 5 * sizeof(uint32_t); offset + sizeof(uint32_t) <= il.size();) {
+    const uint32_t instruction = word(offset);
+    const size_t words = instruction >> 16;
+    const uint32_t opcode = instruction & 0xffff;
+    if (words == 0 || offset + words * sizeof(uint32_t) > il.size()) break;
+    if ((opcode == 28 || opcode == 29) && words >= 3) {
+      TypeInfo info;
+      info.members.push_back(word(offset + 2 * sizeof(uint32_t)));
+      types.insert_or_assign(word(offset + sizeof(uint32_t)), std::move(info));
+    } else if (opcode == 30 && words >= 2) {
+      TypeInfo info;
+      for (size_t index = 2; index < words; ++index)
+        info.members.push_back(word(offset + index * sizeof(uint32_t)));
+      types.insert_or_assign(word(offset + sizeof(uint32_t)), std::move(info));
+    } else if (opcode == 32 && words >= 4) {
+      TypeInfo info;
+      info.kind = TypeInfo::Kind::Pointer;
+      info.pointee = word(offset + 3 * sizeof(uint32_t));
+      info.storage = word(offset + 2 * sizeof(uint32_t));
+      types.insert_or_assign(word(offset + sizeof(uint32_t)), std::move(info));
+    } else if (opcode == 15 && words >= 4) {
+      const size_t name_offset = offset + 3 * sizeof(uint32_t);
+      const size_t name_limit = offset + words * sizeof(uint32_t);
+      size_t end = name_offset;
+      while (end < name_limit && il[end] != 0) ++end;
+      if (end < name_limit &&
+          std::string(reinterpret_cast<const char *>(il.data() + name_offset), end - name_offset) == name)
+        entry = word(offset + 2 * sizeof(uint32_t));
+    }
+    offset += words * sizeof(uint32_t);
+  }
+  if (entry == 0) return {};
+  std::function<bool(uint32_t)> contains_pointer = [&](uint32_t type_id) {
+    const auto found = types.find(type_id);
+    if (found == types.end()) return false;
+    if (found->second.kind == TypeInfo::Kind::Pointer) return true;
+    return std::any_of(found->second.members.begin(), found->second.members.end(), contains_pointer);
+  };
+  std::vector<KernelParameterMetadata> result;
+  bool in_function = false;
+  for (size_t offset = 5 * sizeof(uint32_t); offset + sizeof(uint32_t) <= il.size();) {
+    const uint32_t instruction = word(offset);
+    const size_t words = instruction >> 16;
+    const uint32_t opcode = instruction & 0xffff;
+    if (words == 0 || offset + words * sizeof(uint32_t) > il.size()) break;
+    if (opcode == 54 && words >= 3) in_function = word(offset + 2 * sizeof(uint32_t)) == entry;
+    else if (in_function && opcode == 55 && words >= 2) {
+      const auto found = types.find(word(offset + sizeof(uint32_t)));
+      const auto pointee = found == types.end() || found->second.kind != TypeInfo::Kind::Pointer
+                               ? types.end()
+                               : types.find(found->second.pointee);
+      result.push_back({pointee != types.end() && pointee->second.kind == TypeInfo::Kind::Aggregate,
+                        found != types.end() && found->second.kind == TypeInfo::Kind::Pointer &&
+                            found->second.storage == 4,
+                        contains_pointer(word(offset + sizeof(uint32_t)))});
+    } else if (in_function && opcode == 56) break;
+    offset += words * sizeof(uint32_t);
+  }
+  return result;
 }
 
 AllocationRef retain_allocation(const void *pointer, size_t size) {
@@ -312,12 +528,32 @@ AllocationRef retain_allocation(const void *pointer, size_t size) {
   return {};
 }
 
-std::vector<AllocationRef> retain_all_allocations() {
+std::vector<AllocationRef> retain_kernel_allocations(const Kernel &kernel) {
   std::lock_guard lock(allocations_mutex);
   std::vector<AllocationRef> retained;
-  retained.reserve(allocations.size());
-  for (const auto &[_, allocation] : allocations)
-    retained.push_back(allocation);
+  if (kernel.indirect != 0) {
+    retained.reserve(allocations.size());
+    for (const auto &[_, allocation] : allocations) retained.push_back(allocation);
+    return retained;
+  }
+  std::unordered_set<uint64_t> seen;
+  for (size_t index = 0; index < kernel.arguments.size(); ++index) {
+    const auto &argument = kernel.arguments[index];
+    if (argument.local || argument.bytes.size() < sizeof(uintptr_t) ||
+        (index < kernel.parameters.size() && !kernel.parameters[index].contains_pointer)) continue;
+    for (size_t offset = 0; offset <= argument.bytes.size() - sizeof(uintptr_t); offset += sizeof(uint32_t)) {
+      uintptr_t pointer = 0;
+      std::memcpy(&pointer, argument.bytes.data() + offset, sizeof(pointer));
+      uint64_t allocation_id = 0;
+      uint64_t allocation_offset = 0;
+      if (classify_pointer_value_locked(pointer, allocation_id, allocation_offset) && seen.insert(allocation_id).second) {
+        const auto found = std::find_if(allocations.begin(), allocations.end(), [&](const auto &entry) {
+          return entry.second->id == allocation_id;
+        });
+        if (found != allocations.end()) retained.push_back(found->second);
+      }
+    }
+  }
   return retained;
 }
 
@@ -451,7 +687,14 @@ ze_result_t ZE_APICALL driver_ipc_properties(ze_driver_handle_t, ze_driver_ipc_p
 ze_result_t ZE_APICALL driver_extensions(ze_driver_handle_t, uint32_t *count,
                                          ze_driver_extension_properties_t *properties) {
   if (count == nullptr) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
-  *count = 0;
+  if (properties == nullptr) {
+    *count = 1;
+  } else if (*count != 0) {
+    std::strncpy(properties[0].name, ZE_MODULE_PROGRAM_EXP_NAME, ZE_MAX_EXTENSION_NAME - 1);
+    properties[0].name[ZE_MAX_EXTENSION_NAME - 1] = '\0';
+    properties[0].version = ZE_MODULE_PROGRAM_EXP_VERSION_CURRENT;
+    *count = 1;
+  }
   return ZE_RESULT_SUCCESS;
 }
 
@@ -770,7 +1013,10 @@ ze_result_t launch_rpc(const KernelLaunch &kernel, const ze_group_count_t &group
   if (state.mode == RemoteMode::Misconfigured) return ZE_RESULT_ERROR_UNINITIALIZED;
   if (state.mode != RemoteMode::Ready || kernel.module->backend != ModuleBackend::RPC)
     return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
-  if (mirror_allocations_to_server(state) != 0) {
+  const auto started = std::chrono::steady_clock::now();
+  LaunchPerformance performance;
+  const auto relocations = collect_pointer_relocations(kernel, performance);
+  if (mirror_allocations_to_server(state, kernel, relocations, performance) != 0) {
     remember_remote_error(state, remote_error(state));
     return ZE_RESULT_ERROR_DEVICE_LOST;
   }
@@ -784,12 +1030,18 @@ ze_result_t launch_rpc(const KernelLaunch &kernel, const ze_group_count_t &group
       output.local_size = input.local_size;
       continue;
     }
-    uint64_t allocation_id = 0;
-    uint64_t allocation_offset = 0;
-    if (classify_pointer_argument(input.bytes, allocation_id, allocation_offset)) {
+    const bool pointer_aggregate = index < kernel.parameters.size() && kernel.parameters[index].pointer_aggregate;
+    const auto direct_pointer =
+        !pointer_aggregate && input.bytes.size() == sizeof(uintptr_t)
+            ? std::find_if(relocations.begin(), relocations.end(), [index](const auto &relocation) {
+                return relocation.source_allocation_id == 0 &&
+                       relocation.source_argument_index == index && relocation.source_offset == 0;
+              })
+            : relocations.end();
+    if (direct_pointer != relocations.end()) {
       output.kind = GEMSTONE_ARGUMENT_ALLOCATION;
-      output.allocation_id = allocation_id;
-      output.allocation_offset = allocation_offset;
+      output.allocation_id = direct_pointer->target_allocation_id;
+      output.allocation_offset = direct_pointer->target_offset;
     } else {
       output.kind = GEMSTONE_ARGUMENT_SCALAR;
       output.scalar_bytes = input.bytes.data();
@@ -807,10 +1059,27 @@ ze_result_t launch_rpc(const KernelLaunch &kernel, const ze_group_count_t &group
     return ZE_RESULT_ERROR_INVALID_GROUP_SIZE_DIMENSION;
   const gemstone_dimensions global_size{static_cast<uint32_t>(global_x), static_cast<uint32_t>(global_y),
                                          static_cast<uint32_t>(global_z)};
+  std::vector<gemstone_pointer_relocation> launch_relocations;
+  launch_relocations.reserve(relocations.size());
+  for (const auto &relocation : relocations) {
+    const bool direct_pointer = relocation.source_allocation_id == 0 && relocation.source_offset == 0 &&
+                                relocation.source_argument_index < kernel.arguments.size() &&
+                                !(relocation.source_argument_index < kernel.parameters.size() &&
+                                  kernel.parameters[relocation.source_argument_index].pointer_aggregate) &&
+                                kernel.arguments[relocation.source_argument_index].bytes.size() == sizeof(uintptr_t);
+    if (!direct_pointer) launch_relocations.push_back(relocation);
+  }
   uint64_t completion = 0;
-  if (gemstone_execution_launch(state.client, kernel.module->executor_id, kernel.name.c_str(), group_size,
-                                 group_count, global_size, 0, 0, arguments.data(), static_cast<uint32_t>(arguments.size()),
-                                 &completion) != 0) {
+  const auto launched = launch_relocations.empty()
+                            ? gemstone_execution_launch(
+                                state.client, kernel.module->executor_id, kernel.name.c_str(), group_size, group_count,
+                                global_size, 0, 0, arguments.data(), static_cast<uint32_t>(arguments.size()), &completion)
+                            : gemstone_execution_launch_with_geometry_and_relocations(
+                                state.client, kernel.module->executor_id, kernel.name.c_str(), group_size, group_count,
+                                global_size, 3, gemstone_dimensions{0, 0, 0}, 0, 0, arguments.data(),
+                                static_cast<uint32_t>(arguments.size()), launch_relocations.data(),
+                                static_cast<uint32_t>(launch_relocations.size()), &completion);
+  if (launched != 0) {
     remember_remote_error(state, remote_error(state));
     return ZE_RESULT_ERROR_DEVICE_LOST;
   }
@@ -824,14 +1093,60 @@ ze_result_t launch_rpc(const KernelLaunch &kernel, const ze_group_count_t &group
     if (status == 1) std::this_thread::sleep_for(std::chrono::microseconds(100));
   }
   const std::string completion_error = status < 0 ? remote_error(state) : std::string{};
+  std::vector<gemstone_dirty_range> dirty_ranges;
+  std::vector<gemstone_pointer_relocation> output_relocations;
+  if (status == 0) {
+    uint32_t count = 0;
+    if (gemstone_execution_completion_dirty_ranges(state.client, completion, nullptr, 0, &count) != 0) {
+      status = -1;
+    } else if (count != 0) {
+      dirty_ranges.resize(count);
+      if (gemstone_execution_completion_dirty_ranges(
+              state.client, completion, dirty_ranges.data(), count, &count) != 0)
+        status = -1;
+    }
+  }
+  if (status == 0) {
+    uint32_t count = 0;
+    if (gemstone_execution_completion_pointer_relocations(state.client, completion, nullptr, 0, &count) != 0) {
+      status = -1;
+    } else if (count != 0) {
+      output_relocations.resize(count);
+      if (gemstone_execution_completion_pointer_relocations(
+              state.client, completion, output_relocations.data(), count, &count) != 0)
+        status = -1;
+    }
+  }
   const int released = gemstone_execution_release_completion(state.client, completion);
   if (status != 0 || released != 0) {
     remember_remote_error(state, completion_error.empty() ? remote_error(state) : completion_error);
     return ZE_RESULT_ERROR_DEVICE_LOST;
   }
-  if (mirror_allocations_from_server(state) != 0) {
+  if (mirror_dirty_ranges_from_server(state, dirty_ranges, performance) != 0) {
     remember_remote_error(state, remote_error(state));
     return ZE_RESULT_ERROR_DEVICE_LOST;
+  }
+  for (const auto &relocation : output_relocations) {
+    const auto source = find_allocation_by_id(relocation.source_allocation_id);
+    const auto target = find_allocation_by_id(relocation.target_allocation_id);
+    if (source == nullptr || target == nullptr ||
+        relocation.source_offset > source->size || sizeof(uintptr_t) > source->size - relocation.source_offset ||
+        relocation.target_offset > target->size) {
+      remember_remote_error(state, "execution returned an invalid pointer relocation");
+      return ZE_RESULT_ERROR_DEVICE_LOST;
+    }
+    const auto address = reinterpret_cast<uintptr_t>(target->base) + relocation.target_offset;
+    std::memcpy(static_cast<uint8_t *>(source->base) + relocation.source_offset, &address, sizeof(address));
+  }
+  if (std::getenv("GEMSTONE_PERF_TRACE") != nullptr) {
+    const auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::steady_clock::now() - started).count();
+    std::fprintf(stderr,
+                 "Gemstone Level Zero perf: kernel=%s upload=%llu download=%llu scan=%llu relocations=%llu elapsed_us=%lld\n",
+                 kernel.name.c_str(), static_cast<unsigned long long>(performance.uploaded_bytes),
+                 static_cast<unsigned long long>(performance.downloaded_bytes),
+                 static_cast<unsigned long long>(performance.relocation_scan_bytes),
+                 static_cast<unsigned long long>(performance.relocation_count), static_cast<long long>(elapsed));
   }
   return ZE_RESULT_SUCCESS;
 }
@@ -852,7 +1167,8 @@ ze_result_t ZE_APICALL list_launch(ze_command_list_handle_t handle, ze_kernel_ha
   const auto retained = retain_command_events(signal, wait_count, waits, retained_signal, retained_waits);
   if (retained != ZE_RESULT_SUCCESS) return retained;
   KernelLaunch launch{HandleUse<Kernel>(kernel), kernel->module, kernel->name, kernel->group_x, kernel->group_y,
-                      kernel->group_z, kernel->arguments, retain_all_allocations()};
+                      kernel->group_z, kernel->indirect != 0, kernel->arguments, kernel->parameters,
+                      retain_kernel_allocations(*kernel)};
   return append(cast<CommandList>(handle, Kind::List),
                 [launch = std::move(launch), copied_groups, signal = std::move(retained_signal),
                  waits = std::move(retained_waits)] {
@@ -905,7 +1221,8 @@ ze_result_t allocate(size_t size, size_t alignment, ze_memory_type_t type, void 
     }
   }
   std::lock_guard lock(allocations_mutex);
-  allocations.emplace(*result, std::make_shared<Allocation>(Allocation{*result, size, type, allocation_id}));
+  allocations.emplace(
+      *result, std::make_shared<Allocation>(Allocation{*result, size, type, allocation_id, false, {}}));
   return ZE_RESULT_SUCCESS;
 }
 
@@ -1031,9 +1348,40 @@ ze_result_t ZE_APICALL fence_reset(ze_fence_handle_t handle) {
 ze_result_t ZE_APICALL module_create(ze_context_handle_t, ze_device_handle_t, const ze_module_desc_t *desc,
                                      ze_module_handle_t *result, ze_module_build_log_handle_t *log) {
   if (desc == nullptr || result == nullptr) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
-  if (desc->inputSize != 0 && desc->pInputModule == nullptr) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
-  if (desc->format != ZE_MODULE_FORMAT_IL_SPIRV) return ZE_RESULT_ERROR_UNSUPPORTED_ENUMERATION;
-  uint64_t module_id = 0;
+  // The remote executor consumes SPIR-V in both cases.  Returning the retained
+  // SPIR-V bytes from zeModuleGetNativeBinary lets Unified Runtime populate its
+  // persistent program cache; a later cache hit presents those bytes back as a
+  // native module.
+  if (desc->format != ZE_MODULE_FORMAT_IL_SPIRV && desc->format != ZE_MODULE_FORMAT_NATIVE)
+    return ZE_RESULT_ERROR_UNSUPPORTED_ENUMERATION;
+  std::vector<std::pair<const uint8_t *, size_t>> inputs;
+  const auto *extension = static_cast<const ze_base_desc_t *>(desc->pNext);
+  while (extension != nullptr) {
+    if (extension->stype == ZE_STRUCTURE_TYPE_MODULE_PROGRAM_EXP_DESC) {
+      const auto *program = reinterpret_cast<const ze_module_program_exp_desc_t *>(extension);
+      if (program->count == 0 || program->inputSizes == nullptr || program->pInputModules == nullptr)
+        return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
+      inputs.reserve(program->count);
+      for (uint32_t index = 0; index < program->count; ++index) {
+        if (program->inputSizes[index] == 0 || program->pInputModules[index] == nullptr)
+          return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
+        inputs.emplace_back(program->pInputModules[index], program->inputSizes[index]);
+      }
+      break;
+    }
+    extension = static_cast<const ze_base_desc_t *>(extension->pNext);
+  }
+  if (inputs.empty()) {
+    if (desc->inputSize == 0 || desc->pInputModule == nullptr) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
+    inputs.emplace_back(static_cast<const uint8_t *>(desc->pInputModule), desc->inputSize);
+  }
+  if (inputs.size() != 1) {
+    if (log != nullptr)
+      *log = reinterpret_cast<ze_module_build_log_handle_t>(
+          new BuildLog("Gemstone does not support composing multiple independent SPIR-V modules"));
+    return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
+  }
+  uint64_t executor_id = 0;
   ModuleBackend backend = ModuleBackend::TransferOnly;
   gemstone_levelzero_executor_v1 current{};
   {
@@ -1041,7 +1389,8 @@ ze_result_t ZE_APICALL module_create(ze_context_handle_t, ze_device_handle_t, co
     current = executor;
   }
   if (current.load_spirv != nullptr) {
-    if (current.load_spirv(current.user_data, desc->pInputModule, desc->inputSize, &module_id) != 0) {
+    const auto [image, size] = inputs.front();
+    if (current.load_spirv(current.user_data, image, size, &executor_id) != 0) {
       if (log != nullptr)
         *log = reinterpret_cast<ze_module_build_log_handle_t>(new BuildLog("Gemstone rejected SPIR-V module"));
       return ZE_RESULT_ERROR_MODULE_BUILD_FAILURE;
@@ -1055,9 +1404,13 @@ ze_result_t ZE_APICALL module_create(ze_context_handle_t, ze_device_handle_t, co
     }
     if (state.mode == RemoteMode::Ready) {
       std::lock_guard rpc_lock(rpc_transaction_mutex);
-      if (desc->inputSize > std::numeric_limits<uint32_t>::max() ||
-          gemstone_execution_load_program(state.client, GEMSTONE_PROGRAM_SPIRV, desc->pInputModule,
-                                           static_cast<uint32_t>(desc->inputSize), &module_id) != 0) {
+      const auto [image, size] = inputs.front();
+      if (size > std::numeric_limits<uint32_t>::max()) {
+        if (log != nullptr) *log = reinterpret_cast<ze_module_build_log_handle_t>(new BuildLog("SPIR-V module is too large"));
+        return ZE_RESULT_ERROR_MODULE_BUILD_FAILURE;
+      }
+      if (gemstone_execution_load_program(state.client, GEMSTONE_PROGRAM_SPIRV, image,
+                                           static_cast<uint32_t>(size), &executor_id) != 0) {
         remember_remote_error(state, remote_error(state));
         if (log != nullptr) *log = reinterpret_cast<ze_module_build_log_handle_t>(new BuildLog(state.error));
         return ZE_RESULT_ERROR_MODULE_BUILD_FAILURE;
@@ -1065,9 +1418,8 @@ ze_result_t ZE_APICALL module_create(ze_context_handle_t, ze_device_handle_t, co
       backend = ModuleBackend::RPC;
     }
   }
-  std::vector<uint8_t> bytes;
-  if (desc->inputSize != 0) bytes.assign(desc->pInputModule, desc->pInputModule + desc->inputSize);
-  *result = reinterpret_cast<ze_module_handle_t>(new Module(std::move(bytes), module_id, backend));
+  std::vector<uint8_t> bytes(inputs.front().first, inputs.front().first + inputs.front().second);
+  *result = reinterpret_cast<ze_module_handle_t>(new Module(std::move(bytes), executor_id, backend));
   if (log != nullptr) *log = reinterpret_cast<ze_module_build_log_handle_t>(new BuildLog(""));
   return ZE_RESULT_SUCCESS;
 }
@@ -1081,20 +1433,45 @@ ze_result_t ZE_APICALL module_destroy(ze_module_handle_t handle) {
   } else if (module->backend == ModuleBackend::RPC) {
     auto &state = remote_execution();
     std::lock_guard rpc_lock(rpc_transaction_mutex);
-    if (state.mode == RemoteMode::Ready &&
-        gemstone_execution_unload_program(state.client, module->executor_id) != 0) {
-      remember_remote_error(state, remote_error(state));
-      delete module;
-      return ZE_RESULT_ERROR_DEVICE_LOST;
+    if (state.mode == RemoteMode::Ready) {
+      if (gemstone_execution_unload_program(state.client, module->executor_id) != 0) {
+        remember_remote_error(state, remote_error(state));
+        delete module;
+        return ZE_RESULT_ERROR_DEVICE_LOST;
+      }
     }
   }
   delete module;
   return ZE_RESULT_SUCCESS;
 }
+ze_result_t ZE_APICALL module_dynamic_link(uint32_t count, ze_module_handle_t *modules,
+                                           ze_module_build_log_handle_t *log) {
+  if (count == 0 || modules == nullptr) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
+  for (uint32_t index = 0; index < count; ++index)
+    if (cast<Module>(modules[index], Kind::Module) == nullptr) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
+  if (log != nullptr)
+    *log = reinterpret_cast<ze_module_build_log_handle_t>(
+        new BuildLog("Gemstone does not support dynamic linking of SPIR-V modules"));
+  return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
+}
 ze_result_t ZE_APICALL module_properties(ze_module_handle_t handle, ze_module_properties_t *properties) {
   if (cast<Module>(handle, Kind::Module) == nullptr) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   if (properties == nullptr) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
   properties->flags = 0;
+  return ZE_RESULT_SUCCESS;
+}
+ze_result_t ZE_APICALL module_native_binary(ze_module_handle_t handle, size_t *size, uint8_t *binary) {
+  auto *module = cast<Module>(handle, Kind::Module);
+  if (module == nullptr) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
+  if (size == nullptr) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
+  const size_t required = module->bytes.size();
+  if (binary == nullptr) {
+    *size = required;
+    return ZE_RESULT_SUCCESS;
+  }
+  if (*size < required) return ZE_RESULT_ERROR_INVALID_ARGUMENT;
+  if (required != 0) std::memcpy(binary, module->bytes.data(), required);
+  *size = required;
   return ZE_RESULT_SUCCESS;
 }
 ze_result_t ZE_APICALL build_log_destroy(ze_module_build_log_handle_t handle) {
@@ -1120,7 +1497,9 @@ ze_result_t ZE_APICALL kernel_create(ze_module_handle_t module_handle, const ze_
   auto *module = cast<Module>(module_handle, Kind::Module);
   if (module == nullptr || desc == nullptr || result == nullptr || desc->pKernelName == nullptr)
     return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
-  *result = reinterpret_cast<ze_kernel_handle_t>(new Kernel(module, desc->pKernelName));
+  auto *kernel = new Kernel(module, desc->pKernelName);
+  kernel->parameters = kernel_parameter_metadata(module->bytes, kernel->name);
+  *result = reinterpret_cast<ze_kernel_handle_t>(kernel);
   return ZE_RESULT_SUCCESS;
 }
 ze_result_t ZE_APICALL kernel_destroy(ze_kernel_handle_t handle) {
@@ -1162,9 +1541,13 @@ ze_result_t ZE_APICALL kernel_argument(ze_kernel_handle_t handle, uint32_t index
   if (kernel->arguments.size() <= index) kernel->arguments.resize(index + 1);
   const auto *bytes = static_cast<const uint8_t *>(value);
   auto &argument = kernel->arguments[index];
-  argument.local = value == nullptr;
-  argument.local_size = value == nullptr ? size : 0;
-  argument.bytes = value == nullptr ? std::vector<uint8_t>{} : std::vector<uint8_t>(bytes, bytes + size);
+  // DPC++ also passes a null host pointer for zero-valued or eliminated ABI
+  // fields. Prefer the retained SPIR-V parameter storage class when it is
+  // available; only fall back to Level Zero's null marker for opaque images.
+  argument.local = index < kernel->parameters.size() ? kernel->parameters[index].local : value == nullptr;
+  argument.local_size = argument.local ? size : 0;
+  argument.bytes = argument.local ? std::vector<uint8_t>{} : std::vector<uint8_t>(size, 0);
+  if (!argument.local && value != nullptr) std::memcpy(argument.bytes.data(), bytes, size);
   return ZE_RESULT_SUCCESS;
 }
 ze_result_t ZE_APICALL kernel_properties(ze_kernel_handle_t handle, ze_kernel_properties_t *properties) {
@@ -1280,7 +1663,9 @@ TABLE_BEGIN(zeGetFenceProcAddrTable, ze_fence_dditable_t);
   table->pfnQueryStatus = fence_status; table->pfnReset = fence_reset;
 TABLE_END
 TABLE_BEGIN(zeGetModuleProcAddrTable, ze_module_dditable_t);
-  table->pfnCreate = module_create; table->pfnDestroy = module_destroy; table->pfnGetProperties = module_properties;
+  table->pfnCreate = module_create; table->pfnDestroy = module_destroy; table->pfnDynamicLink = module_dynamic_link;
+  table->pfnGetNativeBinary = module_native_binary;
+  table->pfnGetProperties = module_properties;
 TABLE_END
 TABLE_BEGIN(zeGetModuleBuildLogProcAddrTable, ze_module_build_log_dditable_t);
   table->pfnDestroy = build_log_destroy; table->pfnGetString = build_log_string;

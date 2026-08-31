@@ -68,6 +68,8 @@ object GemstoneLauncher {
             loop(index + 2, api, layout.copy(hsaRuntime = Some(Path.of(arguments(index + 1)))))
           case "--opencl-icd" =>
             loop(index + 2, api, layout.copy(openCLICD = Some(Path.of(arguments(index + 1)))))
+          case "--opencl-loader" =>
+            loop(index + 2, api, layout.copy(openCLLoader = Some(Path.of(arguments(index + 1)))))
           case "--levelzero-driver" =>
             loop(index + 2, api, layout.copy(levelZeroDriver = Some(Path.of(arguments(index + 1)))))
           case option => Left(LaunchError(s"unknown launcher option: $option"))
@@ -81,9 +83,17 @@ object GemstoneLauncher {
     hipRuntime = environment.get("GEMSTONE_HIP_RUNTIME").filter(_.nonEmpty).map(Path.of(_)),
     hsaRuntime = environment.get("GEMSTONE_HSA_RUNTIME").filter(_.nonEmpty).map(Path.of(_)),
     openCLICD = environment.get("GEMSTONE_OPENCL_ICD").filter(_.nonEmpty).map(Path.of(_)),
+    openCLLoader = environment.get("GEMSTONE_OPENCL_LOADER").filter(_.nonEmpty).map(Path.of(_)),
     levelZeroDriver = environment.get("GEMSTONE_LEVELZERO_DRIVER").filter(_.nonEmpty).map(Path.of(_))
   )
 
   private def providerPaths(layout: RuntimeLayout): Col[Path] =
-    Col(layout.cudaDriver, layout.hipRuntime, layout.hsaRuntime, layout.openCLICD, layout.levelZeroDriver).flatten
+    Col(
+      layout.cudaDriver,
+      layout.hipRuntime,
+      layout.hsaRuntime,
+      layout.openCLICD,
+      layout.openCLLoader,
+      layout.levelZeroDriver
+    ).flatten
 }

@@ -6,6 +6,7 @@
 #include <unistd.h>
 
 #include <array>
+#include <atomic>
 #include <cassert>
 #include <cstdint>
 #include <cstring>
@@ -98,6 +99,7 @@ struct MockServer {
   uint16_t port = 0;
   std::vector<uint8_t> allocation;
   uint64_t allocation_id = 0;
+  std::atomic<uint32_t> write_requests{0};
 
 private:
   void serve() {
@@ -119,9 +121,9 @@ private:
       case 0: assert(payload.empty()); respond(connection); break;
       case 1: register_allocation(payload); respond(connection); break;
       case 2:
-        assert(read_u64(payload.data()) == allocation_id);
+        release_allocation(payload);
         respond(connection);
-        running = false;
+        running = released_allocations != 2;
         break;
       case 3: write_allocation(payload); respond(connection); break;
       case 4: read_allocation(connection, payload); break;
@@ -130,6 +132,14 @@ private:
       case 7: launch(connection, payload); break;
       case 8: query_completion(connection, payload); break;
       case 9: assert(read_u64(payload.data()) == completion_id); respond(connection); break;
+      case 10: dirty_ranges(connection, payload); break;
+      case 14: {
+        assert(read_u64(payload.data()) == completion_id);
+        std::vector<uint8_t> response;
+        append_u32(response, 0);
+        respond(connection, response);
+        break;
+      }
       default: assert(false);
       }
     }
@@ -138,34 +148,61 @@ private:
 
   void register_allocation(const std::vector<uint8_t> &payload) {
     assert(payload.size() == 20);
-    allocation_id = read_u64(payload.data());
-    assert(allocation_id != 0);
+    const auto id = read_u64(payload.data());
+    assert(id != 0);
     const auto process_namespace = static_cast<uint64_t>(static_cast<uint32_t>(getpid())) & 0x7fffffffULL;
-    assert(allocation_id >> 32 == process_namespace);
+    assert(id >> 32 == process_namespace);
     assert(read_u32(payload.data() + 8) == 1);
-    allocation.resize(read_u64(payload.data() + 12));
+    if (allocation_id == 0) {
+      allocation_id = id;
+      allocation.resize(read_u64(payload.data() + 12));
+    } else {
+      assert(unrelated_allocation_id == 0);
+      unrelated_allocation_id = id;
+    }
+  }
+
+  void release_allocation(const std::vector<uint8_t> &payload) {
+    const auto id = read_u64(payload.data());
+    assert(id == allocation_id || id == unrelated_allocation_id);
+    ++released_allocations;
   }
 
   void write_allocation(const std::vector<uint8_t> &payload) {
+    // The unrelated allocation is live but unreachable from this non-indirect
+    // kernel, so it must not be mirrored for the launch.
     assert(read_u64(payload.data()) == allocation_id);
     const auto offset = read_u64(payload.data() + 8);
     const auto size = read_u32(payload.data() + 16);
     assert(offset + size <= allocation.size());
     assert(payload.size() == 20 + size);
     std::memcpy(allocation.data() + offset, payload.data() + 20, size);
+    write_requests.fetch_add(1, std::memory_order_relaxed);
   }
 
   void read_allocation(int connection, const std::vector<uint8_t> &payload) {
     assert(read_u64(payload.data()) == allocation_id);
     const auto offset = read_u64(payload.data() + 8);
     const auto size = read_u32(payload.data() + 16);
+    assert(offset == 4);
+    assert(size == sizeof(uint32_t));
     assert(offset + size <= allocation.size());
     respond(connection, std::vector<uint8_t>(allocation.begin() + offset, allocation.begin() + offset + size));
   }
 
+  void dirty_ranges(int connection, const std::vector<uint8_t> &payload) {
+    assert(read_u64(payload.data()) == completion_id);
+    std::vector<uint8_t> response;
+    append_u32(response, 1);
+    append_u64(response, allocation_id);
+    append_u64(response, 4);
+    append_u32(response, sizeof(uint32_t));
+    respond(connection, response);
+  }
+
   void load_program(int connection, const std::vector<uint8_t> &payload) {
     assert(read_u32(payload.data()) == 3);
-    assert(read_u32(payload.data() + 4) == 4);
+    assert(read_u32(payload.data() + 4) >= 4);
     assert(payload[8] == 3 && payload[9] == 2 && payload[10] == 35 && payload[11] == 7);
     std::vector<uint8_t> response;
     append_u64(response, program_id);
@@ -192,7 +229,7 @@ private:
     assert(read_u32(payload.data() + cursor + 36) == 0);
     assert(read_u32(payload.data() + cursor + 40) == 0);
     cursor += 44;
-    assert(read_u32(payload.data() + cursor) == 3);
+    assert(read_u32(payload.data() + cursor) == 4);
     cursor += 4;
     assert(read_u32(payload.data() + cursor) == 2);
     assert(read_u64(payload.data() + cursor + 4) == allocation_id);
@@ -204,6 +241,10 @@ private:
     cursor += 12;
     assert(read_u32(payload.data() + cursor) == 3);
     assert(read_u64(payload.data() + cursor + 4) == 64);
+    cursor += 12;
+    assert(read_u32(payload.data() + cursor) == 1);
+    assert(read_u32(payload.data() + cursor + 4) == sizeof(uint32_t));
+    assert(read_u32(payload.data() + cursor + 8) == 0);
     cursor += 12;
     assert(cursor == payload.size());
     std::memcpy(allocation.data() + 4, value, sizeof(uint32_t));
@@ -221,6 +262,8 @@ private:
 
   int listener = -1;
   std::thread worker;
+  uint64_t unrelated_allocation_id = 0;
+  uint32_t released_allocations = 0;
 };
 
 ze_device_handle_t gemstone_device(ze_driver_handle_t *selected_driver) {
@@ -271,13 +314,36 @@ int main() {
   void *memory = nullptr;
   assert(zeMemAllocDevice(context, &allocation_desc, 16, 8, device, &memory) == ZE_RESULT_SUCCESS);
   std::memset(memory, 0, 16);
+  void *unrelated_memory = nullptr;
+  assert(zeMemAllocDevice(context, &allocation_desc, 16, 8, device, &unrelated_memory) == ZE_RESULT_SUCCESS);
+  std::memset(unrelated_memory, 0, 16);
 
-  const uint8_t image[] = {3, 2, 35, 7};
+  // A minimal SPIR-V kernel signature with a CrossWorkgroup pointer, scalar,
+  // Workgroup pointer, and scalar. DPC++ uses a null host pointer for some
+  // zero-valued ABI scalars, so metadata must distinguish those from local
+  // memory arguments.
+  const uint32_t image[] = {
+      0x07230203, 0x00010600, 0, 12, 0,
+      (5U << 16) | 15U, 6, 6, 0x74697277, 0x00000065,
+      (2U << 16) | 19U, 1,
+      (4U << 16) | 21U, 2, 32, 0,
+      (4U << 16) | 32U, 3, 5, 2,
+      (4U << 16) | 32U, 4, 4, 2,
+      (7U << 16) | 33U, 5, 1, 3, 2, 4, 2,
+      (5U << 16) | 54U, 1, 6, 0, 5,
+      (3U << 16) | 55U, 3, 7,
+      (3U << 16) | 55U, 2, 8,
+      (3U << 16) | 55U, 4, 9,
+      (3U << 16) | 55U, 2, 10,
+      (2U << 16) | 248U, 11,
+      (1U << 16) | 253U,
+      (1U << 16) | 56U,
+  };
   ze_module_desc_t module_desc{};
   module_desc.stype = ZE_STRUCTURE_TYPE_MODULE_DESC;
   module_desc.format = ZE_MODULE_FORMAT_IL_SPIRV;
   module_desc.inputSize = sizeof(image);
-  module_desc.pInputModule = image;
+  module_desc.pInputModule = reinterpret_cast<const uint8_t *>(image);
   ze_module_handle_t module = nullptr;
   ze_module_build_log_handle_t log = nullptr;
   assert(zeModuleCreate(context, device, &module_desc, &module, &log) == ZE_RESULT_SUCCESS);
@@ -285,6 +351,13 @@ int main() {
   module_properties.stype = ZE_STRUCTURE_TYPE_MODULE_PROPERTIES;
   assert(zeModuleGetProperties(module, &module_properties) == ZE_RESULT_SUCCESS);
   assert(module_properties.flags == 0);
+  size_t native_binary_size = 0;
+  assert(zeModuleGetNativeBinary(module, &native_binary_size, nullptr) == ZE_RESULT_SUCCESS);
+  assert(native_binary_size == sizeof(image));
+  std::vector<uint8_t> native_binary(native_binary_size);
+  assert(zeModuleGetNativeBinary(module, &native_binary_size, native_binary.data()) == ZE_RESULT_SUCCESS);
+  const auto *image_bytes = reinterpret_cast<const uint8_t *>(image);
+  assert(native_binary == std::vector<uint8_t>(image_bytes, image_bytes + sizeof(image)));
   assert(zeModuleBuildLogDestroy(log) == ZE_RESULT_SUCCESS);
 
   ze_kernel_desc_t kernel_desc{};
@@ -316,6 +389,7 @@ int main() {
   assert(zeKernelSetArgumentValue(kernel, 0, sizeof(interior), &interior) == ZE_RESULT_SUCCESS);
   assert(zeKernelSetArgumentValue(kernel, 1, sizeof(expected), &expected) == ZE_RESULT_SUCCESS);
   assert(zeKernelSetArgumentValue(kernel, 2, 64, nullptr) == ZE_RESULT_SUCCESS);
+  assert(zeKernelSetArgumentValue(kernel, 3, sizeof(uint32_t), nullptr) == ZE_RESULT_SUCCESS);
 
   ze_command_queue_desc_t queue_desc{};
   queue_desc.stype = ZE_STRUCTURE_TYPE_COMMAND_QUEUE_DESC;
@@ -329,6 +403,8 @@ int main() {
   const ze_group_count_t groups{2, 1, 1};
   assert(zeCommandListAppendLaunchKernel(list, kernel, &groups, nullptr, 0, nullptr) == ZE_RESULT_SUCCESS);
   assert(zeMemFree(context, memory) == ZE_RESULT_ERROR_HANDLE_OBJECT_IN_USE);
+  assert(zeMemFree(context, unrelated_memory) == ZE_RESULT_SUCCESS);
+  unrelated_memory = nullptr;
   assert(zeKernelDestroy(kernel) == ZE_RESULT_ERROR_HANDLE_OBJECT_IN_USE);
   assert(zeModuleDestroy(module) == ZE_RESULT_ERROR_HANDLE_OBJECT_IN_USE);
   const uint32_t changed_after_recording = 0xabcdef01;
@@ -337,6 +413,12 @@ int main() {
   assert(zeCommandListClose(list) == ZE_RESULT_SUCCESS);
   assert(zeCommandQueueExecuteCommandLists(queue, 1, &list, nullptr) == ZE_RESULT_SUCCESS);
   assert(*reinterpret_cast<uint32_t *>(static_cast<uint8_t *>(memory) + 4) == expected);
+  assert(server.write_requests.load(std::memory_order_relaxed) == 1);
+  assert(zeCommandQueueExecuteCommandLists(queue, 1, &list, nullptr) == ZE_RESULT_SUCCESS);
+  assert(server.write_requests.load(std::memory_order_relaxed) == 1);
+  static_cast<uint8_t *>(memory)[8] = 0x5a;
+  assert(zeCommandQueueExecuteCommandLists(queue, 1, &list, nullptr) == ZE_RESULT_SUCCESS);
+  assert(server.write_requests.load(std::memory_order_relaxed) == 2);
 
   assert(zeCommandListDestroy(list) == ZE_RESULT_SUCCESS);
   assert(zeCommandQueueDestroy(queue) == ZE_RESULT_SUCCESS);

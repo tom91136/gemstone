@@ -418,6 +418,21 @@ lazy val levelzero = project
     }
   )
 
+lazy val opencl = project
+  .in(file("runtime/opencl"))
+  .dependsOn(qualityRules % ScalafixConfig)
+  .settings(
+    commonSettings,
+    name := "gemstone-runtime-opencl",
+    CMakeTest.ctest := Def.uncached {
+      CMakeTest.run(baseDirectory.value, target.value / "cmake", Seq("-DBUILD_TESTING=ON"), streams.value.log)
+    },
+    Test / test := (Test / test).dependsOn(CMakeTest.ctest).evaluated,
+    Test / testFull := Def.uncached {
+      (Test / testFull).dependsOn(CMakeTest.ctest).value
+    }
+  )
+
 lazy val ptx = projectMatrix
   .in(file("isa/ptx"))
   .dependsOn(core)
@@ -702,7 +717,7 @@ lazy val isa = project
 
 lazy val runtime = project
   .in(file("runtime"))
-  .aggregate(cuda, hip, hsa, levelzero)
+  .aggregate(cuda, hip, hsa, levelzero, opencl)
   .dependsOn(qualityRules % ScalafixConfig)
   .settings(commonSettings, name := "gemstone-runtime")
 
@@ -776,9 +791,13 @@ addCommandAlias(
 )
 addCommandAlias(
   "testOpenCLConformance",
-  ";conformance / Test / testOnly net.kurobako.gemstone.conformance.OpenCLCTSConformanceSuite"
+  ";opencl / testFull;conformance / Test / testOnly net.kurobako.gemstone.conformance.OpenCLCTSConformanceSuite"
+)
+addCommandAlias(
+  "testExecutionProtocol",
+  ";server / Test / testOnly net.kurobako.gemstone.server.ExecutionRPCConformanceSuite"
 )
 addCommandAlias(
   "testConformance",
-  ";testAPIConformance;testCUDAConformance;testROCmConformance;testOpenCLConformance;testSYCLConformance"
+  ";testExecutionProtocol;testAPIConformance;testCUDAConformance;testROCmConformance;testOpenCLConformance;testSYCLConformance"
 )

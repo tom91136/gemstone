@@ -159,6 +159,8 @@ object AMDGPUExecutionBenchmark {
             Right(())
           } else Left(ExecutionFailure.InvalidRequest("benchmark write range"))
       }
+
+    override def recordPointerRelocation(relocation: PointerRelocation): Unit = ()
   }
 }
 
@@ -169,6 +171,7 @@ object AMDGPUALUExecutionBenchmark {
       Left(ExecutionFailure.Failed("ALU benchmark unexpectedly read memory"))
     override def write(id: AllocationId, offset: Long, bytes: Col[Byte]): Either[ExecutionFailure, Unit] =
       Left(ExecutionFailure.Failed("ALU benchmark unexpectedly wrote memory"))
+    override def recordPointerRelocation(relocation: PointerRelocation): Unit = ()
   }
 
   def main(arguments: Array[String]): Unit = {

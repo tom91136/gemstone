@@ -23,16 +23,30 @@ pair, or an explicitly sized work-group-local allocation. A raw native pointer
 is translated only by the native allocation registry; it is never sent to,
 trusted by, or dereferenced by the executor process.
 
-## Initial memory strategy
+## Memory synchronization
 
-The first implementation mirrors allocation contents over RPC before a launch
-and copies them back after completion. This is intentionally conservative and
-functional. It also works with normal `malloc`/USM pointers and does not need
-page-fault handling.
+The execution service owns a bounded mirror for every registered allocation.
+Completion records identify dirty ranges, so providers read back only bytes
+written by a dispatch. Level Zero additionally restricts non-indirect launches
+to argument-reachable allocations and stores 4 KiB page fingerprints: its first
+launch uploads reachable pages, unchanged launches send nothing, and raw host
+writes cause only changed pages to be uploaded. Kernels declaring indirect
+access remain conservative and consider every live allocation.
+
+OpenCL also uses completion dirty ranges for copy-back. Host-mutable SVM remains
+conservatively uploaded before launch because applications can modify it without
+passing through an ICD operation.
 
 The protocol does not prescribe that transport. A later POSIX shared-memory or
 Windows section mapping can replace the byte copies without changing program,
 argument, or completion semantics.
+
+Set `GEMSTONE_PERF_TRACE=1` to emit one provider line per dispatch containing
+uploaded bytes, downloaded bytes, pointer-relocation scan bytes, relocation
+count, and elapsed microseconds. The SPIR-V interpreter also exposes opt-in
+`Interpreter.PerformanceMetrics`; it counts dispatches, invocations,
+instructions, retained value-state instances, dense ID slots, estimated dense
+state bytes, and elapsed nanoseconds without affecting the default API.
 
 ## Native wire protocol
 

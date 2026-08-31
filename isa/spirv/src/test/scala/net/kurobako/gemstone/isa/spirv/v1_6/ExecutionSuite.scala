@@ -12,6 +12,7 @@ import net.kurobako.gemstone.execution.AllocationId
 import net.kurobako.gemstone.execution.Dimensions
 import net.kurobako.gemstone.execution.KernelArgument
 import net.kurobako.gemstone.execution.KernelDispatch
+import net.kurobako.gemstone.execution.PointerRelocation
 import net.kurobako.gemstone.execution.ProgramId
 
 import java.util.concurrent.atomic.AtomicReference
@@ -188,6 +189,14 @@ final class ExecutionSuite extends munit.FunSuite {
       Col.fill(32)(LittleEndian.toCol(0L, 4)).flatten ++ Col.fill(32)(LittleEndian.toCol(1L, 4)).flatten
     )
 
+    val defaultSubgroupModule = module.copy(instructions = instructions.patch(14, Col.empty, 1))
+    val defaultSubgroupMemory = ArrayMemory(allocation, 256)
+    assertEquals(Interpreter.run(defaultSubgroupModule, dispatch, defaultSubgroupMemory), Right(()))
+    assertEquals(
+      defaultSubgroupMemory.bytes,
+      Col.fill(32)(LittleEndian.toCol(0L, 4)).flatten ++ Col.fill(32)(LittleEndian.toCol(1L, 4)).flatten
+    )
+
     val numSubgroupsModule = module.copy(instructions =
       instructions.updated(
         subgroupDecoration,
@@ -350,8 +359,11 @@ final class ExecutionSuite extends munit.FunSuite {
     val structureValue = operand("IdResult", 12)
     val function       = operand("IdResult", 13)
     val output         = operand("IdResult", 14)
+    val one            = operand("IdResult", 16)
+    val loaded         = operand("IdResult", 17)
+    val secondOutput   = operand("IdResult", 18)
     val module         = Module(
-      Header(ISA.version, Word(0), Word(16), Word(0)),
+      Header(ISA.version, Word(0), Word(19), Word(0)),
       Col(
         Instruction.TypeVoid(voidType),
         Instruction.TypeInt(u32, operand("LiteralInteger", 32), operand("LiteralInteger", 0)),
@@ -363,6 +375,7 @@ final class ExecutionSuite extends munit.FunSuite {
         Instruction.Constant(u32, first, operand("LiteralContextDependentNumber", 11)),
         Instruction.Constant(u32, second, operand("LiteralContextDependentNumber", 22)),
         Instruction.Constant(u32, header, operand("LiteralContextDependentNumber", 5)),
+        Instruction.Constant(u32, one, operand("LiteralContextDependentNumber", 1)),
         Instruction.ConstantComposite(arrayType, arrayValue, Col(first, second)),
         Instruction.ConstantComposite(structureType, structureValue, Col(header, arrayValue)),
         Instruction.Decorate(arrayType, operand("Decoration", 6, 16)),
@@ -372,13 +385,16 @@ final class ExecutionSuite extends munit.FunSuite {
         Instruction.FunctionParameter(outputPointer, output),
         Instruction.Label(operand("IdResult", 15)),
         Instruction.Store(output, structureValue, None),
+        Instruction.Load(structureType, loaded, output, None),
+        Instruction.PtrAccessChain(outputPointer, secondOutput, output, one, Col.empty),
+        Instruction.Store(secondOutput, loaded, None),
         Instruction.Return(),
         Instruction.FunctionEnd()
       ),
       Endianness.Little
     )
     val allocation = AllocationId.fromLong(43L).toOption.get
-    val memory     = ArrayMemory(allocation, 48)
+    val memory     = ArrayMemory(allocation, 96)
     val dispatch   = KernelDispatch
       .create(
         ProgramId.fromLong(43L).toOption.get,
@@ -391,11 +407,224 @@ final class ExecutionSuite extends munit.FunSuite {
       .get
 
     assertEquals(Interpreter.run(module, dispatch, memory), Right(()))
-    val expected = Array.fill[Byte](48)(0)
-    LittleEndian.write(5L, expected, 0, 4)
-    LittleEndian.write(11L, expected, 16, 4)
-    LittleEndian.write(22L, expected, 32, 4)
+    val expected = Array.fill[Byte](96)(0)
+    for (base <- Col(0, 48)) {
+      LittleEndian.write(5L, expected, base, 4)
+      LittleEndian.write(11L, expected, base + 16, 4)
+      LittleEndian.write(22L, expected, base + 32, 4)
+    }
     assertEquals(memory.bytes, Col.from(expected))
+  }
+
+  test("pointer arithmetic uses the SPIR-V stride for packed optional-like structures") {
+    val voidType     = operand("IdResult", 1)
+    val u8           = operand("IdResult", 2)
+    val u32          = operand("IdResult", 3)
+    val u64          = operand("IdResult", 4)
+    val three        = operand("IdResult", 5)
+    val padding      = operand("IdResult", 6)
+    val storage      = operand("IdResult", 7)
+    val payloadBase  = operand("IdResult", 8)
+    val payload      = operand("IdResult", 9)
+    val optionalBase = operand("IdResult", 10)
+    val optional     = operand("IdResult", 11)
+    val optionalPtr  = operand("IdResult", 12)
+    val bytePtr      = operand("IdResult", 13)
+    val functionType = operand("IdResult", 14)
+    val zero         = operand("IdResult", 15)
+    val one          = operand("IdResult", 16)
+    val function     = operand("IdResult", 17)
+    val input        = operand("IdResult", 18)
+    val output       = operand("IdResult", 19)
+    val second       = operand("IdResult", 20)
+    val engaged      = operand("IdResult", 21)
+    val loaded       = operand("IdResult", 22)
+    val module       = Module(
+      Header(ISA.version, Word(0), Word(24), Word(0)),
+      Col(
+        Instruction.TypeVoid(voidType),
+        Instruction.TypeInt(u8, operand("LiteralInteger", 8), operand("LiteralInteger", 0)),
+        Instruction.TypeInt(u32, operand("LiteralInteger", 32), operand("LiteralInteger", 0)),
+        Instruction.TypeInt(u64, operand("LiteralInteger", 64), operand("LiteralInteger", 0)),
+        Instruction.Constant(u64, three, operand("LiteralContextDependentNumber", 3)),
+        Instruction.TypeArray(padding, u8, three),
+        Instruction.TypeStruct(storage, Col(u32)),
+        Instruction.TypeStruct(payloadBase, Col(storage, u8)),
+        Instruction.Decorate(payloadBase, operand("Decoration", 10)),
+        Instruction.TypeStruct(payload, Col(payloadBase, padding)),
+        Instruction.TypeStruct(optionalBase, Col(payload)),
+        Instruction.TypeStruct(optional, Col(optionalBase)),
+        Instruction.TypePointer(optionalPtr, operand("StorageClass", 5), optional),
+        Instruction.TypePointer(bytePtr, operand("StorageClass", 5), u8),
+        Instruction.TypeFunction(functionType, voidType, Col(optionalPtr, bytePtr)),
+        Instruction.Constant(u32, zero, operand("LiteralContextDependentNumber", 0)),
+        Instruction.Constant(u32, one, operand("LiteralContextDependentNumber", 1)),
+        Instruction.EntryPoint(operand("ExecutionModel", 6), function, stringOperand("packed_stride"), Col.empty),
+        Instruction.Function(voidType, function, operand("FunctionControl", 0), functionType),
+        Instruction.FunctionParameter(optionalPtr, input),
+        Instruction.FunctionParameter(bytePtr, output),
+        Instruction.Label(operand("IdResult", 23)),
+        Instruction.PtrAccessChain(optionalPtr, second, input, one, Col.empty),
+        Instruction.AccessChain(bytePtr, engaged, second, Col(zero, zero, zero, one)),
+        Instruction.Load(u8, loaded, engaged, None),
+        Instruction.Store(output, loaded, None),
+        Instruction.Return(),
+        Instruction.FunctionEnd()
+      ),
+      Endianness.Little
+    )
+    val allocation = AllocationId.fromLong(122L).toOption.get
+    val memory     = ArrayMemory(allocation, 40)
+    assertEquals(memory.write(allocation, 12L, Col(1.toByte)), Right(()))
+    val dispatch = KernelDispatch
+      .create(
+        ProgramId.fromLong(122L).toOption.get,
+        "packed_stride",
+        Dimensions.One,
+        Dimensions.One,
+        Col(KernelArgument.Allocation(allocation, 0L), KernelArgument.Allocation(allocation, 32L))
+      )
+      .toOption
+      .get
+
+    assertEquals(Interpreter.run(module, dispatch, memory), Right(()))
+    assertEquals(memory.bytes(32), 1.toByte)
+  }
+
+  test("pointer-bearing arrays use their decorated stride for relocation leaves") {
+    val voidType = operand("IdResult", 1)
+    val u32      = operand("IdResult", 2)
+    val pointer  = operand("IdResult", 3)
+    val length   = operand("IdResult", 4)
+    val array    = operand("IdResult", 5)
+    val module   = Module(
+      Header(ISA.version, Word(0), Word(8), Word(0)),
+      Col(
+        Instruction.TypeVoid(voidType),
+        Instruction.TypeInt(u32, operand("LiteralInteger", 32), operand("LiteralInteger", 0)),
+        Instruction.TypePointer(pointer, operand("StorageClass", 5), u32),
+        Instruction.Constant(u32, length, operand("LiteralContextDependentNumber", 2)),
+        Instruction.TypeArray(array, pointer, length),
+        Instruction.Decorate(array, operand("Decoration", 6, 16))
+      ),
+      Endianness.Little
+    )
+
+    assertEquals(
+      Interpreter.pointerLeafOffsetsForTest(module, 5),
+      Right(Col(0L -> 3, 16L -> 3))
+    )
+  }
+
+  test("pointer-sized relocated arguments bind externally when their aggregate pointee is larger") {
+    val voidType      = operand("IdResult", 1)
+    val u32           = operand("IdResult", 2)
+    val valuePointer  = operand("IdResult", 3)
+    val structureType = operand("IdResult", 4)
+    val structurePtr  = operand("IdResult", 5)
+    val functionType  = operand("IdResult", 6)
+    val one           = operand("IdResult", 7)
+    val expected      = operand("IdResult", 8)
+    val function      = operand("IdResult", 9)
+    val argument      = operand("IdResult", 10)
+    val member        = operand("IdResult", 12)
+    val module        = Module(
+      Header(ISA.version, Word(0), Word(14), Word(0)),
+      Col(
+        Instruction.TypeVoid(voidType),
+        Instruction.TypeInt(u32, operand("LiteralInteger", 32), operand("LiteralInteger", 0)),
+        Instruction.TypePointer(valuePointer, operand("StorageClass", 5), u32),
+        Instruction.TypeStruct(structureType, Col(valuePointer, u32)),
+        Instruction.TypePointer(structurePtr, operand("StorageClass", 5), structureType),
+        Instruction.TypeFunction(functionType, voidType, Col(structurePtr)),
+        Instruction.Constant(u32, one, operand("LiteralContextDependentNumber", 1)),
+        Instruction.Constant(u32, expected, operand("LiteralContextDependentNumber", 42)),
+        Instruction.EntryPoint(operand("ExecutionModel", 6), function, stringOperand("external_aggregate"), Col.empty),
+        Instruction.Function(voidType, function, operand("FunctionControl", 0), functionType),
+        Instruction.FunctionParameter(structurePtr, argument),
+        Instruction.Label(operand("IdResult", 11)),
+        Instruction.AccessChain(valuePointer, member, argument, Col(one)),
+        Instruction.Store(member, expected, None),
+        Instruction.Return(),
+        Instruction.FunctionEnd()
+      ),
+      Endianness.Little
+    )
+    val allocation = AllocationId.fromLong(45L).toOption.get
+    val memory     = ArrayMemory(allocation, 12)
+    val dispatch   = KernelDispatch
+      .create(
+        ProgramId.fromLong(45L).toOption.get,
+        "external_aggregate",
+        Dimensions.One,
+        Dimensions.One,
+        Col(KernelArgument.Scalar(Col.fill(8)(0.toByte))),
+        pointerRelocations = Col(PointerRelocation(None, Some(0), 0L, allocation, 0L))
+      )
+      .toOption
+      .get
+
+    assertEquals(Interpreter.run(module, dispatch, memory), Right(()))
+    assertEquals(memory.bytes.drop(8), LittleEndian.toCol(42L, 4))
+  }
+
+  test("floating minimum and maximum preserve IEEE signed zero") {
+    assertEquals(Interpreter.floatingMinimumBits(16, 0x0000L, 0x8000L), 0x8000L)
+    assertEquals(Interpreter.floatingMaximumBits(16, 0x0000L, 0x8000L), 0x0000L)
+    assertEquals(Interpreter.floatingMinimumBits(32, 0L, 0x80000000L), 0x80000000L)
+    assertEquals(Interpreter.floatingMaximumBits(32, 0L, 0x80000000L), 0L)
+    assertEquals(Interpreter.floatingMinimumBits(64, 0L, 0x8000000000000000L), 0x8000000000000000L)
+    assertEquals(Interpreter.floatingMaximumBits(64, 0L, 0x8000000000000000L), 0L)
+  }
+
+  test("pointer stores dirty the destination and report an output relocation") {
+    val voidType       = operand("IdResult", 1)
+    val u32            = operand("IdResult", 2)
+    val pointerType    = operand("IdResult", 3)
+    val pointerPointer = operand("IdResult", 4)
+    val functionType   = operand("IdResult", 5)
+    val function       = operand("IdResult", 6)
+    val target         = operand("IdResult", 7)
+    val source         = operand("IdResult", 8)
+    val module         = Module(
+      Header(ISA.version, Word(0), Word(12), Word(0)),
+      Col(
+        Instruction.TypeVoid(voidType),
+        Instruction.TypeInt(u32, operand("LiteralInteger", 32), operand("LiteralInteger", 0)),
+        Instruction.TypePointer(pointerType, operand("StorageClass", 5), u32),
+        Instruction.TypePointer(pointerPointer, operand("StorageClass", 5), pointerType),
+        Instruction.TypeFunction(functionType, voidType, Col(pointerPointer, pointerType)),
+        Instruction.EntryPoint(operand("ExecutionModel", 6), function, stringOperand("store_pointer"), Col.empty),
+        Instruction.Function(voidType, function, operand("FunctionControl", 0), functionType),
+        Instruction.FunctionParameter(pointerPointer, target),
+        Instruction.FunctionParameter(pointerType, source),
+        Instruction.Label(operand("IdResult", 9)),
+        Instruction.Store(target, source, None),
+        Instruction.Return(),
+        Instruction.FunctionEnd()
+      ),
+      Endianness.Little
+    )
+    val allocation = AllocationId.fromLong(44L).toOption.get
+    val relocated  = AtomicReference(Option.empty[PointerRelocation])
+    val memory     = ArrayMemory(allocation, 16, value => relocated.set(Some(value)))
+    val dispatch   = KernelDispatch
+      .create(
+        ProgramId.fromLong(44L).toOption.get,
+        "store_pointer",
+        Dimensions.One,
+        Dimensions.One,
+        Col(KernelArgument.Allocation(allocation, 8L), KernelArgument.Allocation(allocation, 0L))
+      )
+      .toOption
+      .get
+
+    assertEquals(Interpreter.run(module, dispatch, memory), Right(()))
+    assertEquals(
+      relocated.get(),
+      Some(PointerRelocation(Some(allocation), None, 8L, allocation, 0L))
+    )
+    assert(memory.bytes.slice(8, 16).exists(_ != 0))
   }
 
   test("dispatch preserves typed null pointers through generic casts and integer conversion") {
@@ -637,7 +866,7 @@ final class ExecutionSuite extends munit.FunSuite {
     val f32                      = operand("IdResult", 25)
     val floatThree               = operand("IdResult", 26)
     val floatResult              = operand("IdResult", 27)
-    val floatingScanInstructions = instructions
+    val floatingScanInstructions = scanInstructions
       .patch(
         12,
         Col(
@@ -654,12 +883,34 @@ final class ExecutionSuite extends munit.FunSuite {
         25,
         Instruction.GroupFAdd(f32, floatResult, workgroupScope, operand("GroupOperation", 1), floatThree)
       )
-      .patch(26, Col.empty[Instruction], 1)
+      .updated(27, Instruction.Store(scanDestination, floatResult, None))
     val floatingScanModule = module.copy(
       instructions = floatingScanInstructions,
       header = module.header.copy(bound = Word(28))
     )
-    assertEquals(Interpreter.run(floatingScanModule, scanDispatch, multiplicationMemory), Right(()))
+    val floatingScanMemory = ArrayMemory(allocation, 64)
+    assertEquals(Interpreter.run(floatingScanModule, scanDispatch, floatingScanMemory), Right(()))
+    assertEquals(
+      floatingScanMemory.bytes,
+      Col.from((1 to 8).iterator.flatMap(index =>
+        LittleEndian.toCol(java.lang.Float.floatToRawIntBits(3.0f * index).toLong, 4) ++ Col.fill(4)(0.toByte)
+      ))
+    )
+    val floatingMultiplicationModule = floatingScanModule.copy(instructions =
+      floatingScanInstructions.updated(
+        25,
+        Instruction.GroupFMulKHR(f32, floatResult, workgroupScope, operand("GroupOperation", 1), floatThree)
+      )
+    )
+    val floatingMultiplicationMemory = ArrayMemory(allocation, 64)
+    assertEquals(Interpreter.run(floatingMultiplicationModule, scanDispatch, floatingMultiplicationMemory), Right(()))
+    assertEquals(
+      floatingMultiplicationMemory.bytes,
+      Col.from((1 to 8).iterator.flatMap(index =>
+        LittleEndian.toCol(java.lang.Float.floatToRawIntBits(math.pow(3.0, index).toFloat).toLong, 4) ++
+          Col.fill(4)(0.toByte)
+      ))
+    )
     assertEquals(
       Interpreter.floatingAddBits(
         32,
@@ -667,6 +918,14 @@ final class ExecutionSuite extends munit.FunSuite {
         java.lang.Float.floatToRawIntBits(0.2f).toLong
       ),
       java.lang.Float.floatToRawIntBits(0.1f + 0.2f).toLong & 0xffffffffL
+    )
+    assertEquals(
+      Interpreter.floatingMultiplyBits(
+        32,
+        java.lang.Float.floatToRawIntBits(0.1f).toLong,
+        java.lang.Float.floatToRawIntBits(0.2f).toLong
+      ),
+      java.lang.Float.floatToRawIntBits(0.1f * 0.2f).toLong & 0xffffffffL
     )
 
     val exclusiveModule = scanModule.copy(instructions =
@@ -697,6 +956,29 @@ final class ExecutionSuite extends munit.FunSuite {
     assertEquals(Interpreter.run(broadcastModule, scanDispatch, broadcastMemory), Right(()))
     assertEquals(broadcastMemory.bytes, Col.fill(8)(LittleEndian.toCol(6L, 8)).flatten)
 
+    val subgroupBroadcastModule = broadcastModule.copy(instructions =
+      broadcastInstructions.updated(
+        8,
+        Instruction.Constant(u32, subgroupScope, operand("LiteralContextDependentNumber", 3))
+      )
+    )
+    val subgroupBroadcastDispatch = KernelDispatch
+      .create(
+        ProgramId.fromLong(27L).toOption.get,
+        "collective",
+        Dimensions.create(16, 1, 1).toOption.get,
+        Dimensions.One,
+        Col(KernelArgument.Allocation(allocation, 0L))
+      )
+      .toOption
+      .get
+    val subgroupBroadcastMemory = ArrayMemory(allocation, 128)
+    assertEquals(
+      Interpreter.run(subgroupBroadcastModule, subgroupBroadcastDispatch, subgroupBroadcastMemory),
+      Right(())
+    )
+    assertEquals(subgroupBroadcastMemory.bytes, Col.fill(16)(LittleEndian.toCol(6L, 8)).flatten)
+
     val invalidScope = module.copy(instructions =
       instructions
         .updated(8, Instruction.Constant(u32, subgroupScope, operand("LiteralContextDependentNumber", 1)))
@@ -716,6 +998,77 @@ final class ExecutionSuite extends munit.FunSuite {
         assertEquals(message, "OpLogicalNotEqual requires matching boolean scalar or vector operand and result types")
       case result => fail(s"expected typed malformed logical operation failure, found $result")
     }
+  }
+
+  test("dispatch retains per-lane state only for entry points that reach collectives") {
+    val voidType           = operand("IdResult", 1)
+    val u32                = operand("IdResult", 2)
+    val functionType       = operand("IdResult", 3)
+    val workgroupScope     = operand("IdResult", 4)
+    val plainFunction      = operand("IdResult", 5)
+    val plainLabel         = operand("IdResult", 6)
+    val collectiveFunction = operand("IdResult", 7)
+    val collectiveLabel    = operand("IdResult", 8)
+    val callResult         = operand("IdResult", 9)
+    val collectiveHelper   = operand("IdResult", 10)
+    val helperLabel        = operand("IdResult", 11)
+    val module             = Module(
+      Header(ISA.version, Word(0), Word(12), Word(0)),
+      Col(
+        Instruction.TypeVoid(voidType),
+        Instruction.TypeInt(u32, operand("LiteralInteger", 32), operand("LiteralInteger", 0)),
+        Instruction.TypeFunction(functionType, voidType, Col.empty),
+        Instruction.Constant(u32, workgroupScope, operand("LiteralContextDependentNumber", 2)),
+        Instruction.EntryPoint(operand("ExecutionModel", 6), plainFunction, stringOperand("plain"), Col.empty),
+        Instruction.EntryPoint(
+          operand("ExecutionModel", 6),
+          collectiveFunction,
+          stringOperand("collective"),
+          Col.empty
+        ),
+        Instruction.Function(voidType, plainFunction, operand("FunctionControl", 0), functionType),
+        Instruction.Label(plainLabel),
+        Instruction.Return(),
+        Instruction.FunctionEnd(),
+        Instruction.Function(voidType, collectiveFunction, operand("FunctionControl", 0), functionType),
+        Instruction.Label(collectiveLabel),
+        Instruction.FunctionCall(voidType, callResult, collectiveHelper, Col.empty),
+        Instruction.Return(),
+        Instruction.FunctionEnd(),
+        Instruction.Function(voidType, collectiveHelper, operand("FunctionControl", 0), functionType),
+        Instruction.Label(helperLabel),
+        Instruction.ControlBarrier(workgroupScope, workgroupScope, workgroupScope),
+        Instruction.Return(),
+        Instruction.FunctionEnd()
+      ),
+      Endianness.Little
+    )
+    val programId  = ProgramId.fromLong(240L).toOption.get
+    val allocation = AllocationId.fromLong(240L).toOption.get
+    val geometry   = Dimensions.create(8, 1, 1).toOption.get
+    val prepared   = Interpreter.prepare(module).toOption.get
+
+    def dispatch(name: String): KernelDispatch =
+      KernelDispatch.create(programId, name, geometry, Dimensions.One, Col.empty).toOption.get
+
+    val plainMetrics = Interpreter.PerformanceMetrics()
+    assertEquals(
+      Interpreter.run(prepared, dispatch("plain"), ArrayMemory(allocation, 0), plainMetrics),
+      Right(())
+    )
+    assertEquals(plainMetrics.snapshot.invocations, 8L)
+    assertEquals(plainMetrics.snapshot.invocationValueInstances, 1L)
+    assertEquals(plainMetrics.snapshot.collectiveDispatches, 0L)
+
+    val collectiveMetrics = Interpreter.PerformanceMetrics()
+    assertEquals(
+      Interpreter.run(prepared, dispatch("collective"), ArrayMemory(allocation, 0), collectiveMetrics),
+      Right(())
+    )
+    assertEquals(collectiveMetrics.snapshot.invocations, 8L)
+    assertEquals(collectiveMetrics.snapshot.invocationValueInstances, 8L)
+    assertEquals(collectiveMetrics.snapshot.collectiveDispatches, 1L)
+    assertEquals(collectiveMetrics.snapshot.estimatedDenseValueBytes, 8L * 12L * 16L)
   }
 
   test("dispatch executes typed function calls and return values") {
@@ -1497,7 +1850,147 @@ final class ExecutionSuite extends munit.FunSuite {
     assertEquals(memory.bytes, LittleEndian.toCol(7L, 8) ++ LittleEndian.toCol(7L, 8) ++ LittleEndian.toCol(10L, 8))
   }
 
-  private final class ArrayMemory(expectedId: AllocationId, size: Int) extends ExecutionMemory {
+  test("dispatch executes the integer atomic operation family") {
+    val voidType     = operand("IdResult", 1)
+    val u32          = operand("IdResult", 2)
+    val pointerType  = operand("IdResult", 3)
+    val functionType = operand("IdResult", 4)
+    val scope        = operand("IdResult", 5)
+    val semantics    = operand("IdResult", 6)
+    val source       = operand("IdResult", 7)
+    val one          = operand("IdResult", 8)
+    val function     = operand("IdResult", 9)
+    val target       = operand("IdResult", 10)
+    val result       = operand("IdResult", 12)
+    val output       = operand("IdResult", 13)
+
+    def execute(operation: Instruction, initial: Long, sourceValue: Long, updated: Long): Unit = {
+      val module = Module(
+        Header(ISA.version, Word(0), Word(14), Word(0)),
+        Col(
+          Instruction.TypeVoid(voidType),
+          Instruction.TypeInt(u32, operand("LiteralInteger", 32), operand("LiteralInteger", 0)),
+          Instruction.TypePointer(pointerType, operand("StorageClass", 5), u32),
+          Instruction.TypeFunction(functionType, voidType, Col(pointerType)),
+          Instruction.Constant(u32, scope, operand("LiteralContextDependentNumber", 2)),
+          Instruction.Constant(u32, semantics, operand("LiteralContextDependentNumber", 896)),
+          Instruction.Constant(u32, source, operand("LiteralContextDependentNumber", sourceValue.toInt)),
+          Instruction.Constant(u32, one, operand("LiteralContextDependentNumber", 1)),
+          Instruction.EntryPoint(operand("ExecutionModel", 6), function, stringOperand("atomic"), Col.empty),
+          Instruction.Function(voidType, function, operand("FunctionControl", 0), functionType),
+          Instruction.FunctionParameter(pointerType, target),
+          Instruction.Label(operand("IdResult", 11)),
+          operation,
+          Instruction.PtrAccessChain(pointerType, output, target, one, Col.empty),
+          Instruction.Store(output, result, None),
+          Instruction.Return(),
+          Instruction.FunctionEnd()
+        ),
+        Endianness.Little
+      )
+      val allocation = AllocationId.fromLong(120L).toOption.get
+      val memory     = ArrayMemory(allocation, 8)
+      assertEquals(memory.write(allocation, 0L, LittleEndian.toCol(initial, 4)), Right(()))
+      val dispatch = KernelDispatch
+        .create(
+          ProgramId.fromLong(120L).toOption.get,
+          "atomic",
+          Dimensions.One,
+          Dimensions.One,
+          Col(KernelArgument.Allocation(allocation, 0L))
+        )
+        .toOption
+        .get
+      assertEquals(Interpreter.run(module, dispatch, memory), Right(()))
+      assertEquals(memory.bytes, LittleEndian.toCol(updated, 4) ++ LittleEndian.toCol(initial, 4))
+    }
+
+    execute(Instruction.AtomicIIncrement(u32, result, target, scope, semantics), 10, 0, 11)
+    execute(Instruction.AtomicIDecrement(u32, result, target, scope, semantics), 10, 0, 9)
+    execute(Instruction.AtomicISub(u32, result, target, scope, semantics, source), 10, 3, 7)
+    execute(Instruction.AtomicSMin(u32, result, target, scope, semantics, source), 1, 0xffffffffL, 0xffffffffL)
+    execute(Instruction.AtomicSMax(u32, result, target, scope, semantics, source), 0xffffffffL, 1, 1)
+    execute(Instruction.AtomicUMax(u32, result, target, scope, semantics, source), 10, 3, 10)
+    execute(Instruction.AtomicAnd(u32, result, target, scope, semantics, source), 10, 3, 2)
+    execute(Instruction.AtomicOr(u32, result, target, scope, semantics, source), 10, 3, 11)
+    execute(Instruction.AtomicXor(u32, result, target, scope, semantics, source), 10, 3, 9)
+  }
+
+  test("dispatch treats floating atomic load, store, and exchange as typed raw bits") {
+    val voidType     = operand("IdResult", 1)
+    val u32          = operand("IdResult", 2)
+    val f32          = operand("IdResult", 3)
+    val pointerType  = operand("IdResult", 4)
+    val functionType = operand("IdResult", 5)
+    val scope        = operand("IdResult", 6)
+    val semantics    = operand("IdResult", 7)
+    val first        = operand("IdResult", 8)
+    val second       = operand("IdResult", 9)
+    val one          = operand("IdResult", 10)
+    val two          = operand("IdResult", 11)
+    val function     = operand("IdResult", 12)
+    val target       = operand("IdResult", 13)
+    val loaded       = operand("IdResult", 15)
+    val exchanged    = operand("IdResult", 16)
+    val firstOutput  = operand("IdResult", 17)
+    val secondOutput = operand("IdResult", 18)
+    val firstBits    = java.lang.Float.floatToRawIntBits(1.5f)
+    val secondBits   = java.lang.Float.floatToRawIntBits(2.5f)
+    val module       = Module(
+      Header(ISA.version, Word(0), Word(19), Word(0)),
+      Col(
+        Instruction.TypeVoid(voidType),
+        Instruction.TypeInt(u32, operand("LiteralInteger", 32), operand("LiteralInteger", 0)),
+        Instruction.TypeFloat(f32, operand("LiteralInteger", 32), None),
+        Instruction.TypePointer(pointerType, operand("StorageClass", 5), f32),
+        Instruction.TypeFunction(functionType, voidType, Col(pointerType)),
+        Instruction.Constant(u32, scope, operand("LiteralContextDependentNumber", 2)),
+        Instruction.Constant(u32, semantics, operand("LiteralContextDependentNumber", 896)),
+        Instruction.Constant(f32, first, operand("LiteralContextDependentNumber", firstBits)),
+        Instruction.Constant(f32, second, operand("LiteralContextDependentNumber", secondBits)),
+        Instruction.Constant(u32, one, operand("LiteralContextDependentNumber", 1)),
+        Instruction.Constant(u32, two, operand("LiteralContextDependentNumber", 2)),
+        Instruction.EntryPoint(operand("ExecutionModel", 6), function, stringOperand("atomic_float"), Col.empty),
+        Instruction.Function(voidType, function, operand("FunctionControl", 0), functionType),
+        Instruction.FunctionParameter(pointerType, target),
+        Instruction.Label(operand("IdResult", 14)),
+        Instruction.AtomicStore(target, scope, semantics, first),
+        Instruction.AtomicLoad(f32, loaded, target, scope, semantics),
+        Instruction.AtomicExchange(f32, exchanged, target, scope, semantics, second),
+        Instruction.PtrAccessChain(pointerType, firstOutput, target, one, Col.empty),
+        Instruction.Store(firstOutput, loaded, None),
+        Instruction.PtrAccessChain(pointerType, secondOutput, target, two, Col.empty),
+        Instruction.Store(secondOutput, exchanged, None),
+        Instruction.Return(),
+        Instruction.FunctionEnd()
+      ),
+      Endianness.Little
+    )
+    val allocation = AllocationId.fromLong(121L).toOption.get
+    val memory     = ArrayMemory(allocation, 12)
+    val dispatch   = KernelDispatch
+      .create(
+        ProgramId.fromLong(121L).toOption.get,
+        "atomic_float",
+        Dimensions.One,
+        Dimensions.One,
+        Col(KernelArgument.Allocation(allocation, 0L))
+      )
+      .toOption
+      .get
+    assertEquals(Interpreter.run(module, dispatch, memory), Right(()))
+    assertEquals(
+      memory.bytes,
+      LittleEndian.toCol(secondBits.toLong, 4) ++
+        LittleEndian.toCol(firstBits.toLong, 4) ++ LittleEndian.toCol(firstBits.toLong, 4)
+    )
+  }
+
+  private final class ArrayMemory(
+      expectedId: AllocationId,
+      size: Int,
+      relocation: PointerRelocation => Unit = _ => ()
+  ) extends ExecutionMemory {
     private val content = AtomicReference(Col.fill(size)(0.toByte))
 
     def bytes: Col[Byte] = content.get()
@@ -1512,6 +2005,8 @@ final class ExecutionSuite extends munit.FunSuite {
         )
         ()
       }
+
+    override def recordPointerRelocation(value: PointerRelocation): Unit = relocation(value)
 
     private def checked(id: AllocationId, offset: Long, length: Int): Either[ExecutionFailure, Int] =
       Either.cond(

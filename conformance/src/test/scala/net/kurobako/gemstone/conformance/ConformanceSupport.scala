@@ -39,6 +39,7 @@ private[conformance] object ConformanceSupport {
     "GEMSTONE_AMDGPU_TARGET",
     "GEMSTONE_NO_ORACLE",
     "GEMSTONE_OPENCL_ICD",
+    "GEMSTONE_OPENCL_LOADER",
     "GEMSTONE_LEVELZERO_DRIVER",
     "HSA_ENABLE_DTIF",
     "HSA_TOOLS_LIB",
@@ -112,6 +113,20 @@ private[conformance] object ConformanceSupport {
       .resolve("gemstone/conformance")
   )
 
+  lazy val openCLLoader: Path = {
+    val configured = sys.env.get("GEMSTONE_OPENCL_LOADER").filter(_.nonEmpty).map(Path.of(_))
+    val candidates = Vector(
+      Path.of("/usr/lib64/libOpenCL.so.1"),
+      Path.of("/usr/lib64/libOpenCL.so"),
+      Path.of("/lib64/libOpenCL.so.1"),
+      Path.of("/usr/lib/x86_64-linux-gnu/libOpenCL.so.1"),
+      Path.of("/usr/lib/aarch64-linux-gnu/libOpenCL.so.1")
+    )
+    configured.filter(Files.isRegularFile(_)).orElse(candidates.find(Files.isRegularFile(_))).getOrElse {
+      throw IllegalStateException("OpenCL loader is absent; set GEMSTONE_OPENCL_LOADER")
+    }
+  }
+
   private val pins = {
     val properties = Properties()
     val stream     = Option(getClass.getResourceAsStream("/gemstone-conformance.properties"))
@@ -172,8 +187,16 @@ private[conformance] object ConformanceSupport {
     )
   }
 
-  def build(build: Path, targetName: String): Unit =
-    runChecked(Vector("cmake", "--build", build.toString, "--parallel", "--target", targetName), root)
+  def build(
+      build: Path,
+      targetName: String,
+      environment: Map[String, String] = Map.empty
+  ): Unit =
+    runChecked(
+      Vector("cmake", "--build", build.toString, "--parallel", "--target", targetName),
+      root,
+      environment
+    )
 
   def inventory(build: Path): Vector[CTestCase] = {
     val result = run(Vector("ctest", "--test-dir", build.toString, "--show-only=json-v1"), root)
@@ -296,23 +319,57 @@ private[conformance] object ConformanceSupport {
           timeout
         )
       else ProcessResult(Vector("<oracle skipped>"), 0, "", "oracle skipped by GEMSTONE_NO_ORACLE\n")
-    val runGemstone = (injected: Environment) =>
-      runConfigured(
+    var observed = Option.empty[ProcessResult]
+    val runGemstone = (injected: Environment) => {
+      val result = runConfigured(
         command,
         directory,
         Environment(gemstoneEnvironment ++ injected.set, injected.unset -- gemstoneEnvironment.keySet),
         timeout
       )
+      observed = Some(result)
+      result
+    }
     val gemstoneAttempt =
       if requireExecution then
         GemstoneProcess.attested(api, layout, (sys.env - "GEMSTONE_NO_ORACLE") ++ gemstoneEnvironment)(runGemstone)
       else
         GemstoneProcess.injected(api, layout, (sys.env - "GEMSTONE_NO_ORACLE") ++ gemstoneEnvironment)(runGemstone)
     val gemstone = gemstoneAttempt.fold(
-      error => ProcessResult(command, 86, "", error.message + "\n"),
+      error => {
+        val result = observed.getOrElse(ProcessResult(command, -1, "", ""))
+        ProcessResult(command, 86, result.stdout, error.message + "\n" + result.stderr)
+      },
       identity
     )
     PairedResult(oracle, gemstone, oracleRan)
+  }
+
+  def runGemstone(
+      api: ComputeAPI,
+      layout: RuntimeLayout,
+      command: Vector[String],
+      directory: Path,
+      gemstoneEnvironment: Map[String, String] = Map.empty,
+      timeout: FiniteDuration = 30.minutes
+  ): ProcessResult = {
+    var observed = Option.empty[ProcessResult]
+    GemstoneProcess.attested(api, layout, sys.env ++ gemstoneEnvironment) { injected =>
+      val result = runConfigured(
+        command,
+        directory,
+        Environment(gemstoneEnvironment ++ injected.set, injected.unset -- gemstoneEnvironment.keySet),
+        timeout
+      )
+      observed = Some(result)
+      result
+    }.fold(
+      error => {
+        val result = observed.getOrElse(ProcessResult(command, -1, "", ""))
+        ProcessResult(command, 86, result.stdout, error.message + "\n" + result.stderr)
+      },
+      identity
+    )
   }
 
   def run(
@@ -330,7 +387,16 @@ private[conformance] object ConformanceSupport {
       timeout: FiniteDuration
   ): ProcessResult = {
     require(timeout > Duration.Zero, s"process timeout must be positive, found $timeout")
-    val builder = ProcessBuilder(command*)
+    val scoped = Vector(
+      "systemd-run",
+      "--user",
+      "--scope",
+      "-p",
+      "MemoryMax=32G",
+      "-p",
+      "MemorySwapMax=0"
+    ) ++ command
+    val builder = ProcessBuilder(scoped*)
     builder.directory(directory.toFile)
     environment.applyTo(builder.environment())
     val process   = builder.start()
@@ -351,7 +417,7 @@ private[conformance] object ConformanceSupport {
     outThread.join()
     errThread.join()
     ProcessResult(
-      command,
+      scoped,
       if (completed) process.exitValue() else -1,
       stdout.toString(StandardCharsets.UTF_8),
       stderr.toString(StandardCharsets.UTF_8) + (if (completed) "" else s"process timed out after $timeout\n")
