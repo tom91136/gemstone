@@ -332,7 +332,15 @@ final class OneDPLConformanceSuite extends munit.FunSuite {
     "zip_view.ctor.views.pass",
     "zip_iterator_copyable.pass"
   )
-  private val cases = (all.zipWithIndex.map { case (testCase, index) => index -> testCase.name } ++
+  // CTest also reports compile-only probes (notably the C++ standard-ranges and
+  // zip-view checks) without a command.  They are useful in the upstream
+  // inventory, but cannot be executed by either the host or provider lanes.
+  // Keep them out of the runnable matrix so batch mode never turns an absent
+  // executable into a spurious CTest failure.
+  private val runnable = all.zipWithIndex.collect { case (testCase, index) if testCase.command.nonEmpty =>
+    index -> testCase.name
+  }
+  private val cases = (runnable ++
     samples.zipWithIndex.map { case (sample, index) => (all.size + index) -> s"samples/${sample.name}" }
   ).filterNot {
     case (_, name) =>
