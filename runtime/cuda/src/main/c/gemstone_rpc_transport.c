@@ -12,6 +12,7 @@
 #include <unistd.h>
 
 #include "gemstone_cuda_rpc.inc"
+#include <netinet/tcp.h>
 #include <sys/socket.h>
 #include <sys/time.h>
 
@@ -221,8 +222,10 @@ static int connect_to_server(void) {
   }
   freeaddrinfo(addresses);
   if (fd < 0) return -1;
-  const struct timeval timeout = {.tv_sec = 30, .tv_usec = 0};
-  if (setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) != 0
+  const int no_delay = 1;
+  const struct timeval timeout = {.tv_sec = 3600, .tv_usec = 0};
+  if (setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &no_delay, sizeof(no_delay)) != 0
+      || setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) != 0
       || setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout)) != 0) {
     close(fd);
     return -1;

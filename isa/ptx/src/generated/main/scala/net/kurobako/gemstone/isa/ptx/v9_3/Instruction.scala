@@ -1214,8 +1214,10 @@ enum InstructionDef(val opcode: String, val decoder: Decoder, metadata: () => Me
             mods: Col[Modifier],
             pred: Option[Predication]
         ) => {
-          if (operands.size == 1 || operands.size == 2 || operands.size == 3 || operands.size == 4)
-            Right(Instruction.Call(operands(0), operands.lift(1), operands.lift(2), operands.lift(3), mods, pred))
+          if (operands.size == 1 || operands.size == 2 || operands.size == 3 || operands.size == 4) Right(if (
+            operands.size >= 2 && operands(0).isInstanceOf[Operand.Parenthesized]
+          ) Instruction.Call(Some(operands(0)), operands(1), operands.lift(2), operands.lift(3), mods, pred)
+          else Instruction.Call(None, operands(0), operands.lift(1), operands.lift(2), mods, pred))
           else Left(InstructionDecodeError.InvalidOperandCount("call", Col(1, 2, 3, 4), operands.size))
         },
         () =>
@@ -1681,10 +1683,8 @@ enum InstructionDef(val opcode: String, val decoder: Decoder, metadata: () => Me
           val modifierNames = mods.map(_.name)
           if (
             !modifierNames.contains("bulk_group") &&
-            (if (modifierNames.contains("ignore_oob"))
-               operands.size == 6 || operands.size == 7
-             else if (modifierNames.contains("multicast::cluster"))
-               operands.size >= 4 && operands.size <= 6
+            (if (modifierNames.contains("ignore_oob")) operands.size == 6 || operands.size == 7
+             else if (modifierNames.contains("multicast::cluster")) operands.size >= 4 && operands.size <= 6
              else operands.size == 4 || operands.size == 5)
           ) Right(if (modifierNames.contains("ignore_oob")) Instruction.CpAsyncBulkMBarrier(
             operands(0),
@@ -2199,9 +2199,7 @@ enum InstructionDef(val opcode: String, val decoder: Decoder, metadata: () => Me
         ) => {
           val modifierNames = mods.map(_.name)
           if (
-            !modifierNames.contains(
-              "bulk_group"
-            ) &&
+            !modifierNames.contains("bulk_group") &&
             (if (modifierNames.exists(_.startsWith("im2col")) && modifierNames.contains("multicast::cluster"))
                operands.size >= 5 && operands.size <= 6
              else if (modifierNames.exists(_.startsWith("im2col")) || modifierNames.contains("multicast::cluster"))
@@ -13871,13 +13869,13 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
   case BrxIdx(index: Operand, tlist: Operand, mods: Col[Modifier], pred: Option[Predication])
       extends Instruction(InstructionDef.BrxIdx, index, tlist)
   case Call(
-      function: Operand,
       returnParams: Option[Operand],
+      function: Operand,
       params: Option[Operand],
       targets: Option[Operand],
       mods: Col[Modifier],
       pred: Option[Predication]
-  ) extends Instruction(InstructionDef.Call, (Col(function) ++ returnParams.toCol ++ params.toCol ++ targets.toCol)*)
+  ) extends Instruction(InstructionDef.Call, (returnParams.toCol ++ Col(function) ++ params.toCol ++ targets.toCol)*)
   case Clmad(dest: Operand, srcA: Operand, srcB: Operand, srcC: Operand, mods: Col[Modifier], pred: Option[Predication])
       extends Instruction(InstructionDef.Clmad, dest, srcA, srcB, srcC)
   case ClusterLaunchControlQueryCancel(
@@ -13925,9 +13923,8 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
       pred: Option[Predication]
   ) extends Instruction(
         InstructionDef.CpAsyncBulkMBarrier,
-        (Col(destAddr, srcAddr, size) ++ ignoredBytesLeft.toCol ++ ignoredBytesRight.toCol ++ Col(
-          barrierAddr
-        ) ++ ctaMask.toCol ++ cachePolicy.toCol)*
+        (Col(destAddr, srcAddr, size) ++ ignoredBytesLeft.toCol ++ ignoredBytesRight.toCol ++ Col(barrierAddr) ++
+          ctaMask.toCol ++ cachePolicy.toCol)*
       )
   case CpAsyncBulkGroup(
       destAddr: Operand,
@@ -14402,14 +14399,8 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
       pred: Option[Predication]
   ) extends Instruction(
         InstructionDef.Tcgen05Mma,
-        (Col(
-          destAddr,
-          srcA,
-          srcBDesc,
-          instDesc
-        ) ++ scaleAAddr.toCol ++ scaleBAddr.toCol ++ disabledOutputLanes.toCol ++ Col(
-          enableInputD
-        ) ++ scaleInputD.toCol)*
+        (Col(destAddr, srcA, srcBDesc, instDesc) ++ scaleAAddr.toCol ++ scaleBAddr.toCol ++ disabledOutputLanes.toCol ++
+          Col(enableInputD) ++ scaleInputD.toCol)*
       )
   case Tcgen05MmaSp(
       destAddr: Operand,
@@ -14426,15 +14417,8 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
       pred: Option[Predication]
   ) extends Instruction(
         InstructionDef.Tcgen05MmaSp,
-        (Col(
-          destAddr,
-          srcA,
-          srcBDesc,
-          sparseMetadataAddr,
-          instDesc
-        ) ++ scaleAAddr.toCol ++ scaleBAddr.toCol ++ disabledOutputLanes.toCol ++ Col(
-          enableInputD
-        ) ++ scaleInputD.toCol)*
+        (Col(destAddr, srcA, srcBDesc, sparseMetadataAddr, instDesc) ++ scaleAAddr.toCol ++ scaleBAddr.toCol ++
+          disabledOutputLanes.toCol ++ Col(enableInputD) ++ scaleInputD.toCol)*
       )
   case Tcgen05MmaWs(
       destAddr: Operand,
@@ -14503,10 +14487,8 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
       pred: Option[Predication]
   ) extends Instruction(
         InstructionDef.Tex,
-        (Col(
-          dest,
-          textureAndCoordinates
-        ) ++ lodOffsetOrDerivativeX.toCol ++ depthCompareOrDerivativeY.toCol ++ offset.toCol ++ depthCompare.toCol)*
+        (Col(dest, textureAndCoordinates) ++ lodOffsetOrDerivativeX.toCol ++ depthCompareOrDerivativeY.toCol ++
+          offset.toCol ++ depthCompare.toCol)*
       )
   case Tld4(
       dest: Operand,

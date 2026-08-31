@@ -55,7 +55,6 @@ type CUdevResourceType = CValue["CUdevResourceType"]
 type CUdevice_P2PAttribute = CValue["CUdevice_P2PAttribute"]
 type CUdevice_attribute = CValue["CUdevice_attribute"]
 type CUdevprop = CValue["CUdevprop"]
-type CUdriverProcAddressQueryResult = CValue["CUdriverProcAddressQueryResult"]
 type CUevent = CValue["CUevent"]
 type CUexecAffinityParam = CValue["CUexecAffinityParam"]
 type CUexecAffinityType = CValue["CUexecAffinityType"]
@@ -535,17 +534,6 @@ trait CUDASurface {
     unsupported
   def cuGetErrorString(error: CUDAStatus, pStr: Pointer[Pointer[Byte, ReadWrite, Opaque], Read, Opaque]): CUDAStatus =
     unsupported
-  def cuGetExportTable(
-      ppExportTable: Pointer[OpaquePointer, Read, Opaque],
-      pExportTableId: Pointer[CUuuid, Read, Opaque]
-  ): CUDAStatus = unsupported
-  def cuGetProcAddress_v2(
-      symbol: CString,
-      pfn: Pointer[OpaquePointer, ReadWrite, Opaque],
-      cudaVersion: Int,
-      flags: cuuint64_t,
-      symbolStatus: Pointer[CUdriverProcAddressQueryResult, ReadWrite, Opaque]
-  ): CUDAStatus = unsupported
   def cuGraphAddBatchMemOpNode(
       phGraphNode: Pointer[CUgraphNode, ReadWrite, Opaque],
       hGraph: CUgraph,
@@ -1529,12 +1517,6 @@ trait CUDASurface {
       mod: CUDAModule
   ): CUDAStatus = unsupported
   def cuModuleGetFunctionCount(count: Pointer[UInt32, ReadWrite, Opaque], mod: CUDAModule): CUDAStatus = unsupported
-  def cuModuleGetGlobal_v2(
-      dptr: Pointer[DevicePtr, ReadWrite, Opaque],
-      bytes: Pointer[SizeT, ReadWrite, Opaque],
-      hmod: CUDAModule,
-      name: CString
-  ): CUDAStatus = unsupported
   def cuModuleGetLoadingMode(mode: Pointer[CUmoduleLoadingMode, ReadWrite, Opaque]): CUDAStatus = unsupported
   def cuModuleGetSurfRef(pSurfRef: Pointer[CUsurfref, ReadWrite, Opaque], hmod: CUDAModule, name: CString): CUDAStatus =
     unsupported

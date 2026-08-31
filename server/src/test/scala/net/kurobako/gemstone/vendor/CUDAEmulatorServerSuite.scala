@@ -8,12 +8,16 @@ import net.kurobako.gemstone.abi.Pointer
 import net.kurobako.gemstone.cuda.CUDAModule
 import net.kurobako.gemstone.cuda.CUDAStatus
 import net.kurobako.gemstone.cuda.DevicePtr
+import net.kurobako.gemstone.cuda.FunctionName
 import net.kurobako.gemstone.cuda.ModuleImage
 import net.kurobako.gemstone.cuda.SizeT
 import net.kurobako.gemstone.generated.GeneratedCUDARPC
 import net.kurobako.gemstone.rpc.RPCRequest
 import net.kurobako.gemstone.rpc.RPCResponse
 import net.kurobako.gemstone.rpc.RPCTransport
+import net.kurobako.gemstone.server.PTXCUDAKernelExecution
+
+import java.nio.charset.StandardCharsets
 
 class CUDAEmulatorServerSuite extends munit.FunSuite {
   private final class TestTransport(
@@ -78,5 +82,62 @@ class CUDAEmulatorServerSuite extends munit.FunSuite {
   test("generated client rejects a schema mismatch before making a call") {
     val transport = TestTransport("wrong", request => fail(s"unexpected call: $request"))
     intercept[IllegalArgumentException](GeneratedCUDARPC.Client(transport))
+  }
+
+  test("PTX module globals preserve size, initializer bytes, and module ownership") {
+    val source =
+      """|.version 8.0
+         |.target sm_80
+         |.address_size 64
+         |.visible .global .align 4 .u32 values[2] = {
+         |  0x11223344, 0xaabbccdd
+         |};
+         |.const .align 4 .u32 constant = 0x55667788;
+         |""".stripMargin
+    val server    = CUDAEmulatorServer(PTXCUDAKernelExecution())
+    val moduleOut = Pointer.output[CUDAModule, One](1)
+    assertEquals(
+      server.cuModuleLoadData(moduleOut, ModuleImage(Col.from(source.getBytes(StandardCharsets.UTF_8)))),
+      CUDAStatus.Success
+    )
+    val module     = moduleOut.snapshot.flatMap(_.headOption).getOrElse(fail("module handle was not initialized"))
+    val pointerOut = Pointer.output[DevicePtr, One](1)
+    val sizeOut    = Pointer.output[SizeT, One](1)
+    assertEquals(
+      server.cuModuleGetGlobal_v2(pointerOut, sizeOut, module, FunctionName("values")),
+      CUDAStatus.Success
+    )
+    assertEquals(sizeOut.snapshot.flatMap(_.headOption).map(_.toLong), Some(8L))
+    val pointer = pointerOut.snapshot.flatMap(_.headOption).getOrElse(fail("global pointer was not initialized"))
+    val bytes   = Pointer.output[Byte, CountedBy["ByteCount"]](8)
+    assertEquals(server.cuMemcpyDtoH_v2(bytes, pointer, SizeT(8L)), CUDAStatus.Success)
+    assertEquals(
+      bytes.snapshot.map(_.toSeq).getOrElse(Seq.empty),
+      Seq[Byte](0x44, 0x33, 0x22, 0x11, 0xdd.toByte, 0xcc.toByte, 0xbb.toByte, 0xaa.toByte)
+    )
+    assertEquals(
+      server.cuModuleGetGlobal_v2(pointerOut, sizeOut, module, FunctionName("constant")),
+      CUDAStatus.Success
+    )
+    assertEquals(sizeOut.snapshot.flatMap(_.headOption).map(_.toLong), Some(4L))
+    assertEquals(
+      server.__cudaGemstoneRegisterGlobal(
+        module,
+        FunctionName("registered"),
+        ModuleImage(Col[Byte](1, 2, 3))
+      ),
+      CUDAStatus.Success
+    )
+    assertEquals(
+      server.cuModuleGetGlobal_v2(pointerOut, sizeOut, module, FunctionName("registered")),
+      CUDAStatus.Success
+    )
+    assertEquals(sizeOut.snapshot.flatMap(_.headOption).map(_.toLong), Some(3L))
+    assertEquals(
+      server.cuModuleGetGlobal_v2(pointerOut, sizeOut, module, FunctionName("missing")),
+      CUDAStatus(500)
+    )
+    assertEquals(server.cuModuleUnload(module), CUDAStatus.Success)
+    assertEquals(server.cuMemcpyDtoH_v2(bytes, pointer, SizeT(8L)), CUDAStatus.InvalidValue)
   }
 }

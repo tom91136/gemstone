@@ -6,10 +6,11 @@ import net.kurobako.gemstone.cuda.*
 import net.kurobako.gemstone.rpc.*
 
 object GeneratedCUDARPC {
-  val SchemaFingerprint: String = "ec53bf9a873f247b54719e7328615bc3ff5fa3c0eb4321e934c923c0a2a6016a"
+  val SchemaFingerprint: String = "29a54b2416a7c2675b38e00f3fd59ac0b5f190301d71cabaf7b8b76931baf136"
 
   private val __cudaGemstoneManagedRegisterId = MessageId(0xc6207aea8d73f5baL, 0x2db4cd6e3a364b1aL)
   private val __cudaGemstoneManagedUnregisterId = MessageId(0x93e5439ad242c3c0L, 0x8e20904fec96004cL)
+  private val __cudaGemstoneRegisterGlobalId = MessageId(0xb47a93542158aaecL, 0x918af76c69f9b8e1L)
   private val cuCtxCreate_v2Id = MessageId(0xe6eb5473c0a097e3L, 0xa17c8d63cec75a44L)
   private val cuCtxDestroy_v2Id = MessageId(0xb574aacc9b35ee6aL, 0x8135b883071cc261L)
   private val cuCtxSynchronizeId = MessageId(0xe21f80c194a589d4L, 0x4af681a7ef75bb10L)
@@ -26,6 +27,7 @@ object GeneratedCUDARPC {
   private val cuMemcpyHtoD_v2Id = MessageId(0x9a8f59036790ef69L, 0x4808ed612739b8faL)
   private val cuMemsetD8_v2Id = MessageId(0x2c1383458eec311aL, 0x73e621c93fd80644L)
   private val cuModuleGetFunctionId = MessageId(0x4b6b65a1226b0723L, 0xc3ac0d7e32b1d4b5L)
+  private val cuModuleGetGlobal_v2Id = MessageId(0x8c4cb4f6691184b3L, 0x31216cd8d1c8d868L)
   private val cuModuleLoadDataId = MessageId(0xfef489c6c628b458L, 0x480e5cb6fe964d3fL)
   private val cuModuleUnloadId = MessageId(0xb94c365c6c5c3902L, 0x2a1466600700709aL)
   private val cuStreamAddCallbackId = MessageId(0x589d21fb33f2aca5L, 0xbe72b9cfe9179b7aL)
@@ -50,6 +52,16 @@ object GeneratedCUDARPC {
         "__cudaGemstoneManagedUnregister",
         __cudaGemstoneManagedUnregisterId,
         Col(RPCParameter("pointer", WireType.DevicePtr, WireDirection.In, WireExtent.Value)),
+        WireType.CUDAStatus
+      ),
+      RPCMethod(
+        "__cudaGemstoneRegisterGlobal",
+        __cudaGemstoneRegisterGlobalId,
+        Col(
+          RPCParameter("module", WireType.CUDAModule, WireDirection.In, WireExtent.Value),
+          RPCParameter("name", WireType.FunctionName, WireDirection.In, WireExtent.Value),
+          RPCParameter("initial", WireType.ModuleImage, WireDirection.In, WireExtent.Value)
+        ),
         WireType.CUDAStatus
       ),
       RPCMethod(
@@ -190,6 +202,17 @@ object GeneratedCUDARPC {
         WireType.CUDAStatus
       ),
       RPCMethod(
+        "cuModuleGetGlobal_v2",
+        cuModuleGetGlobal_v2Id,
+        Col(
+          RPCParameter("dptr", WireType.DevicePtr, WireDirection.Out, WireExtent.One),
+          RPCParameter("bytes", WireType.SizeT, WireDirection.Out, WireExtent.One),
+          RPCParameter("module", WireType.CUDAModule, WireDirection.In, WireExtent.Value),
+          RPCParameter("name", WireType.FunctionName, WireDirection.In, WireExtent.Value)
+        ),
+        WireType.CUDAStatus
+      ),
+      RPCMethod(
         "cuModuleLoadData",
         cuModuleLoadDataId,
         Col(
@@ -262,6 +285,22 @@ object GeneratedCUDARPC {
         __cudaGemstoneManagedUnregisterId,
         "__cudaGemstoneManagedUnregister",
         Col(WireValue.DevicePtrValue(pointer))
+      )) match {
+        case RPCResponse.Success(WireValue.CallResult(status, outputs)) if status.isSuccess =>
+          if (outputs.isEmpty) status else CUDAStatus.Unknown
+        case RPCResponse.Success(WireValue.CallResult(status, _)) => status
+        case _ => CUDAStatus.Unknown
+      }
+
+    override def __cudaGemstoneRegisterGlobal(
+        module: CUDAModule,
+        name: FunctionName,
+        initial: ModuleImage
+    ): CUDAStatus =
+      transport.call(RPCRequest(
+        __cudaGemstoneRegisterGlobalId,
+        "__cudaGemstoneRegisterGlobal",
+        Col(WireValue.CUDAModuleValue(module), WireValue.FunctionNameValue(name), WireValue.ModuleImageValue(initial))
       )) match {
         case RPCResponse.Success(WireValue.CallResult(status, outputs)) if status.isSuccess =>
           if (outputs.isEmpty) status else CUDAStatus.Unknown
@@ -493,6 +532,27 @@ object GeneratedCUDARPC {
         case _ => CUDAStatus.Unknown
       }
 
+    override def cuModuleGetGlobal_v2(
+        dptr: Out[DevicePtr],
+        bytes: Out[SizeT],
+        module: CUDAModule,
+        name: FunctionName
+    ): CUDAStatus =
+      transport.call(RPCRequest(
+        cuModuleGetGlobal_v2Id,
+        "cuModuleGetGlobal_v2",
+        Col(WireValue.CUDAModuleValue(module), WireValue.FunctionNameValue(name))
+      )) match {
+        case RPCResponse.Success(WireValue.CallResult(status, outputs)) if status.isSuccess =>
+          outputs match {
+            case Col(WireValue.DevicePtrValue(output0), WireValue.SizeTValue(output1)) =>
+              if (writeOne(dptr, output0) && writeOne(bytes, output1)) status else CUDAStatus.InvalidValue
+            case _ => CUDAStatus.Unknown
+          }
+        case RPCResponse.Success(WireValue.CallResult(status, _)) => status
+        case _ => CUDAStatus.Unknown
+      }
+
     override def cuModuleLoadData(module: Out[CUDAModule], image: ModuleImage): CUDAStatus =
       transport.call(RPCRequest(cuModuleLoadDataId, "cuModuleLoadData", Col(WireValue.ModuleImageValue(image)))) match {
         case RPCResponse.Success(WireValue.CallResult(status, outputs)) if status.isSuccess =>
@@ -591,6 +651,21 @@ object GeneratedCUDARPC {
               val outputs = if (status.isSuccess) Col.empty[WireValue] else Col.empty[WireValue]
               RPCResponse.Success(WireValue.CallResult(status, outputs))
             case _ => invalid("invalid arguments for __cudaGemstoneManagedUnregister")
+          }
+        case `__cudaGemstoneRegisterGlobalId` if request.functionName == "__cudaGemstoneRegisterGlobal" =>
+          request.arguments match {
+            case Col(
+                  WireValue.CUDAModuleValue(value0),
+                  WireValue.FunctionNameValue(value1),
+                  WireValue.ModuleImageValue(value2)
+                ) =>
+              val argument0 = value0
+              val argument1 = value1
+              val argument2 = value2
+              val status = implementation.__cudaGemstoneRegisterGlobal(argument0, argument1, argument2)
+              val outputs = if (status.isSuccess) Col.empty[WireValue] else Col.empty[WireValue]
+              RPCResponse.Success(WireValue.CallResult(status, outputs))
+            case _ => invalid("invalid arguments for __cudaGemstoneRegisterGlobal")
           }
         case `cuCtxCreate_v2Id` if request.functionName == "cuCtxCreate_v2" =>
           request.arguments match {
@@ -819,6 +894,26 @@ object GeneratedCUDARPC {
               else Col.empty[WireValue]
               RPCResponse.Success(WireValue.CallResult(status, outputs))
             case _ => invalid("invalid arguments for cuModuleGetFunction")
+          }
+        case `cuModuleGetGlobal_v2Id` if request.functionName == "cuModuleGetGlobal_v2" =>
+          request.arguments match {
+            case Col(WireValue.CUDAModuleValue(value2), WireValue.FunctionNameValue(value3)) =>
+              val argument0 = Pointer.output[DevicePtr, One](1)
+              val argument1 = Pointer.output[SizeT, One](1)
+              val argument2 = value2
+              val argument3 = value3
+              val status = implementation.cuModuleGetGlobal_v2(argument0, argument1, argument2, argument3)
+              val outputs = if (status.isSuccess) Col(
+                WireValue.DevicePtrValue(argument0.snapshot.flatMap(
+                  _.headOption
+                ).getOrElse(throw IllegalStateException("dptr was not initialized"))),
+                WireValue.SizeTValue(argument1.snapshot.flatMap(
+                  _.headOption
+                ).getOrElse(throw IllegalStateException("bytes was not initialized")))
+              )
+              else Col.empty[WireValue]
+              RPCResponse.Success(WireValue.CallResult(status, outputs))
+            case _ => invalid("invalid arguments for cuModuleGetGlobal_v2")
           }
         case `cuModuleLoadDataId` if request.functionName == "cuModuleLoadData" =>
           request.arguments match {

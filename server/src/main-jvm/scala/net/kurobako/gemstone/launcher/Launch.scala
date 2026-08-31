@@ -82,7 +82,7 @@ object Launch {
       "GEMSTONE_RPC_PORT"  -> endpoint.port.toString,
       "GEMSTONE_RPC_TOKEN" -> endpoint.token,
       "GEMSTONE_REQUIRED"  -> "1"
-    )
+    ) ++ inherited.get("GEMSTONE_RECORD").filter(_.nonEmpty).map("GEMSTONE_RECORD" -> _)
     val base = Environment(common, RemovedVendorOverrides)
     api match {
       case ComputeAPI.CUDA =>

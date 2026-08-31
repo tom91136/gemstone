@@ -84,9 +84,123 @@ final class InterpreterSuite extends munit.FunSuite {
     )
   }
 
-  test("reject unsupported instructions with a source line") {
-    val error = ISA.compile(vectorAdd.replace("add.u32", "xor.b32")).left.toOption.get
-    assert(error.message.contains("unsupported instruction"))
+  test("lowers shared symbols as addresses") {
+    val source = """
+      |.version 8.0
+      |.target sm_80
+      |.address_size 64
+      |.visible .entry shared_symbols() {
+      |  .shared .align 4 .b8 first[4];
+      |  .shared .align 4 .b8 second[4];
+      |  .reg .b32 %r<2>;
+      |  mov.u32 %r0, first;
+      |  mov.u32 %r1, second;
+      |  ret;
+      |}
+      |""".stripMargin
+    val kernel = ISA.compile(source).fold(error => fail(error.message), identity)
+    assertEquals(kernel.sharedSymbols.keySet, Set("first", "second"))
+    assertNotEquals(kernel.sharedSymbols("first"), kernel.sharedSymbols("second"))
+    assert(
+      kernel.instructions.exists {
+        case ExecutableInstruction.Move(_, Value.Symbol("first"), _) => true
+        case _                                                       => false
+      }
+    )
+    assert(
+      kernel.instructions.exists {
+        case ExecutableInstruction.Move(_, Value.Symbol("second"), _) => true
+        case _                                                        => false
+      }
+    )
+  }
+
+  test("integer conversion and generic shared access support named registers") {
+    val source = """
+      |.version 8.0
+      |.target sm_80
+      |.address_size 64
+      |.visible .entry convert_shared(.param .u64 output) {
+      |  .shared .align 4 .b8 scratch[4];
+      |  .reg .b8 %byte;
+      |  .reg .b32 %wide;
+      |  .reg .b64 %ptr;
+      |  mov.u8 %byte, 255;
+      |  cvt.u32.u8 %wide, %byte;
+      |  cvta.shared.u64 %ptr, scratch;
+      |  st.u32 [%ptr], %wide;
+      |  ld.u32 %wide, [%ptr];
+      |  ld.param.u64 %ptr, [output];
+      |  st.global.u32 [%ptr], %wide;
+      |  ret;
+      |}
+      |""".stripMargin
+    val kernel = ISA.compile(source).fold(error => fail(error.message), identity)
+    val memory = ArrayCheckedMemory.allocate(4, provenance = "generic-shared")
+    val result = Interpreter.execute(
+      kernel,
+      geometry(1, 1),
+      Map("output" -> Argument(memory.allocation.start.value)),
+      memory
+    )
+    assert(result.isRight, result.left.toOption.map(_.message).getOrElse(""))
+    assertEquals(memory.readInt32(memory.allocation.start).toOption.get, 255)
+  }
+
+  test("execute signed and unsigned integer division and remainder") {
+    val source = """
+      |.version 8.0
+      |.target sm_80
+      |.address_size 64
+      |.visible .entry divide(
+      |  .param .s64 dividend,
+      |  .param .u64 unsigned_dividend,
+      |  .param .s64 divisor,
+      |  .param .u64 unsigned_divisor,
+      |  .param .u64 output
+      |) {
+      |  .reg .b64 %rd<9>;
+      |  ld.param.s64 %rd0, [dividend];
+      |  ld.param.u64 %rd1, [unsigned_dividend];
+      |  ld.param.s64 %rd2, [divisor];
+      |  ld.param.u64 %rd3, [unsigned_divisor];
+      |  ld.param.u64 %rd4, [output];
+      |  div.s64 %rd5, %rd0, %rd2;
+      |  st.global.s64 [%rd4], %rd5;
+      |  div.u64 %rd5, %rd1, %rd3;
+      |  st.global.u64 [%rd4+8], %rd5;
+      |  rem.s64 %rd6, %rd0, %rd2;
+      |  st.global.s64 [%rd4+16], %rd6;
+      |  rem.u64 %rd7, %rd1, %rd3;
+      |  st.global.u64 [%rd4+24], %rd7;
+      |  ret;
+      |}
+      |""".stripMargin
+    val kernel = ISA.compile(source).fold(error => fail(error.message), identity)
+    val memory = ArrayCheckedMemory.allocate(32, provenance = "integer-division")
+    val result = Interpreter.execute(
+      kernel,
+      geometry(1, 1),
+      Map(
+        "dividend"          -> Argument(-21L),
+        "unsigned_dividend" -> Argument(-1L),
+        "divisor"           -> Argument(3L),
+        "unsigned_divisor"  -> Argument(2L),
+        "output"            -> Argument(memory.allocation.start.value)
+      ),
+      memory
+    )
+    assert(result.isRight, result.left.toOption.map(_.message).getOrElse(""))
+    assertEquals(memory.readLittleEndian(memory.allocation.start, 8).toOption.get, -7L)
+    assertEquals(
+      memory.readLittleEndian(memory.allocation.start.offset(8L), 8).toOption.get,
+      java.lang.Long.divideUnsigned(-1L, 2L)
+    )
+    assertEquals(memory.readLittleEndian(memory.allocation.start.offset(16L), 8).toOption.get, 0L)
+    assertEquals(
+      memory.readLittleEndian(memory.allocation.start.offset(24L), 8).toOption.get,
+      java.lang.Long.remainderUnsigned(-1L, 2L)
+    )
   }
 
   test("predicated branches reconverge at a block barrier") {
@@ -126,6 +240,85 @@ final class InterpreterSuite extends munit.FunSuite {
     assertEquals(
       Col.tabulate(4)(index => memory.readInt32(memory.allocation.start.offset(index.toLong * 4L)).toOption.get).toSeq,
       Seq(7, 7, 9, 9)
+    )
+  }
+
+  test("divergent warp participants publish shared stores at a warp barrier") {
+    val source = """
+      |.version 8.0
+      |.target sm_80
+      |.address_size 64
+      |.visible .entry choose(.param .u64 output) {
+      |  .reg .pred %p;
+      |  .reg .b32 %r<4>;
+      |  .reg .b64 %rd<3>;
+      |  ld.param.u64 %rd0, [output];
+      |  mov.u32 %r0, %tid.x;
+      |  setp.lt.u32 %p, %r0, 2;
+      |  @%p bra low;
+      |  mov.u32 %r1, 9;
+      |  bra join;
+      |low:
+      |  mov.u32 %r1, 7;
+      |join:
+      |  mul.wide.u32 %rd1, %r0, 4;
+      |  st.shared.u32 [%rd1], %r1;
+      |  bar.warp.sync -1;
+      |  mov.u32 %r2, 0;
+      |  ld.shared.u32 %r3, [%r2];
+      |  mul.wide.u32 %rd2, %r0, 4;
+      |  add.u64 %rd2, %rd0, %rd2;
+      |  st.global.u32 [%rd2], %r3;
+      |  ret;
+      |}
+      |""".stripMargin
+    val kernel = ISA.compile(source).fold(error => fail(error.message), identity)
+    val memory = ArrayCheckedMemory.allocate(16, provenance = "divergent-warp-barrier")
+    val result = Interpreter.execute(
+      kernel,
+      geometry(1, 4),
+      Map("output" -> Argument(memory.allocation.start.value)),
+      memory
+    )
+    assert(result.isRight, result.left.toOption.map(_.message).getOrElse(""))
+    assertEquals(
+      Col.tabulate(4)(index => memory.readInt32(memory.allocation.start.offset(index.toLong * 4L)).toOption.get).toSeq,
+      Seq(7, 7, 7, 7)
+    )
+  }
+
+  test("warp shuffles wait for masked lanes before reading registers") {
+    val source = """
+      |.version 8.0
+      |.target sm_80
+      |.address_size 64
+      |.visible .entry choose(.param .u64 output) {
+      |  .reg .pred %p;
+      |  .reg .b32 %r<4>;
+      |  .reg .b64 %rd<3>;
+      |  ld.param.u64 %rd0, [output];
+      |  mov.u32 %r0, %tid.x;
+      |  setp.eq.u32 %p, %r0, 0;
+      |  @%p mov.u32 %r1, 7;
+      |  shfl.sync.idx.b32 %r2, %r1, 0, 31, -1;
+      |  mul.wide.u32 %rd1, %r0, 4;
+      |  add.u64 %rd2, %rd0, %rd1;
+      |  st.global.u32 [%rd2], %r2;
+      |  ret;
+      |}
+      |""".stripMargin
+    val kernel = ISA.compile(source).fold(error => fail(error.message), identity)
+    val memory = ArrayCheckedMemory.allocate(16, provenance = "synchronized-warp-shuffle")
+    val result = Interpreter.execute(
+      kernel,
+      geometry(1, 4),
+      Map("output" -> Argument(memory.allocation.start.value)),
+      memory
+    )
+    assert(result.isRight, result.left.toOption.map(_.message).getOrElse(""))
+    assertEquals(
+      Col.tabulate(4)(index => memory.readInt32(memory.allocation.start.offset(index.toLong * 4L)).toOption.get).toSeq,
+      Seq(7, 7, 7, 7)
     )
   }
 

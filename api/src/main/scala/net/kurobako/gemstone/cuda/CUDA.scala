@@ -2,15 +2,30 @@ package net.kurobako.gemstone.cuda
 
 import net.kurobako.gemstone.abi.*
 
-type CUctxCreateParams = CValue["CUctxCreateParams"]
-type CUhostFn          = CallbackTypedef["CUhostFn", Tuple1[CallbackData], Unit]
-type CUstreamCallback  = CallbackTypedef["CUstreamCallback", (Stream, CUDAStatus, CallbackData), Unit]
-type GemstoneDim3      = CValue["GemstoneDim3"]
-type int32_t           = CValue["int32_t"]
+type CUctxCreateParams              = CValue["CUctxCreateParams"]
+type CUdriverProcAddressQueryResult = CValue["CUdriverProcAddressQueryResult"]
+type CUhostFn                       = CallbackTypedef["CUhostFn", Tuple1[CallbackData], Unit]
+type CUstreamCallback               = CallbackTypedef["CUstreamCallback", (Stream, CUDAStatus, CallbackData), Unit]
+type GemstoneDim3                   = CValue["GemstoneDim3"]
+type int32_t                        = CValue["int32_t"]
 
 trait CUDACustomSurface {
   def __cudaGemstoneManagedRegister(pointer: DevicePtr, bytesize: SizeT): CUDAStatus
   def __cudaGemstoneManagedUnregister(pointer: DevicePtr): CUDAStatus
+  def __cudaGemstoneRegisterGlobal(module: CUDAModule, name: FunctionName, initial: ModuleImage): CUDAStatus
+
+  def cuGetProcAddress_v2(
+      symbol: CString,
+      pfn: Pointer[OpaquePointer, ReadWrite, Opaque],
+      cudaVersion: Int,
+      flags: cuuint64_t,
+      symbolStatus: Pointer[CUdriverProcAddressQueryResult, ReadWrite, Opaque]
+  ): CUDAStatus = delegate["gemstone_cuGetProcAddress_v2"](symbol, pfn, cudaVersion, flags, symbolStatus)
+
+  def cuGetExportTable(
+      ppExportTable: Pointer[OpaquePointer, Read, Opaque],
+      pExportTableId: Pointer[CUuuid, Read, Opaque]
+  ): CUDAStatus = delegate["gemstone_cuGetExportTable"](ppExportTable, pExportTableId)
 
   def __cudaRegisterFatBinary(fatBinary: OpaquePointer): Pointer[OpaquePointer, ReadWrite, Opaque] =
     delegate["gemstone_cudaRegisterFatBinary"](fatBinary)
@@ -64,6 +79,13 @@ trait CUDACustomSurface {
 
   def __cudaUnregisterFatBinary(handle: Pointer[OpaquePointer, ReadWrite, Opaque]): Unit =
     delegate["gemstone_cudaUnregisterFatBinary"](handle)
+
+  def cuModuleGetGlobal_v2(
+      dptr: Out[DevicePtr],
+      bytes: Out[SizeT],
+      module: CUDAModule,
+      name: FunctionName
+  ): CUDAStatus
 
   def __cudaGetKernel(kernel: Out[OpaquePointer], hostFunction: Pointer[CVoid, Read, Opaque]): int32_t =
     delegate["gemstone_cudaGetKernel"](kernel, hostFunction)

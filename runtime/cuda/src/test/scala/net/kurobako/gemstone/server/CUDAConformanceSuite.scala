@@ -30,8 +30,13 @@ class CUDAConformanceSuite extends munit.FunSuite {
 
   override val munitTimeout: Duration = 30.minutes
 
-  private val root       = findRoot(Path.of(sys.props("user.dir")))
-  private val cases      = discoverCases(root.resolve("conformance/cuda"))
+  private val root     = findRoot(Path.of(sys.props("user.dir")))
+  private val allCases = discoverCases(root.resolve("conformance/cuda"))
+  private val cases    = sys.env.get("GEMSTONE_CUDA_FILTER").filter(_.nonEmpty).fold(allCases) { expression =>
+    val selected = allCases.filter(cudaCase => expression.r.findFirstIn(cudaCase.name).nonEmpty)
+    require(selected.nonEmpty, s"GEMSTONE_CUDA_FILTER selected no CUDA cases: $expression")
+    selected
+  }
   private val targetRoot = Files.createDirectories(root.resolve("target/conformance"))
   private val runRoot    = Files.createTempDirectory(targetRoot, "cuda-scala.")
   private val libraryDir = runRoot.resolve("lib")
@@ -107,11 +112,12 @@ class CUDAConformanceSuite extends munit.FunSuite {
     }
 
   private def runCase(cudaCase: CUDACase): Unit = {
-    val nvcc      = findNvcc().getOrElse(fail("nvcc not found; set NVCC or CUDA_HOME"))
-    val caseRoot  = Files.createDirectories(runRoot.resolve("cuda").resolve(cudaCase.name))
-    val output    = caseRoot.resolve("test")
+    val caseRoot = Files.createDirectories(runRoot.resolve("cuda").resolve(cudaCase.name))
+    val output   = caseRoot.resolve("test")
+    val cublas   = if (cudaCase.cublas) Some(findCUBLAS()) else None
+    val nvcc = if (cudaCase.cublas) "" else findNvcc().getOrElse(fail("nvcc not found; set NVCC or CUDA_HOME")).toString
     val variables = Map(
-      "nvcc"                 -> nvcc.toString,
+      "nvcc"                 -> nvcc,
       "input"                -> cudaCase.source.toString,
       "output"               -> output.toString,
       "dependencies"         -> caseRoot.resolve("dependencies.d").toString,
@@ -119,21 +125,32 @@ class CUDAConformanceSuite extends munit.FunSuite {
       "cuda_host_compat"     -> root.resolve("conformance/cuda/support/nvcc-libstdcxx-compat.h").toString,
       "cuda_driver_defines"  -> "",
       "cuda_driver_link"     -> "-lcuda",
-      "cuda_runtime_link"    -> ""
+      "cuda_runtime_link"    -> "",
+      "cuda_host_compiler"   ->
+        sys.env.get("GEMSTONE_CUDA_HOST_COMPILER").filter(_.nonEmpty).fold("")(value => s"--compiler-bindir $value"),
+      "cuda_cublas_compiler" -> cublas.fold("")(_ => findCUBLASCompiler()),
+      "cuda_cublas_include"  -> cublas.fold("")(_.includeFlag),
+      "cuda_cublas_link"     -> cublas.fold("")(_.linkFlags)
     )
     require(cudaCase.commands.size == 2, s"${cudaCase.source} must contain exactly one compile and one run command")
     val compile = expand(cudaCase.commands.head.text, variables, cudaCase.source)
     runChecked(Col("bash", "-c", compile), caseRoot, Map.empty)
     val dependencies = caseRoot.resolve("dependencies.d")
     if (Files.isRegularFile(dependencies)) auditVendoredDependencies(cudaCase, dependencies, root)
-
-    val execute = Col("bash", "-c", expand(cudaCase.commands.last.text, variables, cudaCase.source))
-    val oracle  = capture(execute, caseRoot, Environment(Map.empty, GemstoneEnvironment))
-    assertResult(cudaCase, "oracle", cudaCase.commands.last, oracle)
+    val execute           = Col("bash", "-c", expand(cudaCase.commands.last.text, variables, cudaCase.source))
+    val vendorEnvironment = cublas.fold(Map.empty[String, String])(_.runtimeEnvironment(sys.env))
+    if (!cudaCase.cublas || !sys.env.get("GEMSTONE_CUBLAS_SKIP_ORACLE").contains("1")) {
+      val oracle = capture(
+        execute,
+        caseRoot,
+        Environment(vendorEnvironment, GemstoneEnvironment -- vendorEnvironment.keySet)
+      )
+      assertResult(cudaCase, "oracle", cudaCase.commands.last, oracle)
+    }
     val gemstone = GemstoneProcess.attested(
       ComputeAPI.CUDA,
       RuntimeLayout(cudaDriver = Some(libraryDir.resolve("libcuda.so.1"))),
-      sys.env
+      sys.env ++ vendorEnvironment
     )(environment => capture(execute, caseRoot, environment)).fold(
       error => fail(s"gemstone/${cudaCase.name}: ${error.message}"),
       identity
@@ -204,10 +221,20 @@ object CUDAConformanceSuite {
   private final case class CUDACase(
       name: String,
       source: Path,
+      cublas: Boolean,
       vendored: Set[String],
       commands: Col[Command],
       semantic: Option[SemanticCase]
   )
+  private final case class CUBLASInstallation(include: Path, library: Path) {
+    def includeFlag: String = s"-I${include.toString}"
+    def linkFlags: String   = s"${library.toString} -L${library.getParent} -lcudart"
+    def runtimeEnvironment(inherited: Map[String, String]): Map[String, String] =
+      Map("LD_LIBRARY_PATH" ->
+        (Vector(
+          library.getParent.toString
+        ) ++ inherited.get("LD_LIBRARY_PATH").toVector).mkString(java.io.File.pathSeparator))
+  }
   private final case class SemanticCase(
       kernel: String,
       blocks: Int,
@@ -238,6 +265,7 @@ object CUDAConformanceSuite {
 
   private def parseCase(source: Path): CUDACase = {
     val CasePrefix     = "#pragma region case: "
+    val CublasPrefix   = "#pragma region cublas"
     val VendoredPrefix = "#pragma region vendored: "
     val DoPrefix       = "#pragma region do: "
     val RequiresPrefix = "#pragma region requires: "
@@ -246,6 +274,7 @@ object CUDAConformanceSuite {
     val InputPrefix    = "#pragma region ptx-input: "
     val OutputPrefix   = "#pragma region ptx-output: "
     var name           = Option.empty[String]
+    var cublas         = false
     var vendored       = Set.empty[String]
     var commands       = Col.empty[Command]
     var kernel         = Option.empty[String]
@@ -257,6 +286,7 @@ object CUDAConformanceSuite {
       case line if line.startsWith(CasePrefix) =>
         require(name.isEmpty, s"$source declares more than one case")
         name = Some(line.drop(CasePrefix.length))
+      case line if line == CublasPrefix            => cublas = true
       case line if line.startsWith(VendoredPrefix) =>
         vendored = line.drop(VendoredPrefix.length).split(',').iterator.map(_.trim).filter(_.nonEmpty).toSet
       case line if line.startsWith(DoPrefix) =>
@@ -287,6 +317,7 @@ object CUDAConformanceSuite {
     CUDACase(
       name.getOrElse(throw IllegalArgumentException(s"$source has no case pragma")),
       source,
+      cublas,
       vendored,
       commands,
       kernel.flatMap(name =>
@@ -353,6 +384,7 @@ object CUDAConformanceSuite {
         "-shared",
         generated.resolve("gemstone_cuda_rpc_client.c").toString,
         generated.resolve("gemstone_cuda_driver_stubs.c").toString,
+        dispatch.resolve("gemstone_cuda_compat.c").toString,
         dispatch.resolve("gemstone_rpc_transport.c").toString,
         s"-I$generated",
         s"-I$dispatch",
@@ -440,6 +472,51 @@ object CUDAConformanceSuite {
         .map(_._2)
     }
   }
+
+  private def findCUBLAS(): CUBLASInstallation = {
+    val explicitLibrary = sys.env.get("GEMSTONE_CUBLAS_LIBRARY").filter(_.nonEmpty).map(Path.of(_)).toVector
+    val cudaHomes       =
+      sys.env.get("GEMSTONE_CUDA_HOME").filter(_.nonEmpty).map(Path.of(_)).toVector ++
+        sys.env.get("CUDA_HOME").filter(_.nonEmpty).map(Path.of(_)).toVector
+    val standardHomes = Vector(Path.of("/usr/local/cuda")) ++ {
+      val directory = Path.of("/usr/local")
+      if (!Files.isDirectory(directory)) Vector.empty
+      else {
+        val stream = Files.list(directory)
+        try stream.iterator.asScala.filter(path =>
+            Files.isDirectory(path) && path.getFileName.toString.startsWith("cuda-")
+          ).toVector.sortBy(_.toString).reverse
+        finally stream.close()
+      }
+    }
+    val homes      = (cudaHomes ++ standardHomes).distinct
+    val candidates = explicitLibrary ++ homes.flatMap { home =>
+      Vector(
+        home.resolve("targets/x86_64-linux/lib/libcublas.so"),
+        home.resolve("lib64/libcublas.so"),
+        home.resolve("lib/libcublas.so")
+      )
+    }
+    val library = candidates.find(Files.isRegularFile(_)).map(_.toAbsolutePath.normalize).getOrElse {
+      throw IllegalStateException(
+        "cuBLAS library is absent; set GEMSTONE_CUBLAS_LIBRARY to a libcublas.so from the installed CUDA toolkit"
+      )
+    }
+    val explicitInclude   = sys.env.get("GEMSTONE_CUBLAS_INCLUDE").filter(_.nonEmpty).map(Path.of(_)).toVector
+    val includeCandidates = explicitInclude ++ Vector(
+      library.getParent.resolve("../include").normalize,
+      library.getParent.resolve("../../include").normalize
+    )
+    val include = includeCandidates.find(path => Files.isRegularFile(path.resolve("cublas_v2.h"))).getOrElse {
+      throw IllegalStateException(
+        s"cuBLAS headers are absent; set GEMSTONE_CUBLAS_INCLUDE to the CUDA include directory (library: $library)"
+      )
+    }
+    CUBLASInstallation(include, library)
+  }
+
+  private def findCUBLASCompiler(): String =
+    sys.env.get("GEMSTONE_CUBLAS_CXX").filter(_.nonEmpty).orElse(sys.env.get("CXX").filter(_.nonEmpty)).getOrElse("c++")
 
   private def nvccVersion(path: Path): Option[(Int, Int)] = {
     val process = ProcessBuilder(path.toString, "--version").redirectErrorStream(true).start()

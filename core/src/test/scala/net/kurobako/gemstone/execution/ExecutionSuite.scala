@@ -33,6 +33,27 @@ class ExecutionSuite extends munit.FunSuite {
     assert(!selected.contains(255))
   }
 
+  test("lane mask set operations preserve membership") {
+    val all   = LaneMask.all(4).toOption.get
+    val low   = all.filterLanes(_ < 2)
+    val high  = all.subtract(low)
+    val union = low.union(high)
+    assertEquals(low.size, 2)
+    assertEquals(high.size, 2)
+    assertEquals(union.size, 4)
+    assertEquals(low.intersect(high).size, 0)
+    assert(low.contains(0) && low.contains(1))
+    assert(high.contains(2) && high.contains(3))
+  }
+
+  test("lane mask exposes the active bits for each warp") {
+    val lanes = LaneMask.all(96).toOption.get
+    assertEquals(lanes.warpBits(0), 0xffffffffL)
+    assertEquals(lanes.warpBits(32), 0xffffffffL)
+    assertEquals(lanes.warpBits(64), 0xffffffffL)
+    assertEquals(lanes.filterLanes(_ != 70).warpBits(64), 0xffffffffL & ~(1L << 6))
+  }
+
   test("effects validate every write before committing any") {
     val effects = Effects[TestWrite]
     val applied = Col.newBuilder[Int]

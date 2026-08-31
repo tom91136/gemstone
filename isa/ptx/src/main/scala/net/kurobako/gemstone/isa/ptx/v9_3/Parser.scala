@@ -68,10 +68,11 @@ object Parser {
   private val hexadecimalDigit: Char => Boolean = character => character.isDigit || "abcdefABCDEF".contains(character)
   private val decimalDigit: P[Char]             = P.charWhere(_.isDigit)
   private val exponent: P[Unit]                 = (P.charIn("eE") *> P.charIn("+-").? *> decimalDigit.rep).void
+  private val integerSuffix: P0[Unit]           = P.charIn("uUlL").rep0.void
 
   private val number: P[String] = lexeme {
-    val prefixed = (P.char('0') *> P.charIn("xXbBfFdDeE") *> P.charsWhile(hexadecimalDigit)).void
-    val decimal  = (decimalDigit.rep ~ (P.char('.') *> decimalDigit.rep).? ~ exponent.?).void
+    val prefixed = (P.char('0') *> P.charIn("xXbBfFdDeE") *> P.charsWhile(hexadecimalDigit) <* integerSuffix).void
+    val decimal  = (decimalDigit.rep ~ (P.char('.') *> decimalDigit.rep).? ~ exponent.? <* integerSuffix).void
     val leadDot  = (P.char('.') *> decimalDigit.rep ~ exponent.?).void
     (P.charIn("+-").?.with1 ~ (prefixed.backtrack | decimal.backtrack | leadDot.backtrack)).void.string
   }
@@ -225,44 +226,90 @@ object Parser {
       .orElse(fixedLineDirective("address_size"))
 
   private val directive: P[Statement] = (dottedPath ~ directiveArguments).flatMap { case (path, arguments) =>
-    semicolon.map(_ => Statement.Directive(path, arguments, DirectiveTerminator.Semicolon))
+    // Data declarations may carry a brace-delimited initializer, for example
+    // `.global .align 4 .b8 table[16] = {1, 2, ...};`.  The declaration
+    // metadata is what the execution layer needs; consume the initializer as
+    // opaque data so large CUDA-generated tables do not make the whole module
+    // unparsable.
+    val initializer = (lexeme(P.char('=')) *> P.until(P.char(';')).void).backtrack.?
+    (initializer *> semicolon).map(_ => Statement.Directive(path, arguments, DirectiveTerminator.Semicolon))
   }
 
   private val label: P[Statement] = (identifier <* lexeme(P.char(':'))).map(Statement.Label.apply)
 
+  // PTX indirect calls introduce a named call prototype between the function
+  // body and the call instruction. The prototype describes the ABI of the
+  // target, but does not itself contribute executable semantics.
+  private val callPrototype: P[Statement] =
+    (identifier <* lexeme(P.char(':')) <* lexeme(P.string(".callprototype")) <*
+      P.charsWhile0(_ != ';').void <* semicolon).as(
+      Statement.Directive(Col("callprototype"), Col.empty, DirectiveTerminator.Semicolon)
+    )
+
   private val instruction: P[Statement] = (predication.backtrack.?.with1 ~ opcode).flatMap {
     case (predicate, (operation, modifiers)) =>
       (strictOperands ~ semicolon.backtrack.?).mapFilter { case (operands, _) =>
-        Instruction.decode(operation, operands, modifiers, predicate).toOption.map(Statement.Instruction.apply)
+        // NVIDIA emits the synchronized ballot spelling as
+        // `vote.ballot.sync.b32`, while the ISA definition is keyed as
+        // `vote.sync.ballot.b32`.  Normalize that modifier permutation before
+        // dispatching to the generated instruction model.
+        val normalizedModifiers =
+          if (operation == "vote" && modifiers.map(_.name).contains("sync") && modifiers.map(_.name).contains("ballot"))
+            Col(Modifier("sync")) ++ modifiers.filterNot(modifier => modifier.name == "sync")
+          else modifiers
+        Instruction.decode(
+          operation,
+          operands,
+          normalizedModifiers,
+          predicate
+        ).toOption.map(Statement.Instruction.apply)
       }
   }
 
   private val functionDirective: P[Unit] = {
-    val names = Set("maxntid", "reqntid", "minnctapersm", "maxnreg", "maxclusterrank", "explicitcluster")
-    (dottedPath.filter(path => path.size == 1 && names.contains(path.head)) ~ directiveArguments).void
+    val names = Col("maxntid", "reqntid", "minnctapersm", "maxnreg", "maxclusterrank", "explicitcluster", "noreturn")
+    // These directives are line-oriented and are terminated by the following
+    // function body rather than by a semicolon.  The normal lexer skips newlines,
+    // so parse the known directive name without lexing its tail; otherwise a
+    // brace-delimited function body can be consumed as another argument when it
+    // starts on the next line.
+    val name = names.iterator.map(value => P.string(s".$value").backtrack).reduce(_.orElse(_))
+    ((skipped.with1 *> name) *> P.charsWhile0(character => character != '{' && character != ';')).void
   }
 
-  private def entryOrFunction(self: P[Statement]): P[Statement] =
-    for {
-      _       <- lexeme(P.char('.'))
-      visible <- (lexeme(P.string("visible")) *> lexeme(P.char('.'))).as(true).backtrack.?
-      isEntry <- lexeme(P.string("entry")).as(true).backtrack | lexeme(P.string("func")).as(false)
-      returns <-
-        if (isEntry) P.pure(Col.empty[Parameter])
-        else parameterList.backtrack.?.map(_.getOrElse(Col.empty[Parameter]))
-      name       <- identifier
-      parameters <- parameterList.backtrack.?.map(_.getOrElse(Col.empty[Parameter]))
-      _          <- functionDirective.backtrack.rep0
-      body       <- (lexeme(P.char('{')) *> (self.rep0 <* lexeme(P.char('}')))).map(_.toCol).backtrack.?
-      _          <- if (!isEntry && body.isEmpty) semicolon.backtrack.? else P.pure(Option.empty[Unit])
-    } yield
-      if (isEntry) Statement.Entry(visible.isDefined, name, parameters, body.getOrElse(Col.empty[Statement]))
-      else Statement.Function(visible.isDefined, name, returns, parameters, body)
+  private def entryOrFunction(self: P[Statement]): P[Statement] = {
+    val functionStart =
+      (lexeme(P.char('.')) *>
+        (lexeme(P.string("visible")) *> lexeme(P.char('.'))).backtrack.? *>
+        (lexeme(P.string("weak")) *> lexeme(P.char('.'))).backtrack.? *>
+        (lexeme(P.string("extern")) *> lexeme(P.char('.'))).backtrack.? *>
+        (lexeme(P.string("entry")).backtrack | lexeme(P.string("func")).backtrack)).peek
+    functionStart.backtrack.with1 *>
+      (for {
+        _       <- lexeme(P.char('.'))
+        visible <- (lexeme(P.string("visible")) *> lexeme(P.char('.'))).as(true).backtrack.?
+        _       <- (lexeme(P.string("weak")) *> lexeme(P.char('.'))).as(()).backtrack.?
+        _       <- (lexeme(P.string("extern")) *> lexeme(P.char('.')).as(())).backtrack.?
+        isEntry <- lexeme(P.string("entry")).as(true).backtrack | lexeme(P.string("func")).as(false)
+        returns <-
+          if (isEntry) P.pure(Col.empty[Parameter])
+          else parameterList.backtrack.?.map(_.getOrElse(Col.empty[Parameter]))
+        name       <- identifier
+        parameters <- parameterList.backtrack.?.map(_.getOrElse(Col.empty[Parameter]))
+        _          <- functionDirective.backtrack.rep0
+        bodyParser = (lexeme(P.char('{')) *> (self.rep0 <* lexeme(P.char('}')))).map(_.toCol)
+        body <- (lexeme(P.char('{')).peek *> bodyParser.map(Some(_))).orElse(P.pure(None))
+        _    <- if (body.isEmpty) semicolon.backtrack.? else P.pure(Option.empty[Unit])
+      } yield
+        if (isEntry) Statement.Entry(visible.isDefined, name, parameters, body.getOrElse(Col.empty[Statement]))
+        else Statement.Function(visible.isDefined, name, returns, parameters, body))
+  }
 
   val statement: P[Statement] = P.recursive { self =>
     val block = (lexeme(P.char('{')) *> (self.rep0 <* lexeme(P.char('}')))).map(values => Statement.Block(values.toCol))
-    entryOrFunction(self).backtrack
+    entryOrFunction(self)
       .orElse(block.backtrack)
+      .orElse(callPrototype.backtrack)
       .orElse(label.backtrack)
       .orElse(lineDirective.backtrack)
       .orElse(directive.backtrack)

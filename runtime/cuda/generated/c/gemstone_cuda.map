@@ -830,6 +830,17 @@ GEMSTONE_0.1 {
     __cudaRegisterFunction;
     __cudaRegisterVar;
     __cudaUnregisterFatBinary;
+    cuArray3DCreate;
+    cuArray3DGetDescriptor;
+    cuArrayCreate;
+    cuArrayGetDescriptor;
+    cuMemcpy2D;
+    cuMemcpy2DUnaligned;
+    cuMemcpy2DAsync;
+    cuMemcpy3D;
+    cuMemcpy3DAsync;
+    cuModuleGetGlobal;
+    cuGetProcAddress;
   local:
     *;
 };

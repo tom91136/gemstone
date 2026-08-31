@@ -3,7 +3,6 @@ package net.kurobako.gemstone.execution
 import net.kurobako.gemstone.Col
 
 import scala.collection.mutable.ArrayBuffer // scalafix:ok GemstoneRuntimeCollections.mutable-collection; hot write buffer
-import scala.collection.immutable.BitSet
 import scala.reflect.ClassTag
 
 opaque type Pc = Int
@@ -27,36 +26,122 @@ object Pc {
   }
 }
 
-opaque type LaneMask = BitSet
+final class LaneMaskData(val words: Array[Long], val count: Int, val limit: Int) {
+  override def equals(other: Any): Boolean = other match {
+    case that: LaneMaskData => count == that.count && java.util.Arrays.equals(words, that.words)
+    case _                  => false
+  }
 
+  override def hashCode(): Int = 31 * count + java.util.Arrays.hashCode(words)
+}
+
+opaque type LaneMask = LaneMaskData
+
+@SuppressWarnings(Array("scalafix:DisableSyntax.var", "scalafix:GemstoneNoExplicitNew.explicit-new"))
 object LaneMask {
-  private val MaximumLanes = 1024
-  val Empty: LaneMask      = BitSet.empty
+  val MaximumLanes    = 1024
+  val WordCount       = MaximumLanes / java.lang.Long.SIZE
+  val Empty: LaneMask = new LaneMaskData(Array.fill(WordCount)(0L), 0, 0)
 
   def all(laneCount: Int): Either[ExecutionFault, LaneMask] =
     if (laneCount < 1 || laneCount > MaximumLanes)
       Left(ExecutionFault.InvalidProgram(s"lane count must be between 1 and $MaximumLanes, found $laneCount"))
-    else Right(BitSet.fromSpecific(0 until laneCount))
+    else {
+      val words = Array.fill(WordCount)(0L)
+      var lane  = 0
+      while (lane < laneCount) {
+        words(lane >>> 6) |= 1L << (lane & 63)
+        lane += 1
+      }
+      Right(new LaneMaskData(words, laneCount, (laneCount + 63) >>> 6))
+    }
 
   def one(lane: Int): Either[ExecutionFault, LaneMask] =
     if (lane < 0 || lane >= MaximumLanes)
       Left(ExecutionFault.InvalidProgram(s"lane index must be between 0 and ${MaximumLanes - 1}, found $lane"))
-    else Right(BitSet(lane))
+    else {
+      val words = Array.fill(WordCount)(0L)
+      words(lane >>> 6) = 1L << (lane & 63)
+      Right(new LaneMaskData(words, 1, (lane >>> 6) + 1))
+    }
 
-  def unsafe(value: Long): LaneMask = BitSet.fromSpecific((0 until 64).filter(index => (value & (1L << index)) != 0L))
+  def unsafe(value: Long): LaneMask = {
+    val words = Array.fill(WordCount)(0L)
+    words(0) = value
+    new LaneMaskData(words, java.lang.Long.bitCount(value), if (value == 0L) 0 else 1)
+  }
 
   extension (mask: LaneMask) {
-    def bits: Long                   = mask.iterator.filter(_ < 64).foldLeft(0L)((value, lane) => value | (1L << lane))
-    def isEmpty: Boolean             = mask.isEmpty
-    def nonEmpty: Boolean            = mask.nonEmpty
-    def size: Int                    = mask.size
-    def contains(lane: Int): Boolean = mask.contains(lane)
-    def intersect(other: LaneMask): LaneMask             = mask & other
-    def union(other: LaneMask): LaneMask                 = mask | other
-    def subtract(other: LaneMask): LaneMask              = mask -- other
-    def filterLanes(predicate: Int => Boolean): LaneMask = mask.filter(predicate)
+    def isEmpty: Boolean             = mask.count == 0
+    def nonEmpty: Boolean            = mask.count != 0
+    def size: Int                    = mask.count
+    def contains(lane: Int): Boolean =
+      lane >= 0 && lane < MaximumLanes && (mask.words(lane >>> 6) & (1L << (lane & 63))) != 0L
 
-    def foreachLane(function: Int => Unit): Unit = mask.foreach(function)
+    def warpBits(lane: Int): Long =
+      if (lane < 0 || lane >= MaximumLanes) 0L
+      else (mask.words(lane >>> 6) >>> (lane & 32)) & 0xffffffffL
+
+    def intersect(other: LaneMask): LaneMask =
+      if (mask.count == 0 || other.count == 0) Empty
+      else combine(other, (left, right) => left & right)
+
+    def union(other: LaneMask): LaneMask =
+      if (mask.count == 0) other
+      else if (other.count == 0) mask
+      else combine(other, (left, right) => left | right)
+
+    def subtract(other: LaneMask): LaneMask =
+      if (mask.count == 0 || other.count == 0) mask
+      else combine(other, (left, right) => left & ~right)
+
+    inline def filterLanes(inline predicate: Int => Boolean): LaneMask =
+      if (mask.count == 0) Empty
+      else {
+        val words = Array.fill(WordCount)(0L)
+        var count = 0
+        foreachLane { lane =>
+          if (predicate(lane)) {
+            words(lane >>> 6) |= 1L << (lane & 63)
+            count += 1
+          }
+        }
+        if (count == 0) Empty
+        else {
+          var limit = WordCount
+          while (words(limit - 1) == 0L) limit -= 1
+          new LaneMaskData(words, count, limit)
+        }
+      }
+
+    inline def foreachLane(inline function: Int => Unit): Unit = {
+      var wordIndex = 0
+      while (wordIndex < mask.limit) {
+        var word = mask.words(wordIndex)
+        while (word != 0L) {
+          val bit = java.lang.Long.numberOfTrailingZeros(word)
+          function((wordIndex << 6) + bit)
+          word &= word - 1L
+        }
+        wordIndex += 1
+      }
+    }
+
+    private def combine(other: LaneMask, operation: (Long, Long) => Long): LaneMask = {
+      val words      = Array.fill(WordCount)(0L)
+      var count      = 0
+      var limit      = 0
+      var index      = 0
+      val inputLimit = Math.max(mask.limit, other.limit)
+      while (index < inputLimit) {
+        val word = operation(mask.words(index), other.words(index))
+        words(index) = word
+        count += java.lang.Long.bitCount(word)
+        if (word != 0L) limit = index + 1
+        index += 1
+      }
+      if (count == 0) Empty else new LaneMaskData(words, count, limit)
+    }
   }
 }
 

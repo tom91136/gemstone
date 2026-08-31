@@ -213,8 +213,9 @@ object GemstoneRPCServer {
           input.readInt() match {
             case RequestMagic =>
               val response = readRequest(input, expectedToken, callbacks, usage) match {
-                case Right(request) => server.dispatch(request)
-                case Left(error)    => RPCResponse.Failure(error)
+                case Right(request) =>
+                  server.dispatch(request)
+                case Left(error) => RPCResponse.Failure(error)
               }
               writeResponse(output, response)
               true

@@ -3,10 +3,11 @@
 
 #include <stdint.h>
 
-#define GEMSTONE_CUDA_RPC_SCHEMA_FINGERPRINT "ec53bf9a873f247b54719e7328615bc3ff5fa3c0eb4321e934c923c0a2a6016a"
+#define GEMSTONE_CUDA_RPC_SCHEMA_FINGERPRINT "29a54b2416a7c2675b38e00f3fd59ac0b5f190301d71cabaf7b8b76931baf136"
 #define GEMSTONE_CUDA_RPC_METHODS(X) \
   X(__cudaGemstoneManagedRegister, UINT64_C(0xc6207aea8d73f5ba), UINT64_C(0x2db4cd6e3a364b1a)) \
   X(__cudaGemstoneManagedUnregister, UINT64_C(0x93e5439ad242c3c0), UINT64_C(0x8e20904fec96004c)) \
+  X(__cudaGemstoneRegisterGlobal, UINT64_C(0xb47a93542158aaec), UINT64_C(0x918af76c69f9b8e1)) \
   X(cuCtxCreate_v2, UINT64_C(0xe6eb5473c0a097e3), UINT64_C(0xa17c8d63cec75a44)) \
   X(cuCtxDestroy_v2, UINT64_C(0xb574aacc9b35ee6a), UINT64_C(0x8135b883071cc261)) \
   X(cuCtxSynchronize, UINT64_C(0xe21f80c194a589d4), UINT64_C(0x4af681a7ef75bb10)) \
@@ -23,6 +24,7 @@
   X(cuMemcpyHtoD_v2, UINT64_C(0x9a8f59036790ef69), UINT64_C(0x4808ed612739b8fa)) \
   X(cuMemsetD8_v2, UINT64_C(0x2c1383458eec311a), UINT64_C(0x73e621c93fd80644)) \
   X(cuModuleGetFunction, UINT64_C(0x4b6b65a1226b0723), UINT64_C(0xc3ac0d7e32b1d4b5)) \
+  X(cuModuleGetGlobal_v2, UINT64_C(0x8c4cb4f6691184b3), UINT64_C(0x31216cd8d1c8d868)) \
   X(cuModuleLoadData, UINT64_C(0xfef489c6c628b458), UINT64_C(0x480e5cb6fe964d3f)) \
   X(cuModuleUnload, UINT64_C(0xb94c365c6c5c3902), UINT64_C(0x2a1466600700709a)) \
   X(cuStreamAddCallback, UINT64_C(0x589d21fb33f2aca5), UINT64_C(0xbe72b9cfe9179b7a)) \

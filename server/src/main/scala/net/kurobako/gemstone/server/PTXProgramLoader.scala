@@ -10,6 +10,7 @@ import net.kurobako.gemstone.isa.ptx.v9_3.Lowering
 import net.kurobako.gemstone.isa.ptx.v9_3.Parser
 import net.kurobako.gemstone.isa.ptx.v9_3.Statement
 import net.kurobako.gemstone.memory.AddressBinding
+import net.kurobako.gemstone.memory.DynamicAddressMemory
 import net.kurobako.gemstone.memory.ExecutionAddressSpace
 import net.kurobako.gemstone.memory.GuestAddress
 
@@ -28,10 +29,12 @@ object PTXProgramLoader extends ProgramLoader {
     Parser.parse(source)
       .leftMap(error => ExecutionFailure.InvalidRequest(error.toString))
       .flatMap { program =>
-        program.statements.collect { case entry: Statement.Entry => entry }
+        val entries   = program.statements.collect { case entry: Statement.Entry => entry }
+        val functions = program.statements.collect { case function: Statement.Function => function }
+        entries
           .foldLeft[Either[ExecutionFailure, Map[String, Kernel]]](Right(Map.empty))((result, entry) =>
             result.flatMap(kernels =>
-              Lowering.lower(entry)
+              Lowering.lower(entry, functions, Map.empty, Map.empty, entries)
                 .leftMap(error => ExecutionFailure.Unsupported(error.message))
                 .map(kernel => kernels.updated(entry.name, kernel))
             )
@@ -73,7 +76,14 @@ object PTXProgramLoader extends ProgramLoader {
       )
       prepared <- prepareArguments(kernel, dispatch.arguments, memory)
       (arguments, addressSpace) = prepared
-      _ <- Interpreter.execute(kernel, dispatch.geometry, arguments, addressSpace, control, captureTrace = false)
+      _ <- Interpreter.execute(
+        kernel,
+        dispatch.geometry,
+        arguments,
+        DynamicAddressMemory(addressSpace),
+        control,
+        captureTrace = false
+      )
         .leftMap(error => ExecutionFailure.Failed(error.message))
     } yield ()
 

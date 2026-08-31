@@ -11,6 +11,36 @@ final class SyntaxSuite extends munit.FunSuite {
     assert(Parser.parse(".visible .entry kernel() .maxntid 256, 1, 1 { ret; }").isRight)
   }
 
+  test("external function declarations parse without a body") {
+    assert(Parser.parse(".extern .func __assertfail(.param .b64 message);\n").isRight)
+  }
+
+  test("weak entry declarations parse") {
+    assert(Parser.parse(".weak .entry kernel() { ret; }\n").isRight)
+    val parameterized =
+      ".weak .entry kernel(\n" +
+        ".param .align 8 .b8 kernel_param_0[24],\n" +
+        ".param .u64 kernel_param_1\n" +
+        ");\n"
+    assert(Parser.parse(parameterized).isRight, Parser.parse(parameterized).left.toString)
+  }
+
+  test("nested instruction blocks parse") {
+    assert(Parser.parse(".reg .b16 c;").isRight, Parser.parse(".reg .b16 c;").left.toString)
+    assert(Parser.parse("cvt.rn.bf16.f32 %rs13, %f17;").isRight)
+    assert(Parser.parse("{ cvt.rn.bf16.f32 %rs13, %f17; }").isRight)
+    assert(Parser.parse("mov.b16 c, 0x3f80U;").isRight)
+    assert(Parser.parse("fma.rn.bf16 %rs17, %rs13, c, %rs16;").isRight)
+    assert(
+      Parser.parse("{ .reg .b16 c; mov.b16 c, 0x3f80U; fma.rn.bf16 %rs17, %rs13, c, %rs16; }").isRight,
+      Parser.parse("{ .reg .b16 c; mov.b16 c, 0x3f80U; fma.rn.bf16 %rs17, %rs13, c, %rs16; }").left.toString
+    )
+    val source =
+      ".visible .func f() { { cvt.rn.bf16.f32 %rs13, %f17; } { .reg .b16 c; mov.b16 c, 0x3f80U; " +
+        "fma.rn.bf16 %rs17, %rs13, c, %rs16; } ret; }"
+    assert(Parser.parse(source).isRight, Parser.parse(source).left.toString)
+  }
+
   private def statement(source: String): Statement =
     Parser.parseStatement(source) match {
       case Right(value) => value
@@ -81,6 +111,22 @@ final class SyntaxSuite extends munit.FunSuite {
     assertEquals(Parser.parse(printed).map(Printer.render), Right(printed))
     assert(printed.contains(", "))
     assert(printed.contains("a\\\"b.ptx"))
+  }
+
+  test("data declaration initializers are accepted") {
+    val sources = Col(
+      ".global table;",
+      ".global .align;",
+      ".global .align 4;",
+      ".global .align 4 .b8;",
+      ".global .align 4 .b8 table;",
+      ".global .align 4 .b8 table[4];",
+      ".global table = {1};",
+      ".global .b8 table[4] = {1};",
+      ".global .align 4 .b8 table = {1};",
+      ".global .align 4 .b8 table[4] = {65, 144, 67, 60};"
+    )
+    sources.foreach(source => assert(Parser.parse(source).isRight, s"$source: ${Parser.parse(source).left}"))
   }
 
   test("complex instruction forms round-trip to an identical AST") {

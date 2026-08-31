@@ -49,6 +49,25 @@ import scala.collection.immutable.Queue
 /** JVM/Native logical CUDA server used by both in-process tests and the future isolated transport. */
 trait CUDAKernelExecution {
   def cuModuleLoadData(image: ModuleImage): CUDAResult[CUDAModule]
+  def cuModuleLoadData(
+      image: ModuleImage,
+      allocateGlobal: (SizeT, Array[Byte]) => CUDAResult[DevicePtr],
+      freeGlobal: DevicePtr => CUDAResult[Unit]
+  ): CUDAResult[CUDAModule] = {
+    val _ = (allocateGlobal, freeGlobal)
+    cuModuleLoadData(image)
+  }
+  def cuModuleGetGlobal(
+      module: CUDAModule,
+      name: FunctionName
+  ): CUDAResult[(DevicePtr, SizeT)]
+  def cuModuleRegisterGlobal(
+      module: CUDAModule,
+      name: FunctionName,
+      initial: Array[Byte],
+      allocateGlobal: (SizeT, Array[Byte]) => CUDAResult[DevicePtr],
+      freeGlobal: DevicePtr => CUDAResult[Unit]
+  ): CUDAResult[Unit]
   def cuModuleGetFunction(module: CUDAModule, name: FunctionName): CUDAResult[KernelFunction]
   def cuModuleUnload(module: CUDAModule): CUDAResult[Unit]
   def cuLaunchKernel(function: CUDAFunction, launch: KernelLaunch, memory: CheckedMemory): CUDAResult[Unit]
@@ -57,6 +76,17 @@ trait CUDAKernelExecution {
 object CUDAKernelExecution {
   private object UnsupportedExecution extends CUDAKernelExecution {
     override def cuModuleLoadData(image: ModuleImage): CUDAResult[CUDAModule] = failure("cuModuleLoadData")
+    override def cuModuleGetGlobal(
+        module: CUDAModule,
+        name: FunctionName
+    ): CUDAResult[(DevicePtr, SizeT)] = failure("cuModuleGetGlobal")
+    override def cuModuleRegisterGlobal(
+        module: CUDAModule,
+        name: FunctionName,
+        initial: Array[Byte],
+        allocateGlobal: (SizeT, Array[Byte]) => CUDAResult[DevicePtr],
+        freeGlobal: DevicePtr => CUDAResult[Unit]
+    ): CUDAResult[Unit] = failure("cuModuleRegisterGlobal")
     override def cuModuleGetFunction(module: CUDAModule, name: FunctionName): CUDAResult[KernelFunction] =
       failure("cuModuleGetFunction")
     override def cuModuleUnload(module: CUDAModule): CUDAResult[Unit] = failure("cuModuleUnload")
@@ -236,7 +266,23 @@ final class CUDAEmulatorServer(kernelExecution: CUDAKernelExecution = CUDAKernel
   }
 
   override def cuModuleLoadData(module: Out[CUDAModule], image: ModuleImage): CUDAStatus =
-    writeOutcome(module, kernelExecution.cuModuleLoadData(image))
+    writeOutcome(
+      module,
+      kernelExecution.cuModuleLoadData(image, (bytesize, initial) => allocate(bytesize, initial), free)
+    )
+
+  override def cuModuleGetGlobal_v2(
+      devicePointer: Out[DevicePtr],
+      bytes: Out[SizeT],
+      module: CUDAModule,
+      name: FunctionName
+  ): CUDAStatus = kernelExecution.cuModuleGetGlobal(module, name) match {
+    case CUDAResult.Success((pointer, size)) =>
+      devicePointer.write(pointer)
+      bytes.write(size)
+      CUDAStatus.Success
+    case CUDAResult.Failure(error) => CUDAStatus(error.code)
+  }
 
   override def cuModuleGetFunction(
       function: Out[KernelFunction],
@@ -294,6 +340,14 @@ final class CUDAEmulatorServer(kernelExecution: CUDAKernelExecution = CUDAKernel
 
   override def __cudaGemstoneManagedUnregister(pointer: DevicePtr): CUDAStatus = status(free(pointer))
 
+  override def __cudaGemstoneRegisterGlobal(
+      module: CUDAModule,
+      name: FunctionName,
+      initial: ModuleImage
+  ): CUDAStatus = status(
+    kernelExecution.cuModuleRegisterGlobal(module, name, Col.toArray(initial.bytes), allocate, free)
+  )
+
   override def cudaGetDeviceCount(count: Out[Int]): CUDAStatus = cuDeviceGetCount(count)
 
   override def cudaMalloc(pointer: Out[DevicePtr], bytesize: SizeT): CUDAStatus =
@@ -301,17 +355,21 @@ final class CUDAEmulatorServer(kernelExecution: CUDAKernelExecution = CUDAKernel
 
   override def cudaFree(pointer: DevicePtr): CUDAStatus = status(free(pointer))
 
-  private def allocate(bytesize: SizeT): CUDAResult[DevicePtr] = synchronized {
+  private def allocate(bytesize: SizeT): CUDAResult[DevicePtr] = allocate(bytesize, Array.empty[Byte])
+
+  private def allocate(bytesize: SizeT, initial: Array[Byte]): CUDAResult[DevicePtr] = synchronized {
     checkedSize(bytesize).flatMap { size =>
       if (size == 0) failure(1, "zero-byte allocation")
       else {
         val current = state.get()
         val base    = current.nextAddress
         val span    = (size.toLong + 0xfffL) & ~0xfffL
+        val bytes   = Array.ofDim[Byte](size)
+        Array.copy(initial, 0, bytes, 0, Math.min(initial.length, bytes.length))
         state.set(
           current.copy(
             nextAddress = Math.addExact(current.nextAddress, span.max(0x1000L)),
-            allocations = current.allocations.updated(base, Array.ofDim[Byte](size))
+            allocations = current.allocations.updated(base, bytes)
           )
         )
         success(DevicePtr(base))
@@ -375,7 +433,9 @@ final class CUDAEmulatorServer(kernelExecution: CUDAKernelExecution = CUDAKernel
 
     override def writeInt8(address: GuestAddress, value: Byte): Either[MemoryError, Unit] =
       CUDAEmulatorServer.this.synchronized {
-        resolve(DevicePtr(address.value), 1).map { case (bytes, offset) => bytes(offset) = value } match {
+        resolve(DevicePtr(address.value), 1).map { case (bytes, offset) =>
+          bytes(offset) = value
+        } match {
           case CUDAResult.Success(())    => Right(())
           case CUDAResult.Failure(error) => Left(MemoryError.InvalidAddress(address, 1, error.message))
         }

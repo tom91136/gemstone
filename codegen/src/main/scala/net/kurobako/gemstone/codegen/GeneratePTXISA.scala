@@ -481,6 +481,8 @@ object GeneratePTXISA {
           s"if (modifierNames.exists(_.startsWith(\"im2col\")) && modifierNames.contains(\"multicast::cluster\")) Instruction.CpAsyncBulkTensorMBarrier(operands(0), operands(1), operands(2), Some(operands(3)), operands.lift(4), operands.lift(5), $remainingModifiers, pred) else if (modifierNames.exists(_.startsWith(\"im2col\"))) Instruction.CpAsyncBulkTensorMBarrier(operands(0), operands(1), operands(2), Some(operands(3)), None, operands.lift(4), $remainingModifiers, pred) else if (modifierNames.contains(\"multicast::cluster\")) Instruction.CpAsyncBulkTensorMBarrier(operands(0), operands(1), operands(2), None, operands.lift(3), operands.lift(4), $remainingModifiers, pred) else Instruction.CpAsyncBulkTensorMBarrier(operands(0), operands(1), operands(2), None, None, operands.lift(3), $remainingModifiers, pred)"
         case "CpAsyncBulkTensorGroup" =>
           s"Instruction.CpAsyncBulkTensorGroup(operands(0), operands(1), operands.lift(2), $remainingModifiers, pred)"
+        case "Call" =>
+          s"if (operands.size >= 2 && operands(0).isInstanceOf[Operand.Parenthesized]) Instruction.Call(Some(operands(0)), operands(1), operands.lift(2), operands.lift(3), $remainingModifiers, pred) else Instruction.Call(None, operands(0), operands.lift(1), operands.lift(2), $remainingModifiers, pred)"
         case "MbarrierTestWait" =>
           s"if (operands.size == 3) Instruction.MbarrierTestWait(operands(0), None, operands(1), operands(2), $remainingModifiers, pred) else Instruction.MbarrierTestWait(operands(0), Some(operands(1)), operands(2), operands(3), $remainingModifiers, pred)"
         case "MbarrierTryWait" =>
@@ -765,7 +767,7 @@ object GeneratePTXISA {
     "barrier"  -> Vector("barrier", "threadCount", "predicate", "value"),
     "bfi"      -> Vector("destination", "insertValue", "baseValue", "bitPosition", "bitLength"),
     "bra"      -> Vector("target"),
-    "call"     -> Vector("function", "returnParameters", "parameters", "targets"),
+    "call"     -> Vector("returnParameters", "function", "parameters", "targets"),
     "cvt"      -> Vector("destination", "source", "secondarySource", "roundingBits"),
     "cvta"     -> Vector("destination", "source"),
     "cp.async" -> Vector("destinationAddress", "sourceAddress", "copySize", "sourceSizeOrIgnore", "cachePolicy"),
@@ -834,6 +836,12 @@ object GeneratePTXISA {
   )
 
   private val ShapeFieldOverrides: Map[String, Vector[InstructionField]] = Map(
+    "call" -> Vector(
+      InstructionField("returnParameters", true),
+      InstructionField("function", false),
+      InstructionField("parameters", true),
+      InstructionField("targets", true)
+    ),
     "mbarrier.test_wait" -> Vector(
       InstructionField("completion", false),
       InstructionField("reportValue", true),

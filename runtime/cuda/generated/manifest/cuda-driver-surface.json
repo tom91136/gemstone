@@ -371,7 +371,7 @@
     {"name":"cuModuleEnumerateFunctions","transport":"stub"},
     {"name":"cuModuleGetFunction","transport":"wired"},
     {"name":"cuModuleGetFunctionCount","transport":"stub"},
-    {"name":"cuModuleGetGlobal_v2","transport":"stub"},
+    {"name":"cuModuleGetGlobal_v2","transport":"wired"},
     {"name":"cuModuleGetLoadingMode","transport":"stub"},
     {"name":"cuModuleGetSurfRef","transport":"stub"},
     {"name":"cuModuleGetTexRef","transport":"stub"},

@@ -20,7 +20,8 @@ sbt testCUDAConformance
 
 No Scala registry needs updating when a translation unit is added. Every case is compiled once through the normal
 vendor command, then that exact executable runs once as the NVIDIA oracle and once through Gemstone. Unsupported
-Gemstone behavior is a named red result; there is no local backend allowlist.
+Gemstone behavior is a named red result; the only local skips are individually documented units proven impractical
+for the emulator.
 
 The Driver callback case mixes `cuLaunchHostFunc` and `cuStreamAddCallback` on one stream, checks ordered shared-state
 transitions and callback-local TLS, and detects overlapping or misrouted callback execution without assuming a
@@ -53,6 +54,11 @@ runtime/driver libraries. Thrust cases use the additional metadata and command v
 The suite audits the dependency file and fails if compilation falls back to toolkit-provided Thrust or CUB headers.
 See `vendor/README.md` for exact upstream revisions and licence details.
 
+The `cublas/` lane follows a different boundary: cuBLAS is proprietary and is therefore neither copied nor wrapped
+into generated code. Its small, self-authored clients link against the installed cuBLAS library in both lanes; the
+Gemstone lane reaches it through the preloaded CUDA Driver RPC provider. See `cublas/README.md` for the toolkit path
+controls and licensing boundary.
+
 ## Official Thrust suite
 
 The full, unmodified Thrust 1.15.0 test tree and unittest harness are vendored under `vendor/thrust/testing`. They run
@@ -67,21 +73,45 @@ The Scala suite discovers the same 160 common, 16 async, and 61 CUDA-specific tr
 own CPP/CUDA CMake configuration. Each executable links the official two-file unittest framework and runs at the
 `tiny` size tier by default. Successful compilation is cached under `target/conformance/thrust-1.15.0`; source,
 compiler, architecture, and compile-command changes invalidate it.
+The Thrust MUnit suite runs a matrix of `(translation unit, compute capability)` cases. By default it selects the
+representative targets `compute_75`, `compute_80`, `compute_86`, `compute_89`, and `compute_90`, filtering out targets
+unsupported by the detected NVCC. Each target has an independent framework/object cache and appears in MUnit as
+`thrust/<case>[compute_N]`.
 
 Useful controls are:
 
 ```console
 GEMSTONE_THRUST_FILTER='^(transform|cuda\\.transform)$' sbt testCUDAConformance
 GEMSTONE_THRUST_SIZES=default sbt testCUDAConformance
-GEMSTONE_THRUST_ARCH=sm_89 sbt testCUDAConformance
+GEMSTONE_THRUST_ARCH=compute_75 sbt testCUDAConformance
+GEMSTONE_THRUST_ARCHES='compute_75,sm_80,cc86' sbt testCUDAConformance
+GEMSTONE_THRUST_ORACLE_ARCHES='compute_75,compute_89' sbt testCUDAConformance
 GEMSTONE_THRUST_JOBS=8 sbt testCUDAConformance
 GEMSTONE_THRUST_INCLUDE_DISABLED=1 sbt testCUDAConformance
+GEMSTONE_THRUST_SKIP_ORACLE=1 sbt testCUDAConformance
 ```
+
+`GEMSTONE_CUDA_FILTER` applies a regular expression to the compact CUDA case names, which is useful for running one
+small lane without scheduling the rest of the corpus.
 
 `GEMSTONE_THRUST_FILTER` is a Scala regular expression over upstream-relative names. `GEMSTONE_THRUST_JOBS` bounds
 compilation and execution concurrency from 1 to 32 and defaults to the smaller of four and the available processor
 count. Each vendor-standard executable runs first against NVIDIA and then unchanged through Gemstone. Dependency
-files are audited to ensure Thrust and CUB never fall back to toolkit copies.
+files are audited to ensure Thrust and CUB never fall back to toolkit copies. The small set of upstream units named
+`*BigIndexes` (and the async `large_indices` units) intentionally launch virtual ranges of 2^30--2^33 elements.
+Those units are explicitly blacklisted for the emulator because a JVM interpreter would visit every element; the
+remaining units in their translation units still run through both lanes. Extend the named list for a newly proven
+emulator-impossible unit with `GEMSTONE_THRUST_EMULATION_BLACKLIST=case:unit,case:unit`.
+`GEMSTONE_THRUST_ARCH` remains a single-target compatibility override. `GEMSTONE_THRUST_ARCHES` accepts a comma-separated
+list of `compute_N`, `sm_N`, `ccN`, `cc_N`, or bare numeric values; `sm_`/`cc`/numeric forms are normalized to the
+PTX-producing `compute_N` form. Explicit targets are validated against NVCC's supported architecture list.
+When device oracles are enabled, the suite queries the visible NVIDIA devices and runs the oracle on matrix targets no
+newer than the least-capable device. `GEMSTONE_THRUST_ORACLE_ARCHES` can explicitly select a subset of the matrix; a
+target newer than the available device is otherwise reported as oracle-skipped while its Gemstone/emulator lane still
+runs. This is necessary because a `compute_90` executable cannot execute on an `sm_89` device.
+
+On an emulator-only machine, set `GEMSTONE_THRUST_SKIP_ORACLE=1` to omit the NVIDIA lane and run only the Gemstone
+lane. This is a diagnostic mode and does not provide oracle conformance results.
 
 ## Provenance and licence boundary
 
