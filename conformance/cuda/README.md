@@ -41,6 +41,8 @@ generated `libcuda.so.1`, RPC server, module registry, and PTX executor.
 
 Independent cases execute concurrently in isolated directories. `GEMSTONE_TEST_JOBS` sets the bounded worker count
 (1-32); it defaults to the smaller of eight and the available processor count.
+`GEMSTONE_CONFORMANCE_TIMEOUT_SECONDS` bounds each compiler/test process to
+120 seconds by default; increase it only for a specifically justified case.
 
 More substantial reference cases live under `samples/` and `thrust/`. Their implementation sources and licences are
 vendored under `vendor/`; the system toolkit supplies only the CUDA compiler, ABI/runtime headers, and reference
@@ -96,7 +98,8 @@ small lane without scheduling the rest of the corpus.
 
 `GEMSTONE_THRUST_FILTER` is a Scala regular expression over upstream-relative names. `GEMSTONE_THRUST_JOBS` bounds
 compilation and execution concurrency from 1 to 32 and defaults to the smaller of four and the available processor
-count. Each vendor-standard executable runs first against NVIDIA and then unchanged through Gemstone. Dependency
+count. `GEMSTONE_CONFORMANCE_TIMEOUT_SECONDS` bounds each Thrust compiler/test process to 120 seconds by default.
+Each vendor-standard executable runs first against NVIDIA and then unchanged through Gemstone. Dependency
 files are audited to ensure Thrust and CUB never fall back to toolkit copies. The small set of upstream units named
 `*BigIndexes` (and the async `large_indices` units) intentionally launch virtual ranges of 2^30--2^33 elements.
 Those units are explicitly blacklisted for the emulator because a JVM interpreter would visit every element; the

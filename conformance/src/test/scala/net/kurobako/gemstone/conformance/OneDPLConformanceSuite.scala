@@ -66,7 +66,7 @@ final class OneDPLConformanceSuite extends munit.FunSuite {
   private val batch         = sys.env.get("GEMSTONE_ONEDPL_BATCH").contains("1")
   private val batchSize = sys.env.get("GEMSTONE_ONEDPL_BATCH_SIZE").fold(256)(_.toInt)
   private val batchParallelism = sys.env.get("GEMSTONE_ONEDPL_BATCH_PARALLEL").fold(2)(_.toInt)
-  private val batchTimeoutSeconds = sys.env.get("GEMSTONE_ONEDPL_BATCH_TIMEOUT").fold(300)(_.toInt)
+  private val batchTimeoutSeconds = sys.env.get("GEMSTONE_ONEDPL_BATCH_TIMEOUT").fold(defaultTestTimeout.toSeconds)(_.toLong)
   private val batchAcceptTimeouts = sys.env.get("GEMSTONE_ONEDPL_BATCH_ACCEPT_TIMEOUTS").contains("1")
   private val includeStress = sys.env.get("GEMSTONE_ONEDPL_INCLUDE_STRESS").contains("1")
   private val excluded = sys.env.get("GEMSTONE_ONEDPL_EXCLUDE").filter(_.nonEmpty).map(_.r)
@@ -461,7 +461,10 @@ final class OneDPLConformanceSuite extends munit.FunSuite {
             command,
             root,
             oracleEnvironment = oracleEnvironment(value),
-            gemstoneEnvironment = gemstoneEnvironment(targetName.get)
+            gemstoneEnvironment = gemstoneEnvironment(targetName.get),
+            // CTest applies batchTimeoutSeconds to each individual test.  The
+            // outer process must be allowed to run the whole batch.
+            timeout = 30.minutes
           )
           require(paired.oracle.exit == 0, s"oracle/${value.id}/batch $chunkIndex:\n${paired.oracle.diagnostic}")
           paired.gemstone
@@ -471,7 +474,8 @@ final class OneDPLConformanceSuite extends munit.FunSuite {
             runtimeLayout(value),
             command,
             root,
-            gemstoneEnvironment(targetName.get)
+            gemstoneEnvironment(targetName.get),
+            timeout = 30.minutes
           )
       }
       val failures = ctestFailures(result.stdout)
@@ -507,7 +511,7 @@ final class OneDPLConformanceSuite extends munit.FunSuite {
       )
       work.backend match {
         case None =>
-          val result = run(command, root, sharedEnvironment)
+          val result = run(command, root, sharedEnvironment, timeout = defaultTestTimeout)
           require(result.exit == 0, s"host/${work.name}:\n${result.diagnostic}")
         case Some(backend) if oracleEnabled =>
           val targetName = work.target.getOrElse(fail(s"provider case lacks a target: ${work.name}"))

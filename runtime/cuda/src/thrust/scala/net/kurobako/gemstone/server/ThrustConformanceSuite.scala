@@ -356,6 +356,12 @@ class ThrustConformanceSuite extends munit.FunSuite {
 }
 
 object ThrustConformanceSuite {
+  private val processTimeout = sys.env.get("GEMSTONE_CONFORMANCE_TIMEOUT_SECONDS").fold(120.seconds)(_.toLong.seconds)
+  require(
+    processTimeout > Duration.Zero,
+    s"GEMSTONE_CONFORMANCE_TIMEOUT_SECONDS must be positive, found $processTimeout"
+  )
+
   private val GemstoneEnvironment = Set(
     "GEMSTONE_RPC_PORT",
     "GEMSTONE_RPC_TOKEN",
@@ -731,13 +737,20 @@ object ThrustConformanceSuite {
       .redirectError(stderr.toFile)
     environment.applyTo(builder.environment())
     val process = builder.start()
-    if (process.waitFor(60, TimeUnit.MINUTES)) process.exitValue()
+    if (process.waitFor(processTimeout.toMillis, TimeUnit.MILLISECONDS)) process.exitValue()
     else {
       process.descendants().forEach { descendant =>
         val _ = descendant.destroyForcibly()
       }
       val _ = process.destroyForcibly()
       val _ = process.waitFor()
+      Files.writeString(
+        stderr,
+        s"process timed out after $processTimeout\n",
+        StandardCharsets.UTF_8,
+        StandardOpenOption.CREATE,
+        StandardOpenOption.APPEND
+      )
       -1
     }
   }

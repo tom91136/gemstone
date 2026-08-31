@@ -30,7 +30,7 @@ default is 256 MiB. `GEMSTONE_OPENCL_LOCAL_MEM_SIZE` can similarly lower the adv
 fixed-workgroup CTS cases such as async-copy tractable on the interpreter. Pointer relocation scanning of ordinary
 buffers can be enabled with `GEMSTONE_OPENCL_SCAN_BUFFER_POINTERS=1`; SVM and USM allocations are scanned
 automatically.
-`GEMSTONE_OPENCL_TIMEOUT_SECONDS` sets the per-inventory-entry timeout (30 minutes by default), allowing short
+`GEMSTONE_OPENCL_TIMEOUT_SECONDS` sets the per-inventory-entry timeout (120 seconds by default), allowing short
 parallel sweeps to classify hangs quickly during development.
 `GEMSTONE_OPENCL_CASE_ARGS` appends an executable-specific test selector when iterating a single filtered inventory
 entry.

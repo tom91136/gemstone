@@ -163,7 +163,7 @@ final class RocBLASConformanceSuite extends munit.FunSuite {
       buildRoot,
       oracleEnvironment,
       gemstoneEnvironment(testCase.target),
-      timeout = 10.minutes
+      timeout = defaultTestTimeout
     )
     if result.oracleRan then
       require(result.oracle.exit == 0, s"oracle/${testCase.identity}:\n${result.oracle.diagnostic}")

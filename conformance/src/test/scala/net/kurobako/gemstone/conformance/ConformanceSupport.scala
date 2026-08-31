@@ -298,6 +298,16 @@ private[conformance] object ConformanceSupport {
     Set("1", "true", "yes").contains(value.trim.toLowerCase)
   }
 
+  /**
+    * Bound an individual vendor/emulator test process.  Build and configure
+    * steps deliberately keep their longer infrastructure timeout; this value
+    * is for the workload process itself so a deadlocked provider cannot occupy
+    * a worker for the duration of a full conformance run.
+    */
+  val defaultTestTimeout: FiniteDuration =
+    sys.env.get("GEMSTONE_CONFORMANCE_TIMEOUT_SECONDS").fold(120.seconds)(_.toLong.seconds)
+  require(defaultTestTimeout > Duration.Zero, s"GEMSTONE_CONFORMANCE_TIMEOUT_SECONDS must be positive, found $defaultTestTimeout")
+
   def runPaired(
       api: ComputeAPI,
       layout: RuntimeLayout,
@@ -306,7 +316,7 @@ private[conformance] object ConformanceSupport {
       oracleEnvironment: Map[String, String] = Map.empty,
       gemstoneEnvironment: Map[String, String] = Map.empty,
       requireExecution: Boolean = true,
-      timeout: FiniteDuration = 30.minutes,
+      timeout: FiniteDuration = defaultTestTimeout,
       oracleCommand: Option[Vector[String]] = None
   ): PairedResult = {
     val oracleRan = oracleEnabled
@@ -351,7 +361,7 @@ private[conformance] object ConformanceSupport {
       command: Vector[String],
       directory: Path,
       gemstoneEnvironment: Map[String, String] = Map.empty,
-      timeout: FiniteDuration = 30.minutes
+      timeout: FiniteDuration = defaultTestTimeout
   ): ProcessResult = {
     var observed = Option.empty[ProcessResult]
     GemstoneProcess.attested(api, layout, sys.env ++ gemstoneEnvironment) { injected =>

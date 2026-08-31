@@ -17,7 +17,7 @@ import scala.jdk.CollectionConverters.*
 
 /** The Khronos OpenCL CTS quick inventory, built once against the stock ICD loader and run unchanged in both lanes. */
 final class OpenCLCTSConformanceSuite extends munit.FunSuite {
-  private val caseTimeout = sys.env.get("GEMSTONE_OPENCL_TIMEOUT_SECONDS").fold(30.minutes)(_.toLong.seconds)
+  private val caseTimeout = sys.env.get("GEMSTONE_OPENCL_TIMEOUT_SECONDS").fold(defaultTestTimeout)(_.toLong.seconds)
   require(caseTimeout > Duration.Zero, s"GEMSTONE_OPENCL_TIMEOUT_SECONDS must be positive, found $caseTimeout")
 
   override val munitTimeout: Duration = caseTimeout + 30.seconds

@@ -9,6 +9,7 @@ import net.kurobako.gemstone.launcher.RuntimeLayout
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.StandardOpenOption
 import java.security.SecureRandom
 import java.util.concurrent.Callable
 import java.util.concurrent.ExecutionException
@@ -213,6 +214,12 @@ class CUDAConformanceSuite extends munit.FunSuite {
 }
 
 object CUDAConformanceSuite {
+  private val processTimeout = sys.env.get("GEMSTONE_CONFORMANCE_TIMEOUT_SECONDS").fold(120.seconds)(_.toLong.seconds)
+  require(
+    processTimeout > Duration.Zero,
+    s"GEMSTONE_CONFORMANCE_TIMEOUT_SECONDS must be positive, found $processTimeout"
+  )
+
   private val GemstoneEnvironment = Set(
     "GEMSTONE_RPC_PORT",
     "GEMSTONE_RPC_TOKEN",
@@ -601,9 +608,16 @@ object CUDAConformanceSuite {
       .redirectError(stderr.toFile)
     environment.applyTo(builder.environment())
     val process = builder.start()
-    if (process.waitFor(20, TimeUnit.MINUTES)) process.exitValue()
+    if (process.waitFor(processTimeout.toMillis, TimeUnit.MILLISECONDS)) process.exitValue()
     else {
       terminate(process)
+      Files.writeString(
+        stderr,
+        s"process timed out after $processTimeout\n",
+        StandardCharsets.UTF_8,
+        StandardOpenOption.CREATE,
+        StandardOpenOption.APPEND
+      )
       -1
     }
   }

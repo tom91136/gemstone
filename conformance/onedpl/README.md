@@ -76,7 +76,10 @@ For a broad emulator run, set `GEMSTONE_ONEDPL_BATCH=1`. The suite builds
 oneDPL once and runs exact-name CTest batches instead of creating one test
 process per upstream case. `GEMSTONE_ONEDPL_BATCH_SIZE` defaults to 256,
 `GEMSTONE_ONEDPL_BATCH_PARALLEL` defaults to 2 (use at most 4 on the serial
-interpreter), and `GEMSTONE_ONEDPL_BATCH_TIMEOUT` controls each CTest case.
+interpreter), and `GEMSTONE_ONEDPL_BATCH_TIMEOUT` controls each CTest case
+(120 seconds by default). `GEMSTONE_CONFORMANCE_TIMEOUT_SECONDS` controls
+the individual provider process timeout for the non-batch path and defaults to
+the same 120 seconds.
 With `GEMSTONE_ONEDPL_BATCH_ACCEPT_TIMEOUTS=1`, timeout-only batch failures are
 reported as duration exclusions; correctness failures and crashes still fail
 the suite. Use `GEMSTONE_ONEDPL_INCLUDE_STRESS=1` to restore the documented
