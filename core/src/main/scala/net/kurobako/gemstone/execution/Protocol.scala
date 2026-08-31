@@ -1,6 +1,7 @@
 package net.kurobako.gemstone.execution
 
 import net.kurobako.gemstone.Col
+import net.kurobako.gemstone.binary.LittleEndian
 
 opaque type AllocationId = Long
 
@@ -212,6 +213,18 @@ final case class DirtyRange(allocation: AllocationId, offset: Long, size: Int)
 trait ExecutionMemory {
   def read(id: AllocationId, offset: Long, size: Int): Either[ExecutionFailure, Col[Byte]]
   def write(id: AllocationId, offset: Long, bytes: Col[Byte]): Either[ExecutionFailure, Unit]
+
+  /** Allocation-free override point for ISA memory operations up to 64 bits. */
+  def readValue(id: AllocationId, offset: Long, size: Int): Either[ExecutionFailure, Long] = {
+    require(size >= 1 && size <= 8, s"memory value size must be in [1, 8], found $size")
+    read(id, offset, size).map(bytes => LittleEndian.decode(bytes, 0, size))
+  }
+
+  /** Allocation-free override point for ISA memory operations up to 64 bits. */
+  def writeValue(id: AllocationId, offset: Long, value: Long, size: Int): Either[ExecutionFailure, Unit] = {
+    require(size >= 1 && size <= 8, s"memory value size must be in [1, 8], found $size")
+    write(id, offset, LittleEndian.toCol(value, size))
+  }
 }
 
 trait LoadedProgram {

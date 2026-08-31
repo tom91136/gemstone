@@ -19,7 +19,7 @@ private[server] object ExecutionRPCProtocol {
   private val ResponseMagic    = 0x474d4631
   private val ProtocolVersion  = 3
   private val TokenBytes       = 64
-  private val MaximumPayload   = 64 * 1024 * 1024
+  private val MaximumPayload   = 128 * 1024 * 1024
   private val MaximumName      = 4096
   private val MaximumArguments = 4096
 

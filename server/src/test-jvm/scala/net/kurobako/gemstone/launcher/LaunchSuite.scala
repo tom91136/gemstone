@@ -28,6 +28,10 @@ final class LaunchSuite extends munit.FunSuite {
     val hsa = Launch.plan(ComputeAPI.HSA, layout, endpoint, Map.empty).fold(error => fail(error.message), identity)
 
     assertEquals(hip.environment.set("LD_PRELOAD"), root.resolve("hip/libamdhip64.so").toString)
+    assertEquals(
+      hip.environment.set("LD_LIBRARY_PATH"),
+      s"${root.resolve("hip")}:${root.resolve("hsa")}"
+    )
     assertEquals(hsa.environment.set("LD_PRELOAD"), root.resolve("hsa/libhsa-runtime64.so.1").toString)
     assert(hip.environment.unset.contains("HSA_ENABLE_DTIF"))
     assert(hsa.environment.unset.contains("HSA_TOOLS_LIB"))

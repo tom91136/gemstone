@@ -139,7 +139,7 @@ class CUDAConformanceSuite extends munit.FunSuite {
     if (Files.isRegularFile(dependencies)) auditVendoredDependencies(cudaCase, dependencies, root)
     val execute           = Col("bash", "-c", expand(cudaCase.commands.last.text, variables, cudaCase.source))
     val vendorEnvironment = cublas.fold(Map.empty[String, String])(_.runtimeEnvironment(sys.env))
-    if (!cudaCase.cublas || !sys.env.get("GEMSTONE_CUBLAS_SKIP_ORACLE").contains("1")) {
+    if (oracleEnabled && (!cudaCase.cublas || !sys.env.get("GEMSTONE_CUBLAS_SKIP_ORACLE").contains("1"))) {
       val oracle = capture(
         execute,
         caseRoot,
@@ -150,7 +150,7 @@ class CUDAConformanceSuite extends munit.FunSuite {
     val gemstone = GemstoneProcess.attested(
       ComputeAPI.CUDA,
       RuntimeLayout(cudaDriver = Some(libraryDir.resolve("libcuda.so.1"))),
-      sys.env ++ vendorEnvironment
+      (sys.env - "GEMSTONE_NO_ORACLE") ++ vendorEnvironment
     )(environment => capture(execute, caseRoot, environment)).fold(
       error => fail(s"gemstone/${cudaCase.name}: ${error.message}"),
       identity
@@ -205,6 +205,10 @@ class CUDAConformanceSuite extends munit.FunSuite {
     val errors = Files.readString(result.stderr, StandardCharsets.UTF_8)
     assertEquals(result.exit, 0, s"$lane/${cudaCase.name} failed\nstdout:\n$actual\nstderr:\n$errors")
     command.expected.foreach(expected => assertEquals(actual, expected, s"$lane/${cudaCase.name}\nstderr:\n$errors"))
+  }
+
+  private def oracleEnabled: Boolean = !sys.env.get("GEMSTONE_NO_ORACLE").exists { value =>
+    Set("1", "true", "yes").contains(value.trim.toLowerCase)
   }
 }
 

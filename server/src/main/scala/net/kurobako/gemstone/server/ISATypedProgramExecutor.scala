@@ -9,27 +9,26 @@ import java.util.concurrent.atomic.AtomicReference
   * loaders so parallel ISA work does not converge on this file.
   */
 final class ISATypedProgramExecutor private (loaders: Map[ProgramFormat, ProgramLoader]) extends ProgramExecutor {
-  private val programs = AtomicReference(Map.empty[ProgramId, LoadedProgram])
+  private val programs      = AtomicReference(Map.empty[ProgramId, LoadedProgram])
+  private val lifecycleLock = Object()
 
   override def load(id: ProgramId, format: ProgramFormat, image: Col[Byte]): Either[ExecutionFailure, Unit] =
-    loaders.get(format).toRight(
-      ExecutionFailure.Unsupported(s"no program loader owns format $format")
-    ).flatMap(_.load(image)).flatMap { prepared =>
-      val previous = programs.getAndUpdate(current =>
-        if (current.contains(id)) current else current.updated(id, prepared)
-      )
-      Either.cond(
-        !previous.contains(id),
-        (),
-        ExecutionFailure.InvalidRequest(s"program ${id.toLong} is already loaded")
-      )
+    lifecycleLock.synchronized {
+      if (programs.get().contains(id))
+        Left(ExecutionFailure.InvalidRequest(s"program ${id.toLong} is already loaded"))
+      else
+        loaders.get(format).toRight(
+          ExecutionFailure.Unsupported(s"no program loader owns format $format")
+        ).flatMap(_.load(image)).map { prepared =>
+          programs.set(programs.get().updated(id, prepared))
+        }
     }
 
-  override def unload(id: ProgramId): Either[ExecutionFailure, Unit] = {
-    val previous = programs.getAndUpdate(_.removed(id))
+  override def unload(id: ProgramId): Either[ExecutionFailure, Unit] = lifecycleLock.synchronized {
+    val current = programs.get()
     Either.cond(
-      previous.contains(id),
-      (),
+      current.contains(id),
+      programs.set(current.removed(id)),
       ExecutionFailure.NotFound(s"program ${id.toLong} is not loaded by an ISA executor")
     )
   }

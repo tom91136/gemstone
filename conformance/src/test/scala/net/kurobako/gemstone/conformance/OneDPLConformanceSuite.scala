@@ -22,7 +22,7 @@ final class OneDPLConformanceSuite extends munit.FunSuite {
     case OpenCL    extends Backend("opencl", "opencl:gpu")
   }
 
-  private final case class Work(index: Int, backend: Backend, name: String)
+  private final case class Work(index: Int, backend: Backend, target: String, name: String)
 
   private val source = {
     val value = pin("onedpl")
@@ -37,6 +37,7 @@ final class OneDPLConformanceSuite extends munit.FunSuite {
   private val sampleRoot = target.resolve("onedpl-official-samples")
   private val compiler   = sys.env.get("GEMSTONE_DPCPP").filter(_.nonEmpty).map(Path.of(_))
     .getOrElse(Path.of("/opt/intel/oneapi/compiler/latest/bin/icpx"))
+  private val targetMatrix = amdgpuTargetMatrix
 
   require(Files.isExecutable(compiler), s"DPC++ compiler is absent: $compiler; set GEMSTONE_DPCPP")
   configure(
@@ -60,12 +61,14 @@ final class OneDPLConformanceSuite extends munit.FunSuite {
   require(samples.size == 3, s"expected three oneDPL/SYCL sample cases, found ${samples.size}")
   private val cases = all.zipWithIndex.map { case (testCase, index) => index -> testCase.name } ++
     samples.zipWithIndex.map { case (sample, index) => (all.size + index) -> s"samples/${sample.name}" }
-  private val work = cases.flatMap { case (index, name) =>
-    Backend.values.map(backend => Work(index, backend, s"${backend.id}/$name"))
+  private val work = targetMatrix.targets.flatMap { target =>
+    cases.flatMap { case (index, name) =>
+      Backend.values.map(backend => Work(index, backend, target, s"$target/${backend.id}/$name"))
+    }
   }
   private val selectedNames = select(work.zipWithIndex.map { case (entry, index) => index -> entry.name }, "ONEDPL")
   private val selected      = selectedNames.map { case (index, _) => work(index) }
-  private val jobs     = sys.env.get("GEMSTONE_ONEDPL_JOBS")
+  private val jobs          = sys.env.get("GEMSTONE_ONEDPL_JOBS")
     .fold(Math.min(8, Runtime.getRuntime.availableProcessors))(_.toInt)
   private val buildLock  = Object()
   private var executor   = Option.empty[ExecutorService]
@@ -75,7 +78,7 @@ final class OneDPLConformanceSuite extends munit.FunSuite {
     require(jobs >= 1 && jobs <= 32, s"GEMSTONE_ONEDPL_JOBS must be between 1 and 32, found $jobs")
     configure(root.resolve("runtime/levelzero"), driverRoot, Vector("-DBUILD_TESTING=OFF"))
     build(driverRoot, "gemstone_levelzero")
-    selected.collect { case Work(index, _, _) if index >= all.size => samples(index - all.size) }.distinct
+    selected.collect { case Work(index, _, _, _) if index >= all.size => samples(index - all.size) }.distinct
       .foreach(compileSample)
     val pool = Executors.newFixedThreadPool(jobs)
     executor = Some(pool)
@@ -85,9 +88,8 @@ final class OneDPLConformanceSuite extends munit.FunSuite {
     }.toMap
   }
 
-  override def afterAll(): Unit = {
+  override def afterAll(): Unit =
     executor.foreach(_.shutdown())
-  }
 
   selected.foreach { entry =>
     test(s"onedpl/${entry.name}") {
@@ -120,13 +122,13 @@ final class OneDPLConformanceSuite extends munit.FunSuite {
         command,
         root,
         oracleEnvironment = oracleEnvironment(work.backend),
-        gemstoneEnvironment = sharedEnvironment
+        gemstoneEnvironment = gemstoneEnvironment(work.target)
       )
-      require(result.oracle.exit == 0, s"oracle/${work.name}:\n${result.oracle.diagnostic}")
+      if result.oracleRan then require(result.oracle.exit == 0, s"oracle/${work.name}:\n${result.oracle.diagnostic}")
       require(result.gemstone.exit == 0, s"gemstone/${work.name}:\n${result.gemstone.diagnostic}")
     } else {
       val sample = samples(work.index - all.size)
-      runPairedSourceCase(sample, work.backend)
+      runPairedSourceCase(sample, work.backend, work.target, work.name)
     }
 
   private def runtimeLayout(backend: Backend): RuntimeLayout = backend match {
@@ -139,15 +141,18 @@ final class OneDPLConformanceSuite extends munit.FunSuite {
   private def sharedEnvironment: Map[String, String] = Map(
     "SYCL_CACHE_PERSISTENT" -> "1",
     "LD_LIBRARY_PATH"       -> libraryPath(Vector(
-        driverRoot,
-        compiler.getParent.getParent.resolve("lib"),
-        Path.of("/opt/intel/oneapi/umf/latest/lib")
-      ))
+      driverRoot,
+      compiler.getParent.getParent.resolve("lib"),
+      Path.of("/opt/intel/oneapi/umf/latest/lib")
+    ))
   )
 
   private def oracleEnvironment(backend: Backend): Map[String, String] = sharedEnvironment ++ Map(
     "ONEAPI_DEVICE_SELECTOR" -> backend.selector
   )
+
+  private def gemstoneEnvironment(target: String): Map[String, String] =
+    sharedEnvironment + ("GEMSTONE_AMDGPU_TARGET" -> target)
 
   private def sampleVariables(sample: SourceCase): Map[String, String] = Map(
     "input"          -> sample.source.toString,
@@ -164,23 +169,26 @@ final class OneDPLConformanceSuite extends munit.FunSuite {
 
   private def runPairedSourceCase(
       sample: SourceCase,
-      backend: Backend
+      backend: Backend,
+      target: String,
+      identity: String
   ): Unit = {
-    val caseRoot = sampleRoot.resolve(sample.name)
-    val execute = expand(sample.commands.last.text, sampleVariables(sample))
-    val result  = runPaired(
+    val caseRoot = Files.createDirectories(sampleRoot.resolve(target).resolve(backend.id).resolve(sample.name))
+    val execute  = expand(sample.commands.last.text, sampleVariables(sample))
+    val result   = runPaired(
       ComputeAPI.SYCL,
       runtimeLayout(backend),
       Vector("bash", "-c", execute),
       caseRoot,
-      oracleEnvironment(backend),
-      sharedEnvironment
+      oracleEnvironment = oracleEnvironment(backend),
+      gemstoneEnvironment = gemstoneEnvironment(target)
     )
-    require(result.oracle.exit == 0, s"oracle/${backend.id}/${sample.name}:\n${result.oracle.diagnostic}")
-    require(result.gemstone.exit == 0, s"gemstone/${backend.id}/${sample.name}:\n${result.gemstone.diagnostic}")
+    if result.oracleRan then require(result.oracle.exit == 0, s"oracle/$identity:\n${result.oracle.diagnostic}")
+    require(result.gemstone.exit == 0, s"gemstone/$identity:\n${result.gemstone.diagnostic}")
     sample.commands.last.expected.foreach { expected =>
-      require(stripOutput(result.oracle.stdout) == expected, s"oracle/${sample.name}: expected '$expected'")
-      require(stripOutput(result.gemstone.stdout) == expected, s"gemstone/${sample.name}: expected '$expected'")
+      if result.oracleRan then
+        require(stripOutput(result.oracle.stdout) == expected, s"oracle/$identity: expected '$expected'")
+      require(stripOutput(result.gemstone.stdout) == expected, s"gemstone/$identity: expected '$expected'")
     }
   }
 

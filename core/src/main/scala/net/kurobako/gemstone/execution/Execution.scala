@@ -310,6 +310,9 @@ final class ExecutionControl private (
 
   def usedInstructions: Long = budget.used
 
+  /** Remaining budget before any ISA executor-local, unflushed quantum. */
+  private[gemstone] def remainingInstructions: Long = budget.remaining
+
   private[gemstone] def cancel(): Unit = cancellation match {
     case source: CancellationToken.Source => source.cancel()
     case _                                => ()

@@ -34,6 +34,10 @@ private[conformance] object ConformanceSupport {
     "GEMSTONE_CUDA_DRIVER",
     "GEMSTONE_HIP_RUNTIME",
     "GEMSTONE_HSA_RUNTIME",
+    "GEMSTONE_AMDGPU_TARGETS",
+    "GEMSTONE_AMDGPU_ORACLE_TARGET",
+    "GEMSTONE_AMDGPU_TARGET",
+    "GEMSTONE_NO_ORACLE",
     "GEMSTONE_OPENCL_ICD",
     "GEMSTONE_LEVELZERO_DRIVER",
     "HSA_ENABLE_DTIF",
@@ -64,6 +68,42 @@ private[conformance] object ConformanceSupport {
   final case class SourceCommand(text: String, expected: Option[String])
   final case class SourceCase(name: String, source: Path, commands: Vector[SourceCommand])
 
+  final case class AMDGPUTargetMatrix(targets: Vector[String], oracleTarget: String) {
+    val targetList: String  = targets.mkString(",")
+    val targetFlags: String = targets.map(target => s"--offload-arch=$target").mkString(" ")
+  }
+
+  object AMDGPUTargetMatrix {
+    private val DefaultTarget = "gfx900"
+    private val TargetPattern = "gfx[0-9]+[a-z]?".r
+
+    def fromEnvironment(environment: Map[String, String]): AMDGPUTargetMatrix = {
+      val rawTargets = environment.get("GEMSTONE_AMDGPU_TARGETS").filter(_.nonEmpty).getOrElse(DefaultTarget)
+      val targets    = rawTargets.split(',').iterator.map(_.trim.toLowerCase).filter(_.nonEmpty).toVector
+      require(targets.nonEmpty, "GEMSTONE_AMDGPU_TARGETS must contain at least one target")
+      require(targets.distinct.size == targets.size, s"GEMSTONE_AMDGPU_TARGETS contains duplicates: $rawTargets")
+      require(
+        targets.forall(_.matches(TargetPattern.regex)),
+        s"invalid GFX target in GEMSTONE_AMDGPU_TARGETS: $rawTargets"
+      )
+      val oracleTarget =
+        environment.get(
+          "GEMSTONE_AMDGPU_ORACLE_TARGET"
+        ).filter(_.nonEmpty).map(_.trim.toLowerCase).getOrElse(DefaultTarget)
+      require(
+        oracleTarget.matches(TargetPattern.regex),
+        s"invalid GFX target in GEMSTONE_AMDGPU_ORACLE_TARGET: $oracleTarget"
+      )
+      require(
+        targets.contains(oracleTarget),
+        s"oracle target $oracleTarget is absent from GEMSTONE_AMDGPU_TARGETS"
+      )
+      AMDGPUTargetMatrix(targets, oracleTarget)
+    }
+  }
+
+  def amdgpuTargetMatrix: AMDGPUTargetMatrix = AMDGPUTargetMatrix.fromEnvironment(sys.env)
+
   val root: Path   = findRoot(Path.of(sys.props("user.dir")))
   val target: Path = Files.createDirectories(root.resolve("target/conformance"))
   val cache: Path  = Files.createDirectories(
@@ -90,7 +130,7 @@ private[conformance] object ConformanceSupport {
       if (url.endsWith(".tar.xz")) ".tar.xz"
       else if (url.endsWith(".zip")) ".zip"
       else ".tar.gz"
-    val archive       = cache.resolve(s"$name$archiveSuffix")
+    val archive = cache.resolve(s"$name$archiveSuffix")
     if (!Files.isRegularFile(archive) || digest(archive) != sha256) download(url, archive)
     require(digest(archive) == sha256, s"$name archive hash differs from its pin")
     val source   = target.resolve(s"sources/$name")
@@ -102,7 +142,7 @@ private[conformance] object ConformanceSupport {
         val expanded = source.resolve("expanded")
         Files.createDirectories(expanded)
         runChecked(Vector("unzip", "-q", archive.toString, "-d", expanded.toString), root)
-        val children = Files.list(expanded)
+        val children  = Files.list(expanded)
         val extracted = try children.iterator.asScala.toVector
         finally children.close()
         require(extracted.size == 1 && Files.isDirectory(extracted.head), s"$name ZIP has no single source root")
@@ -229,7 +269,11 @@ private[conformance] object ConformanceSupport {
       s"command exited with $exit: ${command.mkString(" ")}\nstdout:\n$stdout\nstderr:\n$stderr"
   }
 
-  final case class PairedResult(oracle: ProcessResult, gemstone: ProcessResult)
+  final case class PairedResult(oracle: ProcessResult, gemstone: ProcessResult, oracleRan: Boolean)
+
+  def oracleEnabled: Boolean = !sys.env.get("GEMSTONE_NO_ORACLE").exists { value =>
+    Set("1", "true", "yes").contains(value.trim.toLowerCase)
+  }
 
   def runPaired(
       api: ComputeAPI,
@@ -238,26 +282,37 @@ private[conformance] object ConformanceSupport {
       directory: Path,
       oracleEnvironment: Map[String, String] = Map.empty,
       gemstoneEnvironment: Map[String, String] = Map.empty,
-      timeout: FiniteDuration = 30.minutes
+      requireExecution: Boolean = true,
+      timeout: FiniteDuration = 30.minutes,
+      oracleCommand: Option[Vector[String]] = None
   ): PairedResult = {
-    val oracle = runConfigured(
-      command,
-      directory,
-      Environment(oracleEnvironment, GemstoneEnvironment -- oracleEnvironment.keySet),
-      timeout
-    )
-    val gemstone = GemstoneProcess.attested(api, layout, sys.env ++ gemstoneEnvironment) { injected =>
+    val oracleRan = oracleEnabled
+    val oracle    =
+      if oracleRan then
+        runConfigured(
+          oracleCommand.getOrElse(command),
+          directory,
+          Environment(oracleEnvironment, GemstoneEnvironment -- oracleEnvironment.keySet),
+          timeout
+        )
+      else ProcessResult(Vector("<oracle skipped>"), 0, "", "oracle skipped by GEMSTONE_NO_ORACLE\n")
+    val runGemstone = (injected: Environment) =>
       runConfigured(
         command,
         directory,
         Environment(gemstoneEnvironment ++ injected.set, injected.unset -- gemstoneEnvironment.keySet),
         timeout
       )
-    }.fold(
+    val gemstoneAttempt =
+      if requireExecution then
+        GemstoneProcess.attested(api, layout, (sys.env - "GEMSTONE_NO_ORACLE") ++ gemstoneEnvironment)(runGemstone)
+      else
+        GemstoneProcess.injected(api, layout, (sys.env - "GEMSTONE_NO_ORACLE") ++ gemstoneEnvironment)(runGemstone)
+    val gemstone = gemstoneAttempt.fold(
       error => ProcessResult(command, 86, "", error.message + "\n"),
       identity
     )
-    PairedResult(oracle, gemstone)
+    PairedResult(oracle, gemstone, oracleRan)
   }
 
   def run(
@@ -265,9 +320,8 @@ private[conformance] object ConformanceSupport {
       directory: Path,
       environment: Map[String, String] = Map.empty,
       timeout: FiniteDuration = 30.minutes
-  ): ProcessResult = {
+  ): ProcessResult =
     runConfigured(command, directory, Environment(environment, Set.empty), timeout)
-  }
 
   private def runConfigured(
       command: Vector[String],

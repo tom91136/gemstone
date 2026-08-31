@@ -1,5 +1,5 @@
 #pragma region case: hip-saxpy
-#pragma region do: {hipcc} -std=c++17 -O2 --offload-arch=gfx900 -o {output} {input} -lamdhip64
+#pragma region do: {hipcc} -std=c++17 -O2 {gpu_targets} -o {output} {input} -lamdhip64
 #pragma region do: {output}
 #pragma region requires: pass
 

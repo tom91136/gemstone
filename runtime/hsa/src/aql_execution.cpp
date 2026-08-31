@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "gemstone/hsa/aql_execution.h"
 
-#include <aspartame/unordered_map.hpp>
-
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
@@ -15,6 +13,8 @@
 #include <unordered_set>
 #include <utility>
 #include <vector>
+
+#include <aspartame/unordered_map.hpp>
 
 namespace {
 
@@ -209,6 +209,14 @@ bool resolve_arguments(gemstone_hsa_aql_runtime &runtime, const KernelBinding &b
     } else {
       uint64_t pointer = 0;
       std::memcpy(&pointer, kernarg + field.offset, sizeof(pointer));
+      // A global-buffer argument may legally be null (for example, an
+      // optional output or an empty range). Preserve its zero bytes instead
+      // of trying to manufacture an allocation identity for the sentinel.
+      if (pointer == 0) {
+        append_scalar(field.offset, field.size);
+        covered = field.offset + field.size;
+        continue;
+      }
       gemstone_hsa_argument allocation{};
       if (!resolve_allocation(runtime, pointer, allocation)) return false;
       arguments.push_back(allocation);
@@ -345,7 +353,51 @@ extern "C" int gemstone_hsa_aql_runtime_register_allocation(gemstone_hsa_aql_run
 extern "C" int gemstone_hsa_aql_runtime_unregister_allocation(gemstone_hsa_aql_runtime *runtime, uint64_t native_base) {
   if (runtime == nullptr || native_base == 0) return -1;
   std::lock_guard<std::mutex> guard(runtime->lock);
-  return runtime->allocations.erase(native_base) == 1 ? 0 : -1;
+  const auto removed = runtime->allocations.erase(native_base) == 1;
+  return removed ? 0 : -1;
+}
+
+extern "C" int gemstone_hsa_aql_runtime_dispatch_allocations(gemstone_hsa_aql_runtime *runtime, const void *packet, size_t packet_size,
+                                                             uint64_t *allocation_ids, uint32_t capacity, uint32_t *count) {
+  if (runtime == nullptr || packet == nullptr || count == nullptr || (capacity != 0 && allocation_ids == nullptr)) return -1;
+  gemstone_hsa_aql_packet decoded{};
+  if (gemstone_hsa_decode_aql_packet(packet, packet_size, &decoded) != GEMSTONE_HSA_AQL_DECODE_SUCCESS) return -1;
+  if (decoded.type != GEMSTONE_HSA_AQL_KERNEL_DISPATCH) {
+    *count = 0;
+    return 0;
+  }
+
+  const auto &dispatch = decoded.value.kernel_dispatch;
+  KernelBinding binding;
+  {
+    std::lock_guard<std::mutex> guard(runtime->lock);
+    const auto found = runtime->kernels.find(dispatch.kernel_object);
+    if (found == runtime->kernels.end()) return -1;
+    binding = found->second;
+  }
+  std::vector<gemstone_hsa_argument> arguments;
+  if (!resolve_arguments(*runtime, binding, dispatch.kernarg_address, arguments)) return -1;
+
+  std::vector<uint64_t> ids;
+  ids.reserve(arguments.size() + 1);
+  const auto append = [&](uint64_t id) {
+    if (std::find(ids.begin(), ids.end(), id) == ids.end()) ids.push_back(id);
+  };
+  if (binding.kernarg_size != 0) {
+    gemstone_hsa_argument kernarg{};
+    if (!resolve_allocation(*runtime, dispatch.kernarg_address, kernarg)) return -1;
+    append(kernarg.allocation_id);
+  }
+  for (const auto &argument : arguments)
+    if (argument.kind == GEMSTONE_HSA_ARGUMENT_ALLOCATION) append(argument.allocation_id);
+
+  if (ids.size() > std::numeric_limits<uint32_t>::max()) return -1;
+  const auto required = static_cast<uint32_t>(ids.size());
+  *count = required;
+  if (capacity == 0) return 0;
+  if (capacity < required) return -1;
+  std::copy(ids.begin(), ids.end(), allocation_ids);
+  return 0;
 }
 
 extern "C" int gemstone_hsa_aql_runtime_take_dirty_ranges(gemstone_hsa_aql_runtime *runtime, gemstone_hsa_dirty_range *ranges,
@@ -369,7 +421,15 @@ extern "C" gemstone_hsa_packet_result gemstone_hsa_aql_runtime_consume(uint64_t,
   gemstone_hsa_aql_packet decoded{};
   const auto decode = gemstone_hsa_decode_aql_packet(packet, packet_size, &decoded);
   if (decode != GEMSTONE_HSA_AQL_DECODE_SUCCESS) {
-    set_error(*runtime, gemstone_hsa_aql_decode_error_string(decode));
+    const std::string message = gemstone_hsa_aql_decode_error_string(decode);
+    if (std::getenv("GEMSTONE_HSA_TRACE_PACKETS") != nullptr) std::fprintf(stderr, "Gemstone rejected AQL packet: %s\n", message.c_str());
+    uint64_t completion_signal = 0;
+    if (decoded.type == GEMSTONE_HSA_AQL_KERNEL_DISPATCH) completion_signal = decoded.value.kernel_dispatch.completion_signal;
+    else if (decoded.type == GEMSTONE_HSA_AQL_BARRIER_AND || decoded.type == GEMSTONE_HSA_AQL_BARRIER_OR)
+      completion_signal = decoded.value.barrier.completion_signal;
+    else if (decoded.type == GEMSTONE_HSA_AQL_VENDOR_SPECIFIC) completion_signal = decoded.value.pm4_ib.completion_signal;
+    if (completion_signal != 0) return fail_packet(*runtime, completion_signal, -6, message);
+    set_error(*runtime, message);
     return GEMSTONE_HSA_PACKET_FATAL;
   }
   const bool trace_packets = std::getenv("GEMSTONE_HSA_TRACE_PACKETS") != nullptr;

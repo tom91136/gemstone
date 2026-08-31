@@ -28,8 +28,9 @@ constexpr uint32_t kResponseMagic = UINT32_C(0x474d4631);
 constexpr uint32_t kProtocolVersion = 3;
 constexpr uint32_t kTokenSize = 64;
 constexpr uint32_t kResponseHeaderSize = 20;
-constexpr uint32_t kMaximumPayload = 64U * 1024U * 1024U;
+constexpr uint32_t kMaximumPayload = 128U * 1024U * 1024U;
 constexpr uint32_t kMaximumMessage = 8192;
+constexpr int kSocketTimeoutSeconds = 300;
 
 enum Operation : uint32_t {
   Attest = 0,
@@ -158,7 +159,7 @@ int connect_server(gemstone_execution_client *client) {
   }
   freeaddrinfo(addresses);
   if (fd < 0) return fail(client, "cannot connect to the Gemstone RPC endpoint");
-  const timeval timeout{30, 0};
+  const timeval timeout{kSocketTimeoutSeconds, 0};
   const int no_delay = 1;
   if (setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &no_delay, sizeof(no_delay)) != 0 ||
       setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) != 0 ||

@@ -5,6 +5,9 @@ import net.kurobako.gemstone.execution.*
 import net.kurobako.gemstone.memory.AllocationKind
 
 import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import scala.collection.mutable
 
 class ExecutionServiceSuite extends munit.FunSuite {
@@ -80,6 +83,127 @@ class ExecutionServiceSuite extends munit.FunSuite {
       service.completion(completion),
       Right(CompletionStatus.Failed(ExecutionFailure.Unsupported("barrier")))
     )
+  }
+
+  test("program loading does not block allocation registration") {
+    val loadStarted = CountDownLatch(1)
+    val releaseLoad = CountDownLatch(1)
+    val backend     = TestExecutor(
+      (_, _, _) => {
+        loadStarted.countDown()
+        val _ = releaseLoad.await(5L, TimeUnit.SECONDS)
+        Right(())
+      },
+      _ => Right(()),
+      (_, _, _) => Right(())
+    )
+    val service = ExecutionService(backend)
+    val loaded  = AtomicReference(Option.empty[Either[ExecutionFailure, ProgramId]])
+    val loading = Thread(() => loaded.set(Some(service.load(ProgramFormat.AMDGPUCodeObject, Col.empty))))
+    loading.start()
+    assert(loadStarted.await(5L, TimeUnit.SECONDS), "program load did not start")
+
+    val allocation   = AllocationId.fromLong(23L).toOption.get
+    val registered   = AtomicReference(Option.empty[Either[ExecutionFailure, Unit]])
+    val completed    = CountDownLatch(1)
+    val registration = Thread { () =>
+      registered.set(Some(service.registerAllocation(allocation, 8L, AllocationKind.Shared)))
+      completed.countDown()
+    }
+    registration.start()
+    val responsive = completed.await(1L, TimeUnit.SECONDS)
+    releaseLoad.countDown()
+    loading.join(5000L)
+    registration.join(5000L)
+
+    assert(responsive, "allocation registration waited for program loading")
+    assert(!loading.isAlive, "program load did not finish")
+    assert(!registration.isAlive, "allocation registration did not finish")
+    assertEquals(registered.get(), Some(Right(())))
+    assertEquals(loaded.get().map(_.isRight), Some(true))
+  }
+
+  test("backend program load and explicit unload are serialized") {
+    val loadCount     = AtomicInteger()
+    val loadStarted   = CountDownLatch(1)
+    val releaseLoad   = CountDownLatch(1)
+    val unloadStarted = CountDownLatch(1)
+    val backend       = TestExecutor(
+      (_, _, _) => {
+        if (loadCount.incrementAndGet() == 2) {
+          loadStarted.countDown()
+          val _ = releaseLoad.await(5L, TimeUnit.SECONDS)
+        }
+        Right(())
+      },
+      _ => {
+        unloadStarted.countDown()
+        Right(())
+      },
+      (_, _, _) => Right(())
+    )
+    val service = ExecutionService(backend)
+    val first   = service.load(ProgramFormat.SPIRV, Col.empty).toOption.get
+    val loading = Thread { () =>
+      val _ = service.load(ProgramFormat.SPIRV, Col.empty)
+      ()
+    }
+    loading.start()
+    assert(loadStarted.await(5L, TimeUnit.SECONDS), "second program load did not start")
+
+    val unloading = Thread { () =>
+      val _ = service.unload(first)
+      ()
+    }
+    unloading.start()
+    assert(!unloadStarted.await(200L, TimeUnit.MILLISECONDS), "backend unload overlapped backend load")
+    releaseLoad.countDown()
+    loading.join(5000L)
+    unloading.join(5000L)
+
+    assert(!loading.isAlive, "program load did not finish")
+    assert(!unloading.isAlive, "program unload did not finish")
+    assertEquals(unloadStarted.getCount, 0L)
+  }
+
+  test("backend program load and close cleanup are serialized") {
+    val loadCount     = AtomicInteger()
+    val loadStarted   = CountDownLatch(1)
+    val releaseLoad   = CountDownLatch(1)
+    val unloadStarted = CountDownLatch(1)
+    val backend       = TestExecutor(
+      (_, _, _) => {
+        if (loadCount.incrementAndGet() == 2) {
+          loadStarted.countDown()
+          val _ = releaseLoad.await(5L, TimeUnit.SECONDS)
+        }
+        Right(())
+      },
+      _ => {
+        unloadStarted.countDown()
+        Right(())
+      },
+      (_, _, _) => Right(())
+    )
+    val service = ExecutionService(backend)
+    val _       = service.load(ProgramFormat.SPIRV, Col.empty).toOption.get
+    val loading = Thread { () =>
+      val _ = service.load(ProgramFormat.SPIRV, Col.empty)
+      ()
+    }
+    loading.start()
+    assert(loadStarted.await(5L, TimeUnit.SECONDS), "second program load did not start")
+
+    val closing = Thread(() => service.close())
+    closing.start()
+    assert(!unloadStarted.await(200L, TimeUnit.MILLISECONDS), "close cleanup overlapped backend load")
+    releaseLoad.countDown()
+    loading.join(5000L)
+    closing.join(5000L)
+
+    assert(!loading.isAlive, "program load did not finish")
+    assert(!closing.isAlive, "session close did not finish")
+    assertEquals(unloadStarted.getCount, 0L)
   }
 
   test("launch returns a pending completion before scheduled execution") {

@@ -15,6 +15,7 @@ struct CodeObjectKernelMetadata {
   std::string name;
   std::string symbol;
   uint32_t kernarg_size = 0;
+  uint32_t explicit_argument_count = 0;
   std::vector<gemstone_hsa_kernarg_field> fields;
 };
 

@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <cstdlib>
 
 #include "hsa.h"
 
@@ -57,7 +58,9 @@ int main() {
       || !check(hsa_agent_get_info(agents.gpu, HSA_AGENT_INFO_FEATURE, &features), "HSA_AGENT_INFO_FEATURE")
       || !check(hsa_agent_get_info(agents.gpu, HSA_AGENT_INFO_QUEUE_MAX_SIZE, &queue_max), "HSA_AGENT_INFO_QUEUE_MAX_SIZE"))
     return 4;
-  if (std::strcmp(name, "gfx900") != 0 || (features & HSA_AGENT_FEATURE_KERNEL_DISPATCH) == 0 || queue_max < 64) {
+  const char *expected_target = std::getenv("GEMSTONE_AMDGPU_TARGET");
+  if ((expected_target != nullptr && std::strcmp(name, expected_target) != 0)
+      || (features & HSA_AGENT_FEATURE_KERNEL_DISPATCH) == 0 || queue_max < 64) {
     std::fprintf(stderr, "unexpected virtual agent: name=%s features=%u queue-max=%u\n", name, static_cast<unsigned>(features), queue_max);
     return 5;
   }

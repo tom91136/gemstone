@@ -3,6 +3,8 @@ package net.kurobako.gemstone.server
 import net.kurobako.gemstone.Col
 import net.kurobako.gemstone.execution.*
 
+import java.util.concurrent.atomic.AtomicInteger
+
 final class ProgramLoaderSuite extends munit.FunSuite {
   private final class RecordingProgram(label: String) extends LoadedProgram {
     override def launch(
@@ -16,6 +18,14 @@ final class ProgramLoaderSuite extends munit.FunSuite {
   private final class RecordingLoader(val format: ProgramFormat, label: String) extends ProgramLoader {
     override def load(image: Col[Byte]): Either[ExecutionFailure, LoadedProgram] =
       Either.cond(image == Col(label.length.toByte), RecordingProgram(label), ExecutionFailure.InvalidRequest(label))
+  }
+
+  private final class CountingLoader(loads: AtomicInteger) extends ProgramLoader {
+    override val format: ProgramFormat                                           = ProgramFormat.PTX
+    override def load(image: Col[Byte]): Either[ExecutionFailure, LoadedProgram] = {
+      loads.incrementAndGet()
+      Right(RecordingProgram("ptx"))
+    }
   }
 
   private object EmptyMemory extends ExecutionMemory {
@@ -49,5 +59,18 @@ final class ProgramLoaderSuite extends munit.FunSuite {
       Col(RecordingLoader(ProgramFormat.PTX, "first"), RecordingLoader(ProgramFormat.PTX, "second"))
     )
     assert(result.left.exists(_.contains("PTX")))
+  }
+
+  test("a duplicate program ID is rejected before preparing another program") {
+    val loads    = AtomicInteger()
+    val executor = ISATypedProgramExecutor.create(Col(CountingLoader(loads))).toOption.get
+    val id       = ProgramId.fromLong(1L).toOption.get
+
+    assertEquals(executor.load(id, ProgramFormat.PTX, Col.empty), Right(()))
+    assertEquals(
+      executor.load(id, ProgramFormat.PTX, Col.empty),
+      Left(ExecutionFailure.InvalidRequest("program 1 is already loaded"))
+    )
+    assertEquals(loads.get(), 1)
   }
 }

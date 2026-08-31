@@ -13,7 +13,7 @@ Completion means all of these are green:
 
 1. `sbt check` and `sbt testAPIConformance`;
 2. compact CUDA plus all 237 enabled Thrust 1.15 tests at `tiny` size;
-3. all 348 enabled rocThrust tests plus five HIP/HSA samples;
+3. all 348 enabled rocThrust tests, five HIP/HSA samples, and the pinned rocBLAS smoke dataset;
 4. all 57 compute-applicable Khronos OpenCL CTS quick entries;
 5. all 902 enabled oneDPL tests plus three samples through both Level Zero and OpenCL;
 6. no unsupported operation silently succeeds and no Gemstone run reaches a physical GPU.
@@ -90,6 +90,7 @@ Implemented foundation:
 - HSA AQL, doorbell, code-object, and execution mechanics;
 - compile-once paired Conformance runners for CUDA, Thrust, rocThrust/HIP/HSA samples, OpenCL CTS, and oneDPL;
 - pristine rocThrust setup with separately pinned GoogleTest;
+- a pinned rocBLAS build of the vendor-neutral bounded BLAS harness shared with cuBLAS and oneMKL;
 - pinned official OpenCL CTS quick inventory;
 - oneDPL Level Zero and OpenCL backend lanes.
 

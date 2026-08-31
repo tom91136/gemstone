@@ -12,10 +12,29 @@ then through Gemstone's public provider.
 - codeload SHA-256: `e9b656bc5ab7568b07347825c4fc00d2940c1ca31ee4926e5862b0f6b9fb31e4`
 - licence: Apache-2.0
 
-Upstream CMake owns discovery and disabled-test policy. Gemstone does not keep
-a second allowlist or silently redirect a virtual-device run to a physical
-GPU. Each CTest instance is retained as an independent result so one missing
-operation does not hide the rest of the failure surface.
+Upstream CMake owns discovery and disabled-test policy. Gemstone does not
+silently redirect a virtual-device run to a physical GPU. Each CTest instance
+is retained as an independent result so one missing operation does not hide
+the rest of the failure surface.
+
+The upstream `*WithBigIndexes` cases are explicitly blacklisted at invocation
+time. They submit ranges of 2^30 through 2^33 elements to validate very large
+indexing on a real GPU, which cannot finish in the bounded CPU emulator. The
+same applies to the 4.4-billion-element unique-by-key cases, the 2^31/2^32
+`parallel_for` cases, the 10-billion-element constant iterator case, and the
+deliberately enormous out-of-memory recovery case. The legacy harness filters
+individual named cases and the newer GoogleTest binaries use the equivalent
+GoogleTest filter; all other tests in those executables still run.
+
+The two `address_stability` entries are host-only static/host assertions. They
+run with Gemstone's HIP provider injected, but are intentionally not required
+to produce an execution RPC.
+
+The strict CPU emulator supports the typed `testing/unique_by_key` units,
+including the custom-predicate device paths. To extend the emulator-only
+exception list for a demonstrably impossible workload, set
+`GEMSTONE_ROCTHRUST_EMULATION_BLACKLIST` to comma-separated `case:unit`
+entries; this setting must not be used for ordinary correctness failures.
 
 rocThrust is configured from the pristine pinned archive. GoogleTest 1.11 is downloaded, hash-checked, and installed
 as a separate build dependency, so no upstream source patch is required. Gemstone neither builds a private ROCr nor
@@ -41,15 +60,35 @@ produce named Gemstone failures rather than falling through to hardware.
 
 ```console
 sbt testROCmConformance
-GEMSTONE_ROCTHRUST_FILTER='^testing/(scan|sort)' sbt testROCmConformance
-GEMSTONE_ROCTHRUST_FILTER='^samples/' sbt testROCmConformance
+GEMSTONE_ROCTHRUST_FILTER='^gfx900/testing/(scan|sort)' sbt testROCmConformance
+GEMSTONE_ROCTHRUST_FILTER='^gfx900/samples/' sbt testROCmConformance
 GEMSTONE_ROCTHRUST_SHARD=0/8 GEMSTONE_ROCTHRUST_JOBS=8 sbt testROCmConformance
 ```
 
 The filter is a Scala regular expression over stable qualified case names.
 Shards are zero-based `index/count`; filtering happens before sharding. Worker
 count is 1-32 and defaults to eight. Target compilation is serialized through
-one Ninja build tree while completed executables run concurrently.
+one Ninja build tree while completed executables run concurrently. Each MUnit
+case is qualified by its target (`gfx900/testing/...`), so a comma-separated
+`GEMSTONE_AMDGPU_TARGETS` value builds one fatbinary and runs the cases
+against each selected GFX generation. The default is `gfx900`; the full
+representative GFX-family matrix is:
+
+```console
+GEMSTONE_AMDGPU_TARGETS='gfx600,gfx700,gfx803,gfx900,gfx1010,gfx1100,gfx1200' sbt testROCmConformance
+```
+
+HIP samples carry all selected images in their fatbinary, while HSA sample code
+objects are compiled separately for each selected target. The virtual provider target is passed only to the Gemstone process,
+so the installed ROCm process remains the oracle environment. HSA samples use
+`GEMSTONE_AMDGPU_ORACLE_TARGET` (default `gfx900`) for their physical ROCr
+code object; that target must be included in `GEMSTONE_AMDGPU_TARGETS`
+and match the installed GPU when running the full matrix.
+
+`GEMSTONE_AMDGPU_TARGETS` and `GEMSTONE_AMDGPU_ORACLE_TARGET` are shared by
+the executable AMDGPU-facing conformance suites. OpenCL CTS and oneDPL also
+qualify each Gemstone result by target; their SPIR-V artifacts are compiled
+once because they do not contain target-specific AMDGPU code objects.
 
 The exhaustive suite is intentionally outside the fast `sbt check` lane. See
 the repository README for the current conformance commands and filtering

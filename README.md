@@ -70,7 +70,8 @@ official declarations plus ten required CUDA compatibility/compiler ABI addition
 
 The fast `check` lane runs focused semantic and native boundary tests. Exhaustive vendor-library runs remain explicit.
 `testCUDAConformance` covers the compact CUDA corpus and all 237 enabled Thrust 1.15 translation units at `tiny` size.
-`testROCmConformance` covers focused HSA tests, 348 upstream rocThrust CTest instances, and five HIP/HSA sample cases.
+`testROCmConformance` covers focused HSA tests, 348 upstream rocThrust CTest instances, five HIP/HSA sample cases,
+and the pinned rocBLAS smoke dataset.
 `testOpenCLConformance` covers the 57 compute-applicable entries in the official Khronos OpenCL CTS quick inventory.
 `testSYCLConformance` runs all 902 upstream-enabled oneDPL instances and three samples through both Level Zero and
 OpenCL, retaining each backend/case pair as a separate result. Upstream disabled-test decisions remain authoritative.
@@ -81,6 +82,13 @@ part of `check`; it requires NVCC, HIP/AMDGPU Clang, and DPC++ and is expected t
 as named test failures while the implementation is being expanded. Filters, deterministic shards, and bounded worker
 controls are documented in each conformance directory.
 
+The AMDGPU-facing executable conformance suites share `GEMSTONE_AMDGPU_TARGETS`,
+a comma-separated GFX matrix defaulting to `gfx900`, and
+`GEMSTONE_AMDGPU_ORACLE_TARGET`, the physical target used where an oracle code
+object must be selected. HIP fatbinaries and HSA code objects are target-aware;
+OpenCL CTS and oneDPL artifacts are compiled once and run through each virtual
+target on the Gemstone side. Oracle processes never receive the virtual target.
+
 Checked-in generated Scala and resources live in each owning module's `src/generated/{main,test}` tree; handwritten
 sources remain under `src/{main,test}`. Generators format Scala before comparing or writing it, and `scalafmtAll`
 formats these generated roots as well, so regenerated diffs are canonical. CUDA's generated C artifacts and
@@ -90,6 +98,8 @@ Every external Conformance case follows one invariant: compile once through the 
 exact artifact as the vendor oracle, then run it unchanged through Gemstone. There are no Gemstone compile defines,
 alternate link lines, patched vendor runtimes, or private ROCr hooks. Each Gemstone child receives a fresh authenticated
 server token; a zero exit is changed to a loud failure if the server observed no required CUDA or execution request.
+For emulator-only iteration, `GEMSTONE_NO_ORACLE=1` skips the vendor execution while retaining the Gemstone run and
+its assertions; this mode is not an acceptance result.
 
 The public launch model is `gemstone run --api <api> [provider option] -- <ordinary command>`. CUDA replaces only the
 Driver (`libcuda`), so applications may use the stock CUDA Runtime. HIP and direct HSA use drop-in public runtime

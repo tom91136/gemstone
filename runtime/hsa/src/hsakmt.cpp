@@ -21,6 +21,7 @@
 
 #include "gemstone/hsa/code_object_metadata.hpp"
 #include "gemstone/hsa/hsakmt_runtime.h"
+#include "gemstone/hsa/target.h"
 #include "gemstone/hsa/virtual_kfd.h"
 #include "gemstone_execution_rpc.h"
 #include <hsakmt/hsakmt.h>
@@ -786,8 +787,9 @@ extern "C" HSAKMT_STATUS hsaKmtGetNodeProperties(HSAuint32 node, HsaNodeProperti
   properties->NumCUPerArray = 4;
   properties->NumSIMDPerCU = 4;
   properties->MaxSlotsScratchCU = 32;
-  properties->EngineId.ui32.Major = 9;
-  properties->EngineId.ui32.Minor = 0;
+  const auto version = gemstone::hsa::target_version();
+  properties->EngineId.ui32.Major = version.major;
+  properties->EngineId.ui32.Minor = version.minor;
   properties->VendorId = 0x1002;
   properties->DeviceId = 0x6860;
   properties->LocalMemSize = kAvailableMemory;
@@ -802,8 +804,10 @@ extern "C" HSAKMT_STATUS hsaKmtGetNodeProperties(HSAuint32 node, HsaNodeProperti
   properties->Capability.ui32.QueueSizePowerOfTwo = 1;
   properties->Capability.ui32.DoorbellType = 2;
   properties->Capability.ui32.CoherentHostAccess = 1;
-  const char *name = "gfx900";
-  std::memcpy(properties->AMDName, name, std::strlen(name) + 1);
+  const char *name = gemstone::hsa::target_arch();
+  const size_t name_size = std::min(std::strlen(name), sizeof(properties->AMDName) - 1U);
+  std::memcpy(properties->AMDName, name, name_size);
+  properties->AMDName[name_size] = 0;
   const char *marketing = "Gemstone Virtual AMDGPU";
   for (size_t index = 0; marketing[index] != '\0' && index + 1 < HSA_PUBLIC_NAME_SIZE; ++index)
     properties->MarketingName[index] = static_cast<HSAuint16>(marketing[index]);

@@ -104,13 +104,22 @@ object Parser {
 
   private def parseRegister(text: String): Option[Operand] =
     text.toLowerCase match {
-      case s"$prefix[$first:$last]" if digits(first) && digits(last) && first.toInt <= last.toInt =>
-        registerFile(prefix).map(Operand.Register(_, first.toInt, last.toInt))
+      case s"$prefix[$first:$last]" if digits(first) && digits(last) =>
+        for {
+          firstValue <- first.toIntOption
+          lastValue  <- last.toIntOption
+          if firstValue <= lastValue
+          file <- registerFile(prefix)
+        } yield Operand.Register(file, firstValue, lastValue)
       case value if SpecialRegisters.contains(value) => Some(Operand.SpecialRegister(value))
       case value                                     =>
         RegisterPrefixes.find(value.startsWith).flatMap { prefix =>
           val number = value.drop(prefix.length)
-          registerFile(prefix).filter(_ => digits(number)).map(Operand.Register(_, number.toInt, number.toInt))
+          for {
+            file     <- registerFile(prefix)
+            register <- number.toIntOption
+            if digits(number)
+          } yield Operand.Register(file, register, register)
         }
     }
 

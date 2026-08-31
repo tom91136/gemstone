@@ -1,0 +1,31 @@
+hip_4.2 {
+  global:
+    __hip*;
+    hip*;
+  local: *;
+};
+
+hip_4.3 {
+  global:
+    hipGraphDestroy;
+    hipGraphExecDestroy;
+    hipGraphInstantiate;
+    hipGraphLaunch;
+    hipStreamBeginCapture;
+    hipStreamEndCapture;
+    hipStreamIsCapturing;
+} hip_4.2;
+
+hip_5.1 {
+  global:
+    hipDeviceGetDefaultMemPool;
+    hipFreeAsync;
+    hipMallocAsync;
+    hipMemPoolTrimTo;
+} hip_4.3;
+
+hip_6.0 {
+  global:
+    hipExtGetLastError;
+    hipGetDevicePropertiesR0600;
+} hip_5.1;

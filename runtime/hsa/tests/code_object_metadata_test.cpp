@@ -34,6 +34,12 @@ int main(int argc, char **argv) {
   assert(kernels[0].fields[2].offset == 16 && kernels[0].fields[2].size == (fixture ? 4 : 8));
 
   if (fixture) {
+    const auto multiple_notes = gemstone::hsa::test::code_object_fixture(2);
+    assert(gemstone::hsa::parse_code_object_metadata(multiple_notes.data(), multiple_notes.size(), kernels, error));
+    assert(error.empty());
+    assert(kernels.size() == 2);
+    assert(kernels[0].name == "add" && kernels[1].name == "add");
+
     auto malformed = image;
     malformed[EI_MAG0] = 0;
     assert(!gemstone::hsa::parse_code_object_metadata(malformed.data(), malformed.size(), kernels, error));

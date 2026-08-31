@@ -43,7 +43,7 @@ inline void append_argument(std::vector<uint8_t> &metadata, uint32_t offset, uin
   append_string(metadata, kind);
 }
 
-inline std::vector<uint8_t> code_object_fixture() {
+inline std::vector<uint8_t> code_object_fixture(uint32_t metadata_note_count = 1) {
   std::vector<uint8_t> metadata;
   metadata.push_back(0x81);
   append_string(metadata, "amdhsa.kernels");
@@ -65,7 +65,8 @@ inline std::vector<uint8_t> code_object_fixture() {
   const size_t name_size = 7;
   const size_t padded_name = 8;
   const size_t padded_description = (metadata.size() + 3) & ~size_t{3};
-  const size_t section_offset = note_offset + 12 + padded_name + padded_description;
+  const size_t note_size = 12 + padded_name + padded_description;
+  const size_t section_offset = note_offset + note_size * metadata_note_count;
   std::vector<uint8_t> image(section_offset + 2 * sizeof(Elf64_Shdr));
 
   Elf64_Ehdr header{};
@@ -83,14 +84,17 @@ inline std::vector<uint8_t> code_object_fixture() {
   std::memcpy(image.data(), &header, sizeof(header));
 
   const uint32_t note_header[] = {static_cast<uint32_t>(name_size), static_cast<uint32_t>(metadata.size()), 32};
-  std::memcpy(image.data() + note_offset, note_header, sizeof(note_header));
-  std::memcpy(image.data() + note_offset + 12, "AMDGPU\0", name_size);
-  std::memcpy(image.data() + note_offset + 12 + padded_name, metadata.data(), metadata.size());
+  for (uint32_t index = 0; index < metadata_note_count; ++index) {
+    const size_t current = note_offset + static_cast<size_t>(index) * note_size;
+    std::memcpy(image.data() + current, note_header, sizeof(note_header));
+    std::memcpy(image.data() + current + 12, "AMDGPU\0", name_size);
+    std::memcpy(image.data() + current + 12 + padded_name, metadata.data(), metadata.size());
+  }
 
   Elf64_Shdr note{};
   note.sh_type = SHT_NOTE;
   note.sh_offset = note_offset;
-  note.sh_size = 12 + padded_name + padded_description;
+  note.sh_size = note_size * metadata_note_count;
   std::memcpy(image.data() + section_offset + sizeof(Elf64_Shdr), &note, sizeof(note));
   return image;
 }

@@ -38,4 +38,15 @@ class ParserSuite extends munit.FunSuite {
     assert(Parser.parseInstruction("1bad v0").isLeft)
     assert(Parser.parseInstruction("gemstone_unknown v0").isLeft)
   }
+
+  test("do not throw on register numbers that do not fit the register index") {
+    val sources = Seq(
+      "v_mov_b32 v999999999999, v0",
+      "v_mov_b32 v[0:999999999999], v0"
+    )
+    sources.foreach { source =>
+      try Parser.parseInstruction(source)
+      catch case error: NumberFormatException => fail(s"parser overflowed while reading '$source': $error")
+    }
+  }
 }

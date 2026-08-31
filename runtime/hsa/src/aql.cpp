@@ -46,6 +46,14 @@ extern "C" gemstone_hsa_aql_decode_error gemstone_hsa_decode_aql_packet(const vo
   if (header.acquire_fence_scope > 2 || header.release_fence_scope > 2) return GEMSTONE_HSA_AQL_DECODE_RESERVED_BITS;
   decoded->type = header.type;
 
+  // Preserve the completion signal before validating the packet body. The
+  // queue consumer can then report a malformed packet to its producer instead
+  // of permanently stranding a waiter on a packet that can never execute.
+  if (header.type == GEMSTONE_HSA_AQL_KERNEL_DISPATCH) decoded->value.kernel_dispatch.completion_signal = read_u64(bytes, 56);
+  else if (header.type == GEMSTONE_HSA_AQL_BARRIER_AND || header.type == GEMSTONE_HSA_AQL_BARRIER_OR)
+    decoded->value.barrier.completion_signal = read_u64(bytes, 56);
+  else if (header.type == GEMSTONE_HSA_AQL_VENDOR_SPECIFIC) decoded->value.pm4_ib.completion_signal = read_u64(bytes, 56);
+
   if (header.type == GEMSTONE_HSA_AQL_VENDOR_SPECIFIC) {
     // ROCr gfx9+ AqlQueue::ExecutePM4 publishes format 1 as a 64-byte AQL
     // packet. Gemstone has no physical GPU cache to invalidate, but retaining
@@ -55,7 +63,8 @@ extern "C" gemstone_hsa_aql_decode_error gemstone_hsa_decode_aql_packet(const vo
       if (read_u64(bytes, offset) != 0) return GEMSTONE_HSA_AQL_DECODE_RESERVED_BITS;
     auto &result = decoded->value.pm4_ib;
     result.header = header;
-    for (size_t index = 0; index < 4; ++index) result.indirect_buffer_commands[index] = read_u32(bytes, 4 + index * 4);
+    for (size_t index = 0; index < 4; ++index)
+      result.indirect_buffer_commands[index] = read_u32(bytes, 4 + index * 4);
     result.completion_signal = read_u64(bytes, 56);
     return GEMSTONE_HSA_AQL_DECODE_SUCCESS;
   }

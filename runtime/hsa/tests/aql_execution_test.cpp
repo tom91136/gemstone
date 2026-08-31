@@ -250,6 +250,24 @@ void pm4_ib_synchronization_completes() {
   gemstone_hsa_aql_runtime_destroy(runtime);
 }
 
+void malformed_dispatch_fails_its_completion_signal() {
+  FakeExecutor executor;
+  FakeSignals signals;
+  auto executor_ops = executor_operations(executor);
+  gemstone_hsa_signal_operations signal_ops{&signals, load_signal, complete_signal, fail_signal};
+  auto *runtime = gemstone_hsa_aql_runtime_create(&executor_ops, &signal_ops);
+  assert(runtime != nullptr);
+
+  set_signal(signals, 32, 1);
+  auto packet = kernel_packet(77, 0, 32);
+  write<uint16_t>(packet, 2, 1); // Claims one dimension but retains a four-wide Y workgroup.
+  assert(gemstone_hsa_aql_runtime_consume(1, 0, packet.data(), packet.size(), runtime) == GEMSTONE_HSA_PACKET_ACCEPTED);
+  assert(signal_value(signals, 32) == -6);
+  assert(executor.launches == 0);
+  assert(std::string(gemstone_hsa_aql_runtime_error(runtime)) == "dispatch dimensions are invalid");
+  gemstone_hsa_aql_runtime_destroy(runtime);
+}
+
 void rocr_signal_operations_use_the_stock_value_word() {
   struct RocrSignalStorage {
     uint64_t kind = 0;
@@ -276,6 +294,7 @@ void execution_queue_dispatches_and_completes() {
   assert(runtime != nullptr);
 
   std::array<uint8_t, 32> allocation{};
+  std::array<uint8_t, 64> unrelated_allocation{};
   std::array<uint8_t, 24> kernarg{};
   // A one-past pointer is a legal C/C++ loop bound and must remain relocatable
   // even though it cannot be dereferenced.
@@ -297,6 +316,9 @@ void execution_queue_dispatches_and_completes() {
   const std::array<uint8_t, 4> image{{0x7f, 'E', 'L', 'F'}};
   assert(gemstone_hsa_aql_runtime_register_allocation(runtime, reinterpret_cast<uint64_t>(allocation.data()), allocation.size(), 99) == 0);
   assert(gemstone_hsa_aql_runtime_register_allocation(runtime, reinterpret_cast<uint64_t>(kernarg.data()), kernarg.size(), 100) == 0);
+  assert(gemstone_hsa_aql_runtime_register_allocation(runtime, reinterpret_cast<uint64_t>(unrelated_allocation.data()),
+                                                      unrelated_allocation.size(), 101)
+         == 0);
   assert(gemstone_hsa_aql_runtime_install_kernel(runtime, 77, image.data(), image.size(), "add_one", kernarg.size(), fields.data(),
                                                  fields.size())
          == 0);
@@ -311,6 +333,15 @@ void execution_queue_dispatches_and_completes() {
 
   set_signal(signals, 100, 1);
   ring[0] = kernel_packet(77, reinterpret_cast<uint64_t>(kernarg.data()), 100);
+  uint32_t dispatch_allocation_count = 0;
+  assert(gemstone_hsa_aql_runtime_dispatch_allocations(runtime, ring[0].data(), ring[0].size(), nullptr, 0, &dispatch_allocation_count)
+         == 0);
+  assert(dispatch_allocation_count == 2);
+  std::array<uint64_t, 2> dispatch_allocations{};
+  assert(gemstone_hsa_aql_runtime_dispatch_allocations(runtime, ring[0].data(), ring[0].size(), dispatch_allocations.data(),
+                                                       dispatch_allocations.size(), &dispatch_allocation_count)
+         == 0);
+  assert(dispatch_allocations[0] == 100 && dispatch_allocations[1] == 99);
   __atomic_store_n(resource.write_pointer, UINT64_C(1), __ATOMIC_RELEASE);
   __atomic_store_n(resource.doorbell, UINT64_C(0), __ATOMIC_RELEASE);
   {
@@ -491,6 +522,7 @@ void a_waiting_barrier_does_not_block_another_queue() {
 int main() {
   decoder_is_typed_and_rejects_bad_packets();
   pm4_ib_synchronization_completes();
+  malformed_dispatch_fails_its_completion_signal();
   rocr_signal_operations_use_the_stock_value_word();
   execution_queue_dispatches_and_completes();
   one_code_object_binds_multiple_kernel_objects();

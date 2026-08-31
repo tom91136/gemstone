@@ -20,6 +20,7 @@ final class OpenCLCTSConformanceSuite extends munit.FunSuite {
   override val munitTimeout: Duration = 30.minutes
 
   private final case class CTSCase(name: String, command: String)
+  private final case class MatrixCase(testCase: CTSCase, target: String, identity: String)
 
   private val ctsVersion = version("opencl-cts")
   private val source     = prepareArchive(
@@ -40,6 +41,7 @@ final class OpenCLCTSConformanceSuite extends munit.FunSuite {
   private val buildRoot = target.resolve(s"opencl-cts-$ctsVersion/build")
   private val loader    = sys.env.get("GEMSTONE_OPENCL_LOADER").filter(_.nonEmpty).map(Path.of(_))
     .getOrElse(Path.of("/usr/lib64/libOpenCL.so"))
+  private val targetMatrix = amdgpuTargetMatrix
 
   require(Files.isRegularFile(loader), s"OpenCL loader is absent: $loader; set GEMSTONE_OPENCL_LOADER")
   configure(
@@ -57,9 +59,14 @@ final class OpenCLCTSConformanceSuite extends munit.FunSuite {
     )
   )
 
-  private val all      = parseQuickInventory(source.resolve("test_conformance/opencl_conformance_tests_quick.csv"))
-  private val selected = select(all.zipWithIndex.map { case (entry, index) => index -> entry.name }, "OPENCL")
-    .map { case (index, _) => all(index) }
+  private val all         = parseQuickInventory(source.resolve("test_conformance/opencl_conformance_tests_quick.csv"))
+  private val matrixCases = targetMatrix.targets.flatMap { target =>
+    all.map(entry => MatrixCase(entry, target, s"$target/${entry.name}"))
+  }
+  private val selected = select(
+    matrixCases.zipWithIndex.map { case (entry, index) => index -> entry.identity },
+    "OPENCL"
+  ).map { case (index, _) => matrixCases(index) }
   private val jobs = sys.env.get("GEMSTONE_OPENCL_JOBS")
     .fold(Math.min(8, Runtime.getRuntime.availableProcessors))(_.toInt)
   private var executor   = Option.empty[ExecutorService]
@@ -72,15 +79,15 @@ final class OpenCLCTSConformanceSuite extends munit.FunSuite {
     executor = Some(pool)
     executions = selected.map { entry =>
       val task: Callable[Unit] = () => runCase(entry)
-      entry.name -> pool.submit(task)
+      entry.identity -> pool.submit(task)
     }.toMap
   }
 
   override def afterAll(): Unit = executor.foreach(_.shutdown())
 
   selected.foreach { entry =>
-    test(s"opencl/${entry.name}") {
-      await(entry.name)
+    test(s"opencl/${entry.identity}") {
+      await(entry.identity)
     }
   }
 
@@ -90,19 +97,22 @@ final class OpenCLCTSConformanceSuite extends munit.FunSuite {
       case error: ExecutionException => throw error.getCause
     }
 
-  private def runCase(entry: CTSCase): Unit = {
+  private def runCase(entry: MatrixCase): Unit = {
     val result = runPaired(
       ComputeAPI.OpenCL,
       RuntimeLayout(
         openCLICD = sys.env.get("GEMSTONE_OPENCL_ICD").filter(_.nonEmpty).map(Path.of(_))
       ),
-      Vector("bash", "-c", entry.command),
+      Vector("bash", "-c", entry.testCase.command),
       buildRoot.resolve("test_conformance"),
       oracleEnvironment = Map("CL_DEVICE_TYPE" -> "CL_DEVICE_TYPE_GPU"),
-      gemstoneEnvironment = Map("CL_DEVICE_TYPE" -> "CL_DEVICE_TYPE_GPU")
+      gemstoneEnvironment = Map(
+        "CL_DEVICE_TYPE"         -> "CL_DEVICE_TYPE_GPU",
+        "GEMSTONE_AMDGPU_TARGET" -> entry.target
+      )
     )
-    require(result.oracle.exit == 0, s"oracle/${entry.name}:\n${result.oracle.diagnostic}")
-    require(result.gemstone.exit == 0, s"gemstone/${entry.name}:\n${result.gemstone.diagnostic}")
+    if result.oracleRan then require(result.oracle.exit == 0, s"oracle/${entry.identity}:\n${result.oracle.diagnostic}")
+    require(result.gemstone.exit == 0, s"gemstone/${entry.identity}:\n${result.gemstone.diagnostic}")
   }
 
   private def parseQuickInventory(path: Path): Vector[CTSCase] = {
@@ -111,8 +121,8 @@ final class OpenCLCTSConformanceSuite extends munit.FunSuite {
       if (line.isEmpty || line.startsWith("#")) None
       else
         line.split("\\s*,\\s*", 3) match {
-          case Array(_, command) if command.startsWith("gl/")    => None
-          case Array(name, command)                               => Some(CTSCase(name, command))
+          case Array(_, command) if command.startsWith("gl/") => None
+          case Array(name, command)                           => Some(CTSCase(name, command))
           case Array(device, name, command)
               if device == "CL_DEVICE_TYPE_GPU" && !command.startsWith("gl/") =>
             Some(CTSCase(name, command))

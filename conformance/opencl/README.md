@@ -16,6 +16,18 @@ GEMSTONE_OPENCL_FILTER='^(Basic|API)$' sbt testOpenCLConformance
 GEMSTONE_OPENCL_SHARD=0/8 GEMSTONE_OPENCL_JOBS=8 sbt testOpenCLConformance
 ```
 
+Cases are target-qualified and the Gemstone lane runs once for each target in
+the shared AMDGPU matrix. The OpenCL CTS artifact is compiled once because it
+contains SPIR-V rather than target-specific AMDGPU code:
+
+```console
+GEMSTONE_AMDGPU_TARGETS='gfx900,gfx1036,gfx1100' GEMSTONE_OPENCL_FILTER='^gfx1036/(Basic|API)$' sbt testOpenCLConformance
+```
+
+The oracle remains the installed physical OpenCL device. The shared
+`GEMSTONE_AMDGPU_ORACLE_TARGET` setting is only needed when a lane requires a
+physical-target code object, such as the direct-HSA samples in rocThrust.
+
 Set `GEMSTONE_OPENCL_ICD` to a directory containing only Gemstone's `.icd` file. The provider must authenticate with
 the execution server; missing provider discovery, silent vendor fallback, or a process that never uses Gemstone fails
 loudly. `GEMSTONE_OPENCL_LOADER` may override the stock loader used at compile/link time.

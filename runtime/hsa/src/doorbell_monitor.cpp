@@ -34,6 +34,7 @@ struct QueueState {
   std::atomic<bool> active{true};
   std::atomic<bool> fatal{false};
   std::atomic<uint32_t> scans{0};
+  std::atomic<bool> traced_armed{false};
   std::mutex scan_lock;
   std::condition_variable scan_finished;
 };
@@ -105,10 +106,19 @@ struct gemstone_hsa_doorbell_monitor {
     // replacement cannot observe a write edge to ordinary memory. The first
     // non-sentinel value arms the queue; thereafter ring publication and the
     // write index are polled so repeated doorbell values cannot lose work.
-    if (load(&queue.doorbell->value, __ATOMIC_ACQUIRE) == kUnrungDoorbell) return false;
+    const uint64_t doorbell = load(&queue.doorbell->value, __ATOMIC_ACQUIRE);
+    if (doorbell == kUnrungDoorbell) return false;
 
     uint64_t next = load(q.read_index, __ATOMIC_ACQUIRE);
     uint64_t end = load(q.write_index, __ATOMIC_ACQUIRE);
+    const bool first_trace =
+        std::getenv("GEMSTONE_HSA_TRACE_PACKETS") != nullptr && !queue.traced_armed.exchange(true, std::memory_order_relaxed);
+    if (first_trace) {
+      const auto *packet = static_cast<const unsigned char *>(q.ring_base) + ((next & (q.ring_size_packets - 1)) * q.packet_size);
+      const uint16_t header = load(reinterpret_cast<const uint16_t *>(packet + q.packet_header_offset), __ATOMIC_ACQUIRE);
+      std::fprintf(stderr, "Gemstone armed AQL queue=%lu doorbell=%lu read=%lu write=%lu header=0x%04x mask=0x%04x invalid=0x%04x\n",
+                   q.queue_id, doorbell, next, end, header, q.packet_type_mask, q.invalid_packet_type);
+    }
     end = std::min(end, next + q.ring_size_packets);
     bool progressed = false;
 

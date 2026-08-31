@@ -30,6 +30,8 @@ lazy val spirvVersion         = "1.6"
 lazy val spirvPackage         = "v" + spirvVersion.replace('.', '_')
 lazy val rocThrustCommit      = "ed551d53d9bac8fd55b2a7fc62683946e33060a0"
 lazy val rocThrustSha256      = "e9b656bc5ab7568b07347825c4fc00d2940c1ca31ee4926e5862b0f6b9fb31e4"
+lazy val rocBLASCommit         = "9eee14a3340e00fb8385e9035c6c15521396dcc6"
+lazy val rocBLASSha256         = "a1a2f748b7de4d2b7b8d5df4f8990b7d4f56a4ca8679fefdca90e71b5c406ad2"
 lazy val rocmExamplesCommit   = "143ead779346e6e7179100cf7c56d9f3562554ae"
 lazy val rocmExamplesSha256   = "566b19aedd133dc913cb25d4b97c60f01ef24f03668e86c4d45ca855e97f14cd"
 lazy val oneDPLCommit         = "3e0e05b32bf53850816f6a6bb09bcfded4f7edb7"
@@ -386,6 +388,21 @@ lazy val hsa = project
     }
   )
 
+lazy val hip = project
+  .in(file("runtime/hip"))
+  .dependsOn(qualityRules % ScalafixConfig)
+  .settings(
+    commonSettings,
+    name := "gemstone-runtime-hip",
+    CMakeTest.ctest := Def.uncached {
+      CMakeTest.run(baseDirectory.value, target.value / "cmake", Seq("-DBUILD_TESTING=ON"), streams.value.log)
+    },
+    Test / test := (Test / test).dependsOn(CMakeTest.ctest).evaluated,
+    Test / testFull := Def.uncached {
+      (Test / testFull).dependsOn(CMakeTest.ctest).value
+    }
+  )
+
 lazy val levelzero = project
   .in(file("runtime/levelzero"))
   .dependsOn(qualityRules % ScalafixConfig)
@@ -535,7 +552,9 @@ lazy val amdgpu = projectMatrix
   .jvmPlatform(
     scalaVersions = Seq(scala3Version),
     settings = catsCoreJVMSettings ++ Seq(
-      libraryDependencies += "org.typelevel" %% "cats-parse" % catsParseVersion
+      libraryDependencies += "org.typelevel" %% "cats-parse" % catsParseVersion,
+      Test / unmanagedSourceDirectories +=
+        (LocalRootProject / baseDirectory).value / "isa" / "amdgpu" / "src" / "test-jvm" / "scala"
     )
   )
   .nativePlatform(
@@ -683,7 +702,7 @@ lazy val isa = project
 
 lazy val runtime = project
   .in(file("runtime"))
-  .aggregate(cuda, hsa, levelzero)
+  .aggregate(cuda, hip, hsa, levelzero)
   .dependsOn(qualityRules % ScalafixConfig)
   .settings(commonSettings, name := "gemstone-runtime")
 
@@ -703,6 +722,8 @@ lazy val conformance = project
         Seq(
           s"rocthrust.commit=$rocThrustCommit",
           s"rocthrust.sha256=$rocThrustSha256",
+          s"rocblas.commit=$rocBLASCommit",
+          s"rocblas.sha256=$rocBLASSha256",
           s"rocm-examples.commit=$rocmExamplesCommit",
           s"rocm-examples.sha256=$rocmExamplesSha256",
           s"onedpl.commit=$oneDPLCommit",
@@ -747,7 +768,7 @@ addCommandAlias(
 )
 addCommandAlias(
   "testROCmConformance",
-  ";hsa / testFull;conformance / Test / testOnly net.kurobako.gemstone.conformance.RocThrustConformanceSuite"
+  ";hsa / testFull;hip / testFull;conformance / Test / testOnly net.kurobako.gemstone.conformance.RocThrustConformanceSuite net.kurobako.gemstone.conformance.RocBLASConformanceSuite"
 )
 addCommandAlias(
   "testSYCLConformance",

@@ -216,10 +216,10 @@ class ThrustConformanceSuite extends munit.FunSuite {
     Option(compileFailures.get(matrixCase.name)).foreach(error => throw error)
     val caseRoot = caseRootFor(matrixCase)
     val command  = Vector(caseRoot.resolve("test").toString) ++ unitFilters ++ Vector(s"--sizes=$sizes", outputMode)
-    if (oracleArchitectures.contains(matrixCase.architecture)) {
+    if (oracleEnabled && oracleArchitectures.contains(matrixCase.architecture)) {
       val oracle = capture(command, caseRoot, Environment(Map.empty, GemstoneEnvironment))
       assertPass(matrixCase, "oracle", oracle)
-    } else if (!skipOracle) {
+    } else if (oracleEnabled && !skipOracle) {
       println(s"[thrust] oracle skipped for ${matrixCase.name}: target is not executable on the available device set")
     }
 
@@ -240,7 +240,7 @@ class ThrustConformanceSuite extends munit.FunSuite {
     val gemstone = GemstoneProcess.attested(
       ComputeAPI.CUDA,
       RuntimeLayout(cudaDriver = Some(libraryDir.resolve("libcuda.so.1"))),
-      sys.env
+      sys.env - "GEMSTONE_NO_ORACLE"
     )(environment =>
       capture(
         gemstoneCommand,
@@ -276,6 +276,10 @@ class ThrustConformanceSuite extends munit.FunSuite {
       actual.contains("0 failures") && actual.contains("passes"),
       s"$lane/${matrixCase.name}\nstderr:\n$errors\n$actual"
     )
+  }
+
+  private def oracleEnabled: Boolean = !sys.env.get("GEMSTONE_NO_ORACLE").exists { value =>
+    Set("1", "true", "yes").contains(value.trim.toLowerCase)
   }
 
   private def includeFlags: Vector[String] = Vector(

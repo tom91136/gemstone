@@ -31,15 +31,16 @@ import java.util.concurrent.atomic.LongAdder
 import java.util.concurrent.ConcurrentHashMap
 
 object GemstoneRPCServer {
-  private val RequestMagic       = 0x474d5331
-  private val ResponseMagic      = 0x474d5231
-  private val ProtocolVersion    = 2
-  private val CallbackMagic      = 0x474d4331
-  private val CallbackReplyMagic = 0x474d4131
-  private val FingerprintBytes   = 64
-  private val TokenBytes         = 64
-  private val MaximumNameBytes   = 128
-  private val MaximumPayload     = 64 * 1024 * 1024
+  private val RequestMagic        = 0x474d5331
+  private val ResponseMagic       = 0x474d5231
+  private val ProtocolVersion     = 2
+  private val CallbackMagic       = 0x474d4331
+  private val CallbackReplyMagic  = 0x474d4131
+  private val FingerprintBytes    = 64
+  private val TokenBytes          = 64
+  private val MaximumNameBytes    = 128
+  private val MaximumPayload      = 128 * 1024 * 1024
+  private val SocketTimeoutMillis = 300000
 
   private final case class ExecutionSessionEntry(service: ExecutionService, connections: Int)
 
@@ -203,7 +204,7 @@ object GemstoneRPCServer {
     val execution = executions.connection()
     try {
       socket.setTcpNoDelay(true)
-      socket.setSoTimeout(30000)
+      socket.setSoTimeout(SocketTimeoutMillis)
       val server              = CUDAServer.emulated
       val input               = DataInputStream(socket.getInputStream)
       val output              = DataOutputStream(socket.getOutputStream)
@@ -226,8 +227,7 @@ object GemstoneRPCServer {
         catch {
           case _: EOFException                       => false
           case _: SocketException if socket.isClosed => false
-          case _: Throwable                          =>
-            false
+          case _: Throwable                          => false
         }
       Iterator.continually(exchange()).takeWhile(identity).foreach(_ => ())
     } finally {

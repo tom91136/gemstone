@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <array>
 #include <cstring>
+#include <iterator>
 #include <limits>
 #include <string_view>
 #include <utility>
@@ -201,8 +202,7 @@ bool string_value(const Value *value, std::string &result) {
 }
 
 bool allocation_value_kind(std::string_view kind) {
-  constexpr std::array<std::string_view, 6> pointer_kinds = {"global_buffer",        "by_reference",         "queue",
-                                                             "hidden_printf_buffer", "hidden_default_queue", "hidden_completion_action"};
+  constexpr std::array<std::string_view, 3> pointer_kinds = {"global_buffer", "by_reference", "queue"};
   return std::find(pointer_kinds.begin(), pointer_kinds.end(), kind) != pointer_kinds.end();
 }
 
@@ -235,6 +235,7 @@ bool decode_kernel(const Value &value, CodeObjectKernelMetadata &kernel, std::st
       error = "AMDGPU pointer kernarg is not 64 bits";
       return false;
     }
+    if (value_kind.rfind("hidden_", 0) != 0) ++kernel.explicit_argument_count;
     kernel.fields.push_back({kind, offset, size});
   }
   std::sort(kernel.fields.begin(), kernel.fields.end(), [](const auto &left, const auto &right) { return left.offset < right.offset; });
@@ -254,6 +255,7 @@ size_t align_four(size_t value) { return (value + 3U) & ~size_t{3U}; }
 
 bool decode_note_range(const uint8_t *bytes, size_t size, std::vector<CodeObjectKernelMetadata> &kernels, std::string &error) {
   size_t offset = 0;
+  bool found_metadata = false;
   while (checked_range(offset, 12, size)) {
     uint32_t name_size = 0;
     uint32_t description_size = 0;
@@ -295,9 +297,10 @@ bool decode_note_range(const uint8_t *bytes, size_t size, std::vector<CodeObject
       if (!decode_kernel(item, kernel, error)) return false;
       decoded.push_back(std::move(kernel));
     }
-    kernels = std::move(decoded);
-    return true;
+    kernels.insert(kernels.end(), std::make_move_iterator(decoded.begin()), std::make_move_iterator(decoded.end()));
+    found_metadata = true;
   }
+  if (found_metadata) return true;
   error = "AMDGPU metadata note is absent";
   return false;
 }

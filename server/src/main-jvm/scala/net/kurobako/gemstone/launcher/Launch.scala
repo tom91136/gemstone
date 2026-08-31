@@ -1,5 +1,7 @@
 package net.kurobako.gemstone.launcher
 
+import net.kurobako.gemstone.Col.*
+
 import java.nio.file.Path
 
 enum ComputeAPI(val id: String) {
@@ -88,7 +90,7 @@ object Launch {
       case ComputeAPI.CUDA =>
         preload("CUDA Driver", api, layout.cudaDriver, base, inherited, RequiredEvidence.CUDA)
       case ComputeAPI.HIP =>
-        preload("HIP Runtime", api, layout.hipRuntime, base, inherited, RequiredEvidence.Execution)
+        hip(api, layout, base, inherited)
       case ComputeAPI.HSA =>
         preload("HSA Runtime", api, layout.hsaRuntime, base, inherited, RequiredEvidence.Execution)
       case ComputeAPI.OpenCL =>
@@ -167,6 +169,29 @@ object Launch {
           )
         ),
         evidence
+      )
+    }
+
+  private def hip(
+      api: ComputeAPI,
+      layout: RuntimeLayout,
+      base: Environment,
+      inherited: Map[String, String]
+  ): Either[LaunchError, LaunchPlan] =
+    provider("HIP Runtime", layout.hipRuntime).map { library =>
+      val directories =
+        (Option(library.getParent).toCol ++ layout.hsaRuntime.flatMap(path => Option(path.getParent)).toCol)
+          .map(_.toString)
+      val libraryPath = (directories ++ inherited.get("LD_LIBRARY_PATH").filter(_.nonEmpty).toCol).mkString(":")
+      LaunchPlan(
+        api,
+        base.copy(set =
+          base.set ++ Map(
+            "LD_PRELOAD"      -> library.toString,
+            "LD_LIBRARY_PATH" -> libraryPath
+          )
+        ),
+        RequiredEvidence.Execution
       )
     }
 

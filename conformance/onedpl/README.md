@@ -14,7 +14,7 @@ Upstream CMake owns recursive `*.pass.cpp` discovery, target variants,
 configure-time exclusions, and runtime skip code 77. Gemstone retains every
 discovered CTest instance as an independent result and has no local skip list.
 A Gemstone run selects exactly one provider and fails closed rather than falling back to a physical device. Each
-target is compiled once. Its identical executable runs as the selected vendor-backend oracle and then through the
+executable is compiled once. Its identical executable runs as the selected vendor-backend oracle and then through the
 corresponding Gemstone backend, yielding separate `levelzero/...` and `opencl/...` MUnit results.
 
 The pinned oneDPL commit is `3e0e05b32bf53850816f6a6bb09bcfded4f7edb7`
@@ -32,14 +32,24 @@ MIT licensing.
 ```console
 sbt testSYCLConformance
 GEMSTONE_ONEDPL_FILTER='fill\.pass' sbt testSYCLConformance
-GEMSTONE_ONEDPL_FILTER='^samples/' sbt testSYCLConformance
+GEMSTONE_ONEDPL_FILTER='^gfx900/.*samples/' sbt testSYCLConformance
 GEMSTONE_ONEDPL_SHARD=0/16 GEMSTONE_ONEDPL_JOBS=8 sbt testSYCLConformance
 ```
 
 The filter is a Scala regular expression over stable CTest/sample names.
 Shards are zero-based `index/count`; filtering happens before sharding. Worker
-count is 1-32 and defaults to eight. Target compilation is serialized through
-one Ninja build tree while completed executables run concurrently.
+count is 1-32 and defaults to eight. Executable compilation is serialized through
+one Ninja build tree while completed executables run concurrently. Every case
+is qualified by its shared AMDGPU target (`gfx900/levelzero/...` or
+`gfx900/opencl/...`), so the same SPIR-V-producing executable is checked
+through each selected virtual target:
+
+```console
+GEMSTONE_AMDGPU_TARGETS='gfx900,gfx1036,gfx1100' GEMSTONE_ONEDPL_FILTER='^gfx1036/(levelzero|opencl)/' sbt testSYCLConformance
+```
+
+The oracle remains the installed physical backend; the virtual target is
+passed only to Gemstone.
 
 The exhaustive suite is intentionally outside the fast `sbt check` lane. See
 the repository README for the current conformance commands and filtering

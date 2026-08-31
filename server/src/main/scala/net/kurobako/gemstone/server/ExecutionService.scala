@@ -2,6 +2,7 @@ package net.kurobako.gemstone.server
 
 import net.kurobako.gemstone.Col
 import net.kurobako.gemstone.binary.ByteRange
+import net.kurobako.gemstone.binary.LittleEndian
 import net.kurobako.gemstone.execution.*
 import net.kurobako.gemstone.memory.AllocationKind
 
@@ -42,6 +43,7 @@ final class ExecutionService(
   private val dirtyChunks =
     mutable.HashMap.empty[Long, mutable.HashMap[AllocationId, mutable.LongMap[Unit]]]
   private val pendingExecutions        = mutable.Queue.empty[(CompletionId, KernelDispatch, ExecutionControl)]
+  private val programLifecycleLock     = Object()
   private var executionWorkerScheduled = false
   private var closed                   = false
 
@@ -75,36 +77,73 @@ final class ExecutionService(
     }
   }
 
-  def load(format: ProgramFormat, image: Col[Byte]): Either[ExecutionFailure, ProgramId] = synchronized {
-    val current = state.get()
-    if (closed) Left(ExecutionFailure.Failed("execution session is closed"))
-    else {
-      val id = ProgramId.unsafe(current.nextProgram)
-      executor.load(id, format, image).map { _ =>
-        state.set(
-          current.copy(
-            programs = current.programs + id,
-            nextProgram = Math.addExact(current.nextProgram, 1L)
-          )
-        )
-        id
+  def load(format: ProgramFormat, image: Col[Byte]): Either[ExecutionFailure, ProgramId] = {
+    // Reserve the identity under the service monitor, but do not hold that
+    // monitor while decoding/preparing a potentially large code object. HSA
+    // memory and AQL connections share this service; keeping the old monitor
+    // around the executor call made hipMalloc wait behind code-object loading.
+    val reserved = synchronized {
+      val current = state.get()
+      if (closed) Left(ExecutionFailure.Failed("execution session is closed"))
+      else {
+        val id = ProgramId.unsafe(current.nextProgram)
+        state.set(current.copy(nextProgram = Math.addExact(current.nextProgram, 1L)))
+        Right(id)
+      }
+    }
+    reserved.flatMap { id =>
+      val loaded = programLifecycleLock.synchronized(executor.load(id, format, image))
+      loaded.flatMap { _ =>
+        val accepted = synchronized {
+          if (closed) Left(ExecutionFailure.Failed("execution session is closed"))
+          else {
+            val current = state.get()
+            state.set(current.copy(programs = current.programs + id))
+            Right(())
+          }
+        }
+        accepted match {
+          case Right(_)    => Right(id)
+          case Left(error) =>
+            val _ = programLifecycleLock.synchronized(executor.unload(id))
+            Left(error)
+        }
       }
     }
   }
 
-  def unload(id: ProgramId): Either[ExecutionFailure, Unit] = synchronized {
-    val current = state.get()
-    if (!current.programs.contains(id)) Left(ExecutionFailure.NotFound(s"program ${id.toLong} is not loaded"))
-    else if (
-      current.completions.valuesIterator.exists(record =>
-        record.program == id && record.status == CompletionStatus.Pending
+  def unload(id: ProgramId): Either[ExecutionFailure, Unit] = {
+    // Remove the program from the service state before entering the backend so
+    // no new dispatch can race the unload. Backend lifecycle calls use their
+    // own lock and never hold the service monitor while doing potentially slow
+    // work.
+    val reserved = synchronized {
+      val current = state.get()
+      if (!current.programs.contains(id)) Left(ExecutionFailure.NotFound(s"program ${id.toLong} is not loaded"))
+      else if (
+        current.completions.valuesIterator.exists(record =>
+          record.program == id && record.status == CompletionStatus.Pending
+        )
       )
-    )
-      Left(ExecutionFailure.InvalidRequest(s"program ${id.toLong} is retained by pending execution"))
-    else
-      executor.unload(id).map { _ =>
+        Left(ExecutionFailure.InvalidRequest(s"program ${id.toLong} is retained by pending execution"))
+      else {
         state.set(current.copy(programs = current.programs - id))
+        Right(())
       }
+    }
+    reserved.flatMap { _ =>
+      val result = programLifecycleLock.synchronized(executor.unload(id))
+      if (result.isLeft) {
+        synchronized {
+          val current = state.get()
+          state.set(current.copy(programs = current.programs + id))
+        }
+        // If close raced this failed unload, make the restored program visible
+        // to close cleanup and retry it through the same serialized path.
+        cleanupClosedSession()
+      }
+      result
+    }
   }
 
   def launch(dispatch: KernelDispatch): Either[ExecutionFailure, CompletionId] = {
@@ -162,7 +201,6 @@ final class ExecutionService(
       val value = pendingExecutions.dequeueFirst(_ => true)
       if (value.isEmpty) {
         executionWorkerScheduled = false
-        if (closed) cleanupClosedSession()
       }
       value
     }
@@ -189,50 +227,63 @@ final class ExecutionService(
         pendingExecutions.dequeueFirst(_ => true) match {
           case None =>
             executionWorkerScheduled = false
-            if (closed) cleanupClosedSession()
             None
           case value => value
         }
       }
     }
+    cleanupClosedSession()
   }
 
-  private def failPendingExecutions(error: ExecutionFailure): Unit = synchronized {
-    val ids = pendingExecutions.map(_._1).toSet
-    pendingExecutions.clear()
-    executionWorkerScheduled = false
-    val current = state.get()
-    state.set(current.copy(completions = current.completions.map { case (id, record) =>
-      if (ids.contains(id)) id -> record.copy(status = CompletionStatus.Failed(error)) else id -> record
-    }))
-    if (closed) cleanupClosedSession()
-  }
-
-  override def close(): Unit = synchronized {
-    if (!closed) {
-      closed = true
-      state.get().completions.valuesIterator.foreach(_.control.cancel())
-      val cancelled = pendingExecutions.map(_._1).toSet
+  private def failPendingExecutions(error: ExecutionFailure): Unit = {
+    synchronized {
+      val ids = pendingExecutions.map(_._1).toSet
       pendingExecutions.clear()
+      executionWorkerScheduled = false
       val current = state.get()
       state.set(current.copy(completions = current.completions.map { case (id, record) =>
-        if (cancelled.contains(id))
-          id -> record.copy(status =
-            CompletionStatus.Failed(ExecutionFailure.Failed("execution session closed before dispatch"))
-          )
-        else id -> record
+        if (ids.contains(id)) id -> record.copy(status = CompletionStatus.Failed(error)) else id -> record
       }))
-      if (!executionWorkerScheduled) cleanupClosedSession()
     }
+    cleanupClosedSession()
+  }
+
+  override def close(): Unit = {
+    synchronized {
+      if (!closed) {
+        closed = true
+        state.get().completions.valuesIterator.foreach(_.control.cancel())
+        val cancelled = pendingExecutions.map(_._1).toSet
+        pendingExecutions.clear()
+        val current = state.get()
+        state.set(current.copy(completions = current.completions.map { case (id, record) =>
+          if (cancelled.contains(id))
+            id -> record.copy(status =
+              CompletionStatus.Failed(ExecutionFailure.Failed("execution session closed before dispatch"))
+            )
+          else id -> record
+        }))
+      }
+    }
+    cleanupClosedSession()
   }
 
   private def cleanupClosedSession(): Unit = {
-    val current = state.get()
-    current.programs.foreach { id =>
-      val _ = executor.unload(id)
+    val programs = synchronized {
+      if (!closed || executionWorkerScheduled) Set.empty[ProgramId]
+      else {
+        val current = state.get()
+        state.set(current.copy(allocations = Map.empty, programs = Set.empty, completions = Map.empty))
+        dirtyChunks.clear()
+        current.programs
+      }
     }
-    state.set(current.copy(allocations = Map.empty, programs = Set.empty, completions = Map.empty))
-    dirtyChunks.clear()
+    if (programs.nonEmpty)
+      programLifecycleLock.synchronized {
+        programs.foreach { id =>
+          val _ = executor.unload(id)
+        }
+      }
   }
 
   def completion(id: CompletionId): Either[ExecutionFailure, CompletionStatus] =
@@ -282,24 +333,53 @@ final class ExecutionService(
     state.get().allocations.get(id).toRight(
       ExecutionFailure.NotFound(s"allocation ${id.toLong} is not registered")
     ).flatMap { allocation =>
-      checkedRange(allocation.bytes.length, offset, size).map { start =>
+      checkedRange(allocation.bytes.length, offset, size).left.map(error =>
+        ExecutionFailure.InvalidRequest(s"allocation ${id.toLong}: $error")
+      ).map { start =>
         Col.unsafeFromArray(java.util.Arrays.copyOfRange(allocation.bytes, start, start + size))
       }
+    }
+  }
+
+  override def readValue(id: AllocationId, offset: Long, size: Int): Either[ExecutionFailure, Long] = synchronized {
+    state.get().allocations.get(id).toRight(
+      ExecutionFailure.NotFound(s"allocation ${id.toLong} is not registered")
+    ).flatMap { allocation =>
+      checkedRange(allocation.bytes.length, offset, size).left.map(error =>
+        ExecutionFailure.InvalidRequest(s"allocation ${id.toLong}: $error")
+      ).map(start => LittleEndian.decode(allocation.bytes, start, size))
     }
   }
 
   override def write(id: AllocationId, offset: Long, bytes: Col[Byte]): Either[ExecutionFailure, Unit] =
     write(id, offset, bytes, null)
 
+  override def writeValue(
+      id: AllocationId,
+      offset: Long,
+      value: Long,
+      size: Int
+  ): Either[ExecutionFailure, Unit] = writeValue(id, offset, value, size, null)
+
   private final class CompletionMemory(completion: CompletionId) extends ExecutionMemory {
     override def read(id: AllocationId, offset: Long, size: Int): Either[ExecutionFailure, Col[Byte]] =
       ExecutionService.this.read(id, offset, size)
+
+    override def readValue(id: AllocationId, offset: Long, size: Int): Either[ExecutionFailure, Long] =
+      ExecutionService.this.readValue(id, offset, size)
 
     override def write(
         id: AllocationId,
         offset: Long,
         bytes: Col[Byte]
     ): Either[ExecutionFailure, Unit] = ExecutionService.this.write(id, offset, bytes, completion.toLong)
+
+    override def writeValue(
+        id: AllocationId,
+        offset: Long,
+        value: Long,
+        size: Int
+    ): Either[ExecutionFailure, Unit] = ExecutionService.this.writeValue(id, offset, value, size, completion.toLong)
   }
 
   private def completionMemory(completion: CompletionId): ExecutionMemory = CompletionMemory(completion)
@@ -314,22 +394,52 @@ final class ExecutionService(
     else state.get().allocations.get(id).toRight(
       ExecutionFailure.NotFound(s"allocation ${id.toLong} is not registered")
     ).flatMap { allocation =>
-      checkedRange(allocation.bytes.length, offset, bytes.length).map { start =>
+      checkedRange(allocation.bytes.length, offset, bytes.length).left.map(error =>
+        ExecutionFailure.InvalidRequest(s"allocation ${id.toLong}: $error")
+      ).map { start =>
         val _ = bytes.copyToArray(allocation.bytes, start, bytes.length)
-        if (completion != null && bytes.nonEmpty) {
-          val allocations = dirtyChunks.getOrElseUpdate(completion.longValue(), mutable.HashMap.empty)
-          val chunks      = allocations.getOrElseUpdate(id, mutable.LongMap.empty)
-          val first       = offset / DirtyChunkSize
-          val last        = (offset + bytes.length.toLong - 1L) / DirtyChunkSize
-          var chunk       = first
-          while (chunk <= last) {
-            chunks.update(chunk, ())
-            chunk += 1L
-          }
-        }
+        markDirty(completion, id, offset, bytes.length)
       }
     }
   }
+
+  private def writeValue(
+      id: AllocationId,
+      offset: Long,
+      value: Long,
+      size: Int,
+      completion: java.lang.Long | Null
+  ): Either[ExecutionFailure, Unit] = synchronized {
+    if (closed && completion == null) Left(ExecutionFailure.Failed("execution session is closed"))
+    else state.get().allocations.get(id).toRight(
+      ExecutionFailure.NotFound(s"allocation ${id.toLong} is not registered")
+    ).flatMap { allocation =>
+      checkedRange(allocation.bytes.length, offset, size).left.map(error =>
+        ExecutionFailure.InvalidRequest(s"allocation ${id.toLong}: $error")
+      ).map { start =>
+        LittleEndian.write(value, allocation.bytes, start, size)
+        markDirty(completion, id, offset, size)
+      }
+    }
+  }
+
+  private def markDirty(
+      completion: java.lang.Long | Null,
+      id: AllocationId,
+      offset: Long,
+      size: Int
+  ): Unit =
+    if (completion != null && size > 0) {
+      val allocations = dirtyChunks.getOrElseUpdate(completion.longValue(), mutable.HashMap.empty)
+      val chunks      = allocations.getOrElseUpdate(id, mutable.LongMap.empty)
+      val first       = offset / DirtyChunkSize
+      val last        = (offset + size.toLong - 1L) / DirtyChunkSize
+      var chunk       = first
+      while (chunk <= last) {
+        chunks.update(chunk, ())
+        chunk += 1L
+      }
+    }
 
   private def validateArguments(arguments: Col[KernelArgument], current: State): Either[ExecutionFailure, Unit] =
     arguments.collectFirst {

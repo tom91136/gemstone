@@ -107,6 +107,14 @@ int gemstone_hsa_aql_runtime_register_allocation(gemstone_hsa_aql_runtime *runti
 
 int gemstone_hsa_aql_runtime_unregister_allocation(gemstone_hsa_aql_runtime *runtime, uint64_t native_base);
 
+// Reports the registered allocations directly reachable by a kernel dispatch:
+// the kernarg buffer itself and every allocation pointer described by metadata
+// (including pointers nested in opaque scalar fields). A zero-capacity call
+// reports the required count. This lets a fine-grained host runtime synchronize
+// only memory visible to the dispatched kernel.
+int gemstone_hsa_aql_runtime_dispatch_allocations(gemstone_hsa_aql_runtime *runtime, const void *packet, size_t packet_size,
+                                                  uint64_t *allocation_ids, uint32_t capacity, uint32_t *count);
+
 // Returns exact executor-written ranges from successful kernel launches since
 // the previous successful take. A zero-capacity call reports the required
 // count without consuming it. The single process-wide AQL worker serializes
