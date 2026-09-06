@@ -8,6 +8,13 @@ private[amdgpu] enum InstructionSource {
   case Scalar(index: Int)
   case VectorRegister(index: Int)
   case Constant(value: Long)
+
+  /** A literal dword embedded in the instruction stream.
+    *
+    * Literals share the raw integer representation of [[Constant]], but are kept distinct because floating-point
+    * instructions promote them from binary32 to their operand width rather than treating the dword as an integer value.
+    */
+  case Literal(value: Long)
 }
 
 private[amdgpu] enum SubDwordSelection(val width: Int, val shift: Int) {
@@ -30,13 +37,18 @@ enum DecodedInstruction {
   case SMoveImmediate(dest: Int, value: Int)
   case SMultiplyImmediate(dest: Int, value: Int)
   case SMove64(dest: Int, src: InstructionSource)
+
+  /** Set a hardware register (for example the flat-scratch base). */
+  case SSetReg(hwreg: Int, src: Int)
   case SGetPc(dest: Int, offset: Int)
   case SSetPc(src: InstructionSource)
   case SSwapPc(dest: Int, src: InstructionSource)
-  case SAndSaveExec(dest: Int, src: InstructionSource)
-  case SAndn2SaveExec(dest: Int, src: InstructionSource)
-  case SOrSaveExec(dest: Int, src: InstructionSource)
-  case SXorSaveExec(dest: Int, src: InstructionSource)
+
+  /** Save the current EXEC mask and update EXEC with a 32- or 64-bit mask. */
+  case SAndSaveExec(dest: Int, src: InstructionSource, width: Int)
+  case SAndn2SaveExec(dest: Int, src: InstructionSource, width: Int)
+  case SOrSaveExec(dest: Int, src: InstructionSource, width: Int)
+  case SXorSaveExec(dest: Int, src: InstructionSource, width: Int)
   case SUnary(opcode: String, dest: Int, src: InstructionSource)
   case SBinary(opcode: String, dest: Int, srcA: InstructionSource, srcB: InstructionSource)
   case SBinary64(opcode: String, dest: Int, srcA: InstructionSource, srcB: InstructionSource)
@@ -47,6 +59,12 @@ enum DecodedInstruction {
   case SAddImmediate(dest: Int, immediate: Int)
   case SCmp(opcode: String, srcA: InstructionSource, srcB: InstructionSource)
   case VMove(dest: Int, src: InstructionSource)
+
+  /** Read a VGPR through the scalar M0 register (v_movrels_b32). */
+  case VMoveRelative(dest: Int, src: InstructionSource)
+
+  /** Write a VGPR through the scalar M0 register (v_movreld_b32). */
+  case VMoveRelativeDestination(dest: Int, src: InstructionSource)
   case VNot(dest: Int, src: InstructionSource)
   case VSwap(dest: Int, src: InstructionSource)
   case VBitReverse(dest: Int, src: InstructionSource)
@@ -77,6 +95,12 @@ enum DecodedInstruction {
   case VMaskBitCount(dest: Int, mask: InstructionSource, base: InstructionSource, high: Boolean)
   case VBitCount(dest: Int, src: InstructionSource, base: InstructionSource)
   case VBinary(opcode: String, dest: Int, srcA: InstructionSource, srcB: InstructionSource, clamp: Boolean)
+
+  /** Two packed f16 products accumulated into an f32 destination. */
+  case VDot2F32F16(dest: Int, srcA: InstructionSource, srcB: InstructionSource, accumulate: Boolean)
+
+  /** Four unsigned byte products accumulated into a u32 destination. */
+  case VDot4U32U8(dest: Int, srcA: InstructionSource, srcB: InstructionSource, srcC: InstructionSource)
   case VBinaryF32Modified(
       opcode: String,
       dest: Int,
@@ -112,6 +136,9 @@ enum DecodedInstruction {
   )
   case VFlatLoadD16(dest: Int, address: Int, offset: Int, high: Boolean)
   case VMadMkF32(dest: Int, srcA: InstructionSource, multiplier: Long, addend: InstructionSource)
+
+  /** Fused multiply-add with an inline literal addend: dst = srcA * srcB + literal. */
+  case VMadAkF32(dest: Int, srcA: InstructionSource, srcB: InstructionSource, addend: Long)
   case VBinary64(opcode: String, dest: Int, srcA: InstructionSource, srcB: InstructionSource)
   case VBinary64Modified(
       opcode: String,
@@ -155,6 +182,38 @@ enum DecodedInstruction {
       negateHigh: Int,
       clamp: Boolean
   )
+
+  /** FMA with mixed f32/f16 inputs and an f16 result in one half of the destination VGPR.
+    *
+    * `opSelectionHi` selects which inputs are converted from f16; for those inputs `opSelection` selects the low or
+    * high half of the source VGPR. The source modifier bit convention is the FP16 input convention, where bit 0 is
+    * negate and bit 1 is absolute (rather than packed neg_hi).
+    */
+  case VFmaMixF16(
+      dest: Int,
+      srcA: InstructionSource,
+      srcB: InstructionSource,
+      srcC: InstructionSource,
+      opSelection: Int,
+      opSelectionHi: Int,
+      negate: Int,
+      absolute: Int,
+      clamp: Boolean,
+      high: Boolean
+  )
+
+  /** FMA with mixed f32/f16 inputs and an f32 result. */
+  case VFmaMixF32(
+      dest: Int,
+      srcA: InstructionSource,
+      srcB: InstructionSource,
+      srcC: InstructionSource,
+      opSelection: Int,
+      opSelectionHi: Int,
+      negate: Int,
+      absolute: Int,
+      clamp: Boolean
+  )
   case VAddCarry(
       dest: Int,
       carryDest: Int,
@@ -177,10 +236,14 @@ enum DecodedInstruction {
       carryIn: Option[InstructionSource]
   )
   case VMadF32(
+      opcode: String,
       dest: Int,
       srcA: InstructionSource,
       srcB: InstructionSource,
       srcC: InstructionSource,
+      absA: Boolean,
+      absB: Boolean,
+      absC: Boolean,
       negateA: Boolean,
       negateB: Boolean,
       negateC: Boolean,
@@ -256,6 +319,15 @@ enum DecodedInstruction {
   case GlobalStore(address: Int, scalarAddress: Option[Int], src: Int, bytes: Int, offset: Int)
   case GlobalStoreD16High(address: Int, scalarAddress: Option[Int], src: Int, bytes: Int, offset: Int)
   case GlobalAtomicAdd(dest: Int, address: Int, scalarAddress: Option[Int], src: Int, bytes: Int, offset: Int)
+  case GlobalAtomicInc(
+      dest: Int,
+      address: Int,
+      scalarAddress: Option[Int],
+      src: Int,
+      bytes: Int,
+      offset: Int,
+      returnValue: Boolean
+  )
   case GlobalAtomicCompareSwap(
       dest: Int,
       address: Int,
@@ -285,7 +357,9 @@ enum DecodedInstruction {
   case DSSignedRead(dest: Int, address: Int, bytes: Int, offsetA: Int, offsetB: Option[Int])
   case DSReadD16(dest: Int, address: Int, bytes: Int, offset: Int, high: Boolean)
   case DSSignedReadD16(dest: Int, address: Int, bytes: Int, offset: Int, high: Boolean)
-  case DSBPermute(dest: Int, address: Int, src: Int)
+  case DSPermute(dest: Int, address: Int, src: Int, offset: Int)
+  case DSBPermute(dest: Int, address: Int, src: Int, offset: Int)
+  case DSSwizzle(dest: Int, src: Int, control: Int)
   case DSAtomic(opcode: String, dest: Int, address: Int, src: Int, bytes: Int, offset: Int)
   case DSWrite(address: Int, srcA: Int, srcB: Option[Int], bytes: Int, offsetA: Int, offsetB: Option[Int])
   case DSWriteD16High(address: Int, src: Int, offset: Int)
@@ -388,6 +462,7 @@ private[amdgpu] object ExecutableInstruction {
           require(index >= 0 && index <= 255, s"VGPR source must be in [0, 255], found $index")
           1L -> index.toLong
         case InstructionSource.Constant(raw) => 2L -> (raw & SourceMask)
+        case InstructionSource.Literal(raw)  => 2L -> (raw & SourceMask)
       }
       VMoveTag.toLong |
         (dest.toLong << DestinationAt) |
@@ -470,6 +545,13 @@ private[amdgpu] object ExecutableInstruction {
     inline val MulF16    = 18
     inline val MinF16    = 19
     inline val MaxF16    = 20
+    inline val AddU16    = 21
+    inline val MulLoU16  = 22
+    inline val LshlB16   = 23
+    inline val LshrB16   = 24
+    inline val AshrI16   = 25
+    inline val AshrI32   = 26
+    inline val MacF16    = 27
 
     private def opcodeId(opcode: String): Int = opcode match {
       case "v_add_u32"     => AddU32
@@ -492,6 +574,13 @@ private[amdgpu] object ExecutableInstruction {
       case "v_mul_f16"     => MulF16
       case "v_min_f16"     => MinF16
       case "v_max_f16"     => MaxF16
+      case "v_fmac_f16"    => MacF16
+      case "v_add_u16"     => AddU16
+      case "v_mul_lo_u16"  => MulLoU16
+      case "v_lshlrev_b16" => LshlB16
+      case "v_lshrrev_b16" => LshrB16
+      case "v_ashrrev_i16" => AshrI16
+      case "v_ashrrev_i32" => AshrI32
       case _               => 0
     }
 
@@ -516,6 +605,13 @@ private[amdgpu] object ExecutableInstruction {
       case MulF16    => "v_mul_f16"
       case MinF16    => "v_min_f16"
       case MaxF16    => "v_max_f16"
+      case MacF16    => "v_fmac_f16"
+      case AddU16    => "v_add_u16"
+      case MulLoU16  => "v_mul_lo_u16"
+      case LshlB16   => "v_lshlrev_b16"
+      case LshrB16   => "v_lshrrev_b16"
+      case AshrI16   => "v_ashrrev_i16"
+      case AshrI32   => "v_ashrrev_i32"
       case other     => s"unknown-vbinary-$other"
     }
 

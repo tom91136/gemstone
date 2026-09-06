@@ -75,6 +75,8 @@ int gemstone_execution_read_allocation(gemstone_execution_client *client, uint64
 int gemstone_execution_load_program(gemstone_execution_client *client, gemstone_program_format format,
                                      const void *image, uint32_t image_size, uint64_t *program_id);
 int gemstone_execution_unload_program(gemstone_execution_client *client, uint64_t program_id);
+int gemstone_execution_write_program_global(gemstone_execution_client *client, uint64_t program_id,
+                                             const char *name, uint64_t offset, const void *bytes, uint32_t size);
 int gemstone_execution_launch(gemstone_execution_client *client, uint64_t program_id,
                                const char *kernel_name, gemstone_dimensions group_size,
                                gemstone_dimensions group_count, gemstone_dimensions global_size,

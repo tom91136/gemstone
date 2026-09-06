@@ -17,6 +17,7 @@ std::vector<Case> algorithm_f64_cases(const Configuration &configuration);
 std::vector<Case> blas_cases(const Configuration &configuration);
 std::vector<Case> edge_case_cases(const Configuration &configuration);
 std::vector<Case> stress_cases(const Configuration &configuration);
+std::vector<Case> async_cases(const Configuration &configuration);
 
 } // namespace unified_suite::program
 

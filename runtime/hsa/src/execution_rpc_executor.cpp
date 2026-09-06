@@ -33,6 +33,11 @@ int unload_program(void *context, uint64_t program_id) {
   return gemstone_execution_unload_program(executor->client, program_id);
 }
 
+int write_global(void *context, uint64_t program_id, const char *name, uint64_t offset, const void *bytes, uint32_t size) {
+  auto *executor = static_cast<EnvironmentExecutor *>(context);
+  return gemstone_execution_write_program_global(executor->client, program_id, name, offset, bytes, size);
+}
+
 int launch(void *context, uint64_t program_id, const char *kernel_name, gemstone_hsa_dimensions group_size,
            gemstone_hsa_dimensions group_count, gemstone_hsa_dimensions global_size, uint32_t private_segment_bytes,
            uint32_t group_segment_bytes, const gemstone_hsa_argument *arguments, uint32_t argument_count, uint64_t *completion_id) {
@@ -113,7 +118,8 @@ extern "C" gemstone_hsa_aql_runtime *gemstone_hsa_aql_runtime_create_from_enviro
     return nullptr;
   }
   const gemstone_hsa_executor operations{
-      executor, load_program, unload_program, launch, await_completion, completion_dirty_ranges, release_completion, error, destroy};
+      executor, load_program, unload_program, launch, await_completion, completion_dirty_ranges, release_completion, error, destroy,
+      write_global};
   auto *runtime = gemstone_hsa_aql_runtime_create(&operations, signals);
   if (runtime == nullptr) destroy(executor);
   return runtime;

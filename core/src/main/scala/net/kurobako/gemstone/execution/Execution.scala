@@ -247,8 +247,86 @@ final class Effects[W <: Write: ClassTag] {
 
 final case class ExecutionLimits(maxInstructions: Long, quantum: Int)
 
+/** Bounded work-item/work-group execution supplied by the hosting runtime.
+  *
+  * ISA interpreters keep a sequential implementation as their default so direct JVM/Native tests remain deterministic.
+  * The server may provide a shared bounded implementation; the task count is deliberately independent of the pool size,
+  * so a 1024-group launch never creates 1024 workers.
+  */
+trait ExecutionParallelism {
+  def parallelism: Int
+  def shouldParallel(taskCount: Long, workItemsPerTask: Long): Boolean
+  def parallelFor(taskCount: Long)(task: Long => Either[ExecutionFailure, Unit]): Either[ExecutionFailure, Unit]
+}
+
+object ExecutionParallelism {
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var", "scalafix:DisableSyntax.return"))
+  private object SequentialImplementation extends ExecutionParallelism {
+    override val parallelism: Int = 1
+
+    override def shouldParallel(taskCount: Long, workItemsPerTask: Long): Boolean = false
+
+    override def parallelFor(
+        taskCount: Long
+    )(task: Long => Either[ExecutionFailure, Unit]): Either[ExecutionFailure, Unit] = {
+      require(taskCount >= 0L, s"parallel task count must be non-negative: $taskCount")
+      var index = 0L
+      while (index < taskCount) {
+        task(index) match {
+          case Left(error) => return Left(error)
+          case Right(())   => ()
+        }
+        index += 1L
+      }
+      Right(())
+    }
+  }
+
+  val Sequential: ExecutionParallelism = SequentialImplementation
+}
+
 object ExecutionLimits {
+
+  /** The default guard remains deliberately finite and applies when no profile is selected. */
   val Default: ExecutionLimits = ExecutionLimits(maxInstructions = 100000000L, quantum = 4096)
+
+  /** Environment variables are read by the JVM server before a child process is launched. They are intentionally not
+    * part of the wire protocol: a workload cannot raise its own execution limit after it has connected to an
+    * already-running server.
+    */
+  val MaxInstructionsEnvironment = "GEMSTONE_EXECUTION_MAX_INSTRUCTIONS"
+  val QuantumEnvironment         = "GEMSTONE_EXECUTION_QUANTUM"
+
+  /** Read an opt-in execution profile from an environment map.
+    *
+    * An absent variable keeps the corresponding default. Invalid values fail closed rather than silently changing the
+    * safety boundary. This method is kept in core so every JVM entry point can apply exactly the same validation.
+    */
+  def fromEnvironment(environment: Map[String, String]): Either[String, ExecutionLimits] = {
+    def positiveLong(name: String, value: String): Either[String, Long] =
+      value.toLongOption match {
+        case Some(parsed) if parsed > 0L => Right(parsed)
+        case Some(_)                     => Left(s"$name must be positive: $value")
+        case None                        => Left(s"$name must be a positive integer: $value")
+      }
+
+    def positiveInt(name: String, value: String): Either[String, Int] =
+      value.toIntOption match {
+        case Some(parsed) if parsed > 0 => Right(parsed)
+        case Some(_)                    => Left(s"$name must be positive: $value")
+        case None                       => Left(s"$name must be a positive integer: $value")
+      }
+
+    for {
+      maxInstructions <-
+        environment.get(MaxInstructionsEnvironment).fold[Either[String, Long]](Right(Default.maxInstructions))(
+          positiveLong(MaxInstructionsEnvironment, _)
+        )
+      quantum <- environment.get(QuantumEnvironment).fold[Either[String, Int]](Right(Default.quantum))(
+        positiveInt(QuantumEnvironment, _)
+      )
+    } yield ExecutionLimits(maxInstructions, quantum)
+  }
 
   def create(maxInstructions: Long, quantum: Int): Either[String, ExecutionLimits] =
     if (maxInstructions <= 0L) Left(s"maxInstructions must be positive: $maxInstructions")
@@ -256,26 +334,42 @@ object ExecutionLimits {
     else Right(ExecutionLimits(maxInstructions, quantum))
 }
 
-final class ExecutionBudget private (val limit: Long) {
+@SuppressWarnings(Array("scalafix:DisableSyntax.var", "scalafix:DisableSyntax.return"))
+final class ExecutionBudget private (val limit: Long, threadSafe: Boolean) {
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  private var usedValue = 0L
+  private var sequentialUsed = 0L
+  private val usedValue      = java.util.concurrent.atomic.AtomicLong(0L)
 
-  def used: Long      = usedValue
-  def remaining: Long = limit - usedValue
+  def used: Long      = if (threadSafe) usedValue.get() else sequentialUsed
+  def remaining: Long = limit - used
 
   def consume(cost: Int = 1): Either[ExecutionFault, Unit] =
     if (cost <= 0) Left(ExecutionFault.InvalidState(s"instruction cost must be positive: $cost"))
-    else if (cost.toLong > remaining) Left(ExecutionFault.BudgetExceeded(limit))
     else {
-      usedValue += cost.toLong
-      Right(())
+      val increment = cost.toLong
+      if (!threadSafe) {
+        if (increment > limit - sequentialUsed) Left(ExecutionFault.BudgetExceeded(limit))
+        else {
+          sequentialUsed += increment
+          Right(())
+        }
+      } else {
+        var current  = usedValue.get()
+        var complete = false
+        while (!complete) {
+          if (increment > limit - current) return Left(ExecutionFault.BudgetExceeded(limit))
+          complete = usedValue.compareAndSet(current, current + increment)
+          if (!complete) current = usedValue.get()
+        }
+        Right(())
+      }
     }
 }
 
 object ExecutionBudget {
-  def fromLong(limit: Long): Either[String, ExecutionBudget] =
+  def fromLong(limit: Long, threadSafe: Boolean = false): Either[String, ExecutionBudget] =
     if (limit <= 0L) Left(s"instruction budget must be positive: $limit")
-    else Right(ExecutionBudget(limit))
+    else Right(ExecutionBudget(limit, threadSafe))
 }
 
 trait CancellationToken {
@@ -302,7 +396,8 @@ object CancellationToken {
 final class ExecutionControl private (
     val limits: ExecutionLimits,
     val cancellation: CancellationToken,
-    private val budget: ExecutionBudget
+    private val budget: ExecutionBudget,
+    val parallelism: ExecutionParallelism
 ) {
   def checkpoint(cost: Int = 1): Either[ExecutionFault, Unit] =
     if (cancellation.isCancelled) Left(ExecutionFault.Cancelled)
@@ -322,15 +417,17 @@ final class ExecutionControl private (
 object ExecutionControl {
   def create(
       limits: ExecutionLimits = ExecutionLimits.Default,
-      cancellation: CancellationToken = CancellationToken.Never
+      cancellation: CancellationToken = CancellationToken.Never,
+      parallelism: ExecutionParallelism = ExecutionParallelism.Sequential
   ): ExecutionControl =
     ExecutionControl(
       limits,
       cancellation,
-      ExecutionBudget.fromLong(limits.maxInstructions).fold(
+      ExecutionBudget.fromLong(limits.maxInstructions, parallelism.parallelism > 1).fold(
         message => throw IllegalArgumentException(message),
         identity
-      )
+      ),
+      parallelism
     )
 
   def default: ExecutionControl = create()

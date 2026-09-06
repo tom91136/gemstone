@@ -14,6 +14,9 @@ import java.net.SocketTimeoutException
 import java.security.SecureRandom
 import java.util.HexFormat
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.ConcurrentHashMap
 
 class ExecutionRPCConformanceSuite extends munit.FunSuite {
   private object TestBackend extends ProgramExecutor {
@@ -49,6 +52,53 @@ class ExecutionRPCConformanceSuite extends munit.FunSuite {
       assertEquals(run.start().waitFor(), 0)
       assert(server.usage.executionRequests > 0)
       assertEquals(server.usage.cudaRequests, 0L)
+    } finally {
+      server.close()
+      val _ = Files.deleteIfExists(output)
+    }
+  }
+
+  private final case class ProfileBackend(observed: AtomicReference[Option[ExecutionLimits]]) extends ProgramExecutor {
+    override def load(id: ProgramId, format: ProgramFormat, image: Col[Byte]) =
+      TestBackend.load(id, format, image)
+    override def unload(id: ProgramId) = TestBackend.unload(id)
+    override def launch(dispatch: KernelDispatch, memory: ExecutionMemory, control: ExecutionControl) = {
+      observed.set(Some(control.limits))
+      TestBackend.launch(dispatch, memory, control)
+    }
+  }
+
+  test("an explicit server execution profile is applied to each dispatch") {
+    val root     = findRoot(Path.of(sys.props("user.dir")))
+    val output   = compileClient(root)
+    val token    = randomToken()
+    val limits   = ExecutionLimits(maxInstructions = 17L, quantum = 3)
+    val observed = AtomicReference(Option.empty[ExecutionLimits])
+    val backend  = ProfileBackend(observed)
+    val server   = GemstoneRPCServer.start(token, backend, limits)
+    try {
+      val run = ProcessBuilder(output.toString).inheritIO()
+      run.environment().put("GEMSTONE_RPC_PORT", server.port.toString)
+      run.environment().put("GEMSTONE_RPC_TOKEN", token)
+      assertEquals(run.start().waitFor(), 0)
+      assertEquals(observed.get(), Some(limits))
+    } finally {
+      server.close()
+      val _ = Files.deleteIfExists(output)
+    }
+  }
+
+  test("execution connections survive an idle memory connection during a long dispatch") {
+    val root   = findRoot(Path.of(sys.props("user.dir")))
+    val output = compileClient(root)
+    val token  = randomToken()
+    val server = GemstoneRPCServer.start(token, TestBackend, ExecutionLimits(maxInstructions = 1L, quantum = 1), 50)
+    try {
+      val run = ProcessBuilder(output.toString).inheritIO()
+      run.environment().put("GEMSTONE_RPC_PORT", server.port.toString)
+      run.environment().put("GEMSTONE_RPC_TOKEN", token)
+      run.environment().put("GEMSTONE_EXECUTION_HOLD_ALLOCATION", "1")
+      assertEquals(run.start().waitFor(), 0)
     } finally {
       server.close()
       val _ = Files.deleteIfExists(output)
@@ -124,6 +174,49 @@ class ExecutionRPCConformanceSuite extends munit.FunSuite {
       server.join()
       val _ = Files.deleteIfExists(output)
     }
+  }
+
+  test("work-group execution uses a bounded shared pool") {
+    val pool    = BoundedExecutionPool(4)
+    val running = AtomicInteger(0)
+    val maximum = AtomicInteger(0)
+    val visited = AtomicInteger(0)
+    val threads = ConcurrentHashMap.newKeySet[String]()
+    try {
+      val result = pool.parallelFor(1024L) { _ =>
+        val active = running.incrementAndGet()
+        maximum.accumulateAndGet(active, java.lang.Integer.max)
+        threads.add(Thread.currentThread().getName)
+        Thread.`yield`()
+        visited.incrementAndGet()
+        running.decrementAndGet()
+        Right(())
+      }
+      assert(result == Right(()), s"bounded pool returned $result")
+      assertEquals(visited.get(), 1024)
+      assert(maximum.get() <= 4, s"bounded pool ran ${maximum.get()} workers")
+      assert(threads.size() <= 4, s"bounded pool created ${threads.size()} worker threads")
+    } finally pool.close()
+  }
+
+  test("execution parallelism defaults to one worker and rejects host oversubscription") {
+    val defaultPool = BoundedExecutionPool.fromEnvironment(Map.empty)
+    val hostBound   = math.min(64, math.max(1, Runtime.getRuntime.availableProcessors()))
+    try assertEquals(defaultPool.parallelism, math.max(1, hostBound - 2))
+    finally defaultPool.close()
+
+    val hipPool = BoundedExecutionPool.fromEnvironment(Map.empty, Some("hip"))
+    try assertEquals(hipPool.parallelism, math.min(math.max(1, hostBound - 2), 2))
+    finally hipPool.close()
+
+    val invalidZero = intercept[IllegalArgumentException](BoundedExecutionPool.fromEnvironment(Map(
+      BoundedExecutionPool.EnvironmentName -> "0"
+    )))
+    assert(invalidZero.getMessage.contains("must be positive"))
+    val invalidOversubscription = intercept[IllegalArgumentException](BoundedExecutionPool.fromEnvironment(Map(
+      BoundedExecutionPool.EnvironmentName -> (hostBound + 1).toString
+    )))
+    assert(invalidOversubscription.getMessage.contains("exceeds host bound"))
   }
 
   private def compileClient(root: Path, source: String = "execution_rpc_smoke.cpp"): Path = {

@@ -34,6 +34,8 @@ int main() {
   assert(hipGetDevicePropertiesR0600(&properties, 0) == hipSuccess);
   assert(std::strcmp(properties.gcnArchName, "gfx1010") == 0);
   assert(properties.major == 10 && properties.minor == 1);
+  assert(properties.maxThreadsPerMultiProcessor == 1024);
+  assert(properties.maxSharedMemoryPerMultiProcessor == 64U * 1024U);
 
   unsetenv("GEMSTONE_RPC_PORT");
   unsetenv("GEMSTONE_RPC_TOKEN");
@@ -41,5 +43,8 @@ int main() {
   assert(hipGetDeviceCount(&count) == hipErrorNoDevice);
   assert(count == 0);
   assert(hipGetLastError() == hipErrorNoDevice);
+  assert(hipMemAdvise(nullptr, 0, hipMemAdviseSetReadMostly, 0) == hipErrorNoDevice);
+  assert(hipMemAdvise(nullptr, 0, hipMemAdviseSetAccessedBy, 0) == hipErrorNoDevice);
+  assert(hipMemAdvise(nullptr, 0, hipMemAdviseUnsetAccessedBy, 0) == hipErrorNoDevice);
   return 0;
 }

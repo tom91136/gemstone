@@ -79,6 +79,11 @@ object Dimensions {
 
 final case class Coordinates(x: Int, y: Int, z: Int)
 
+/** A global work-item coordinate or extent. Work-group dimensions remain Int-sized, but a padded global launch may
+  * legitimately exceed Int.MaxValue when it is represented as a virtual dispatch.
+  */
+final case class LongCoordinates(x: Long, y: Long, z: Long)
+
 enum Axis {
   case X, Y, Z
 
@@ -100,7 +105,8 @@ final case class LaunchGeometry private (
     groupCount: Dimensions,
     globalSize: Dimensions,
     workDim: Int,
-    globalOffset: Coordinates
+    globalOffset: Coordinates,
+    private val globalSizeLong: LongCoordinates
 ) {
   def localCoordinates(index: Int): Coordinates = coordinates(index.toLong, groupSize)
 
@@ -113,10 +119,34 @@ final case class LaunchGeometry private (
       Math.addExact(globalOffset.z, Math.addExact(Math.multiplyExact(group.z, groupSize.z), local.z))
     )
 
+  def globalCoordinatesLong(group: Coordinates, local: Coordinates): LongCoordinates =
+    LongCoordinates(
+      Math.addExact(
+        globalOffset.x.toLong,
+        Math.addExact(Math.multiplyExact(group.x.toLong, groupSize.x), local.x.toLong)
+      ),
+      Math.addExact(
+        globalOffset.y.toLong,
+        Math.addExact(Math.multiplyExact(group.y.toLong, groupSize.y), local.y.toLong)
+      ),
+      Math.addExact(
+        globalOffset.z.toLong,
+        Math.addExact(Math.multiplyExact(group.z.toLong, groupSize.z), local.z.toLong)
+      )
+    )
+
   def containsGlobal(coordinates: Coordinates): Boolean =
     coordinates.x >= globalOffset.x && coordinates.x - globalOffset.x < globalSize.x &&
       coordinates.y >= globalOffset.y && coordinates.y - globalOffset.y < globalSize.y &&
       coordinates.z >= globalOffset.z && coordinates.z - globalOffset.z < globalSize.z
+
+  def containsGlobal(coordinates: LongCoordinates): Boolean =
+    coordinates.x >= globalOffset.x.toLong && coordinates.x - globalOffset.x.toLong < globalSizeLong.x &&
+      coordinates.y >= globalOffset.y.toLong && coordinates.y - globalOffset.y.toLong < globalSizeLong.y &&
+      coordinates.z >= globalOffset.z.toLong && coordinates.z - globalOffset.z.toLong < globalSizeLong.z
+
+  /** The exact long-width padded global extent, including virtual launches larger than Int.MaxValue. */
+  def globalSizeLongValue: LongCoordinates = globalSizeLong
 
   private def coordinates(index: Long, dimensions: Dimensions): Coordinates = {
     val volume = dimensions.volume.fold(message => throw IllegalArgumentException(message), identity)
@@ -150,7 +180,40 @@ object LaunchGeometry {
       (),
       s"global size $exact exceeds padded dispatch size $padded"
     )
-  } yield LaunchGeometry(groupSize, groupCount, exact, workDim, globalOffset)
+  } yield LaunchGeometry(
+    groupSize,
+    groupCount,
+    exact,
+    workDim,
+    globalOffset,
+    LongCoordinates(exact.x.toLong, exact.y.toLong, exact.z.toLong)
+  )
+
+  /** Build a padded geometry when the per-axis global extent exceeds the legacy Int-sized Dimensions representation.
+    * The legacy [[LaunchGeometry.globalSize]] field is saturated for diagnostics; execution uses the exact long-width
+    * extent exposed through [[LaunchGeometry.containsGlobal(LongCoordinates)]].
+    */
+  def createVirtual(
+      groupSize: Dimensions,
+      groupCount: Dimensions,
+      workDim: Int = 3,
+      globalOffset: Coordinates = Coordinates(0, 0, 0)
+  ): Either[String, LaunchGeometry] = for {
+    _ <- Either.cond(workDim >= 1 && workDim <= 3, (), s"work dimension must be between 1 and 3: $workDim")
+    _ <- Either.cond(
+      globalOffset.x >= 0 && globalOffset.y >= 0 && globalOffset.z >= 0,
+      (),
+      s"global offset must be non-negative: $globalOffset"
+    )
+    x = Math.multiplyExact(groupSize.x.toLong, groupCount.x.toLong)
+    y = Math.multiplyExact(groupSize.y.toLong, groupCount.y.toLong)
+    z = Math.multiplyExact(groupSize.z.toLong, groupCount.z.toLong)
+    legacy <- Dimensions.create(
+      Math.min(x, Int.MaxValue.toLong).toInt,
+      Math.min(y, Int.MaxValue.toLong).toInt,
+      Math.min(z, Int.MaxValue.toLong).toInt
+    )
+  } yield LaunchGeometry(groupSize, groupCount, legacy, workDim, globalOffset, LongCoordinates(x, y, z))
 }
 
 enum KernelArgument {
@@ -266,6 +329,11 @@ trait ExecutionMemory {
 }
 
 trait LoadedProgram {
+
+  /** Copy bytes into a named device global, when the program format exposes one. */
+  def writeGlobal(name: String, offset: Long, bytes: Col[Byte]): Either[ExecutionFailure, Unit] =
+    Left(ExecutionFailure.Unsupported("program globals are not writable"))
+
   def launch(
       dispatch: KernelDispatch,
       memory: ExecutionMemory,
@@ -281,6 +349,9 @@ trait ProgramLoader {
 trait ProgramExecutor {
   def load(id: ProgramId, format: ProgramFormat, image: Col[Byte]): Either[ExecutionFailure, Unit]
   def unload(id: ProgramId): Either[ExecutionFailure, Unit]
+  def writeGlobal(id: ProgramId, name: String, offset: Long, bytes: Col[Byte]): Either[ExecutionFailure, Unit] =
+    Left(ExecutionFailure.Unsupported("program globals are not writable"))
+
   def launch(
       dispatch: KernelDispatch,
       memory: ExecutionMemory,

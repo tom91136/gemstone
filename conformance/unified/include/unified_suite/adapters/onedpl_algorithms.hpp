@@ -6,6 +6,7 @@
 
 #include <oneapi/dpl/algorithm>
 #include <oneapi/dpl/execution>
+#include <oneapi/dpl/memory>
 #include <oneapi/dpl/numeric>
 #include <sycl/sycl.hpp>
 
@@ -62,7 +63,7 @@ public:
     if (operation == algorithms::Operation::gather || operation == algorithms::Operation::scatter ||
         operation == algorithms::Operation::unique_by_key ||
         operation == algorithms::Operation::merge_by_key ||
-        operation == algorithms::Operation::partition_point)
+        operation == algorithms::Operation::partition_point || operation == algorithms::Operation::shuffle)
       return false;
     return !std::is_same_v<T, double> || sycl_support::supports_fp64(queue_.get_device());
   }
@@ -87,6 +88,19 @@ public:
     onedpl_detail::Shared<T> source(queue_, input);
     onedpl_detail::Shared<T> output(queue_, count);
     std::copy_n(policy<T, 21>(), source.begin(), count, output.begin());
+    return finish(output);
+  }
+
+  template <class T> std::vector<T> uninitialized_copy(const std::vector<T> &input) {
+    onedpl_detail::Shared<T> source(queue_, input);
+    onedpl_detail::Shared<T> output(queue_, input.size());
+    std::uninitialized_copy(policy<T, 68>(), source.begin(), source.end(), output.begin());
+    return finish(output);
+  }
+
+  template <class T> std::vector<T> uninitialized_fill(std::size_t size, T value) {
+    onedpl_detail::Shared<T> output(queue_, size);
+    std::uninitialized_fill(policy<T, 69>(), output.begin(), output.end(), value);
     return finish(output);
   }
 
@@ -490,6 +504,10 @@ public:
     return finish(output);
   }
 
+  template <class T> std::vector<T> shuffle(const std::vector<T> &) {
+    throw Unsupported("shuffle has no oneDPL execution-policy overload");
+  }
+
   template <class T> std::size_t min_element(const std::vector<T> &input) {
     onedpl_detail::Shared<T> source(queue_, input);
     const auto result = std::min_element(policy<T, 54>(), source.begin(), source.end());
@@ -590,6 +608,11 @@ public:
     onedpl_detail::Shared<T> device_keys(queue_, keys);
     onedpl_detail::Shared<std::int32_t> source(queue_, values);
     onedpl_detail::Shared<std::int32_t> output(queue_, values.size());
+    // oneDPL's segmented exclusive scan can leave the first slot untouched on
+    // the emulated SPIR-V path for a 128-element dispatch.  Initialize the
+    // destination so that an otherwise valid zero-initialized segment cannot
+    // inherit a value from a recycled USM allocation.
+    std::fill(policy<T, 70>(), output.begin(), output.end(), std::int32_t{0});
     oneapi::dpl::exclusive_scan_by_segment(policy<T, 67>(), device_keys.begin(), device_keys.end(),
                                            source.begin(), output.begin(), std::int32_t{0});
     queue_.wait_and_throw();

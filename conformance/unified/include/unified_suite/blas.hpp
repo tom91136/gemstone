@@ -5,6 +5,7 @@
 #include "unified_suite/result.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -68,6 +69,20 @@ inline constexpr std::string_view name(Operation operation) {
 
 inline constexpr Operation level1_operations[] = {Operation::axpy, Operation::scal, Operation::copy,
                                                   Operation::dot,  Operation::nrm2, Operation::asum};
+
+// BLAS permits negative increments for the two-vector routines. rocBLAS
+// treats a non-positive increment as a quick return for the single-vector
+// SCAL/NRM2/ASUM routines, so keep those operations on positive layouts and
+// exercise both independent signs only where the common contract is valid.
+inline constexpr Operation level1_negative_stride_operations[] = {Operation::axpy, Operation::copy,
+                                                                   Operation::dot};
+
+constexpr bool has_negative_stride_contract(Operation operation) {
+  for (const auto candidate : level1_negative_stride_operations)
+    if (candidate == operation)
+      return true;
+  return false;
+}
 
 inline constexpr Operation matrix_operations[] = {Operation::gemv,
                                                   Operation::gemv_transpose,
@@ -211,15 +226,47 @@ inline std::size_t strided_size(std::size_t n, std::size_t increment) {
                       "strided size");
 }
 
+inline std::size_t vector_index(std::size_t n, std::size_t position, int increment) {
+  if (increment < 0)
+    return unified_suite::detail::checked_multiply(n - position - 1, static_cast<std::size_t>(-increment),
+                                                   "negative vector index");
+  return unified_suite::detail::checked_multiply(position, static_cast<std::size_t>(increment),
+                                                 "vector index");
+}
+
+inline std::size_t matrix_storage_size(std::size_t leading_dimension, std::size_t columns) {
+  return unified_suite::detail::checked_multiply(leading_dimension, columns, "matrix storage");
+}
+
+inline std::string transpose_name(Transpose transpose_a, Transpose transpose_b) {
+  if (transpose_a == Transpose::none && transpose_b == Transpose::none)
+    return "nn";
+  if (transpose_a == Transpose::none && transpose_b == Transpose::transpose)
+    return "nt";
+  if (transpose_a == Transpose::transpose && transpose_b == Transpose::none)
+    return "tn";
+  return "tt";
+}
+
+inline constexpr std::pair<Transpose, Transpose> gemm_transpose_variants[] = {
+    {Transpose::none, Transpose::none},
+    {Transpose::none, Transpose::transpose},
+    {Transpose::transpose, Transpose::none},
+    {Transpose::transpose, Transpose::transpose},
+};
+
+inline constexpr int level1_status_size = 0;
+
 template <ScalarType Kind, class Backend>
-void execute_level1(Backend &backend, Operation operation, std::size_t n) {
+void execute_level1_layout(Backend &backend, Operation operation, std::size_t n, int incx, int incy,
+                           const std::string &where) {
   if (!backend.supports(operation))
     throw Unsupported(std::string(name(operation)) + " is unsupported for " +
                       std::string(unified_suite::name(Kind)));
-  constexpr int incx = 2;
-  constexpr int incy = 3;
-  const auto x_host = values(strided_size(n, incx), unified_suite::detail::checked_add(n, 1, "salt"));
-  const auto y_host = values(strided_size(n, incy), unified_suite::detail::checked_add(n, 7, "salt"));
+  const auto x_host = values(strided_size(n, static_cast<std::size_t>(std::abs(incx))),
+                             unified_suite::detail::checked_add(n, 1, "salt"));
+  const auto y_host = values(strided_size(n, static_cast<std::size_t>(std::abs(incy))),
+                             unified_suite::detail::checked_add(n, 7, "salt"));
   auto x = backend.allocate(x_host.size());
   auto y = backend.allocate(y_host.size());
   backend.upload(x, x_host);
@@ -229,62 +276,72 @@ void execute_level1(Backend &backend, Operation operation, std::size_t n) {
     backend.axpy(unified_suite::detail::checked_int(n, "AXPY size"), 0.75L, x, incx, y, incy);
     auto expected = y_host;
     for (std::size_t index = 0; index < n; ++index)
-      expected[index * incy] += 0.75L * x_host[index * incx];
+      expected[vector_index(n, index, incy)] += 0.75L * x_host[vector_index(n, index, incx)];
     std::vector<bool> active(y_host.size(), false);
     for (std::size_t index = 0; index < n; ++index)
-      active[index * incy] = true;
-    require_close_active<Kind>(backend.download(y, y_host.size()), expected, active, "axpy");
+      active[vector_index(n, index, incy)] = true;
+    require_close_active<Kind>(backend.download(y, y_host.size()), expected, active, where + "/axpy");
     return;
   }
   case Operation::scal: {
     backend.scal(unified_suite::detail::checked_int(n, "SCAL size"), -0.5L, x, incx);
     auto expected = x_host;
     for (std::size_t index = 0; index < n; ++index)
-      expected[index * incx] *= -0.5L;
+      expected[vector_index(n, index, incx)] *= -0.5L;
     std::vector<bool> active(x_host.size(), false);
     for (std::size_t index = 0; index < n; ++index)
-      active[index * incx] = true;
-    require_close_active<Kind>(backend.download(x, x_host.size()), expected, active, "scal");
+      active[vector_index(n, index, incx)] = true;
+    require_close_active<Kind>(backend.download(x, x_host.size()), expected, active, where + "/scal");
     return;
   }
   case Operation::copy: {
     backend.copy(unified_suite::detail::checked_int(n, "COPY size"), x, incx, y, incy);
     auto expected = y_host;
     for (std::size_t index = 0; index < n; ++index)
-      expected[index * incy] = x_host[index * incx];
+      expected[vector_index(n, index, incy)] = x_host[vector_index(n, index, incx)];
     std::vector<bool> active(y_host.size(), false);
     for (std::size_t index = 0; index < n; ++index)
-      active[index * incy] = true;
-    require_close_active<Kind>(backend.download(y, y_host.size()), expected, active, "copy");
+      active[vector_index(n, index, incy)] = true;
+    require_close_active<Kind>(backend.download(y, y_host.size()), expected, active, where + "/copy");
     return;
   }
   case Operation::dot: {
     long double expected = 0.0L;
     for (std::size_t index = 0; index < n; ++index)
-      expected += x_host[index * incx] * y_host[index * incy];
+      expected += x_host[vector_index(n, index, incx)] * y_host[vector_index(n, index, incy)];
     require_close<Kind>(backend.dot(unified_suite::detail::checked_int(n, "DOT size"), x, incx, y, incy),
-                        expected, "dot");
+                        expected, where + "/dot");
     return;
   }
   case Operation::nrm2: {
     long double expected = 0.0L;
     for (std::size_t index = 0; index < n; ++index)
-      expected += x_host[index * incx] * x_host[index * incx];
+      expected += x_host[vector_index(n, index, incx)] * x_host[vector_index(n, index, incx)];
     require_close<Kind>(backend.nrm2(unified_suite::detail::checked_int(n, "NRM2 size"), x, incx),
-                        std::sqrt(expected), "nrm2");
+                        std::sqrt(expected), where + "/nrm2");
     return;
   }
   case Operation::asum: {
     long double expected = 0.0L;
     for (std::size_t index = 0; index < n; ++index)
-      expected += std::fabs(x_host[index * incx]);
+      expected += std::fabs(x_host[vector_index(n, index, incx)]);
     require_close<Kind>(backend.asum(unified_suite::detail::checked_int(n, "ASUM size"), x, incx), expected,
-                        "asum");
+                        where + "/asum");
     return;
   }
   default:
     throw std::logic_error("non-level-1 BLAS operation");
   }
+}
+
+template <ScalarType Kind, class Backend>
+void execute_level1(Backend &backend, Operation operation, std::size_t n) {
+  execute_level1_layout<Kind>(backend, operation, n, 2, 3, std::string(name(operation)) + "/strided");
+}
+
+template <ScalarType Kind, class Backend> void execute_level1_status(Backend &backend, Operation operation) {
+  execute_level1_layout<Kind>(backend, operation, level1_status_size, 1, 1,
+                              std::string(name(operation)) + "/status");
 }
 
 template <ScalarType Kind, class Backend>
@@ -319,6 +376,48 @@ void execute_gemv(Backend &backend, Operation operation, const MatrixShape &shap
     expected[output] = 1.25L * sum - 0.5L * y_host[output];
   }
   require_close<Kind>(backend.download(y, y_host.size()), expected, std::string(name(operation)));
+}
+
+template <ScalarType Kind, class Backend>
+void execute_gemv_padded(Backend &backend, Operation operation, const MatrixShape &shape) {
+  if (!backend.supports(operation))
+    throw Unsupported(std::string(name(operation)) + " is unsupported for " +
+                      std::string(unified_suite::name(Kind)));
+  const auto transpose = operation == Operation::gemv_transpose ? Transpose::transpose : Transpose::none;
+  const auto m = unified_suite::detail::checked_int(shape.m, "GEMV M");
+  const auto n = unified_suite::detail::checked_int(shape.n, "GEMV N");
+  const auto lda_size = unified_suite::detail::checked_add(shape.m, 3, "GEMV padded LDA");
+  const auto lda = unified_suite::detail::checked_int(lda_size, "GEMV padded LDA");
+  constexpr int incx = 2;
+  constexpr int incy = 3;
+  const auto x_size = transpose == Transpose::none ? shape.n : shape.m;
+  const auto y_size = transpose == Transpose::none ? shape.m : shape.n;
+  const auto a_host = values(matrix_storage_size(lda_size, shape.n), 103);
+  const auto x_host = values(strided_size(x_size, incx), 107);
+  const auto y_host = values(strided_size(y_size, incy), 109);
+  auto a = backend.allocate(a_host.size());
+  auto x = backend.allocate(x_host.size());
+  auto y = backend.allocate(y_host.size());
+  backend.upload(a, a_host);
+  backend.upload(x, x_host);
+  backend.upload(y, y_host);
+  backend.gemv(transpose, m, n, 1.25L, a, lda, x, incx, -0.5L, y, incy);
+  auto expected = y_host;
+  for (std::size_t output = 0; output < y_size; ++output) {
+    long double sum = 0.0L;
+    for (std::size_t input = 0; input < x_size; ++input) {
+      const auto row = transpose == Transpose::none ? output : input;
+      const auto column = transpose == Transpose::none ? input : output;
+      sum += a_host[row + column * lda_size] * x_host[vector_index(x_size, input, incx)];
+    }
+    const auto output_index = vector_index(y_size, output, incy);
+    expected[output_index] = 1.25L * sum - 0.5L * y_host[output_index];
+  }
+  std::vector<bool> active(y_host.size(), false);
+  for (std::size_t output = 0; output < y_size; ++output)
+    active[vector_index(y_size, output, incy)] = true;
+  require_close_active<Kind>(backend.download(y, y_host.size()), expected, active,
+                             std::string(name(operation)) + "/padded");
 }
 
 inline std::pair<Transpose, Transpose> gemm_transposes(Operation operation) {
@@ -388,6 +487,74 @@ void execute_gemm(Backend &backend, Operation operation, const MatrixShape &shap
   require_close<Kind>(backend.download(c, c_host.size()), expected, std::string(name(operation)));
 }
 
+template <ScalarType Kind, class Backend>
+void execute_gemm_padded(Backend &backend, Operation operation, const MatrixShape &shape,
+                         Transpose transpose_a, Transpose transpose_b) {
+  if (!backend.supports(operation))
+    throw Unsupported(std::string(name(operation)) + " is unsupported for " +
+                      std::string(unified_suite::name(Kind)));
+  const auto m = unified_suite::detail::checked_int(shape.m, "GEMM M");
+  const auto n = unified_suite::detail::checked_int(shape.n, "GEMM N");
+  const auto k = unified_suite::detail::checked_int(shape.k, "GEMM K");
+  const auto lda_size = unified_suite::detail::checked_add(transpose_a == Transpose::none ? shape.m : shape.k,
+                                                           2, "GEMM padded LDA");
+  const auto ldb_size = unified_suite::detail::checked_add(transpose_b == Transpose::none ? shape.k : shape.n,
+                                                           3, "GEMM padded LDB");
+  const auto ldc_size = unified_suite::detail::checked_add(shape.m, 4, "GEMM padded LDC");
+  const auto lda = unified_suite::detail::checked_int(lda_size, "GEMM padded LDA");
+  const auto ldb = unified_suite::detail::checked_int(ldb_size, "GEMM padded LDB");
+  const auto ldc = unified_suite::detail::checked_int(ldc_size, "GEMM padded LDC");
+  const auto a_columns = transpose_a == Transpose::none ? shape.k : shape.m;
+  const auto b_columns = transpose_b == Transpose::none ? shape.n : shape.k;
+  const auto a_matrix_size = matrix_storage_size(lda_size, a_columns);
+  const auto b_matrix_size = matrix_storage_size(ldb_size, b_columns);
+  const auto c_matrix_size = matrix_storage_size(ldc_size, shape.n);
+  const bool batched = operation == Operation::gemm_strided_batched;
+  constexpr std::size_t batch_count = 3;
+  const auto batches = batched ? batch_count : std::size_t{1};
+  const auto stride_a = unified_suite::detail::checked_add(a_matrix_size, 5, "GEMM A stride");
+  const auto stride_b = unified_suite::detail::checked_add(b_matrix_size, 7, "GEMM B stride");
+  const auto stride_c = unified_suite::detail::checked_add(c_matrix_size, 11, "GEMM C stride");
+  const auto a_host =
+      values(unified_suite::detail::checked_multiply(stride_a, batches, "GEMM padded A"), 113);
+  const auto b_host =
+      values(unified_suite::detail::checked_multiply(stride_b, batches, "GEMM padded B"), 127);
+  const auto c_host =
+      values(unified_suite::detail::checked_multiply(stride_c, batches, "GEMM padded C"), 131);
+  auto a = backend.allocate(a_host.size());
+  auto b = backend.allocate(b_host.size());
+  auto c = backend.allocate(c_host.size());
+  backend.upload(a, a_host);
+  backend.upload(b, b_host);
+  backend.upload(c, c_host);
+  if (batched)
+    backend.gemm_strided_batched(transpose_a, transpose_b, m, n, k, 0.75L, a, lda, stride_a, b, ldb, stride_b,
+                                 -0.25L, c, ldc, stride_c,
+                                 unified_suite::detail::checked_int(batch_count, "GEMM batch count"));
+  else
+    backend.gemm(transpose_a, transpose_b, m, n, k, 0.75L, a, lda, b, ldb, -0.25L, c, ldc);
+  auto expected = c_host;
+  std::vector<bool> active(c_host.size(), false);
+  for (std::size_t batch = 0; batch < batches; ++batch)
+    for (std::size_t column = 0; column < shape.n; ++column)
+      for (std::size_t row = 0; row < shape.m; ++row) {
+        long double sum = 0.0L;
+        for (std::size_t inner = 0; inner < shape.k; ++inner) {
+          const auto a_index =
+              transpose_a == Transpose::none ? row + inner * lda_size : inner + row * lda_size;
+          const auto b_index =
+              transpose_b == Transpose::none ? inner + column * ldb_size : column + inner * ldb_size;
+          sum += a_host[batch * stride_a + a_index] * b_host[batch * stride_b + b_index];
+        }
+        const auto c_index = batch * stride_c + row + column * ldc_size;
+        expected[c_index] = 0.75L * sum - 0.25L * c_host[c_index];
+        active[c_index] = true;
+      }
+  const auto suffix =
+      std::string(name(operation)) + "/" + transpose_name(transpose_a, transpose_b) + "/padded";
+  require_close_active<Kind>(backend.download(c, c_host.size()), expected, active, suffix);
+}
+
 template <template <ScalarType> class Backend, ScalarType Kind>
 Case level1_case(Operation operation, std::size_t size) {
   return {"blas/" + std::string(name(operation)) + "/" + std::string(unified_suite::name(Kind)) + "/n" +
@@ -396,6 +563,30 @@ Case level1_case(Operation operation, std::size_t size) {
             return capture([&] {
               Backend<Kind> backend;
               execute_level1<Kind>(backend, operation, size);
+            });
+          }};
+}
+
+template <template <ScalarType> class Backend, ScalarType Kind>
+Case level1_layout_case(Operation operation, std::size_t size, int incx, int incy, std::string_view layout) {
+  return {"blas/" + std::string(name(operation)) + "/" + std::string(unified_suite::name(Kind)) + "/n" +
+              std::to_string(size) + "/" + std::string(layout),
+          [operation, size, incx, incy, layout] {
+            return capture([&] {
+              Backend<Kind> backend;
+              detail::execute_level1_layout<Kind>(backend, operation, size, incx, incy,
+                                                  std::string(name(operation)) + "/" + std::string(layout));
+            });
+          }};
+}
+
+template <template <ScalarType> class Backend, ScalarType Kind> Case level1_status_case(Operation operation) {
+  return {"blas/status/" + std::string(name(operation)) + "/" + std::string(unified_suite::name(Kind)) +
+              "/n0",
+          [operation] {
+            return capture([&] {
+              Backend<Kind> backend;
+              detail::execute_level1_status<Kind>(backend, operation);
             });
           }};
 }
@@ -416,13 +607,56 @@ Case matrix_case(Operation operation, MatrixShape shape) {
 }
 
 template <template <ScalarType> class Backend, ScalarType Kind>
+Case gemv_padded_case(Operation operation, MatrixShape shape) {
+  return {"blas/" + std::string(name(operation)) + "/" + std::string(unified_suite::name(Kind)) + "/" +
+              unified_suite::name(shape) + "/padded",
+          [operation, shape] {
+            return capture([&] {
+              Backend<Kind> backend;
+              detail::execute_gemv_padded<Kind>(backend, operation, shape);
+            });
+          }};
+}
+
+template <template <ScalarType> class Backend, ScalarType Kind>
+Case gemm_padded_case(Operation operation, MatrixShape shape, Transpose transpose_a, Transpose transpose_b) {
+  return {"blas/" + std::string(name(operation)) + "/" + std::string(unified_suite::name(Kind)) + "/" +
+              unified_suite::name(shape) + "/" + transpose_name(transpose_a, transpose_b) + "/padded",
+          [operation, shape, transpose_a, transpose_b] {
+            return capture([&] {
+              Backend<Kind> backend;
+              detail::execute_gemm_padded<Kind>(backend, operation, shape, transpose_a, transpose_b);
+            });
+          }};
+}
+
+template <template <ScalarType> class Backend, ScalarType Kind>
 void append_supported_type(std::vector<Case> &result, const Configuration &configuration) {
   for (const auto operation : level1_operations)
-    for (const auto size : configuration.blas_sizes)
+    for (const auto size : configuration.blas_sizes) {
       result.push_back(level1_case<Backend, Kind>(operation, size));
+      result.push_back(level1_layout_case<Backend, Kind>(operation, size, 1, 1, "contiguous"));
+      if (has_negative_stride_contract(operation)) {
+        result.push_back(level1_layout_case<Backend, Kind>(operation, size, -2, -3, "negative-stride"));
+        result.push_back(level1_layout_case<Backend, Kind>(operation, size, -2, 3, "x-negative"));
+        result.push_back(level1_layout_case<Backend, Kind>(operation, size, 2, -3, "y-negative"));
+      }
+    }
+  for (const auto operation : level1_operations)
+    result.push_back(level1_status_case<Backend, Kind>(operation));
   for (const auto shape : configuration.matrix_shapes)
-    for (const auto operation : matrix_operations)
+    for (const auto operation : matrix_operations) {
       result.push_back(matrix_case<Backend, Kind>(operation, shape));
+      if (operation == Operation::gemv || operation == Operation::gemv_transpose)
+        result.push_back(gemv_padded_case<Backend, Kind>(operation, shape));
+      else if (operation == Operation::gemm || operation == Operation::gemm_nt ||
+               operation == Operation::gemm_tn || operation == Operation::gemm_tt)
+        result.push_back(gemm_padded_case<Backend, Kind>(operation, shape, gemm_transposes(operation).first,
+                                                         gemm_transposes(operation).second));
+      else if (operation == Operation::gemm_strided_batched)
+        for (const auto [transpose_a, transpose_b] : gemm_transpose_variants)
+          result.push_back(gemm_padded_case<Backend, Kind>(operation, shape, transpose_a, transpose_b));
+    }
 }
 
 template <template <ScalarType> class Backend>
@@ -443,15 +677,51 @@ void append_type(std::vector<Case> &result, ScalarType type, const Configuration
   case ScalarType::i32:
   case ScalarType::i64:
     for (const auto operation : level1_operations)
-      for (const auto size : configuration.blas_sizes)
+      for (const auto size : configuration.blas_sizes) {
         result.push_back({"blas/" + std::string(name(operation)) + "/" +
                               std::string(unified_suite::name(type)) + "/n" + std::to_string(size),
                           [] { return Result::skip("this BLAS scalar type is not instantiated"); }});
+        result.push_back({"blas/" + std::string(name(operation)) + "/" +
+                              std::string(unified_suite::name(type)) + "/n" + std::to_string(size) +
+                              "/contiguous",
+                          [] { return Result::skip("this BLAS scalar type is not instantiated"); }});
+        if (has_negative_stride_contract(operation)) {
+          for (const auto layout : std::array<std::string_view, 3>{"negative-stride", "x-negative", "y-negative"})
+            result.push_back({"blas/" + std::string(name(operation)) + "/" +
+                                  std::string(unified_suite::name(type)) + "/n" + std::to_string(size) + "/" +
+                                  std::string(layout),
+                              [] { return Result::skip("this BLAS scalar type is not instantiated"); }});
+        }
+      }
+    for (const auto operation : level1_operations)
+      result.push_back({"blas/status/" + std::string(name(operation)) + "/" +
+                            std::string(unified_suite::name(type)) + "/n0",
+                        [] { return Result::skip("this BLAS scalar type is not instantiated"); }});
     for (const auto shape : configuration.matrix_shapes)
-      for (const auto operation : matrix_operations)
+      for (const auto operation : matrix_operations) {
         result.push_back({"blas/" + std::string(name(operation)) + "/" +
                               std::string(unified_suite::name(type)) + "/" + unified_suite::name(shape),
                           [] { return Result::skip("this BLAS scalar type is not instantiated"); }});
+        if (operation == Operation::gemv || operation == Operation::gemv_transpose)
+          result.push_back({"blas/" + std::string(name(operation)) + "/" +
+                                std::string(unified_suite::name(type)) + "/" + unified_suite::name(shape) +
+                                "/padded",
+                            [] { return Result::skip("this BLAS scalar type is not instantiated"); }});
+        else if (operation == Operation::gemm || operation == Operation::gemm_nt ||
+                 operation == Operation::gemm_tn || operation == Operation::gemm_tt)
+          result.push_back(
+              {"blas/" + std::string(name(operation)) + "/" + std::string(unified_suite::name(type)) + "/" +
+                   unified_suite::name(shape) + "/" +
+                   transpose_name(gemm_transposes(operation).first, gemm_transposes(operation).second) +
+                   "/padded",
+               [] { return Result::skip("this BLAS scalar type is not instantiated"); }});
+        else if (operation == Operation::gemm_strided_batched)
+          for (const auto [transpose_a, transpose_b] : gemm_transpose_variants)
+            result.push_back({"blas/" + std::string(name(operation)) + "/" +
+                                  std::string(unified_suite::name(type)) + "/" + unified_suite::name(shape) +
+                                  "/" + transpose_name(transpose_a, transpose_b) + "/padded",
+                              [] { return Result::skip("this BLAS scalar type is not instantiated"); }});
+      }
     break;
   }
 }

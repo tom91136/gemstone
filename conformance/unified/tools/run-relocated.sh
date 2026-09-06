@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ $# -lt 2 ]]; then
+  echo "usage: run-relocated.sh <artifact-directory> <host|cuda|hip|sycl> [runner arguments ...]" >&2
+  exit 2
+fi
+
+artifact_directory="$(cd -- "$1" && pwd -P)"
+backend="$2"
+case "$backend" in
+  host|cuda|hip|sycl) ;;
+  *) echo "unsupported backend: $backend" >&2; exit 2 ;;
+esac
+shift 2
+
+# Do not let an inherited SDK/toolchain variable turn a missing optional
+# component into an accidental host ROCm/CUDA/oneAPI dependency. Device
+# selection/provider variables (CUDA_VISIBLE_DEVICES, ROCR_VISIBLE_DEVICES,
+# SYCL_DEVICE_FILTER, OCL_ICD_VENDORS, ...) are intentionally preserved.
+unset CUDA_HOME CUDA_PATH CUDA_ROOT CUDA_TOOLKIT_ROOT_DIR \
+  HIP_PATH ROCM_PATH ROCM_HOME ONEAPI_ROOT ONEAPI_HOME DPCPP_HOME \
+  INTEL_ONEAPI_ROOT HSA_TOOLS_LIB ROCP_TOOL_LIB CPATH LIBRARY_PATH \
+  CMAKE_PREFIX_PATH
+
+manifest="$artifact_directory/manifest.tsv"
+target_arch=""
+if [[ -f "$manifest" ]]; then
+  manifest_backend="$(awk -F '\t' '$1 == "backend" { print $2; exit }' "$manifest")"
+  if [[ -n "$manifest_backend" && "$manifest_backend" != "$backend" ]]; then
+    echo "artifact backend is $manifest_backend, not $backend: $artifact_directory" >&2
+    exit 1
+  fi
+  target_arch="$(awk -F '\t' '$1 == "target-arch" { print $2; exit }' "$manifest")"
+fi
+
+executable="$artifact_directory/bin/unified_suite_${backend}"
+if [[ ! -x "$executable" ]]; then
+  echo "relocated runner is missing or not executable: $executable" >&2
+  exit 1
+fi
+
+library_path="$artifact_directory/lib"
+if [[ -d "$library_path" ]]; then
+  # The artifact's userspace closure must win without inheriting a host CUDA,
+  # ROCm or oneAPI installation.  The dynamic loader still supplies the
+  # explicitly host-owned libc/loader and kernel-driver ABI libraries through
+  # its normal system paths.
+  export LD_LIBRARY_PATH="$library_path"
+fi
+if [[ "$backend" == sycl && -z "${UR_ADAPTERS_FORCE_LOAD:-}" ]]; then
+  # The oneAPI UR loader does not search an arbitrary relocated directory for
+  # adapters.  Force the bundled Level Zero adapter unless the caller selected
+  # a different adapter explicitly (for example, the OpenCL adapter).
+  adapter="$library_path/libur_adapter_level_zero.so.0.12.0"
+  if [[ -f "$adapter" ]]; then
+    export UR_ADAPTERS_FORCE_LOAD="$adapter"
+  fi
+fi
+case "$backend" in
+  cuda)
+    # CUDA's static runtime performs host-side architecture checks from the
+    # driver function attributes. Preserve the build target in a relocated
+    # artifact instead of relying on host GPU discovery.
+    if [[ -n "$target_arch" && -z "${GEMSTONE_CUDA_TARGET_ARCH:-}" ]]; then
+      export GEMSTONE_CUDA_TARGET_ARCH="$target_arch"
+    fi
+    ;;
+  hip)
+    if [[ -n "$target_arch" && -z "${GEMSTONE_AMDGPU_TARGET:-}" ]]; then
+      export GEMSTONE_AMDGPU_TARGET="$target_arch"
+    fi
+    # rocBLAS discovers Tensile kernels through a runtime path that is not
+    # represented in DT_NEEDED.  Keep that lookup inside the relocated
+    # artifact as well; otherwise an incomplete/host library directory can
+    # make rocBLAS abort before the provider receives its first dispatch.
+    tensile_library="$library_path/rocblas/library"
+    if [[ -d "$tensile_library" && -z "${ROCBLAS_TENSILE_LIBPATH:-}" ]]; then
+      export ROCBLAS_TENSILE_LIBPATH="$tensile_library"
+    fi
+    if [[ -f "$artifact_directory/share/libdrm/amdgpu.ids" ]]; then
+      export AMDGPU_ASIC_ID_TABLE_PATHS="$artifact_directory/share/libdrm${AMDGPU_ASIC_ID_TABLE_PATHS:+:$AMDGPU_ASIC_ID_TABLE_PATHS}"
+    fi
+    ;;
+esac
+exec "$executable" "$@"

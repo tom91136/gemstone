@@ -65,6 +65,12 @@ GEMSTONE_ROCTHRUST_FILTER='^gfx900/samples/' sbt testROCmConformance
 GEMSTONE_ROCTHRUST_SHARD=0/8 GEMSTONE_ROCTHRUST_JOBS=8 sbt testROCmConformance
 ```
 
+Use `GEMSTONE_ORACLE_ONLY=1` for a vendor-only baseline. The suite still
+builds and runs rocThrust, HSA samples, and rocBLAS artifacts against the
+installed ROCm stack, while skipping Gemstone provider construction and
+execution. The flag requires oracle execution and cannot be combined with
+`GEMSTONE_NO_ORACLE=1`.
+
 The filter is a Scala regular expression over stable qualified case names.
 Shards are zero-based `index/count`; filtering happens before sharding. Worker
 count is 1-32 and defaults to eight. Target compilation is serialized through

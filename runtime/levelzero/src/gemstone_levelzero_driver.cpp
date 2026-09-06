@@ -94,7 +94,17 @@ struct Fence final : Handle {
   Event event;
 };
 
-using Command = std::function<ze_result_t()>;
+using CommandAction = std::function<ze_result_t()>;
+
+struct RecordedCommand {
+  CommandAction action;
+  std::function<void()> release;
+
+  void release_resources() {
+    if (release) release();
+    release = {};
+  }
+};
 
 struct CommandList final : Handle {
   CommandList(bool immediate_value, Context *context_value, Device *device_value)
@@ -103,7 +113,7 @@ struct CommandList final : Handle {
   bool closed = false;
   Context *context;
   Device *device;
-  std::vector<Command> commands;
+  std::vector<RecordedCommand> commands;
 };
 
 struct Queue final : Handle {
@@ -621,11 +631,15 @@ ze_result_t wait_dependencies(const EventUses &events) {
   return ZE_RESULT_SUCCESS;
 }
 
-ze_result_t append(CommandList *list, Command command) {
+ze_result_t append(CommandList *list, CommandAction command, std::function<void()> release = {}) {
   if (list == nullptr) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
-  if (list->immediate) return command();
+  if (list->immediate) {
+    const auto result = command();
+    if (result == ZE_RESULT_SUCCESS && release) release();
+    return result;
+  }
   if (list->closed) return ZE_RESULT_ERROR_INVALID_ARGUMENT;
-  list->commands.emplace_back(std::move(command));
+  list->commands.push_back({std::move(command), std::move(release)});
   return ZE_RESULT_SUCCESS;
 }
 
@@ -698,9 +712,32 @@ ze_result_t ZE_APICALL driver_extensions(ze_driver_handle_t, uint32_t *count,
   return ZE_RESULT_SUCCESS;
 }
 
-ze_result_t ZE_APICALL driver_extension_address(ze_driver_handle_t, const char *, void **address) {
+ze_result_t ZE_APICALL driver_import_external_pointer(ze_driver_handle_t handle, void *pointer, size_t size) {
+  if (cast<Driver>(handle, Kind::Driver) == nullptr) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
+  if (pointer == nullptr || size == 0) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
+  // Gemstone executes against a host-backed mirror, so external host memory
+  // does not need a second device registration. Allocations made through the
+  // Level Zero memory API are already tracked by the mirror layer.
+  return ZE_RESULT_SUCCESS;
+}
+
+ze_result_t ZE_APICALL driver_release_imported_pointer(ze_driver_handle_t handle, void *pointer) {
+  if (cast<Driver>(handle, Kind::Driver) == nullptr) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
+  if (pointer == nullptr) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
+  return ZE_RESULT_SUCCESS;
+}
+
+ze_result_t ZE_APICALL driver_extension_address(ze_driver_handle_t, const char *name, void **address) {
   if (address == nullptr) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
   *address = nullptr;
+  if (name != nullptr && std::strcmp(name, "zexDriverImportExternalPointer") == 0) {
+    *address = reinterpret_cast<void *>(&driver_import_external_pointer);
+    return ZE_RESULT_SUCCESS;
+  }
+  if (name != nullptr && std::strcmp(name, "zexDriverReleaseImportedPointer") == 0) {
+    *address = reinterpret_cast<void *>(&driver_release_imported_pointer);
+    return ZE_RESULT_SUCCESS;
+  }
   return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
 }
 
@@ -886,8 +923,9 @@ ze_result_t ZE_APICALL queue_execute(ze_command_queue_handle_t, uint32_t count,
     auto *list = cast<CommandList>(handles[index], Kind::List);
     if (list == nullptr) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
     for (auto &command : list->commands) {
-      const auto result = command();
+      const auto result = command.action();
       if (result != ZE_RESULT_SUCCESS) return result;
+      command.release_resources();
     }
   }
   if (auto *fence = cast<Fence>(fence_handle, Kind::Fence)) signal_event(&fence->event);
@@ -948,13 +986,17 @@ ze_result_t ZE_APICALL list_copy(ze_command_list_handle_t handle, void *destinat
   if (retained != ZE_RESULT_SUCCESS) return retained;
   auto destination_allocation = retain_allocation(destination, size);
   auto source_allocation = retain_allocation(source, size);
+  auto allocation_lifetime = std::make_shared<std::vector<AllocationRef>>();
+  if (destination_allocation) allocation_lifetime->push_back(std::move(destination_allocation));
+  if (source_allocation) allocation_lifetime->push_back(std::move(source_allocation));
   return append(cast<CommandList>(handle, Kind::List),
-                [=, signal = std::move(retained_signal), waits = std::move(retained_waits),
-                 destination_lifetime = std::move(destination_allocation), source_lifetime = std::move(source_allocation)] {
+                [=, signal = std::move(retained_signal), waits = std::move(retained_waits)] {
+    (void)allocation_lifetime;
     auto result = wait_dependencies(waits);
     if (result == ZE_RESULT_SUCCESS) std::memmove(destination, source, size);
     return result == ZE_RESULT_SUCCESS ? signal_event(signal.get()) : result;
-  });
+  },
+                [allocation_lifetime] { allocation_lifetime->clear(); });
 }
 
 ze_result_t ZE_APICALL list_fill(ze_command_list_handle_t handle, void *destination, const void *pattern,
@@ -968,16 +1010,19 @@ ze_result_t ZE_APICALL list_fill(ze_command_list_handle_t handle, void *destinat
   const auto retained = retain_command_events(signal, wait_count, waits, retained_signal, retained_waits);
   if (retained != ZE_RESULT_SUCCESS) return retained;
   auto destination_allocation = retain_allocation(destination, size);
+  auto allocation_lifetime = std::make_shared<std::vector<AllocationRef>>();
+  if (destination_allocation) allocation_lifetime->push_back(std::move(destination_allocation));
   return append(cast<CommandList>(handle, Kind::List),
-                [=, signal = std::move(retained_signal), waits = std::move(retained_waits),
-                 destination_lifetime = std::move(destination_allocation)] {
+                [=, signal = std::move(retained_signal), waits = std::move(retained_waits)] {
+    (void)allocation_lifetime;
     auto result = wait_dependencies(waits);
     if (result == ZE_RESULT_SUCCESS) {
       auto *bytes = static_cast<uint8_t *>(destination);
       for (size_t offset = 0; offset < size; ++offset) bytes[offset] = copied_pattern[offset % pattern_size];
     }
     return result == ZE_RESULT_SUCCESS ? signal_event(signal.get()) : result;
-  });
+  },
+                [allocation_lifetime] { allocation_lifetime->clear(); });
 }
 
 ze_result_t ZE_APICALL list_signal(ze_command_list_handle_t handle, ze_event_handle_t signal) {
@@ -1169,9 +1214,11 @@ ze_result_t ZE_APICALL list_launch(ze_command_list_handle_t handle, ze_kernel_ha
   KernelLaunch launch{HandleUse<Kernel>(kernel), kernel->module, kernel->name, kernel->group_x, kernel->group_y,
                       kernel->group_z, kernel->indirect != 0, kernel->arguments, kernel->parameters,
                       retain_kernel_allocations(*kernel)};
+  auto allocation_lifetime = std::make_shared<std::vector<AllocationRef>>(std::move(launch.allocations));
   return append(cast<CommandList>(handle, Kind::List),
                 [launch = std::move(launch), copied_groups, signal = std::move(retained_signal),
-                 waits = std::move(retained_waits)] {
+                 waits = std::move(retained_waits), allocation_lifetime] {
+    (void)allocation_lifetime;
     auto result = wait_dependencies(waits);
     gemstone_levelzero_executor_v1 current{};
     {
@@ -1193,7 +1240,8 @@ ze_result_t ZE_APICALL list_launch(ze_command_list_handle_t handle, ze_kernel_ha
                    : ZE_RESULT_ERROR_DEVICE_LOST;
     } else if (result == ZE_RESULT_SUCCESS) result = launch_rpc(launch, copied_groups);
     return result == ZE_RESULT_SUCCESS ? signal_event(signal.get()) : result;
-  });
+  },
+                [allocation_lifetime] { allocation_lifetime->clear(); });
 }
 
 void *aligned_allocate(size_t size, size_t alignment) {
@@ -1210,6 +1258,10 @@ ze_result_t allocate(size_t size, size_t alignment, ze_memory_type_t type, void 
     return ZE_RESULT_ERROR_UNSUPPORTED_SIZE;
   *result = aligned_allocate(size, alignment);
   if (*result == nullptr) return ZE_RESULT_ERROR_OUT_OF_HOST_MEMORY;
+  // Device allocations are uninitialized by the Level Zero specification, but
+  // deterministic zero-fill keeps empty-range kernels observable and mirrors
+  // the fresh allocation behaviour of the physical oracle used by the suite.
+  std::memset(*result, 0, std::max(size, size_t{1}));
   const uint64_t allocation_id = next_allocation_id();
   if (state.mode == RemoteMode::Ready) {
     std::lock_guard rpc_lock(rpc_transaction_mutex);
@@ -1258,17 +1310,31 @@ ze_result_t ZE_APICALL mem_free(ze_context_handle_t, void *pointer) {
   std::free(pointer);
   return released ? ZE_RESULT_SUCCESS : ZE_RESULT_ERROR_DEVICE_LOST;
 }
+ze_result_t ZE_APICALL mem_free_ext(ze_context_handle_t context, const ze_memory_free_ext_desc_t *desc, void *pointer) {
+  if (cast<Context>(context, Kind::Context) == nullptr) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
+  if (desc == nullptr || pointer == nullptr) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
+  constexpr auto supported_policies = ZE_DRIVER_MEMORY_FREE_POLICY_EXT_FLAG_BLOCKING_FREE |
+                                      ZE_DRIVER_MEMORY_FREE_POLICY_EXT_FLAG_DEFER_FREE;
+  if ((desc->freePolicy & ~supported_policies) != 0) return ZE_RESULT_ERROR_INVALID_ENUMERATION;
+  return mem_free(context, pointer);
+}
 ze_result_t ZE_APICALL mem_properties(ze_context_handle_t, const void *pointer,
                                       ze_memory_allocation_properties_t *properties, ze_device_handle_t *device) {
   if (properties == nullptr) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
+  if (pointer == nullptr) return ZE_RESULT_ERROR_INVALID_ARGUMENT;
+  const auto address = reinterpret_cast<uintptr_t>(pointer);
   std::lock_guard lock(allocations_mutex);
-  const auto found = allocations.find(const_cast<void *>(pointer));
-  if (found == allocations.end()) return ZE_RESULT_ERROR_INVALID_ARGUMENT;
-  properties->type = found->second->type;
-  properties->id = found->second->id;
-  properties->pageSize = 4096;
-  if (device != nullptr) *device = reinterpret_cast<ze_device_handle_t>(&global_device);
-  return ZE_RESULT_SUCCESS;
+  for (const auto &[base, allocation] : allocations) {
+    const auto start = reinterpret_cast<uintptr_t>(base);
+    if (address >= start && address - start < allocation->size) {
+      properties->type = allocation->type;
+      properties->id = allocation->id;
+      properties->pageSize = 4096;
+      if (device != nullptr) *device = reinterpret_cast<ze_device_handle_t>(&global_device);
+      return ZE_RESULT_SUCCESS;
+    }
+  }
+  return ZE_RESULT_ERROR_INVALID_ARGUMENT;
 }
 ze_result_t ZE_APICALL mem_range(ze_context_handle_t, const void *pointer, void **base, size_t *size) {
   if (base == nullptr || size == nullptr) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
@@ -1554,7 +1620,7 @@ ze_result_t ZE_APICALL kernel_properties(ze_kernel_handle_t handle, ze_kernel_pr
   auto *kernel = cast<Kernel>(handle, Kind::Kernel);
   if (kernel == nullptr) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   if (properties == nullptr) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
-  properties->numKernelArgs = static_cast<uint32_t>(kernel->arguments.size());
+  properties->numKernelArgs = static_cast<uint32_t>(kernel->parameters.size());
   properties->requiredGroupSizeX = 0;
   properties->requiredGroupSizeY = 0;
   properties->requiredGroupSizeZ = 0;
@@ -1576,6 +1642,7 @@ ze_result_t ZE_APICALL kernel_properties(ze_kernel_handle_t handle, ze_kernel_pr
   }
   return ZE_RESULT_SUCCESS;
 }
+
 ze_result_t ZE_APICALL kernel_set_indirect(ze_kernel_handle_t handle, ze_kernel_indirect_access_flags_t flags) {
   auto *kernel = cast<Kernel>(handle, Kind::Kernel);
   if (kernel == nullptr) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
@@ -1649,7 +1716,8 @@ TABLE_BEGIN(zeGetCommandListProcAddrTable, ze_command_list_dditable_t);
 TABLE_END
 TABLE_BEGIN(zeGetMemProcAddrTable, ze_mem_dditable_t);
   table->pfnAllocShared = mem_shared; table->pfnAllocDevice = mem_device; table->pfnAllocHost = mem_host;
-  table->pfnFree = mem_free; table->pfnGetAllocProperties = mem_properties; table->pfnGetAddressRange = mem_range;
+  table->pfnFree = mem_free; table->pfnFreeExt = mem_free_ext; table->pfnGetAllocProperties = mem_properties;
+  table->pfnGetAddressRange = mem_range;
 TABLE_END
 TABLE_BEGIN(zeGetEventPoolProcAddrTable, ze_event_pool_dditable_t);
   table->pfnCreate = event_pool_create; table->pfnDestroy = event_pool_destroy;

@@ -44,6 +44,11 @@ GEMSTONE_OPENCL_FILTER='^(Basic|API)$' sbt --server -batch testOpenCLConformance
 GEMSTONE_OPENCL_SHARD=0/8 GEMSTONE_OPENCL_JOBS=8 sbt --server -batch testOpenCLConformance
 ```
 
+For a vendor-only baseline, set `GEMSTONE_ORACLE_ONLY=1`. The selected CTS
+commands are compiled and run against the installed OpenCL ICD, while
+Gemstone's ICD is not built or loaded. This requires the oracle to be enabled
+and cannot be combined with `GEMSTONE_NO_ORACLE` or `GEMSTONE_OPENCL_ORACLE=0`.
+
 Cases are target-qualified and the Gemstone lane runs once for each target in
 the shared AMDGPU matrix. The OpenCL CTS artifact is compiled once because it
 contains SPIR-V rather than target-specific AMDGPU code:

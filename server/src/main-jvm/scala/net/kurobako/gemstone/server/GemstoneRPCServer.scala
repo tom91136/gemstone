@@ -8,6 +8,7 @@ import net.kurobako.gemstone.cuda.*
 import net.kurobako.gemstone.generated.GeneratedCUDARPC
 import net.kurobako.gemstone.rpc.*
 import net.kurobako.gemstone.execution.ProgramExecutor
+import net.kurobako.gemstone.execution.ExecutionLimits
 import net.kurobako.gemstone.launcher.UsageSnapshot
 
 import java.io.ByteArrayOutputStream
@@ -51,7 +52,11 @@ object GemstoneRPCServer {
     def snapshot: UsageSnapshot = UsageSnapshot(cuda.sum(), execution.sum())
   }
 
-  private final class ExecutionSessions(executor: () => ProgramExecutor) {
+  private final class ExecutionSessions(
+      executor: () => ProgramExecutor,
+      executionLimits: ExecutionLimits,
+      executionPool: BoundedExecutionPool
+  ) {
     private val entries = AtomicReference(Map.empty[ExecutionRPCProtocol.SessionId, ExecutionSessionEntry])
 
     def connection(): ExecutionRPCProtocol.SessionConnection = ExecutionSessionConnection(this)
@@ -63,7 +68,12 @@ object GemstoneRPCServer {
           entries.set(current.updated(session, entry.copy(connections = Math.addExact(entry.connections, 1))))
           entry.service
         case None =>
-          val service = ExecutionService(executor())
+          val service = ExecutionService(
+            executor(),
+            schedule = executionPool.schedule,
+            executionLimits = executionLimits,
+            parallelism = executionPool
+          )
           entries.set(current.updated(session, ExecutionSessionEntry(service, 1)))
           service
       }
@@ -106,7 +116,8 @@ object GemstoneRPCServer {
       server: ServerSocket,
       acceptThread: Thread,
       connections: ClientConnections,
-      usageCounter: UsageCounter
+      usageCounter: UsageCounter,
+      executionPool: BoundedExecutionPool
   ) extends AutoCloseable {
     def await(): Unit        = acceptThread.join()
     def usage: UsageSnapshot = usageCounter.snapshot
@@ -115,6 +126,7 @@ object GemstoneRPCServer {
       server.close()
       connections.closeAll()
       acceptThread.join()
+      executionPool.close()
     }
   }
 
@@ -148,43 +160,79 @@ object GemstoneRPCServer {
   }
 
   def start(token: String): RunningServer =
-    startWith(token, () => ISATypedProgramExecutor.default)
+    startWith(token, () => ISATypedProgramExecutor.default, configuredExecutionLimits(sys.env), SocketTimeoutMillis)
+
+  /** Start the default server with an explicit per-dispatch execution profile. */
+  def start(token: String, executionLimits: ExecutionLimits): RunningServer =
+    startWith(token, () => ISATypedProgramExecutor.default, executionLimits, SocketTimeoutMillis)
+
+  /** Start the default server with the public frontend's conservative pool profile. */
+  def start(token: String, executionLimits: ExecutionLimits, backend: String): RunningServer =
+    startWith(token, () => ISATypedProgramExecutor.default, executionLimits, SocketTimeoutMillis, Some(backend))
 
   private[server] def start(token: String, executor: ProgramExecutor): RunningServer =
-    startWith(token, () => executor)
+    startWith(token, () => executor, ExecutionLimits.Default, SocketTimeoutMillis)
 
-  private def startWith(token: String, executor: () => ProgramExecutor): RunningServer = {
+  private[server] def start(
+      token: String,
+      executor: ProgramExecutor,
+      executionLimits: ExecutionLimits
+  ): RunningServer =
+    startWith(token, () => executor, executionLimits, SocketTimeoutMillis)
+
+  private[server] def start(
+      token: String,
+      executor: ProgramExecutor,
+      executionLimits: ExecutionLimits,
+      socketTimeoutMillis: Int
+  ): RunningServer = {
+    require(socketTimeoutMillis >= 0, "socket timeout must be non-negative")
+    startWith(token, () => executor, executionLimits, socketTimeoutMillis)
+  }
+
+  private def startWith(
+      token: String,
+      executor: () => ProgramExecutor,
+      executionLimits: ExecutionLimits,
+      socketTimeoutMillis: Int,
+      backend: Option[String] = None
+  ): RunningServer = {
     require(validToken(token), "token must contain exactly 64 lowercase hexadecimal characters")
     val tokenBytes = token.getBytes(StandardCharsets.US_ASCII)
     val server     = ServerSocket()
     // Execution resources belong to an authenticated process session. HSA
     // deliberately uses separate connections for memory and AQL execution;
     // both carry the same session identity and therefore share one service.
-    val executions  = ExecutionSessions(executor)
-    val connections = ClientConnections()
-    val usage       = UsageCounter()
+    val executionPool = BoundedExecutionPool.fromEnvironment(sys.env, backend)
+    val executions    = ExecutionSessions(executor, executionLimits, executionPool)
+    val connections   = ClientConnections()
+    val usage         = UsageCounter()
     server.bind(InetSocketAddress(InetAddress.getLoopbackAddress, 0))
     val acceptThread = Thread(
-      () => acceptConnections(server, tokenBytes, executions, connections, usage),
+      () => acceptConnections(server, tokenBytes, executions, connections, usage, socketTimeoutMillis),
       "gemstone-rpc-accept"
     )
     acceptThread.setDaemon(true)
     acceptThread.start()
-    RunningServer(server.getLocalPort, server, acceptThread, connections, usage)
+    RunningServer(server.getLocalPort, server, acceptThread, connections, usage, executionPool)
   }
+
+  private def configuredExecutionLimits(environment: Map[String, String]): ExecutionLimits =
+    ExecutionLimits.fromEnvironment(environment).fold(message => throw IllegalArgumentException(message), identity)
 
   private def acceptConnections(
       server: ServerSocket,
       token: Array[Byte],
       executions: ExecutionSessions,
       connections: ClientConnections,
-      usage: UsageCounter
+      usage: UsageCounter,
+      socketTimeoutMillis: Int
   ): Unit =
     try
       Iterator.continually(server.accept()).foreach { socket =>
         connections.add(socket)
         val thread = Thread(
-          () => serve(socket, token, executions, connections, usage),
+          () => serve(socket, token, executions, connections, usage, socketTimeoutMillis),
           s"gemstone-rpc-${socket.getPort}"
         )
         thread.setDaemon(true)
@@ -199,12 +247,13 @@ object GemstoneRPCServer {
       expectedToken: Array[Byte],
       executions: ExecutionSessions,
       connections: ClientConnections,
-      usage: UsageCounter
+      usage: UsageCounter,
+      socketTimeoutMillis: Int
   ): Unit = {
     val execution = executions.connection()
     try {
       socket.setTcpNoDelay(true)
-      socket.setSoTimeout(SocketTimeoutMillis)
+      socket.setSoTimeout(socketTimeoutMillis)
       val server              = CUDAServer.emulated
       val input               = DataInputStream(socket.getInputStream)
       val output              = DataOutputStream(socket.getOutputStream)
@@ -221,6 +270,11 @@ object GemstoneRPCServer {
               writeResponse(output, response)
               true
             case ExecutionRPCProtocol.RequestMagic =>
+              // Execution requests return quickly, but the connection can
+              // legitimately sit idle while another same-session connection
+              // runs a long dispatch. Do not let the generic idle timeout
+              // tear down that session before its allocations are released.
+              socket.setSoTimeout(0)
               ExecutionRPCProtocol.exchange(input, output, expectedToken, execution, () => usage.execution.increment())
             case value => throw IllegalArgumentException(f"invalid request magic: 0x$value%08x")
           }
@@ -388,7 +442,7 @@ object GemstoneRPCServer {
       case WireValue.KernelFunctionValue(value) =>
         output.writeLong(value.handle.handle)
         output.writeInt(value.parameterWidths.length)
-        value.parameterWidths.iterator.foreach(width => output.writeByte(width.toInt))
+        value.parameterWidths.iterator.foreach(output.writeInt)
       case WireValue.KernelLaunchValue(_) =>
         throw IllegalArgumentException("KernelLaunch is a request-only wire type")
       case WireValue.StreamValue(value)       => output.writeLong(value.handle)

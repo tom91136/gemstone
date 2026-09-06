@@ -38,6 +38,9 @@ class CUDAConformanceSuite extends munit.FunSuite {
     require(selected.nonEmpty, s"GEMSTONE_CUDA_FILTER selected no CUDA cases: $expression")
     selected
   }
+  private val oracleOnly = sys.env.get("GEMSTONE_ORACLE_ONLY").exists { value =>
+    Set("1", "true", "yes").contains(value.trim.toLowerCase)
+  }
   private val targetRoot = Files.createDirectories(root.resolve("target/conformance"))
   private val runRoot    = Files.createTempDirectory(targetRoot, "cuda-scala.")
   private val libraryDir = runRoot.resolve("lib")
@@ -51,14 +54,23 @@ class CUDAConformanceSuite extends munit.FunSuite {
     val semantics   = cases.filter(_.semantic.nonEmpty).map { cudaCase =>
       s"gemstone-ptx/${cudaCase.name}" -> (() => runSemanticCase(cudaCase))
     }
-    conformance ++ semantics :+ ("gemstone/rejects-invalid-token" -> (() => rejectInvalidToken()))
+    if (oracleOnly) conformance
+    else conformance ++ semantics :+ ("gemstone/rejects-invalid-token" -> (() => rejectInvalidToken()))
   }
 
   override def beforeAll(): Unit = {
+    require(!oracleOnly || oracleEnabled, "GEMSTONE_ORACLE_ONLY requires the vendor oracle to be enabled")
+    require(
+      !oracleOnly ||
+        cases.forall(cudaCase => !cudaCase.cublas || !sys.env.get("GEMSTONE_CUBLAS_SKIP_ORACLE").contains("1")),
+      "GEMSTONE_ORACLE_ONLY cannot be combined with GEMSTONE_CUBLAS_SKIP_ORACLE=1"
+    )
     require(jobs >= 1 && jobs <= 32, s"GEMSTONE_TEST_JOBS must be between 1 and 32, found $jobs")
     Files.createDirectories(libraryDir)
-    buildGemstoneFacade(root, libraryDir)
-    verifyGemstoneSurface(root, libraryDir, runRoot)
+    if (!oracleOnly) {
+      buildGemstoneFacade(root, libraryDir)
+      verifyGemstoneSurface(root, libraryDir, runRoot)
+    }
     val pool = Executors.newFixedThreadPool(jobs)
     executor = Some(pool)
     executions = work.map { case (name, run) =>
@@ -148,15 +160,17 @@ class CUDAConformanceSuite extends munit.FunSuite {
       )
       assertResult(cudaCase, "oracle", cudaCase.commands.last, oracle)
     }
-    val gemstone = GemstoneProcess.attested(
-      ComputeAPI.CUDA,
-      RuntimeLayout(cudaDriver = Some(libraryDir.resolve("libcuda.so.1"))),
-      (sys.env - "GEMSTONE_NO_ORACLE") ++ vendorEnvironment
-    )(environment => capture(execute, caseRoot, environment)).fold(
-      error => fail(s"gemstone/${cudaCase.name}: ${error.message}"),
-      identity
-    )
-    assertResult(cudaCase, "gemstone", cudaCase.commands.last, gemstone)
+    if (!oracleOnly) {
+      val gemstone = GemstoneProcess.attested(
+        ComputeAPI.CUDA,
+        RuntimeLayout(cudaDriver = Some(libraryDir.resolve("libcuda.so.1"))),
+        (sys.env - "GEMSTONE_NO_ORACLE") ++ vendorEnvironment
+      )(environment => capture(execute, caseRoot, environment)).fold(
+        error => fail(s"gemstone/${cudaCase.name}: ${error.message}"),
+        identity
+      )
+      assertResult(cudaCase, "gemstone", cudaCase.commands.last, gemstone)
+    }
   }
 
   private def runSemanticCase(cudaCase: CUDACase): Unit = {
@@ -396,13 +410,16 @@ object CUDAConformanceSuite {
         generated.resolve("gemstone_cuda_rpc_client.c").toString,
         generated.resolve("gemstone_cuda_driver_stubs.c").toString,
         dispatch.resolve("gemstone_cuda_compat.c").toString,
+        dispatch.resolve("gemstone_cublas_compat.c").toString,
         dispatch.resolve("gemstone_rpc_transport.c").toString,
         s"-I$generated",
         s"-I$dispatch",
         s"-I${cudaHeaderInclude(root)}",
         "-Wl,-soname,libcuda.so.1",
         s"-Wl,--version-script=${generated.resolve("gemstone_cuda.map")}",
+        s"-Wl,--version-script=${dispatch.resolve("gemstone_cublas.map")}",
         "-pthread",
+        "-lm",
         "-o",
         library.toString
       ),

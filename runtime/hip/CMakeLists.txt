@@ -19,7 +19,16 @@ find_path(HIP_INCLUDE_DIR hip/hip_runtime_api.h
   REQUIRED)
 find_library(ZSTD_LIBRARY zstd REQUIRED)
 
-add_library(gemstone_hip_runtime SHARED src/hip_runtime.cpp)
+# Keep the HIP drop-in self-contained.  A vendor HIP binary normally brings
+# `libhsa-runtime64.so.1` into the process before LD_PRELOAD is considered;
+# linking our HSA facade as a shared dependency would therefore resolve the
+# provider's internal calls against that vendor SONAME.  Embedding the
+# provider implementation avoids the collision and keeps HIP and direct HSA
+# on the same virtual runtime.
+add_library(gemstone_hip_runtime SHARED
+  src/hip_runtime.cpp
+  ../hsa/src/hsa_runtime.cpp
+)
 set_target_properties(gemstone_hip_runtime PROPERTIES
   OUTPUT_NAME "amdhip64"
   SOVERSION 7
@@ -27,14 +36,16 @@ set_target_properties(gemstone_hip_runtime PROPERTIES
   INSTALL_RPATH "$ORIGIN")
 target_include_directories(gemstone_hip_runtime PRIVATE
   ${HIP_INCLUDE_DIR}
+  ${HSA_INCLUDE_DIR}
   include
   ../hsa/include
   ../../native/execution)
 target_compile_features(gemstone_hip_runtime PRIVATE cxx_std_17)
 target_compile_definitions(gemstone_hip_runtime PRIVATE __HIP_PLATFORM_AMD__=1)
 target_compile_options(gemstone_hip_runtime PRIVATE -Wall -Wextra -Werror -Wno-pedantic)
-target_link_libraries(gemstone_hip_runtime PRIVATE gemstone_hsa_runtime gemstone_hsa_doorbell ${ZSTD_LIBRARY})
+target_link_libraries(gemstone_hip_runtime PRIVATE gemstone_hsa_doorbell ${ZSTD_LIBRARY})
 target_link_options(gemstone_hip_runtime PRIVATE
+  "-Wl,-Bsymbolic"
   "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/abi/amdhip64.map")
 
 include(CTest)

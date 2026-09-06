@@ -65,11 +65,22 @@ inline std::string name(const MatrixShape &shape) {
 }
 
 struct Configuration {
+  // The legacy-red inventory is an explicit regression probe. Keep it out of
+  // ordinary oracle/emulation catalogs unless the caller opts in.
+  bool include_legacy_reds = false;
+  // Optional root containing the container-built upstream test executables
+  // used by the imported legacy inventory. It is intentionally opt-in so the
+  // normal unified suite remains self-contained and does not depend on a
+  // vendor checkout or build tree.
+  std::string legacy_binary_root;
+  // Optional directory for preserving stdout/stderr from imported legacy
+  // executable cases. Empty keeps the normal quiet status-only behavior.
+  std::string legacy_output_directory;
   std::vector<std::size_t> algorithm_sizes{0, 1, 31, 32, 33, 63, 64, 65, 257};
   std::vector<std::size_t> blas_sizes{1, 31, 64, 257};
   std::vector<std::size_t> edge_case_sizes{0, 1, 7, 31, 32, 33, 257};
   std::vector<std::size_t> stress_sizes{257, 4096};
-  std::vector<MatrixShape> matrix_shapes{{2, 2, 3}, {7, 5, 9}};
+  std::vector<MatrixShape> matrix_shapes{{1, 1, 1}, {2, 2, 3}, {7, 5, 9}};
   std::vector<ScalarType> algorithm_types{ScalarType::i32, ScalarType::f32};
   std::vector<ScalarType> blas_types{ScalarType::f32};
   std::vector<ScalarType> edge_algorithm_types{ScalarType::i32, ScalarType::f32};

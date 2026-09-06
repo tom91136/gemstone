@@ -1,0 +1,37 @@
+ARG BASE_IMAGE=ubuntu:24.04
+FROM ${BASE_IMAGE}
+
+USER root
+
+ARG BUILDER_UID=1000
+ARG BUILDER_GID=1000
+ARG INSTALL_OPENCL=0
+ENV DEBIAN_FRONTEND=noninteractive
+
+# The compiler and SDK come only from BASE_IMAGE.  The installed artifact is
+# assembled after the build and never contains this compiler/toolchain tree.
+RUN apt-get update \
+    && apt-get install --no-install-recommends --yes \
+       binutils \
+       build-essential \
+        ca-certificates \
+        cmake \
+        file \
+        git \
+        ninja-build \
+       patchelf \
+    && if [ "${INSTALL_OPENCL}" = 1 ]; then \
+         apt-get install --no-install-recommends --yes opencl-headers ocl-icd-opencl-dev; \
+       fi \
+    && rm -rf /var/lib/apt/lists/* \
+    && if ! getent group "${BUILDER_GID}" >/dev/null; then \
+         groupadd --gid "${BUILDER_GID}" gemstone-builder; \
+       fi \
+    && if ! getent passwd "${BUILDER_UID}" >/dev/null; then \
+         useradd --create-home --uid "${BUILDER_UID}" --gid "${BUILDER_GID}" gemstone-builder; \
+       fi \
+    && mkdir --parents --mode=1777 /work \
+    && chmod 1777 /work
+
+USER ${BUILDER_UID}:${BUILDER_GID}
+WORKDIR /work

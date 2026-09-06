@@ -42,6 +42,7 @@ typedef struct gemstone_hsa_kernel_binding {
   uint32_t kernarg_size;
   const gemstone_hsa_kernarg_field *fields;
   uint32_t field_count;
+  uint32_t explicit_argument_count;
 } gemstone_hsa_kernel_binding;
 
 typedef struct gemstone_hsa_dirty_range {
@@ -65,6 +66,9 @@ typedef struct gemstone_hsa_executor {
   int (*release_completion)(void *context, uint64_t completion_id);
   const char *(*error)(void *context);
   void (*destroy)(void *context);
+  // Optional host-to-device copy for a named program global. Older test
+  // executors may leave this null; regular RPC-backed execution supplies it.
+  int (*write_global)(void *context, uint64_t program_id, const char *name, uint64_t offset, const void *bytes, uint32_t size);
 } gemstone_hsa_executor;
 
 typedef struct gemstone_hsa_signal_operations {
@@ -99,6 +103,11 @@ int gemstone_hsa_aql_runtime_install_code_object(gemstone_hsa_aql_runtime *runti
                                                  const gemstone_hsa_kernel_binding *bindings, uint32_t binding_count);
 
 int gemstone_hsa_aql_runtime_remove_kernel(gemstone_hsa_aql_runtime *runtime, uint64_t kernel_object);
+
+// Updates a named global belonging to the code object that owns kernel_object.
+// This is used by HIP's symbol-copy API for constant-memory launch state.
+int gemstone_hsa_aql_runtime_write_global(gemstone_hsa_aql_runtime *runtime, uint64_t kernel_object, const char *name,
+                                          uint64_t offset, const void *bytes, uint32_t size);
 
 // Maps host pointer values embedded in kernarg buffers to allocations already
 // registered with the shared execution service.

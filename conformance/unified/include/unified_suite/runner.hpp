@@ -2,6 +2,7 @@
 #define UNIFIED_SUITE_RUNNER_HPP
 
 #include "unified_suite/algorithms.hpp"
+#include "unified_suite/async_cases.hpp"
 #include "unified_suite/blas.hpp"
 #include "unified_suite/config.hpp"
 #include "unified_suite/edge_cases.hpp"
@@ -9,6 +10,7 @@
 #include "unified_suite/stress.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <exception>
@@ -23,7 +25,7 @@
 
 namespace unified_suite {
 
-enum class SuiteSelection { all, algorithms, blas, edge_cases, stress };
+enum class SuiteSelection { all, algorithms, blas, edge_cases, async, stress };
 
 struct RunOptions {
   Configuration configuration;
@@ -31,6 +33,8 @@ struct RunOptions {
   bool list = false;
   bool fail_fast = false;
   bool quiet_pass = false;
+  bool timing = false;
+  bool expect_reds = false;
   bool allow_empty_shard = false;
   bool allow_all_skipped = false;
   std::optional<std::string> exact_case;
@@ -46,6 +50,7 @@ struct CatalogProvider {
   CaseBuilder blas;
   CaseBuilder edge_cases;
   CaseBuilder stress;
+  CaseBuilder async = nullptr;
 };
 
 inline void print_usage(std::ostream &output, std::string_view executable) {
@@ -53,7 +58,7 @@ inline void print_usage(std::ostream &output, std::string_view executable) {
          << "  --list                              list selected stable case names\n"
          << "  --case=NAME                         run one exact case\n"
          << "  --filter=REGEX                      select case names by regular expression\n"
-         << "  --suite=all|algorithms|blas|edge-cases|stress\n"
+         << "  --suite=all|algorithms|blas|edge-cases|async|stress\n"
          << "                                      select a suite\n"
          << "  --sizes=N,N,...                     set sizes for every suite\n"
          << "  --algorithm-sizes=N,N,...           set algorithm sizes\n"
@@ -69,9 +74,14 @@ inline void print_usage(std::ostream &output, std::string_view executable) {
          << "  --edge-algorithm-types=TYPE,...     set edge algorithm scalar types\n"
          << "  --edge-blas-types=TYPE,...          set edge BLAS scalar types\n"
          << "  --stress-types=TYPE,...             set bounded stress scalar types\n"
+         << "  --include-legacy-reds               include the imported old-suite red inventory\n"
+         << "  --legacy-bin-root=PATH              run imported identities from upstream binaries at PATH\n"
+         << "  --legacy-output-dir=PATH            preserve imported legacy stdout/stderr under PATH\n"
          << "  --shard-index=N --shard-count=N     run a stable hash shard\n"
          << "  --fail-fast                         stop after the first failure\n"
          << "  --quiet-pass                        print only skips, failures and summary\n"
+         << "  --timing                            print per-case wall-clock timing\n"
+         << "  --expect-reds                       require expected legacy-red cases to fail\n"
          << "  --allow-empty-shard                 permit an empty hash shard\n"
          << "  --allow-all-skipped                 permit a selected run with zero passes\n"
          << "  --help                              show this help\n"
@@ -144,6 +154,17 @@ inline std::optional<RunOptions> parse_options(int argc, char **argv, std::ostre
         result.fail_fast = true;
       else if (argument == "--quiet-pass")
         result.quiet_pass = true;
+      else if (argument == "--timing")
+        result.timing = true;
+      else if (argument == "--expect-reds")
+        result.expect_reds = true;
+      else if (argument == "--include-legacy-reds")
+        result.configuration.include_legacy_reds = true;
+      else if (argument.starts_with("--legacy-bin-root="))
+        result.configuration.legacy_binary_root = std::string(detail::value(argument, "--legacy-bin-root"));
+      else if (argument.starts_with("--legacy-output-dir="))
+        result.configuration.legacy_output_directory =
+            std::string(detail::value(argument, "--legacy-output-dir"));
       else if (argument == "--allow-empty-shard")
         result.allow_empty_shard = true;
       else if (argument == "--allow-all-skipped")
@@ -162,6 +183,8 @@ inline std::optional<RunOptions> parse_options(int argc, char **argv, std::ostre
           result.suite = SuiteSelection::blas;
         else if (selected == "edge-cases")
           result.suite = SuiteSelection::edge_cases;
+        else if (selected == "async")
+          result.suite = SuiteSelection::async;
         else if (selected == "stress")
           result.suite = SuiteSelection::stress;
         else
@@ -244,6 +267,16 @@ inline std::vector<Case> catalog(const RunOptions &options, const CatalogProvide
     result.insert(result.end(), std::make_move_iterator(edge_case_cases.begin()),
                   std::make_move_iterator(edge_case_cases.end()));
   }
+  if (options.suite == SuiteSelection::all || options.suite == SuiteSelection::async) {
+    if (provider.async == nullptr) {
+      if (options.suite == SuiteSelection::async)
+        throw std::logic_error("async suite was requested but this provider has no async catalog");
+    } else {
+      auto async_cases = provider.async(options.configuration);
+      result.insert(result.end(), std::make_move_iterator(async_cases.begin()),
+                    std::make_move_iterator(async_cases.end()));
+    }
+  }
   if (options.suite == SuiteSelection::all || options.suite == SuiteSelection::stress) {
     auto stress_cases = provider.stress(options.configuration);
     result.insert(result.end(), std::make_move_iterator(stress_cases.begin()),
@@ -303,30 +336,68 @@ inline int run(const RunOptions &options, const CatalogProvider &provider, std::
   std::size_t passed = 0;
   std::size_t skipped = 0;
   std::size_t failed = 0;
+  std::size_t expected_failed = 0;
+  std::size_t unexpected_pass = 0;
+  std::size_t unexpected_skip = 0;
+  std::size_t executed = 0;
+  std::chrono::microseconds total_case_time(0);
+  std::chrono::microseconds longest_case_time(0);
+  const auto run_started = std::chrono::steady_clock::now();
   for (const auto *test_case : selected) {
+    const auto case_started = std::chrono::steady_clock::now();
     const auto result = test_case->execute();
-    if (result.status == Status::pass)
+    const auto case_time =
+        std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - case_started);
+    ++executed;
+    total_case_time += case_time;
+    longest_case_time = std::max(longest_case_time, case_time);
+    const bool expected_red = options.expect_reds && test_case->expected_failure;
+    const bool xfail = expected_red && result.status == Status::fail;
+    const bool xpass = expected_red && result.status == Status::pass;
+    const bool xskip = expected_red && result.status == Status::skip;
+    if (xfail)
+      ++expected_failed;
+    else if (xpass || xskip) {
+      if (xpass)
+        ++unexpected_pass;
+      else
+        ++unexpected_skip;
+      ++failed;
+    } else if (result.status == Status::pass)
       ++passed;
     else if (result.status == Status::skip)
       ++skipped;
     else
       ++failed;
-    if (result.status != Status::pass || !options.quiet_pass) {
-      output << name(result.status) << ' ' << test_case->name;
+    if (result.status != Status::pass || xpass || xskip || !options.quiet_pass) {
+      output << (xfail ? "XFAIL" : (xpass ? "XPASS" : (xskip ? "XSKIP" : name(result.status)))) << ' '
+             << test_case->name;
       if (!result.message.empty())
         output << ": " << result.message;
       output << '\n';
+      output.flush();
+    }
+    if (options.timing) {
+      output << "TIMING " << test_case->name << " elapsed_us=" << case_time.count() << '\n';
       output.flush();
     }
     if (failed != 0 && options.fail_fast)
       break;
   }
   output << "SUMMARY pass=" << passed << " skip=" << skipped << " fail=" << failed
+         << " xfail=" << expected_failed << " xpass=" << unexpected_pass << " xskip=" << unexpected_skip
          << " selected=" << selected.size() << " shard=" << options.shard_index << '/' << options.shard_count
          << '\n';
+  if (options.timing) {
+    const auto elapsed =
+        std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - run_started);
+    output << "TIMING_SUMMARY elapsed_us=" << elapsed.count() << " executed=" << executed
+           << " total_case_us=" << total_case_time.count() << " max_case_us=" << longest_case_time.count()
+           << '\n';
+  }
   if (failed != 0)
     return 1;
-  if (passed == 0 && !options.allow_all_skipped) {
+  if (passed == 0 && expected_failed == 0 && !options.allow_all_skipped) {
     errors << "no selected case passed; use --allow-all-skipped only for an intentional capability probe\n";
     return 1;
   }

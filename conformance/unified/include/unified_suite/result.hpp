@@ -34,6 +34,10 @@ struct Result {
 struct Case {
   std::string name;
   std::function<Result()> execute;
+  // A legacy emulator regression can be carried by the unified suite without
+  // weakening the oracle: the runner only treats this as an expected failure
+  // when --expect-reds is explicitly requested.
+  bool expected_failure = false;
 };
 
 class Unsupported : public std::exception {

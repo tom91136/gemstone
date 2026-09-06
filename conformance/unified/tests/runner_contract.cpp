@@ -15,6 +15,7 @@ std::size_t algorithm_builds = 0;
 std::size_t blas_builds = 0;
 std::size_t edge_case_builds = 0;
 std::size_t stress_builds = 0;
+std::size_t async_builds = 0;
 
 std::vector<unified_suite::Case> algorithm_cases(const unified_suite::Configuration &) {
   ++algorithm_builds;
@@ -34,6 +35,17 @@ std::vector<unified_suite::Case> edge_case_cases(const unified_suite::Configurat
 std::vector<unified_suite::Case> stress_cases(const unified_suite::Configuration &) {
   ++stress_builds;
   return {{"stress/provider-contract", [] { return unified_suite::Result::pass(); }}};
+}
+
+std::vector<unified_suite::Case> async_cases(const unified_suite::Configuration &) {
+  ++async_builds;
+  return {{"async/provider-contract", [] { return unified_suite::Result::pass(); }}};
+}
+
+std::vector<unified_suite::Case> red_contract_cases(const unified_suite::Configuration &) {
+  return {{"legacy-red/contract/fails", [] { return unified_suite::Result::fail("known emulator defect"); },
+           true},
+          {"legacy-red/contract/passes", [] { return unified_suite::Result::pass(); }, true}};
 }
 
 template <class Operation> bool throws_invalid_argument(Operation operation) {
@@ -123,13 +135,57 @@ int main() {
   if (run(invalid_shard) == 0)
     return 10;
 
+  const unified_suite::CatalogProvider red_provider{red_contract_cases, red_contract_cases,
+                                                    red_contract_cases, red_contract_cases};
+  unified_suite::RunOptions red_options;
+  red_options.suite = unified_suite::SuiteSelection::algorithms;
+  red_options.filter = std::regex("^legacy-red/contract/fails$");
+  std::ostringstream red_output;
+  std::ostringstream red_errors;
+  if (unified_suite::run(red_options, red_provider, red_output, red_errors) == 0)
+    return 11;
+  red_options.expect_reds = true;
+  if (unified_suite::run(red_options, red_provider, red_output, red_errors) != 0)
+    return 12;
+  red_options.filter = std::regex("^legacy-red/contract/passes$");
+  if (unified_suite::run(red_options, red_provider, red_output, red_errors) == 0)
+    return 13;
+
+  char executable[] = "runner";
+  char include_reds[] = "--include-legacy-reds";
+  char legacy_root[] = "--legacy-bin-root=/tmp/legacy";
+  char legacy_output[] = "--legacy-output-dir=/tmp/legacy-reports";
+  char expect_reds[] = "--expect-reds";
+  char *red_arguments[] = {executable, include_reds, legacy_root, legacy_output, expect_reds};
+  std::ostringstream parse_output;
+  std::ostringstream parse_errors;
+  const auto parsed = unified_suite::parse_options(5, red_arguments, parse_output, parse_errors);
+  if (!parsed || !parsed->configuration.include_legacy_reds ||
+      parsed->configuration.legacy_binary_root != "/tmp/legacy" ||
+      parsed->configuration.legacy_output_directory != "/tmp/legacy-reports" || !parsed->expect_reds)
+    return 14;
+
+  char timing[] = "--timing";
+  char *timing_arguments[] = {executable, timing};
+  const auto timing_parsed = unified_suite::parse_options(2, timing_arguments, parse_output, parse_errors);
+  if (!timing_parsed || !timing_parsed->timing)
+    return 15;
+
   const unified_suite::CatalogProvider provider{algorithm_cases, blas_cases, edge_case_cases, stress_cases};
   unified_suite::RunOptions provider_options;
   provider_options.suite = unified_suite::SuiteSelection::blas;
   const auto provided = unified_suite::catalog(provider_options, provider);
   if (provided.size() != 1 || provided.front().name != "blas/provider-contract")
-    return 11;
-  if (algorithm_builds != 0 || blas_builds != 1 || edge_case_builds != 0 || stress_builds != 0)
-    return 12;
+    return 16;
+  const unified_suite::CatalogProvider async_provider{algorithm_cases, blas_cases, edge_case_cases,
+                                                      stress_cases, async_cases};
+  unified_suite::RunOptions async_options;
+  async_options.suite = unified_suite::SuiteSelection::async;
+  const auto provided_async = unified_suite::catalog(async_options, async_provider);
+  if (provided_async.size() != 1 || provided_async.front().name != "async/provider-contract")
+    return 16;
+  if (algorithm_builds != 0 || blas_builds != 1 || edge_case_builds != 0 || stress_builds != 0 ||
+      async_builds != 1)
+    return 17;
   return 0;
 }

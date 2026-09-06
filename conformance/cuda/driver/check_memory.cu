@@ -55,7 +55,11 @@ int main() {
   CUDA_REQUIRE(cuMemAlloc_v2(&second, size));
   CUDA_REQUIRE(cuMemcpyHtoD_v2(first, source.data(), size));
   CUDA_REQUIRE(cuMemsetD8(first + 257, 0xa5, 193));
-  CUDA_REQUIRE(cuMemcpyDtoD_v2(second, first, size));
+  // CUDA runtimes may dispatch directional copies through the generic entry
+  // points after resolving them with cuGetProcAddress. Exercise both spellings
+  // here so a provider cannot silently leave the generic ABI as a weak stub.
+  CUDA_REQUIRE(cuMemcpy(second, first, size));
+  CUDA_REQUIRE(cuMemcpyAsync(second, first, size, nullptr));
   CUDA_REQUIRE(cuMemcpyDtoH_v2(result.data(), second, size));
 
   for (std::size_t i = 0; i < size; ++i) {

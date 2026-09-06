@@ -17,9 +17,35 @@ private[v1_6] object OperandDecoder {
       shapes: Col[OperandShape],
       kinds: Map[String, OperandKindInfo]
   ): Either[InstructionDecodeError, DecodedOperands] =
-    decodeShapes(opcode, words, shapes, kinds, 0, 0, Chain.empty).map(fields =>
-      DecodedOperands(Col.from(fields.iterator))
-    )
+    decodeShapes(opcode, words, shapes, kinds, 0, 0, Chain.empty)
+      .map(fields => DecodedOperands(Col.from(fields.iterator))) match {
+      case right @ Right(_)                    => right
+      case Left(error) if opcode == "OpSwitch" =>
+        // OpSwitch literals have the width of their selector.  The core
+        // grammar represents the common 32-bit form as a pair, but a 64-bit
+        // selector uses two literal words followed by the target label.  The
+        // selector type is resolved after binary decoding, so accept the
+        // lossless three-word form here when the fixed-width parse rejects it.
+        decodeSwitch64(words) match {
+          case right @ Right(_) => right
+          case Left(_)          => Left(error)
+        }
+      case Left(error) => Left(error)
+    }
+
+  private def decodeSwitch64(
+      words: Col[Word]
+  ): Either[InstructionDecodeError, DecodedOperands] =
+    if (words.size < 2 || (words.size - 2) % 3 != 0)
+      Left(InstructionDecodeError.InvalidOperandCount("OpSwitch", "literal/label pairs are not 64-bit aligned"))
+    else {
+      val selector = Operand("IdRef", Col(words(0)))
+      val default  = Operand("IdRef", Col(words(1)))
+      val targets  = (2 until words.size by 3).map(index =>
+        Operand("PairLiteralIntegerIdRef", words.slice(index, index + 3))
+      )
+      Right(DecodedOperands(Col(Col(selector), Col(default), Col.from(targets))))
+    }
 
   private def decodeShapes(
       opcode: String,

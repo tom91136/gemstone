@@ -20,10 +20,14 @@ namespace {
 
 using namespace aspartame;
 
+constexpr uint64_t kAllocationBase = UINT64_C(0x400000000000);
+constexpr uint64_t kAllocationSpan = UINT64_C(0x000100000000);
+
 struct KernelBinding {
   uint64_t program_id = 0;
   std::string name;
   uint32_t kernarg_size = 0;
+  uint32_t explicit_argument_count = 0;
   std::vector<gemstone_hsa_kernarg_field> fields;
 };
 
@@ -95,6 +99,8 @@ bool copy_fields(uint32_t kernarg_size, const gemstone_hsa_kernarg_field *fields
 gemstone_hsa_packet_result fail_packet(gemstone_hsa_aql_runtime &runtime, uint64_t completion_signal, int32_t error_code,
                                        std::string message) {
   set_error(runtime, std::move(message));
+  if (std::getenv("GEMSTONE_HSA_TRACE_PACKETS") != nullptr)
+    std::fprintf(stderr, "Gemstone AQL dispatch failure: %s\n", gemstone_hsa_aql_runtime_error(&runtime));
   if (completion_signal == 0) return GEMSTONE_HSA_PACKET_FATAL;
   return runtime.signals.fail_release(runtime.signals.context, completion_signal, error_code) == 0 ? GEMSTONE_HSA_PACKET_ACCEPTED
                                                                                                    : GEMSTONE_HSA_PACKET_FATAL;
@@ -153,7 +159,9 @@ bool resolve_allocation(gemstone_hsa_aql_runtime &runtime, uint64_t pointer, gem
 
 bool resolve_arguments(gemstone_hsa_aql_runtime &runtime, const KernelBinding &binding, uint64_t kernarg_address,
                        std::vector<gemstone_hsa_argument> &arguments) {
-  if (binding.kernarg_size != 0 && kernarg_address == 0) return false;
+  if (binding.kernarg_size != 0 && kernarg_address == 0) {
+    return false;
+  }
   if (binding.kernarg_size != 0) {
     bool readable = false;
     std::lock_guard<std::mutex> guard(runtime.lock);
@@ -164,7 +172,9 @@ bool resolve_arguments(gemstone_hsa_aql_runtime &runtime, const KernelBinding &b
         break;
       }
     }
-    if (!readable) return false;
+    if (!readable) {
+      return false;
+    }
   }
   const auto *kernarg = reinterpret_cast<const uint8_t *>(static_cast<uintptr_t>(kernarg_address));
   arguments.reserve(binding.fields.size() + 2);
@@ -209,6 +219,18 @@ bool resolve_arguments(gemstone_hsa_aql_runtime &runtime, const KernelBinding &b
     } else {
       uint64_t pointer = 0;
       std::memcpy(&pointer, kernarg + field.offset, sizeof(pointer));
+      // LLVM's OpenMP AMDGPU plugin prepends a kernel-launch-environment
+      // pointer to every target kernel.  For kernels without reductions it
+      // deliberately uses ~0 as the sentinel instead of allocating an
+      // environment object.  This field is part of the device ABI. Preserve
+      // its eight bytes as a scalar so the execution service packs the
+      // following arguments at their ABI offsets, but never resolve it as a
+      // user allocation.
+      if (field.offset == 0 && pointer == UINT64_MAX) {
+        append_scalar(field.offset, field.size);
+        covered = field.offset + field.size;
+        continue;
+      }
       // A global-buffer argument may legally be null (for example, an
       // optional output or an empty range). Preserve its zero bytes instead
       // of trying to manufacture an allocation identity for the sentinel.
@@ -265,7 +287,7 @@ extern "C" const char *gemstone_hsa_aql_runtime_error(const gemstone_hsa_aql_run
 extern "C" int gemstone_hsa_aql_runtime_install_kernel(gemstone_hsa_aql_runtime *runtime, uint64_t kernel_object, const void *code_object,
                                                        uint32_t code_object_size, const char *kernel_name, uint32_t kernarg_size,
                                                        const gemstone_hsa_kernarg_field *fields, uint32_t field_count) {
-  const gemstone_hsa_kernel_binding binding{kernel_object, kernel_name, kernarg_size, fields, field_count};
+  const gemstone_hsa_kernel_binding binding{kernel_object, kernel_name, kernarg_size, fields, field_count, field_count};
   return gemstone_hsa_aql_runtime_install_code_object(runtime, code_object, code_object_size, &binding, 1);
 }
 
@@ -280,11 +302,12 @@ extern "C" int gemstone_hsa_aql_runtime_install_code_object(gemstone_hsa_aql_run
   for (uint32_t index = 0; index < binding_count; ++index) {
     const auto &input = bindings[index];
     if (input.kernel_object == 0 || input.kernel_name == nullptr || input.kernel_name[0] == '\0'
-        || !objects.insert(input.kernel_object).second)
+        || input.explicit_argument_count > input.field_count || !objects.insert(input.kernel_object).second)
       return -1;
     std::vector<gemstone_hsa_kernarg_field> fields;
     if (!copy_fields(input.kernarg_size, input.fields, input.field_count, fields)) return -1;
-    copied.emplace_back(input.kernel_object, KernelBinding{0, input.kernel_name, input.kernarg_size, std::move(fields)});
+    copied.emplace_back(input.kernel_object,
+                        KernelBinding{0, input.kernel_name, input.kernarg_size, input.explicit_argument_count, std::move(fields)});
   }
   {
     std::lock_guard<std::mutex> guard(runtime->lock);
@@ -337,6 +360,50 @@ extern "C" int gemstone_hsa_aql_runtime_remove_kernel(gemstone_hsa_aql_runtime *
   return !unload || runtime->executor.unload_program(runtime->executor.context, program_id) == 0 ? 0 : -1;
 }
 
+extern "C" int gemstone_hsa_aql_runtime_write_global(gemstone_hsa_aql_runtime *runtime, uint64_t kernel_object, const char *name,
+                                                       uint64_t offset, const void *bytes, uint32_t size) {
+  if (runtime == nullptr || kernel_object == 0 || name == nullptr || name[0] == '\0' || (size != 0 && bytes == nullptr)) return -1;
+  uint64_t program_id = 0;
+  {
+    std::lock_guard<std::mutex> guard(runtime->lock);
+    const auto found = runtime->kernels.find(kernel_object);
+    if (found == runtime->kernels.end()) {
+      set_error(*runtime, "program global belongs to an unknown kernel object");
+      return -1;
+    }
+    program_id = found->second.program_id;
+  }
+  if (runtime->executor.write_global == nullptr) {
+    set_error(*runtime, "execution backend does not support program globals");
+    return -1;
+  }
+  std::vector<uint8_t> relocated(size);
+  if (size != 0) std::memcpy(relocated.data(), bytes, size);
+  // HIP functors copied into constant memory contain ordinary host-process
+  // device pointers. Convert any registered pointer-sized word to the same
+  // stable virtual address encoding used by AMDGPU kernarg packing before the
+  // bytes cross the process boundary. Only exact registered ranges are
+  // rewritten, so scalar data remains byte-for-byte unchanged.
+  for (uint32_t position = 0; position + sizeof(uint64_t) <= size; ++position) {
+    uint64_t pointer = 0;
+    std::memcpy(&pointer, relocated.data() + position, sizeof(pointer));
+    gemstone_hsa_argument allocation{};
+    if (!resolve_allocation(*runtime, pointer, allocation)) continue;
+    if (allocation.allocation_id == 0 || allocation.allocation_id - 1 > (UINT64_MAX - kAllocationBase) / kAllocationSpan)
+      continue;
+    const uint64_t virtual_pointer = kAllocationBase + (allocation.allocation_id - 1) * kAllocationSpan + allocation.allocation_offset;
+    std::memcpy(relocated.data() + position, &virtual_pointer, sizeof(virtual_pointer));
+    position += sizeof(uint64_t) - 1;
+  }
+  const void *write_bytes = size == 0 ? bytes : relocated.data();
+  const int result = runtime->executor.write_global(runtime->executor.context, program_id, name, offset, write_bytes, size);
+  if (result != 0) {
+    set_error(*runtime, executor_error(*runtime));
+    return -1;
+  }
+  return 0;
+}
+
 extern "C" int gemstone_hsa_aql_runtime_register_allocation(gemstone_hsa_aql_runtime *runtime, uint64_t native_base, uint64_t size,
                                                             uint64_t allocation_id) {
   if (runtime == nullptr || native_base == 0 || size == 0 || allocation_id == 0
@@ -359,9 +426,18 @@ extern "C" int gemstone_hsa_aql_runtime_unregister_allocation(gemstone_hsa_aql_r
 
 extern "C" int gemstone_hsa_aql_runtime_dispatch_allocations(gemstone_hsa_aql_runtime *runtime, const void *packet, size_t packet_size,
                                                              uint64_t *allocation_ids, uint32_t capacity, uint32_t *count) {
-  if (runtime == nullptr || packet == nullptr || count == nullptr || (capacity != 0 && allocation_ids == nullptr)) return -1;
+  if (runtime == nullptr) return -1;
+  const auto reject = [&](std::string message) {
+    set_error(*runtime, std::move(message));
+    return -1;
+  };
+  if (packet == nullptr || count == nullptr || (capacity != 0 && allocation_ids == nullptr))
+    return reject("invalid dispatch allocation query");
   gemstone_hsa_aql_packet decoded{};
-  if (gemstone_hsa_decode_aql_packet(packet, packet_size, &decoded) != GEMSTONE_HSA_AQL_DECODE_SUCCESS) return -1;
+  const auto decode = gemstone_hsa_decode_aql_packet(packet, packet_size, &decoded);
+  if (decode != GEMSTONE_HSA_AQL_DECODE_SUCCESS) {
+    return reject(std::string("cannot decode dispatch packet: ") + gemstone_hsa_aql_decode_error_string(decode));
+  }
   if (decoded.type != GEMSTONE_HSA_AQL_KERNEL_DISPATCH) {
     *count = 0;
     return 0;
@@ -372,11 +448,15 @@ extern "C" int gemstone_hsa_aql_runtime_dispatch_allocations(gemstone_hsa_aql_ru
   {
     std::lock_guard<std::mutex> guard(runtime->lock);
     const auto found = runtime->kernels.find(dispatch.kernel_object);
-    if (found == runtime->kernels.end()) return -1;
+    if (found == runtime->kernels.end()) {
+      return reject("kernel object is not installed: 0x" + std::to_string(dispatch.kernel_object));
+    }
     binding = found->second;
   }
   std::vector<gemstone_hsa_argument> arguments;
-  if (!resolve_arguments(*runtime, binding, dispatch.kernarg_address, arguments)) return -1;
+  if (!resolve_arguments(*runtime, binding, dispatch.kernarg_address, arguments)) {
+    return reject(kernel_error(binding, "kernarg buffer or allocation pointer is invalid"));
+  }
 
   std::vector<uint64_t> ids;
   ids.reserve(arguments.size() + 1);
@@ -385,17 +465,21 @@ extern "C" int gemstone_hsa_aql_runtime_dispatch_allocations(gemstone_hsa_aql_ru
   };
   if (binding.kernarg_size != 0) {
     gemstone_hsa_argument kernarg{};
-    if (!resolve_allocation(*runtime, dispatch.kernarg_address, kernarg)) return -1;
+    if (!resolve_allocation(*runtime, dispatch.kernarg_address, kernarg)) {
+      return reject(kernel_error(binding, "kernarg allocation pointer is not registered"));
+    }
     append(kernarg.allocation_id);
   }
   for (const auto &argument : arguments)
     if (argument.kind == GEMSTONE_HSA_ARGUMENT_ALLOCATION) append(argument.allocation_id);
 
-  if (ids.size() > std::numeric_limits<uint32_t>::max()) return -1;
+  if (ids.size() > std::numeric_limits<uint32_t>::max()) return reject(kernel_error(binding, "too many allocation arguments"));
   const auto required = static_cast<uint32_t>(ids.size());
   *count = required;
   if (capacity == 0) return 0;
-  if (capacity < required) return -1;
+  if (capacity < required) {
+    return reject(kernel_error(binding, "allocation query capacity is too small"));
+  }
   std::copy(ids.begin(), ids.end(), allocation_ids);
   return 0;
 }

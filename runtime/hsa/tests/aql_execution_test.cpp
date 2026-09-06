@@ -40,6 +40,9 @@ struct FakeExecutor {
   std::vector<uint8_t> scalar;
   uint64_t allocation = 0;
   uint64_t allocation_offset = 0;
+  std::string global_name;
+  uint64_t global_offset = 0;
+  std::vector<uint8_t> global_bytes;
   bool fail_launch = false;
   bool fail_await = false;
   bool completion_awaited = false;
@@ -47,6 +50,7 @@ struct FakeExecutor {
   uint32_t dirty_queries = 0;
   std::vector<gemstone_hsa_dirty_range> dirty_ranges{{99, 8, 4}};
   std::string error = "fake execution failure";
+  bool expect_openmp_environment_sentinel = false;
 };
 
 int load_program(void *context, const void *image, uint32_t size, uint64_t *program) {
@@ -64,16 +68,36 @@ int unload_program(void *context, uint64_t program) {
   return 0;
 }
 
+int write_global(void *context, uint64_t program, const char *name, uint64_t offset, const void *bytes, uint32_t size) {
+  auto &executor = *static_cast<FakeExecutor *>(context);
+  assert(program == executor.program && name != nullptr && (size == 0 || bytes != nullptr));
+  executor.global_name = name;
+  executor.global_offset = offset;
+  executor.global_bytes.assign(static_cast<const uint8_t *>(bytes), static_cast<const uint8_t *>(bytes) + size);
+  return 0;
+}
+
 int launch(void *context, uint64_t program, const char *kernel, gemstone_hsa_dimensions group_size, gemstone_hsa_dimensions group_count,
            gemstone_hsa_dimensions global_size, uint32_t private_segment_bytes, uint32_t group_segment_bytes,
            const gemstone_hsa_argument *arguments, uint32_t argument_count, uint64_t *completion) {
   auto &executor = *static_cast<FakeExecutor *>(context);
   if (executor.fail_launch) return -1;
-  assert(program == executor.program && argument_count == 5);
-  assert(arguments[0].kind == GEMSTONE_HSA_ARGUMENT_ALLOCATION);
-  for (uint32_t index = 1; index < argument_count; ++index) {
+  assert(program == executor.program);
+  const uint32_t expected_arguments = executor.expect_openmp_environment_sentinel ? 2 : 5;
+  assert(argument_count == expected_arguments);
+  const uint32_t first_scalar = 1;
+  if (executor.expect_openmp_environment_sentinel) {
+    assert(arguments[0].kind == GEMSTONE_HSA_ARGUMENT_SCALAR);
+    assert(arguments[0].scalar_size == 8);
+    uint64_t sentinel = 0;
+    std::memcpy(&sentinel, arguments[0].scalar_bytes, sizeof(sentinel));
+    assert(sentinel == UINT64_MAX);
+  } else {
+    assert(arguments[0].kind == GEMSTONE_HSA_ARGUMENT_ALLOCATION);
+  }
+  for (uint32_t index = first_scalar; index < argument_count; ++index) {
     assert(arguments[index].kind == GEMSTONE_HSA_ARGUMENT_SCALAR);
-    assert(arguments[index].scalar_size == 4);
+    assert(arguments[index].scalar_size == (executor.expect_openmp_environment_sentinel ? 8 : 4));
   }
   {
     std::lock_guard<std::mutex> guard(executor.lock);
@@ -83,10 +107,10 @@ int launch(void *context, uint64_t program, const char *kernel, gemstone_hsa_dim
     executor.global_size = global_size;
     executor.private_segment_bytes = private_segment_bytes;
     executor.group_segment_bytes = group_segment_bytes;
-    executor.allocation = arguments[0].allocation_id;
-    executor.allocation_offset = arguments[0].allocation_offset;
+    executor.allocation = executor.expect_openmp_environment_sentinel ? 0 : arguments[0].allocation_id;
+    executor.allocation_offset = executor.expect_openmp_environment_sentinel ? 0 : arguments[0].allocation_offset;
     executor.scalar.clear();
-    for (uint32_t index = 1; index < argument_count; ++index)
+    for (uint32_t index = first_scalar; index < argument_count; ++index)
       executor.scalar.insert(executor.scalar.end(), arguments[index].scalar_bytes,
                              arguments[index].scalar_bytes + arguments[index].scalar_size);
     ++executor.launches;
@@ -132,7 +156,7 @@ void destroy_executor(void *) {}
 
 gemstone_hsa_executor executor_operations(FakeExecutor &executor) {
   return gemstone_hsa_executor{&executor,          load_program,   unload_program,  launch, await_completion, completion_dirty_ranges,
-                               release_completion, executor_error, destroy_executor};
+                               release_completion, executor_error, destroy_executor, write_global};
 }
 
 struct FakeSignals {
@@ -414,17 +438,80 @@ void one_code_object_binds_multiple_kernel_objects() {
   const std::array<uint8_t, 4> image{{0x7f, 'E', 'L', 'F'}};
   const std::array<gemstone_hsa_kernarg_field, 1> fields{{{GEMSTONE_HSA_ARGUMENT_SCALAR, 0, 4}}};
   const std::array<gemstone_hsa_kernel_binding, 2> bindings{{
-      {41, "first", 4, fields.data(), fields.size()},
-      {42, "second", 4, fields.data(), fields.size()},
+      {41, "first", 4, fields.data(), fields.size(), fields.size()},
+      {42, "second", 4, fields.data(), fields.size(), fields.size()},
   }};
   assert(gemstone_hsa_aql_runtime_install_code_object(runtime, image.data(), image.size(), bindings.data(), bindings.size()) == 0);
   assert(executor.loads == 1 && executor.unloads == 0);
+  const std::array<uint8_t, 3> global{{9, 8, 7}};
+  assert(gemstone_hsa_aql_runtime_write_global(runtime, 41, "device_global", 4, global.data(), global.size()) == 0);
+  assert(executor.global_name == "device_global" && executor.global_offset == 4 && executor.global_bytes ==
+         std::vector<uint8_t>(global.begin(), global.end()));
+  std::array<uint8_t, 8> allocation{};
+  const uint64_t native_pointer = reinterpret_cast<uint64_t>(allocation.data() + 3);
+  assert(gemstone_hsa_aql_runtime_register_allocation(runtime, reinterpret_cast<uint64_t>(allocation.data()), allocation.size(), 99) == 0);
+  assert(gemstone_hsa_aql_runtime_write_global(runtime, 41, "device_global", 0, &native_pointer, sizeof(native_pointer)) == 0);
+  uint64_t relocated = 0;
+  std::memcpy(&relocated, executor.global_bytes.data(), sizeof(relocated));
+  assert(relocated == UINT64_C(0x400000000000) + UINT64_C(98) * UINT64_C(0x100000000) + 3);
   assert(gemstone_hsa_aql_runtime_remove_kernel(runtime, 41) == 0);
   assert(executor.unloads == 0);
   assert(gemstone_hsa_aql_runtime_remove_kernel(runtime, 42) == 0);
   assert(executor.unloads == 1);
   gemstone_hsa_aql_runtime_destroy(runtime);
   assert(executor.unloads == 1);
+}
+
+void openmp_kernel_environment_sentinel_preserves_abi_without_pointer_resolution() {
+  FakeExecutor executor;
+  executor.expect_openmp_environment_sentinel = true;
+  FakeSignals signals;
+  auto executor_ops = executor_operations(executor);
+  gemstone_hsa_signal_operations signal_ops{&signals, load_signal, complete_signal, fail_signal};
+  auto *runtime = gemstone_hsa_aql_runtime_create(&executor_ops, &signal_ops);
+  assert(runtime != nullptr);
+
+  std::array<uint8_t, 16> kernarg{};
+  const uint64_t sentinel = UINT64_MAX;
+  const uint64_t scalar = 0x123456789abcdef0ULL;
+  std::memcpy(kernarg.data(), &sentinel, sizeof(sentinel));
+  std::memcpy(kernarg.data() + 8, &scalar, sizeof(scalar));
+  const std::array<gemstone_hsa_kernarg_field, 2> fields{{
+      {GEMSTONE_HSA_ARGUMENT_ALLOCATION, 0, 8},
+      {GEMSTONE_HSA_ARGUMENT_SCALAR, 8, 8},
+  }};
+  const std::array<uint8_t, 4> image{{0x7f, 'E', 'L', 'F'}};
+  assert(gemstone_hsa_aql_runtime_register_allocation(runtime, reinterpret_cast<uint64_t>(kernarg.data()), kernarg.size(), 100) == 0);
+  assert(gemstone_hsa_aql_runtime_install_kernel(runtime, 77, image.data(), image.size(), "openmp_kernel", kernarg.size(), fields.data(),
+                                                 fields.size())
+         == 0);
+
+  std::array<Packet, 1> ring{};
+  write<uint16_t>(ring[0], 0, GEMSTONE_HSA_AQL_INVALID);
+  auto *kfd = gemstone_hsa_virtual_kfd_create(1);
+  gemstone_hsa_virtual_queue_resource resource{};
+  auto *queue = gemstone_hsa_virtual_kfd_create_execution_queue(kfd, runtime, ring.data(), ring.size(), &resource);
+  assert(queue != nullptr);
+  set_signal(signals, 100, 1);
+  ring[0] = kernel_packet(77, reinterpret_cast<uint64_t>(kernarg.data()), 100);
+  uint32_t allocation_count = 0;
+  assert(gemstone_hsa_aql_runtime_dispatch_allocations(runtime, ring[0].data(), ring[0].size(), nullptr, 0, &allocation_count) == 0);
+  assert(allocation_count == 1);
+  __atomic_store_n(resource.write_pointer, UINT64_C(1), __ATOMIC_RELEASE);
+  __atomic_store_n(resource.doorbell, UINT64_C(0), __ATOMIC_RELEASE);
+  {
+    std::unique_lock<std::mutex> guard(executor.lock);
+    assert(executor.launched.wait_for(guard, std::chrono::seconds(2), [&] { return executor.launches == 1; }));
+  }
+  assert(executor.scalar.size() == sizeof(scalar));
+  assert(std::memcmp(executor.scalar.data(), &scalar, sizeof(scalar)) == 0);
+  for (unsigned attempt = 0; attempt < 2000 && signal_value(signals, 100) != 0; ++attempt)
+    std::this_thread::yield();
+  assert(signal_value(signals, 100) == 0);
+
+  gemstone_hsa_virtual_kfd_destroy_queue(queue);
+  gemstone_hsa_virtual_kfd_destroy(kfd);
+  gemstone_hsa_aql_runtime_destroy(runtime);
 }
 
 void barriers_wait_and_complete() {
@@ -526,6 +613,7 @@ int main() {
   rocr_signal_operations_use_the_stock_value_word();
   execution_queue_dispatches_and_completes();
   one_code_object_binds_multiple_kernel_objects();
+  openmp_kernel_environment_sentinel_preserves_abi_without_pointer_resolution();
   barriers_wait_and_complete();
   a_waiting_barrier_does_not_block_another_queue();
   return 0;

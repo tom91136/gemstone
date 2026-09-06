@@ -15,7 +15,7 @@ object Parser {
     P.charWhere(character => character == ' ' || character == '\t' || character == '\r' || character == '\n').void
 
   private val lineComment: P[Unit] =
-    P.string("//") *> P.charsWhile0(character => character != '\n' && character != '\r').void
+    P.string("//") *> P.charsWhile(character => character != '\n' && character != '\r').rep0.void
 
   private val blockComment: P[Unit] =
     P.string("/*") *> P.until(P.string("*/")).void <* P.string("*/")
@@ -262,7 +262,12 @@ object Parser {
           operands,
           normalizedModifiers,
           predicate
-        ).toOption.map(Statement.Instruction.apply)
+        ) match {
+          case Right(value)                                  => Some(Statement.Instruction(value))
+          case Left(InstructionDecodeError.UnknownOpcode(_)) =>
+            Some(Statement.UnsupportedInstruction(operation, operands, normalizedModifiers, predicate))
+          case Left(_) => None
+        }
       }
   }
 
@@ -314,6 +319,7 @@ object Parser {
       .orElse(lineDirective.backtrack)
       .orElse(directive.backtrack)
       .orElse(instruction)
+      .backtrack
   }
 
   private val module: P[Col[Statement]] = (statement.rep.map(_.iterator.toCol) <* skipped) <* P.end

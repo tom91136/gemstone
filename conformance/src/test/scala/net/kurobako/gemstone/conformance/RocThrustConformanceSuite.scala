@@ -245,12 +245,12 @@ final class RocThrustConformanceSuite extends munit.FunSuite {
       runtimeLayout,
       command,
       refreshed.workingDirectory,
-      oracleEnvironment,
+      hipOracleEnvironment,
       Map("GEMSTONE_AMDGPU_TARGET" -> target),
       requireExecution = !hostOnly.contains(relativeWorkingDirectory(testCase) + "/" + testCase.name)
     )
     if result.oracleRan then require(result.oracle.exit == 0, s"oracle/$identity:\n${result.oracle.diagnostic}")
-    require(result.gemstone.exit == 0, s"gemstone/$identity:\n${result.gemstone.diagnostic}")
+    if result.gemstoneRan then require(result.gemstone.exit == 0, s"gemstone/$identity:\n${result.gemstone.diagnostic}")
   }
 
   private def buildSelectedUpstream(): Unit = {
@@ -268,13 +268,15 @@ final class RocThrustConformanceSuite extends munit.FunSuite {
 
   private def commandFor(testCase: CTestCase, executable: Vector[String]): Vector[String] =
     relativeWorkingDirectory(testCase) match {
-      case "test" => executable :+ s"--gtest_filter=${gtestUnreasonableFilter(testCase.name)}"
+      case "test" =>
+        if (oracleOnly) executable else executable :+ s"--gtest_filter=${gtestUnreasonableFilter(testCase.name)}"
       case directory if directory.startsWith("testing") =>
         val listing = run(executable :+ "--list", testCase.workingDirectory)
         require(listing.exit == 0, s"could not list ${testCase.name}:\n${listing.diagnostic}")
         val names       = listing.stdout.linesIterator.map(_.trim).filter(_.nonEmpty).toVector
-        val blacklisted = names.filter(name => isEmulatorUnreasonable(testCase.name, name))
-        val sizes       = Vector("--sizes=tiny", "--concise")
+        val blacklisted =
+          if (oracleOnly) Vector.empty else names.filter(name => isEmulatorUnreasonable(testCase.name, name))
+        val sizes = Vector("--sizes=tiny", "--concise")
         if (blacklisted.isEmpty) executable ++ sizes
         else {
           val runnable = names.filterNot(name => isEmulatorUnreasonable(testCase.name, name))
@@ -299,14 +301,14 @@ final class RocThrustConformanceSuite extends munit.FunSuite {
       "gpu_targets"     -> targetMatrix.targetFlags,
       "hsa_vector_copy" -> codeObject(target).toString
     )
-    runChecked(Vector("bash", "-c", expand(sample.commands.head.text, variables)), caseRoot, oracleEnvironment)
+    runChecked(Vector("bash", "-c", expand(sample.commands.head.text, variables)), caseRoot)
     val api    = if (sample.source.getParent.getFileName.toString == "hip") ComputeAPI.HIP else ComputeAPI.HSA
     val result = runPaired(
       api,
       runtimeLayout,
       Vector("bash", "-c", expand(sample.commands.last.text, variables)),
       caseRoot,
-      oracleEnvironment,
+      if api == ComputeAPI.HSA then hsaOracleEnvironment else hipOracleEnvironment,
       Map("GEMSTONE_AMDGPU_TARGET" -> target),
       oracleCommand = Some(Vector(
         "bash",
@@ -318,11 +320,13 @@ final class RocThrustConformanceSuite extends munit.FunSuite {
       ))
     )
     if result.oracleRan then require(result.oracle.exit == 0, s"oracle/${sample.name}:\n${result.oracle.diagnostic}")
-    require(result.gemstone.exit == 0, s"gemstone/${sample.name}:\n${result.gemstone.diagnostic}")
+    if result.gemstoneRan then
+      require(result.gemstone.exit == 0, s"gemstone/${sample.name}:\n${result.gemstone.diagnostic}")
     sample.commands.last.expected.foreach { expected =>
       if result.oracleRan then
         require(stripOutput(result.oracle.stdout) == expected, s"oracle/${sample.name}: expected '$expected'")
-      require(stripOutput(result.gemstone.stdout) == expected, s"gemstone/${sample.name}: expected '$expected'")
+      if result.gemstoneRan then
+        require(stripOutput(result.gemstone.stdout) == expected, s"gemstone/${sample.name}: expected '$expected'")
     }
   }
 
@@ -331,7 +335,8 @@ final class RocThrustConformanceSuite extends munit.FunSuite {
     hsaRuntime = sys.env.get("GEMSTONE_HSA_RUNTIME").filter(_.nonEmpty).map(Path.of(_))
   )
 
-  private def oracleEnvironment: Map[String, String] = Map("HSA_MAX_QUEUES" -> "8")
+  private val hipOracleEnvironment = Map.empty[String, String]
+  private val hsaOracleEnvironment = Map.empty[String, String]
 
   private def expand(command: String, variables: Map[String, String]): String = {
     val expanded = variables.foldLeft(command) { case (value, (name, replacement)) =>

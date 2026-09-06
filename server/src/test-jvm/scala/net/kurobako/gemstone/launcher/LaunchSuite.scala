@@ -1,5 +1,7 @@
 package net.kurobako.gemstone.launcher
 
+import net.kurobako.gemstone.execution.ExecutionLimits
+
 import java.io.File
 import java.nio.file.Path
 
@@ -112,5 +114,16 @@ final class LaunchSuite extends munit.FunSuite {
 
     assert(result.isLeft)
     assert(result.swap.exists(_.message.contains("vendor GPU was used")))
+  }
+
+  test("process-scoped execution profiles reject malformed values before launch") {
+    val result = GemstoneProcess.attested(
+      ComputeAPI.CUDA,
+      layout,
+      Map(ExecutionLimits.MaxInstructionsEnvironment -> "not-a-number")
+    )(_ => 0)
+
+    assert(result.isLeft)
+    assert(result.swap.exists(_.message.contains("invalid execution profile")))
   }
 }

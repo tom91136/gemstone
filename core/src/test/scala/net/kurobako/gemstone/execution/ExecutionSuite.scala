@@ -83,4 +83,28 @@ class ExecutionSuite extends munit.FunSuite {
     cancellation.cancel()
     assertEquals(cancelled.checkpoint(), Left(ExecutionFault.Cancelled))
   }
+
+  test("execution profiles keep the safe default unless explicitly configured") {
+    assertEquals(ExecutionLimits.fromEnvironment(Map.empty), Right(ExecutionLimits.Default))
+    assertEquals(
+      ExecutionLimits.fromEnvironment(
+        Map(
+          ExecutionLimits.MaxInstructionsEnvironment -> "2000000000",
+          ExecutionLimits.QuantumEnvironment         -> "8192"
+        )
+      ),
+      Right(ExecutionLimits(maxInstructions = 2000000000L, quantum = 8192))
+    )
+  }
+
+  test("execution profile parsing fails closed for invalid values") {
+    val invalidMax = ExecutionLimits.fromEnvironment(
+      Map(ExecutionLimits.MaxInstructionsEnvironment -> "0")
+    )
+    val invalidQuantum = ExecutionLimits.fromEnvironment(
+      Map(ExecutionLimits.QuantumEnvironment -> "not-a-number")
+    )
+    assert(invalidMax.isLeft)
+    assert(invalidQuantum.isLeft)
+  }
 }

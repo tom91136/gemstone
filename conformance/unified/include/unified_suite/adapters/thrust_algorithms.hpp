@@ -9,6 +9,7 @@
 #include <thrust/count.h>
 #include <thrust/device_vector.h>
 #include <thrust/equal.h>
+#include <thrust/execution_policy.h>
 #include <thrust/extrema.h>
 #include <thrust/fill.h>
 #include <thrust/find.h>
@@ -20,6 +21,7 @@
 #include <thrust/merge.h>
 #include <thrust/mismatch.h>
 #include <thrust/partition.h>
+#include <thrust/random.h>
 #include <thrust/reduce.h>
 #include <thrust/remove.h>
 #include <thrust/replace.h>
@@ -27,18 +29,54 @@
 #include <thrust/scan.h>
 #include <thrust/scatter.h>
 #include <thrust/set_operations.h>
+#include <thrust/shuffle.h>
 #include <thrust/sort.h>
 #include <thrust/swap.h>
 #include <thrust/transform.h>
 #include <thrust/transform_reduce.h>
 #include <thrust/transform_scan.h>
+#include <thrust/uninitialized_copy.h>
+#include <thrust/uninitialized_fill.h>
 #include <thrust/unique.h>
+
+#if defined(__HIPCC__)
+#include <hip/hip_runtime.h>
+#else
+#include <cuda_runtime_api.h>
+#endif
 
 #include <cstddef>
 #include <cstdint>
+#include <stdexcept>
+#include <string>
 #include <vector>
 
 namespace unified_suite::adapters {
+
+namespace thrust_algorithm_detail {
+
+template <class T>
+__global__ void legacy_device_dispatch_kernel(const T *first, T *output, std::size_t size) {
+  // The old vendor suites exercise Thrust from inside a device-launched
+  // kernel. This is intentionally distinct from the ordinary host dispatch
+  // used by the portable catalog: it catches nested execution/iterator ABI
+  // regressions while remaining a small, deterministic fixture.
+  thrust::adjacent_difference(thrust::device, first, first + size, output);
+}
+
+#if defined(__HIPCC__)
+inline void check_legacy(hipError_t status, const char *where) {
+  if (status != hipSuccess)
+    throw std::runtime_error(std::string(where) + ": " + hipGetErrorString(status));
+}
+#else
+inline void check_legacy(cudaError_t status, const char *where) {
+  if (status != cudaSuccess)
+    throw std::runtime_error(std::string(where) + ": " + cudaGetErrorString(status));
+}
+#endif
+
+} // namespace thrust_algorithm_detail
 
 class ThrustAlgorithms {
 public:
@@ -68,6 +106,19 @@ public:
     const thrust::device_vector<T> source(input.begin(), input.end());
     thrust::device_vector<T> output(count);
     thrust::copy_n(source.begin(), count, output.begin());
+    return host(output);
+  }
+
+  template <class T> std::vector<T> uninitialized_copy(const std::vector<T> &input) {
+    const thrust::device_vector<T> source(input.begin(), input.end());
+    thrust::device_vector<T> output(input.size());
+    thrust::uninitialized_copy(source.begin(), source.end(), output.begin());
+    return host(output);
+  }
+
+  template <class T> std::vector<T> uninitialized_fill(std::size_t size, T value) {
+    thrust::device_vector<T> output(size);
+    thrust::uninitialized_fill(output.begin(), output.end(), value);
     return host(output);
   }
 
@@ -365,6 +416,22 @@ public:
     return host(output);
   }
 
+  template <class T> std::vector<T> legacy_device_dispatch(std::size_t size) {
+    const auto input = algorithms::detail::values<T>(size, 1);
+    thrust::device_vector<T> source(input.begin(), input.end());
+    thrust::device_vector<T> output(size);
+    thrust_algorithm_detail::legacy_device_dispatch_kernel<<<1, 1>>>(
+        thrust::raw_pointer_cast(source.data()), thrust::raw_pointer_cast(output.data()), size);
+#if defined(__HIPCC__)
+    thrust_algorithm_detail::check_legacy(hipGetLastError(), "legacy device dispatch launch");
+    thrust_algorithm_detail::check_legacy(hipDeviceSynchronize(), "legacy device dispatch synchronize");
+#else
+    thrust_algorithm_detail::check_legacy(cudaGetLastError(), "legacy device dispatch launch");
+    thrust_algorithm_detail::check_legacy(cudaDeviceSynchronize(), "legacy device dispatch synchronize");
+#endif
+    return host(output);
+  }
+
   template <class T> std::vector<T> set_union(const std::vector<T> &left, const std::vector<T> &right) {
     const thrust::device_vector<T> a(left.begin(), left.end());
     const thrust::device_vector<T> b(right.begin(), right.end());
@@ -413,6 +480,13 @@ public:
     const thrust::device_vector<T> source(input.begin(), input.end());
     thrust::device_vector<T> output(input.size());
     thrust::reverse_copy(source.begin(), source.end(), output.begin());
+    return host(output);
+  }
+
+  template <class T> std::vector<T> shuffle(const std::vector<T> &input) {
+    thrust::device_vector<T> output(input.begin(), input.end());
+    thrust::default_random_engine generator(17);
+    thrust::shuffle(output.begin(), output.end(), generator);
     return host(output);
   }
 

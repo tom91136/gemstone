@@ -72,6 +72,11 @@ The suite is intentionally outside the fast `sbt check` lane. The three
 repository samples are compiled and run as provider cases when selected; use
 `GEMSTONE_ONEDPL_FILTER='samples/'` to select them.
 
+For a vendor-only baseline, set `GEMSTONE_ORACLE_ONLY=1`. This still builds and
+runs the selected oneDPL vendor/CTest cases (and samples), but does not build or
+construct a Gemstone provider. It requires the oneDPL oracle to be enabled and
+cannot be combined with `GEMSTONE_NO_ORACLE` or `GEMSTONE_ONEDPL_ORACLE=0`.
+
 For a broad emulator run, set `GEMSTONE_ONEDPL_BATCH=1`. The suite builds
 oneDPL once and runs exact-name CTest batches instead of creating one test
 process per upstream case. `GEMSTONE_ONEDPL_BATCH_SIZE` defaults to 256,

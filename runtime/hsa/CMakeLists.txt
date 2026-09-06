@@ -70,6 +70,8 @@ target_include_directories(gemstone_hsa_runtime PRIVATE ../../native/execution)
 target_compile_features(gemstone_hsa_runtime PUBLIC cxx_std_17)
 target_compile_options(gemstone_hsa_runtime PRIVATE -Wall -Wextra -Werror -Wno-pedantic)
 target_link_libraries(gemstone_hsa_runtime PRIVATE gemstone_hsa_doorbell gemstone_execution_rpc)
+target_link_options(gemstone_hsa_runtime PRIVATE
+  "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/abi/hsa-runtime64.map")
 
 include(CTest)
 if(BUILD_TESTING)

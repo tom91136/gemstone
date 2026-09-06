@@ -790,6 +790,10 @@ addCommandAlias(
   ";levelzero / testFull;conformance / Test / testOnly net.kurobako.gemstone.conformance.OneDPLConformanceSuite"
 )
 addCommandAlias(
+  "testMiniappsConformance",
+  ";conformance / Test / testOnly net.kurobako.gemstone.conformance.MiniappsConformanceSuite"
+)
+addCommandAlias(
   "testOpenCLConformance",
   ";opencl / testFull;conformance / Test / testOnly net.kurobako.gemstone.conformance.OpenCLCTSConformanceSuite"
 )
@@ -799,5 +803,5 @@ addCommandAlias(
 )
 addCommandAlias(
   "testConformance",
-  ";testExecutionProtocol;testAPIConformance;testCUDAConformance;testROCmConformance;testOpenCLConformance;testSYCLConformance"
+  ";testExecutionProtocol;testAPIConformance;testCUDAConformance;testROCmConformance;testOpenCLConformance;testSYCLConformance;testMiniappsConformance"
 )

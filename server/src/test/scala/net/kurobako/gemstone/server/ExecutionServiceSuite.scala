@@ -14,12 +14,15 @@ class ExecutionServiceSuite extends munit.FunSuite {
   private final class TestExecutor(
       loadFn: (ProgramId, ProgramFormat, Col[Byte]) => Either[ExecutionFailure, Unit],
       unloadFn: ProgramId => Either[ExecutionFailure, Unit],
-      launchFn: (KernelDispatch, ExecutionMemory, ExecutionControl) => Either[ExecutionFailure, Unit]
+      launchFn: (KernelDispatch, ExecutionMemory, ExecutionControl) => Either[ExecutionFailure, Unit],
+      writeGlobalFn: (ProgramId, String, Long, Col[Byte]) => Either[ExecutionFailure, Unit] = (_, _, _, _) => Right(())
   ) extends ProgramExecutor {
     override def load(id: ProgramId, format: ProgramFormat, image: Col[Byte]) = loadFn(id, format, image)
     override def unload(id: ProgramId)                                        = unloadFn(id)
     override def launch(dispatch: KernelDispatch, memory: ExecutionMemory, control: ExecutionControl) =
       launchFn(dispatch, memory, control)
+    override def writeGlobal(id: ProgramId, name: String, offset: Long, bytes: Col[Byte]) =
+      writeGlobalFn(id, name, offset, bytes)
   }
 
   test("program, allocation, dispatch, and completion lifecycle is process-neutral") {
@@ -82,6 +85,28 @@ class ExecutionServiceSuite extends munit.FunSuite {
     assertEquals(
       service.completion(completion),
       Right(CompletionStatus.Failed(ExecutionFailure.Unsupported("barrier")))
+    )
+  }
+
+  test("named program-global writes are routed only to loaded programs") {
+    val observed = AtomicReference(Option.empty[(ProgramId, String, Long, Col[Byte])])
+    val backend  = TestExecutor(
+      (_, _, _) => Right(()),
+      _ => Right(()),
+      (_, _, _) => Right(()),
+      (id, name, offset, bytes) => {
+        observed.set(Some((id, name, offset, bytes)))
+        Right(())
+      }
+    )
+    val service = ExecutionService(backend)
+    val program = service.load(ProgramFormat.AMDGPUCodeObject, Col[Byte](1)).toOption.get
+
+    assertEquals(service.writeGlobal(program, "constant_buffer", 8L, Col[Byte](4, 3, 2, 1)), Right(()))
+    assertEquals(observed.get(), Some((program, "constant_buffer", 8L, Col[Byte](4, 3, 2, 1))))
+    assertEquals(
+      service.writeGlobal(ProgramId.fromLong(99L).toOption.get, "constant_buffer", 0L, Col[Byte](1)),
+      Left(ExecutionFailure.NotFound("program 99 is not loaded"))
     )
   }
 

@@ -830,6 +830,10 @@ GEMSTONE_0.1 {
     __cudaRegisterFunction;
     __cudaRegisterVar;
     __cudaUnregisterFatBinary;
+    cuCtxPushCurrent;
+    cuCtxPopCurrent;
+    cuDevicePrimaryCtxRelease;
+    cuDevicePrimaryCtxReset;
     cuArray3DCreate;
     cuArray3DGetDescriptor;
     cuArrayCreate;
@@ -841,6 +845,23 @@ GEMSTONE_0.1 {
     cuMemcpy3DAsync;
     cuModuleGetGlobal;
     cuGetProcAddress;
+    cuMemcpyHtoD_ptds;
+    cuMemcpyHtoD_v2_ptds;
+    cuMemcpyDtoH_ptds;
+    cuMemcpyDtoH_v2_ptds;
+    cuMemcpyDtoD_ptds;
+    cuMemcpyDtoD_v2_ptds;
+    cuMemcpy_ptds;
+    cuMemcpyAsync_ptsz;
+    cuMemcpyHtoDAsync_ptsz;
+    cuMemcpyHtoDAsync_v2_ptsz;
+    cuMemcpyDtoHAsync_ptsz;
+    cuMemcpyDtoHAsync_v2_ptsz;
+    cuMemcpyDtoDAsync_ptsz;
+    cuMemcpyDtoDAsync_v2_ptsz;
+    cuMemsetD8_ptds;
+    cuMemsetD8_v2_ptds;
+    cuMemsetD8Async_ptsz;
   local:
     *;
 };

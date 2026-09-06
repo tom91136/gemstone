@@ -5,7 +5,9 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <memory>
 #include <numeric>
+#include <random>
 #include <utility>
 #include <vector>
 
@@ -31,6 +33,30 @@ public:
   template <class T> std::vector<T> copy_n(const std::vector<T> &input, std::size_t count) {
     std::vector<T> output(count);
     std::copy_n(input.begin(), count, output.begin());
+    return output;
+  }
+
+  template <class T> std::vector<T> uninitialized_copy(const std::vector<T> &input) {
+    if (input.empty())
+      return {};
+    std::allocator<T> allocator;
+    T *storage = allocator.allocate(input.size());
+    std::uninitialized_copy(input.begin(), input.end(), storage);
+    std::vector<T> output(storage, storage + input.size());
+    std::destroy_n(storage, input.size());
+    allocator.deallocate(storage, input.size());
+    return output;
+  }
+
+  template <class T> std::vector<T> uninitialized_fill(std::size_t size, T value) {
+    if (size == 0)
+      return {};
+    std::allocator<T> allocator;
+    T *storage = allocator.allocate(size);
+    std::uninitialized_fill(storage, storage + size, value);
+    std::vector<T> output(storage, storage + size);
+    std::destroy_n(storage, size);
+    allocator.deallocate(storage, size);
     return output;
   }
 
@@ -329,6 +355,13 @@ public:
   template <class T> std::vector<T> reverse_copy(const std::vector<T> &input) {
     std::vector<T> output(input.size());
     std::reverse_copy(input.begin(), input.end(), output.begin());
+    return output;
+  }
+
+  template <class T> std::vector<T> shuffle(const std::vector<T> &input) {
+    auto output = input;
+    std::mt19937 generator(17);
+    std::shuffle(output.begin(), output.end(), generator);
     return output;
   }
 

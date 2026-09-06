@@ -30,7 +30,7 @@ object Interpreter {
   private val VirtualAddressSpan         = 0x0000010000000000L
   private val OpenCLUnaryFloatingOpcodes = Set(
     0, 1, 2, 3, 4, 5, 6, 8, 9, 11, 12, 14, 15, 16, 19, 20, 21, 22, 23, 25, 37, 38, 39, 40, 41,
-    53, 55, 56, 57, 59, 60, 61, 62, 63, 64, 66
+    53, 55, 56, 57, 59, 60, 61, 62, 63, 64, 66, 81, 83, 84, 85, 86, 87, 88, 90, 91, 92, 93, 94
   )
   private val OpenCLBinaryFloatingOpcodes = Set(7, 10, 24, 29, 32, 50)
 
@@ -76,6 +76,15 @@ object Interpreter {
     }
 
     private[Interpreter] def recordElapsed(nanos: Long): Unit = dispatchElapsedNanos += nanos
+
+    private[Interpreter] def merge(other: PerformanceMetrics): Unit = synchronized {
+      invocationCount += other.invocationCount
+      instructionCount += other.instructionCount
+      invocationValueInstanceCount += other.invocationValueInstanceCount
+      denseValueSlotCount += other.denseValueSlotCount
+      estimatedDenseValueByteCount += other.estimatedDenseValueByteCount
+      dispatchElapsedNanos += other.dispatchElapsedNanos
+    }
 
     def snapshot: PerformanceSnapshot = PerformanceSnapshot(
       dispatchCount,
@@ -343,7 +352,15 @@ object Interpreter {
       (dirty(offset >>> 6) & (1L << (offset & 63))) != 0L
   }
 
-  private final class MemoryState(memory: ExecutionMemory, relocations: Col[PointerRelocation]) {
+  private final class MemoryState(
+      memory: ExecutionMemory,
+      relocations: Col[PointerRelocation],
+      threadSafe: Boolean
+  ) {
+    private val lock = Object()
+
+    private inline def withLock[A](inline operation: => A): A =
+      if (threadSafe) lock.synchronized(operation) else operation
     private val writes                   = mutable.HashMap.empty[AllocationId, mutable.LongMap[DirtyPage]]
     private val externalVirtualAddresses = mutable.HashMap.empty[AllocationId, Long]
     private val internalVirtualAddresses = java.util.IdentityHashMap[Array[Byte], java.lang.Long]()
@@ -365,7 +382,7 @@ object Interpreter {
     }
     private var nextVirtualAddress = 0x0000100000000000L
 
-    def pointerInteger(pointer: Pointer): Either[ExecutionFailure, Long] = {
+    def pointerInteger(pointer: Pointer): Either[ExecutionFailure, Long] = withLock {
       val base = pointer.region match {
         case Region.External(id)    => externalVirtualAddresses.getOrElseUpdate(id, allocateVirtualAddress(pointer))
         case Region.Internal(bytes) =>
@@ -386,7 +403,7 @@ object Interpreter {
       )
     }
 
-    def relocateArgument(index: Int, bytes: Col[Byte]): Either[ExecutionFailure, Array[Byte]] = {
+    def relocateArgument(index: Int, bytes: Col[Byte]): Either[ExecutionFailure, Array[Byte]] = withLock {
       val relocated = bytes.toArray
       argumentRelocations.get(index).iterator.flatMap(_.iterator).foldLeft[Either[
         ExecutionFailure,
@@ -414,13 +431,15 @@ object Interpreter {
       }.map(_ => relocated)
     }
 
-    def argumentRelocation(index: Int, offset: Long): Option[(AllocationId, Long)] =
+    def argumentRelocation(index: Int, offset: Long): Option[(AllocationId, Long)] = withLock {
       argumentRelocations.get(index).flatMap(_.get(offset))
+    }
 
-    def allocationRelocation(source: AllocationId, offset: Long): Option[(AllocationId, Long)] =
+    def allocationRelocation(source: AllocationId, offset: Long): Option[(AllocationId, Long)] = withLock {
       pointerRelocations.get(source -> offset)
+    }
 
-    def recordPointerRelocation(pointer: Pointer, destination: Pointer): Unit =
+    def recordPointerRelocation(pointer: Pointer, destination: Pointer): Unit = withLock {
       (pointer.region, destination.region) match {
         case (_, Region.External(destinationAllocation)) =>
           val _ = pointerRelocations.remove(destinationAllocation -> destination.offset)
@@ -443,39 +462,44 @@ object Interpreter {
           }
         case _ => ()
       }
+    }
 
-    def relocatedPointer(source: Pointer, pointee: Int, storageClass: Int): Option[Pointer] = source.region match {
-      case Region.External(allocation) =>
-        allocationRelocation(allocation, source.offset).map { case (target, targetOffset) =>
-          Pointer(Region.External(target), targetOffset, pointee, storageClass)
-        }
-      case _ => None
+    def relocatedPointer(source: Pointer, pointee: Int, storageClass: Int): Option[Pointer] = withLock {
+      source.region match {
+        case Region.External(allocation) =>
+          allocationRelocation(allocation, source.offset).map { case (target, targetOffset) =>
+            Pointer(Region.External(target), targetOffset, pointee, storageClass)
+          }
+        case _ => None
+      }
     }
 
     def elementOffset(program: DispatchProgram, source: Pointer, index: Long): Long =
       Math.addExact(source.offset, Math.multiplyExact(index, typeSize(program, source.pointee).toLong))
 
     def integerPointer(address: Long, pointee: Int, storageClass: Int): Either[ExecutionFailure, Pointer] =
-      if (address == 0L) Right(Pointer(Region.Null, 0L, pointee, storageClass))
-      else {
-        val base   = address & ~(VirtualAddressSpan - 1L)
-        val offset = address - base
-        virtualPointers.get(base) match {
-          case Some(origin) if offset >= 0L && offset < VirtualAddressSpan =>
-            Either.cond(
-              storageClass == 8 || storageClass == origin.storageClass,
-              origin.copy(offset = offset, pointee = pointee),
-              ExecutionFailure.InvalidRequest(
-                s"SPIR-V virtual address 0x${java.lang.Long.toHexString(address)} belongs to storage class " +
-                  s"${origin.storageClass}, not $storageClass"
+      withLock {
+        if (address == 0L) Right(Pointer(Region.Null, 0L, pointee, storageClass))
+        else {
+          val base   = address & ~(VirtualAddressSpan - 1L)
+          val offset = address - base
+          virtualPointers.get(base) match {
+            case Some(origin) if offset >= 0L && offset < VirtualAddressSpan =>
+              Either.cond(
+                storageClass == 8 || storageClass == origin.storageClass,
+                origin.copy(offset = offset, pointee = pointee),
+                ExecutionFailure.InvalidRequest(
+                  s"SPIR-V virtual address 0x${java.lang.Long.toHexString(address)} belongs to storage class " +
+                    s"${origin.storageClass}, not $storageClass"
+                )
               )
-            )
-          case _ =>
-            Left(
-              ExecutionFailure.InvalidRequest(
-                s"SPIR-V integer 0x${java.lang.Long.toHexString(address)} is not a dispatch-local virtual address"
+            case _ =>
+              Left(
+                ExecutionFailure.InvalidRequest(
+                  s"SPIR-V integer 0x${java.lang.Long.toHexString(address)} is not a dispatch-local virtual address"
+                )
               )
-            )
+          }
         }
       }
 
@@ -486,34 +510,36 @@ object Interpreter {
       address
     }
 
-    def read(pointer: Pointer, size: Int): Either[ExecutionFailure, Array[Byte]] = pointer.region match {
-      case Region.Internal(bytes) =>
-        checkedRange(bytes.length, pointer.offset, size).map(start =>
-          java.util.Arrays.copyOfRange(bytes, start, start + size)
-        )
-      case Region.External(id) =>
-        memory.read(id, pointer.offset, size) match {
-          case Left(error)   => Left(error)
-          case Right(source) =>
-            val result = source.toArray
-            writes.get(id).foreach { pending =>
-              var index = 0
-              while (index < result.length) {
-                val absolute   = pointer.offset + index.toLong
-                val pageOffset = (absolute & 4095L).toInt
-                pending.get(absolute >>> 12).foreach { page =>
-                  if (page.contains(pageOffset)) result(index) = page.bytes(pageOffset)
+    def read(pointer: Pointer, size: Int): Either[ExecutionFailure, Array[Byte]] = withLock {
+      pointer.region match {
+        case Region.Internal(bytes) =>
+          checkedRange(bytes.length, pointer.offset, size).map(start =>
+            java.util.Arrays.copyOfRange(bytes, start, start + size)
+          )
+        case Region.External(id) =>
+          memory.read(id, pointer.offset, size) match {
+            case Left(error)   => Left(error)
+            case Right(source) =>
+              val result = source.toArray
+              writes.get(id).foreach { pending =>
+                var index = 0
+                while (index < result.length) {
+                  val absolute   = pointer.offset + index.toLong
+                  val pageOffset = (absolute & 4095L).toInt
+                  pending.get(absolute >>> 12).foreach { page =>
+                    if (page.contains(pageOffset)) result(index) = page.bytes(pageOffset)
+                  }
+                  index += 1
                 }
-                index += 1
               }
-            }
-            Right(result)
-        }
-      case Region.Null =>
-        Left(ExecutionFailure.InvalidRequest("cannot read through a null SPIR-V pointer"))
+              Right(result)
+          }
+        case Region.Null =>
+          Left(ExecutionFailure.InvalidRequest("cannot read through a null SPIR-V pointer"))
+      }
     }
 
-    def readScalar(pointer: Pointer, size: Int): Either[ExecutionFailure, Long] = {
+    def readScalar(pointer: Pointer, size: Int): Either[ExecutionFailure, Long] = withLock {
       val relocation =
         if (size != 8) None
         else
@@ -554,61 +580,65 @@ object Interpreter {
         Left(ExecutionFailure.InvalidRequest("cannot read scalar through a null SPIR-V pointer"))
     }
 
-    def write(pointer: Pointer, bytes: Array[Byte]): Either[ExecutionFailure, Unit] = pointer.region match {
-      case Region.Internal(target) =>
-        checkedRange(target.length, pointer.offset, bytes.length).map { start =>
-          System.arraycopy(bytes, 0, target, start, bytes.length)
-        }
-      case Region.External(id) =>
-        if (pointer.offset < 0L || pointer.offset > Long.MaxValue - bytes.length.toLong)
-          Left(ExecutionFailure.InvalidRequest(s"invalid external write offset ${pointer.offset}"))
-        else {
-          val pending = writes.getOrElseUpdate(id, mutable.LongMap.empty)
-          var index   = 0
-          while (index < bytes.length) {
-            val absolute   = pointer.offset + index.toLong
-            val pageOffset = (absolute & 4095L).toInt
-            pending.getOrElseUpdate(absolute >>> 12, DirtyPage()).update(pageOffset, bytes(index))
-            index += 1
+    def write(pointer: Pointer, bytes: Array[Byte]): Either[ExecutionFailure, Unit] = withLock {
+      pointer.region match {
+        case Region.Internal(target) =>
+          checkedRange(target.length, pointer.offset, bytes.length).map { start =>
+            System.arraycopy(bytes, 0, target, start, bytes.length)
           }
-          Right(())
-        }
-      case Region.Null =>
-        Left(
-          ExecutionFailure.InvalidRequest(
-            s"cannot write through a null SPIR-V pointer (offset=${pointer.offset}, pointee=%${pointer.pointee}, " +
-              s"storage=${pointer.storageClass})"
+        case Region.External(id) =>
+          if (pointer.offset < 0L || pointer.offset > Long.MaxValue - bytes.length.toLong)
+            Left(ExecutionFailure.InvalidRequest(s"invalid external write offset ${pointer.offset}"))
+          else {
+            val pending = writes.getOrElseUpdate(id, mutable.LongMap.empty)
+            var index   = 0
+            while (index < bytes.length) {
+              val absolute   = pointer.offset + index.toLong
+              val pageOffset = (absolute & 4095L).toInt
+              pending.getOrElseUpdate(absolute >>> 12, DirtyPage()).update(pageOffset, bytes(index))
+              index += 1
+            }
+            Right(())
+          }
+        case Region.Null =>
+          Left(
+            ExecutionFailure.InvalidRequest(
+              s"cannot write through a null SPIR-V pointer (offset=${pointer.offset}, pointee=%${pointer.pointee}, " +
+                s"storage=${pointer.storageClass})"
+            )
           )
-        )
+      }
     }
 
-    def writeScalar(pointer: Pointer, value: Long, size: Int): Either[ExecutionFailure, Unit] = pointer.region match {
-      case Region.Internal(target) =>
-        checkedRange(target.length, pointer.offset, size).map(start => LittleEndian.write(value, target, start, size))
-      case Region.External(id) =>
-        if (pointer.offset < 0L || size < 0 || pointer.offset > Long.MaxValue - size.toLong)
-          Left(ExecutionFailure.InvalidRequest(s"invalid external write offset ${pointer.offset}"))
-        else {
-          val pending = writes.getOrElseUpdate(id, mutable.LongMap.empty)
-          LittleEndian.write(value, size) { (index, byte) =>
-            val absolute   = pointer.offset + index.toLong
-            val pageOffset = (absolute & 4095L).toInt
-            pending
-              .getOrElseUpdate(absolute >>> 12, DirtyPage())
-              .update(pageOffset, byte)
+    def writeScalar(pointer: Pointer, value: Long, size: Int): Either[ExecutionFailure, Unit] = withLock {
+      pointer.region match {
+        case Region.Internal(target) =>
+          checkedRange(target.length, pointer.offset, size).map(start => LittleEndian.write(value, target, start, size))
+        case Region.External(id) =>
+          if (pointer.offset < 0L || size < 0 || pointer.offset > Long.MaxValue - size.toLong)
+            Left(ExecutionFailure.InvalidRequest(s"invalid external write offset ${pointer.offset}"))
+          else {
+            val pending = writes.getOrElseUpdate(id, mutable.LongMap.empty)
+            LittleEndian.write(value, size) { (index, byte) =>
+              val absolute   = pointer.offset + index.toLong
+              val pageOffset = (absolute & 4095L).toInt
+              pending
+                .getOrElseUpdate(absolute >>> 12, DirtyPage())
+                .update(pageOffset, byte)
+            }
+            Right(())
           }
-          Right(())
-        }
-      case Region.Null =>
-        Left(
-          ExecutionFailure.InvalidRequest(
-            s"cannot write through a null SPIR-V pointer (offset=${pointer.offset}, pointee=%${pointer.pointee}, " +
-              s"storage=${pointer.storageClass})"
+        case Region.Null =>
+          Left(
+            ExecutionFailure.InvalidRequest(
+              s"cannot write through a null SPIR-V pointer (offset=${pointer.offset}, pointee=%${pointer.pointee}, " +
+                s"storage=${pointer.storageClass})"
+            )
           )
-        )
+      }
     }
 
-    def copySlots(destination: Pointer, origin: Pointer, size: Long): Either[ExecutionFailure, Unit] =
+    def copySlots(destination: Pointer, origin: Pointer, size: Long): Either[ExecutionFailure, Unit] = withLock {
       if (size < 0L || origin.offset > Long.MaxValue - size || destination.offset > Long.MaxValue - size)
         Left(ExecutionFailure.InvalidRequest(s"invalid aggregate copy size $size"))
       else {
@@ -632,8 +662,12 @@ object Interpreter {
         }
         Right(())
       }
+    }
 
-    def flush(): Either[ExecutionFailure, Unit] = {
+    /** Keep read-modify-write atomics indivisible when workgroups share a pool. */
+    def atomic[A](operation: => A): A = if (threadSafe) lock.synchronized(operation) else operation
+
+    def flush(): Either[ExecutionFailure, Unit] = withLock {
       val allocations = writes.iterator.toArray.sortBy(_._1.toLong)
       var allocation  = 0
       while (allocation < allocations.length) {
@@ -800,7 +834,7 @@ object Interpreter {
         case Instruction.TypeBool(dest)                   => types.update(id(dest), RuntimeType.Bool)
         case Instruction.TypeInt(dest, width, signedness) =>
           val bits = unsigned(width).toInt
-          if (!Col(8, 16, 32, 64).contains(bits))
+          if (bits < 8 || bits > 64 || bits % 8 != 0)
             return Left(ExecutionFailure.Unsupported(s"SPIR-V integer width $bits is unsupported"))
           types.update(id(dest), RuntimeType.Integer(bits, unsigned(signedness) != 0L))
         case Instruction.TypeFloat(dest, width, _) =>
@@ -977,7 +1011,7 @@ object Interpreter {
           _: Instruction.GroupSMin | _: Instruction.GroupSMax | _: Instruction.GroupIAdd |
           _: Instruction.GroupIMulKHR | _: Instruction.GroupFAdd | _: Instruction.GroupFMin |
           _: Instruction.GroupFMax | _: Instruction.GroupFMulKHR |
-          _: Instruction.SubgroupShuffleUpINTEL | _: Instruction.GroupBroadcast |
+          _: Instruction.SubgroupShuffleINTEL | _: Instruction.SubgroupShuffleUpINTEL | _: Instruction.SubgroupShuffleDownINTEL | _: Instruction.GroupBroadcast |
           _: Instruction.ControlBarrier => true
       case Instruction.FunctionCall(_, _, called, _) =>
         functionNames.get(id(called)).exists(isOpenCLCollective)
@@ -1090,7 +1124,6 @@ object Interpreter {
       control: ExecutionControl,
       metrics: PerformanceMetrics | Null
   ): Either[ExecutionFailure, Unit] = {
-    val state        = MemoryState(memory, dispatch.pointerRelocations)
     val globalValues = materializeGlobals(program, storageClass => storageClass != 4 && storageClass != 6) match {
       case Left(error)  => return Left(error)
       case Right(value) => value
@@ -1104,10 +1137,28 @@ object Interpreter {
     val totalLocal     = Math.multiplyExact(Math.multiplyExact(sx, sy), sz)
     val subgroup       = program.subgroupSizes.getOrElse(function.id, math.max(1, math.min(32, totalLocal)))
     val hasCollectives = program.collectiveFunctions.contains(function.id)
-    val baseScalars    = BaseScalarValues(program.constants, globalValues, program.module.header.bound.toUnsigned)
+    val hasAtomics     = program.module.instructions.exists {
+      case _: Instruction.AtomicStore | _: Instruction.AtomicLoad | _: Instruction.AtomicExchange |
+          _: Instruction.AtomicCompareExchange | _: Instruction.AtomicCompareExchangeWeak |
+          _: Instruction.AtomicFAddEXT | _: Instruction.AtomicFMinEXT | _: Instruction.AtomicFMaxEXT |
+          _: Instruction.AtomicIAdd | _: Instruction.AtomicUMin | _: Instruction.AtomicIIncrement |
+          _: Instruction.AtomicIDecrement | _: Instruction.AtomicISub | _: Instruction.AtomicSMin |
+          _: Instruction.AtomicSMax | _: Instruction.AtomicUMax | _: Instruction.AtomicAnd |
+          _: Instruction.AtomicOr | _: Instruction.AtomicXor => true
+      case _ => false
+    }
+    val baseScalars = BaseScalarValues(program.constants, globalValues, program.module.header.bound.toUnsigned)
     if (metrics != null) metrics.recordDispatch(hasCollectives)
+    val groupCount = Math.multiplyExact(Math.multiplyExact(gx.toLong, gy.toLong), gz.toLong)
+    // A large number of one-invocation groups is common in oneDPL. For those
+    // launches, queueing work-group tasks costs more than the interpreter work
+    // itself. Parallelize either genuinely large workgroups or a sufficiently
+    // large number of groups; the pool still enforces the global worker cap.
+    val parallelWork   = !hasAtomics && control.parallelism.shouldParallel(groupCount, totalLocal.toLong)
+    val state          = MemoryState(memory, dispatch.pointerRelocations, threadSafe = false)
+    val flushLock      = Object()
     val reusableValues =
-      if (hasCollectives) None
+      if (hasCollectives || parallelWork) None
       else
         Some(
           InvocationValues(
@@ -1118,119 +1169,169 @@ object Interpreter {
             metrics
           )
         )
-    var reusableExecution: InvocationExecution | Null = null
-    var groupZ                                        = 0
-    while (groupZ < gz) {
-      var groupY = 0
-      while (groupY < gy) {
-        var groupX = 0
-        while (groupX < gx) {
-          val workgroupValues = materializeGlobals(program, _ == 4) match {
-            case Left(error)  => return Left(error)
-            case Right(value) => value
-          }
-          val shared = dispatch.arguments.zipWithIndex.collect { case (KernelArgument.Local(size), argumentIndex) =>
-            argumentIndex -> Region.Internal(Array.ofDim[Byte](checkedSize(size)))
-          }.toMap
-          val executions = mutable.ArrayBuffer.empty[InvocationExecution]
-          var localZ     = 0
-          while (localZ < sz) {
-            var localY = 0
-            while (localY < sy) {
-              var localX = 0
-              while (localX < sx) {
-                val linearLocal     = (localZ * sy + localY) * sx + localX
-                val relativeGlobalX = groupX.toLong * sx + localX
-                val relativeGlobalY = groupY.toLong * sy + localY
-                val relativeGlobalZ = groupZ.toLong * sz + localZ
-                if (
-                  relativeGlobalX < dispatch.geometry.globalSize.x && relativeGlobalY < dispatch.geometry.globalSize.y &&
-                  relativeGlobalZ < dispatch.geometry.globalSize.z
-                ) {
-                  if (metrics != null) metrics.recordInvocation()
-                  val globalX       = Math.addExact(dispatch.geometry.globalOffset.x.toLong, relativeGlobalX)
-                  val globalY       = Math.addExact(dispatch.geometry.globalOffset.y.toLong, relativeGlobalY)
-                  val globalZ       = Math.addExact(dispatch.geometry.globalOffset.z.toLong, relativeGlobalZ)
-                  val privateValues = materializeGlobals(program, _ == 6) match {
-                    case Left(error)  => return Left(error)
-                    case Right(value) => value
-                  }
-                  val invocation = Invocation(
-                    groupX = groupX.toLong,
-                    groupY = groupY.toLong,
-                    groupZ = groupZ.toLong,
-                    localX = localX.toLong,
-                    localY = localY.toLong,
-                    localZ = localZ.toLong,
-                    globalX = globalX,
-                    globalY = globalY,
-                    globalZ = globalZ,
-                    globalSizeX = dispatch.geometry.globalSize.x.toLong,
-                    globalSizeY = dispatch.geometry.globalSize.y.toLong,
-                    globalSizeZ = dispatch.geometry.globalSize.z.toLong,
-                    globalOffsetX = dispatch.geometry.globalOffset.x.toLong,
-                    globalOffsetY = dispatch.geometry.globalOffset.y.toLong,
-                    globalOffsetZ = dispatch.geometry.globalOffset.z.toLong,
-                    workDim = dispatch.geometry.workDim,
-                    numWorkgroupsX = dispatch.geometry.groupCount.x.toLong,
-                    numWorkgroupsY = dispatch.geometry.groupCount.y.toLong,
-                    numWorkgroupsZ = dispatch.geometry.groupCount.z.toLong,
-                    workgroupSizeX = sx.toLong,
-                    workgroupSizeY = sy.toLong,
-                    workgroupSizeZ = sz.toLong,
-                    subgroupSize = subgroup,
-                    subgroupIndex = linearLocal / subgroup,
-                    subgroupLocal = linearLocal % subgroup
-                  )
-                  prepareInvocation(
-                    program,
-                    function,
-                    dispatch.arguments,
-                    shared,
-                    invocation,
-                    globalValues ++ workgroupValues ++ privateValues,
-                    reusableValues,
-                    reusableExecution,
-                    state,
-                    baseScalars,
-                    metrics
-                  ) match {
-                    case Left(error)  => return Left(error)
-                    case Right(value) =>
-                      if (hasCollectives) executions += value
-                      else {
-                        reusableExecution = value
-                        resumeInvocation(program, value, state, control, metrics) match {
-                          case Left(error)                  => return Left(error)
-                          case Right(()) if value.completed => ()
-                          case Right(())                    =>
-                            return Left(
-                              ExecutionFailure.InvalidRequest(
-                                "SPIR-V program suspended at a collective absent from its static instruction set"
-                              )
-                            )
-                        }
-                      }
-                  }
-                }
-                localX += 1
-              }
-              localY += 1
-            }
-            localZ += 1
-          }
-          if (hasCollectives)
-            runWorkgroup(program, executions, state, control, metrics) match {
-              case Left(error) => return Left(error)
-              case Right(())   => ()
-            }
-          groupX += 1
-        }
-        groupY += 1
+    val reusableExecution = Array[InvocationExecution | Null](null)
+
+    def runGroup(
+        groupIndex: Long,
+        reuseInvocationState: Boolean,
+        groupMetrics: PerformanceMetrics | Null,
+        reuseValues: Option[InvocationValues],
+        reuseExecution: Option[Array[InvocationExecution | Null]],
+        groupState: MemoryState
+    ): Either[ExecutionFailure, Unit] = {
+      val group           = dispatch.geometry.groupCoordinates(groupIndex)
+      val groupX          = group.x
+      val groupY          = group.y
+      val groupZ          = group.z
+      val workgroupValues = materializeGlobals(program, _ == 4) match {
+        case Left(error)  => return Left(error)
+        case Right(value) => value
       }
-      groupZ += 1
+      val shared = dispatch.arguments.zipWithIndex.collect { case (KernelArgument.Local(size), argumentIndex) =>
+        argumentIndex -> Region.Internal(Array.ofDim[Byte](checkedSize(size)))
+      }.toMap
+      val reusableValues = if (hasCollectives) None
+      else reuseValues.orElse(
+        Some(
+          InvocationValues(
+            program.constants,
+            globalValues,
+            program.module.header.bound.toUnsigned,
+            baseScalars,
+            groupMetrics
+          )
+        )
+      )
+      var reusableExecution: InvocationExecution | Null = reuseExecution match {
+        case Some(slot) => slot(0)
+        case None       => null
+      }
+      val executions = mutable.ArrayBuffer.empty[InvocationExecution]
+      var localZ     = 0
+      while (localZ < sz) {
+        var localY = 0
+        while (localY < sy) {
+          var localX = 0
+          while (localX < sx) {
+            val linearLocal     = (localZ * sy + localY) * sx + localX
+            val relativeGlobalX = groupX.toLong * sx + localX
+            val relativeGlobalY = groupY.toLong * sy + localY
+            val relativeGlobalZ = groupZ.toLong * sz + localZ
+            if (
+              relativeGlobalX < dispatch.geometry.globalSize.x && relativeGlobalY < dispatch.geometry.globalSize.y &&
+              relativeGlobalZ < dispatch.geometry.globalSize.z
+            ) {
+              if (groupMetrics != null) groupMetrics.recordInvocation()
+              val globalX       = Math.addExact(dispatch.geometry.globalOffset.x.toLong, relativeGlobalX)
+              val globalY       = Math.addExact(dispatch.geometry.globalOffset.y.toLong, relativeGlobalY)
+              val globalZ       = Math.addExact(dispatch.geometry.globalOffset.z.toLong, relativeGlobalZ)
+              val privateValues = materializeGlobals(program, _ == 6) match {
+                case Left(error)  => return Left(error)
+                case Right(value) => value
+              }
+              val invocation = Invocation(
+                groupX = groupX.toLong,
+                groupY = groupY.toLong,
+                groupZ = groupZ.toLong,
+                localX = localX.toLong,
+                localY = localY.toLong,
+                localZ = localZ.toLong,
+                globalX = globalX,
+                globalY = globalY,
+                globalZ = globalZ,
+                globalSizeX = dispatch.geometry.globalSize.x.toLong,
+                globalSizeY = dispatch.geometry.globalSize.y.toLong,
+                globalSizeZ = dispatch.geometry.globalSize.z.toLong,
+                globalOffsetX = dispatch.geometry.globalOffset.x.toLong,
+                globalOffsetY = dispatch.geometry.globalOffset.y.toLong,
+                globalOffsetZ = dispatch.geometry.globalOffset.z.toLong,
+                workDim = dispatch.geometry.workDim,
+                numWorkgroupsX = dispatch.geometry.groupCount.x.toLong,
+                numWorkgroupsY = dispatch.geometry.groupCount.y.toLong,
+                numWorkgroupsZ = dispatch.geometry.groupCount.z.toLong,
+                workgroupSizeX = sx.toLong,
+                workgroupSizeY = sy.toLong,
+                workgroupSizeZ = sz.toLong,
+                subgroupSize = subgroup,
+                subgroupIndex = linearLocal / subgroup,
+                subgroupLocal = linearLocal % subgroup
+              )
+              prepareInvocation(
+                program,
+                function,
+                dispatch.arguments,
+                shared,
+                invocation,
+                globalValues ++ workgroupValues ++ privateValues,
+                reusableValues,
+                reusableExecution,
+                groupState,
+                baseScalars,
+                groupMetrics
+              ) match {
+                case Left(error)  => return Left(error)
+                case Right(value) =>
+                  if (hasCollectives) executions += value
+                  else {
+                    if (reuseInvocationState) {
+                      reusableExecution = value
+                      reuseExecution.foreach(_(0) = value)
+                    }
+                    resumeInvocation(program, value, groupState, control, groupMetrics) match {
+                      case Left(error)                  => return Left(error)
+                      case Right(()) if value.completed => ()
+                      case Right(())                    =>
+                        return Left(
+                          ExecutionFailure.InvalidRequest(
+                            "SPIR-V program suspended at a collective absent from its static instruction set"
+                          )
+                        )
+                    }
+                  }
+              }
+            }
+            localX += 1
+          }
+          localY += 1
+        }
+        localZ += 1
+      }
+      if (hasCollectives)
+        runWorkgroup(program, executions, groupState, control, groupMetrics)
+      else Right(())
     }
-    state.flush()
+
+    val runResult = if (!parallelWork) {
+      var groupIndex = 0L
+      var result     = Right(()): Either[ExecutionFailure, Unit]
+      while (groupIndex < groupCount && result.isRight) {
+        result = runGroup(
+          groupIndex,
+          reuseInvocationState = true,
+          metrics,
+          reusableValues,
+          Some(reusableExecution),
+          state
+        )
+        groupIndex += 1L
+      }
+      result
+    } else {
+      control.parallelism.parallelFor(groupCount) { groupIndex =>
+        val groupMetrics = if (metrics == null) null else PerformanceMetrics()
+        val groupState   = MemoryState(memory, dispatch.pointerRelocations, threadSafe = false)
+        runGroup(groupIndex, reuseInvocationState = false, groupMetrics, None, None, groupState).flatMap { _ =>
+          flushLock.synchronized(groupState.flush())
+        }.map { _ =>
+          if (metrics != null && groupMetrics != null) metrics.merge(groupMetrics)
+        }
+      }
+    }
+    runResult match {
+      case Left(error) => return Left(error)
+      case Right(())   => ()
+    }
+    if (parallelWork) Right(()) else state.flush()
   }
 
   private final case class Invocation(
@@ -1284,18 +1385,28 @@ object Interpreter {
     case FloatingMin
     case FloatingMax
     case FloatingMultiply
+    case Shuffle
     case ShuffleUp
+    case ShuffleDown
     case Broadcast
     case Barrier
   }
 
   private enum CollectivePayload {
     case Value(resultType: Int, destination: Int, value: RuntimeValue)
+    case Shuffle(resultType: Int, destination: Int, data: RuntimeValue, invocationId: RuntimeValue)
     case ShuffleUp(
         resultType: Int,
         destination: Int,
         previous: RuntimeValue,
         current: RuntimeValue,
+        delta: Long
+    )
+    case ShuffleDown(
+        resultType: Int,
+        destination: Int,
+        current: RuntimeValue,
+        next: RuntimeValue,
         delta: Long
     )
     case Barrier(memoryScope: Int, semantics: Long)
@@ -1677,6 +1788,11 @@ object Interpreter {
                   pc += 1
               }
             case None => return Left(undefined(source))
+          }
+        case Instruction.BitCount(resultType, dest, base) =>
+          integerBitCount(program, values, resultType, dest, base) match {
+            case Left(error) => return Left(error)
+            case Right(())   => pc += 1
           }
         case Instruction.PtrCastToGeneric(resultType, dest, source) =>
           (program.types.get(id(resultType)), values.get(id(source))) match {
@@ -2075,6 +2191,53 @@ object Interpreter {
             unequal,
             value,
             comparator
+          ) match {
+            case Left(error) => return Left(error)
+            case Right(())   => pc += 1
+          }
+        case Instruction.AtomicFAddEXT(resultType, dest, pointer, memoryScope, semantics, value) =>
+          atomicFloatingAdd(
+            program,
+            values,
+            memory,
+            resultType,
+            dest,
+            pointer,
+            memoryScope,
+            semantics,
+            value
+          ) match {
+            case Left(error) => return Left(error)
+            case Right(())   => pc += 1
+          }
+        case Instruction.AtomicFMinEXT(resultType, dest, pointer, memoryScope, semantics, value) =>
+          atomicFloatingMinMax(
+            program,
+            values,
+            memory,
+            resultType,
+            dest,
+            pointer,
+            memoryScope,
+            semantics,
+            value,
+            maximum = false
+          ) match {
+            case Left(error) => return Left(error)
+            case Right(())   => pc += 1
+          }
+        case Instruction.AtomicFMaxEXT(resultType, dest, pointer, memoryScope, semantics, value) =>
+          atomicFloatingMinMax(
+            program,
+            values,
+            memory,
+            resultType,
+            dest,
+            pointer,
+            memoryScope,
+            semantics,
+            value,
+            maximum = true
           ) match {
             case Left(error) => return Left(error)
             case Right(())   => pc += 1
@@ -2815,8 +2978,22 @@ object Interpreter {
               suspend(execution, currentFunction, pc, currentLabel, predecessor, instructionCount, request)
               return Right(())
           }
+        case Instruction.SubgroupShuffleINTEL(resultType, dest, data, invocationId) =>
+          collectiveShuffle(values, currentFunction.id, pc, resultType, dest, data, invocationId) match {
+            case Left(error)    => return Left(error)
+            case Right(request) =>
+              suspend(execution, currentFunction, pc, currentLabel, predecessor, instructionCount, request)
+              return Right(())
+          }
         case Instruction.SubgroupShuffleUpINTEL(resultType, dest, previous, current, delta) =>
           collectiveShuffleUp(values, currentFunction.id, pc, resultType, dest, previous, current, delta) match {
+            case Left(error)    => return Left(error)
+            case Right(request) =>
+              suspend(execution, currentFunction, pc, currentLabel, predecessor, instructionCount, request)
+              return Right(())
+          }
+        case Instruction.SubgroupShuffleDownINTEL(resultType, dest, current, next, delta) =>
+          collectiveShuffleDown(values, currentFunction.id, pc, resultType, dest, current, next, delta) match {
             case Left(error)    => return Left(error)
             case Right(request) =>
               suspend(execution, currentFunction, pc, currentLabel, predecessor, instructionCount, request)
@@ -3315,11 +3492,24 @@ object Interpreter {
               var target = default
               var index  = 0
               while (index < targets.size) {
-                val pair = targets(index)
-                if (pair.words.size != 2)
+                val pair    = targets(index)
+                val literal = pair.words match {
+                  case Col(low, _) =>
+                    if (pair.kind != "PairLiteralIntegerIdRef")
+                      return Left(ExecutionFailure.InvalidRequest("OpSwitch target is not a literal/label pair"))
+                    low.toUnsigned
+                  case Col(low, high, _) =>
+                    if (pair.kind != "PairLiteralIntegerIdRef")
+                      return Left(ExecutionFailure.InvalidRequest("OpSwitch target is not a literal/label pair"))
+                    low.toUnsigned | (high.toUnsigned << 32)
+                  case _ =>
+                    return Left(ExecutionFailure.InvalidRequest("OpSwitch has an incomplete literal/label pair"))
+                }
+                if (pair.words.size != 2 && pair.words.size != 3)
                   return Left(ExecutionFailure.InvalidRequest("OpSwitch has an incomplete literal/label pair"))
-                if (pair.words.head.toUnsigned == value)
-                  target = Operand("IdRef", Col(pair.words(1)))
+                val label = pair.words.last
+                if (literal == value)
+                  target = Operand("IdRef", Col(label))
                 index += 1
               }
               predecessor = currentLabel
@@ -3478,6 +3668,11 @@ object Interpreter {
         case (CollectivePayload.Value(leftType, _, _), CollectivePayload.Value(rightType, _, _)) =>
           leftType == rightType
         case (
+              CollectivePayload.Shuffle(leftType, _, _, _),
+              CollectivePayload.Shuffle(rightType, _, _, _)
+            ) =>
+          leftType == rightType
+        case (
               CollectivePayload.Barrier(leftMemoryScope, leftSemantics),
               CollectivePayload.Barrier(rightMemoryScope, rightSemantics)
             ) =>
@@ -3485,6 +3680,11 @@ object Interpreter {
         case (
               CollectivePayload.ShuffleUp(leftType, _, _, _, leftDelta),
               CollectivePayload.ShuffleUp(rightType, _, _, _, rightDelta)
+            ) =>
+          leftType == rightType && leftDelta == rightDelta
+        case (
+              CollectivePayload.ShuffleDown(leftType, _, _, _, leftDelta),
+              CollectivePayload.ShuffleDown(rightType, _, _, _, rightDelta)
             ) =>
           leftType == rightType && leftDelta == rightDelta
         case _ => false
@@ -3504,6 +3704,46 @@ object Interpreter {
           execution.suspended = None
         }
         Right(())
+      case CollectivePayload.Shuffle(resultType, _, _, _) =>
+        val shuffleRequests = requests.collect {
+          case CollectiveRequest(_, _, _, _, CollectivePayload.Shuffle(_, destination, data, invocationId), _, _) =>
+            (destination, data, invocationId)
+        }
+        if (shuffleRequests.size != requests.size)
+          Left(ExecutionFailure.InvalidRequest("subgroup shuffle participants have incompatible payloads"))
+        else {
+          val results =
+            participants.zip(shuffleRequests).foldLeft[Either[ExecutionFailure, Col[RuntimeValue]]](Right(Col.empty)) {
+              case (Right(existing), request) =>
+                val invocationId = request._2._3
+                invocationId match {
+                  case RuntimeValue.Bits(_, Array(sourceLocal)) =>
+                    participants.find(_.invocation.subgroupLocal.toLong == sourceLocal) match {
+                      case Some(sourceExecution) =>
+                        sourceExecution.suspended match {
+                          case Some(CollectiveRequest(_, _, _, _, CollectivePayload.Shuffle(_, _, data, _), _, _)) =>
+                            Right(existing :+ retag(data, resultType))
+                          case _ => Left(ExecutionFailure.InvalidRequest("subgroup shuffle source is not suspended"))
+                        }
+                      case None =>
+                        Left(ExecutionFailure.InvalidRequest(s"subgroup shuffle source lane $sourceLocal is absent"))
+                    }
+                  case _ => Left(ExecutionFailure.InvalidRequest("subgroup shuffle invocation id must be scalar"))
+                }
+              case (Left(error), _) => Left(error)
+            }
+          results.map { values =>
+            participants.zip(values).foreach { case (execution, value) =>
+              execution.suspended.get.payload match {
+                case CollectivePayload.Shuffle(requestType, destination, _, _) =>
+                  execution.values.update(destination, retag(value, requestType))
+                case _ => ()
+              }
+              execution.pc = execution.suspended.get.pc + 1
+              execution.suspended = None
+            }
+          }
+        }
       case CollectivePayload.ShuffleUp(resultType, _, _, _, delta) =>
         val shuffleRequests = requests.collect {
           case CollectiveRequest(
@@ -3559,6 +3799,60 @@ object Interpreter {
                 case _ => ()
               }
               execution.pc = request.pc + 1
+              execution.suspended = None
+            }
+          }
+        }
+      case CollectivePayload.ShuffleDown(resultType, _, _, _, delta) =>
+        val shuffleRequests = requests.collect {
+          case CollectiveRequest(
+                _,
+                _,
+                _,
+                _,
+                CollectivePayload.ShuffleDown(_, destination, current, next, requestDelta),
+                _,
+                _
+              ) if requestDelta == delta =>
+            (destination, current, next)
+        }
+        if (shuffleRequests.size != requests.size)
+          Left(ExecutionFailure.InvalidRequest("subgroup shuffle-down participants have incompatible payloads"))
+        else {
+          val results =
+            participants.zip(shuffleRequests).foldLeft[Either[ExecutionFailure, Col[RuntimeValue]]](Right(Col.empty)) {
+              case (Right(existing), (execution, _)) =>
+                val unwrappedSource = execution.invocation.subgroupLocal.toLong + delta
+                val useNext         = unwrappedSource >= execution.invocation.subgroupSize.toLong
+                val sourceLocal = if (useNext) unwrappedSource - execution.invocation.subgroupSize else unwrappedSource
+                val value       = participants.find(_.invocation.subgroupLocal.toLong == sourceLocal) match {
+                  case Some(sourceExecution) =>
+                    sourceExecution.suspended match {
+                      case Some(CollectiveRequest(
+                            _,
+                            _,
+                            _,
+                            _,
+                            CollectivePayload.ShuffleDown(_, _, current, next, _),
+                            _,
+                            _
+                          )) => Right(if (useNext) next else current)
+                      case _ => Left(ExecutionFailure.InvalidRequest("subgroup shuffle-down source is not suspended"))
+                    }
+                  case None =>
+                    Left(ExecutionFailure.InvalidRequest(s"subgroup shuffle-down source lane $sourceLocal is absent"))
+                }
+                value.map(result => existing :+ retag(result, resultType))
+              case (Left(error), _) => Left(error)
+            }
+          results.map { values =>
+            participants.zip(values).foreach { case (execution, value) =>
+              execution.suspended.get.payload match {
+                case CollectivePayload.ShuffleDown(requestType, destination, _, _, _) =>
+                  execution.values.update(destination, retag(value, requestType))
+                case _ => ()
+              }
+              execution.pc = execution.suspended.get.pc + 1
               execution.suspended = None
             }
           }
@@ -3772,6 +4066,10 @@ object Interpreter {
               }
             case CollectiveKind.ShuffleUp =>
               Left(ExecutionFailure.InvalidRequest("subgroup shuffle-up payload was resolved as a value collective"))
+            case CollectiveKind.ShuffleDown =>
+              Left(ExecutionFailure.InvalidRequest("subgroup shuffle-down payload was resolved as a value collective"))
+            case CollectiveKind.Shuffle =>
+              Left(ExecutionFailure.InvalidRequest("subgroup shuffle payload was resolved as a value collective"))
             case CollectiveKind.Broadcast =>
               val selected = (expected.scope, expected.selector) match {
                 case (3, Col(x)) =>
@@ -3801,8 +4099,10 @@ object Interpreter {
               request.payload match {
                 case CollectivePayload.Value(requestType, destination, _) =>
                   execution.values.update(destination, retag(value, requestType))
-                case CollectivePayload.Barrier(_, _)            => ()
-                case CollectivePayload.ShuffleUp(_, _, _, _, _) => ()
+                case CollectivePayload.Barrier(_, _)              => ()
+                case CollectivePayload.Shuffle(_, _, _, _)        => ()
+                case CollectivePayload.ShuffleUp(_, _, _, _, _)   => ()
+                case CollectivePayload.ShuffleDown(_, _, _, _, _) => ()
               }
               execution.pc = request.pc + 1
               execution.suspended = None
@@ -4265,6 +4565,80 @@ object Interpreter {
       case (_, _, Left(error)) => Left(error)
       case (None, _, _)        => Left(undefined(previous))
       case (_, None, _)        => Left(undefined(current))
+    }
+
+  private def collectiveShuffle(
+      values: InvocationValues,
+      function: Int,
+      pc: Int,
+      resultType: Operand,
+      destination: Operand,
+      data: Operand,
+      invocationId: Operand
+  ): Either[ExecutionFailure, CollectiveRequest] =
+    (values.get(id(data)), values.get(id(invocationId))) match {
+      case (
+            Some(dataValue @ RuntimeValue.Bits(dataType, dataLanes)),
+            Some(invocationValue @ RuntimeValue.Bits(_, Array(_)))
+          )
+          if dataType == id(resultType) && dataLanes.nonEmpty =>
+        Right(
+          CollectiveRequest(
+            CollectiveKind.Shuffle,
+            function,
+            pc,
+            3,
+            CollectivePayload.Shuffle(id(resultType), id(destination), dataValue, invocationValue)
+          )
+        )
+      case (Some(_), Some(RuntimeValue.Bits(_, lanes))) if lanes.length != 1 =>
+        Left(ExecutionFailure.InvalidRequest("OpSubgroupShuffleINTEL invocation id must be scalar"))
+      case (Some(_), Some(_)) =>
+        Left(ExecutionFailure.InvalidRequest("OpSubgroupShuffleINTEL requires matching data and result types"))
+      case (None, _) => Left(undefined(data))
+      case (_, None) => Left(undefined(invocationId))
+    }
+
+  private def collectiveShuffleDown(
+      values: InvocationValues,
+      function: Int,
+      pc: Int,
+      resultType: Operand,
+      destination: Operand,
+      current: Operand,
+      next: Operand,
+      delta: Operand
+  ): Either[ExecutionFailure, CollectiveRequest] =
+    (values.get(id(current)), values.get(id(next)), scalar(values, delta)) match {
+      case (
+            Some(currentValue @ RuntimeValue.Bits(currentType, currentLanes)),
+            Some(nextValue @ RuntimeValue.Bits(nextType, nextLanes)),
+            Right(deltaValue)
+          )
+          if currentType == id(resultType) && nextType == id(resultType) &&
+            currentLanes.length == nextLanes.length && deltaValue >= 0L =>
+        Right(
+          CollectiveRequest(
+            CollectiveKind.ShuffleDown,
+            function,
+            pc,
+            3,
+            CollectivePayload.ShuffleDown(
+              id(resultType),
+              id(destination),
+              currentValue,
+              nextValue,
+              deltaValue
+            )
+          )
+        )
+      case (Some(_), Some(_), Right(deltaValue)) if deltaValue < 0L =>
+        Left(ExecutionFailure.InvalidRequest("OpSubgroupShuffleDownINTEL delta must be non-negative"))
+      case (Some(_), Some(_), Right(_)) =>
+        Left(ExecutionFailure.InvalidRequest("OpSubgroupShuffleDownINTEL requires matching result and operand types"))
+      case (_, _, Left(error)) => Left(error)
+      case (None, _, _)        => Left(undefined(current))
+      case (_, None, _)        => Left(undefined(next))
     }
 
   private def collectiveBroadcast(
@@ -5382,6 +5756,18 @@ object Interpreter {
           case 63 => "tanh"
           case 64 => "tanpi"
           case 66 => "trunc"
+          case 81 => "native_cos"
+          case 83 => "native_exp"
+          case 84 => "native_exp2"
+          case 85 => "native_exp10"
+          case 86 => "native_log"
+          case 87 => "native_log2"
+          case 88 => "native_log10"
+          case 90 => "native_recip"
+          case 91 => "native_rsqrt"
+          case 92 => "native_sin"
+          case 93 => "native_sqrt"
+          case 94 => "native_tan"
         }
         if (sources.size != 1)
           Left(ExecutionFailure.InvalidRequest(s"OpenCL.std $name expects 1 operand, received ${sources.size}"))
@@ -5433,6 +5819,18 @@ object Interpreter {
                       case 63 => Math.tanh(value)
                       case 64 => openCLTanPi(value)
                       case 66 => if (value < 0.0) Math.ceil(value) else Math.floor(value)
+                      case 81 => Math.cos(value)
+                      case 83 => Math.exp(value)
+                      case 84 => Math.pow(2.0, value)
+                      case 85 => Math.pow(10.0, value)
+                      case 86 => Math.log(value)
+                      case 87 => Math.log(value) / Math.log(2.0)
+                      case 88 => Math.log10(value)
+                      case 90 => 1.0 / value
+                      case 91 => 1.0 / Math.sqrt(value)
+                      case 92 => Math.sin(value)
+                      case 93 => Math.sqrt(value)
+                      case 94 => Math.tan(value)
                     }
                     resultWidth match {
                       case 16 if opcode == 23 => raw & 0x7fffL
@@ -7528,6 +7926,41 @@ object Interpreter {
     }
   }
 
+  private def integerBitCount(
+      program: DispatchProgram,
+      values: InvocationValues,
+      resultType: Operand,
+      destination: Operand,
+      base: Operand
+  ): Either[ExecutionFailure, Unit] = {
+    val resultId = id(resultType)
+    val baseId   = id(base)
+    integerShape(program, resultId) match {
+      case None =>
+        Left(ExecutionFailure.InvalidRequest(s"OpBitCount result type %$resultId is not an integer scalar or vector"))
+      case Some((width, count)) =>
+        val operation: Long => Long = value =>
+          if (width <= 32) java.lang.Integer.bitCount((value & mask(width)).toInt).toLong
+          else java.lang.Long.bitCount(value & mask(width)).toLong
+        if (count == 1 && values.scalarType(baseId) == resultId) {
+          values.updateScalar(id(destination), resultId, operation(values.scalarBits(baseId)) & mask(width))
+          Right(())
+        } else
+          values.get(baseId) match {
+            case Some(RuntimeValue.Bits(baseType, lanes))
+                if baseType == resultId && lanes.length == count =>
+              values.update(
+                id(destination),
+                RuntimeValue.Bits(resultId, lanes.map(value => operation(value) & mask(width)))
+              )
+              Right(())
+            case Some(_) =>
+              Left(ExecutionFailure.InvalidRequest("OpBitCount requires a matching integer scalar or vector base"))
+            case None => Left(undefined(base))
+          }
+    }
+  }
+
   private def logicalBinary(
       program: DispatchProgram,
       values: InvocationValues,
@@ -7887,9 +8320,11 @@ object Interpreter {
     if (!Col(4, 5, 8, 10, 11, 12, 5349).contains(target.storageClass))
       return Left(ExecutionFailure.InvalidRequest(s"$opcode pointer storage class does not support atomic access"))
     validateAtomicControls(values, scope, semantics, opcode).flatMap { _ =>
-      memory.readScalar(target, shape._1 / 8).flatMap { previous =>
-        memory.writeScalar(target, values.scalarBits(valueId) & mask(shape._1), shape._1 / 8).map { _ =>
-          values.updateScalar(id(destination), resultTypeId, previous & mask(shape._1))
+      memory.atomic {
+        memory.readScalar(target, shape._1 / 8).flatMap { previous =>
+          memory.writeScalar(target, values.scalarBits(valueId) & mask(shape._1), shape._1 / 8).map { _ =>
+            values.updateScalar(id(destination), resultTypeId, previous & mask(shape._1))
+          }
         }
       }
     }
@@ -7928,13 +8363,17 @@ object Interpreter {
     if (!Col(4, 5, 8, 10, 11, 12, 5349).contains(target.storageClass))
       return Left(ExecutionFailure.InvalidRequest(s"$opcode pointer storage class does not support atomic access"))
     for {
-      _        <- validateAtomicControls(values, scope, equal, opcode)
-      _        <- validateAtomicControls(values, scope, unequal, opcode)
-      previous <- memory.readScalar(target, shape._1 / 8)
-      _        <- if ((previous & mask(shape._1)) == (values.scalarBits(comparatorId) & mask(shape._1)))
-        memory.writeScalar(target, values.scalarBits(valueId) & mask(shape._1), shape._1 / 8)
-      else Right(())
-    } yield values.updateScalar(id(destination), resultTypeId, previous & mask(shape._1))
+      _      <- validateAtomicControls(values, scope, equal, opcode)
+      _      <- validateAtomicControls(values, scope, unequal, opcode)
+      result <- memory.atomic {
+        for {
+          previous <- memory.readScalar(target, shape._1 / 8)
+          _        <- if ((previous & mask(shape._1)) == (values.scalarBits(comparatorId) & mask(shape._1)))
+            memory.writeScalar(target, values.scalarBits(valueId) & mask(shape._1), shape._1 / 8)
+          else Right(())
+        } yield previous
+      }
+    } yield values.updateScalar(id(destination), resultTypeId, result & mask(shape._1))
   }
 
   private def validateAtomicControls(
@@ -8012,31 +8451,127 @@ object Interpreter {
     }
     val width    = shape._1
     val byteSize = width / 8
-    memory.readScalar(target, byteSize).flatMap { previous =>
-      val operand = valueId.fold(1L)(values.scalarBits) & mask(width)
-      val updated = operation match {
-        case AtomicIntegerOperation.Increment     => (previous + 1L) & mask(width)
-        case AtomicIntegerOperation.Decrement     => (previous - 1L) & mask(width)
-        case AtomicIntegerOperation.Add           => (previous + operand) & mask(width)
-        case AtomicIntegerOperation.Subtract      => (previous - operand) & mask(width)
-        case AtomicIntegerOperation.SignedMinimum =>
-          if (signExtend(previous, width) > signExtend(operand, width)) operand else previous
-        case AtomicIntegerOperation.UnsignedMinimum =>
-          if (width == 64 && java.lang.Long.compareUnsigned(previous, operand) > 0) operand
-          else if (width < 64 && previous > operand) operand
-          else previous
-        case AtomicIntegerOperation.SignedMaximum =>
-          if (signExtend(previous, width) < signExtend(operand, width)) operand else previous
-        case AtomicIntegerOperation.UnsignedMaximum =>
-          if (width == 64 && java.lang.Long.compareUnsigned(previous, operand) < 0) operand
-          else if (width < 64 && previous < operand) operand
-          else previous
-        case AtomicIntegerOperation.And => previous & operand
-        case AtomicIntegerOperation.Or  => previous | operand
-        case AtomicIntegerOperation.Xor => previous ^ operand
+    memory.atomic {
+      memory.readScalar(target, byteSize).flatMap { previous =>
+        val operand = valueId.fold(1L)(values.scalarBits) & mask(width)
+        val updated = operation match {
+          case AtomicIntegerOperation.Increment     => (previous + 1L) & mask(width)
+          case AtomicIntegerOperation.Decrement     => (previous - 1L) & mask(width)
+          case AtomicIntegerOperation.Add           => (previous + operand) & mask(width)
+          case AtomicIntegerOperation.Subtract      => (previous - operand) & mask(width)
+          case AtomicIntegerOperation.SignedMinimum =>
+            if (signExtend(previous, width) > signExtend(operand, width)) operand else previous
+          case AtomicIntegerOperation.UnsignedMinimum =>
+            if (width == 64 && java.lang.Long.compareUnsigned(previous, operand) > 0) operand
+            else if (width < 64 && previous > operand) operand
+            else previous
+          case AtomicIntegerOperation.SignedMaximum =>
+            if (signExtend(previous, width) < signExtend(operand, width)) operand else previous
+          case AtomicIntegerOperation.UnsignedMaximum =>
+            if (width == 64 && java.lang.Long.compareUnsigned(previous, operand) < 0) operand
+            else if (width < 64 && previous < operand) operand
+            else previous
+          case AtomicIntegerOperation.And => previous & operand
+          case AtomicIntegerOperation.Or  => previous | operand
+          case AtomicIntegerOperation.Xor => previous ^ operand
+        }
+        memory.writeScalar(target, updated, byteSize).map { _ =>
+          values.updateScalar(id(destination), resultTypeId, previous & mask(width))
+        }
       }
-      memory.writeScalar(target, updated, byteSize).map { _ =>
-        values.updateScalar(id(destination), resultTypeId, previous & mask(width))
+    }
+  }
+
+  private def atomicFloatingAdd(
+      program: DispatchProgram,
+      values: InvocationValues,
+      memory: MemoryState,
+      resultType: Operand,
+      destination: Operand,
+      pointer: Operand,
+      scope: Operand,
+      semantics: Operand,
+      value: Operand
+  ): Either[ExecutionFailure, Unit] = {
+    val opcode       = "OpAtomicFAddEXT"
+    val resultTypeId = id(resultType)
+    val valueId      = id(value)
+    val shape        = floatingShape(program, resultTypeId) match {
+      case Some(result @ (width, 1)) if width == 16 || width == 32 || width == 64 => result
+      case _                                                                      =>
+        return Left(
+          ExecutionFailure.InvalidRequest(s"$opcode requires a 16-, 32-, or 64-bit scalar floating-point result")
+        )
+    }
+    if (values.scalarType(valueId) != resultTypeId)
+      return Left(ExecutionFailure.InvalidRequest(s"$opcode requires matching result and value types"))
+    val target = address(values, pointer) match {
+      case Left(error)  => return Left(error)
+      case Right(value) => value
+    }
+    if (target.pointee != resultTypeId)
+      return Left(ExecutionFailure.InvalidRequest(s"$opcode pointer pointee does not match result type"))
+    if (!Col(4, 5, 8, 10, 11, 12, 5349).contains(target.storageClass))
+      return Left(ExecutionFailure.InvalidRequest(s"$opcode pointer storage class does not support atomic access"))
+    validateAtomicControls(values, scope, semantics, opcode).flatMap { _ =>
+      val width    = shape._1
+      val byteSize = width / 8
+      memory.atomic {
+        memory.readScalar(target, byteSize).flatMap { previous =>
+          val updated = floatingAddBits(width, previous, values.scalarBits(valueId)) & mask(width)
+          memory.writeScalar(target, updated, byteSize).map { _ =>
+            values.updateScalar(id(destination), resultTypeId, previous & mask(width))
+          }
+        }
+      }
+    }
+  }
+
+  private def atomicFloatingMinMax(
+      program: DispatchProgram,
+      values: InvocationValues,
+      memory: MemoryState,
+      resultType: Operand,
+      destination: Operand,
+      pointer: Operand,
+      scope: Operand,
+      semantics: Operand,
+      value: Operand,
+      maximum: Boolean
+  ): Either[ExecutionFailure, Unit] = {
+    val opcode       = if (maximum) "OpAtomicFMaxEXT" else "OpAtomicFMinEXT"
+    val resultTypeId = id(resultType)
+    val valueId      = id(value)
+    val shape        = floatingShape(program, resultTypeId) match {
+      case Some(result @ (width, 1)) if width == 16 || width == 32 || width == 64 => result
+      case _                                                                      =>
+        return Left(
+          ExecutionFailure.InvalidRequest(s"$opcode requires a 16-, 32-, or 64-bit scalar floating-point result")
+        )
+    }
+    if (values.scalarType(valueId) != resultTypeId)
+      return Left(ExecutionFailure.InvalidRequest(s"$opcode requires matching result and value types"))
+    val target = address(values, pointer) match {
+      case Left(error)  => return Left(error)
+      case Right(value) => value
+    }
+    if (target.pointee != resultTypeId)
+      return Left(ExecutionFailure.InvalidRequest(s"$opcode pointer pointee does not match result type"))
+    if (!Col(4, 5, 8, 10, 11, 12, 5349).contains(target.storageClass))
+      return Left(ExecutionFailure.InvalidRequest(s"$opcode pointer storage class does not support atomic access"))
+    validateAtomicControls(values, scope, semantics, opcode).flatMap { _ =>
+      val width    = shape._1
+      val byteSize = width / 8
+      memory.atomic {
+        memory.readScalar(target, byteSize).flatMap { previous =>
+          val operand = values.scalarBits(valueId)
+          val updated =
+            if (maximum) floatingMaximumBits(width, previous, operand)
+            else floatingMinimumBits(width, previous, operand)
+          memory.writeScalar(target, updated & mask(width), byteSize).map { _ =>
+            values.updateScalar(id(destination), resultTypeId, previous & mask(width))
+          }
+        }
       }
     }
   }

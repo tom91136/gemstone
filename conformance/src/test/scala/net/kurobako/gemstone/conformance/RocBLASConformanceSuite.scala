@@ -167,7 +167,8 @@ final class RocBLASConformanceSuite extends munit.FunSuite {
     )
     if result.oracleRan then
       require(result.oracle.exit == 0, s"oracle/${testCase.identity}:\n${result.oracle.diagnostic}")
-    require(result.gemstone.exit == 0, s"gemstone/${testCase.identity}:\n${result.gemstone.diagnostic}")
+    if result.gemstoneRan then
+      require(result.gemstone.exit == 0, s"gemstone/${testCase.identity}:\n${result.gemstone.diagnostic}")
   }
 
   private def runtimeLayout: RuntimeLayout = RuntimeLayout(

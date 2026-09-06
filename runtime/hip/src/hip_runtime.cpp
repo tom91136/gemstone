@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -9,6 +10,7 @@
 #include <mutex>
 #include <new>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <unordered_map>
 #include <utility>
@@ -19,6 +21,7 @@
 
 #include "gemstone/hip/dispatch.hpp"
 #include "gemstone/hsa/code_object_metadata.hpp"
+#include "gemstone/hsa/global.h"
 #include "gemstone/hsa/target.h"
 #include <hip/hip_ext.h>
 #include <hip/hip_runtime_api.h>
@@ -44,13 +47,17 @@ struct Kernel {
   std::vector<gemstone_hsa_kernarg_field> fields;
 };
 
+struct Module;
+
 struct Variable {
   void *host = nullptr;
   std::string device_name;
   size_t size = 0;
+  std::shared_ptr<Module> module;
 };
 
 struct Module {
+  std::mutex lock;
   // The address of this member is the opaque value passed back to the HIP
   // compiler's registration callbacks.
   void *token = nullptr;
@@ -71,6 +78,12 @@ struct Module {
   }
 };
 
+struct FunctionBinding {
+  std::shared_ptr<Module> module;
+  std::string name;
+  std::shared_ptr<Kernel> kernel;
+};
+
 struct ModuleHandle {
   std::shared_ptr<Module> module;
 };
@@ -89,7 +102,7 @@ struct State {
   hsa_queue_t *queue = nullptr;
   std::unordered_map<void **, std::shared_ptr<Module>> modules;
   std::vector<std::weak_ptr<Module>> driver_modules;
-  std::unordered_map<const void *, std::shared_ptr<Kernel>> kernels;
+  std::unordered_map<const void *, FunctionBinding> kernels;
   std::unordered_map<const void *, Variable> variables;
   std::unordered_map<void *, size_t> host_allocations;
 };
@@ -256,6 +269,8 @@ bool decompress_bundle(const uint8_t *compressed, std::vector<uint8_t> &decompre
   return true;
 }
 
+bool bundle_target_compatible(const std::string &triple);
+
 bool select_bundle(const void *fatbin, const void **image, size_t *image_size, std::vector<uint8_t> *decompressed = nullptr) {
   if (fatbin == nullptr || image == nullptr || image_size == nullptr) return false;
   const auto *bytes = static_cast<const uint8_t *>(fatbin);
@@ -300,7 +315,7 @@ bool select_bundle(const void *fatbin, const void **image, size_t *image_size, s
     if (entry.offset == 0 || entry.size == 0 || entry.offset > std::numeric_limits<size_t>::max()
         || entry.size > std::numeric_limits<size_t>::max() - static_cast<size_t>(entry.offset))
       return false;
-    if (entry.triple.find(gemstone::hsa::target_arch()) != std::string::npos) target = &entry;
+    if (bundle_target_compatible(entry.triple)) target = &entry;
   }
   // Never run an image for a different virtual target. A fallback would make
   // a matrix case appear to work while executing another generation's ISA.
@@ -315,6 +330,21 @@ bool image_is_elf(const void *image) {
   if (image == nullptr) return false;
   const auto *bytes = static_cast<const uint8_t *>(image);
   return bytes[EI_MAG0] == ELFMAG0 && bytes[EI_MAG1] == ELFMAG1 && bytes[EI_MAG2] == ELFMAG2 && bytes[EI_MAG3] == ELFMAG3;
+}
+
+// HIP fatbinaries emitted by ROCm use the first target in an ISA family for
+// host-side registration (for example gfx1030), even when the virtual agent
+// is exposed as a later ASIC variant (gfx1036).  These variants share the
+// decoder/execution profile; accept the canonical family image while still
+// rejecting a genuinely different generation.
+bool bundle_target_compatible(const std::string &triple) {
+  const std::string target = gemstone::hsa::target_arch();
+  if (triple.find(target) != std::string::npos) return true;
+  constexpr std::array<std::pair<std::string_view, std::string_view>, 4> families = {
+      {{"gfx103", "gfx1030"}, {"gfx110", "gfx1100"}, {"gfx115", "gfx1150"}, {"gfx120", "gfx1200"}}};
+  for (const auto &[prefix, canonical] : families)
+    if (target.rfind(prefix, 0) == 0 && triple.find(canonical) != std::string::npos) return true;
+  return false;
 }
 
 bool add_file_range(uint64_t offset, uint64_t size, uint64_t &end) {
@@ -360,13 +390,6 @@ std::shared_ptr<Module> find_module(void **token) {
   auto &runtime = state();
   const auto found = runtime.modules.find(token);
   return found == runtime.modules.end() ? std::shared_ptr<Module>{} : found->second;
-}
-
-const gemstone::hsa::CodeObjectKernelMetadata *find_metadata(const Module &module, const char *name) {
-  if (name == nullptr) return nullptr;
-  for (const auto &candidate : module.metadata)
-    if (candidate.name == name || candidate.symbol == name || candidate.symbol + ".kd" == name) return &candidate;
-  return nullptr;
 }
 
 bool load_module(Module &module) {
@@ -423,10 +446,41 @@ bool load_module(Module &module) {
   return module.loaded;
 }
 
-std::shared_ptr<Kernel> find_kernel(const void *function_address) {
+bool ensure_module_loaded(const std::shared_ptr<Module> &module) {
+  if (!module) return false;
+  std::lock_guard<std::mutex> guard(module->lock);
+  return load_module(*module);
+}
+
+std::shared_ptr<Kernel> resolve_kernel(const void *function_address) {
   auto &runtime = state();
-  const auto found = runtime.kernels.find(function_address);
-  return found == runtime.kernels.end() ? std::shared_ptr<Kernel>{} : found->second;
+  FunctionBinding binding;
+  {
+    std::lock_guard<std::mutex> guard(runtime.lock);
+    const auto found = runtime.kernels.find(function_address);
+    if (found == runtime.kernels.end()) return {};
+    binding = found->second;
+  }
+  if (binding.kernel) return binding.kernel;
+  if (!ensure_module_loaded(binding.module)) return {};
+  std::shared_ptr<Kernel> kernel;
+  {
+    std::lock_guard<std::mutex> guard(binding.module->lock);
+    const auto found = binding.module->kernels.find(binding.name);
+    if (found != binding.module->kernels.end()) kernel = found->second;
+    else if (binding.name.size() > 3 && binding.name.compare(binding.name.size() - 3, 3, ".kd") == 0) {
+      const auto candidate = binding.module->kernels.find(binding.name.substr(0, binding.name.size() - 3));
+      if (candidate != binding.module->kernels.end()) kernel = candidate->second;
+    }
+  }
+  if (!kernel) return {};
+  {
+    std::lock_guard<std::mutex> guard(runtime.lock);
+    const auto found = runtime.kernels.find(function_address);
+    if (found != runtime.kernels.end() && found->second.module == binding.module && found->second.name == binding.name)
+      found->second.kernel = kernel;
+  }
+  return kernel;
 }
 
 hipError_t dispatch_kernel(const std::shared_ptr<Kernel> &kernel, dim3 grid, dim3 block, void **args, size_t shared, hipStream_t,
@@ -439,8 +493,8 @@ hipError_t dispatch_kernel(const std::shared_ptr<Kernel> &kernel, dim3 grid, dim
     return remember(hipErrorInvalidDeviceFunction);
   }
   if (trace_modules())
-    std::fprintf(stderr, "Gemstone HIP dispatch kernel=%p object=%llu explicit=%u kernarg=%u\n", static_cast<const void *>(kernel.get()),
-                 static_cast<unsigned long long>(kernel->object), kernel->explicit_argument_count, kernel->kernarg_size);
+    std::fprintf(stderr, "Gemstone HIP dispatch kernel=%p object=%llu explicit=%u kernarg=%u shared=%zu\n", static_cast<const void *>(kernel.get()),
+                 static_cast<unsigned long long>(kernel->object), kernel->explicit_argument_count, kernel->kernarg_size, shared);
   if (grid.x == 0 || grid.y == 0 || grid.z == 0 || block.x == 0 || block.y == 0 || block.z == 0
       || grid.x > std::numeric_limits<uint32_t>::max() / block.x || grid.y > std::numeric_limits<uint32_t>::max() / block.y
       || grid.z > std::numeric_limits<uint32_t>::max() / block.z || shared > std::numeric_limits<uint32_t>::max())
@@ -513,7 +567,11 @@ hipError_t dispatch_kernel(const std::shared_ptr<Kernel> &kernel, dim3 grid, dim
   if (status == HSA_STATUS_SUCCESS) {
     const uint64_t index = hsa_queue_add_write_index_relaxed(state().queue, 1);
     auto *packet = &static_cast<hsa_kernel_dispatch_packet_t *>(state().queue->base_address)[index & (state().queue->size - 1U)];
-    std::memset(packet, 0, sizeof(*packet));
+    // Keep the slot unpublished while its body is rebuilt.  Clearing the
+    // header with memset after publishing the write index briefly turns the
+    // slot into a vendor-specific (type 0) packet, which the doorbell worker
+    // is allowed to consume before the final dispatch header is released.
+    std::memset(reinterpret_cast<uint8_t *>(packet) + sizeof(packet->header), 0, sizeof(*packet) - sizeof(packet->header));
     packet->setup = gemstone::hip::dispatch_dimensions(grid, block) << HSA_KERNEL_DISPATCH_PACKET_SETUP_DIMENSIONS;
     packet->workgroup_size_x = static_cast<uint16_t>(block.x);
     packet->workgroup_size_y = static_cast<uint16_t>(block.y);
@@ -544,11 +602,7 @@ hipError_t dispatch_kernel(const std::shared_ptr<Kernel> &kernel, dim3 grid, dim
 }
 
 hipError_t dispatch(const void *function_address, dim3 grid, dim3 block, void **args, size_t shared, hipStream_t stream) {
-  std::shared_ptr<Kernel> kernel;
-  {
-    std::lock_guard<std::mutex> guard(state().lock);
-    kernel = find_kernel(function_address);
-  }
+  const auto kernel = resolve_kernel(function_address);
   if (trace_modules())
     std::fprintf(stderr, "Gemstone HIP direct launch host=%p kernel=%p\n", function_address, static_cast<const void *>(kernel.get()));
   return dispatch_kernel(kernel, grid, block, args, shared, stream);
@@ -698,6 +752,8 @@ extern "C" hipError_t hipGetDevicePropertiesR0600(hipDeviceProp_tR0600 *properti
   properties->sharedMemPerBlock = 64U * 1024U;
   properties->warpSize = 64;
   properties->maxThreadsPerBlock = 1024;
+  properties->maxThreadsPerMultiProcessor = 1024;
+  properties->maxSharedMemoryPerMultiProcessor = 64U * 1024U;
   properties->maxThreadsDim[0] = 1024;
   properties->maxThreadsDim[1] = 1024;
   properties->maxThreadsDim[2] = 1024;
@@ -745,12 +801,26 @@ extern "C" hipError_t hipMemcpy(void *destination, const void *source, size_t si
 
 hipError_t copy_symbol(void *destination, const void *source, size_t size, size_t offset) {
   if ((destination == nullptr || source == nullptr) && size != 0) return remember(hipErrorInvalidValue);
-  std::lock_guard<std::mutex> guard(state().lock);
-  const auto found = state().variables.find(destination);
-  if (found == state().variables.end() || offset > found->second.size || size > found->second.size - offset)
-    return remember(hipErrorInvalidSymbol);
-  if (size != 0) std::memcpy(static_cast<unsigned char *>(found->second.host) + offset, source, size);
-  return remember(hipSuccess);
+  std::shared_ptr<Module> module;
+  std::string device_name;
+  {
+    std::lock_guard<std::mutex> guard(state().lock);
+    const auto found = state().variables.find(destination);
+    if (found == state().variables.end() || offset > found->second.size || size > found->second.size - offset)
+      return remember(hipErrorInvalidSymbol);
+    if (size != 0) std::memcpy(static_cast<unsigned char *>(found->second.host) + offset, source, size);
+    module = found->second.module;
+    device_name = found->second.device_name;
+  }
+  if (!ensure_module_loaded(module)) return remember(hipErrorInvalidImage);
+  hsa_executable_t executable{};
+  {
+    std::lock_guard<std::mutex> guard(module->lock);
+    executable = module->executable;
+  }
+  if (executable.handle == 0) return remember(hipErrorInvalidSymbol);
+  const hsa_status_t status = gemstone_hsa_executable_write_global(executable, device_name.c_str(), source, size, offset);
+  return remember(map_hsa(status));
 }
 
 const void *symbol_source(const void *symbol, size_t size, size_t offset, hipError_t &error) {
@@ -821,6 +891,30 @@ extern "C" hipError_t hipMemcpyDtoD(hipDeviceptr_t destination, hipDeviceptr_t s
 }
 
 extern "C" hipError_t hipMallocManaged(void **pointer, size_t size, unsigned int) { return hipMalloc(pointer, size); }
+extern "C" hipError_t hipMemAdvise(const void *pointer, size_t size, hipMemoryAdvise advice, int device) {
+  if ((pointer == nullptr && size != 0) || device != 0) return remember(hipErrorInvalidValue);
+  if (!ensure_initialized()) return remember(hipErrorNoDevice);
+
+  // HIP's StdPar allocator obtains ordinary host pages and then marks them
+  // as device-accessible with SetAccessedBy.  The emulator must register
+  // those pages with the HSA facade before an AQL dispatch can resolve the
+  // pointer.  The matching unset advice is issued before the allocator
+  // returns the pages to libc; deregister it first so the facade never keeps
+  // a dangling host allocation.
+  switch (advice) {
+    case hipMemAdviseSetAccessedBy: {
+      if (pointer == nullptr || size == 0) return remember(hipErrorInvalidValue);
+      const hsa_status_t status = hsa_memory_register(const_cast<void *>(pointer), size);
+      return remember(status == HSA_STATUS_ERROR_INVALID_ALLOCATION ? hipSuccess : map_hsa(status));
+    }
+    case hipMemAdviseUnsetAccessedBy: {
+      if (pointer == nullptr) return remember(hipErrorInvalidValue);
+      const hsa_status_t status = hsa_memory_deregister(const_cast<void *>(pointer), 0);
+      return remember(status == HSA_STATUS_ERROR_INVALID_ALLOCATION ? hipSuccess : map_hsa(status));
+    }
+    default: return remember(hipSuccess);
+  }
+}
 extern "C" hipError_t hipMallocHost(void **pointer, size_t size) { return allocate_host(pointer, size); }
 extern "C" hipError_t hipHostMalloc(void **pointer, size_t size, unsigned int) { return allocate_host(pointer, size); }
 extern "C" hipError_t hipFreeHost(void *pointer) { return release_host(pointer); }
@@ -881,8 +975,7 @@ extern "C" hipError_t hipLaunchKernel(const void *function_address, dim3 grid, d
 extern "C" hipError_t hipFuncGetAttributes(struct hipFuncAttributes *attributes, const void *function_address) {
   if (attributes == nullptr || function_address == nullptr) return remember(hipErrorInvalidValue);
   if (!ensure_initialized()) return remember(hipErrorNoDevice);
-  std::lock_guard<std::mutex> guard(state().lock);
-  if (!find_kernel(function_address)) return remember(hipErrorInvalidDeviceFunction);
+  if (!resolve_kernel(function_address)) return remember(hipErrorInvalidDeviceFunction);
   std::memset(attributes, 0, sizeof(*attributes));
   attributes->binaryVersion = 900;
   attributes->maxThreadsPerBlock = 1024;
@@ -1114,11 +1207,6 @@ extern "C" void **__hipRegisterFatBinary(const void *fatbin) {
     std::lock_guard<std::mutex> guard(runtime.lock);
     runtime.modules.emplace(token, module);
   }
-  if (ensure_initialized()) {
-    auto &runtime = state();
-    std::lock_guard<std::mutex> guard(runtime.lock);
-    (void)load_module(*module);
-  }
   if (trace_modules())
     std::fprintf(stderr, "Gemstone HIP fatbinary=%p selected=%d loaded=%d kernels=%zu image_size=%zu error=%s\n", fatbin, selected ? 1 : 0,
                  module->loaded ? 1 : 0, module->kernels.size(), module->image_size, module->error.c_str());
@@ -1130,13 +1218,8 @@ extern "C" void __hipRegisterFunction(void **modules, const void *host_function,
   auto &runtime = state();
   std::lock_guard<std::mutex> guard(runtime.lock);
   const auto module = find_module(modules);
-  if (!module || !module->loaded || host_function == nullptr || device_name == nullptr) return;
-  const auto found = module->kernels.find(device_name);
-  if (found != module->kernels.end()) runtime.kernels[host_function] = found->second;
-  else if (const auto *metadata = find_metadata(*module, device_name)) {
-    const auto candidate = module->kernels.find(metadata->name);
-    if (candidate != module->kernels.end()) runtime.kernels[host_function] = candidate->second;
-  }
+  if (!module || host_function == nullptr || device_name == nullptr) return;
+  runtime.kernels.insert_or_assign(host_function, FunctionBinding{module, device_name, nullptr});
 }
 
 extern "C" void __hipRegisterVar(void **modules, void *var, char *, char *device_name, int, size_t size, int, int) {
@@ -1145,8 +1228,8 @@ extern "C" void __hipRegisterVar(void **modules, void *var, char *, char *device
   std::lock_guard<std::mutex> guard(runtime.lock);
   const auto module = find_module(modules);
   if (!module) return;
-  const auto [iterator, inserted] =
-      runtime.variables.insert_or_assign(var, Variable{var, device_name == nullptr ? std::string{} : std::string(device_name), size});
+  const auto [iterator, inserted] = runtime.variables.insert_or_assign(
+      var, Variable{var, device_name == nullptr ? std::string{} : std::string(device_name), size, module});
   (void)iterator;
   if (inserted) module->variables.push_back(var);
 }
@@ -1161,12 +1244,9 @@ extern "C" void __hipUnregisterFatBinary(void **modules) {
     module = found->second;
     runtime.modules.erase(found);
     if (module) {
-      for (const auto &[name, kernel] : module->kernels) {
-        (void)name;
-        for (auto iterator = runtime.kernels.begin(); iterator != runtime.kernels.end();) {
-          if (iterator->second == kernel) iterator = runtime.kernels.erase(iterator);
-          else ++iterator;
-        }
+      for (auto iterator = runtime.kernels.begin(); iterator != runtime.kernels.end();) {
+        if (iterator->second.module == module) iterator = runtime.kernels.erase(iterator);
+        else ++iterator;
       }
       for (const void *variable : module->variables)
         runtime.variables.erase(variable);

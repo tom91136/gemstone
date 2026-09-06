@@ -29,12 +29,34 @@ final class AMDGPUProgramLoaderSuite extends munit.FunSuite {
     assertEquals(aliases, Map("first" -> "first", "second" -> "second"))
   }
 
+  test("AMDGPU kernel aliases use the ROCm family enum for concrete GFX revisions") {
+    val generic = "wrapped_target_archE"
+    val gfx1030 = "wrapped_target_archE1030E"
+    val aliases = AMDGPUKernelVariants.select(Set(generic, gfx1030), "gfx1036").toOption.get
+
+    assertEquals(aliases(generic), gfx1030)
+    assertEquals(aliases(gfx1030), gfx1030)
+  }
+
+  test("AMDGPU kernel aliases fall back to the generic body when the target alias is a stub") {
+    val generic = "wrapped_target_archE"
+    val gfx1030 = "wrapped_target_archE1030E"
+    val aliases = AMDGPUKernelVariants.select(
+      Set(generic, gfx1030),
+      "gfx1036",
+      name => name == generic
+    ).toOption.get
+
+    assertEquals(aliases(generic), generic)
+    assertEquals(aliases(gfx1030), generic)
+  }
+
   test("AMDGPU kernel aliases reject a variant group without the code-object target") {
     val generic = "wrapped_target_archE"
     val gfx906  = "wrapped_target_archE906E"
 
     assertEquals(
-      AMDGPUKernelVariants.select(Set(generic, gfx906), "gfx900"),
+      AMDGPUKernelVariants.select(Set(generic, gfx906), "gfx900", _ => false),
       Left("AMDGPU kernel variant wrapped_target_archE has no gfx900 implementation")
     )
   }

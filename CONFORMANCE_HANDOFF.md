@@ -21,6 +21,12 @@ Completion means all of these are green:
 
 Upstream-disabled tests remain disabled. Do not add a Gemstone skip/pass allowlist.
 
+For the current handoff, the requested completion scope is the non-legacy
+portable unified matrix plus the available mini-app matrix. The imported
+legacy identities and the exhaustive upstream vendor-suite matrices remain
+explicitly out of scope for this gate; their status is retained as future
+work below.
+
 ## Non-negotiable Conformance invariant
 
 Every external case has one build and two executions:
@@ -57,6 +63,12 @@ gemstone run --api <cuda|hip|hsa|opencl|levelzero|sycl> [provider option] -- com
 The Scala entry point is currently
 `net.kurobako.gemstone.launcher.GemstoneLauncher`; packaging a standalone distribution script remains product work.
 
+Emulated dispatches have a finite safety budget of 100,000,000 instructions by default. A deliberately selected large
+workload can opt into a larger budget by setting `GEMSTONE_EXECUTION_MAX_INSTRUCTIONS` in the environment of the
+Gemstone launcher; `GEMSTONE_EXECUTION_QUANTUM` optionally changes checkpoint granularity. Both values are validated
+before the child is launched and malformed values fail closed. The profile is server-side and is not accepted from the
+RPC client.
+
 | Application frontend | Interception boundary | Selection mechanism |
 | --- | --- | --- |
 | CUDA Runtime or Driver | CUDA Driver `libcuda.so.1` only | preload plus provider-first library path |
@@ -75,7 +87,7 @@ authenticated Driver request; execution providers send an authenticated executio
 that exits zero without the required evidence becomes failure 86. This detects failed injection and vendor-only
 execution. Provider isolation must continue to ensure a process cannot use Gemstone and hardware in the same run.
 
-## Current state on 2026-08-31
+## Current state on 2026-09-06
 
 Branch: `main`. CUDA/PTX, AMDGPU/HIP/HSA, and SPIR-V/OpenCL/Level Zero were integrated as separate commits so further
 vendor work remains bisectable.
@@ -97,7 +109,12 @@ Implemented foundation:
 - pinned official OpenCL CTS quick inventory;
 - oneDPL Level Zero and OpenCL backend lanes.
 - a separate header-only unified C++ workload catalog under `conformance/unified`, with host, CUDA, HIP, and SYCL
-  runners and CTest sharding.
+  runners, async dependency cases, expanded BLAS layouts, ROCm-derived iterator/set probes, a compact/full CTest
+  profile, and parallel sharding.
+- the imported legacy-red regression inventory is now strict and green: CUDA Thrust 56/56 and the exact rocThrust/HSA
+  binary lane 50/50 pass through the authenticated emulation providers. The expanded unified HIP semantic probes are
+  also strict-green at 39/39. Focused HIP algorithms (including i8), BLAS, edge, and async profiles are currently
+  strict-green; current tallies and reproduction commands are tracked in `UNIFIED_EMULATION_WORK.md`.
 
 Important incompleteness:
 
@@ -105,7 +122,17 @@ Important incompleteness:
 - the public HIP, HSA, OpenCL, and Level Zero surfaces are intentionally incomplete and will expose named vendor-suite
   reds until their API and execution behavior is filled out;
 - Level Zero and SPIR-V semantics are far from full oneDPL coverage;
-- AMDGPU semantics are far from full rocThrust coverage;
+- the complete 348-test rocThrust inventory and full oneDPL/OpenCL CTS matrices remain future work; the imported
+  50-case rocThrust legacy-red boundary is currently green under emulation;
+- the expanded unified profile is host-validated (1,812 portable cases; HIP lists 72 HIP-async and 39 additional ROCm
+  semantic probes, for 1,923 HIP identities), and the non-legacy relocated CUDA/HIP/SYCL emulator matrix is now
+  green at its documented workload bounds. The complete counts and the SYCL n1024/n257 policy are tracked in
+  `UNIFIED_EMULATION_WORK.md`; the available mini-app matrix is also green at 39/39, with OpenACC pending an image.
+- interpreter work-group parallelism is bounded by one shared, self-tuned JVM pool per server. General CUDA/SYCL
+  runs default to host logical processors minus two; HIP/HSA defaults to two workers with serial matrix fan-out, and
+  HIP Kokkos/StdPar mini-app models automatically retain serial dispatch until their cross-kernel ordering is
+  validated. HIP fatbinaries now install lazily and share bounded immutable AMDGPU indexes across sessions. The
+  measured non-legacy campaign timing is recorded in `UNIFIED_EMULATION_WORK.md`.
 - the launcher is not yet packaged as a standalone installed command;
 - Windows transport/provider selection still needs native implementation.
 
@@ -131,8 +158,8 @@ Parallel streams should own disjoint trees:
 | Lane | Primary ownership |
 | --- | --- |
 | PTX/CUDA | `isa/ptx`, CUDA server adapter, `runtime/cuda`, `conformance/cuda` |
-| AMDGPU/HIP/HSA | `isa/amdgpu`, AMDGPU server adapter, `runtime/hsa`, future `runtime/hip`, rocThrust samples/suite |
-| SPIR-V/OpenCL/Level Zero/SYCL | `isa/spirv`, SPIR-V server adapter, `runtime/levelzero`, future `runtime/opencl`, OpenCL CTS and oneDPL |
+| AMDGPU/HIP/HSA | `isa/amdgpu`, AMDGPU server adapter, `runtime/hsa`, `runtime/hip`, rocThrust samples/suite |
+| SPIR-V/OpenCL/Level Zero/SYCL | `isa/spirv`, SPIR-V server adapter, `runtime/levelzero`, `runtime/opencl`, OpenCL CTS and oneDPL |
 | Integration | `core`, `api`, `native/execution`, launcher, Conformance support, `build.sbt` |
 
 Land shared protocol changes through the integration lane before multiple ISA lanes depend on them. Do not force the
@@ -157,10 +184,28 @@ sbt testOpenCLConformance
 sbt testSYCLConformance
 sbt testConformance
 
-cmake -S conformance/unified -B target/unified-conformance
-cmake --build target/unified-conformance --parallel
-ctest --test-dir target/unified-conformance --output-on-failure --parallel
+GEMSTONE_UNIFIED_CONTAINER_RUN_CTEST=1 \
+  conformance/unified/tools/container-build.sh host target/unified-artifacts/host
+conformance/unified/tools/container-build.sh cuda
+conformance/unified/tools/container-build.sh hip
+conformance/unified/tools/container-build.sh sycl
+conformance/unified/tools/run-relocated.sh target/unified-artifacts/hip hip --list
+
+# Release-sized host matrix (the default CTest profile remains compact).
+cmake -S conformance/unified -B target/unified-full -DUNIFIED_SUITE_CTEST_PROFILE=full
+cmake --build target/unified-full --parallel
+ctest --test-dir target/unified-full --output-on-failure --parallel
 ```
+
+HIP relocation must include the complete rocBLAS Tensile closure under
+`lib/rocblas/library`. `run-relocated.sh` exports `ROCBLAS_TENSILE_LIBPATH`
+to that bundled directory automatically; an artifact with only a partial
+Tensile set can abort inside rocBLAS before Gemstone receives a dispatch.
+
+The unified runner is the one exception to the host-build convention: its compiler and SDK are selected by the
+digest-pinned container wrapper in `conformance/unified/tools/container-build.sh`. The installed artifact is copied to
+the host with relative RPATHs and bundled vendor user-space libraries, so Gemstone runs do not require the build image;
+only the host ELF loader/libc and the physical vendor kernel driver (for an oracle) remain external requirements.
 
 Focused examples:
 
@@ -173,6 +218,13 @@ GEMSTONE_ONEDPL_FILTER='^gfx900/levelzero/samples/' GEMSTONE_ONEDPL_JOBS=1 sbt t
 
 All external filters are Scala regular expressions. `GEMSTONE_<SUITE>_SHARD=index/count` provides deterministic
 zero-based sharding. Worker counts are bounded and independent cases execute concurrently.
+
+For a reference-only legacy baseline, set `GEMSTONE_ORACLE_ONLY=1`. The paired
+CUDA, Thrust, rocThrust, rocBLAS, OpenCL CTS, and oneDPL suites compile and run
+the vendor artifacts without constructing Gemstone providers. The flag requires
+the corresponding oracle and must not be combined with `GEMSTONE_NO_ORACLE` or
+suite-specific oracle suppression. The native `hsa`, `hip`, `opencl`, and
+`levelzero` smoke projects are provider tests and are not oracle-paired.
 
 Provider variables:
 

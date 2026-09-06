@@ -8,6 +8,7 @@ int main(int argc, char **argv) {
       unified_suite::program::blas_cases,
       unified_suite::program::edge_case_cases,
       unified_suite::program::stress_cases,
+      unified_suite::program::async_cases,
   };
   return unified_suite::main(argc, argv, provider);
 }

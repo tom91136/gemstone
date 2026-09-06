@@ -7,6 +7,8 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
+#include <iostream>
 #include <iterator>
 #include <numeric>
 #include <sstream>
@@ -27,6 +29,8 @@ namespace unified_suite::algorithms {
   X(copy, "copy")                                                                                            \
   X(copy_if, "copy-if")                                                                                      \
   X(copy_n, "copy-n")                                                                                        \
+  X(uninitialized_copy, "uninitialized-copy")                                                                \
+  X(uninitialized_fill, "uninitialized-fill")                                                                \
   X(fill, "fill")                                                                                            \
   X(generate, "generate")                                                                                    \
   X(for_each, "for-each")                                                                                    \
@@ -38,6 +42,7 @@ namespace unified_suite::algorithms {
   X(remove_copy_if, "remove-copy-if")                                                                        \
   X(reverse, "reverse")                                                                                      \
   X(reverse_copy, "reverse-copy")                                                                            \
+  X(shuffle, "shuffle")                                                                                      \
   X(swap_ranges, "swap-ranges")                                                                              \
   X(reduce, "reduce")                                                                                        \
   X(transform_reduce, "transform-reduce")                                                                    \
@@ -228,7 +233,18 @@ template <class T> inline void require_equal(T actual, T expected, const std::st
 template <class T>
 inline void require_equal(const std::vector<T> &actual, const std::vector<T> &expected,
                           const std::string &where) {
-  require(actual.size() == expected.size(), where + ": result size mismatch");
+  if (std::getenv("GEMSTONE_UNIFIED_TRACE_MISMATCH") != nullptr) {
+    std::cerr << where << " actual=";
+    for (const auto &value : actual)
+      std::cerr << ' ' << +value;
+    std::cerr << " expected=";
+    for (const auto &value : expected)
+      std::cerr << ' ' << +value;
+    std::cerr << '\n';
+  }
+  require(actual.size() == expected.size(),
+          where + ": result size mismatch (expected " + std::to_string(expected.size()) + ", got " +
+              std::to_string(actual.size()) + ")");
   for (std::size_t index = 0; index < expected.size(); ++index)
     require_equal(actual[index], expected[index], where + "[" + std::to_string(index) + "]");
 }
@@ -281,8 +297,21 @@ template <class T> inline std::vector<T> duplicate_keys(std::size_t size) {
 
 template <class T> inline std::vector<T> sorted_values(std::size_t size, std::size_t stride) {
   std::vector<T> result(size);
-  for (std::size_t index = 0; index < size; ++index)
-    result[index] = static_cast<T>((index * stride) / 2);
+  if constexpr (std::is_same_v<T, std::int8_t>) {
+    // Keep sorted-algorithm inputs within the signed-byte domain. The old
+    // 0,1,2,... generator wrapped at 128 for n257 and violated the API
+    // precondition before the backend was called.
+    constexpr std::int64_t minimum = -48;
+    constexpr std::size_t span = 96;
+    const auto divisor = std::max<std::size_t>(1, (size * stride + span - 1) / span);
+    for (std::size_t index = 0; index < size; ++index) {
+      const auto rank = std::min<std::size_t>(span, (index * stride) / divisor);
+      result[index] = static_cast<T>(minimum + static_cast<std::int64_t>(rank));
+    }
+  } else {
+    for (std::size_t index = 0; index < size; ++index)
+      result[index] = static_cast<T>((index * stride) / 2);
+  }
   return result;
 }
 
@@ -364,6 +393,13 @@ template <class T, class Backend> void execute(Backend &backend, Operation opera
                   "copy-n");
     return;
   }
+  case Operation::uninitialized_copy:
+    require_equal(backend.uninitialized_copy(input), input, "uninitialized-copy");
+    return;
+  case Operation::uninitialized_fill:
+    require_equal(backend.template uninitialized_fill<T>(size, T{7}), std::vector<T>(size, T{7}),
+                  "uninitialized-fill");
+    return;
   case Operation::fill:
     require_equal(backend.template fill<T>(size, T{7}), std::vector<T>(size, T{7}), "fill");
     return;
@@ -743,6 +779,14 @@ template <class T, class Backend> void execute(Backend &backend, Operation opera
     auto expected = input;
     std::reverse(expected.begin(), expected.end());
     require_equal(backend.reverse_copy(input), expected, "reverse-copy");
+    return;
+  }
+  case Operation::shuffle: {
+    auto expected = input;
+    auto actual = backend.shuffle(input);
+    std::sort(expected.begin(), expected.end());
+    std::sort(actual.begin(), actual.end());
+    require_equal(actual, expected, "shuffle.permutation");
     return;
   }
   case Operation::min_element: {

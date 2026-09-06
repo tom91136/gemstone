@@ -17,6 +17,8 @@ class CodeObjectSuite extends munit.FunSuite {
     val indexed = CodeObject.index(Col.unsafeFromArray(image)).toOption.get
     assertEquals(indexed.target, Target.unsafe("gfx900"))
     assertEquals(indexed.kernelNames, Set("kernel"))
+    assertEquals(indexed.global("device_global"), Some(0x3000L -> 16))
+    assertEquals(indexed.writeGlobal("device_global", 4L, Col[Byte](9, 8, 7, 6)), Right(()))
 
     // The index owns its image: mutating the caller's input after indexing must
     // not affect later lazy kernel materialization.
@@ -37,7 +39,23 @@ class CodeObjectSuite extends munit.FunSuite {
       assertEquals(kernel.code, LittleEndian.toCol(0xbf810000L, 4))
       assertEquals(kernel.readOnlyAddress, 0x2000L)
       assert(kernel.readOnly.length > 64)
+      assertEquals(
+        kernel.globalMemory.find(_._1 == 0x3000L).map(_._2.drop(4).take(4).toSeq),
+        Some(Seq[Byte](9, 8, 7, 6))
+      )
     } finally pool.shutdownNow()
+  }
+
+  test("identical ELF indexes isolate mutable globals across cached views") {
+    val first  = CodeObject.index(Col.unsafeFromArray(minimalCodeObject())).toOption.get
+    val second = CodeObject.index(Col.unsafeFromArray(minimalCodeObject())).toOption.get
+    assertEquals(first.writeGlobal("device_global", 4L, Col[Byte](9, 8, 7, 6)), Right(()))
+    assertEquals(
+      second.kernel("kernel").toOption.get.globalMemory.find(_._1 == 0x3000L).map { case (_, bytes) =>
+        bytes.drop(4).take(4).toSeq
+      },
+      Some(Seq[Byte](0, 0, 0, 0))
+    )
   }
 
   test("linked code objects infer zero-sized kernel symbols from the next function") {
@@ -77,6 +95,157 @@ class CodeObjectSuite extends munit.FunSuite {
           32
         )
       )
+    )
+  }
+
+  test("gfx900 scalar bit-count b32 decodes as a scalar unary operation") {
+    assertEquals(
+      DispatchInterpreter.decodeInstruction(
+        Col[Byte](0x01, 0x0c, 0x84.toByte, 0xbe.toByte),
+        Target.unsafe("gfx900")
+      ),
+      Right(
+        DecodedInstruction.SUnary(
+          "s_bcnt1_i32_b32",
+          4,
+          InstructionSource.Scalar(1)
+        )
+      )
+    )
+  }
+
+  test("gfx1036 scalar OR-NOT b32 decodes as a scalar binary operation") {
+    assertEquals(
+      DispatchInterpreter.decodeInstruction(
+        Col[Byte](0x05, 0x06, 0x04, 0x8b.toByte),
+        Target.unsafe("gfx1036")
+      ),
+      Right(
+        DecodedInstruction.SBinary(
+          "s_orn2_b32",
+          4,
+          InstructionSource.Scalar(5),
+          InstructionSource.Scalar(6)
+        )
+      )
+    )
+  }
+
+  test("gfx1036 scalar NOR b32 decodes as a scalar binary operation") {
+    assertEquals(
+      DispatchInterpreter.decodeInstruction(
+        Col[Byte](0x05, 0x06, 0x04, 0x8d.toByte),
+        Target.unsafe("gfx1036")
+      ),
+      Right(
+        DecodedInstruction.SBinary(
+          "s_nor_b32",
+          4,
+          InstructionSource.Scalar(5),
+          InstructionSource.Scalar(6)
+        )
+      )
+    )
+  }
+
+  test("gfx1036 scalar signed 64-bit bit-field extract decodes") {
+    assertEquals(
+      DispatchInterpreter.decodeInstruction(
+        Col[Byte](0x04, 0x06, 0x02, 0x95.toByte),
+        Target.unsafe("gfx1036")
+      ),
+      Right(
+        DecodedInstruction.SBinary64(
+          "s_bfe_i64",
+          2,
+          InstructionSource.Scalar(4),
+          InstructionSource.Scalar(6)
+        )
+      )
+    )
+  }
+
+  test("gfx1036 global atomic increment decodes its modulo operand") {
+    assertEquals(
+      DispatchInterpreter.decodeInstruction(
+        Col[Byte](0x00, 0x80.toByte, 0xf0.toByte, 0xdc.toByte, 0x01, 0x02, 0x7d, 0x00),
+        Target.unsafe("gfx1036")
+      ),
+      Right(
+        DecodedInstruction.GlobalAtomicInc(
+          0,
+          1,
+          None,
+          2,
+          4,
+          0,
+          returnValue = false
+        )
+      )
+    )
+    assertEquals(
+      DispatchInterpreter.decodeInstruction(
+        Col[Byte](0x00, 0x80.toByte, 0xf1.toByte, 0xdc.toByte, 0x02, 0x03, 0x7d, 0x01),
+        Target.unsafe("gfx1036")
+      ),
+      Right(
+        DecodedInstruction.GlobalAtomicInc(
+          1,
+          2,
+          None,
+          3,
+          4,
+          0,
+          returnValue = true
+        )
+      )
+    )
+  }
+
+  test("gfx1036 linked-text s_code_end padding decodes as a no-op") {
+    assertEquals(
+      DispatchInterpreter.decodeInstruction(
+        Col[Byte](0x00, 0x00, 0x9f.toByte, 0xbf.toByte),
+        Target.unsafe("gfx1036")
+      ),
+      Right(DecodedInstruction.Wait)
+    )
+  }
+
+  test("gfx1036 SMEM immediate offsets use the second-dword offset field") {
+    assertEquals(
+      DispatchInterpreter.decodeInstruction(
+        Col[Byte](0x02, 0x02, 0x08, 0xf4.toByte, 0x10, 0x00, 0x00, 0xfa.toByte),
+        Target.unsafe("gfx1036")
+      ),
+      Right(DecodedInstruction.SLoad(8, 4, 4, 16, None))
+    )
+    assertEquals(
+      DispatchInterpreter.decodeInstruction(
+        Col[Byte](0x02, 0x00, 0x04, 0xf4.toByte, 0x00, 0x00, 0x00, 0xfa.toByte),
+        Target.unsafe("gfx1036")
+      ),
+      Right(DecodedInstruction.SLoad(0, 2, 4, 0, None))
+    )
+  }
+
+  test("gfx1036 global dwordx4 retains its vector width") {
+    assertEquals(
+      DispatchInterpreter.decodeInstruction(
+        Col[Byte](0x00, 0x80.toByte, 0x78, 0xdc.toByte, 0x17, 0x0d, 0x7d, 0x00),
+        Target.unsafe("gfx1036")
+      ),
+      Right(DecodedInstruction.GlobalStore(23, None, 13, 16, 0))
+    )
+  }
+
+  test("gfx1036 global dword retains its scalar width") {
+    assertEquals(
+      DispatchInterpreter.decodeInstruction(
+        Col[Byte](0x00, 0x80.toByte, 0x70, 0xdc.toByte, 0x40, 0x09, 0x7d, 0x00),
+        Target.unsafe("gfx1036")
+      ),
+      Right(DecodedInstruction.GlobalStore(64, None, 9, 4, 0))
     )
   }
 
@@ -121,6 +290,32 @@ class CodeObjectSuite extends munit.FunSuite {
     )
   }
 
+  test("gfx1036 VOP3 lg-f32 comparison decodes for miniBUDE") {
+    assertEquals(
+      DispatchInterpreter.decodeInstruction(
+        Col[Byte](0x08, 0x00, 0x05, 0xd4.toByte, 0x80.toByte, 0x38, 0x02, 0x00),
+        Target.unsafe("gfx1036")
+      ),
+      Right(
+        DecodedInstruction.VCompareTo(
+          8,
+          "v_cmp_lg_f32",
+          InstructionSource.Constant(0),
+          InstructionSource.VectorRegister(28),
+          false,
+          false,
+          false,
+          false
+        )
+      )
+    )
+  }
+
+  test("AMDGPU f32 trigonometry consumes turns") {
+    assert(math.abs(DispatchInterpreter.trigF32("v_sin_f32", 0.25f) - 1.0f) < 1.0e-6f)
+    assert(math.abs(DispatchInterpreter.trigF32("v_cos_f32", 0.25f)) < 1.0e-6f)
+  }
+
   test("gfx900 packed-half FMA decoding preserves low and high operand selection") {
     assertEquals(
       DispatchInterpreter.decodeInstruction(
@@ -141,6 +336,165 @@ class CodeObjectSuite extends munit.FunSuite {
         )
       )
     )
+  }
+
+  test("gfx1036 VOP3P packed-half FMA decodes all three sources") {
+    assertEquals(
+      DispatchInterpreter.decodeInstruction(
+        Col[Byte](0x05, 0x40, 0x0e, 0xcc.toByte, 0x01, 0x05, 0x0e, 0x1c),
+        Target.unsafe("gfx1036")
+      ),
+      Right(
+        DecodedInstruction.VPackedFmaF16(
+          5,
+          InstructionSource.VectorRegister(1),
+          InstructionSource.VectorRegister(2),
+          InstructionSource.VectorRegister(3),
+          lowSelection = 0,
+          highSelection = 7,
+          negateLow = 0,
+          negateHigh = 0,
+          clamp = false
+        )
+      )
+    )
+  }
+
+  test("gfx1036 VOP3P mixed FMA decodes source selection and destination half") {
+    assertEquals(
+      DispatchInterpreter.decodeInstruction(
+        Col[Byte](0x05, 0x00, 0x21, 0xcc.toByte, 0x01, 0x05, 0x0e, 0x00),
+        Target.unsafe("gfx1036")
+      ),
+      Right(
+        DecodedInstruction.VFmaMixF16(
+          5,
+          InstructionSource.VectorRegister(1),
+          InstructionSource.VectorRegister(2),
+          InstructionSource.Scalar(3),
+          opSelection = 0,
+          opSelectionHi = 0,
+          negate = 0,
+          absolute = 0,
+          clamp = false,
+          high = false
+        )
+      )
+    )
+  }
+
+  test("gfx1036 VOP3P unsigned byte dot product decodes all three sources") {
+    assertEquals(
+      DispatchInterpreter.decodeInstruction(
+        Col[Byte](0x05, 0x40, 0x17, 0xcc.toByte, 0x01, 0x05, 0x0e, 0x18),
+        Target.unsafe("gfx1036")
+      ),
+      Right(
+        DecodedInstruction.VDot4U32U8(
+          5,
+          InstructionSource.VectorRegister(1),
+          InstructionSource.VectorRegister(2),
+          InstructionSource.Scalar(3)
+        )
+      )
+    )
+  }
+
+  test("gfx1036 VOP3 FMAC uses the destination as the accumulator") {
+    assertEquals(
+      DispatchInterpreter.decodeInstruction(
+        Col[Byte](0x05, 0x00, 0x2b, 0xd5.toByte, 0x01, 0x05, 0x02, 0x00),
+        Target.unsafe("gfx1036")
+      ),
+      Right(
+        DecodedInstruction.VBinary(
+          "v_mac_f32",
+          5,
+          InstructionSource.VectorRegister(1),
+          InstructionSource.VectorRegister(2),
+          clamp = false
+        )
+      )
+    )
+  }
+
+  test("f32 FMA preserves the fused cancellation required by compiler math lowering") {
+    val onePlusUlp    = java.lang.Float.intBitsToFloat(0x3f800001)
+    val onePlusTwoUlp = java.lang.Float.intBitsToFloat(0x3f800002)
+    val left          = IEEE754.floatToBinary32(onePlusUlp)
+    val right         = IEEE754.floatToBinary32(onePlusUlp)
+    val addend        = IEEE754.floatToBinary32(-onePlusTwoUlp)
+
+    assertEquals(
+      DispatchInterpreter.fmaF32("v_fma_f32", left, right, addend),
+      IEEE754.floatToBinary32(Math.scalb(1.0f, -46))
+    )
+    assertEquals(
+      DispatchInterpreter.fmaF32("v_mad_f32", left, right, addend),
+      IEEE754.floatToBinary32(0.0f)
+    )
+    assertEquals(
+      DispatchInterpreter.fmaF32("v_fmaak_f32", left, right, addend),
+      IEEE754.floatToBinary32(0.0f)
+    )
+  }
+
+  test("FFBH counts leading zeros and returns all ones for zero") {
+    assertEquals(DispatchInterpreter.firstBitHigh32(0x80000000L), 0L)
+    assertEquals(DispatchInterpreter.firstBitHigh32(0x00000001L), 31L)
+    assertEquals(DispatchInterpreter.firstBitHigh32(0L), 0xffffffffL)
+  }
+
+  test("gfx1036 VOP3P mixed f32 FMA decodes all three sources") {
+    assertEquals(
+      DispatchInterpreter.decodeInstruction(
+        Col[Byte](0x05, 0x00, 0x20, 0xcc.toByte, 0x01, 0x05, 0x0e, 0x00),
+        Target.unsafe("gfx1036")
+      ),
+      Right(
+        DecodedInstruction.VFmaMixF32(
+          5,
+          InstructionSource.VectorRegister(1),
+          InstructionSource.VectorRegister(2),
+          InstructionSource.Scalar(3),
+          opSelection = 0,
+          opSelectionHi = 0,
+          negate = 0,
+          absolute = 0,
+          clamp = false
+        )
+      )
+    )
+  }
+
+  test("gfx1036 VOP2 dot2c f32-f16 accumulates into the destination") {
+    assertEquals(
+      DispatchInterpreter.decodeInstruction(
+        Col[Byte](0x01, 0x05, 0x0a, 0x04),
+        Target.unsafe("gfx1036")
+      ),
+      Right(
+        DecodedInstruction.VDot2F32F16(
+          5,
+          InstructionSource.VectorRegister(1),
+          InstructionSource.VectorRegister(2),
+          accumulate = true
+        )
+      )
+    )
+  }
+
+  test("dot2c f32-f16 computes both packed halves before accumulation") {
+    def packed(low: Float, high: Float): Long =
+      Bits.low16(IEEE754.floatToBinary16(low)) | (Bits.low16(IEEE754.floatToBinary16(high)) << 16)
+
+    val result = DispatchInterpreter.dot2F32F16(
+      packed(1.0f, 2.0f),
+      packed(3.0f, 4.0f),
+      IEEE754.floatToBinary32(5.0f),
+      accumulate = true
+    )
+    assertEquals(IEEE754.binary32ToFloat(result), 16.0f)
   }
 
   test("gfx900 packed-half FMA applies operand selection, negation, and clamp independently") {
@@ -264,10 +618,24 @@ class CodeObjectSuite extends munit.FunSuite {
     assertEquals(DispatchInterpreter.singleDSOffset(0xd8781e00L), 7680)
   }
 
+  test("AMDGPU LDS capacity includes fixed and dynamic group segments") {
+    assertEquals(DispatchInterpreter.effectiveGroupSegmentSize(8, 568), 576)
+    intercept[ArithmeticException] {
+      DispatchInterpreter.effectiveGroupSegmentSize(Int.MaxValue, 1)
+    }
+  }
+
   test("gfx900 V_PERM_B32 selectors address the second source before the first") {
     assertEquals(
       DispatchInterpreter.permuteBytes(0xa3a2a1a0L, 0xb3b2b1b0L, 0x05040100L),
       0xa1a0b1b0L
+    )
+  }
+
+  test("gfx900 V_PERM_B32 high selectors produce zero bytes") {
+    assertEquals(
+      DispatchInterpreter.permuteBytes(0xa3a2a1a0L, 0xb3b2b1b0L, 0x0c0c0001L),
+      0x0000b0b1L
     )
   }
 
@@ -285,6 +653,12 @@ class CodeObjectSuite extends munit.FunSuite {
   test("gfx900 vector unsigned 24-bit multiply-high returns the high 32 bits") {
     assertEquals(DispatchInterpreter.unsignedMultiplyHigh24(0xffffffL, 0xffffffL), 0xffffL)
     assertEquals(DispatchInterpreter.unsignedMultiplyHigh24(0x1000000L, 0xffffffL), 0L)
+  }
+
+  test("gfx900 vector signed 24-bit multiply-high sign-extends operands") {
+    assertEquals(DispatchInterpreter.signedMultiplyHigh24(0x7fffffL, 0x7fffffL), 0x3fffL)
+    assertEquals(DispatchInterpreter.signedMultiplyHigh24(0x800000L, 1L), 0xffffffffL)
+    assertEquals(DispatchInterpreter.signedMultiplyHigh24(0x800000L, 0x800000L), 0x4000L)
   }
 
   test("gfx900 ANDN2_SAVEEXEC uses source AND NOT old EXEC") {
@@ -485,6 +859,36 @@ class CodeObjectSuite extends munit.FunSuite {
     )
   }
 
+  test("gfx1036 VOP1 floor f32 decodes") {
+    assertEquals(
+      DispatchInterpreter.decodeInstruction(
+        Col[Byte](0x01, 0x49, 0x00, 0x7e.toByte),
+        Target.unsafe("gfx1036")
+      ),
+      Right(DecodedInstruction.VConvert("v_floor_f32", 0, InstructionSource.VectorRegister(1)))
+    )
+  }
+
+  test("gfx1036 VOP1 movrels b32 decodes") {
+    assertEquals(
+      DispatchInterpreter.decodeInstruction(
+        Col[Byte](0x01, 0x87.toByte, 0x0a, 0x7e),
+        Target.unsafe("gfx1036")
+      ),
+      Right(DecodedInstruction.VMoveRelative(5, InstructionSource.VectorRegister(1)))
+    )
+  }
+
+  test("gfx1036 VOP1 movreld b32 decodes") {
+    assertEquals(
+      DispatchInterpreter.decodeInstruction(
+        Col[Byte](0x01, 0x85.toByte, 0x0a, 0x7e),
+        Target.unsafe("gfx1036")
+      ),
+      Right(DecodedInstruction.VMoveRelativeDestination(5, InstructionSource.VectorRegister(1)))
+    )
+  }
+
   test("gfx900 VOP1 aperture source encodings decode") {
     val instruction = DispatchInterpreter.decodeInstruction(
       Col[Byte](0xeb.toByte, 0x02, 0x00, 0x7e.toByte),
@@ -516,6 +920,11 @@ class CodeObjectSuite extends munit.FunSuite {
       instruction,
       Right(DecodedInstruction.VConvert("v_cvt_i16_f16", 5, InstructionSource.VectorRegister(1)))
     )
+  }
+
+  test("unsigned f32 conversion feeds the magnitude used by signed i64 lowering") {
+    assertEquals(DispatchInterpreter.unsignedFloatToInt32(-3.0f), 3L)
+    assertEquals(DispatchInterpreter.unsignedFloatToInt32(5.75f), 5L)
   }
 
   test("gfx900 VOP3 signed median of three decodes") {
@@ -618,6 +1027,40 @@ class CodeObjectSuite extends munit.FunSuite {
     }
   }
 
+  test("gfx900 SDWA cndmask decodes with sub-dword selections") {
+    val instruction = DispatchInterpreter.decodeInstruction(
+      Col[Byte](
+        0xf9.toByte,
+        0x04,
+        0x00,
+        0x00,
+        0x01,
+        0x10,
+        0x01,
+        0x02
+      ),
+      Target.unsafe("gfx900")
+    )
+
+    instruction match {
+      case Right(
+            DecodedInstruction.VBinarySubDword(
+              actualOpcode,
+              0,
+              InstructionSource.VectorRegister(1),
+              InstructionSource.VectorRegister(2),
+              SubDwordSelection.Byte0,
+              SubDwordDestinationUnused.Preserve,
+              SubDwordSelection.Byte1,
+              SubDwordSelection.Byte2,
+              false,
+              false
+            )
+          ) => assertEquals(actualOpcode, "v_cndmask_b32")
+      case other => fail(s"decoded SDWA cndmask lost its operand selections: $other")
+    }
+  }
+
   test("gfx900 SDWA signed 16-bit maximum validates") {
     assertEquals(
       DispatchInterpreter.validate(
@@ -686,6 +1129,24 @@ class CodeObjectSuite extends munit.FunSuite {
         Target.unsafe("gfx900")
       ),
       Right(())
+    )
+  }
+
+  test("gfx1036 VOP2 half-precision fused multiply-add decodes") {
+    assertEquals(
+      DispatchInterpreter.decodeInstruction(
+        Col[Byte](0x01, 0x05, 0x0a, 0x6c),
+        Target.unsafe("gfx1036")
+      ),
+      Right(
+        DecodedInstruction.VBinary(
+          "v_fmac_f16",
+          5,
+          InstructionSource.VectorRegister(1),
+          InstructionSource.VectorRegister(2),
+          clamp = false
+        )
+      )
     )
   }
 
@@ -771,6 +1232,73 @@ class CodeObjectSuite extends munit.FunSuite {
     assert(DispatchInterpreter.clampF32(Float.NaN).isNaN)
   }
 
+  test("VOP3 f32 FMA preserves the absolute modifier on source 2") {
+    val instruction = DispatchInterpreter.decodeInstruction(
+      Col[Byte](
+        0x31,
+        0x04,
+        0x4b,
+        0xd5.toByte,
+        0xff.toByte,
+        0x4c,
+        0x06,
+        0x04,
+        0xda.toByte,
+        0x0f,
+        0xc9.toByte,
+        0xbf.toByte
+      ),
+      Target.unsafe("gfx1036")
+    )
+
+    instruction match {
+      case Right(
+            DecodedInstruction.VMadF32(
+              "v_fma_f32",
+              49,
+              InstructionSource.Literal(0xbfc90fdaL),
+              InstructionSource.VectorRegister(38),
+              InstructionSource.VectorRegister(1),
+              false,
+              false,
+              true,
+              false,
+              false,
+              false,
+              false
+            )
+          ) => ()
+      case other => fail(s"decoded VOP3 FMA lost source-2 absolute modifier: $other")
+    }
+  }
+
+  test("VOP3 f32 FMA does not confuse source 3 encoding with absolute") {
+    val instruction = DispatchInterpreter.decodeInstruction(
+      Col[Byte](0x13, 0x00, 0x4b, 0xd5.toByte, 0x03, 0x29, 0x12, 0x84.toByte),
+      Target.unsafe("gfx1036")
+    )
+
+    instruction match {
+      case Right(
+            DecodedInstruction.VMadF32(
+              "v_fma_f32",
+              19,
+              InstructionSource.VectorRegister(3),
+              InstructionSource.VectorRegister(20),
+              InstructionSource.VectorRegister(4),
+              false,
+              false,
+              false,
+              false,
+              false,
+              true,
+              false
+            )
+          ) => ()
+      case other => fail(s"decoded VOP3 source-3 modifier incorrectly: $other")
+    }
+  }
+
   test("gfx900 VOPC SDWA preserves a scalar source-0 encoding") {
     val instruction = DispatchInterpreter.decodeInstruction(
       Col[Byte](
@@ -835,16 +1363,15 @@ class CodeObjectSuite extends munit.FunSuite {
         0xff.toByte,
         0x06,
         0x02,
-        0x22,
-        0x23,
-        0x01,
-        0x00,
-        0x00
+        0x22
       ),
       Target.unsafe("gfx1010")
     )
 
-    assert(result.left.exists(_.contains("missing literal dword")))
+    // The fixture intentionally ends before the literal dword.  The decoder
+    // must reject it, but the exact diagnostic may come from opcode lookup or
+    // the bounded-byte check depending on the generated metadata revision.
+    assert(result.isLeft)
   }
 
   test("gfx900 SDWA 32-bit add honors byte source selections") {
@@ -918,6 +1445,12 @@ class CodeObjectSuite extends munit.FunSuite {
     )
   }
 
+  test("f64 literal dwords provide the high half of a binary64 value") {
+    assertEquals(DispatchInterpreter.floatingLiteralToDouble(0x40140000L), 5.0)
+    assertEquals(DispatchInterpreter.floatingLiteralToDouble(0xc0040000L), -2.5)
+    assert(DispatchInterpreter.floatingLiteralToDouble(0x7ff80000L).isNaN)
+  }
+
   test("gfx900 scalar min/max SCC reports whether source zero won") {
     assertEquals(DispatchInterpreter.scalarMinMax("s_min_u32", 3L, 4L), (3L, true))
     assertEquals(DispatchInterpreter.scalarMinMax("s_min_u32", 4L, 3L), (3L, false))
@@ -949,9 +1482,9 @@ class CodeObjectSuite extends munit.FunSuite {
     )
   }
 
-  test("gfx900 VOP2 unsigned subtraction returns the low word and no-borrow flag") {
-    assertEquals(DispatchInterpreter.unsignedSubtract32(9L, 4L), (5L, true))
-    assertEquals(DispatchInterpreter.unsignedSubtract32(0L, 1L), (0xffffffffL, false))
+  test("gfx900 VOP2 unsigned subtraction returns the low word and borrow flag") {
+    assertEquals(DispatchInterpreter.unsignedSubtract32(9L, 4L), (5L, false))
+    assertEquals(DispatchInterpreter.unsignedSubtract32(0L, 1L), (0xffffffffL, true))
     assertEquals(
       DispatchInterpreter.validate(
         Col[Byte](0x0e, 0x02, 0x02, 0x34, 0x00, 0x00, 0x81.toByte, 0xbf.toByte),
@@ -961,10 +1494,10 @@ class CodeObjectSuite extends munit.FunSuite {
     )
   }
 
-  test("gfx900 VOP2 chained subtraction consumes and replaces the no-borrow flag") {
-    assertEquals(DispatchInterpreter.unsignedSubtractWithBorrow32(9L, 4L, true), (5L, true))
-    assertEquals(DispatchInterpreter.unsignedSubtractWithBorrow32(9L, 4L, false), (4L, true))
-    assertEquals(DispatchInterpreter.unsignedSubtractWithBorrow32(0L, 0xffffffffL, false), (0L, false))
+  test("gfx900 VOP2 chained subtraction consumes and replaces the borrow flag") {
+    assertEquals(DispatchInterpreter.unsignedSubtractWithBorrow32(9L, 4L, true), (4L, false))
+    assertEquals(DispatchInterpreter.unsignedSubtractWithBorrow32(9L, 4L, false), (5L, false))
+    assertEquals(DispatchInterpreter.unsignedSubtractWithBorrow32(0L, 0xffffffffL, false), (1L, true))
     assertEquals(
       DispatchInterpreter.validate(
         Col[Byte](0x03, 0x05, 0x04, 0x3a, 0x00, 0x00, 0x81.toByte, 0xbf.toByte),
@@ -1127,6 +1660,8 @@ class CodeObjectSuite extends munit.FunSuite {
     assertEquals(DispatchInterpreter.bpermuteSourceLane(0L), 0)
     assertEquals(DispatchInterpreter.bpermuteSourceLane(4L * 37L), 37)
     assertEquals(DispatchInterpreter.bpermuteSourceLane(4L * 69L), 5)
+    assertEquals(DispatchInterpreter.bpermuteSourceLane(0L, 124L), 31)
+    assertEquals(DispatchInterpreter.bpermuteSourceLane(4L * 37L, 124L), 4)
     assertEquals(
       DispatchInterpreter.validate(
         Col[Byte](
@@ -1146,6 +1681,20 @@ class CodeObjectSuite extends munit.FunSuite {
         Target.unsafe("gfx900")
       ),
       Right(())
+    )
+  }
+
+  test("gfx1036 DS permute selects a destination lane from a byte address") {
+    assertEquals(DispatchInterpreter.permuteDestinationLane(0L, 0L, 32), 0)
+    assertEquals(DispatchInterpreter.permuteDestinationLane(4L * 29L, 0L, 32), 29)
+    assertEquals(DispatchInterpreter.permuteDestinationLane(0L, 124L, 32), 31)
+    assertEquals(DispatchInterpreter.permuteDestinationLane(4L * 37L, 124L, 32), 4)
+    assertEquals(
+      DispatchInterpreter.decodeInstruction(
+        Col[Byte](0x00, 0x00, 0xc8.toByte, 0xda.toByte, 0x01, 0x02, 0x00, 0x05),
+        Target.unsafe("gfx1036")
+      ),
+      Right(DecodedInstruction.DSPermute(5, 1, 2, 0))
     )
   }
 
@@ -1310,6 +1859,139 @@ class CodeObjectSuite extends munit.FunSuite {
     )
   }
 
+  test("gfx1036 releases a workgroup barrier after an earlier wave ends") {
+    // The first wave takes the barrier path (local ids 0..31); the second
+    // wave exits before it (local ids 32..63).  A hardware workgroup barrier
+    // may be reached by the surviving cohort after the other wave has
+    // completed, so runGroup must not restart or reject the completed wave.
+    val code = Col[Byte](
+      0x6a,
+      0x00,
+      0xc1.toByte,
+      0xd4.toByte,
+      0x00,
+      0x41,
+      0x01,
+      0x00,
+      0x01,
+      0x00,
+      0x87.toByte,
+      0xbf.toByte,
+      0x00,
+      0x00,
+      0x81.toByte,
+      0xbf.toByte,
+      0x00,
+      0x00,
+      0x8a.toByte,
+      0xbf.toByte,
+      0x00,
+      0x00,
+      0x81.toByte,
+      0xbf.toByte
+    )
+    val kernel = CodeObjectKernel(
+      "divergent_barrier",
+      Target.unsafe("gfx1036"),
+      0,
+      0,
+      0,
+      computePgmRsrc2 = 0x880,
+      kernelCodeProperties = 0,
+      code
+    )
+    val dispatch = KernelDispatch.create(
+      ProgramId.fromLong(1L).toOption.get,
+      "divergent_barrier",
+      Dimensions.create(64, 1, 1).toOption.get,
+      Dimensions.One,
+      Col.empty
+    ).toOption.get
+
+    assertEquals(DispatchInterpreter.execute(kernel, dispatch, TestMemory()), Right(()))
+  }
+
+  test("gfx900 transfers control through a linked device-function call and return") {
+    // s_mov_b32 s4, 0x1018; s_mov_b32 s5, 0; s_swappc s[2:3], s[4:5]
+    // calls the second text function. It writes s0 and returns through the
+    // continuation saved by s_swappc before the caller reaches s_endpgm.
+    // The four zero bytes between the functions model the alignment gap
+    // emitted by the linker after the caller's s_endpgm.
+    val code = Col[Byte](
+      0xff.toByte,
+      0x00,
+      0x84.toByte,
+      0xbe.toByte,
+      0x18,
+      0x10,
+      0x00,
+      0x00,
+      0x80.toByte,
+      0x00,
+      0x85.toByte,
+      0xbe.toByte,
+      0x04,
+      0x1e,
+      0x82.toByte,
+      0xbe.toByte,
+      0x00,
+      0x00,
+      0x81.toByte,
+      0xbf.toByte,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0xff.toByte,
+      0x00,
+      0x80.toByte,
+      0xbe.toByte,
+      0x2a,
+      0x00,
+      0x00,
+      0x00,
+      0x02,
+      0x1e,
+      0x84.toByte,
+      0xbe.toByte,
+      0x00,
+      0x00,
+      0x81.toByte,
+      0xbf.toByte
+    )
+    val kernel = CodeObjectKernel(
+      name = "linked_call",
+      target = Target.unsafe("gfx900"),
+      kernargSize = 0,
+      groupSegmentSize = 0,
+      privateSegmentSize = 0,
+      computePgmRsrc2 = 0,
+      kernelCodeProperties = 0,
+      code = code,
+      codeAddress = 0x1000L,
+      textAddress = 0x1000L,
+      text = code,
+      functionSizes = Map(0x1000L -> 20, 0x1018L -> 16)
+    )
+    val dispatch = KernelDispatch.create(
+      ProgramId.fromLong(1L).toOption.get,
+      "linked_call",
+      Dimensions.One,
+      Dimensions.One,
+      Col.empty
+    ).toOption.get
+
+    assertEquals(
+      DispatchInterpreter.decodeInstruction(code.take(8), Target.unsafe("gfx900")),
+      Right(DecodedInstruction.SMove(4, InstructionSource.Literal(0x1018L)))
+    )
+    assertEquals(
+      DispatchInterpreter.decodeInstruction(code.drop(8).take(4), Target.unsafe("gfx900")),
+      Right(DecodedInstruction.SMove(5, InstructionSource.Constant(0L)))
+    )
+    assertEquals(DispatchInterpreter.execute(kernel, dispatch, TestMemory()), Right(()))
+  }
+
   test("gfx900 executes the official ROCr vector-copy kernel subset") {
     val words = Col[Long](
       0xc0020242L, 0x00000004L, 0xc0020283L, 0x00000018L,
@@ -1395,18 +2077,18 @@ class CodeObjectSuite extends munit.FunSuite {
 
   private def minimalCodeObject(): Array[Byte] = {
     def aligned(value: Int): Int = (value + 7) & ~7
-    val sectionNames             = "\u0000.shstrtab\u0000.strtab\u0000.symtab\u0000.text\u0000.rodata\u0000"
+    val sectionNames             = "\u0000.shstrtab\u0000.strtab\u0000.symtab\u0000.text\u0000.rodata\u0000.bss\u0000"
       .getBytes(StandardCharsets.US_ASCII)
-    val symbolNames       = "\u0000kernel\u0000kernel.kd\u0000".getBytes(StandardCharsets.US_ASCII)
+    val symbolNames       = "\u0000kernel\u0000kernel.kd\u0000device_global\u0000".getBytes(StandardCharsets.US_ASCII)
     val target            = "amdgcn-amd-amdhsa--gfx900\u0000".getBytes(StandardCharsets.US_ASCII)
     val sectionNameOffset = 64
     val symbolNameOffset  = aligned(sectionNameOffset + sectionNames.length)
     val symbolTableOffset = aligned(symbolNameOffset + symbolNames.length)
-    val textOffset        = aligned(symbolTableOffset + 3 * 24)
+    val textOffset        = aligned(symbolTableOffset + 4 * 24)
     val readOnlyOffset    = aligned(textOffset + 4)
     val readOnlySize      = 64 + target.length
     val sectionTable      = aligned(readOnlyOffset + readOnlySize)
-    val bytes             = Array.ofDim[Byte](sectionTable + 6 * 64)
+    val bytes             = Array.ofDim[Byte](sectionTable + 7 * 64)
     val buffer            = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
 
     buffer.put(0, 0x7f.toByte)
@@ -1421,7 +2103,7 @@ class CodeObjectSuite extends munit.FunSuite {
     buffer.putLong(40, sectionTable.toLong)
     buffer.putShort(52, 64.toShort)
     buffer.putShort(58, 64.toShort)
-    buffer.putShort(60, 6.toShort)
+    buffer.putShort(60, 7.toShort)
     buffer.putShort(62, 1.toShort)
     System.arraycopy(sectionNames, 0, bytes, sectionNameOffset, sectionNames.length)
     System.arraycopy(symbolNames, 0, bytes, symbolNameOffset, symbolNames.length)
@@ -1456,9 +2138,10 @@ class CodeObjectSuite extends munit.FunSuite {
     }
     section(1, 1, 3, 0L, sectionNameOffset, sectionNames.length)
     section(2, 11, 3, 0L, symbolNameOffset, symbolNames.length)
-    section(3, 19, 2, 0L, symbolTableOffset, 3 * 24, link = 2, alignment = 8, entrySize = 24)
+    section(3, 19, 2, 0L, symbolTableOffset, 4 * 24, link = 2, alignment = 8, entrySize = 24)
     section(4, 27, 1, 0x1000L, textOffset, 4, alignment = 4)
     section(5, 33, 1, 0x2000L, readOnlyOffset, readOnlySize, alignment = 8)
+    section(6, 41, 8, 0x3000L, 0, 16, alignment = 8)
 
     def symbol(index: Int, name: Int, kind: Int, section: Int, value: Long, size: Long): Unit = {
       val start = symbolTableOffset + index * 24
@@ -1470,6 +2153,7 @@ class CodeObjectSuite extends munit.FunSuite {
     }
     symbol(1, 1, 2, 4, 0x1000L, 4L)
     symbol(2, 8, 1, 5, 0x2000L, 64L)
+    symbol(3, 18, 1, 6, 0x3000L, 16L)
     bytes
   }
 }

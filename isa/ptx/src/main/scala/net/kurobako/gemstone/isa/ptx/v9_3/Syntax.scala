@@ -50,6 +50,16 @@ enum Statement {
       terminator: DirectiveTerminator
   )
   case Instruction(value: net.kurobako.gemstone.isa.ptx.v9_3.Instruction)
+
+  /** Parsed instruction whose opcode is valid PTX syntax but is outside the currently implemented semantic subset. It
+    * remains in the syntax tree so libraries can be loaded and inspected; lowering reports it when executed.
+    */
+  case UnsupportedInstruction(
+      opcode: String,
+      operands: Col[Operand],
+      mods: Col[Modifier],
+      pred: Option[Predication]
+  )
   case Block(body: Col[Statement])
   case Entry(visible: Boolean, name: String, parameters: Col[Parameter], body: Col[Statement])
   case Function(

@@ -50,6 +50,18 @@ class ProtocolSuite extends munit.FunSuite {
     assert(LaunchGeometry.create(groupSize, groupCount, workDim = 0).isLeft)
   }
 
+  test("virtual launch geometry preserves padded extents beyond Int.MaxValue") {
+    val groupSize  = Dimensions.create(256, 1, 1).toOption.get
+    val groupCount = Dimensions.create(16777216, 1, 1).toOption.get
+    val geometry   = LaunchGeometry.createVirtual(groupSize, groupCount).toOption.get
+
+    assertEquals(geometry.globalSizeLongValue, LongCoordinates(4294967296L, 1L, 1L))
+    val last = geometry.globalCoordinatesLong(Coordinates(16777215, 0, 0), Coordinates(255, 0, 0))
+    assertEquals(last, LongCoordinates(4294967295L, 0L, 0L))
+    assert(geometry.containsGlobal(last))
+    assert(!geometry.containsGlobal(LongCoordinates(4294967296L, 0L, 0L)))
+  }
+
   test("pointer relocations cannot refer to an absent kernel argument") {
     val program    = ProgramId.fromLong(1L).toOption.get
     val target     = AllocationId.fromLong(2L).toOption.get

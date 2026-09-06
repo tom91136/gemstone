@@ -18,6 +18,18 @@ Run the complete CUDA lane with:
 sbt testCUDAConformance
 ```
 
+To establish only the physical NVIDIA baseline before exercising the emulator,
+set `GEMSTONE_ORACLE_ONLY=1`. This compiles and runs each vendor artifact but
+does not build or invoke Gemstone's provider:
+
+```console
+GEMSTONE_ORACLE_ONLY=1 sbt testCUDAConformance
+```
+
+The mode requires oracle execution; do not combine it with
+`GEMSTONE_NO_ORACLE=1`, `GEMSTONE_THRUST_SKIP_ORACLE=1`, or
+`GEMSTONE_CUBLAS_SKIP_ORACLE=1`.
+
 No Scala registry needs updating when a translation unit is added. Every case is compiled once through the normal
 vendor command, then that exact executable runs once as the NVIDIA oracle and once through Gemstone. Unsupported
 Gemstone behavior is a named red result; the only local skips are individually documented units proven impractical
@@ -56,10 +68,11 @@ runtime/driver libraries. Thrust cases use the additional metadata and command v
 The suite audits the dependency file and fails if compilation falls back to toolkit-provided Thrust or CUB headers.
 See `vendor/README.md` for exact upstream revisions and licence details.
 
-The `cublas/` lane follows a different boundary: cuBLAS is proprietary and is therefore neither copied nor wrapped
-into generated code. Its small, self-authored clients link against the installed cuBLAS library in both lanes; the
-Gemstone lane reaches it through the preloaded CUDA Driver RPC provider. See `cublas/README.md` for the toolkit path
-controls and licensing boundary.
+The `cublas/` lane follows a different boundary: cuBLAS is proprietary and is therefore neither copied nor generated
+into the repository. Its small, self-authored clients link against the installed cuBLAS library for the oracle. In the
+Gemstone lane, the preloaded provider supplies a narrow, versioned host-side cuBLAS compatibility surface for the
+covered BLAS calls and executes their data movement through the CUDA Driver RPC. See `cublas/README.md` for the
+toolkit path controls and licensing boundary.
 
 ## Official Thrust suite
 

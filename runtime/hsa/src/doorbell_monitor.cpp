@@ -130,7 +130,9 @@ struct gemstone_hsa_doorbell_monitor {
       // INVALID header is a legitimate multi-producer hole and stops this
       // in-order consumer until its owner publishes it.
       const uint16_t header = load(header_address, __ATOMIC_ACQUIRE);
-      if ((header & q.packet_type_mask) == q.invalid_packet_type) break;
+      if ((header & q.packet_type_mask) == q.invalid_packet_type) {
+        break;
+      }
 
       const auto result = q.consume(q.queue_id, next, packet, q.packet_size, q.user_data);
       if (result == GEMSTONE_HSA_PACKET_RETRY) break;

@@ -98,7 +98,7 @@ final case class FunctionName(value: String) {
 /** The logical result of `cuModuleGetFunction`. Parameter widths are returned to the C facade so it can safely copy the
   * otherwise untyped `void **kernelParams` array at launch time.
   */
-final case class KernelFunction(handle: CUDAFunction, parameterWidths: Col[Byte])
+final case class KernelFunction(handle: CUDAFunction, parameterWidths: Col[Int])
 
 final case class KernelArgument(bytes: Col[Byte])
 final case class KernelParameters(arguments: Col[KernelArgument])

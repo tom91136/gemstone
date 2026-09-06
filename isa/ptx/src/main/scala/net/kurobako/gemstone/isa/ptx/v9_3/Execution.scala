@@ -289,8 +289,9 @@ enum ExecutableInstruction(val opcode: String) {
       source: Value,
       delta: Value,
       clamp: Value,
-      memberMask: Value
-  ) extends ExecutableInstruction("shfl.sync.down.b32")
+      memberMask: Value,
+      width: Int
+  ) extends ExecutableInstruction(s"shfl.sync.down.b$width")
 
   case ShuffleUp(
       destination: String,
@@ -298,8 +299,9 @@ enum ExecutableInstruction(val opcode: String) {
       source: Value,
       delta: Value,
       clamp: Value,
-      memberMask: Value
-  ) extends ExecutableInstruction("shfl.sync.up.b32")
+      memberMask: Value,
+      width: Int
+  ) extends ExecutableInstruction(s"shfl.sync.up.b$width")
 
   case ShuffleIndex(
       destination: String,
@@ -307,8 +309,9 @@ enum ExecutableInstruction(val opcode: String) {
       source: Value,
       index: Value,
       clamp: Value,
-      memberMask: Value
-  ) extends ExecutableInstruction("shfl.sync.idx.b32")
+      memberMask: Value,
+      width: Int
+  ) extends ExecutableInstruction(s"shfl.sync.idx.b$width")
 
   case ShuffleBfly(
       destination: String,
@@ -316,8 +319,9 @@ enum ExecutableInstruction(val opcode: String) {
       source: Value,
       index: Value,
       clamp: Value,
-      memberMask: Value
-  ) extends ExecutableInstruction("shfl.sync.bfly.b32")
+      memberMask: Value,
+      width: Int
+  ) extends ExecutableInstruction(s"shfl.sync.bfly.b$width")
 
   case VoteBallot(destination: String, predicate: String, memberMask: Value)
       extends ExecutableInstruction("vote.sync.ballot.b32")
@@ -342,6 +346,9 @@ enum ExecutableInstruction(val opcode: String) {
       bitLength: Value,
       width: Int
   ) extends ExecutableInstruction(s"bfi.b$width")
+
+  case BitMask(destination: String, start: Value, widthValue: Value, mode: String)
+      extends ExecutableInstruction(s"bmsk.$mode.b32")
 
   case BytePermute(
       destination: String,
@@ -411,6 +418,21 @@ enum ExecutableInstruction(val opcode: String) {
   case StoreLocalVector(address: Value, sources: Col[String], width: Int)
       extends ExecutableInstruction(s"st.local.v${sources.size}.u$width")
 
+  /** Synchronous model of the PTX asynchronous shared-memory copy. The emulator applies the copy at this instruction;
+    * commit/wait operations below remain ordered no-ops because there is no separate copy engine.
+    */
+  case AsyncCopy(destination: Value, source: Value, size: Int)
+      extends ExecutableInstruction("cp.async")
+
+  case AsyncCommit extends ExecutableInstruction("cp.async.commit_group")
+
+  case AsyncWait extends ExecutableInstruction("cp.async.wait_group")
+
+  /** Cache prefetch hints have no architecturally visible effect in the emulator; preserve them as ordered no-ops so
+    * generated kernels remain loadable and predication is still honoured.
+    */
+  case Prefetch extends ExecutableInstruction("prefetch")
+
   case SetPredicate(
       destination: String,
       comparison: Comparison,
@@ -443,8 +465,19 @@ enum ExecutableInstruction(val opcode: String) {
   case AtomicAdd(destination: String, address: Value, source: Value, width: Int, global: Boolean)
       extends ExecutableInstruction(s"atom.${if (global) "global" else "shared"}.add.u$width")
 
+  case AtomicMin(destination: String, address: Value, source: Value, width: Int, global: Boolean)
+      extends ExecutableInstruction(s"atom.${if (global) "global" else "shared"}.min.u$width")
+
   case AtomicAddFloat(destination: String, address: Value, source: Value, width: Int)
       extends ExecutableInstruction(s"atom.global.add.f$width")
+
+  case WarpReduce(
+      destination: String,
+      source: Value,
+      memberMask: Value,
+      operation: IntegerOperation,
+      width: Int
+  ) extends ExecutableInstruction("redux.sync")
 
   case MemoryBarrier extends ExecutableInstruction("membar")
 
@@ -615,7 +648,10 @@ object Lowering {
       body: Col[Statement],
       functionNames: Set[String]
   ): Either[LoweringError, ExecutableProgram[PredicatedInstruction]] = {
-    val flat             = flatten(body)
+    val flat = flattenScoped(body) match {
+      case Left(error)  => return Left(error)
+      case Right(value) => value
+    }
     val labels           = mutable.Map.empty[String, Pc]
     var instructionIndex = 0
     var statementIndex   = 0
@@ -624,8 +660,13 @@ object Lowering {
         case Statement.Label(label) =>
           if (labels.contains(label)) return Left(LoweringError.Invalid(s"duplicate label: $label"))
           labels(label) = Pc.unsafe(instructionIndex)
-        case Statement.Instruction(_) => instructionIndex += 1
-        case _                        => ()
+        case Statement.Instruction(_)                                       => instructionIndex += 1
+        case Statement.UnsupportedInstruction(opcode, operands, mods, pred) =>
+          val qualified = (opcode +: mods.map(_.name)).mkString(".")
+          val rendered  = pred.map(value => s"${Printer.render(value)} ").getOrElse("") +
+            qualified + (if (operands.isEmpty) "" else operands.map(Printer.render).mkString(" ", ", ", "")) + ";"
+          return Left(LoweringError.Unsupported(rendered, "instruction is not implemented"))
+        case _ => ()
       }
       statementIndex += 1
     }
@@ -747,6 +788,82 @@ object Lowering {
       index += 1
     }
     Right(result.result())
+  }
+
+  /** Flatten PTX blocks while alpha-renaming registers declared in nested scopes. */
+  private def flattenScoped(statements: Col[Statement]): Either[LoweringError, Col[Statement]] = {
+    var nextScope = 0
+
+    def registerNames(operand: Operand): Iterator[String] = operand match {
+      case Operand.Register(name, _)    => Iterator.single(name)
+      case Operand.VectorLiteral(items) => items.iterator.flatMap(registerNames)
+      case Operand.Parenthesized(items) => items.iterator.flatMap(registerNames)
+      case _                            => Iterator.empty
+    }
+
+    def declaredRegisters(body: Col[Statement]): Col[String] =
+      Col.toCol(body.iterator.flatMap {
+        case Statement.Directive(path, arguments, _)
+            if path == Col("reg") || path.headOption.contains("reg") =>
+          arguments.iterator.flatMap(argument => registerNames(argument.operand))
+        case _ => Iterator.empty
+      }).distinct
+
+    def renameOperand(operand: Operand, names: Map[String, String]): Operand = operand match {
+      case Operand.Register(name, part)  => Operand.Register(names.getOrElse(name, name), part)
+      case Operand.VectorLiteral(items)  => Operand.VectorLiteral(items.map(renameOperand(_, names)))
+      case Operand.Parenthesized(items)  => Operand.Parenthesized(items.map(renameOperand(_, names)))
+      case Operand.Address(items)        => Operand.Address(items.map(renameOperand(_, names)))
+      case Operand.Index(base, index)    => Operand.Index(renameOperand(base, names), renameOperand(index, names))
+      case Operand.Add(left, right)      => Operand.Add(renameOperand(left, names), renameOperand(right, names))
+      case Operand.Subtract(left, right) =>
+        Operand.Subtract(renameOperand(left, names), renameOperand(right, names))
+      case Operand.WithPredicate(base, predicate) =>
+        Operand.WithPredicate(renameOperand(base, names), renameOperand(predicate, names))
+      case Operand.Negate(value) => Operand.Negate(renameOperand(value, names))
+      case value                 => value
+    }
+
+    def renameInstruction(instruction: Instruction, names: Map[String, String]): Either[LoweringError, Instruction] = {
+      val operands = instruction.operands.map(renameOperand(_, names))
+      val pred     = instruction.pred.map(value => value.copy(operand = renameOperand(value.operand, names)))
+      Instruction.decode(instruction.opcode, operands, instruction.mods, pred).leftMap(error =>
+        LoweringError.Invalid(s"failed to preserve scoped instruction ${Printer.render(instruction)}: $error")
+      )
+    }
+
+    def visit(body: Col[Statement], names: Map[String, String]): Either[LoweringError, Col[Statement]] = {
+      val result = Col.newBuilder[Statement]
+      var index  = 0
+      while (index < body.size) {
+        body(index) match {
+          case Statement.Block(nested) =>
+            val scope = nextScope
+            nextScope += 1
+            val scopedNames = declaredRegisters(nested).foldLeft(names) { (current, name) =>
+              current.updated(name, s"$name$$scope$scope")
+            }
+            visit(nested, scopedNames) match {
+              case Left(error)  => return Left(error)
+              case Right(value) => value.foreach(result += _)
+            }
+          case Statement.Instruction(instruction) =>
+            renameInstruction(instruction, names) match {
+              case Left(error)  => return Left(error)
+              case Right(value) => result += Statement.Instruction(value)
+            }
+          case Statement.UnsupportedInstruction(opcode, operands, mods, pred) =>
+            val renamedOperands = operands.map(renameOperand(_, names))
+            val renamedPred     = pred.map(value => value.copy(operand = renameOperand(value.operand, names)))
+            result += Statement.UnsupportedInstruction(opcode, renamedOperands, mods, renamedPred)
+          case value => result += value
+        }
+        index += 1
+      }
+      Right(result.result())
+    }
+
+    visit(statements, Map.empty)
   }
 
   private def flatten(statements: Col[Statement]): Col[Statement] = statements.flatMap {
@@ -1149,7 +1266,7 @@ object Lowering {
       case Instruction.Shl(destination, left, right, modifiers, _) if instruction.qualifiedOpcode.startsWith("shl.") =>
         integerWidth(modifiers).flatMap(integerBinary(IntegerOperation.ShiftLeft, _, destination, left, right))
       case Instruction.Shr(destination, left, right, modifiers, _)
-          if instruction.qualifiedOpcode.startsWith("shr.u") =>
+          if instruction.qualifiedOpcode.startsWith("shr.u") || instruction.qualifiedOpcode.startsWith("shr.b") =>
         integerWidth(modifiers).flatMap(integerBinary(IntegerOperation.ShiftRightLogical, _, destination, left, right))
       case Instruction.Shr(destination, left, right, modifiers, _)
           if instruction.qualifiedOpcode.startsWith("shr.s") =>
@@ -1160,69 +1277,77 @@ object Lowering {
           left,
           right
         ))
-      case Instruction.ShflSync(destination, source, delta, clamp, memberMask, _, _)
-          if instruction.qualifiedOpcode == "shfl.sync.down.b32" =>
+      case Instruction.ShflSync(destination, source, delta, clamp, memberMask, modifiers, _)
+          if Set("shfl.sync.down.b32", "shfl.sync.down.b64").contains(instruction.qualifiedOpcode) =>
         for {
           destinationInfo <- valueDestination(destination)
           sourceValue     <- value(source)
           deltaValue      <- value(delta)
           clampValue      <- value(clamp)
           memberMaskValue <- value(memberMask)
+          width           <- integerWidth(modifiers)
         } yield ExecutableInstruction.ShuffleDown(
           destinationInfo._1,
           destinationInfo._2,
           sourceValue,
           deltaValue,
           clampValue,
-          memberMaskValue
+          memberMaskValue,
+          width
         )
-      case Instruction.ShflSync(destination, source, delta, clamp, memberMask, _, _)
-          if instruction.qualifiedOpcode == "shfl.sync.up.b32" =>
+      case Instruction.ShflSync(destination, source, delta, clamp, memberMask, modifiers, _)
+          if Set("shfl.sync.up.b32", "shfl.sync.up.b64").contains(instruction.qualifiedOpcode) =>
         for {
           destinationInfo <- valueDestination(destination)
           sourceValue     <- value(source)
           deltaValue      <- value(delta)
           clampValue      <- value(clamp)
           memberMaskValue <- value(memberMask)
+          width           <- integerWidth(modifiers)
         } yield ExecutableInstruction.ShuffleUp(
           destinationInfo._1,
           destinationInfo._2,
           sourceValue,
           deltaValue,
           clampValue,
-          memberMaskValue
+          memberMaskValue,
+          width
         )
-      case Instruction.ShflSync(destination, source, index, clamp, memberMask, _, _)
-          if instruction.qualifiedOpcode == "shfl.sync.idx.b32" =>
+      case Instruction.ShflSync(destination, source, index, clamp, memberMask, modifiers, _)
+          if Set("shfl.sync.idx.b32", "shfl.sync.idx.b64").contains(instruction.qualifiedOpcode) =>
         for {
           destinationInfo <- valueDestination(destination)
           sourceValue     <- value(source)
           indexValue      <- value(index)
           clampValue      <- value(clamp)
           memberMaskValue <- value(memberMask)
+          width           <- integerWidth(modifiers)
         } yield ExecutableInstruction.ShuffleIndex(
           destinationInfo._1,
           destinationInfo._2,
           sourceValue,
           indexValue,
           clampValue,
-          memberMaskValue
+          memberMaskValue,
+          width
         )
-      case Instruction.ShflSync(destination, source, index, clamp, memberMask, _, _)
-          if instruction.qualifiedOpcode == "shfl.sync.bfly.b32" =>
+      case Instruction.ShflSync(destination, source, index, clamp, memberMask, modifiers, _)
+          if Set("shfl.sync.bfly.b32", "shfl.sync.bfly.b64").contains(instruction.qualifiedOpcode) =>
         for {
           destinationInfo <- valueDestination(destination)
           sourceValue     <- value(source)
           indexValue      <- value(index)
           clampValue      <- value(clamp)
           memberMaskValue <- value(memberMask)
+          width           <- integerWidth(modifiers)
         } yield ExecutableInstruction.ShuffleBfly(
           destinationInfo._1,
           destinationInfo._2,
           sourceValue,
           indexValue,
           clampValue,
-          memberMaskValue
+          memberMaskValue,
+          width
         )
       case Instruction.Vote(destination, predicate, _, _) if instruction.qualifiedOpcode == "vote.ballot.b32" =>
         for {
@@ -1281,6 +1406,18 @@ object Lowering {
           lengthOperand,
           width
         )
+      case Instruction.Bmsk(destination, start, widthValue, modifiers, _)
+          if instruction.qualifiedOpcode.startsWith("bmsk.") =>
+        for {
+          destinationName <- registerName(destination)
+          startValue      <- value(start)
+          widthOperand    <- value(widthValue)
+          mode            <- modifiers.map(_.name).find(name => name == "clamp" || name == "wrap")
+            .toRight(LoweringError.Invalid("bmsk requires .clamp or .wrap"))
+          _ <- modifiers.map(_.name).find(_.startsWith("b32")).toRight(
+            LoweringError.Invalid("bmsk requires a .b32 width")
+          )
+        } yield ExecutableInstruction.BitMask(destinationName, startValue, widthOperand, mode)
       case Instruction.Prmt(destination, left, right, control, _, _)
           if instruction.qualifiedOpcode.startsWith("prmt.b32") =>
         for {
@@ -1797,6 +1934,33 @@ object Lowering {
           sourceValue  <- value(source)
           width        <- integerWidth(modifiers)
         } yield ExecutableInstruction.StoreLocal(addressValue, sourceValue, width)
+      case Instruction.CpAsync(destination, source, copySize, _, _, _, _) =>
+        for {
+          destinationValue <- addressValue(destination)
+          sourceValue      <- addressValue(source)
+          size             <- immediate(copySize).flatMap { value =>
+            if (Set(4L, 8L, 16L).contains(value)) Right(value.toInt)
+            else invalid(s"cp.async copy size must be 4, 8, or 16 bytes, found $value")
+          }
+        } yield ExecutableInstruction.AsyncCopy(destinationValue, sourceValue, size)
+      case Instruction.CpAsyncCommitGroup(_, _)  => Right(ExecutableInstruction.AsyncCommit)
+      case Instruction.CpAsyncWaitAll(_, _)      => Right(ExecutableInstruction.AsyncWait)
+      case Instruction.CpAsyncWaitGroup(_, _, _) => Right(ExecutableInstruction.AsyncWait)
+      case Instruction.ReduxSync(destination, source, memberMask, modifiers, _)
+          if instruction.qualifiedOpcode.startsWith("redux.sync.") =>
+        for {
+          destinationName <- registerName(destination)
+          sourceValue     <- value(source)
+          memberMaskValue <- value(memberMask)
+          width           <- integerWidth(modifiers)
+          operation       <-
+            if (instruction.qualifiedOpcode.contains(".add.")) Right(IntegerOperation.Add)
+            else if (instruction.qualifiedOpcode.contains(".min."))
+              Right(IntegerOperation.Minimum(instruction.qualifiedOpcode.contains(".s")))
+            else if (instruction.qualifiedOpcode.contains(".max."))
+              Right(IntegerOperation.Maximum(instruction.qualifiedOpcode.contains(".s")))
+            else invalid(s"unsupported redux.sync operation ${instruction.qualifiedOpcode}")
+        } yield ExecutableInstruction.WarpReduce(destinationName, sourceValue, memberMaskValue, operation, width)
       case Instruction.Atom(destination, address, source, None, _, _)
           if instruction.qualifiedOpcode.matches("atom\\.global\\.add\\.u(?:32|64)") =>
         for {
@@ -1813,6 +1977,20 @@ object Lowering {
           sourceValue     <- value(source)
           width = if (instruction.qualifiedOpcode.endsWith(".u64")) 64 else 32
         } yield ExecutableInstruction.AtomicAdd(destinationName, addressValue, sourceValue, width, global = false)
+      case Instruction.Atom(destination, address, source, None, _, _)
+          if instruction.qualifiedOpcode.matches("atom\\.(?:shared|global)\\.min\\.u(?:32|64)") =>
+        for {
+          destinationName <- registerName(destination)
+          addressValue    <- addressValue(address)
+          sourceValue     <- value(source)
+          width = if (instruction.qualifiedOpcode.endsWith(".u64")) 64 else 32
+        } yield ExecutableInstruction.AtomicMin(
+          destinationName,
+          addressValue,
+          sourceValue,
+          width,
+          global = instruction.qualifiedOpcode.startsWith("atom.global.")
+        )
       case Instruction.Atom(destination, address, source, None, _, _)
           if instruction.qualifiedOpcode == "atom.global.add.f32" || instruction.qualifiedOpcode == "atom.global.add.f64" =>
         for {
@@ -1851,6 +2029,12 @@ object Lowering {
         }
       case Instruction.Membar(_, _) if instruction.qualifiedOpcode.startsWith("membar.") =>
         Right(ExecutableInstruction.MemoryBarrier)
+      case Instruction.Prefetch(_, _, _) =>
+        Right(ExecutableInstruction.Prefetch)
+      case Instruction.NanoSleep(_, _, _) =>
+        // nanosleep is a scheduling hint; it has no observable architectural
+        // effect in the deterministic emulator.
+        Right(ExecutableInstruction.Prefetch)
       case Instruction.BarWarpSync(memberMask, _, _) =>
         value(memberMask).map(ExecutableInstruction.WarpBarrier.apply)
       case Instruction.Exit(_, _)                                        => Right(ExecutableInstruction.Return)
@@ -2256,7 +2440,7 @@ object Lowering {
   }
 
   private def isBareRegisterName(name: String): Boolean =
-    name.matches("(?:r|rd|p)\\d*")
+    name.matches("(?:r|rd|p)\\d*|lo|hi")
 
   private def isSignedScalarOpcode(opcode: String): Boolean =
     opcode.endsWith(".s8") || opcode.endsWith(".s16") || opcode.endsWith(".s32") || opcode.endsWith(".s64")
@@ -2277,7 +2461,9 @@ private enum StateWrite extends Write {
   case Local(lane: Int, address: Long, width: Int, value: Long)
   case Memory(lane: Int, address: GuestAddress, width: Int, value: Long)
   case AtomicSharedAdd(lane: Int, destination: String, address: Long, width: Int, value: Long)
+  case AtomicSharedMin(lane: Int, destination: String, address: Long, width: Int, value: Long)
   case AtomicMemoryAdd(lane: Int, destination: String, address: GuestAddress, width: Int, value: Long)
+  case AtomicMemoryMin(lane: Int, destination: String, address: GuestAddress, width: Int, value: Long)
   case AtomicMemoryAddFloat(lane: Int, destination: String, address: GuestAddress, width: Int, value: Long)
 }
 
@@ -2975,7 +3161,7 @@ private object Semantics {
               StateWrite.Register(lane, destination, bf16FmaBits(leftBits, rightBits, addendBits))
             )
           }.map(_ => Step.Advance)
-        case ExecutableInstruction.ShuffleDown(destination, validity, source, delta, clamp, _) =>
+        case ExecutableInstruction.ShuffleDown(destination, validity, source, delta, clamp, _, width) =>
           forEveryLane(context) { lane =>
             for {
               deltaValue <- context.read(lane, delta)
@@ -2990,11 +3176,11 @@ private object Semantics {
                 context.read(targetLane, source)
               else Right(0L)
             } yield {
-              effects.stage(StateWrite.Register(lane, destination, truncate(value, 32)))
+              effects.stage(StateWrite.Register(lane, destination, truncate(value, width)))
               validity.foreach(name => effects.stage(StateWrite.Predicate(lane, name, valid)))
             }
           }.map(_ => Step.Advance)
-        case ExecutableInstruction.ShuffleUp(destination, validity, source, delta, clamp, _) =>
+        case ExecutableInstruction.ShuffleUp(destination, validity, source, delta, clamp, _, width) =>
           forEveryLane(context) { lane =>
             for {
               deltaValue <- context.read(lane, delta)
@@ -3008,11 +3194,11 @@ private object Semantics {
                 context.read(targetLane, source)
               else Right(0L)
             } yield {
-              effects.stage(StateWrite.Register(lane, destination, truncate(value, 32)))
+              effects.stage(StateWrite.Register(lane, destination, truncate(value, width)))
               validity.foreach(name => effects.stage(StateWrite.Predicate(lane, name, valid)))
             }
           }.map(_ => Step.Advance)
-        case ExecutableInstruction.ShuffleIndex(destination, validity, source, index, clamp, _) =>
+        case ExecutableInstruction.ShuffleIndex(destination, validity, source, index, clamp, _, width) =>
           forEveryLane(context) { lane =>
             for {
               indexValue <- context.read(lane, index)
@@ -3024,11 +3210,11 @@ private object Semantics {
               valid        = requested <= shuffleClamp(clampValue) && targetLane < context.state.laneCount
               value <- context.read(if (valid) targetLane else lane, source)
             } yield {
-              effects.stage(StateWrite.Register(lane, destination, truncate(value, 32)))
+              effects.stage(StateWrite.Register(lane, destination, truncate(value, width)))
               validity.foreach(name => effects.stage(StateWrite.Predicate(lane, name, valid)))
             }
           }.map(_ => Step.Advance)
-        case ExecutableInstruction.ShuffleBfly(destination, validity, source, index, clamp, _) =>
+        case ExecutableInstruction.ShuffleBfly(destination, validity, source, index, clamp, _, width) =>
           forEveryLane(context) { lane =>
             for {
               indexValue <- context.read(lane, index)
@@ -3042,7 +3228,7 @@ private object Semantics {
               targetLane = (lane - laneInWarp) + bflyLane
               value <- context.read(if (valid && targetLane < context.state.laneCount) targetLane else lane, source)
             } yield {
-              effects.stage(StateWrite.Register(lane, destination, truncate(value, 32)))
+              effects.stage(StateWrite.Register(lane, destination, truncate(value, width)))
               validity.foreach(name => effects.stage(StateWrite.Predicate(lane, name, valid)))
             }
           }.map(_ => Step.Advance)
@@ -3114,6 +3300,17 @@ private object Semantics {
               start  <- context.read(lane, bitPosition)
               count  <- context.read(lane, bitLength)
             } yield effects.stage(StateWrite.Register(lane, destination, insertBits(insert, base, start, count, width)))
+          }.map(_ => Step.Advance)
+        case ExecutableInstruction.BitMask(destination, start, widthValue, mode) =>
+          forEveryLane(context) { lane =>
+            for {
+              startValue <- context.read(lane, start)
+              countValue <- context.read(lane, widthValue)
+            } yield effects.stage(StateWrite.Register(
+              lane,
+              destination,
+              bitMask(startValue, countValue, mode)
+            ))
           }.map(_ => Step.Advance)
         case ExecutableInstruction.BytePermute(destination, left, right, control, mode) =>
           forEveryLane(context) { lane =>
@@ -3434,6 +3631,72 @@ private object Semantics {
               }
             }
           }.map(_ => Step.Advance)
+        case ExecutableInstruction.AsyncCopy(destination, source, size) =>
+          forEveryLane(context) { lane =>
+            for {
+              destinationAddress <- context.read(lane, destination)
+              sourceAddress      <- context.read(lane, source)
+              _                  <- (0 until size by 8).foldLeft[Either[ExecutionFault, Unit]](Right(())) {
+                case (result, offset) =>
+                  result.flatMap { _ =>
+                    val width = Math.min(8, size - offset) * 8
+                    context.memory
+                      .readLittleEndian(GuestAddress(sourceAddress + offset.toLong), byteCount(width))
+                      .leftMap(error => ExecutionFault.Memory(s"pc ${context.pc.value}, lane $lane: ${error.message}"))
+                      .map(value =>
+                        effects.stage(StateWrite.Shared(
+                          lane,
+                          destinationAddress + offset.toLong,
+                          width,
+                          value
+                        ))
+                      )
+                  }
+              }
+            } yield ()
+          }.map(_ => Step.Advance)
+        case ExecutableInstruction.AsyncCommit | ExecutableInstruction.AsyncWait                 => Right(Step.Advance)
+        case ExecutableInstruction.WarpReduce(destination, source, memberMask, operation, width) =>
+          val values                          = mutable.Map.empty[Int, Long]
+          val masks                           = mutable.Map.empty[Int, Long]
+          var failure: Option[ExecutionFault] = None
+          context.active.foreachLane { lane =>
+            if (failure.isEmpty)
+              context.read(lane, source).flatMap(value =>
+                context.read(lane, memberMask).map { mask =>
+                  values(lane) = value
+                  masks(lane) = mask
+                }
+              ).left.foreach(error => failure = Some(error))
+          }
+          failure match {
+            case Some(error) => Left(error)
+            case None        =>
+              context.active.foreachLane { lane =>
+                val warpBase = lane & ~31
+                val mask     = masks.getOrElse(lane, 0L)
+                val members  = Col.toCol(values.iterator.collect {
+                  case (candidate, value)
+                      if (candidate & ~31) == warpBase && (mask & (1L << (candidate & 31))) != 0L => value
+                })
+                val reduced = members.foldLeft(0L) { (accumulator, value) =>
+                  operation match {
+                    case IntegerOperation.Add                       => truncate(accumulator + value, width)
+                    case IntegerOperation.Minimum(signed) if signed =>
+                      Math.min(accumulator.toInt.toLong, value.toInt.toLong)
+                    case IntegerOperation.Minimum(_) =>
+                      if (java.lang.Long.compareUnsigned(accumulator, value) < 0) accumulator else value
+                    case IntegerOperation.Maximum(signed) if signed =>
+                      Math.max(accumulator.toInt.toLong, value.toInt.toLong)
+                    case IntegerOperation.Maximum(_) =>
+                      if (java.lang.Long.compareUnsigned(accumulator, value) > 0) accumulator else value
+                    case _ => accumulator
+                  }
+                }
+                effects.stage(StateWrite.Register(lane, destination, truncate(reduced, width)))
+              }
+              Right(Step.Advance)
+          }
         case ExecutableInstruction.AtomicAdd(destination, address, source, width, global) =>
           forEveryLane(context) { lane =>
             for {
@@ -3449,6 +3712,22 @@ private object Semantics {
                   sourceValue
                 ))
               else effects.stage(StateWrite.AtomicSharedAdd(lane, destination, rawAddress, width, sourceValue))
+          }.map(_ => Step.Advance)
+        case ExecutableInstruction.AtomicMin(destination, address, source, width, global) =>
+          forEveryLane(context) { lane =>
+            for {
+              rawAddress  <- context.read(lane, address)
+              sourceValue <- context.read(lane, source)
+            } yield
+              if (global)
+                effects.stage(StateWrite.AtomicMemoryMin(
+                  lane,
+                  destination,
+                  GuestAddress(rawAddress),
+                  width,
+                  sourceValue
+                ))
+              else effects.stage(StateWrite.AtomicSharedMin(lane, destination, rawAddress, width, sourceValue))
           }.map(_ => Step.Advance)
         case ExecutableInstruction.AtomicAddFloat(destination, address, source, width) =>
           forEveryLane(context) { lane =>
@@ -3514,9 +3793,11 @@ private object Semantics {
           }.map(_ => Step.Advance)
         case ExecutableInstruction.Branch(target)  => Right(Step.Jump(target))
         case ExecutableInstruction.BarrierSync(id) =>
-          Right(Step.Suspend(WaitKey(WaitScope.Workgroup, id.toLong, context.pc.value.toLong)))
+          // A workgroup barrier is identified by its hardware barrier slot, not
+          // by the static PC at which a divergent cohort happens to arrive.
+          Right(Step.Suspend(WaitKey(WaitScope.Workgroup, id.toLong, 0L)))
         case ExecutableInstruction.BarrierReduce(_, id, _, _) =>
-          Right(Step.Suspend(WaitKey(WaitScope.Workgroup, id.toLong, context.pc.value.toLong)))
+          Right(Step.Suspend(WaitKey(WaitScope.Workgroup, id.toLong, 0L)))
         case ExecutableInstruction.WarpBarrier(memberMask) =>
           var firstLane = -1
           context.active.foreachLane { lane => if (firstLane < 0) firstLane = lane }
@@ -3536,6 +3817,7 @@ private object Semantics {
               Right(Step.Suspend(WaitKey(WaitScope.Warp, memberMaskValue, context.pc.value.toLong)))
           }
         case ExecutableInstruction.MemoryBarrier                              => Right(Step.Advance)
+        case ExecutableInstruction.Prefetch                                   => Right(Step.Advance)
         case ExecutableInstruction.Call(function, returnParameter, parameter) =>
           forEveryLane(context) { lane =>
             context.functionName(lane, function).flatMap { name =>
@@ -3774,6 +4056,17 @@ private object Semantics {
             readFast(context, lane, bitLength),
             width
           )
+        )
+      }
+      true
+    case ExecutableInstruction.BitMask(destination, start, widthValue, mode) =>
+      val destinationIndex = RegisterFile.index(destination)
+      context.active.foreachLane { lane =>
+        writeRegister(
+          context.state.registers(lane),
+          destination,
+          destinationIndex,
+          bitMask(readFast(context, lane, start), readFast(context, lane, widthValue), mode)
         )
       }
       true
@@ -4294,6 +4587,10 @@ private object Semantics {
         memory.validateRange(address, byteCount(width)).leftMap(error =>
           ExecutionFault.Memory(s"pc ${pc.value}, lane $lane: ${error.message}")
         )
+      case StateWrite.AtomicMemoryMin(lane, _, address, width, _) =>
+        memory.validateRange(address, byteCount(width)).leftMap(error =>
+          ExecutionFault.Memory(s"pc ${pc.value}, lane $lane: ${error.message}")
+        )
       case StateWrite.AtomicMemoryAddFloat(lane, _, address, width, _) =>
         memory.validateRange(address, byteCount(width)).leftMap(error =>
           ExecutionFault.Memory(s"pc ${pc.value}, lane $lane: ${error.message}")
@@ -4324,6 +4621,12 @@ private object Semantics {
       val previous = state.readShared(address, width)
       state.registers(lane)(destination) = truncate(previous, width)
       state.writeShared(address, width, previous + value)
+    case StateWrite.AtomicSharedMin(lane, destination, address, width, value) =>
+      val previous = state.readShared(address, width)
+      state.registers(lane)(destination) = truncate(previous, width)
+      val mask   = if (width >= 64) -1L else (1L << width) - 1L
+      val result = Math.min(previous & mask, value & mask)
+      state.writeShared(address, width, result)
     case StateWrite.AtomicMemoryAdd(lane, destination, address, width, value) =>
       val previous = memory.readLittleEndian(address, byteCount(width)).fold(
         error =>
@@ -4332,6 +4635,17 @@ private object Semantics {
       )
       state.registers(lane)(destination) = truncate(previous, width)
       memory.writeLittleEndian(address, previous + value, byteCount(width)).left.foreach(error =>
+        throw IllegalStateException(error.message)
+      )
+    case StateWrite.AtomicMemoryMin(lane, destination, address, width, value) =>
+      val previous = memory.readLittleEndian(address, byteCount(width)).fold(
+        error => throw IllegalStateException(error.message),
+        identity
+      )
+      state.registers(lane)(destination) = truncate(previous, width)
+      val mask   = if (width >= 64) -1L else (1L << width) - 1L
+      val result = Math.min(previous & mask, value & mask)
+      memory.writeLittleEndian(address, result, byteCount(width)).left.foreach(error =>
         throw IllegalStateException(error.message)
       )
     case StateWrite.AtomicMemoryAddFloat(lane, destination, address, width, value) =>
@@ -4539,6 +4853,22 @@ private object Semantics {
       val extracted      = (sourceBits >>> bitStart) & mask
       truncate(if (signed) signExtend(extracted, extractedWidth) else extracted, width)
     }
+  }
+
+  private def bitMask(start: Long, count: Long, mode: String): Long = {
+    val rawStart         = start & 0xffffffffL
+    val rawCount         = count & 0xffffffffL
+    val start1           = rawStart & 0x1fL
+    val count1           = rawCount & 0x1fL
+    val positionOverflow = mode == "clamp" && rawStart >= 32L
+    val widthOverflow    = mode == "clamp" && rawCount >= 32L
+    val sum              = start1 + count1
+    val mask0            = if (positionOverflow) 0L else truncate(-1L << start1.toInt, 32)
+    val mask1            =
+      if (sum >= 32L || positionOverflow || widthOverflow) 0L
+      else if (count1 == 0L) 0xffffffffL
+      else truncate(-1L << sum.toInt, 32)
+    truncate(mask0 & ~mask1, 32)
   }
 
   private def multiplyHigh(left: Long, right: Long, width: Int, signed: Boolean): Long = {
@@ -4814,6 +5144,13 @@ object Interpreter {
   )
   private final case class Waiting(cohort: Cohort, key: WaitKey, reduction: Option[BarrierReduction] = None)
 
+  private def containsAtomics(executable: Array[ExecutableInstruction]): Boolean = executable.exists {
+    case _: ExecutableInstruction.AtomicAdd      => true
+    case _: ExecutableInstruction.AtomicMin      => true
+    case _: ExecutableInstruction.AtomicAddFloat => true
+    case _                                       => false
+  }
+
   def execute(
       kernel: Kernel,
       geometry: LaunchGeometry,
@@ -4821,7 +5158,8 @@ object Interpreter {
       memory: AddressMemory,
       control: ExecutionControl = ExecutionControl.default,
       captureTrace: Boolean = true,
-      initialParameterBuffers: Map[Long, Array[Byte]] = Map.empty
+      initialParameterBuffers: Map[Long, Array[Byte]] = Map.empty,
+      blockIndices: Option[Col[Int]] = None
   ): Either[ExecutionError, ExecutionResult] = {
     val laneCount = geometry.groupSize.volumeInt match {
       case Left(message) => return Left(ExecutionError(message))
@@ -4835,34 +5173,57 @@ object Interpreter {
       case Left(fault)  => return Left(ExecutionError(fault.message))
       case Right(value) => value
     }
-    var trace = Trace.empty
-    var step  = 0L
-    var block = 0
-    while (block < groupCount) {
-      val group = geometry.groupCoordinates(block.toLong)
-      val live  = allLanes.filterLanes(lane =>
-        geometry.containsGlobal(geometry.globalCoordinates(group, geometry.localCoordinates(lane)))
-      )
-      executeBlock(
-        kernel,
-        block,
-        group,
-        geometry,
-        live,
-        arguments,
-        memory,
-        control,
-        captureTrace,
-        trace,
-        step,
-        initialParameterBuffers
-      ) match {
-        case Left(fault)                  => return Left(ExecutionError(fault.message))
-        case Right((nextTrace, nextStep)) =>
-          trace = nextTrace
-          step = nextStep
+    var trace                                              = Trace.empty
+    var step                                               = 0L
+    def runBlock(block: Int): Either[ExecutionError, Unit] =
+      if (block < 0 || block >= groupCount) Left(ExecutionError(s"selected PTX block is outside the launch: $block"))
+      else {
+        val group = geometry.groupCoordinates(block.toLong)
+        val live  = allLanes.filterLanes(lane =>
+          geometry.containsGlobal(geometry.globalCoordinatesLong(group, geometry.localCoordinates(lane)))
+        )
+        executeBlock(
+          kernel,
+          block,
+          group,
+          geometry,
+          live,
+          arguments,
+          memory,
+          control,
+          captureTrace,
+          trace,
+          step,
+          initialParameterBuffers
+        ) match {
+          case Left(fault)                  => Left(ExecutionError(fault.message))
+          case Right((nextTrace, nextStep)) =>
+            trace = nextTrace
+            step = nextStep
+            Right(())
+        }
       }
-      block += 1
+    val selectedBlocks = blockIndices.getOrElse(Col.from(0 until groupCount))
+    val parallelBlocks = !captureTrace &&
+      control.parallelism.shouldParallel(selectedBlocks.size.toLong, laneCount.toLong) &&
+      !containsAtomics(kernel.program.instructions.toArray.map(_.instruction))
+    if (parallelBlocks) {
+      val result = control.parallelism.parallelFor(selectedBlocks.size.toLong) { index =>
+        runBlock(selectedBlocks(index.toInt)).left.map(error => ExecutionFailure.Failed(error.message))
+      }
+      result match {
+        case Left(error) => return Left(ExecutionError(error.message))
+        case Right(())   => ()
+      }
+    } else {
+      var index = 0
+      while (index < selectedBlocks.size) {
+        runBlock(selectedBlocks(index)) match {
+          case Left(error) => return Left(error)
+          case Right(_)    => ()
+        }
+        index += 1
+      }
     }
     Right(ExecutionResult(trace))
   }
@@ -4908,13 +5269,14 @@ object Interpreter {
     enqueue(Pc.Entry, state.live)
 
     def warpMemberMask(instruction: ExecutableInstruction): Option[Value] = instruction match {
-      case ExecutableInstruction.ShuffleDown(_, _, _, _, _, memberMask)  => Some(memberMask)
-      case ExecutableInstruction.ShuffleUp(_, _, _, _, _, memberMask)    => Some(memberMask)
-      case ExecutableInstruction.ShuffleIndex(_, _, _, _, _, memberMask) => Some(memberMask)
-      case ExecutableInstruction.ShuffleBfly(_, _, _, _, _, memberMask)  => Some(memberMask)
-      case ExecutableInstruction.VoteBallot(_, _, memberMask)            => Some(memberMask)
-      case ExecutableInstruction.VotePredicate(_, _, memberMask, _)      => Some(memberMask)
-      case _                                                             => None
+      case ExecutableInstruction.ShuffleDown(_, _, _, _, _, memberMask, _)  => Some(memberMask)
+      case ExecutableInstruction.ShuffleUp(_, _, _, _, _, memberMask, _)    => Some(memberMask)
+      case ExecutableInstruction.ShuffleIndex(_, _, _, _, _, memberMask, _) => Some(memberMask)
+      case ExecutableInstruction.ShuffleBfly(_, _, _, _, _, memberMask, _)  => Some(memberMask)
+      case ExecutableInstruction.VoteBallot(_, _, memberMask)               => Some(memberMask)
+      case ExecutableInstruction.VotePredicate(_, _, memberMask, _)         => Some(memberMask)
+      case ExecutableInstruction.WarpReduce(_, _, memberMask, _, _)         => Some(memberMask)
+      case _                                                                => None
     }
 
     def synchronizeWarpInstruction(
@@ -5076,6 +5438,7 @@ object Interpreter {
 
         val context =
           ExecutionContext(kernel, block, group, geometry, state, cohort.pc, active, arguments, memory, control)
+
         effects.clear()
         val outcome =
           if (active.isEmpty) Right(Step.Advance)
@@ -5191,6 +5554,10 @@ object Interpreter {
         memory.validateRange(address, byteCount(width)).leftMap(error =>
           ExecutionFault.Memory(s"pc ${pc.value}, lane $lane: ${error.message}")
         )
+      case StateWrite.AtomicMemoryMin(lane, _, address, width, _) =>
+        memory.validateRange(address, byteCount(width)).leftMap(error =>
+          ExecutionFault.Memory(s"pc ${pc.value}, lane $lane: ${error.message}")
+        )
       case StateWrite.AtomicMemoryAddFloat(lane, _, address, width, _) =>
         memory.validateRange(address, byteCount(width)).leftMap(error =>
           ExecutionFault.Memory(s"pc ${pc.value}, lane $lane: ${error.message}")
@@ -5222,6 +5589,12 @@ object Interpreter {
       val previous = state.readShared(address, width)
       state.registers(lane)(destination) = truncate(previous, width)
       state.writeShared(address, width, previous + value)
+    case StateWrite.AtomicSharedMin(lane, destination, address, width, value) =>
+      val previous = state.readShared(address, width)
+      state.registers(lane)(destination) = truncate(previous, width)
+      val mask   = if (width >= 64) -1L else (1L << width) - 1L
+      val result = Math.min(previous & mask, value & mask)
+      state.writeShared(address, width, result)
     case StateWrite.AtomicMemoryAdd(lane, destination, address, width, value) =>
       val previous = memory.readLittleEndian(address, byteCount(width)).fold(
         error =>
@@ -5230,6 +5603,17 @@ object Interpreter {
       )
       state.registers(lane)(destination) = truncate(previous, width)
       memory.writeLittleEndian(address, previous + value, byteCount(width)).left.foreach(error =>
+        throw IllegalStateException(error.message)
+      )
+    case StateWrite.AtomicMemoryMin(lane, destination, address, width, value) =>
+      val previous = memory.readLittleEndian(address, byteCount(width)).fold(
+        error => throw IllegalStateException(error.message),
+        identity
+      )
+      state.registers(lane)(destination) = truncate(previous, width)
+      val mask   = if (width >= 64) -1L else (1L << width) - 1L
+      val result = Math.min(previous & mask, value & mask)
+      memory.writeLittleEndian(address, result, byteCount(width)).left.foreach(error =>
         throw IllegalStateException(error.message)
       )
     case StateWrite.AtomicMemoryAddFloat(lane, destination, address, width, value) =>

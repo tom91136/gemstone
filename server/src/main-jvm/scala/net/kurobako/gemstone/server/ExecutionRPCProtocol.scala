@@ -47,6 +47,7 @@ private[server] object ExecutionRPCProtocol {
     case LaunchWithGeometry               extends Operation(12)
     case LaunchWithGeometryAndRelocations extends Operation(13)
     case CompletionPointerRelocations     extends Operation(14)
+    case WriteProgramGlobal               extends Operation(15)
   }
 
   def exchange(
@@ -141,6 +142,14 @@ private[server] object ExecutionRPCProtocol {
       } yield longBytes(id.toLong)
     case Operation.UnloadProgram =>
       programId(payload.getLong()).flatMap(service.unload).map(_ => Col.empty)
+    case Operation.WriteProgramGlobal =>
+      for {
+        program <- programId(payload.getLong())
+        name    <- string(payload)
+        offset = payload.getLong()
+        bytes <- byteArray(payload)
+        _     <- service.writeGlobal(program, name, offset, bytes)
+      } yield Col.empty
     case Operation.Launch =>
       decodeDispatch(payload, includeRelocations = false, includeGeometry = false).flatMap(service.launch).map(id =>
         longBytes(id.toLong)

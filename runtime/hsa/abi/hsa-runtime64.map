@@ -1,0 +1,7 @@
+ROCR_1 {
+  global:
+    hsa_*;
+    gemstone_hsa_*;
+  local:
+    *;
+};

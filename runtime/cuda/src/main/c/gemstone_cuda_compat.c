@@ -47,8 +47,18 @@ static int32_t gemstone_ptx_target_version(const char *ptx) {
 static int32_t gemstone_configured_ptx_version(void) {
   const char *value = getenv("GEMSTONE_CUDA_TARGET_ARCH");
   if (value == NULL) return 0;
-  if (strncmp(value, "compute_", 8) == 0) value += 8;
-  else if (strncmp(value, "sm_", 3) == 0) value += 3;
+  /* Accept both spellings emitted by our launchers (compute_89/sm_89) and
+   * the compact forms commonly used in CUDA build flags (compute89/sm89).
+   * The environment is a process-local target contract, so normalising the
+   * harmless separator here avoids silently advertising the historical 7.5
+   * default when a caller supplies the compact spelling. */
+  if (strncmp(value, "compute", 7) == 0) {
+    value += 7;
+    if (*value == '_') ++value;
+  } else if (strncmp(value, "sm", 2) == 0) {
+    value += 2;
+    if (*value == '_') ++value;
+  }
   else return 0;
   if (*value < '0' || *value > '9') return 0;
   int32_t version = 0;
@@ -58,6 +68,22 @@ static int32_t gemstone_configured_ptx_version(void) {
     ++value;
   }
   return version;
+}
+
+/* The advertised compute capability is part of the emulated device contract,
+ * not a property of the host running the RPC server.  Keep the historical
+ * 7.5 default for callers which do not select a target, but make a relocated
+ * artifact targeting sm_89 (or compute_89) observable as 8.9 to CUDA
+ * libraries such as cuBLAS. */
+static void gemstone_compute_capability(int32_t *major, int32_t *minor) {
+  const int32_t target = gemstone_configured_ptx_version();
+  if (target >= 10) {
+    *major = target / 10;
+    *minor = target % 10;
+  } else {
+    *major = 7;
+    *minor = 5;
+  }
 }
 
 static int32_t gemstone_registered_ptx_version(const void *function);
@@ -336,6 +362,99 @@ extern int32_t cuMemcpyHtoD_v2(uint64_t destination, const void *source, size_t 
 extern int32_t cuModuleGetGlobal_v2(uint64_t *pointer, size_t *bytes, void *module, const char *name);
 extern int32_t gemstone_managed_register_remote(uint64_t pointer, size_t size);
 extern int32_t gemstone_managed_unregister_remote(uint64_t pointer);
+extern _Thread_local void *gemstone_current_context;
+
+/* The CUDA 13 runtime probes destination pointers with the Driver pointer
+ * attribute APIs before issuing a copy.  A real driver can answer those
+ * queries from its VA map; Gemstone's device addresses are logical handles,
+ * so answer the portable attributes directly and keep the ABI useful without
+ * pretending the address is host-mapped. */
+enum {
+  GEMSTONE_CU_POINTER_ATTRIBUTE_CONTEXT = 1,
+  GEMSTONE_CU_POINTER_ATTRIBUTE_MEMORY_TYPE = 2,
+  GEMSTONE_CU_POINTER_ATTRIBUTE_DEVICE_POINTER = 3,
+  GEMSTONE_CU_POINTER_ATTRIBUTE_HOST_POINTER = 4,
+  GEMSTONE_CU_POINTER_ATTRIBUTE_SYNC_MEMOPS = 6,
+  GEMSTONE_CU_POINTER_ATTRIBUTE_BUFFER_ID = 7,
+  GEMSTONE_CU_POINTER_ATTRIBUTE_IS_MANAGED = 8,
+  GEMSTONE_CU_POINTER_ATTRIBUTE_DEVICE_ORDINAL = 9,
+  GEMSTONE_CU_POINTER_ATTRIBUTE_RANGE_START_ADDR = 11,
+  GEMSTONE_CU_POINTER_ATTRIBUTE_RANGE_SIZE = 12,
+  GEMSTONE_CU_POINTER_ATTRIBUTE_MAPPED = 13,
+  GEMSTONE_CU_POINTER_ATTRIBUTE_ALLOWED_HANDLE_TYPES = 14,
+  GEMSTONE_CU_POINTER_ATTRIBUTE_ACCESS_FLAGS = 16,
+  GEMSTONE_CU_POINTER_ATTRIBUTE_MEMPOOL_HANDLE = 17,
+  GEMSTONE_CU_POINTER_ATTRIBUTE_MAPPING_SIZE = 18,
+  GEMSTONE_CU_POINTER_ATTRIBUTE_MAPPING_BASE_ADDR = 19,
+  GEMSTONE_CU_POINTER_ATTRIBUTE_MEMORY_BLOCK_ID = 20,
+  GEMSTONE_CU_POINTER_ATTRIBUTE_IS_HW_DECOMPRESS_CAPABLE = 21
+};
+
+static int32_t gemstone_cuPointerGetAttribute(void *data, int32_t attribute, uint64_t pointer) {
+  if (data == NULL || pointer == 0) return GEMSTONE_STATUS_INVALID_VALUE;
+  const int device_pointer = pointer >= UINT64_C(0x100000000);
+  switch (attribute) {
+    case GEMSTONE_CU_POINTER_ATTRIBUTE_CONTEXT:
+      *(void **)data = gemstone_current_context;
+      return GEMSTONE_STATUS_SUCCESS;
+    case GEMSTONE_CU_POINTER_ATTRIBUTE_MEMORY_TYPE:
+      *(uint32_t *)data = device_pointer ? 2U : 1U;
+      return GEMSTONE_STATUS_SUCCESS;
+    case GEMSTONE_CU_POINTER_ATTRIBUTE_DEVICE_POINTER:
+      *(uint64_t *)data = device_pointer ? pointer : 0;
+      return GEMSTONE_STATUS_SUCCESS;
+    case GEMSTONE_CU_POINTER_ATTRIBUTE_HOST_POINTER:
+      *(uint64_t *)data = device_pointer ? 0 : pointer;
+      return GEMSTONE_STATUS_SUCCESS;
+    case GEMSTONE_CU_POINTER_ATTRIBUTE_SYNC_MEMOPS:
+    case GEMSTONE_CU_POINTER_ATTRIBUTE_IS_MANAGED:
+    case GEMSTONE_CU_POINTER_ATTRIBUTE_DEVICE_ORDINAL:
+    case GEMSTONE_CU_POINTER_ATTRIBUTE_MAPPED:
+    case GEMSTONE_CU_POINTER_ATTRIBUTE_ALLOWED_HANDLE_TYPES:
+    case GEMSTONE_CU_POINTER_ATTRIBUTE_ACCESS_FLAGS:
+    case GEMSTONE_CU_POINTER_ATTRIBUTE_IS_HW_DECOMPRESS_CAPABLE:
+      *(uint32_t *)data = attribute == GEMSTONE_CU_POINTER_ATTRIBUTE_MAPPED && device_pointer
+          ? 1U
+          : attribute == GEMSTONE_CU_POINTER_ATTRIBUTE_ACCESS_FLAGS && device_pointer ? 3U : 0U;
+      return GEMSTONE_STATUS_SUCCESS;
+    case GEMSTONE_CU_POINTER_ATTRIBUTE_BUFFER_ID:
+    case GEMSTONE_CU_POINTER_ATTRIBUTE_RANGE_START_ADDR:
+    case GEMSTONE_CU_POINTER_ATTRIBUTE_RANGE_SIZE:
+    case GEMSTONE_CU_POINTER_ATTRIBUTE_MAPPING_SIZE:
+    case GEMSTONE_CU_POINTER_ATTRIBUTE_MAPPING_BASE_ADDR:
+    case GEMSTONE_CU_POINTER_ATTRIBUTE_MEMORY_BLOCK_ID:
+      *(uint64_t *)data = attribute == GEMSTONE_CU_POINTER_ATTRIBUTE_RANGE_START_ADDR ||
+          attribute == GEMSTONE_CU_POINTER_ATTRIBUTE_MAPPING_BASE_ADDR ? pointer : 0;
+      return GEMSTONE_STATUS_SUCCESS;
+    case GEMSTONE_CU_POINTER_ATTRIBUTE_MEMPOOL_HANDLE:
+      *(void **)data = (void *)(uintptr_t)UINT64_C(0x300000000);
+      return GEMSTONE_STATUS_SUCCESS;
+    default:
+      return GEMSTONE_STATUS_INVALID_VALUE;
+  }
+}
+
+static int32_t gemstone_cuPointerGetAttributes(
+    uint32_t count,
+    int32_t *attributes,
+    void **data,
+    uint64_t pointer) {
+  if (count != 0 && (attributes == NULL || data == NULL)) return GEMSTONE_STATUS_INVALID_VALUE;
+  if (pointer == 0) return GEMSTONE_STATUS_INVALID_VALUE;
+  for (uint32_t index = 0; index < count; ++index) {
+    const int32_t status = gemstone_cuPointerGetAttribute(data[index], attributes[index], pointer);
+    if (status != GEMSTONE_STATUS_SUCCESS) return status;
+  }
+  return GEMSTONE_STATUS_SUCCESS;
+}
+
+int32_t cuPointerGetAttribute(void *data, int32_t attribute, uint64_t pointer) {
+  return gemstone_cuPointerGetAttribute(data, attribute, pointer);
+}
+
+int32_t cuPointerGetAttributes(uint32_t count, int32_t *attributes, void **data, uint64_t pointer) {
+  return gemstone_cuPointerGetAttributes(count, attributes, data, pointer);
+}
 
 typedef struct GemstoneMirroredAllocation {
   uint64_t pointer;
@@ -1231,6 +1350,25 @@ int32_t cuKernelGetAttribute(int32_t *value, int32_t attribute, void *kernel, in
   return cuFuncGetAttribute(value, attribute, kernel);
 }
 
+/* Kernel tuning attributes are advisory for the interpreter.  Accept the
+ * setters so vendor libraries can configure their generated kernels without
+ * turning an otherwise executable launch into NOT_SUPPORTED. */
+int32_t cuFuncSetAttribute(void *function, int32_t attribute, int32_t value) {
+  (void)attribute;
+  (void)value;
+  return function == NULL ? GEMSTONE_STATUS_INVALID_VALUE : GEMSTONE_STATUS_SUCCESS;
+}
+
+int32_t cuFuncSetCacheConfig(void *function, int32_t config) {
+  (void)config;
+  return function == NULL ? GEMSTONE_STATUS_INVALID_VALUE : GEMSTONE_STATUS_SUCCESS;
+}
+
+int32_t cuFuncSetSharedMemConfig(void *function, int32_t config) {
+  (void)config;
+  return function == NULL ? GEMSTONE_STATUS_INVALID_VALUE : GEMSTONE_STATUS_SUCCESS;
+}
+
 /*
  * The CUDA runtime uses this driver entry while CUB is selecting a reduction
  * plan.  There is no useful device occupancy to query for the JVM executor,
@@ -1277,6 +1415,20 @@ extern int32_t cuStreamAddCallback(void *stream, void *callback, void *user_data
 extern int32_t cuMemcpyDtoD_v2(uint64_t destination, uint64_t source, size_t size);
 extern int32_t cuMemsetD8_v2(uint64_t destination, uint8_t value, size_t count);
 extern int32_t cuModuleLoadData(void **module, const void *image);
+extern int32_t cuModuleLoad(void **module, const char *filename);
+extern int32_t cuModuleGetLoadingMode(int32_t *mode);
+
+static int32_t gemstone_cuModuleGetTexRef(void **reference, void *module, const char *name) {
+  if (reference == NULL || module == NULL || name == NULL) return GEMSTONE_STATUS_INVALID_VALUE;
+  *reference = module;
+  return GEMSTONE_STATUS_SUCCESS;
+}
+
+static int32_t gemstone_cuModuleGetSurfRef(void **reference, void *module, const char *name) {
+  if (reference == NULL || module == NULL || name == NULL) return GEMSTONE_STATUS_INVALID_VALUE;
+  *reference = module;
+  return GEMSTONE_STATUS_SUCCESS;
+}
 extern int32_t cuModuleGetFunction(void **function, void *module, const char *name);
 extern int32_t cuModuleUnload(void *module);
 extern int32_t gemstone_cuCtxCreate_v4(void **context, void *parameters, uint32_t flags, int32_t device);
@@ -1318,6 +1470,44 @@ int32_t cuLaunchKernel_ptsz(
       block_z,
       shared_memory_bytes,
       stream,
+      kernel_params,
+      extra);
+}
+
+/* CUDA 11.6 added an extensible launch entry point.  The runtime only uses
+ * the fixed geometry fields for ordinary kernels; attributes are optional
+ * hints that have no equivalent in the emulator.  Keep this declaration
+ * private so the compatibility object does not depend on a particular CUDA
+ * header revision (the generated weak stub has the vendor declaration). */
+typedef struct GemstoneCudaLaunchConfig {
+  uint32_t grid_x;
+  uint32_t grid_y;
+  uint32_t grid_z;
+  uint32_t block_x;
+  uint32_t block_y;
+  uint32_t block_z;
+  uint32_t shared_memory_bytes;
+  void *stream;
+  void *attributes;
+  uint32_t attribute_count;
+} GemstoneCudaLaunchConfig;
+
+int32_t cuLaunchKernelEx(
+    const GemstoneCudaLaunchConfig *config,
+    void *function,
+    void **kernel_params,
+    void **extra) {
+  if (config == NULL) return GEMSTONE_STATUS_INVALID_VALUE;
+  return cuLaunchKernel(
+      function,
+      config->grid_x,
+      config->grid_y,
+      config->grid_z,
+      config->block_x,
+      config->block_y,
+      config->block_z,
+      config->shared_memory_bytes,
+      config->stream,
       kernel_params,
       extra);
 }
@@ -1422,8 +1612,6 @@ int32_t cuLinkDestroy(void *state_pointer) {
   return GEMSTONE_STATUS_SUCCESS;
 }
 
-extern _Thread_local void *gemstone_current_context;
-
 static int32_t gemstone_cuLibraryLoadData(
     void **library,
     const void *code,
@@ -1451,6 +1639,23 @@ static int32_t gemstone_cuLibraryGetModule(void **module, void *library) {
   if (module == NULL || library == NULL) return GEMSTONE_STATUS_INVALID_VALUE;
   *module = library;
   return GEMSTONE_STATUS_SUCCESS;
+}
+
+/* cuBLAS probes every internal library for managed globals while it builds
+ * its dispatch catalogue.  A missing global is a normal lookup miss, not an
+ * unsupported driver operation; returning NOT_SUPPORTED (801) makes cuBLAS
+ * abort its catalogue build with CUDA_ERROR_SYSTEM_DRIVER_MISMATCH. */
+int32_t cuLibraryGetManaged(
+    uint64_t *device_pointer,
+    size_t *bytes,
+    void *library,
+    const char *name) {
+  (void)library;
+  (void)name;
+  if (device_pointer == NULL || bytes == NULL) return GEMSTONE_STATUS_INVALID_VALUE;
+  *device_pointer = 0;
+  *bytes = 0;
+  return GEMSTONE_STATUS_NOT_FOUND;
 }
 
 static int32_t gemstone_cuLibraryUnload(void *library) {
@@ -1618,8 +1823,16 @@ int32_t cudaDeviceGetAttribute(int32_t *value, int32_t attribute, int32_t device
     case 72: *value = 2147483647; break;
     case 73: *value = 32768; break;
     case 74: *value = 32768; break;
-    case 75: *value = 7; break;
-    case 76: *value = 5; break;
+    case 75: {
+      const int32_t target = gemstone_configured_ptx_version();
+      *value = target >= 10 ? target / 10 : 7;
+      break;
+    }
+    case 76: {
+      const int32_t target = gemstone_configured_ptx_version();
+      *value = target >= 10 ? target % 10 : 5;
+      break;
+    }
     case 77: *value = 32768; break;
     case 78: *value = 1; break;
     case 79: *value = 1; break;
@@ -1641,6 +1854,8 @@ int32_t cudaDeviceGetAttribute(int32_t *value, int32_t attribute, int32_t device
     case 100: *value = 0; break;
     case 101: *value = 0; break;
     case 108: *value = 4194304; break;
+    case 109: *value = 4096; break;
+    case 115: *value = 1; break;
     case 106: *value = 32; break;
     default: *value = 0; break;
   }
@@ -1686,8 +1901,7 @@ int32_t cudaGetDeviceProperties(void *properties, int32_t device) {
   value->max_grid_size[1] = 65535;
   value->max_grid_size[2] = 65535;
   value->total_constant_memory = 65536;
-  value->major = 7;
-  value->minor = 5;
+  gemstone_compute_capability(&value->major, &value->minor);
   value->texture_alignment = 256;
   value->texture_pitch_alignment = 32;
   value->multiprocessor_count = 1;
@@ -2009,8 +2223,7 @@ static int32_t gemstone_cuDeviceTotalMem_v2(uint64_t *bytes, int32_t device) {
 
 static int32_t gemstone_cuDeviceComputeCapability(int32_t *major, int32_t *minor, int32_t device) {
   if (major == NULL || minor == NULL || device != 0) return GEMSTONE_STATUS_INVALID_VALUE;
-  *major = 7;
-  *minor = 5;
+  gemstone_compute_capability(major, minor);
   return GEMSTONE_STATUS_SUCCESS;
 }
 
@@ -2033,6 +2246,22 @@ static int32_t gemstone_cuCtxGetDevice_v2(int32_t *device, void *context) {
 
 static int32_t gemstone_cuCtxSetCurrent(void *context) {
   gemstone_current_context = context;
+  return GEMSTONE_STATUS_SUCCESS;
+}
+
+/* Older CUDA libraries still resolve the unversioned push/pop spellings
+ * directly.  Keep both spellings functional; the generated ABI stubs only
+ * cover the v2 names and return NOT_SUPPORTED. */
+static int32_t gemstone_cuCtxPushCurrent(void *context) {
+  if (context == NULL) return GEMSTONE_STATUS_INVALID_VALUE;
+  gemstone_current_context = context;
+  return GEMSTONE_STATUS_SUCCESS;
+}
+
+static int32_t gemstone_cuCtxPopCurrent(void **context) {
+  if (context == NULL) return GEMSTONE_STATUS_INVALID_VALUE;
+  *context = gemstone_current_context;
+  gemstone_current_context = NULL;
   return GEMSTONE_STATUS_SUCCESS;
 }
 
@@ -2091,6 +2320,33 @@ static int32_t gemstone_cuDeviceGetP2PAttribute(
 static int32_t gemstone_cuDeviceCanAccessPeer(int32_t *value, int32_t source, int32_t destination) {
   if (value == NULL || source != 0 || destination != 0) return GEMSTONE_STATUS_INVALID_VALUE;
   *value = 0;
+  return GEMSTONE_STATUS_SUCCESS;
+}
+
+/* CUDA libraries probe these capability queries while constructing their
+ * dispatch tables.  The emulator deliberately advertises no host/P2P atomic
+ * operations, but a successful query is required so a consumer can make that
+ * decision itself rather than treating the driver as uninitialised. */
+int32_t cuDeviceGetHostAtomicCapabilities(
+    uint32_t *capabilities,
+    const void *operations,
+    uint32_t count,
+    int32_t device) {
+  (void)operations;
+  if (capabilities == NULL || device != 0) return GEMSTONE_STATUS_INVALID_VALUE;
+  memset(capabilities, 0, (size_t)count * sizeof(*capabilities));
+  return GEMSTONE_STATUS_SUCCESS;
+}
+
+int32_t cuDeviceGetP2PAtomicCapabilities(
+    uint32_t *capabilities,
+    const void *operations,
+    uint32_t count,
+    int32_t source,
+    int32_t destination) {
+  (void)operations;
+  if (capabilities == NULL || source != 0 || destination != 0) return GEMSTONE_STATUS_INVALID_VALUE;
+  memset(capabilities, 0, (size_t)count * sizeof(*capabilities));
   return GEMSTONE_STATUS_SUCCESS;
 }
 
@@ -2252,6 +2508,22 @@ int32_t cuCtxGetDevice_v2(int32_t *device, void *context) {
 
 int32_t cuCtxSetCurrent(void *context) {
   return gemstone_cuCtxSetCurrent(context);
+}
+
+int32_t cuCtxPushCurrent(void *context) {
+  return gemstone_cuCtxPushCurrent(context);
+}
+
+int32_t cuCtxPushCurrent_v2(void *context) {
+  return gemstone_cuCtxPushCurrent(context);
+}
+
+int32_t cuCtxPopCurrent(void **context) {
+  return gemstone_cuCtxPopCurrent(context);
+}
+
+int32_t cuCtxPopCurrent_v2(void **context) {
+  return gemstone_cuCtxPopCurrent(context);
 }
 
 int32_t cuCtxCreate(void **context, uint32_t flags, int32_t device) {
@@ -2514,8 +2786,20 @@ static const char *gemstone_cuGetErrorString(int32_t status) {
   return cudaGetErrorString(status);
 }
 
+/* cuBLAS obtains these through dlsym while constructing its driver dispatch
+ * table, so the ordinary ABI symbols must carry the same semantics as the
+ * cuGetProcAddress entries above.  The generated weak-presence stubs return
+ * NOT_SUPPORTED and make an otherwise valid library load fail. */
+const char *cuGetErrorString(int32_t status) {
+  return gemstone_cuGetErrorString(status);
+}
+
 static const char *gemstone_cuGetErrorName(int32_t status) {
   return cudaGetErrorName(status);
+}
+
+const char *cuGetErrorName(int32_t status) {
+  return gemstone_cuGetErrorName(status);
 }
 
 static int32_t gemstone_cuMemcpyHtoDAsync_v2(uint64_t destination, const void *source, size_t size, void *stream) {
@@ -2533,9 +2817,101 @@ static int32_t gemstone_cuMemcpyDtoDAsync_v2(uint64_t destination, uint64_t sour
   return cuMemcpyDtoD_v2(destination, source, size);
 }
 
+/* CUDA's runtime resolves the generic copy entry points while building its
+ * dispatch table.  Route by the logical address class so the same ABI also
+ * handles host-to-device and device-to-host calls issued through that table. */
+int32_t cuMemcpy(uint64_t destination, uint64_t source, size_t size) {
+  const int destination_device = destination >= UINT64_C(0x100000000) && destination < UINT64_C(0x1000000000);
+  const int source_device = source >= UINT64_C(0x100000000) && source < UINT64_C(0x1000000000);
+  if (destination_device && !source_device) return cuMemcpyHtoD_v2(destination, (const void *)(uintptr_t)source, size);
+  if (!destination_device && source_device) return cuMemcpyDtoH_v2((void *)(uintptr_t)destination, source, size);
+  return cuMemcpyDtoD_v2(destination, source, size);
+}
+
+int32_t cuMemcpy_ptds(uint64_t destination, uint64_t source, size_t size) {
+  return cuMemcpy(destination, source, size);
+}
+
+int32_t cuMemcpyAsync(uint64_t destination, uint64_t source, size_t size, void *stream) {
+  const int destination_device = destination >= UINT64_C(0x100000000) && destination < UINT64_C(0x1000000000);
+  const int source_device = source >= UINT64_C(0x100000000) && source < UINT64_C(0x1000000000);
+  if (destination_device && !source_device) return gemstone_cuMemcpyHtoDAsync_v2(destination, (const void *)(uintptr_t)source, size, stream);
+  if (!destination_device && source_device) return gemstone_cuMemcpyDtoHAsync_v2((void *)(uintptr_t)destination, source, size, stream);
+  return gemstone_cuMemcpyDtoDAsync_v2(destination, source, size, stream);
+}
+
+int32_t cuMemcpyAsync_ptsz(uint64_t destination, uint64_t source, size_t size, void *stream) {
+  return cuMemcpyAsync(destination, source, size, stream);
+}
+
+/* CUDA 13's runtime uses these stream-specialized spellings for ordinary
+ * copies.  They are ABI aliases, not distinct stream implementations: the
+ * emulator currently executes every operation synchronously on its logical
+ * default stream.  Export real symbols as well as registering them below so
+ * both dlsym and cuGetProcAddress callers take the same path. */
+int32_t cuMemcpyHtoD_ptds(uint64_t destination, const void *source, size_t size) {
+  return cuMemcpyHtoD_v2(destination, source, size);
+}
+
+int32_t cuMemcpyHtoD_v2_ptds(uint64_t destination, const void *source, size_t size) {
+  return cuMemcpyHtoD_v2(destination, source, size);
+}
+
+int32_t cuMemcpyDtoH_ptds(void *destination, uint64_t source, size_t size) {
+  return cuMemcpyDtoH_v2(destination, source, size);
+}
+
+int32_t cuMemcpyDtoH_v2_ptds(void *destination, uint64_t source, size_t size) {
+  return cuMemcpyDtoH_v2(destination, source, size);
+}
+
+int32_t cuMemcpyDtoD_ptds(uint64_t destination, uint64_t source, size_t size) {
+  return cuMemcpyDtoD_v2(destination, source, size);
+}
+
+int32_t cuMemcpyDtoD_v2_ptds(uint64_t destination, uint64_t source, size_t size) {
+  return cuMemcpyDtoD_v2(destination, source, size);
+}
+
+int32_t cuMemcpyHtoDAsync_ptsz(uint64_t destination, const void *source, size_t size, void *stream) {
+  return gemstone_cuMemcpyHtoDAsync_v2(destination, source, size, stream);
+}
+
+int32_t cuMemcpyHtoDAsync_v2_ptsz(uint64_t destination, const void *source, size_t size, void *stream) {
+  return gemstone_cuMemcpyHtoDAsync_v2(destination, source, size, stream);
+}
+
+int32_t cuMemcpyDtoHAsync_ptsz(void *destination, uint64_t source, size_t size, void *stream) {
+  return gemstone_cuMemcpyDtoHAsync_v2(destination, source, size, stream);
+}
+
+int32_t cuMemcpyDtoHAsync_v2_ptsz(void *destination, uint64_t source, size_t size, void *stream) {
+  return gemstone_cuMemcpyDtoHAsync_v2(destination, source, size, stream);
+}
+
+int32_t cuMemcpyDtoDAsync_ptsz(uint64_t destination, uint64_t source, size_t size, void *stream) {
+  return gemstone_cuMemcpyDtoDAsync_v2(destination, source, size, stream);
+}
+
+int32_t cuMemcpyDtoDAsync_v2_ptsz(uint64_t destination, uint64_t source, size_t size, void *stream) {
+  return gemstone_cuMemcpyDtoDAsync_v2(destination, source, size, stream);
+}
+
 static int32_t gemstone_cuMemsetD8Async(uint64_t destination, uint8_t value, size_t count, void *stream) {
   (void)stream;
   return cuMemsetD8_v2(destination, value, count);
+}
+
+int32_t cuMemsetD8_ptds(uint64_t destination, uint8_t value, size_t count) {
+  return cuMemsetD8_v2(destination, value, count);
+}
+
+int32_t cuMemsetD8_v2_ptds(uint64_t destination, uint8_t value, size_t count) {
+  return cuMemsetD8_v2(destination, value, count);
+}
+
+int32_t cuMemsetD8Async_ptsz(uint64_t destination, uint8_t value, size_t count, void *stream) {
+  return gemstone_cuMemsetD8Async(destination, value, count, stream);
 }
 
 static int32_t gemstone_cuStreamSynchronize(void *stream) {
@@ -3138,6 +3514,14 @@ int32_t GEMSTONE_CUDA_API gemstone_cuGetProcAddress_v2(
     int32_t *symbol_status) {
   (void)flags;
   if (symbol == NULL || pfn == NULL) return GEMSTONE_STATUS_INVALID_VALUE;
+  /* CUDA's loader uses an empty spelling as a harmless capability probe.
+   * Match the vendor driver: it is a successful lookup with no function,
+   * rather than CUDA_ERROR_NOT_FOUND. */
+  if (symbol[0] == '\0') {
+    *pfn = NULL;
+    if (symbol_status != NULL) *symbol_status = 1;
+    return GEMSTONE_STATUS_SUCCESS;
+  }
   if (strcmp(symbol, "cuLaunchKernel") == 0) {
     *pfn = (void *)(uintptr_t)cuLaunchKernel;
     if (symbol_status != NULL) *symbol_status = 0;
@@ -3181,6 +3565,8 @@ int32_t GEMSTONE_CUDA_API gemstone_cuGetProcAddress_v2(
   GEMSTONE_CUDA_PROC("cuDeviceGetName", gemstone_cuDeviceGetName)
   GEMSTONE_CUDA_PROC("cuDeviceGetP2PAttribute", gemstone_cuDeviceGetP2PAttribute)
   GEMSTONE_CUDA_PROC("cuDeviceCanAccessPeer", gemstone_cuDeviceCanAccessPeer)
+  GEMSTONE_CUDA_PROC("cuDeviceGetHostAtomicCapabilities", cuDeviceGetHostAtomicCapabilities)
+  GEMSTONE_CUDA_PROC("cuDeviceGetP2PAtomicCapabilities", cuDeviceGetP2PAtomicCapabilities)
   GEMSTONE_CUDA_PROC("cuDeviceGetTexture1DLinearMaxWidth", gemstone_cuDeviceGetTexture1DLinearMaxWidth)
   GEMSTONE_CUDA_PROC("cuDeviceGetDefaultMemPool", gemstone_cuDeviceGetDefaultMemPool)
   GEMSTONE_CUDA_PROC("cuDeviceGetMemPool", gemstone_cuDeviceGetMemPool)
@@ -3214,6 +3600,10 @@ int32_t GEMSTONE_CUDA_API gemstone_cuGetProcAddress_v2(
   GEMSTONE_CUDA_PROC("cuCtxGetDevice", gemstone_cuCtxGetDevice)
   GEMSTONE_CUDA_PROC("cuCtxGetDevice_v2", gemstone_cuCtxGetDevice_v2)
   GEMSTONE_CUDA_PROC("cuCtxSetCurrent", gemstone_cuCtxSetCurrent)
+  GEMSTONE_CUDA_PROC("cuCtxPushCurrent", gemstone_cuCtxPushCurrent)
+  GEMSTONE_CUDA_PROC("cuCtxPushCurrent_v2", cuCtxPushCurrent_v2)
+  GEMSTONE_CUDA_PROC("cuCtxPopCurrent", gemstone_cuCtxPopCurrent)
+  GEMSTONE_CUDA_PROC("cuCtxPopCurrent_v2", cuCtxPopCurrent_v2)
   GEMSTONE_CUDA_PROC("cuDevicePrimaryCtxRetain", gemstone_cuDevicePrimaryCtxRetain)
   GEMSTONE_CUDA_PROC("cuDevicePrimaryCtxRelease", gemstone_cuDevicePrimaryCtxRelease_v2)
   GEMSTONE_CUDA_PROC("cuDevicePrimaryCtxRelease_v2", gemstone_cuDevicePrimaryCtxRelease_v2)
@@ -3227,6 +3617,13 @@ int32_t GEMSTONE_CUDA_API gemstone_cuGetProcAddress_v2(
   GEMSTONE_CUDA_PROC("cuMemFree", cuMemFree_v2)
   GEMSTONE_CUDA_PROC("cuMemFree_v2", cuMemFree_v2)
   GEMSTONE_CUDA_PROC("cuMemAllocManaged", gemstone_cuMemAllocManaged)
+  GEMSTONE_CUDA_PROC("cuMemAllocHost", cuMemAllocHost)
+  GEMSTONE_CUDA_PROC("cuMemAllocHost_v2", cuMemAllocHost_v2)
+  GEMSTONE_CUDA_PROC("cuMemFreeHost", cuMemFreeHost)
+  GEMSTONE_CUDA_PROC("cuMemHostAlloc", cuMemHostAlloc)
+  GEMSTONE_CUDA_PROC("cuMemHostGetDevicePointer", cuMemHostGetDevicePointer_v2)
+  GEMSTONE_CUDA_PROC("cuMemHostGetDevicePointer_v2", cuMemHostGetDevicePointer_v2)
+  GEMSTONE_CUDA_PROC("cuMemHostGetFlags", cuMemHostGetFlags)
   GEMSTONE_CUDA_PROC("cuMemAllocAsync", gemstone_cuMemAllocAsync)
   GEMSTONE_CUDA_PROC("cuMemAllocFromPoolAsync", gemstone_cuMemAllocFromPoolAsync)
   GEMSTONE_CUDA_PROC("cuMemFreeAsync", gemstone_cuMemFreeAsync)
@@ -3239,13 +3636,36 @@ int32_t GEMSTONE_CUDA_API gemstone_cuGetProcAddress_v2(
   GEMSTONE_CUDA_PROC("cuMemAllocPitch_v2", gemstone_cuMemAllocPitch_v2)
   GEMSTONE_CUDA_PROC("cuMemGetInfo", gemstone_cuMemGetInfo_v2)
   GEMSTONE_CUDA_PROC("cuMemGetInfo_v2", gemstone_cuMemGetInfo_v2)
+  GEMSTONE_CUDA_PROC("cuPointerGetAttribute", cuPointerGetAttribute)
+  GEMSTONE_CUDA_PROC("cuPointerGetAttributes", cuPointerGetAttributes)
   GEMSTONE_CUDA_PROC("cuFlushGPUDirectRDMAWrites", cuFlushGPUDirectRDMAWrites)
   GEMSTONE_CUDA_PROC("cuMemcpyHtoD", cuMemcpyHtoD_v2)
   GEMSTONE_CUDA_PROC("cuMemcpyHtoD_v2", cuMemcpyHtoD_v2)
+  /* CUDA 13's runtime resolves the per-thread-default-stream spelling for
+   * synchronous copies through cuGetProcAddress.  The _ptds entry points have
+   * the same ABI and semantics as their ordinary driver counterparts; leaving
+   * them absent makes cudart translate the lookup miss into
+   * cudaErrorCallRequiresNewerDriver before it ever issues the RPC. */
+  GEMSTONE_CUDA_PROC("cuMemcpyHtoD_ptds", cuMemcpyHtoD_v2)
+  GEMSTONE_CUDA_PROC("cuMemcpyHtoD_v2_ptds", cuMemcpyHtoD_v2)
   GEMSTONE_CUDA_PROC("cuMemcpyDtoH", cuMemcpyDtoH_v2)
   GEMSTONE_CUDA_PROC("cuMemcpyDtoH_v2", cuMemcpyDtoH_v2)
+  GEMSTONE_CUDA_PROC("cuMemcpyDtoH_ptds", cuMemcpyDtoH_v2)
+  GEMSTONE_CUDA_PROC("cuMemcpyDtoH_v2_ptds", cuMemcpyDtoH_v2)
   GEMSTONE_CUDA_PROC("cuMemcpyDtoD", cuMemcpyDtoD_v2)
   GEMSTONE_CUDA_PROC("cuMemcpyDtoD_v2", cuMemcpyDtoD_v2)
+  GEMSTONE_CUDA_PROC("cuMemcpyDtoD_ptds", cuMemcpyDtoD_v2)
+  GEMSTONE_CUDA_PROC("cuMemcpyDtoD_v2_ptds", cuMemcpyDtoD_v2)
+  GEMSTONE_CUDA_PROC("cuMemcpy", cuMemcpy)
+  GEMSTONE_CUDA_PROC("cuMemcpy_ptds", cuMemcpy_ptds)
+  GEMSTONE_CUDA_PROC("cuMemcpyAsync", cuMemcpyAsync)
+  GEMSTONE_CUDA_PROC("cuMemcpyAsync_ptsz", cuMemcpyAsync_ptsz)
+  GEMSTONE_CUDA_PROC("cuMemcpyHtoDAsync_ptsz", gemstone_cuMemcpyHtoDAsync_v2)
+  GEMSTONE_CUDA_PROC("cuMemcpyHtoDAsync_v2_ptsz", gemstone_cuMemcpyHtoDAsync_v2)
+  GEMSTONE_CUDA_PROC("cuMemcpyDtoHAsync_ptsz", gemstone_cuMemcpyDtoHAsync_v2)
+  GEMSTONE_CUDA_PROC("cuMemcpyDtoHAsync_v2_ptsz", gemstone_cuMemcpyDtoHAsync_v2)
+  GEMSTONE_CUDA_PROC("cuMemcpyDtoDAsync_ptsz", gemstone_cuMemcpyDtoDAsync_v2)
+  GEMSTONE_CUDA_PROC("cuMemcpyDtoDAsync_v2_ptsz", gemstone_cuMemcpyDtoDAsync_v2)
   GEMSTONE_CUDA_PROC("cuMemcpy2D_v2", cuMemcpy2D_v2)
   GEMSTONE_CUDA_PROC("cuMemcpy2DUnaligned_v2", cuMemcpy2DUnaligned_v2)
   GEMSTONE_CUDA_PROC("cuMemcpy2DAsync_v2", cuMemcpy2DAsync_v2)
@@ -3257,6 +3677,9 @@ int32_t GEMSTONE_CUDA_API gemstone_cuGetProcAddress_v2(
   GEMSTONE_CUDA_VERSIONED_PROC("cuMemcpy3D", cuMemcpy3D, cuMemcpy3D_v2)
   GEMSTONE_CUDA_VERSIONED_PROC("cuMemcpy3DAsync", cuMemcpy3DAsync, cuMemcpy3DAsync_v2)
   GEMSTONE_CUDA_PROC("cuFuncGetAttribute", cuFuncGetAttribute)
+  GEMSTONE_CUDA_PROC("cuFuncSetAttribute", cuFuncSetAttribute)
+  GEMSTONE_CUDA_PROC("cuFuncSetCacheConfig", cuFuncSetCacheConfig)
+  GEMSTONE_CUDA_PROC("cuFuncSetSharedMemConfig", cuFuncSetSharedMemConfig)
   GEMSTONE_CUDA_PROC("cuKernelGetAttribute", cuKernelGetAttribute)
   GEMSTONE_CUDA_PROC("cuOccupancyMaxActiveBlocksPerMultiprocessor", cuOccupancyMaxActiveBlocksPerMultiprocessor)
   GEMSTONE_CUDA_PROC("cuOccupancyMaxActiveBlocksPerMultiprocessorWithFlags", cuOccupancyMaxActiveBlocksPerMultiprocessorWithFlags)
@@ -3268,6 +3691,8 @@ int32_t GEMSTONE_CUDA_API gemstone_cuGetProcAddress_v2(
   GEMSTONE_CUDA_PROC("cuMemcpyDtoDAsync_v2", gemstone_cuMemcpyDtoDAsync_v2)
   GEMSTONE_CUDA_PROC("cuMemsetD8", cuMemsetD8_v2)
   GEMSTONE_CUDA_PROC("cuMemsetD8_v2", cuMemsetD8_v2)
+  GEMSTONE_CUDA_PROC("cuMemsetD8_ptds", cuMemsetD8_v2)
+  GEMSTONE_CUDA_PROC("cuMemsetD8_v2_ptds", cuMemsetD8_v2)
   GEMSTONE_CUDA_PROC("cuMemsetD8Async", gemstone_cuMemsetD8Async)
   GEMSTONE_CUDA_PROC("cuStreamSynchronize", gemstone_cuStreamSynchronize)
   GEMSTONE_CUDA_PROC("cuStreamQuery", gemstone_cuStreamQuery)
@@ -3286,7 +3711,13 @@ int32_t GEMSTONE_CUDA_API gemstone_cuGetProcAddress_v2(
   GEMSTONE_CUDA_PROC("cuStreamAddCallback", cuStreamAddCallback)
   GEMSTONE_CUDA_PROC("cuLaunchHostFunc", cuLaunchHostFunc)
   GEMSTONE_CUDA_PROC("cuModuleLoadData", cuModuleLoadData)
+  GEMSTONE_CUDA_PROC("cuModuleLoadDataEx", cuModuleLoadDataEx)
+  GEMSTONE_CUDA_PROC("cuModuleLoadFatBinary", cuModuleLoadFatBinary)
+  GEMSTONE_CUDA_PROC("cuModuleLoad", cuModuleLoad)
   GEMSTONE_CUDA_PROC("cuModuleGetFunction", cuModuleGetFunction)
+  GEMSTONE_CUDA_PROC("cuModuleGetTexRef", gemstone_cuModuleGetTexRef)
+  GEMSTONE_CUDA_PROC("cuModuleGetSurfRef", gemstone_cuModuleGetSurfRef)
+  GEMSTONE_CUDA_PROC("cuModuleGetLoadingMode", cuModuleGetLoadingMode)
   GEMSTONE_CUDA_VERSIONED_PROC("cuModuleGetGlobal", cuModuleGetGlobal, cuModuleGetGlobal_v2)
   GEMSTONE_CUDA_PROC("cuModuleGetGlobal_v2", cuModuleGetGlobal_v2)
   GEMSTONE_CUDA_PROC("cuModuleUnload", cuModuleUnload)
@@ -3295,9 +3726,11 @@ int32_t GEMSTONE_CUDA_API gemstone_cuGetProcAddress_v2(
   GEMSTONE_CUDA_PROC("cuKernelGetFunction", cuKernelGetFunction)
   GEMSTONE_CUDA_PROC("cuLibraryGetGlobal", cuLibraryGetGlobal)
   GEMSTONE_CUDA_PROC("cuLibraryGetModule", gemstone_cuLibraryGetModule)
+  GEMSTONE_CUDA_PROC("cuLibraryGetManaged", cuLibraryGetManaged)
   GEMSTONE_CUDA_PROC("cuLibraryUnload", gemstone_cuLibraryUnload)
   GEMSTONE_CUDA_PROC("cuLaunchKernel", cuLaunchKernel)
   GEMSTONE_CUDA_PROC("cuLaunchKernel_ptsz", cuLaunchKernel_ptsz)
+  GEMSTONE_CUDA_PROC("cuLaunchKernelEx", cuLaunchKernelEx)
   GEMSTONE_CUDA_PROC("cuGetErrorString", gemstone_cuGetErrorString)
   GEMSTONE_CUDA_PROC("cuGetErrorName", gemstone_cuGetErrorName)
   GEMSTONE_CUDA_PROC("cuGetExportTable", gemstone_cuGetExportTable)

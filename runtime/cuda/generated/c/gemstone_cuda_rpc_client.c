@@ -92,7 +92,7 @@ typedef struct GemstoneKernelSignature {
   uint64_t function;
   uint64_t module;
   uint32_t count;
-  uint8_t *widths;
+  uint32_t *widths;
   struct GemstoneKernelSignature *next;
 } GemstoneKernelSignature;
 
@@ -107,9 +107,10 @@ static int gemstone_store_kernel_signature(
   GemstoneKernelSignature *entry = (GemstoneKernelSignature *)calloc(1, sizeof(*entry));
   if (entry == NULL) return -1;
   if (count != 0) {
-    entry->widths = (uint8_t *)malloc(count);
+    entry->widths = (uint32_t *)malloc((size_t)count * sizeof(*entry->widths));
     if (entry->widths == NULL) { free(entry); return -1; }
-    memcpy(entry->widths, widths, count);
+    for (uint32_t index = 0; index < count; ++index)
+      entry->widths[index] = gemstone_get_u32(widths + (size_t)index * 4);
   }
   entry->function = function;
   entry->module = module;
@@ -419,7 +420,8 @@ int32_t cuModuleLoadData(void **module, const void *image) {
   if (module == NULL || image == NULL) return GEMSTONE_STATUS_INVALID_VALUE;
   if (!gemstone_is_probably_textual_ptx(image)) {
     const char *ptx = gemstone_cuda_find_uncompressed_ptx(image);
-    if (ptx != NULL) image = ptx;
+    if (ptx == NULL) return GEMSTONE_STATUS_NOT_SUPPORTED;
+    image = ptx;
   }
   const size_t size = gemstone_bounded_string_length((const char *)image, GEMSTONE_RPC_MAXIMUM_PAYLOAD_SIZE);
   if (size == GEMSTONE_RPC_MAXIMUM_PAYLOAD_SIZE || size > GEMSTONE_RPC_MAXIMUM_PAYLOAD_SIZE - 4) {
@@ -465,7 +467,7 @@ int32_t cuModuleGetFunction(void **function, void *module, const char *name) {
     else {
       const uint64_t handle = gemstone_get_u64(response.data);
       const uint32_t count = gemstone_get_u32(response.data + 8);
-      if (count > 4096 || response.size != 12 + count ||
+      if (count > 4096 || response.size != 12 + (size_t)count * 4 ||
           gemstone_store_kernel_signature(handle, (uint64_t)(uintptr_t)module, response.data + 12, count) != 0) {
         status = GEMSTONE_STATUS_UNKNOWN;
       } else *function = (void *)(uintptr_t)handle;

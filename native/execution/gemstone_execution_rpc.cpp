@@ -47,7 +47,8 @@ enum Operation : uint32_t {
   LaunchWithRelocations = 11,
   LaunchWithGeometry = 12,
   LaunchWithGeometryAndRelocations = 13,
-  CompletionPointerRelocations = 14
+  CompletionPointerRelocations = 14,
+  WriteProgramGlobal = 15
 };
 
 void put_u32(std::vector<uint8_t> &output, uint32_t value) {
@@ -411,6 +412,23 @@ extern "C" int gemstone_execution_unload_program(gemstone_execution_client *clie
   if (client == nullptr || program_id == 0) return -1;
   std::vector<uint8_t> response;
   return exchange(client, UnloadProgram, identity_payload(program_id), response);
+}
+
+extern "C" int gemstone_execution_write_program_global(gemstone_execution_client *client, uint64_t program_id,
+                                                          const char *name, uint64_t offset, const void *bytes, uint32_t size) {
+  if (client == nullptr || program_id == 0 || name == nullptr || name[0] == '\0' || strlen(name) > 4096 ||
+      (size != 0 && bytes == nullptr))
+    return -1;
+  std::vector<uint8_t> payload = identity_payload(program_id);
+  const size_t name_size = strlen(name);
+  put_u32(payload, static_cast<uint32_t>(name_size));
+  payload.insert(payload.end(), name, name + name_size);
+  put_u64(payload, offset);
+  put_u32(payload, size);
+  const auto *input = static_cast<const uint8_t *>(bytes);
+  if (size != 0) payload.insert(payload.end(), input, input + size);
+  std::vector<uint8_t> response;
+  return exchange(client, WriteProgramGlobal, payload, response);
 }
 
 extern "C" int gemstone_execution_launch(gemstone_execution_client *client, uint64_t program_id,

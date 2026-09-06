@@ -14,6 +14,8 @@ int main() {
   cl_uint device_count = 0;
   assert(clGetDeviceIDs(platform, CL_DEVICE_TYPE_GPU, 1, &device, &device_count) == CL_SUCCESS);
   assert(device != nullptr && device_count == 1);
+  assert(clRetainDevice(device) == CL_SUCCESS);
+  assert(clReleaseDevice(device) == CL_SUCCESS);
 
   cl_ulong timer_resolution = 1;
   assert(clGetPlatformInfo(platform, CL_PLATFORM_HOST_TIMER_RESOLUTION,

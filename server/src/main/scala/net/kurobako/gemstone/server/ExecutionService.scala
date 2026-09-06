@@ -15,7 +15,8 @@ import scala.concurrent.ExecutionContext
 final class ExecutionService(
     executor: ProgramExecutor,
     schedule: Runnable => Unit = runnable => ExecutionContext.global.execute(runnable),
-    executionLimits: ExecutionLimits = ExecutionLimits.Default
+    executionLimits: ExecutionLimits = ExecutionLimits.Default,
+    parallelism: ExecutionParallelism = ExecutionParallelism.Sequential
 ) extends AutoCloseable {
   private val DirtyChunkSize = 64 * 1024L
 
@@ -146,6 +147,21 @@ final class ExecutionService(
     }
   }
 
+  def writeGlobal(
+      id: ProgramId,
+      name: String,
+      offset: Long,
+      bytes: Col[Byte]
+  ): Either[ExecutionFailure, Unit] = {
+    val accepted = synchronized {
+      val current = state.get()
+      if (closed) Left(ExecutionFailure.Failed("execution session is closed"))
+      else if (!current.programs.contains(id)) Left(ExecutionFailure.NotFound(s"program ${id.toLong} is not loaded"))
+      else Right(())
+    }
+    accepted.flatMap(_ => programLifecycleLock.synchronized(executor.writeGlobal(id, name, offset, bytes)))
+  }
+
   def launch(dispatch: KernelDispatch): Either[ExecutionFailure, CompletionId] = {
     val accepted = synchronized {
       val current = state.get()
@@ -155,7 +171,11 @@ final class ExecutionService(
       else
         validateDispatch(dispatch, current).map { _ =>
           val id      = CompletionId.unsafe(current.nextCompletion)
-          val control = ExecutionControl.create(executionLimits, CancellationToken.Source())
+          val control = ExecutionControl.create(
+            executionLimits,
+            CancellationToken.Source(),
+            parallelism
+          )
           state.set(
             current.copy(
               completions = current.completions.updated(
@@ -214,8 +234,9 @@ final class ExecutionService(
       val (id, dispatch, control) = next.get
       val status                  =
         try
-          executor
-            .launch(dispatch, completionMemory(id), control)
+          programLifecycleLock.synchronized {
+            executor.launch(dispatch, completionMemory(id), control)
+          }
             .fold(CompletionStatus.Failed.apply, _ => CompletionStatus.Succeeded)
         catch {
           case error: Throwable =>

@@ -56,10 +56,18 @@ sbt testConformance
 sbt serverNative/compile
 sbt check
 
-cmake -S conformance/unified -B target/unified-conformance
-cmake --build target/unified-conformance --parallel
-ctest --test-dir target/unified-conformance --output-on-failure --parallel
+GEMSTONE_UNIFIED_CONTAINER_RUN_CTEST=1 \
+  conformance/unified/tools/container-build.sh host target/unified-artifacts/host
+conformance/unified/tools/container-build.sh cuda
+conformance/unified/tools/container-build.sh hip
+conformance/unified/tools/container-build.sh sycl
+conformance/unified/tools/run-relocated.sh target/unified-artifacts/hip hip --list
 ```
+
+The relocated SYCL runner forces its bundled Level Zero adapter through
+`UR_ADAPTERS_FORCE_LOAD`, so it does not depend on host oneAPI adapter search
+paths; override that variable only when intentionally selecting another
+bundled adapter.
 
 `test` is incremental in sbt 2. Use `testFull` when every JVM and Native suite must be executed regardless of the
 incremental test cache.
@@ -87,9 +95,11 @@ as named test failures while the implementation is being expanded. Filters, dete
 controls are documented in each conformance directory.
 
 `conformance/unified` is an additional header-only C++20 workload suite; it does not replace the Scala/vendor
-dashboards above. Its common catalog runs deterministic algorithm, BLAS, edge-case, and bounded-stress workloads
-through host, CUDA/Thrust/cuBLAS, HIP/rocThrust/rocBLAS, or SYCL/oneDPL/oneMKL adapters. The supplied CMake runners are
-split by suite and scalar type for practical vendor-compiler memory use while the reusable API remains header-only.
+dashboards above. Its common catalog runs deterministic algorithm, BLAS, asynchronous, edge-case, and bounded-stress workloads
+through host, CUDA/Thrust/cuBLAS, HIP/rocThrust/rocBLAS, or SYCL/oneDPL/oneMKL adapters. Vendor runners are built in
+the pinned container images and installed as relocatable artifacts under `target/unified-artifacts`; execution through
+Gemstone therefore does not depend on the build container or its filesystem. The supplied CMake runners are split by
+suite and scalar type for practical vendor-compiler memory use while the reusable API remains header-only.
 
 The AMDGPU-facing executable conformance suites share `GEMSTONE_AMDGPU_TARGETS`,
 a comma-separated GFX matrix defaulting to `gfx900`, and
@@ -108,12 +118,21 @@ exact artifact as the vendor oracle, then run it unchanged through Gemstone. The
 alternate link lines, patched vendor runtimes, or private ROCr hooks. Each Gemstone child receives a fresh authenticated
 server token; a zero exit is changed to a loud failure if the server observed no required CUDA or execution request.
 For emulator-only iteration, `GEMSTONE_NO_ORACLE=1` skips the vendor execution while retaining the Gemstone run and
-its assertions; this mode is not an acceptance result.
+its assertions; this mode is not an acceptance result. `GEMSTONE_ORACLE_ONLY=1` is the complementary legacy-suite
+mode: it compiles and runs the vendor artifact, requires the oracle result, and does not construct or invoke a
+Gemstone provider. It is useful for establishing the physical baseline before an emulator pass; it cannot be combined
+with `GEMSTONE_NO_ORACLE=1` or a suite-specific oracle-suppression flag.
 
 The public launch model is `gemstone run --api <api> [provider option] -- <ordinary command>`. CUDA replaces only the
 Driver (`libcuda`), so applications may use the stock CUDA Runtime. HIP and direct HSA use drop-in public runtime
 libraries, OpenCL uses an isolated ICD directory, Level Zero uses the loader's alternate-driver mechanism, and SYCL
 selects exactly one of the OpenCL or Level Zero backends. See [docs/API_TRANSPORT.md](docs/API_TRANSPORT.md) and the
 [Conformance handoff](CONFORMANCE_HANDOFF.md).
+
+Each dispatch retains a finite instruction budget (`100000000` instructions by default). Large emulator-only
+workloads may opt into an explicit profile by setting `GEMSTONE_EXECUTION_MAX_INSTRUCTIONS` before `gemstone run`;
+`GEMSTONE_EXECUTION_QUANTUM` optionally selects the execution checkpoint quantum. Values are parsed by the server
+before the child starts and invalid values fail closed. These settings never cross the RPC wire, so a workload cannot
+raise its own limit.
 
 See [GEMSTONE_PLAN.md](GEMSTONE_PLAN.md) for the architecture, milestones, and permanent invariants.

@@ -4,6 +4,9 @@
 #include "unified_suite/edge_cases.hpp"
 
 #include <thrust/device_vector.h>
+#include <thrust/device_malloc.h>
+#include <thrust/device_free.h>
+#include <thrust/adjacent_difference.h>
 #include <thrust/execution_policy.h>
 #include <thrust/functional.h>
 #include <thrust/iterator/counting_iterator.h>
@@ -30,6 +33,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <iterator>
 #include <limits>
 #include <stdexcept>
 #include <string>
@@ -38,6 +42,38 @@
 namespace unified_suite::adapters {
 
 namespace thrust_edge_detail {
+
+struct SetExpectedFlagForEach {
+  unsigned long long expected;
+  bool *flag;
+
+  __device__ void operator()(unsigned long long value) const {
+    if (value == expected)
+      *flag = true;
+  }
+};
+
+struct DetectWrongDifference {
+  using value_type = long long;
+  using difference_type = std::ptrdiff_t;
+  using pointer = DetectWrongDifference *;
+  using reference = DetectWrongDifference;
+  using iterator_category = std::output_iterator_tag;
+
+  bool *flag;
+
+  __host__ __device__ DetectWrongDifference operator++() const { return *this; }
+  __host__ __device__ DetectWrongDifference operator*() const { return *this; }
+  template <class Difference>
+  __host__ __device__ DetectWrongDifference operator+(Difference) const { return *this; }
+  template <class Index>
+  __host__ __device__ DetectWrongDifference operator[](Index) const { return *this; }
+
+  __device__ void operator=(long long difference) const {
+    if (difference != 1)
+      *flag = false;
+  }
+};
 
 template <class T> struct TupleWidePairValue {
   template <class Tuple> __host__ __device__ std::int64_t operator()(const Tuple &value) const {
@@ -172,6 +208,46 @@ template <class T> std::vector<T> host(const thrust::device_vector<T> &input) {
 class ThrustEdgeCases {
 public:
   template <class T> bool supports(edge_cases::Operation) const { return true; }
+
+  // These two probes are the semantic form of Thrust's
+  // Test*WithBigIndexes fixtures.  They intentionally use counting
+  // iterators, so the test does not allocate a 2^33-element buffer; the
+  // vendor implementation must still walk the complete 64-bit range and
+  // update one device-side flag.
+  void for_each_big_indexes(unsigned magnitude) {
+    if (magnitude >= 63)
+      throw std::invalid_argument("big-index magnitude must be below 63");
+    const auto begin = thrust::make_counting_iterator<unsigned long long>(0);
+    const auto end = begin + (1ULL << magnitude);
+    if (end - begin != (1LL << magnitude))
+      throw std::runtime_error("for-each big-index distance mismatch");
+    auto flag = thrust::device_malloc<bool>(1);
+    *flag = false;
+    thrust::for_each(thrust::device, begin, end,
+                     thrust_edge_detail::SetExpectedFlagForEach{(1ULL << magnitude) - 1,
+                                                                  thrust::raw_pointer_cast(flag)});
+    const bool observed = *flag;
+    thrust::device_free(flag);
+    if (!observed)
+      throw std::runtime_error("for-each big-index terminal value was not visited");
+  }
+
+  void adjacent_difference_big_indexes(unsigned magnitude) {
+    if (magnitude >= 63)
+      throw std::invalid_argument("big-index magnitude must be below 63");
+    const auto begin = thrust::make_counting_iterator<long long>(1);
+    const auto end = begin + (1LL << magnitude);
+    if (end - begin != (1LL << magnitude))
+      throw std::runtime_error("adjacent-difference big-index distance mismatch");
+    auto flag = thrust::device_malloc<bool>(1);
+    *flag = true;
+    thrust::adjacent_difference(thrust::device, begin, end,
+                                thrust_edge_detail::DetectWrongDifference{thrust::raw_pointer_cast(flag)});
+    const bool observed = *flag;
+    thrust::device_free(flag);
+    if (!observed)
+      throw std::runtime_error("adjacent-difference big-index produced a wrong difference");
+  }
 
   template <class T> std::int64_t composed_iterator_reduce(std::size_t size) {
     const auto indices = thrust::make_counting_iterator<std::size_t>(0);

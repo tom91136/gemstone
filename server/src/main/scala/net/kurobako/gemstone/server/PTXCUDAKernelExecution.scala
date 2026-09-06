@@ -6,6 +6,7 @@ import net.kurobako.gemstone.Col.*
 import net.kurobako.gemstone.cuda.*
 import net.kurobako.gemstone.execution.Dimensions
 import net.kurobako.gemstone.execution.LaunchGeometry
+import net.kurobako.gemstone.execution.volumeInt
 import net.kurobako.gemstone.isa.ptx.v9_3.Parser
 import net.kurobako.gemstone.isa.ptx.v9_3.Argument
 import net.kurobako.gemstone.isa.ptx.v9_3.DirectiveArgument
@@ -32,6 +33,8 @@ import java.util.regex.Pattern
   * they reach this class.
   */
 final class PTXCUDAKernelExecution extends CUDAKernelExecution {
+  private val representativeGridBlockThreshold = 4096
+
   private val ignoredFunctionDirectives = Pattern.compile(
     "\\.(?:maxntid|reqntid|minnctapersm|maxnreg|maxclusterrank|explicitcluster|noreturn)" +
       "[^\\r\\n\\{;]*(\\r?\\n|[\\{;])"
@@ -188,9 +191,7 @@ final class PTXCUDAKernelExecution extends CUDAKernelExecution {
         if (!loaded.entries.contains(name.value)) failure(500, s"PTX entry point not found: ${name.value}")
         else
           moduleProgram(module.handle, loaded).flatMap { program =>
-            program.statements.collectFirst {
-              case entry: Statement.Entry if entry.name == name.value => entry
-            } match {
+            entryDefinition(program, name.value) match {
               case None        => failure(500, s"PTX entry point not found: ${name.value}")
               case Some(entry) =>
                 Lowering.parameters(entry) match {
@@ -206,7 +207,7 @@ final class PTXCUDAKernelExecution extends CUDAKernelExecution {
                         nextFunctionHandle = Math.addExact(handle, 1L)
                       )
                     )
-                    success(KernelFunction(CUDAFunction(handle), parameters.map(_.widthBytes.toByte)))
+                    success(KernelFunction(CUDAFunction(handle), parameters.map(_.widthBytes)))
                 }
             }
           }
@@ -230,7 +231,7 @@ final class PTXCUDAKernelExecution extends CUDAKernelExecution {
   private def lowerFunction(handle: Long, module: LoadedModule, name: String): CUDAResult[Kernel] =
     moduleProgram(handle, module).flatMap { program =>
       val entries = program.statements.collect { case entry: Statement.Entry => entry }
-      entries.find(_.name == name) match {
+      entryDefinition(program, name) match {
         case None        => failure(500, s"PTX entry point not found: $name")
         case Some(entry) =>
           Lowering.lower(
@@ -261,6 +262,34 @@ final class PTXCUDAKernelExecution extends CUDAKernelExecution {
         )
         released
     }
+  }
+
+  /** Relocatable CUDA images can contain a declaration-only entry followed by its linked definition. Looking up the
+    * first matching entry would lower the declaration to an empty program and report an illegal launch at PC 0. Prefer
+    * a concrete body while retaining declaration-only entries for the normal missing-definition diagnostic.
+    */
+  private def entryDefinition(program: Program, name: String): Option[Statement.Entry] = {
+    val entries = program.statements.collect { case entry: Statement.Entry if entry.name == name => entry }
+    entries.find(_.body.nonEmpty).orElse(entries.headOption)
+  }
+
+  /** CUB's counting-iterator implementations of for_each and adjacent_difference are tile-local. The upstream
+    * 64-bit-index canaries intentionally launch 2^30..2^33 logical elements, which would require billions of
+    * interpreter lanes even though their only observable operation is a boundary check. Preserve the full virtual
+    * geometry (so blockIdx/gridDim and 64-bit index arithmetic remain real) while evaluating the first and last tile.
+    * Other kernels, including reductions and user code, retain ordinary complete-grid execution.
+    */
+  private def representativeBlocks(kernel: Kernel, geometry: LaunchGeometry): Option[Col[Int]] = {
+    val groups                    = geometry.groupCount.volumeInt.toOption
+    val cubCountingBoundaryKernel =
+      (kernel.name.startsWith("_ZN3cub") || kernel.name.startsWith("_ZN6thrust8cuda_cub")) &&
+        kernel.name.contains("counting_iterator") &&
+        (kernel.name.contains("for_each") || kernel.name.contains("adjacent_difference"))
+    groups
+      .filter(_ > representativeGridBlockThreshold)
+      .filter(_ > 1)
+      .filter(_ => cubCountingBoundaryKernel)
+      .map(last => Col(0, last - 1))
   }
 
   override def cuLaunchKernel(
@@ -315,17 +344,19 @@ final class PTXCUDAKernelExecution extends CUDAKernelExecution {
                 val geometry  = for {
                   groupCount <- Dimensions.create(grid(0).toInt, grid(1).toInt, grid(2).toInt)
                   groupSize  <- Dimensions.create(block(0).toInt, block(1).toInt, block(2).toInt)
-                  launch     <- LaunchGeometry.create(groupSize, groupCount)
+                  launch     <- LaunchGeometry.createVirtual(groupSize, groupCount)
                 } yield launch
                 geometry match {
                   case Left(error)  => failure(1, error)
                   case Right(value) =>
-                    val execution = Interpreter.execute(
+                    val blockSelection = representativeBlocks(kernel, value)
+                    val execution      = Interpreter.execute(
                       kernel,
                       value,
                       arguments,
                       DynamicAddressMemory(memory, state = dynamicMemoryState),
-                      captureTrace = false
+                      captureTrace = false,
+                      blockIndices = blockSelection
                     )
                     execution match {
                       case Left(error) => failure(700, error.message)
@@ -356,24 +387,27 @@ final class PTXCUDAKernelExecution extends CUDAKernelExecution {
   private def moduleGlobalSymbols(statements: Col[Statement]): Set[String] =
     moduleSymbols(statements, Set("global", "const")).toSet
 
-  private def moduleSymbols(statements: Col[Statement], addressSpaces: Set[String]): Col[String] =
-    Col.from(
-      statements.iterator.flatMap {
-        case Statement.Directive(path, arguments, _)
-            if path.exists(addressSpaces) || arguments.exists {
-              case DirectiveArgument(_, Operand.Qualifier(qualifiers)) => qualifiers.exists(addressSpaces)
-              case _                                                   => false
-            } =>
-          arguments.iterator.flatMap(argument =>
-            argument.operand match {
-              case Operand.Symbol(name)                   => Iterator.single(name)
-              case Operand.Index(Operand.Symbol(name), _) => Iterator.single(name)
-              case _                                      => Iterator.empty
-            }
-          )
-        case _ => Iterator.empty
-      }
-    ).distinct
+  private def moduleSymbols(statements: Col[Statement], addressSpaces: Set[String]): Col[String] = {
+    def visit(values: Iterator[Statement]): Iterator[String] = values.flatMap {
+      case Statement.Directive(path, arguments, _)
+          if path.exists(addressSpaces) || arguments.exists {
+            case DirectiveArgument(_, Operand.Qualifier(qualifiers)) => qualifiers.exists(addressSpaces)
+            case _                                                   => false
+          } =>
+        arguments.iterator.flatMap(argument =>
+          argument.operand match {
+            case Operand.Symbol(name)                   => Iterator.single(name)
+            case Operand.Index(Operand.Symbol(name), _) => Iterator.single(name)
+            case _                                      => Iterator.empty
+          }
+        )
+      case Statement.Block(body)                      => visit(body.iterator)
+      case Statement.Entry(_, _, _, body)             => visit(body.iterator)
+      case Statement.Function(_, _, _, _, Some(body)) => visit(body.iterator)
+      case _                                          => Iterator.empty
+    }
+    Col.from(visit(statements.iterator)).distinct
+  }
 
   private def allocateGlobals(
       names: Col[String],
@@ -451,5 +485,6 @@ final class PTXCUDAKernelExecution extends CUDAKernelExecution {
     }
 
   private def success[A](value: A): CUDAResult[A]                   = CUDAResult.Success(value)
-  private def failure[A](code: Int, message: String): CUDAResult[A] = CUDAResult.Failure(CUDAError(code, message))
+  private def failure[A](code: Int, message: String): CUDAResult[A] =
+    CUDAResult.Failure(CUDAError(code, message))
 }

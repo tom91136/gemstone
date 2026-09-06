@@ -243,6 +243,49 @@ final class InterpreterSuite extends munit.FunSuite {
     )
   }
 
+  test("workgroup barriers match divergent arrivals by hardware barrier ID") {
+    val source = """
+      |.version 8.0
+      |.target sm_80
+      |.address_size 64
+      |.visible .entry divergent_barrier(.param .u64 output) {
+      |  .shared .align 8 .b8 values[2048];
+      |  .reg .pred %p;
+      |  .reg .b32 %r<2>;
+      |  .reg .b64 %rd<4>;
+      |  .reg .f64 %fd;
+      |  ld.param.u64 %rd0, [output];
+      |  mov.u32 %r0, %tid.x;
+      |  mul.wide.u32 %rd1, %r0, 8;
+      |  mov.u64 %rd2, values;
+      |  add.s64 %rd2, %rd2, %rd1;
+      |  mov.f64 %fd, 0d3ff0000000000000;
+      |  st.shared.f64 [%rd2], %fd;
+      |  setp.lt.u32 %p, %r0, 128;
+      |  @%p bra low;
+      |  bar.sync 0;
+      |  bra join;
+      |low:
+      |  bar.sync 0;
+      |  ld.shared.f64 %fd, [%rd2];
+      |join:
+      |  setp.eq.u32 %p, %r0, 0;
+      |  @%p st.global.f64 [%rd0], %fd;
+      |  ret;
+      |}
+      |""".stripMargin
+    val kernel = ISA.compile(source).fold(error => fail(error.message), identity)
+    val memory = ArrayCheckedMemory.allocate(8, provenance = "divergent-workgroup-barrier-id")
+    val result = Interpreter.execute(
+      kernel,
+      geometry(1, 256),
+      Map("output" -> Argument(memory.allocation.start.value)),
+      memory
+    )
+    assert(result.isRight, result.left.toOption.map(_.message).getOrElse(""))
+    assertEquals(memory.readLittleEndian(memory.allocation.start, 8).toOption.get, 0x3ff0000000000000L)
+  }
+
   test("divergent warp participants publish shared stores at a warp barrier") {
     val source = """
       |.version 8.0
@@ -319,6 +362,70 @@ final class InterpreterSuite extends munit.FunSuite {
     assertEquals(
       Col.tabulate(4)(index => memory.readInt32(memory.allocation.start.offset(index.toLong * 4L)).toOption.get).toSeq,
       Seq(7, 7, 7, 7)
+    )
+  }
+
+  test("64-bit warp shuffles preserve the complete register value") {
+    val source = """
+      |.version 8.0
+      |.target sm_80
+      |.address_size 64
+      |.visible .entry choose(.param .u64 output) {
+      |  .reg .b64 %rd<4>;
+      |  ld.param.u64 %rd0, [output];
+      |  mov.b64 %rd1, 0x1122334455667788;
+      |  shfl.sync.idx.b64 %rd2, %rd1, 0, 31, -1;
+      |  st.global.b64 [%rd0], %rd2;
+      |  ret;
+      |}
+      |""".stripMargin
+    val kernel = ISA.compile(source).fold(error => fail(error.message), identity)
+    val memory = ArrayCheckedMemory.allocate(8, provenance = "64-bit-warp-shuffle")
+    val result = Interpreter.execute(
+      kernel,
+      geometry(1, 4),
+      Map("output" -> Argument(memory.allocation.start.value)),
+      memory
+    )
+    assert(result.isRight, result.left.toOption.map(_.message).getOrElse(""))
+    assertEquals(
+      memory.readLittleEndian(memory.allocation.start, 8).toOption,
+      Some(0x1122334455667788L)
+    )
+  }
+
+  test("inline PTX warp-shuffle register aliases are accepted") {
+    val source = """
+      |.version 8.0
+      |.target sm_80
+      |.address_size 64
+      |.visible .entry choose(.param .u64 output) {
+      |  .reg .pred p;
+      |  .reg .b32 lo;
+      |  .reg .b32 %r<2>;
+      |  .reg .b64 %rd<3>;
+      |  ld.param.u64 %rd0, [output];
+      |  mov.u32 lo, 7;
+      |  shfl.sync.up.b32 lo|p, lo, 1, 0, -1;
+      |  mov.u32 %r0, %tid.x;
+      |  mul.wide.u32 %rd1, %r0, 4;
+      |  add.u64 %rd2, %rd0, %rd1;
+      |  st.global.u32 [%rd2], lo;
+      |  ret;
+      |}
+      |""".stripMargin
+    val kernel = ISA.compile(source).fold(error => fail(error.message), identity)
+    val memory = ArrayCheckedMemory.allocate(8, provenance = "inline-warp-shuffle-registers")
+    val result = Interpreter.execute(
+      kernel,
+      geometry(1, 2),
+      Map("output" -> Argument(memory.allocation.start.value)),
+      memory
+    )
+    assert(result.isRight, result.left.toOption.map(_.message).getOrElse(""))
+    assertEquals(
+      Col.tabulate(2)(index => memory.readInt32(memory.allocation.start.offset(index.toLong * 4L)).toOption.get).toSeq,
+      Seq(7, 7)
     )
   }
 

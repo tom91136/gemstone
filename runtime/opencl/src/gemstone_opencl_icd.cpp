@@ -1903,6 +1903,19 @@ CL_API_ENTRY cl_int CL_API_CALL clGetDeviceIDs(cl_platform_id value, cl_device_t
   return CL_SUCCESS;
 }
 
+CL_API_ENTRY cl_int CL_API_CALL clRetainDevice(cl_device_id value) {
+  // Gemstone exposes one root device. It is owned by the ICD for the
+  // lifetime of the process, so retaining it is a successful no-op rather
+  // than a reference-count transition that could invalidate the static
+  // device object.
+  return valid_device(value) ? CL_SUCCESS : CL_INVALID_DEVICE;
+}
+
+CL_API_ENTRY cl_int CL_API_CALL clReleaseDevice(cl_device_id value) {
+  // The root device remains available until the ICD is unloaded.
+  return valid_device(value) ? CL_SUCCESS : CL_INVALID_DEVICE;
+}
+
 CL_API_ENTRY cl_int CL_API_CALL clGetDeviceInfo(cl_device_id value, cl_device_info name, size_t size, void *output,
                                                 size_t *written) {
   if (!valid_device(value)) return CL_INVALID_DEVICE;
@@ -3865,6 +3878,8 @@ void initialize_dispatch() {
     dispatch.clGetPlatformInfo = &clGetPlatformInfo;
     dispatch.clGetDeviceIDs = &clGetDeviceIDs;
     dispatch.clGetDeviceInfo = &clGetDeviceInfo;
+    dispatch.clRetainDevice = &clRetainDevice;
+    dispatch.clReleaseDevice = &clReleaseDevice;
     dispatch.clGetDeviceAndHostTimer = &clGetDeviceAndHostTimer;
     dispatch.clGetHostTimer = &clGetHostTimer;
     dispatch.clCreateContext = &clCreateContext;

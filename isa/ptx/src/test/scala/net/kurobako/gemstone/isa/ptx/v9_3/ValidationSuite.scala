@@ -42,7 +42,12 @@ final class ValidationSuite extends munit.FunSuite {
     )
   }
 
-  test("unknown instructions fail during decoding") {
-    assert(Parser.parseStatement("not_a_ptx_instruction.u32 %r0;").isLeft)
+  test("unknown instructions remain explicit after parsing") {
+    Parser.parseStatement("not_a_ptx_instruction.u32 %r0;") match {
+      case Right(Statement.UnsupportedInstruction("not_a_ptx_instruction", operands, mods, None)) =>
+        assertEquals(operands.size, 1)
+        assertEquals(mods.map(_.name).toSeq, Seq("u32"))
+      case other => fail(s"unexpected parse result: $other")
+    }
   }
 }

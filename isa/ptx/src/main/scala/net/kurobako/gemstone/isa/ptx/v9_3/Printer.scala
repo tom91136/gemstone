@@ -52,7 +52,12 @@ object Printer {
       }.mkString
       val suffix = if (terminator == DirectiveTerminator.Semicolon) ";" else ""
       head + tail + suffix
-    case Statement.Instruction(instruction)               => render(instruction)
+    case Statement.Instruction(instruction)                             => render(instruction)
+    case Statement.UnsupportedInstruction(opcode, operands, mods, pred) =>
+      val prefix    = pred.map(value => s"${render(value)} ").getOrElse("")
+      val qualified = (opcode +: mods.map(_.name)).mkString(".")
+      val tail      = if (operands.isEmpty) "" else operands.map(render).mkString(" ", ", ", "")
+      s"$prefix$qualified$tail;"
     case Statement.Block(body)                            => renderBody(body)
     case Statement.Entry(visible, name, parameters, body) =>
       val visibility = if (visible) ".visible " else ""

@@ -37,6 +37,7 @@ constexpr uint64_t kAvailableMemory = UINT64_C(1) * 1024 * 1024 * 1024;
 constexpr uint32_t kPageSize = 4096;
 constexpr uint32_t kTransferChunk = 64U * 1024U * 1024U;
 constexpr uint32_t kUploadChunk = 64U * 1024U;
+constexpr uint16_t kInvalidPacketType = 1;
 
 struct Allocation {
   Allocation(void *allocation_base, uint64_t allocation_size, uint64_t allocation_id, HsaMemFlags allocation_flags,
@@ -264,7 +265,6 @@ bool notify_signal_event(uint64_t signal) {
 gemstone_hsa_packet_result consume_packet(uint64_t queue_id, uint64_t packet_id, const void *packet, size_t packet_size, void *) {
   auto &runtime = state();
   const bool trace_packets = std::getenv("GEMSTONE_HSA_TRACE_PACKETS") != nullptr;
-  const bool trace_failures = trace_packets || std::getenv("GEMSTONE_HSA_TRACE_FAILURES") != nullptr;
   if (trace_packets) std::fprintf(stderr, "Gemstone consuming AQL queue=%lu packet=%lu\n", queue_id, packet_id);
   gemstone_hsa_aql_packet decoded{};
   const auto decode = gemstone_hsa_decode_aql_packet(packet, packet_size, &decoded);
@@ -301,13 +301,6 @@ gemstone_hsa_packet_result consume_packet(uint64_t queue_id, uint64_t packet_id,
       if (packet != nullptr && packet_size >= sizeof(header)) std::memcpy(&header, packet, sizeof(header));
       std::fprintf(stderr, "Gemstone rejected AQL decode queue=%lu packet=%lu size=%zu header=0x%04x decode=%d result=%d error=%s\n",
                    queue_id, packet_id, packet_size, header, decode, result, gemstone_hsa_aql_runtime_error(aql));
-      if (packet != nullptr) {
-        const auto *bytes = static_cast<const unsigned char *>(packet);
-        std::fprintf(stderr, "Gemstone raw AQL queue=%lu packet=%lu bytes=", queue_id, packet_id);
-        for (size_t index = 0; index < packet_size; ++index)
-          std::fprintf(stderr, "%02x", bytes[index]);
-        std::fprintf(stderr, "\n");
-      }
     }
     return result;
   }
@@ -348,14 +341,6 @@ gemstone_hsa_packet_result consume_packet(uint64_t queue_id, uint64_t packet_id,
   if (trace_packets) std::fprintf(stderr, "Gemstone executed AQL queue=%lu packet=%lu result=%d\n", queue_id, packet_id, result);
   if (result != GEMSTONE_HSA_PACKET_ACCEPTED) return result;
   const int64_t outcome = __atomic_load_n(&deferred.value, __ATOMIC_ACQUIRE);
-  if (trace_failures && outcome < 0) {
-    if (decoded.type == GEMSTONE_HSA_AQL_KERNEL_DISPATCH)
-      std::fprintf(stderr, "Gemstone rejected AQL queue=%lu packet=%lu kernel_object=0x%lx outcome=%ld error=%s\n", queue_id, packet_id,
-                   decoded.value.kernel_dispatch.kernel_object, outcome, gemstone_hsa_aql_runtime_error(aql));
-    else
-      std::fprintf(stderr, "Gemstone rejected AQL queue=%lu packet=%lu outcome=%ld error=%s\n", queue_id, packet_id, outcome,
-                   gemstone_hsa_aql_runtime_error(aql));
-  }
   const auto signals = gemstone_hsa_rocr_signal_operations();
   if (outcome < 0)
     return signals.fail_release(signals.context, completion, static_cast<int32_t>(outcome)) == 0 && notify_signal_event(completion)
@@ -497,7 +482,6 @@ extern "C" int gemstone_hsakmt_notify_code_object(const void *code_object, uint6
     runtime.loader_error = "invalid ROCr code-object notification";
     return -1;
   }
-
   std::vector<gemstone::hsa::CodeObjectKernelMetadata> metadata;
   std::string parse_error;
   if (!gemstone::hsa::parse_code_object_metadata(code_object, static_cast<size_t>(code_object_size), metadata, parse_error)) {
@@ -536,7 +520,7 @@ extern "C" int gemstone_hsakmt_notify_code_object(const void *code_object, uint6
       return -1;
     }
     bindings.push_back({loaded.kernel_object, kernel->name.c_str(), kernel->kernarg_size, kernel->fields.data(),
-                        static_cast<uint32_t>(kernel->fields.size())});
+                        static_cast<uint32_t>(kernel->fields.size()), kernel->explicit_argument_count});
   }
   if (!bindings.empty()
       && gemstone_hsa_aql_runtime_install_code_object(aql, code_object, static_cast<uint32_t>(code_object_size), bindings.data(),
@@ -1119,6 +1103,17 @@ extern "C" HSAKMT_STATUS hsaKmtCreateQueueExt(HSAuint32 node, HSA_QUEUE_TYPE typ
   // hsa_queue_add_write_index_* and therefore cannot implement stock AQL.
   auto *read_pointer = resource->Queue_read_ptr_aql;
   auto *write_pointer = resource->Queue_write_ptr_aql;
+  // A freshly-created ROCr ring is empty, but its backing pages are commonly
+  // zeroed rather than filled with HSA_PACKET_TYPE_INVALID.  Zero is a valid
+  // vendor-specific packet type, so initialise empty slots before arming the
+  // monitor; otherwise it can consume an unpublished zero packet as PM4.
+  const uint64_t initial_read = read_pointer == nullptr ? 0 : __atomic_load_n(read_pointer, __ATOMIC_ACQUIRE);
+  const uint64_t initial_write = write_pointer == nullptr ? 0 : __atomic_load_n(write_pointer, __ATOMIC_ACQUIRE);
+  if (initial_read == initial_write) {
+    for (size_t index = 0; index < static_cast<size_t>(size / 64); ++index)
+      __atomic_store_n(reinterpret_cast<uint16_t *>(static_cast<uint8_t *>(ring) + index * 64), kInvalidPacketType,
+                       __ATOMIC_RELAXED);
+  }
   auto &runtime = state();
   record->queue = gemstone_hsa_virtual_kfd_create_aql_queue(runtime.kfd, ring, static_cast<size_t>(size / 64), read_pointer, write_pointer,
                                                             consume_packet, record.get(), &record->resource);

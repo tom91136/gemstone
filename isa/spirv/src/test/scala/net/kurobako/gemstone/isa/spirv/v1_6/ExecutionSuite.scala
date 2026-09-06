@@ -18,6 +18,18 @@ import net.kurobako.gemstone.execution.ProgramId
 import java.util.concurrent.atomic.AtomicReference
 
 final class ExecutionSuite extends munit.FunSuite {
+  test("prepares byte-aligned nonstandard integer widths") {
+    val module = Module(
+      Header(ISA.version, Word(0), Word(4), Word(0)),
+      Col(
+        Instruction.TypeInt(operand("IdResult", 1), operand("LiteralInteger", 24), operand("LiteralInteger", 0)),
+        Instruction.TypeInt(operand("IdResult", 2), operand("LiteralInteger", 48), operand("LiteralInteger", 0))
+      ),
+      Endianness.Little
+    )
+    assertEquals(Interpreter.prepare(module).map(_ => ()), Right(()))
+  }
+
   test("dispatch binds built-ins and typed arguments without exposing native pointers") {
     val u32          = operand("IdResult", 2)
     val u64          = operand("IdResult", 3)
@@ -575,6 +587,85 @@ final class ExecutionSuite extends munit.FunSuite {
     assertEquals(Interpreter.floatingMaximumBits(32, 0L, 0x80000000L), 0L)
     assertEquals(Interpreter.floatingMinimumBits(64, 0L, 0x8000000000000000L), 0x8000000000000000L)
     assertEquals(Interpreter.floatingMaximumBits(64, 0L, 0x8000000000000000L), 0L)
+  }
+
+  test("dispatch executes floating atomic minimum and maximum and returns old values") {
+    val voidType    = operand("IdResult", 1)
+    val u32         = operand("IdResult", 2)
+    val f32         = operand("IdResult", 3)
+    val pointer     = operand("IdResult", 4)
+    val functionTy  = operand("IdResult", 5)
+    val scope       = operand("IdResult", 6)
+    val semantics   = operand("IdResult", 7)
+    val initial     = operand("IdResult", 8)
+    val minimum     = operand("IdResult", 9)
+    val maximum     = operand("IdResult", 10)
+    val one         = operand("IdResult", 11)
+    val two         = operand("IdResult", 12)
+    val function    = operand("IdResult", 13)
+    val target      = operand("IdResult", 14)
+    val oldMinimum  = operand("IdResult", 15)
+    val oldMaximum  = operand("IdResult", 16)
+    val minOutput   = operand("IdResult", 17)
+    val maxOutput   = operand("IdResult", 18)
+    val initialBits = java.lang.Float.floatToRawIntBits(3.0f)
+    val minimumBits = java.lang.Float.floatToRawIntBits(1.0f)
+    val maximumBits = java.lang.Float.floatToRawIntBits(5.0f)
+    val module      = Module(
+      Header(ISA.version, Word(0), Word(19), Word(0)),
+      Col(
+        Instruction.TypeVoid(voidType),
+        Instruction.TypeInt(u32, operand("LiteralInteger", 32), operand("LiteralInteger", 0)),
+        Instruction.TypeFloat(f32, operand("LiteralInteger", 32), None),
+        Instruction.TypePointer(pointer, operand("StorageClass", 5), f32),
+        Instruction.TypeFunction(functionTy, voidType, Col(pointer)),
+        Instruction.Constant(u32, scope, operand("LiteralContextDependentNumber", 2)),
+        Instruction.Constant(u32, semantics, operand("LiteralContextDependentNumber", 896)),
+        Instruction.Constant(f32, initial, operand("LiteralContextDependentNumber", initialBits)),
+        Instruction.Constant(f32, minimum, operand("LiteralContextDependentNumber", minimumBits)),
+        Instruction.Constant(f32, maximum, operand("LiteralContextDependentNumber", maximumBits)),
+        Instruction.Constant(u32, one, operand("LiteralContextDependentNumber", 1)),
+        Instruction.Constant(u32, two, operand("LiteralContextDependentNumber", 2)),
+        Instruction.EntryPoint(
+          operand("ExecutionModel", 6),
+          function,
+          stringOperand("atomic_float_min_max"),
+          Col.empty
+        ),
+        Instruction.Function(voidType, function, operand("FunctionControl", 0), functionTy),
+        Instruction.FunctionParameter(pointer, target),
+        Instruction.Label(operand("IdResult", 19)),
+        Instruction.AtomicStore(target, scope, semantics, initial),
+        Instruction.AtomicFMinEXT(f32, oldMinimum, target, scope, semantics, minimum),
+        Instruction.AtomicFMaxEXT(f32, oldMaximum, target, scope, semantics, maximum),
+        Instruction.PtrAccessChain(pointer, minOutput, target, one, Col.empty),
+        Instruction.Store(minOutput, oldMinimum, None),
+        Instruction.PtrAccessChain(pointer, maxOutput, target, two, Col.empty),
+        Instruction.Store(maxOutput, oldMaximum, None),
+        Instruction.Return(),
+        Instruction.FunctionEnd()
+      ),
+      Endianness.Little
+    )
+    val allocation = AllocationId.fromLong(122L).toOption.get
+    val memory     = ArrayMemory(allocation, 12)
+    val dispatch   = KernelDispatch
+      .create(
+        ProgramId.fromLong(122L).toOption.get,
+        "atomic_float_min_max",
+        Dimensions.One,
+        Dimensions.One,
+        Col(KernelArgument.Allocation(allocation, 0L))
+      )
+      .toOption
+      .get
+
+    assertEquals(Interpreter.run(module, dispatch, memory), Right(()), "floating atomic min/max execution")
+    assertEquals(
+      memory.bytes,
+      LittleEndian.toCol(maximumBits, 4) ++
+        LittleEndian.toCol(initialBits, 4) ++ LittleEndian.toCol(minimumBits, 4)
+    )
   }
 
   test("pointer stores dirty the destination and report an output relocation") {
@@ -1180,6 +1271,158 @@ final class ExecutionSuite extends munit.FunSuite {
 
     assertEquals(Interpreter.run(module, dispatch, memory), Right(()))
     assertEquals(memory.bytes, LittleEndian.toCol(java.lang.Double.doubleToRawLongBits(5.0), 8))
+  }
+
+  test("dispatch executes OpenCL.std native reciprocal") {
+    val voidType     = operand("IdResult", 1)
+    val f32          = operand("IdResult", 2)
+    val pointerType  = operand("IdResult", 3)
+    val functionType = operand("IdResult", 4)
+    val opencl       = operand("IdResult", 5)
+    val function     = operand("IdResult", 6)
+    val output       = operand("IdResult", 7)
+    val input        = operand("IdResult", 8)
+    val result       = operand("IdResult", 10)
+    val module       = Module(
+      Header(ISA.version, Word(0), Word(11), Word(0)),
+      Col(
+        Instruction.ExtInstImport(opencl, stringOperand("OpenCL.std")),
+        Instruction.TypeVoid(voidType),
+        Instruction.TypeFloat(f32, operand("LiteralInteger", 32), None),
+        Instruction.TypePointer(pointerType, operand("StorageClass", 5), f32),
+        Instruction.TypeFunction(functionType, voidType, Col(pointerType, f32)),
+        Instruction.EntryPoint(operand("ExecutionModel", 6), function, stringOperand("native_recip"), Col.empty),
+        Instruction.Function(voidType, function, operand("FunctionControl", 0), functionType),
+        Instruction.FunctionParameter(pointerType, output),
+        Instruction.FunctionParameter(f32, input),
+        Instruction.Label(operand("IdResult", 9)),
+        Instruction.ExtInst(f32, result, opencl, operand("LiteralExtInstInteger", 90), Col(input)),
+        Instruction.Store(output, result, None),
+        Instruction.Return(),
+        Instruction.FunctionEnd()
+      ),
+      Endianness.Little
+    )
+    val allocation = AllocationId.fromLong(23L).toOption.get
+    val memory     = ArrayMemory(allocation, 4)
+    val dispatch   = KernelDispatch
+      .create(
+        ProgramId.fromLong(23L).toOption.get,
+        "native_recip",
+        Dimensions.One,
+        Dimensions.One,
+        Col(
+          KernelArgument.Allocation(allocation, 0L),
+          KernelArgument.Scalar(LittleEndian.toCol(java.lang.Float.floatToRawIntBits(4.0f).toLong, 4))
+        )
+      )
+      .toOption
+      .get
+
+    assertEquals(Interpreter.run(module, dispatch, memory), Right(()))
+    assertEquals(memory.bytes, LittleEndian.toCol(java.lang.Float.floatToRawIntBits(0.25f).toLong, 4))
+  }
+
+  test("dispatch executes OpenCL.std native sine") {
+    val voidType     = operand("IdResult", 1)
+    val f32          = operand("IdResult", 2)
+    val pointerType  = operand("IdResult", 3)
+    val functionType = operand("IdResult", 4)
+    val opencl       = operand("IdResult", 5)
+    val function     = operand("IdResult", 6)
+    val output       = operand("IdResult", 7)
+    val input        = operand("IdResult", 8)
+    val result       = operand("IdResult", 10)
+    val module       = Module(
+      Header(ISA.version, Word(0), Word(11), Word(0)),
+      Col(
+        Instruction.ExtInstImport(opencl, stringOperand("OpenCL.std")),
+        Instruction.TypeVoid(voidType),
+        Instruction.TypeFloat(f32, operand("LiteralInteger", 32), None),
+        Instruction.TypePointer(pointerType, operand("StorageClass", 5), f32),
+        Instruction.TypeFunction(functionType, voidType, Col(pointerType, f32)),
+        Instruction.EntryPoint(operand("ExecutionModel", 6), function, stringOperand("native_sin"), Col.empty),
+        Instruction.Function(voidType, function, operand("FunctionControl", 0), functionType),
+        Instruction.FunctionParameter(pointerType, output),
+        Instruction.FunctionParameter(f32, input),
+        Instruction.Label(operand("IdResult", 9)),
+        Instruction.ExtInst(f32, result, opencl, operand("LiteralExtInstInteger", 92), Col(input)),
+        Instruction.Store(output, result, None),
+        Instruction.Return(),
+        Instruction.FunctionEnd()
+      ),
+      Endianness.Little
+    )
+    val allocation = AllocationId.fromLong(24L).toOption.get
+    val memory     = ArrayMemory(allocation, 4)
+    val dispatch   = KernelDispatch
+      .create(
+        ProgramId.fromLong(24L).toOption.get,
+        "native_sin",
+        Dimensions.One,
+        Dimensions.One,
+        Col(
+          KernelArgument.Allocation(allocation, 0L),
+          KernelArgument.Scalar(LittleEndian.toCol(java.lang.Float.floatToRawIntBits(0.5f).toLong, 4))
+        )
+      )
+      .toOption
+      .get
+
+    assertEquals(Interpreter.run(module, dispatch, memory), Right(()))
+    val actual = java.lang.Float.intBitsToFloat(LittleEndian.decode(memory.bytes, 0, 4).toInt)
+    assert(math.abs(actual - 0.47942555f) < 1.0e-6f)
+  }
+
+  test("dispatch executes OpenCL.std native cosine") {
+    val voidType     = operand("IdResult", 1)
+    val f32          = operand("IdResult", 2)
+    val pointerType  = operand("IdResult", 3)
+    val functionType = operand("IdResult", 4)
+    val opencl       = operand("IdResult", 5)
+    val function     = operand("IdResult", 6)
+    val output       = operand("IdResult", 7)
+    val input        = operand("IdResult", 8)
+    val result       = operand("IdResult", 10)
+    val module       = Module(
+      Header(ISA.version, Word(0), Word(11), Word(0)),
+      Col(
+        Instruction.ExtInstImport(opencl, stringOperand("OpenCL.std")),
+        Instruction.TypeVoid(voidType),
+        Instruction.TypeFloat(f32, operand("LiteralInteger", 32), None),
+        Instruction.TypePointer(pointerType, operand("StorageClass", 5), f32),
+        Instruction.TypeFunction(functionType, voidType, Col(pointerType, f32)),
+        Instruction.EntryPoint(operand("ExecutionModel", 6), function, stringOperand("native_cos"), Col.empty),
+        Instruction.Function(voidType, function, operand("FunctionControl", 0), functionType),
+        Instruction.FunctionParameter(pointerType, output),
+        Instruction.FunctionParameter(f32, input),
+        Instruction.Label(operand("IdResult", 9)),
+        Instruction.ExtInst(f32, result, opencl, operand("LiteralExtInstInteger", 81), Col(input)),
+        Instruction.Store(output, result, None),
+        Instruction.Return(),
+        Instruction.FunctionEnd()
+      ),
+      Endianness.Little
+    )
+    val allocation = AllocationId.fromLong(25L).toOption.get
+    val memory     = ArrayMemory(allocation, 4)
+    val dispatch   = KernelDispatch
+      .create(
+        ProgramId.fromLong(25L).toOption.get,
+        "native_cos",
+        Dimensions.One,
+        Dimensions.One,
+        Col(
+          KernelArgument.Allocation(allocation, 0L),
+          KernelArgument.Scalar(LittleEndian.toCol(java.lang.Float.floatToRawIntBits(0.5f).toLong, 4))
+        )
+      )
+      .toOption
+      .get
+
+    assertEquals(Interpreter.run(module, dispatch, memory), Right(()))
+    val actual = java.lang.Float.intBitsToFloat(LittleEndian.decode(memory.bytes, 0, 4).toInt)
+    assert(math.abs(actual - 0.87758255f) < 1.0e-6f)
   }
 
   test("dispatch executes structured loops and Phi values") {

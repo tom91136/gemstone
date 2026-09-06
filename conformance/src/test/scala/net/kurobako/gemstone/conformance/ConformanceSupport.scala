@@ -40,6 +40,7 @@ private[conformance] object ConformanceSupport {
     "GEMSTONE_NO_ORACLE",
     "GEMSTONE_OPENCL_ICD",
     "GEMSTONE_OPENCL_LOADER",
+    "GEMSTONE_ORACLE_ONLY",
     "GEMSTONE_LEVELZERO_DRIVER",
     "HSA_ENABLE_DTIF",
     "HSA_TOOLS_LIB",
@@ -292,21 +293,31 @@ private[conformance] object ConformanceSupport {
       s"command exited with $exit: ${command.mkString(" ")}\nstdout:\n$stdout\nstderr:\n$stderr"
   }
 
-  final case class PairedResult(oracle: ProcessResult, gemstone: ProcessResult, oracleRan: Boolean)
+  final case class PairedResult(
+      oracle: ProcessResult,
+      gemstone: ProcessResult,
+      oracleRan: Boolean,
+      gemstoneRan: Boolean
+  )
 
   def oracleEnabled: Boolean = !sys.env.get("GEMSTONE_NO_ORACLE").exists { value =>
     Set("1", "true", "yes").contains(value.trim.toLowerCase)
   }
 
-  /**
-    * Bound an individual vendor/emulator test process.  Build and configure
-    * steps deliberately keep their longer infrastructure timeout; this value
-    * is for the workload process itself so a deadlocked provider cannot occupy
-    * a worker for the duration of a full conformance run.
+  def oracleOnly: Boolean = sys.env.get("GEMSTONE_ORACLE_ONLY").exists { value =>
+    Set("1", "true", "yes").contains(value.trim.toLowerCase)
+  }
+
+  /** Bound an individual vendor/emulator test process. Build and configure steps deliberately keep their longer
+    * infrastructure timeout; this value is for the workload process itself so a deadlocked provider cannot occupy a
+    * worker for the duration of a full conformance run.
     */
   val defaultTestTimeout: FiniteDuration =
     sys.env.get("GEMSTONE_CONFORMANCE_TIMEOUT_SECONDS").fold(120.seconds)(_.toLong.seconds)
-  require(defaultTestTimeout > Duration.Zero, s"GEMSTONE_CONFORMANCE_TIMEOUT_SECONDS must be positive, found $defaultTestTimeout")
+  require(
+    defaultTestTimeout > Duration.Zero,
+    s"GEMSTONE_CONFORMANCE_TIMEOUT_SECONDS must be positive, found $defaultTestTimeout"
+  )
 
   def runPaired(
       api: ComputeAPI,
@@ -320,7 +331,8 @@ private[conformance] object ConformanceSupport {
       oracleCommand: Option[Vector[String]] = None
   ): PairedResult = {
     val oracleRan = oracleEnabled
-    val oracle    =
+    require(!oracleOnly || oracleRan, "GEMSTONE_ORACLE_ONLY requires the vendor oracle to be enabled")
+    val oracle =
       if oracleRan then
         runConfigured(
           oracleCommand.getOrElse(command),
@@ -329,30 +341,39 @@ private[conformance] object ConformanceSupport {
           timeout
         )
       else ProcessResult(Vector("<oracle skipped>"), 0, "", "oracle skipped by GEMSTONE_NO_ORACLE\n")
-    var observed = Option.empty[ProcessResult]
-    val runGemstone = (injected: Environment) => {
-      val result = runConfigured(
-        command,
-        directory,
-        Environment(gemstoneEnvironment ++ injected.set, injected.unset -- gemstoneEnvironment.keySet),
-        timeout
+    if oracleOnly then
+      PairedResult(
+        oracle,
+        ProcessResult(Vector("<gemstone skipped>"), 0, "", "Gemstone skipped by GEMSTONE_ORACLE_ONLY\n"),
+        oracleRan,
+        gemstoneRan = false
       )
-      observed = Some(result)
-      result
+    else {
+      var observed    = Option.empty[ProcessResult]
+      val runGemstone = (injected: Environment) => {
+        val result = runConfigured(
+          command,
+          directory,
+          Environment(gemstoneEnvironment ++ injected.set, injected.unset -- gemstoneEnvironment.keySet),
+          timeout
+        )
+        observed = Some(result)
+        result
+      }
+      val gemstoneAttempt =
+        if requireExecution then
+          GemstoneProcess.attested(api, layout, (sys.env - "GEMSTONE_NO_ORACLE") ++ gemstoneEnvironment)(runGemstone)
+        else
+          GemstoneProcess.injected(api, layout, (sys.env - "GEMSTONE_NO_ORACLE") ++ gemstoneEnvironment)(runGemstone)
+      val gemstone = gemstoneAttempt.fold(
+        error => {
+          val result = observed.getOrElse(ProcessResult(command, -1, "", ""))
+          ProcessResult(command, 86, result.stdout, error.message + "\n" + result.stderr)
+        },
+        identity
+      )
+      PairedResult(oracle, gemstone, oracleRan, gemstoneRan = true)
     }
-    val gemstoneAttempt =
-      if requireExecution then
-        GemstoneProcess.attested(api, layout, (sys.env - "GEMSTONE_NO_ORACLE") ++ gemstoneEnvironment)(runGemstone)
-      else
-        GemstoneProcess.injected(api, layout, (sys.env - "GEMSTONE_NO_ORACLE") ++ gemstoneEnvironment)(runGemstone)
-    val gemstone = gemstoneAttempt.fold(
-      error => {
-        val result = observed.getOrElse(ProcessResult(command, -1, "", ""))
-        ProcessResult(command, 86, result.stdout, error.message + "\n" + result.stderr)
-      },
-      identity
-    )
-    PairedResult(oracle, gemstone, oracleRan)
   }
 
   def runGemstone(

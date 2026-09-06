@@ -191,7 +191,7 @@ void bootstrap_memory_events_and_direct_queue() {
   ExecutorContext executor_context;
   executor_context.memory = &transport;
   const gemstone_hsa_executor executor{&executor_context,       load_program,       unload_program, launch, await_completion,
-                                       completion_dirty_ranges, release_completion, executor_error, nullptr};
+                                       completion_dirty_ranges, release_completion, executor_error, nullptr, nullptr};
   const auto signals = gemstone_hsa_rocr_signal_operations();
   auto *aql = gemstone_hsa_aql_runtime_create(&executor, &signals);
   assert(aql != nullptr);

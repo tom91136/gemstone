@@ -63,13 +63,15 @@ final class OneDPLConformanceSuite extends munit.FunSuite {
   require(samples.size == 3, s"expected three oneDPL/SYCL sample cases, found ${samples.size}")
   private val oracleEnabled =
     sys.env.get("GEMSTONE_ONEDPL_ORACLE").forall(_ != "0") && ConformanceSupport.oracleEnabled
-  private val batch         = sys.env.get("GEMSTONE_ONEDPL_BATCH").contains("1")
-  private val batchSize = sys.env.get("GEMSTONE_ONEDPL_BATCH_SIZE").fold(256)(_.toInt)
-  private val batchParallelism = sys.env.get("GEMSTONE_ONEDPL_BATCH_PARALLEL").fold(2)(_.toInt)
-  private val batchTimeoutSeconds = sys.env.get("GEMSTONE_ONEDPL_BATCH_TIMEOUT").fold(defaultTestTimeout.toSeconds)(_.toLong)
-  private val batchAcceptTimeouts = sys.env.get("GEMSTONE_ONEDPL_BATCH_ACCEPT_TIMEOUTS").contains("1")
-  private val includeStress = sys.env.get("GEMSTONE_ONEDPL_INCLUDE_STRESS").contains("1")
-  private val excluded = sys.env.get("GEMSTONE_ONEDPL_EXCLUDE").filter(_.nonEmpty).map(_.r)
+  private val oracleOnly          = ConformanceSupport.oracleOnly
+  private val batch               = sys.env.get("GEMSTONE_ONEDPL_BATCH").contains("1")
+  private val batchSize           = sys.env.get("GEMSTONE_ONEDPL_BATCH_SIZE").fold(256)(_.toInt)
+  private val batchParallelism    = sys.env.get("GEMSTONE_ONEDPL_BATCH_PARALLEL").fold(2)(_.toInt)
+  private val batchTimeoutSeconds =
+    sys.env.get("GEMSTONE_ONEDPL_BATCH_TIMEOUT").fold(defaultTestTimeout.toSeconds)(_.toLong)
+  private val batchAcceptTimeouts   = sys.env.get("GEMSTONE_ONEDPL_BATCH_ACCEPT_TIMEOUTS").contains("1")
+  private val includeStress         = sys.env.get("GEMSTONE_ONEDPL_INCLUDE_STRESS").contains("1")
+  private val excluded              = sys.env.get("GEMSTONE_ONEDPL_EXCLUDE").filter(_.nonEmpty).map(_.r)
   private val defaultStressExcluded = Set(
     "exclusive_scan_by_segment.pass",
     "inclusive_scan_by_segment.pass",
@@ -337,18 +339,19 @@ final class OneDPLConformanceSuite extends munit.FunSuite {
   // inventory, but cannot be executed by either the host or provider lanes.
   // Keep them out of the runnable matrix so batch mode never turns an absent
   // executable into a spurious CTest failure.
-  private val runnable = all.zipWithIndex.collect { case (testCase, index) if testCase.command.nonEmpty =>
-    index -> testCase.name
+  private val runnable = all.zipWithIndex.collect {
+    case (testCase, index) if testCase.command.nonEmpty =>
+      index -> testCase.name
   }
-  private val cases = (runnable ++
-    samples.zipWithIndex.map { case (sample, index) => (all.size + index) -> s"samples/${sample.name}" }
-  ).filterNot {
-    case (_, name) =>
-      defaultExcluded.contains(name) ||
-      // The configure used for this emulator intentionally leaves the C++ standard-ranges lane off.
-      name.startsWith("std_ranges_") ||
-      excluded.exists(_.findFirstIn(name).nonEmpty)
-  }
+  private val cases =
+    (runnable ++
+      samples.zipWithIndex.map { case (sample, index) => (all.size + index) -> s"samples/${sample.name}" }).filterNot {
+      case (_, name) =>
+        defaultExcluded.contains(name) ||
+        // The configure used for this emulator intentionally leaves the C++ standard-ranges lane off.
+        name.startsWith("std_ranges_") ||
+        excluded.exists(_.findFirstIn(name).nonEmpty)
+    }
   private def isHostOnly(name: String): Boolean =
     if (
       hostOnly.contains(name) ||
@@ -376,14 +379,19 @@ final class OneDPLConformanceSuite extends munit.FunSuite {
   private var executions = Map.empty[String, JavaFuture[Unit]]
 
   override def beforeAll(): Unit = {
+    require(!oracleOnly || oracleEnabled, "GEMSTONE_ORACLE_ONLY requires the oneDPL vendor oracle to be enabled")
     require(jobs >= 1 && jobs <= 32, s"GEMSTONE_ONEDPL_JOBS must be between 1 and 32, found $jobs")
     require(batchSize >= 1, s"GEMSTONE_ONEDPL_BATCH_SIZE must be positive, found $batchSize")
-    require(batchParallelism >= 1 && batchParallelism <= 8,
-      s"GEMSTONE_ONEDPL_BATCH_PARALLEL must be between 1 and 8, found $batchParallelism")
+    require(
+      batchParallelism >= 1 && batchParallelism <= 8,
+      s"GEMSTONE_ONEDPL_BATCH_PARALLEL must be between 1 and 8, found $batchParallelism"
+    )
     require(batchTimeoutSeconds >= 1, s"GEMSTONE_ONEDPL_BATCH_TIMEOUT must be positive, found $batchTimeoutSeconds")
-    configure(root.resolve("runtime/levelzero"), driverRoot, Vector("-DBUILD_TESTING=OFF"), sharedEnvironment)
-    build(driverRoot, "gemstone_levelzero", sharedEnvironment)
-    if (selected.exists(_.backend.contains(Backend.OpenCL))) prepareOpenCLProvider()
+    if (!oracleOnly) {
+      configure(root.resolve("runtime/levelzero"), driverRoot, Vector("-DBUILD_TESTING=OFF"), sharedEnvironment)
+      build(driverRoot, "gemstone_levelzero", sharedEnvironment)
+      if (selected.exists(_.backend.contains(Backend.OpenCL))) prepareOpenCLProvider()
+    }
     selected.collect { case Work(index, _, _, _) if index >= all.size => samples(index - all.size) }.distinct
       .foreach(compileSample)
     if (batch) {
@@ -397,8 +405,9 @@ final class OneDPLConformanceSuite extends munit.FunSuite {
             Some(targetName),
             entries.collect { case Work(index, _, _, _) if index < all.size => all(index).name }
           )
-          entries.collect { case Work(index, Some(_), Some(_), _) if index >= all.size =>
-            index -> samples(index - all.size)
+          entries.collect {
+            case Work(index, Some(_), Some(_), _) if index >= all.size =>
+              index -> samples(index - all.size)
           }.foreach { case (index, sample) =>
             runPairedSourceCase(sample, backend, targetName, entries.find(_.index == index).get.name)
           }
@@ -416,7 +425,7 @@ final class OneDPLConformanceSuite extends munit.FunSuite {
   override def afterAll(): Unit =
     executor.foreach(_.shutdown())
 
-  if (batch) test("onedpl/batch") { () }
+  if (batch) test("onedpl/batch")(())
   else selected.foreach { entry =>
     test(s"onedpl/${entry.name}") {
       await(entry.name)
@@ -467,7 +476,7 @@ final class OneDPLConformanceSuite extends munit.FunSuite {
             timeout = 30.minutes
           )
           require(paired.oracle.exit == 0, s"oracle/${value.id}/batch $chunkIndex:\n${paired.oracle.diagnostic}")
-          paired.gemstone
+          if paired.gemstoneRan then paired.gemstone else paired.oracle
         case Some(value) =>
           runGemstone(
             ComputeAPI.SYCL,
@@ -478,8 +487,8 @@ final class OneDPLConformanceSuite extends munit.FunSuite {
             timeout = 30.minutes
           )
       }
-      val failures = ctestFailures(result.stdout)
-      val timedOut = failures.collect { case (name, reason) if reason.contains("Timeout") => name }
+      val failures   = ctestFailures(result.stdout)
+      val timedOut   = failures.collect { case (name, reason) if reason.contains("Timeout") => name }
       val unexpected = failures.filterNot { case (_, reason) => reason.contains("Timeout") }
       if (result.exit != 0 && batchAcceptTimeouts && timedOut.nonEmpty && unexpected.isEmpty) {
         println(s"oneDPL batch chunk $chunkIndex duration exclusions: ${timedOut.mkString(", ")}")
@@ -515,7 +524,7 @@ final class OneDPLConformanceSuite extends munit.FunSuite {
           require(result.exit == 0, s"host/${work.name}:\n${result.diagnostic}")
         case Some(backend) if oracleEnabled =>
           val targetName = work.target.getOrElse(fail(s"provider case lacks a target: ${work.name}"))
-          val result = runPaired(
+          val result     = runPaired(
             ComputeAPI.SYCL,
             runtimeLayout(backend),
             command,
@@ -525,10 +534,11 @@ final class OneDPLConformanceSuite extends munit.FunSuite {
           )
           if result.oracleRan then
             require(result.oracle.exit == 0, s"oracle/${work.name}:\n${result.oracle.diagnostic}")
-          require(result.gemstone.exit == 0, s"gemstone/${work.name}:\n${result.gemstone.diagnostic}")
+          if result.gemstoneRan then
+            require(result.gemstone.exit == 0, s"gemstone/${work.name}:\n${result.gemstone.diagnostic}")
         case Some(backend) =>
           val targetName = work.target.getOrElse(fail(s"provider case lacks a target: ${work.name}"))
-          val result = runGemstone(
+          val result     = runGemstone(
             ComputeAPI.SYCL,
             runtimeLayout(backend),
             command,
@@ -549,7 +559,7 @@ final class OneDPLConformanceSuite extends munit.FunSuite {
 
   private def runtimeLayout(backend: Backend): RuntimeLayout = backend match {
     case Backend.LevelZero => RuntimeLayout(levelZeroDriver = Some(driverRoot.resolve("libze_gemstone.so")))
-    case Backend.OpenCL => RuntimeLayout(
+    case Backend.OpenCL    => RuntimeLayout(
         openCLICD = Some(openCLRoot.resolve("icd")),
         openCLLoader = Some(ConformanceSupport.openCLLoader)
       )
@@ -559,16 +569,16 @@ final class OneDPLConformanceSuite extends munit.FunSuite {
     // Intel's compiler/runtime must see these before IGC is loaded. The
     // emulator implements fp64 through Intel's DP emulation path.
     "OverrideDefaultFP64Settings" -> "1",
-    "IGC_EnableDPEmulation"        -> "1",
+    "IGC_EnableDPEmulation"       -> "1",
     // Persistent images can outlive the emulator/provider ABI and make
     // Intel's SYCL cache loader dereference stale device-image metadata.
-    "SYCL_CACHE_PERSISTENT"        -> "0",
+    "SYCL_CACHE_PERSISTENT" -> "0",
     "LD_LIBRARY_PATH"       -> libraryPath(Vector(
       driverRoot,
       openCLRoot,
       compiler.getParent.getParent.resolve("lib"),
-        Path.of("/opt/intel/oneapi/umf/latest/lib")
-      ))
+      Path.of("/opt/intel/oneapi/umf/latest/lib")
+    ))
   ) ++ sys.env.collect {
     case (name, value) if Set("GEMSTONE_TRACE", "SYCL_PI_TRACE", "SYCL_UR_TRACE").contains(name) => name -> value
   }
@@ -601,7 +611,8 @@ final class OneDPLConformanceSuite extends munit.FunSuite {
     configure(root.resolve("runtime/opencl"), openCLRoot, Vector("-DBUILD_TESTING=OFF"), sharedEnvironment)
     build(openCLRoot, "gemstone_opencl", sharedEnvironment)
     val directory = Files.createDirectories(openCLRoot.resolve("icd"))
-    val _ = Files.writeString(directory.resolve("gemstone.icd"), openCLRoot.resolve("libOpenCL_gemstone.so").toString + "\n")
+    val _         =
+      Files.writeString(directory.resolve("gemstone.icd"), openCLRoot.resolve("libOpenCL_gemstone.so").toString + "\n")
   }
 
   private def runPairedSourceCase(
@@ -622,11 +633,13 @@ final class OneDPLConformanceSuite extends munit.FunSuite {
         gemstoneEnvironment = gemstoneEnvironment(target)
       )
       if result.oracleRan then require(result.oracle.exit == 0, s"oracle/$identity:\n${result.oracle.diagnostic}")
-      require(result.gemstone.exit == 0, s"gemstone/$identity:\n${result.gemstone.diagnostic}")
+      if result.gemstoneRan then
+        require(result.gemstone.exit == 0, s"gemstone/$identity:\n${result.gemstone.diagnostic}")
       sample.commands.last.expected.foreach { expected =>
         if result.oracleRan then
           require(stripOutput(result.oracle.stdout) == expected, s"oracle/$identity: expected '$expected'")
-        require(stripOutput(result.gemstone.stdout) == expected, s"gemstone/$identity: expected '$expected'")
+        if result.gemstoneRan then
+          require(stripOutput(result.gemstone.stdout) == expected, s"gemstone/$identity: expected '$expected'")
       }
     } else {
       val result = runGemstone(

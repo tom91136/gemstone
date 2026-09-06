@@ -42,9 +42,12 @@ class ThrustConformanceSuite extends munit.FunSuite {
     val pattern    = sys.env.get("GEMSTONE_THRUST_FILTER").filter(_.nonEmpty).map(_.r)
     pattern.fold(discovered)(regex => discovered.filter(testCase => regex.findFirstIn(testCase.name).nonEmpty))
   }
-  private val sizes       = sys.env.getOrElse("GEMSTONE_THRUST_SIZES", "tiny")
-  private val outputMode  = if (sys.env.get("GEMSTONE_THRUST_VERBOSE").contains("1")) "--verbose" else "--concise"
-  private val skipOracle  = sys.env.get("GEMSTONE_THRUST_SKIP_ORACLE").contains("1")
+  private val sizes      = sys.env.getOrElse("GEMSTONE_THRUST_SIZES", "tiny")
+  private val outputMode = if (sys.env.get("GEMSTONE_THRUST_VERBOSE").contains("1")) "--verbose" else "--concise"
+  private val skipOracle = sys.env.get("GEMSTONE_THRUST_SKIP_ORACLE").contains("1")
+  private val oracleOnly = sys.env.get("GEMSTONE_ORACLE_ONLY").exists { value =>
+    Set("1", "true", "yes").contains(value.trim.toLowerCase)
+  }
   private val unitFilters = sys.env.get("GEMSTONE_THRUST_UNIT_FILTER").toVector
     .flatMap(_.split(',').iterator.map(_.trim).filter(_.nonEmpty))
   private val emulationBlacklist = ThrustConformanceSuite.emulationBlacklist
@@ -106,15 +109,17 @@ class ThrustConformanceSuite extends munit.FunSuite {
     println(
       s"[thrust] filter=${sys.env.get("GEMSTONE_THRUST_FILTER")} selected=${selectedCases.size} " +
         s"architectures=${architectures.mkString(",")} matrix=${selectedMatrixCases.size} " +
-        s"oracleArchitectures=${oracleArchitectures.mkString(",")} skipOracle=$skipOracle"
+        s"oracleArchitectures=${oracleArchitectures.mkString(",")} skipOracle=$skipOracle oracleOnly=$oracleOnly"
     )
+    require(!oracleOnly || oracleEnabled, "GEMSTONE_ORACLE_ONLY requires the vendor oracle to be enabled")
+    require(!oracleOnly || !skipOracle, "GEMSTONE_ORACLE_ONLY cannot be combined with GEMSTONE_THRUST_SKIP_ORACLE=1")
     require(
       Set("tiny", "small", "medium", "default", "large", "huge", "epic", "max").contains(sizes),
       s"invalid GEMSTONE_THRUST_SIZES value: $sizes"
     )
     require(compileJobs >= 1 && compileJobs <= 32, s"GEMSTONE_THRUST_JOBS must be between 1 and 32, found $compileJobs")
     require(runJobs >= 1 && runJobs <= 32, s"GEMSTONE_THRUST_RUN_JOBS must be between 1 and 32, found $runJobs")
-    buildGemstoneFacade(root, libraryDir)
+    if (!oracleOnly) buildGemstoneFacade(root, libraryDir)
     architectures.foreach(buildFramework)
     compileCases()
     val executor = Executors.newFixedThreadPool(runJobs)
@@ -223,35 +228,37 @@ class ThrustConformanceSuite extends munit.FunSuite {
       println(s"[thrust] oracle skipped for ${matrixCase.name}: target is not executable on the available device set")
     }
 
-    val blacklisted   = emulationBlacklist.getOrElse(testCase.name, Set.empty)
-    val gemstoneUnits =
-      if (blacklisted.isEmpty) unitFilters
-      else {
-        val available = listUnits(caseRoot)
-        val requested = if (unitFilters.isEmpty) available else available.filter(matchesUnitFilter)
-        val selected  = requested.filterNot(blacklisted)
-        println(s"[thrust] emulation blacklist ${testCase.name}: ${blacklisted.toVector.sorted.mkString(", ")}")
-        selected
-      }
-    if (blacklisted.nonEmpty && gemstoneUnits.isEmpty) return
+    if (!oracleOnly) {
+      val blacklisted   = emulationBlacklist.getOrElse(testCase.name, Set.empty)
+      val gemstoneUnits =
+        if (blacklisted.isEmpty) unitFilters
+        else {
+          val available = listUnits(caseRoot)
+          val requested = if (unitFilters.isEmpty) available else available.filter(matchesUnitFilter)
+          val selected  = requested.filterNot(blacklisted)
+          println(s"[thrust] emulation blacklist ${testCase.name}: ${blacklisted.toVector.sorted.mkString(", ")}")
+          selected
+        }
+      if (blacklisted.nonEmpty && gemstoneUnits.isEmpty) return
 
-    val gemstoneCommand = Vector(caseRoot.resolve("test").toString) ++ gemstoneUnits ++
-      Vector(s"--sizes=$sizes", outputMode)
-    val gemstone = GemstoneProcess.attested(
-      ComputeAPI.CUDA,
-      RuntimeLayout(cudaDriver = Some(libraryDir.resolve("libcuda.so.1"))),
-      sys.env - "GEMSTONE_NO_ORACLE"
-    )(environment =>
-      capture(
-        gemstoneCommand,
-        caseRoot,
-        environment.copy(set = environment.set.updated("GEMSTONE_CUDA_TARGET_ARCH", matrixCase.architecture))
+      val gemstoneCommand = Vector(caseRoot.resolve("test").toString) ++ gemstoneUnits ++
+        Vector(s"--sizes=$sizes", outputMode)
+      val gemstone = GemstoneProcess.attested(
+        ComputeAPI.CUDA,
+        RuntimeLayout(cudaDriver = Some(libraryDir.resolve("libcuda.so.1"))),
+        sys.env - "GEMSTONE_NO_ORACLE"
+      )(environment =>
+        capture(
+          gemstoneCommand,
+          caseRoot,
+          environment.copy(set = environment.set.updated("GEMSTONE_CUDA_TARGET_ARCH", matrixCase.architecture))
+        )
+      ).fold(
+        error => fail(s"gemstone/${matrixCase.name}: ${error.message}"),
+        identity
       )
-    ).fold(
-      error => fail(s"gemstone/${matrixCase.name}: ${error.message}"),
-      identity
-    )
-    assertPass(matrixCase, "gemstone", gemstone)
+      assertPass(matrixCase, "gemstone", gemstone)
+    }
   }
 
   private def listUnits(caseRoot: Path): Vector[String] = {
@@ -662,13 +669,16 @@ object ThrustConformanceSuite {
         generated.resolve("gemstone_cuda_rpc_client.c").toString,
         generated.resolve("gemstone_cuda_driver_stubs.c").toString,
         dispatch.resolve("gemstone_cuda_compat.c").toString,
+        dispatch.resolve("gemstone_cublas_compat.c").toString,
         dispatch.resolve("gemstone_rpc_transport.c").toString,
         s"-I$generated",
         s"-I$dispatch",
         s"-I${cudaHeaderInclude(root)}",
         "-Wl,-soname,libcuda.so.1",
         s"-Wl,--version-script=${generated.resolve("gemstone_cuda.map")}",
+        s"-Wl,--version-script=${dispatch.resolve("gemstone_cublas.map")}",
         "-pthread",
+        "-lm",
         "-o",
         library.toString
       ),

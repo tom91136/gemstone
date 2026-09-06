@@ -33,6 +33,18 @@ final class ISATypedProgramExecutor private (loaders: Map[ProgramFormat, Program
     )
   }
 
+  override def writeGlobal(
+      id: ProgramId,
+      name: String,
+      offset: Long,
+      bytes: Col[Byte]
+  ): Either[ExecutionFailure, Unit] =
+    lifecycleLock.synchronized {
+      programs.get().get(id).toRight(
+        ExecutionFailure.NotFound(s"program ${id.toLong} is not loaded")
+      ).flatMap(_.writeGlobal(name, offset, bytes))
+    }
+
   override def launch(
       dispatch: KernelDispatch,
       memory: ExecutionMemory,

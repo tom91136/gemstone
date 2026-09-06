@@ -33,6 +33,6 @@ dereferenced by the managed executor.
 - Unsupported opcodes, argument layouts, and pointer provenance fail closed.
 
 Focused Level Zero CTest cases cover loader discovery, transfers, lifecycle, and execution RPC. The identical 902
-oneDPL binaries plus three samples are each run through both backend paths; the OpenCL cases intentionally remain red
-until the ICD facade exists. The exhaustive upstream inventory is described in
+oneDPL binaries plus three samples are each run through both backend paths; OpenCL cases are paired with the ICD
+facade where the selected oneDPL workload supports it. The exhaustive upstream inventory is described in
 `conformance/onedpl/README.md`.
