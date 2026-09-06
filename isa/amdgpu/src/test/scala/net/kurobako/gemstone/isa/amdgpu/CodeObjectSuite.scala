@@ -1331,6 +1331,74 @@ class CodeObjectSuite extends munit.FunSuite {
     }
   }
 
+  test("gfx900 VOPC SDWA unsigned 16-bit greater-than is supported") {
+    val instruction = DispatchInterpreter.decodeInstruction(
+      Col[Byte](0xf9.toByte, 0x04, 0x58, 0x7d, 0x03, 0x80.toByte, 0x86.toByte, 0x06),
+      Target.unsafe("gfx900")
+    )
+
+    instruction match {
+      case Right(
+            DecodedInstruction.VCompareSubDword(
+              "v_cmp_gt_u16",
+              InstructionSource.Scalar(3),
+              InstructionSource.VectorRegister(2),
+              SubDwordSelection.DWord,
+              SubDwordSelection.DWord,
+              false,
+              false,
+              Some(0)
+            )
+          ) => ()
+      case other => fail(s"decoded VOPC SDWA unsigned comparison was rejected: $other")
+    }
+  }
+
+  test("gfx900 VOPC SDWA unsigned 16-bit less-than-or-equal is supported") {
+    val instruction = DispatchInterpreter.decodeInstruction(
+      Col[Byte](0xf9.toByte, 0x04, 0x56, 0x7d, 0x03, 0x80.toByte, 0x86.toByte, 0x06),
+      Target.unsafe("gfx900")
+    )
+
+    instruction match {
+      case Right(DecodedInstruction.VCompareSubDword("v_cmp_le_u16", _, _, _, _, _, _, _)) => ()
+      case other => fail(s"decoded VOPC SDWA unsigned less-than-or-equal was rejected: $other")
+    }
+  }
+
+  test("gfx1036 packed signed 16-bit maximum is supported") {
+    val instruction = DispatchInterpreter.decodeInstruction(
+      Col[Byte](0x01, 0x00, 0x07, 0xcc.toByte, 0x02, 0x07, 0x12, 0x04),
+      Target.unsafe("gfx1036")
+    )
+
+    instruction match {
+      case Right(
+            DecodedInstruction.VPackedBinary(
+              "v_pk_max_i16",
+              1,
+              InstructionSource.VectorRegister(2),
+              InstructionSource.VectorRegister(3),
+              false,
+              false
+            )
+          ) => ()
+      case other => fail(s"decoded packed signed maximum was rejected: $other")
+    }
+  }
+
+  test("gfx1036 packed unsigned 16-bit maximum is supported") {
+    val instruction = DispatchInterpreter.decodeInstruction(
+      Col[Byte](0x01, 0x00, 0x0c, 0xcc.toByte, 0x02, 0x07, 0x12, 0x04),
+      Target.unsafe("gfx1036")
+    )
+
+    instruction match {
+      case Right(DecodedInstruction.VPackedBinary("v_pk_max_u16", _, _, _, _, _)) => ()
+      case other => fail(s"decoded packed unsigned maximum was rejected: $other")
+    }
+  }
+
   test("gfx1100 VOP3 DPP instructions fail closed") {
     val result = DispatchInterpreter.decodeInstruction(
       Col[Byte](

@@ -111,10 +111,11 @@ Implemented foundation:
 - a separate header-only unified C++ workload catalog under `conformance/unified`, with host, CUDA, HIP, and SYCL
   runners, async dependency cases, expanded BLAS layouts, ROCm-derived iterator/set probes, a compact/full CTest
   profile, and parallel sharding.
-- the imported legacy-red regression inventory is now strict and green: CUDA Thrust 56/56 and the exact rocThrust/HSA
-  binary lane 50/50 pass through the authenticated emulation providers. The expanded unified HIP semantic probes are
-  also strict-green at 39/39. Focused HIP algorithms (including i8), BLAS, edge, and async profiles are currently
-  strict-green; current tallies and reproduction commands are tracked in `UNIFIED_EMULATION_WORK.md`.
+- the imported legacy-red regression inventory is green for CUDA Thrust (56/56) but not yet fully green for the exact
+  rocThrust/HSA binary lane: the latest authenticated run is 49/51 pass, with `random` and `unittest_static_assert`
+  still failing. The expanded unified HIP semantic probes remain strict-green at 39/39. Focused HIP algorithms
+  (including i8), BLAS, edge, and async profiles are currently strict-green; current tallies and reproduction
+  commands are tracked in `UNIFIED_EMULATION_WORK.md`.
 
 Important incompleteness:
 
@@ -123,7 +124,8 @@ Important incompleteness:
   reds until their API and execution behavior is filled out;
 - Level Zero and SPIR-V semantics are far from full oneDPL coverage;
 - the complete 348-test rocThrust inventory and full oneDPL/OpenCL CTS matrices remain future work; the imported
-  50-case rocThrust legacy-red boundary is currently green under emulation;
+  50-case rocThrust legacy-red boundary has two remaining emulation failures (`random` and
+  `unittest_static_assert`);
 - the expanded unified profile is host-validated (1,812 portable cases; HIP lists 72 HIP-async and 39 additional ROCm
   semantic probes, for 1,923 HIP identities), and the non-legacy relocated CUDA/HIP/SYCL emulator matrix is now
   green at its documented workload bounds. The complete counts and the SYCL n1024/n257 policy are tracked in

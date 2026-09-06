@@ -266,7 +266,9 @@ The old CUDA Thrust and ROCm rocThrust runners produced a large number of
 Gemstone-only failures. The unified catalog carries only identities reproduced
 by the current container-built upstream binaries: all 48 imported CUDA Thrust
 identities are now recorded as fixed, and all 50 AMD rocThrust/HSA cases are
-recorded as fixed. The two formerly failing CUDA identities are also decomposed into the
+recorded as strict regressions. The latest HIP emulation sweep passes 49/51;
+`random` and `unittest_static_assert` remain failures pending investigation.
+The two formerly failing CUDA identities are also decomposed into the
 eight tested 64-bit big-index magnitudes as ordinary semantic unified cases. The complete 317-entry AMD historical inventory is
 retained as `roc_historical`; 72 cases whose bounded probe timed out remain in
 `legacy_reds::deferred`. The formerly red rocBLAS half-precision AXPY case is

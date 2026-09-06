@@ -946,10 +946,12 @@ object DispatchInterpreter {
     "v_cmp_ne_i16",
     "v_cmp_ne_u16",
     "v_cmp_gt_i16",
+    "v_cmp_gt_u16",
     "v_cmp_ge_u16",
     "v_cmp_lt_i16",
     "v_cmp_lt_u16",
-    "v_cmp_le_i16"
+    "v_cmp_le_i16",
+    "v_cmp_le_u16"
   )
   private val SupportedVOP3SourceModifierOpcodes = Set(
     "v_cndmask_b32",
@@ -2895,7 +2897,8 @@ object DispatchInterpreter {
           ))
         case packed @ (
               "v_pk_add_u16" | "v_pk_add_f16" | "v_pk_mul_lo_u16" | "v_pk_mul_f16" |
-              "v_pk_max_f16" | "v_pk_min_f16" | "v_pk_sub_i16" | "v_pk_lshrrev_b16"
+              "v_pk_max_f16" | "v_pk_min_f16" | "v_pk_max_i16" | "v_pk_max_u16" | "v_pk_sub_i16" |
+              "v_pk_lshrrev_b16"
             ) =>
           Either.cond(
             (second >>> 29) == 0L,
@@ -5762,6 +5765,10 @@ object DispatchInterpreter {
                         IEEE754.binary16ToFloat(Bits.low16(a)),
                         IEEE754.binary16ToFloat(Bits.low16(b))
                       )))
+                    case "v_pk_max_i16" =>
+                      if (Bits.signExtend(Bits.low16(a), 16) >= Bits.signExtend(Bits.low16(b), 16)) Bits.low16(a)
+                      else Bits.low16(b)
+                    case "v_pk_max_u16"     => math.max(Bits.low16(a), Bits.low16(b))
                     case "v_pk_sub_i16"     => Bits.low16(a - b)
                     case "v_pk_lshrrev_b16" => Bits.low16(b >>> (a.toInt & 15))
                   }

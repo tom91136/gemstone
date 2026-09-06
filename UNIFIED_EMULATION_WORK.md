@@ -238,6 +238,19 @@ relocated ROCm 7.1 rocBLAS/Tensile directory (both pass). An older artifact
 containing only a small subset of that directory can abort inside rocBLAS
 before Gemstone receives a dispatch; the relocation launcher now exports the
 artifact's Tensile path automatically.
+
+## Legacy-suite checkpoint (2026-09-06)
+
+Checkpoint commit `6b95ea9` captured the conformance/runtime/matrix work before
+the legacy sweep. The strict CUDA legacy lane is green at 56/56 in 119.64 s.
+The exact HIP/rocThrust legacy lane completed at 49/51 in 926.57 s, with no
+skips; the remaining failures are `random` (exit 1 after its launches complete)
+and `unittest_static_assert` (exit 134 from an unmapped AMDGPU address
+`0x8b98`). The eleven failures seen before the latest AMDGPU interpreter fixes
+were reduced to these two: SDWA `v_cmp_gt_u16`/`v_cmp_le_u16` and packed
+`v_pk_max_i16`/`v_pk_max_u16` are now implemented and covered by focused
+decoder regression tests. The async inclusive scan and all descending set
+operations now pass.
 The legacy upstream suite remains intact and was not retired or modified into
 a mask.
 
@@ -361,9 +374,10 @@ fresh host-backed allocations deterministic contents.
 - [x] The available mini-app matrix is strict-green: 39 / 39 passed with
   zero ignored cases. OpenACC remains optional and is not present without
   `GEMSTONE_MINIAPP_OPENACC_IMAGE`.
-- [x] The exact imported legacy rocThrust binary inventory is green: all 50
-  imported identities pass the bounded emulator sweep (50/50 strict). This is
-  distinct from the expanded 39-case ROCm semantic probe catalog.
+- [ ] The exact imported legacy rocThrust binary inventory is not fully green
+  yet: the latest bounded emulator sweep passes 49/51, with `random` and
+  `unittest_static_assert` remaining. This is distinct from the expanded
+  39-case ROCm semantic probe catalog, which remains 39/39 strict-green.
 - [ ] Full oneDPL/OpenCL CTS and the complete upstream vendor-suite matrix are
   not part of this requested gate; they remain future work for the legacy
   suite and are intentionally excluded here.
@@ -429,7 +443,7 @@ into `XFAIL` and treats `XPASS`/`XSKIP` as a failed check.
 | Source | Imported identities | Oracle | Gemstone red check |
 |---|---:|---:|---:|
 | CUDA Thrust (`compute_89`) | 48 fixed upstream identities; 8 decomposed big-index cases | 48/48 upstream and 8/8 semantic oracle pass | 48/48 + 8/8 strict pass |
-| AMD rocThrust/HSA (`gfx1036`) | 50 imported identities (0 active; 50 strict-fixed) | 50/50 oracle baseline | 50/50 strict pass |
+| AMD rocThrust/HSA (`gfx1036`) | 50 imported identities | 50/50 oracle baseline | 49/51 strict pass; `random`, `unittest_static_assert` remain |
 | AMD rocBLAS (`gfx1036`, f16 AXPY) | 1 | 1/1 pass | fixed |
 | Intel oneDPL/SYCL | 0 observed | 187/24/0 unified smoke | no red cases |
 
@@ -446,15 +460,19 @@ Reproduction commands for the authenticated Gemstone checks:
   --algorithm-types=i32 --blas-types=f16
 ```
 
-The bounded provider checks completed with no unexpected pass or skip:
+The latest strict provider checks completed with no skips in the selected
+legacy lanes as follows:
 
 ```text
 CUDA Thrust upstream: SUMMARY pass=2 skip=0 fail=0 xfail=0 xpass=0 xskip=0 selected=2
 CUDA Thrust semantic: SUMMARY pass=8 skip=0 fail=0 xfail=0 xpass=0 xskip=0 selected=8
 rocThrust active-red lane: SUMMARY pass=0 skip=0 fail=0 xfail=0 xpass=0 xskip=0 selected=0
-rocThrust strict-fixed lane: SUMMARY pass=50 skip=0 fail=0 xfail=0 xpass=0
-xskip=0 selected=50 (elapsed=64.83s). This was a no-oracle emulator run using
-the relocated ROCm userspace and Gemstone HIP/HSA providers.
+CUDA Thrust full legacy lane: SUMMARY pass=56 skip=0 fail=0 xfail=0 xpass=0
+xskip=0 selected=56 (elapsed=119.64s).
+rocThrust full legacy lane: SUMMARY pass=49 skip=0 fail=2 xfail=0 xpass=0
+xskip=0 selected=51 (elapsed=926.57s); the failures are `random` and
+`unittest_static_assert`. This was a no-oracle emulator run using the relocated
+ROCm userspace and Gemstone HIP/HSA providers.
 rocBLAS f16: SUMMARY pass=1 skip=0 fail=0 xfail=0   xpass=0 xskip=0 selected=1
 ```
 
@@ -476,8 +494,9 @@ also pass after fixing missing pinned-host allocation entry points, relocatable
 PTX declaration selection, and the kernel parameter-width wire encoding.
 
 The exact 50 imported upstream rocThrust binaries remain a strict regression
-lane and currently pass 50/50, including both async-simple binaries,
-`reduce_large`, `set_difference_key_value`, and the large keyed-sort cases.
+lane. The latest run passes 49/51, including both async-simple binaries,
+`reduce_large`, `set_difference_key_value`, and the large keyed-sort cases;
+`random` and `unittest_static_assert` remain reproducible failures.
 The reconstructed 39-case ROCm semantic catalog is also now strict-green
 (39/39); these cases stay in the ordinary catalog rather than being hidden by
 an XFAIL mask. No AMD hardware/oracle execution was used in this expansion
@@ -497,8 +516,8 @@ check` completed successfully in 76 seconds (including JVM and Scala Native suit
 all runtime CTest checks, and the CUDA conformance suite: 18/18); the parallel
 host CTest remains 251/251. The run emitted only existing Scala discarded-value
 warnings in AMDGPU test fixtures. No physical GPU or vendor oracle was used.
-Current legacy inventory: 50 strict-fixed rocThrust identities (50/50 bounded
-emulator pass). CUDA, rocBLAS, the historical compact unified catalog, and the
+Current legacy inventory: 50 rocThrust identities (49/51 bounded emulator
+pass, with two residual failures). CUDA, rocBLAS, the historical compact unified catalog, and the
 JVM/native ISA suites remain green at their recorded boundaries; no semantic
 red is currently reproduced in the completed focused expanded profiles.
 Installed artifacts that predate the
