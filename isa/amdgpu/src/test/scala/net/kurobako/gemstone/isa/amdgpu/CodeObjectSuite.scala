@@ -1979,6 +1979,70 @@ class CodeObjectSuite extends munit.FunSuite {
     assertEquals(DispatchInterpreter.execute(kernel, dispatch, TestMemory()), Right(()))
   }
 
+  test("a linked code object fills its GOT slot from an absolute 64-bit relocation") {
+    // HIP reaches a device global through a .got slot when the symbol is not
+    // directly addressable, so the slot has to hold the symbol address before
+    // the first kernel reads it.
+    val indexed = CodeObject.index(Col.unsafeFromArray(minimalCodeObject(globalPointer = true))).toOption.get
+    val kernel  = indexed.kernel("kernel").toOption.get
+    assertEquals(
+      kernel.globalMemory.find(_._1 == 0x4000L).map(_._2.take(8).toSeq),
+      Some(LittleEndian.toCol(0x3000L, 8).toSeq)
+    )
+  }
+
+  test("gfx1036 preserves a vcc_hi scratch counter across a vector comparison") {
+    // HIP kernels keep loop counters in vcc_hi (s107) on wave32 targets. A
+    // vector comparison only defines the wave's lane bits of VCC, so the
+    // counter has to survive one. Without that the loop below never reaches
+    // zero and the dispatch only ends by exhausting its instruction budget.
+    val code = Col[Byte](
+      0x8a.toByte,
+      0x03.toByte,
+      0xeb.toByte,
+      0xbe.toByte, // s_mov_b32 vcc_hi, 10
+      0x80.toByte,
+      0x18.toByte,
+      0x1a.toByte,
+      0x7c.toByte, // v_cmp_neq_f32_e32 vcc_lo, 0, v12
+      0x6b.toByte,
+      0xc1.toByte,
+      0x6b.toByte,
+      0x81.toByte, // s_add_i32 vcc_hi, vcc_hi, -1
+      0x6b.toByte,
+      0x80.toByte,
+      0x07.toByte,
+      0xbf.toByte, // s_cmp_lg_u32 vcc_hi, 0
+      0xfc.toByte,
+      0xff.toByte,
+      0x85.toByte,
+      0xbf.toByte, // s_cbranch_scc1 -4 (displacement is in dwords)
+      0x00,
+      0x00,
+      0x81.toByte,
+      0xbf.toByte // s_endpgm
+    )
+    val kernel = CodeObjectKernel(
+      "vcc_scratch_counter",
+      Target.unsafe("gfx1036"),
+      0,
+      0,
+      0,
+      computePgmRsrc2 = 0x880,
+      kernelCodeProperties = 0,
+      code
+    )
+    val dispatch = KernelDispatch.create(
+      ProgramId.fromLong(1L).toOption.get,
+      "vcc_scratch_counter",
+      Dimensions.create(32, 1, 1).toOption.get,
+      Dimensions.One,
+      Col.empty
+    ).toOption.get
+    val control = ExecutionControl.create(ExecutionLimits(maxInstructions = 4096L, quantum = 64))
+    assertEquals(DispatchInterpreter.execute(kernel, dispatch, TestMemory(), control), Right(()))
+  }
+
   test("gfx900 transfers control through a linked device-function call and return") {
     // s_mov_b32 s4, 0x1018; s_mov_b32 s5, 0; s_swappc s[2:3], s[4:5]
     // calls the second text function. It writes s0 and returns through the
@@ -2143,10 +2207,13 @@ class CodeObjectSuite extends munit.FunSuite {
     override def recordPointerRelocation(relocation: PointerRelocation): Unit = ()
   }
 
-  private def minimalCodeObject(): Array[Byte] = {
+  private def minimalCodeObject(globalPointer: Boolean = false): Array[Byte] = {
     def aligned(value: Int): Int = (value + 7) & ~7
-    val sectionNames             = "\u0000.shstrtab\u0000.strtab\u0000.symtab\u0000.text\u0000.rodata\u0000.bss\u0000"
-      .getBytes(StandardCharsets.US_ASCII)
+    val sectionNames             =
+      (if (globalPointer)
+         "\u0000.shstrtab\u0000.strtab\u0000.symtab\u0000.text\u0000.rodata\u0000.bss\u0000.got\u0000.rela.dyn\u0000"
+       else "\u0000.shstrtab\u0000.strtab\u0000.symtab\u0000.text\u0000.rodata\u0000.bss\u0000")
+        .getBytes(StandardCharsets.US_ASCII)
     val symbolNames       = "\u0000kernel\u0000kernel.kd\u0000device_global\u0000".getBytes(StandardCharsets.US_ASCII)
     val target            = "amdgcn-amd-amdhsa--gfx900\u0000".getBytes(StandardCharsets.US_ASCII)
     val sectionNameOffset = 64
@@ -2156,7 +2223,10 @@ class CodeObjectSuite extends munit.FunSuite {
     val readOnlyOffset    = aligned(textOffset + 4)
     val readOnlySize      = 64 + target.length
     val sectionTable      = aligned(readOnlyOffset + readOnlySize)
-    val bytes             = Array.ofDim[Byte](sectionTable + 7 * 64)
+    val sectionCount      = if (globalPointer) 9 else 7
+    val gotOffset         = aligned(sectionTable + sectionCount * 64)
+    val relocationOffset  = aligned(gotOffset + 8)
+    val bytes             = Array.ofDim[Byte](if (globalPointer) relocationOffset + 24 else sectionTable + 7 * 64)
     val buffer            = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
 
     buffer.put(0, 0x7f.toByte)
@@ -2171,7 +2241,7 @@ class CodeObjectSuite extends munit.FunSuite {
     buffer.putLong(40, sectionTable.toLong)
     buffer.putShort(52, 64.toShort)
     buffer.putShort(58, 64.toShort)
-    buffer.putShort(60, 7.toShort)
+    buffer.putShort(60, sectionCount.toShort)
     buffer.putShort(62, 1.toShort)
     System.arraycopy(sectionNames, 0, bytes, sectionNameOffset, sectionNames.length)
     System.arraycopy(symbolNames, 0, bytes, symbolNameOffset, symbolNames.length)
@@ -2222,6 +2292,14 @@ class CodeObjectSuite extends munit.FunSuite {
     symbol(1, 1, 2, 4, 0x1000L, 4L)
     symbol(2, 8, 1, 5, 0x2000L, 64L)
     symbol(3, 18, 1, 6, 0x3000L, 16L)
+    if (globalPointer) {
+      section(7, 46, 1, 0x4000L, gotOffset, 8, alignment = 8)
+      section(8, 51, 4, 0x5000L, relocationOffset, 24, link = 3, alignment = 8, entrySize = 24)
+      // R_AMDGPU_ABS64 for device_global (symbol 3) stored into the .got slot.
+      LittleEndian.write(0x4000L, bytes, relocationOffset, 8)
+      LittleEndian.write((3L << 32) | 3L, bytes, relocationOffset + 8, 8)
+      LittleEndian.write(0L, bytes, relocationOffset + 16, 8)
+    }
     bytes
   }
 }

@@ -99,7 +99,8 @@ object CodeObject {
       private val textSection: Section,
       private val readOnlySection: Option[Section],
       private val globalSections: Map[Int, Section],
-      private val globalSymbols: Map[String, Symbol]
+      private val globalSymbols: Map[String, Symbol],
+      private val globalRelocations: Col[(Long, Long)]
   ) {
     private val materialized   = ConcurrentHashMap[String, CodeObjectKernel]()
     private lazy val textImage = java.util.Arrays.copyOfRange(
@@ -112,12 +113,22 @@ object CodeObject {
         case (index, candidate) if candidate == section => candidate.address -> globalImages(index)
       }.getOrElse(section.address -> Array.emptyByteArray)
     }
-    private lazy val globalImages: Map[Int, Array[Byte]] = globalSections.iterator.map { case (index, section) =>
-      val image =
-        if (section.sectionType == 8) Array.ofDim[Byte](section.size)
-        else java.util.Arrays.copyOfRange(bytes, section.offset, section.offset + section.size)
-      index -> image
-    }.toMap
+    private lazy val globalImages: Map[Int, Array[Byte]] = {
+      val images = globalSections.iterator.map { case (index, section) =>
+        val image =
+          if (section.sectionType == 8) Array.ofDim[Byte](section.size)
+          else java.util.Arrays.copyOfRange(bytes, section.offset, section.offset + section.size)
+        index -> image
+      }.toMap
+      globalRelocations.foreach { case (address, value) =>
+        globalSections.iterator.collectFirst {
+          case (index, section)
+              if address >= section.address && address - section.address <= section.size.toLong - 8L =>
+            LittleEndian.write(value, images(index), (address - section.address).toInt, 8)
+        }
+      }
+      images
+    }
     private lazy val globalRegions: Array[(Long, Array[Byte])] =
       globalSections.keysIterator.toArray.sorted.map { index =>
         val section = globalSections(index)
@@ -164,7 +175,8 @@ object CodeObject {
         textSection,
         readOnlySection,
         globalSections,
-        globalSymbols
+        globalSymbols,
+        globalRelocations
       )
 
     private[amdgpu] def imageMatches(candidate: Array[Byte]): Boolean =
@@ -344,11 +356,13 @@ object CodeObject {
         .map(_.toMap)
       _ <- Either.cond(records.nonEmpty, (), CodeObjectError.Invalid("AMDGPU code object has no kernel symbols"))
       globalSections = sections.zip(names).zipWithIndex.collect {
-        case ((section, name), index) if name == ".rodata" || name == ".data" || name == ".bss" => index -> section
+        case ((section, name), index)
+            if name == ".rodata" || name == ".data" || name == ".bss" || name == ".got" => index -> section
       }.toMap
       globalSymbols = symbols.iterator.filter { symbol =>
         symbol.kind == 1 && symbol.size > 0 && globalSections.contains(symbol.section)
       }.map(symbol => symbol.name -> symbol).toMap
+      globalRelocations = readGlobalRelocations(bytes, sections)
     } yield Index(
       target,
       bytes,
@@ -358,7 +372,8 @@ object CodeObject {
       textSection,
       readOnlySection,
       globalSections,
-      globalSymbols
+      globalSymbols,
+      globalRelocations
     )
 
   def index(image: Col[Byte]): Either[CodeObjectError, Index] = {
@@ -535,6 +550,45 @@ object CodeObject {
         )
       }.sequence
   }
+
+  private val RelocationSection = 4
+  private val RelocationAbs64   = 3L
+  private val SymbolEntrySize   = 24
+
+  /** Absolute 64-bit relocations a linked HIP code object still carries. HIP resolves a device global that is reached
+    * through a GOT slot (internal-linkage statics, for example) by storing the symbol address in `.got` at load time,
+    * so the slot has to be filled before the first kernel reads it.
+    */
+  private def readGlobalRelocations(bytes: Array[Byte], sections: Col[Section]): Col[(Long, Long)] = {
+    val buffer  = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
+    val builder = Col.newBuilder[(Long, Long)]
+    sections.iterator.filter(section => section.sectionType == RelocationSection).foreach { section =>
+      val stride = math.max(24, section.entrySize)
+      var index  = 0
+      while (index + stride <= section.size) {
+        val start  = section.offset + index
+        val target = buffer.getLong(start)
+        val info   = buffer.getLong(start + 8)
+        val addend = buffer.getLong(start + 16)
+        val symbol = (info >>> 32).toInt
+        val value  = symbolValue(bytes, sections, section.link, symbol)
+        if ((info & 0xffffffffL) == RelocationAbs64)
+          value.foreach(resolved => builder += (target -> (resolved + addend)))
+        index += stride
+      }
+    }
+    builder.result()
+  }
+
+  private def symbolValue(bytes: Array[Byte], sections: Col[Section], table: Int, index: Int): Option[Long] =
+    sections.lift(table).filter(section => section.entrySize >= SymbolEntrySize).flatMap { section =>
+      val start = section.offset + index * SymbolEntrySize
+      Option.when(
+        start >= 0 && start + SymbolEntrySize <= bytes.length && start + SymbolEntrySize <= section.offset + section.size
+      )(
+        ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).getLong(start + 8)
+      )
+    }
 
   private def sectionNames(
       bytes: Array[Byte],
@@ -1398,13 +1452,31 @@ object DispatchInterpreter {
   private final class LaneBits(lanes: Int, initial: Long) {
     private val laneLimit = Bits.mask(lanes)
     private var value     = initial & laneLimit
+    private var storage   = initial & laneLimit
     private var bitCount  = java.lang.Long.bitCount(value)
 
+    // Lane-mask view: comparison results and EXEC masking operate on the low
+    // `lanes` bits and leave a wave32 upper half untouched.
     def bits: Long               = value
-    def bits_=(next: Long): Unit = {
+    def bits_=(next: Long): Unit = writeLanes(next)
+
+    // Full architectural register. VCC and EXEC are also ordinary scalar
+    // registers (s106/s107 and s126/s127), and the compiler uses their upper
+    // halves as scratch on wave32 targets, so scalar reads must observe what
+    // scalar writes stored even when the wave is narrower than 64 lanes.
+    def register: Long               = storage
+    def register_=(next: Long): Unit = {
+      storage = next
       value = next & laneLimit
       bitCount = java.lang.Long.bitCount(value)
     }
+
+    private def writeLanes(next: Long): Unit = {
+      value = next & laneLimit
+      storage = (storage & ~laneLimit) | value
+      bitCount = java.lang.Long.bitCount(value)
+    }
+
     def apply(lane: Int): Boolean                 = (value & (1L << lane)) != 0L
     def update(lane: Int, enabled: Boolean): Unit = {
       val mask       = 1L << lane
@@ -1412,9 +1484,11 @@ object DispatchInterpreter {
       if (enabled != wasEnabled) {
         if (enabled) {
           value |= mask
+          storage |= mask
           bitCount += 1
         } else {
           value &= ~mask
+          storage &= ~mask
           bitCount -= 1
         }
       }
@@ -1455,10 +1529,10 @@ object DispatchInterpreter {
         }
       case other =>
         val value = other match {
-          case InstructionSource.Scalar(106)       => Bits.low32(carry.bits)
-          case InstructionSource.Scalar(107)       => Bits.high32(carry.bits)
-          case InstructionSource.Scalar(126)       => Bits.low32(active.bits)
-          case InstructionSource.Scalar(127)       => Bits.high32(active.bits)
+          case InstructionSource.Scalar(106)       => Bits.low32(carry.register)
+          case InstructionSource.Scalar(107)       => Bits.high32(carry.register)
+          case InstructionSource.Scalar(126)       => Bits.low32(active.register)
+          case InstructionSource.Scalar(127)       => Bits.high32(active.register)
           case InstructionSource.Scalar(index)     => scalar(index)
           case InstructionSource.Constant(raw)     => raw
           case InstructionSource.Literal(raw)      => raw
@@ -1492,10 +1566,10 @@ object DispatchInterpreter {
       case kind =>
         val value = kind match {
           case 0 => sourceValue.toInt match {
-              case 106   => Bits.low32(carry.bits)
-              case 107   => Bits.high32(carry.bits)
-              case 126   => Bits.low32(active.bits)
-              case 127   => Bits.high32(active.bits)
+              case 106   => Bits.low32(carry.register)
+              case 107   => Bits.high32(carry.register)
+              case 126   => Bits.low32(active.register)
+              case 127   => Bits.high32(active.register)
               case index => scalar(index)
             }
           case 2 => sourceValue
@@ -1656,10 +1730,10 @@ object DispatchInterpreter {
   ): Long =
     if ((descriptor & 0x100) != 0) vector(descriptor & 0xff)(lane)
     else descriptor match {
-      case 106   => Bits.low32(carry.bits)
-      case 107   => Bits.high32(carry.bits)
-      case 126   => Bits.low32(active.bits)
-      case 127   => Bits.high32(active.bits)
+      case 106   => Bits.low32(carry.register)
+      case 107   => Bits.high32(carry.register)
+      case 126   => Bits.low32(active.register)
+      case 127   => Bits.high32(active.register)
       case index => scalar(index)
     }
 
@@ -3907,11 +3981,11 @@ object DispatchInterpreter {
       case state => state.vector
     }
     val carry = initial match {
-      // VCC is a 64-bit scalar condition register even for wave32.  Keeping
-      // the full width matters for instructions that consume vcc_hi (for
-      // example f64 predicates and cndmask); branch conditions below still
-      // intentionally inspect only the active wave's lanes.
-      case null  => LaneBits(64, 0L)
+      // A vector comparison defines only the wave's lane bits of VCC. On a
+      // wave32 target the compiler keeps scratch values in vcc_hi (s107), so
+      // the upper half has to survive a comparison while scalar reads and
+      // writes of s106/s107 still round-trip through the full register.
+      case null  => LaneBits(lanes, 0L)
       case state => state.carry
     }
     val active = initial match {
@@ -4033,10 +4107,10 @@ object DispatchInterpreter {
       if (width == 32) writeScalar32(destination, value) else writeScalar64(destination, value)
 
     def source(value: InstructionSource, lane: Int): Long = value match {
-      case InstructionSource.Scalar(106)           => Bits.low32(laneMask(carry))
-      case InstructionSource.Scalar(107)           => Bits.high32(laneMask(carry))
-      case InstructionSource.Scalar(126)           => Bits.low32(laneMask(active))
-      case InstructionSource.Scalar(127)           => Bits.high32(laneMask(active))
+      case InstructionSource.Scalar(106)           => Bits.low32(carry.register)
+      case InstructionSource.Scalar(107)           => Bits.high32(carry.register)
+      case InstructionSource.Scalar(126)           => Bits.low32(active.register)
+      case InstructionSource.Scalar(127)           => Bits.high32(active.register)
       case InstructionSource.Scalar(index)         => scalar(index)
       case InstructionSource.VectorRegister(index) => vector(index)(lane)
       case InstructionSource.Constant(raw)         => raw
@@ -4044,10 +4118,10 @@ object DispatchInterpreter {
     }
 
     def sourceScalar64(value: InstructionSource): Long = value match {
-      case InstructionSource.Scalar(106)       => laneMask(carry)
-      case InstructionSource.Scalar(107)       => Bits.high32(laneMask(carry))
-      case InstructionSource.Scalar(126)       => laneMask(active)
-      case InstructionSource.Scalar(127)       => Bits.high32(laneMask(active))
+      case InstructionSource.Scalar(106)       => carry.register
+      case InstructionSource.Scalar(107)       => Bits.high32(carry.register)
+      case InstructionSource.Scalar(126)       => active.register
+      case InstructionSource.Scalar(127)       => Bits.high32(active.register)
       case InstructionSource.Scalar(index)     => pair(scalar, index)
       case InstructionSource.Constant(raw)     => raw
       case InstructionSource.Literal(raw)      => raw
@@ -4055,17 +4129,17 @@ object DispatchInterpreter {
     }
 
     def writeScalar64(dest: Int, value: Long): Unit = dest match {
-      case 106 => carry.bits = value
-      case 126 => active.bits = value
+      case 106 => carry.register = value
+      case 126 => active.register = value
       case _   => setPair(scalar, dest, value)
     }
 
     def writeScalar32(dest: Int, value: Long): Unit = dest match {
-      case 106 => carry.bits = (carry.bits & 0xffffffff00000000L) | Bits.low32(value)
+      case 106 => carry.register = (carry.register & 0xffffffff00000000L) | Bits.low32(value)
       case 107 =>
-        carry.bits = (carry.bits & 0xffffffffL) | (Bits.low32(value) << 32)
-      case 126 => active.bits = (active.bits & 0xffffffff00000000L) | Bits.low32(value)
-      case 127 => active.bits = (active.bits & 0xffffffffL) | (Bits.low32(value) << 32)
+        carry.register = (carry.register & 0xffffffffL) | (Bits.low32(value) << 32)
+      case 126 => active.register = (active.register & 0xffffffff00000000L) | Bits.low32(value)
+      case 127 => active.register = (active.register & 0xffffffffL) | (Bits.low32(value) << 32)
       case _   => scalar(dest) = Bits.low32(value)
     }
 

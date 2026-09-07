@@ -295,16 +295,37 @@ The original single-array reduction remains available as
 `legacy-red/miniapp/cloverleaf/cuda-shared-reduction`; both are strict
 diagnostics and report failures normally.
 
-The HIP runner also includes 39 ordinary `algorithms/roc-thrust-semantic/*`
+The HIP runner also includes 48 ordinary `algorithms/roc-thrust-semantic/*`
 probes for keyed/descending/key-value set operations, duplicate handling,
 binary-search and gather variants, permutation/zip/pair/tuple iterators,
-async-adjacent reductions, and larger stable workloads. These are always
-selected with the HIP `i32` algorithm family; the exact upstream executables
-remain opt-in under `--include-legacy-reds`. The current emulator result is
-39/39 strict pass. The cases remain ordinary tests rather than an XFAIL mask,
-so future lookback/set regressions remain visible.
-Key/value cases compare keys only, with values validated as selected payloads,
-matching rocThrust's `key_value<Key, Value>` contract.
+async-adjacent reductions, larger stable workloads, the device-side random
+engine/distribution contract, and host-to-device global-symbol publishing.
+These are always selected with the HIP `i32` algorithm family; the exact upstream
+executables remain opt-in under `--include-legacy-reds`. The cases remain
+ordinary tests rather than an XFAIL mask, so future lookback/set/RNG regressions
+remain visible. Key/value cases compare keys only, with values validated as
+selected payloads, matching rocThrust's `key_value<Key, Value>` contract.
+
+The random probes reproduce the upstream `testing/random` contract on the
+device: engine validation of the 10,000th value, engine min/max bounds,
+engine equality, host-side engine and distribution save/restore, and 10,000-draw
+min/max bounds for every `uniform_int_distribution`, `uniform_real_distribution`
+and `normal_distribution` instantiation the upstream case covers. Each
+distribution is attempted even after a device error, so the failing
+instantiation is named rather than hidden. The device-global probe installs a
+device pointer in a `__device__` global with `hipMemcpyToSymbol`, publishes
+through it from a kernel, and reads the result back, which is the capability
+`testing/unittest_static_assert` depends on.
+
+The current emulator result for the complete probe catalog is 48/48 strict
+pass. Two cases were red when they were first ported,
+`random-distribution-min` and `random-distribution-max`, and both needed
+AMDGPU emulator fixes rather than a workload change: a wave32 vector comparison
+was clobbering the `vcc_hi` (s107) scratch register HIP kernels use for loop
+counters, so the ten-thousand-draw loop never terminated, and a device global
+reached through a `.got` slot was read without applying the code object's
+`R_AMDGPU_ABS64` relocation. Both are covered by focused regressions in
+`CodeObjectSuite`.
 
 When included, oracle runs are strict and must pass these cases. The fixed CUDA
 identities and reconstructed edge cases are ordinary strict tests. The
@@ -345,7 +366,7 @@ explicit skip, never as a semantic failure. The remaining CUDA and ROCm timeout 
 is understood.
 
 The captured Intel oneDPL/SYCL run had no emulator reds to import; its current
-unified smoke baseline is recorded in `UNIFIED_EMULATION_WORK.md` rather than
+unified smoke baseline is recorded in `CONFORMANCE_HANDOFF.md` rather than
 being represented by fabricated expected-failure cases.
 
 ## CTest sharding

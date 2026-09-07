@@ -1,293 +1,225 @@
-# Gemstone full-Conformance handoff
+# Gemstone conformance: live handoff and worklist
 
-This is the cold-start handoff for taking Gemstone from its present WIP state to full vendor-suite Conformance. It
-assumes no conversation history.
+This is the cold-start handoff for Gemstone conformance and the running worklist
+for the active campaign. It is trimmed as work completes: dated narrative and
+superseded detail live in git history, not here. It assumes no conversation
+history. Trim this document when facts become stale; add what the next session
+needs to resume without re-deriving it.
 
-## Goal
+## Product invariant
 
-Gemstone is a deterministic virtual GPU. Unmodified applications are compiled and linked through the ordinary vendor
-flow, then launched against public Gemstone provider libraries. PTX, AMDGPU, and SPIR-V execute in the shared managed
-server without opening a physical GPU.
+Every external case has one build and two executions through an ordinary vendor
+binary: identical executable, arguments, and working directory, with only the
+runtime provider selection differing between the vendor oracle and Gemstone.
 
-Completion means all of these are green:
+Never accept any of: a Gemstone compile define, an alternate Gemstone link, a
+patched vendor source, a user requirement to alter a vendor installation, or a
+run that silently reaches a physical GPU. Upstream-disabled tests stay
+disabled. Gemstone failures are never recoded as XFAILs or skips; a failure
+must become a named unified case or an owning-layer fix.
 
-1. `sbt check` and `sbt testAPIConformance`;
-2. compact CUDA plus all 237 enabled Thrust 1.15 tests at `tiny` size;
-3. all 348 enabled rocThrust tests, five HIP/HSA samples, and the pinned rocBLAS smoke dataset;
-4. all 57 compute-applicable Khronos OpenCL CTS quick entries;
-5. all 902 enabled oneDPL tests plus three samples through both Level Zero and OpenCL;
-6. the portable `conformance/unified` algorithm, BLAS, edge-case, and bounded-stress matrices;
-7. no unsupported operation silently succeeds and no Gemstone run reaches a physical GPU.
+Pinned upstream archives are hash-checked under `~/.cache/gemstone/conformance`.
+Build products live in `target/conformance` and relocatable runner artifacts in
+`target/unified-artifacts/<name>` (each carries a `manifest.tsv`).
 
-Upstream-disabled tests remain disabled. Do not add a Gemstone skip/pass allowlist.
+## Current verified state (2026-09-06)
 
-For the current handoff, the requested completion scope is the non-legacy
-portable unified matrix plus the available mini-app matrix. The imported
-legacy identities and the exhaustive upstream vendor-suite matrices remain
-explicitly out of scope for this gate; their status is retained as future
-work below.
+| Check | Result |
+|---|---|
+| `SBT_OPTS=-Xmx12G sbt check` | green, 87 s (JVM + native, API conformance, runtime CTests) |
+| Host unified CTest, full profile | 251/251 |
+| HIP semantic probe catalog (`algorithms/roc-thrust-semantic/*`) | 48/48 strict pass |
+| rocThrust imported reds (binary lane) | 50/50; `random` 51/51 and `unittest_static_assert` 3/3 unit-test pass |
+| CUDA Thrust legacy lane | 56/56 across compute_75-90 |
+| Emulator campaign, one target per backend | CUDA 700 s, HIP 1450 s, SYCL 342 s wall time; all four portable matrices green at documented bounds |
+| Mini-app matrix | 39/39 |
 
-## Non-negotiable Conformance invariant
+Two owning-layer emulator defects were fixed behind this state and are covered
+by `CodeObjectSuite`: wave32 VCC comparisons must not clobber the `vcc_hi`
+(s107) scratch register, and `.got`-relocated device globals need the
+`R_AMDGPU_ABS64` entries applied to the code-object section images.
 
-Every external case has one build and two executions:
+Workload bounds policy stays as documented in `conformance/unified/README.md`:
+algorithms through n1024 for SYCL/n4096 elsewhere, GEMM endpoints at n1024, and
+n4096 probes as explicit opt-in diagnostics.
 
-```text
-ordinary vendor compiler/linker
-             |
-             v
-       one executable
-          /       \
- vendor oracle   gemstone run
-```
-
-The executable, arguments, and working directory are identical. Only runtime provider selection differs. Never add:
-
-- a Gemstone compile define;
-- an alternate Gemstone link command;
-- `nvcc --cudart=none`;
-- a patched CUDA, ROCm, oneDPL, rocThrust, or CTS source;
-- ROCr DTIF, `HSA_TOOLS_LIB`, libdtif, or substituted hsakmt;
-- a user requirement to alter a vendor installation.
-
-Pinned upstream archives are hash checked and cached under `~/.cache/gemstone/conformance`. Build products remain in
-`target/conformance`.
-
-## Public launch model
-
-The intended UX is:
+## Running the emulator locally (no packaged launcher)
 
 ```console
-gemstone run --api <cuda|hip|hsa|opencl|levelzero|sycl> [provider option] -- command args...
+cp=$(ls target/out/jvm/scala-3.9.0/{gemstone-server,gemstone-api,gemstone-core,gemstone-isa-ptx,gemstone-isa-amdgpu,gemstone-isa-spirv}/classes | paste -sd:)
+cp="$cp:$(ls ~/.cache/coursier/v1/https/repo1.maven.org/maven2/...jar paths for scala3/cats/scala-library)"
+java -cp "$cp" net.kurobako.gemstone.launcher.GemstoneLauncher run --api hip \
+  --hip-runtime target/out/jvm/scala-3.9.0/gemstone-runtime-hip/cmake/libamdhip64.so \
+  --hsa-runtime target/out/jvm/scala-3.9.0/gemstone-runtime-hip/cmake/hsa-runtime/libhsa-runtime64.so.1 -- \
+  ./unified_suite_hip --suite=algorithms --algorithm-types=i32 [filters]
 ```
 
-The Scala entry point is currently
-`net.kurobako.gemstone.launcher.GemstoneLauncher`; packaging a standalone distribution script remains product work.
-
-Emulated dispatches have a finite safety budget of 100,000,000 instructions by default. A deliberately selected large
-workload can opt into a larger budget by setting `GEMSTONE_EXECUTION_MAX_INSTRUCTIONS` in the environment of the
-Gemstone launcher; `GEMSTONE_EXECUTION_QUANTUM` optionally changes checkpoint granularity. Both values are validated
-before the child is launched and malformed values fail closed. The profile is server-side and is not accepted from the
-RPC client.
-
-| Application frontend | Interception boundary | Selection mechanism |
-| --- | --- | --- |
-| CUDA Runtime or Driver | CUDA Driver `libcuda.so.1` only | preload plus provider-first library path |
-| HIP | public HIP Runtime `libamdhip64` | drop-in preload/path |
-| direct HSA | public HSA Runtime `libhsa-runtime64` | drop-in preload/path |
-| OpenCL | OpenCL ICD | isolated `OCL_ICD_VENDORS` directory |
-| Level Zero | Level Zero driver | `ZE_ENABLE_ALT_DRIVERS` |
-| SYCL | exactly one OpenCL or Level Zero backend | provider selection plus `ONEAPI_DEVICE_SELECTOR` |
-
-CUDA deliberately does not replace `libcudart`; stock Runtime calls are intercepted downstream at the Driver. HIP is
-retained for systems where direct HSA is unavailable, including Windows. Direct HSA is a first-class public boundary,
-not an internal ROCr hook.
-
-`GemstoneProcess` creates a new loopback server and random 256-bit token for every child. The CUDA facade records an
-authenticated Driver request; execution providers send an authenticated execution-protocol attestation. A process
-that exits zero without the required evidence becomes failure 86. This detects failed injection and vendor-only
-execution. Provider isolation must continue to ensure a process cannot use Gemstone and hardware in the same run.
-
-## Current state on 2026-09-06
-
-Branch: `main`. CUDA/PTX, AMDGPU/HIP/HSA, and SPIR-V/OpenCL/Level Zero were integrated as separate commits so further
-vendor work remains bisectable.
-
-Implemented foundation:
-
-- official-header validation for CUDA, HIP, HSA plus AMD extensions, OpenCL plus Intel extensions, and Level Zero;
-- generated CUDA Driver facade and authenticated typed RPC, including reverse callbacks;
-- shared execution RPC with provider attestation;
-- `gemstone run` planning for all public boundaries above;
-- per-process usage counters and fail-closed attestation;
-- PTX, AMDGPU, and SPIR-V loaders/interpreters with shared checked memory, geometry, budget, and cancellation;
-- Level Zero provider and focused native tests;
-- public HIP and HSA runtime providers plus HSA AQL, doorbell, code-object, and execution mechanics;
-- public OpenCL ICD and Level Zero providers with focused native tests;
-- compile-once paired Conformance runners for CUDA, Thrust, rocThrust/HIP/HSA samples, OpenCL CTS, and oneDPL;
-- pristine rocThrust setup with separately pinned GoogleTest;
-- a pinned rocBLAS build of the vendor-neutral bounded BLAS harness shared with cuBLAS and oneMKL;
-- pinned official OpenCL CTS quick inventory;
-- oneDPL Level Zero and OpenCL backend lanes.
-- a separate header-only unified C++ workload catalog under `conformance/unified`, with host, CUDA, HIP, and SYCL
-  runners, async dependency cases, expanded BLAS layouts, ROCm-derived iterator/set probes, a compact/full CTest
-  profile, and parallel sharding.
-- the imported legacy-red regression inventory is green for CUDA Thrust (56/56) but not yet fully green for the exact
-  rocThrust/HSA binary lane: the latest authenticated run is 49/51 pass, with `random` and `unittest_static_assert`
-  still failing. The expanded unified HIP semantic probes remain strict-green at 39/39. Focused HIP algorithms
-  (including i8), BLAS, edge, and async profiles are currently strict-green; current tallies and reproduction
-  commands are tracked in `UNIFIED_EMULATION_WORK.md`.
-
-Important incompleteness:
-
-- CUDA Driver/PTX supports only an early subset of the full test surface;
-- the public HIP, HSA, OpenCL, and Level Zero surfaces are intentionally incomplete and will expose named vendor-suite
-  reds until their API and execution behavior is filled out;
-- Level Zero and SPIR-V semantics are far from full oneDPL coverage;
-- the complete 348-test rocThrust inventory and full oneDPL/OpenCL CTS matrices remain future work; the imported
-  50-case rocThrust legacy-red boundary has two remaining emulation failures (`random` and
-  `unittest_static_assert`);
-- the expanded unified profile is host-validated (1,812 portable cases; HIP lists 72 HIP-async and 39 additional ROCm
-  semantic probes, for 1,923 HIP identities), and the non-legacy relocated CUDA/HIP/SYCL emulator matrix is now
-  green at its documented workload bounds. The complete counts and the SYCL n1024/n257 policy are tracked in
-  `UNIFIED_EMULATION_WORK.md`; the available mini-app matrix is also green at 39/39, with OpenACC pending an image.
-- interpreter work-group parallelism is bounded by one shared, self-tuned JVM pool per server. General CUDA/SYCL
-  runs default to host logical processors minus two; HIP/HSA defaults to two workers with serial matrix fan-out, and
-  HIP Kokkos/StdPar mini-app models automatically retain serial dispatch until their cross-kernel ordering is
-  validated. HIP fatbinaries now install lazily and share bounded immutable AMDGPU indexes across sessions. The
-  measured non-legacy campaign timing is recorded in `UNIFIED_EMULATION_WORK.md`.
-- the launcher is not yet packaged as a standalone installed command;
-- Windows transport/provider selection still needs native implementation.
-
-The missing HIP/HSA/OpenCL provider paths intentionally yield named reds. Do not “fix” them by pointing Gemstone
-provider variables at vendor libraries; attestation exists to reject that mistake.
-
-## Module ownership
-
-```text
-core
-├── api
-├── isa/ptx
-├── isa/amdgpu
-└── isa/spirv
-
-api + core + all ISA modules -> server
-server protocol -> runtime/cuda, runtime/hip, runtime/hsa, runtime/opencl, runtime/levelzero
-api -> codegen
-```
-
-Parallel streams should own disjoint trees:
-
-| Lane | Primary ownership |
-| --- | --- |
-| PTX/CUDA | `isa/ptx`, CUDA server adapter, `runtime/cuda`, `conformance/cuda` |
-| AMDGPU/HIP/HSA | `isa/amdgpu`, AMDGPU server adapter, `runtime/hsa`, `runtime/hip`, rocThrust samples/suite |
-| SPIR-V/OpenCL/Level Zero/SYCL | `isa/spirv`, SPIR-V server adapter, `runtime/levelzero`, `runtime/opencl`, OpenCL CTS and oneDPL |
-| Integration | `core`, `api`, `native/execution`, launcher, Conformance support, `build.sbt` |
-
-Land shared protocol changes through the integration lane before multiple ISA lanes depend on them. Do not force the
-three ISAs into one generic execution loop: share memory, bits, geometry, faults, budget, cancellation, and tracing;
-keep PTX reconvergence, AMD wavefront state, and SPIR-V structured execution in their owning modules.
-
-## Commands and controls
-
-Fast invariant gate:
+Set `GEMSTONE_AMDGPU_TARGET` (single target) to the virtual provider target; a
+runner artifact that carries one target exports it automatically. New HIP
+executables are built locally with
 
 ```console
-sbt check
-sbt testAPIConformance
+cmake -S conformance/unified -B target/<build-dir> -G Ninja \
+  -DUNIFIED_SUITE_BUILD_HOST=OFF -DUNIFIED_SUITE_BUILD_HIP=ON -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_HIP_ARCHITECTURES=gfx1036 -DCMAKE_HIP_FLAGS="<rocThrust/rocblas include dirs>"
+ninja -C target/<build-dir> unified_suite_hip
 ```
 
-Vendor dashboards:
+or with `conformance/unified/tools/container-build.sh hip` for the
+hermetic container artifact.
 
-```console
-sbt testCUDAConformance
-sbt testROCmConformance
-sbt testOpenCLConformance
-sbt testSYCLConformance
-sbt testConformance
+## Active campaign: retire the vendor legacy suites
 
-GEMSTONE_UNIFIED_CONTAINER_RUN_CTEST=1 \
-  conformance/unified/tools/container-build.sh host target/unified-artifacts/host
-conformance/unified/tools/container-build.sh cuda
-conformance/unified/tools/container-build.sh hip
-conformance/unified/tools/container-build.sh sycl
-conformance/unified/tools/run-relocated.sh target/unified-artifacts/hip hip --list
+The legacy suite today is three lanes of unmodified vendor test binaries:
+rocThrust (348 enabled CTest instances, swept across
+`GEMSTONE_AMDGPU_TARGETS`), CUDA Thrust 1.15 (237 enabled tests across
+compute_75/80/86/89/90), and the pinned rocBLAS smoke dataset. They exist on
+top of container source builds (build-pristine trees, googletest) and reach the
+emulator through the `--include-legacy-reds` binary lane.
 
-# Release-sized host matrix (the default CTest profile remains compact).
-cmake -S conformance/unified -B target/unified-full -DUNIFIED_SUITE_CTEST_PROFILE=full
-cmake --build target/unified-full --parallel
-ctest --test-dir target/unified-full --output-on-failure --parallel
-```
+Scout results (2026-09-06): rocThrust identity names map as **87 already in
+the unified catalog**, **15 thrust::async variants**, **~70 unmodelled**, of
+which ~33 are host-only library tests that exercise no dispatch and can be
+dropped with the suite. The remaining device-relevant work is step 2 below.
+The unified edge-case catalog is already aligned across host/CUDA/HIP/SYCL by
+construction: 11 shared operations, identical names and sizes, and divergence
+is only explicit capability gates (oneDPL `runtime-error-recover` and FP64
+gating; HIP f16-edge/i8-BLAS slices; block-size-32 group scans).
 
-HIP relocation must include the complete rocBLAS Tensile closure under
-`lib/rocblas/library`. `run-relocated.sh` exports `ROCBLAS_TENSILE_LIBPATH`
-to that bundled directory automatically; an artifact with only a partial
-Tensile set can abort inside rocBLAS before Gemstone receives a dispatch.
+### Step 1: multi-arch unified artifacts - mechanism verified end to end (2026-09-06)
 
-The unified runner is the one exception to the host-build convention: its compiler and SDK are selected by the
-digest-pinned container wrapper in `conformance/unified/tools/container-build.sh`. The installed artifact is copied to
-the host with relative RPATHs and bundled vendor user-space libraries, so Gemstone runs do not require the build image;
-only the host ELF loader/libc and the physical vendor kernel driver (for an oracle) remain external requirements.
+`container-build.sh` and `run-relocated.sh` now accept comma/semicolon
+architecture lists. One artifact carries several device targets: the manifest
+gains `target-archs` (with `target-arch` remaining the first entry), the
+rocBLAS/Tensile mapping runs per target, and a multi-target manifest no longer
+exports `GEMSTONE_AMDGPU_TARGET`/`GEMSTONE_CUDA_TARGET_ARCH` silently (the
+caller selects one per run; a stderr note says so). Verified by shell trace
+tests and `bash -n`.
 
-Focused examples:
+A local `gfx900;gfx1036;gfx1100;gfx1200` HIP artifact (one binary, four code
+objects) built and ran end to end with one failure per target reported as a
+named dispatch error. That quantifies the execution spread behind step 5 for
+the same 81-probe suffix selection: gfx1036 `78 pass / 3 skip`, gfx900 `6/81`
+(first gap: `ds_max_i32 DS execution is not implemented`), gfx1100/gfx1200
+`6/81` (first gap: `s_load_b64/b32 SMEM execution is not implemented`). The
+first per-target work items are therefore DS/LDS execution for GFX9 and scalar
+(SMEM) load execution for RDNA3/4, at the owning interpreter layers.
 
-```console
-GEMSTONE_THRUST_FILTER='^transform$' GEMSTONE_THRUST_JOBS=1 sbt testCUDAConformance
-GEMSTONE_ROCTHRUST_FILTER='^samples/' GEMSTONE_ROCTHRUST_JOBS=1 sbt testROCmConformance
-GEMSTONE_OPENCL_FILTER='^gfx900/(Basic|API)$' sbt testOpenCLConformance
-GEMSTONE_ONEDPL_FILTER='^gfx900/levelzero/samples/' GEMSTONE_ONEDPL_JOBS=1 sbt testSYCLConformance
-```
+### Step 2: port the residual device-exercising rocThrust identities - landed (2026-09-06)
 
-All external filters are Scala regular expressions. `GEMSTONE_<SUITE>_SHARD=index/count` provides deterministic
-zero-based sharding. Worker counts are bounded and independent cases execute concurrently.
+The unified HIP semantic catalog grew from 39 to 81 probes (`78 pass / 3 skip
+/ 0 fail` under emulation, ~119 s): vector insert/erase/resize,
+device-pointer/reference/dereference, memory malloc/free, universal memory,
+complex arithmetic/transform/interop, zip-function and zip-reduce combos,
+permutation/reverse/constant/counting/discard/tabulate-output iterators, sort
+permutation variants, pair/tuple manipulation and algorithms, advance/distance,
+and three thrust::async probes.
 
-For a reference-only legacy baseline, set `GEMSTONE_ORACLE_ONLY=1`. The paired
-CUDA, Thrust, rocThrust, rocBLAS, OpenCL CTS, and oneDPL suites compile and run
-the vendor artifacts without constructing Gemstone providers. The flag requires
-the corresponding oracle and must not be combined with `GEMSTONE_NO_ORACLE` or
-suite-specific oracle suppression. The native `hsa`, `hip`, `opencl`, and
-`levelzero` smoke projects are provider tests and are not oracle-paired.
+Documented skips (honest, upstream-contract-true, not capability masks):
+`device-delete` is KNOWN_FAILURE in rocThrust itself, `generate-const-iterators`
+is a compile-time negative check, `out-of-memory-recovery` asserting an
+allocation-failure destructor path is not reproducible under the emulator.
 
-Provider variables:
+One finding worth a future red-naming pass: on device, a rocprim transform
+instantiation of `thrust::exp`/`thrust::sin` on f64 `thrust::complex` can
+sign-flip a component depending on negative inputs and code layout; a probe
+with all-positive components verifies the correct subset. Verified with
+standalone kernels that a direct device `cexp` path is exact.
 
-```text
-GEMSTONE_CUDA_DRIVER
-GEMSTONE_HIP_RUNTIME
-GEMSTONE_HSA_RUNTIME
-GEMSTONE_OPENCL_ICD
-GEMSTONE_LEVELZERO_DRIVER
-```
+Still open inside step 2:
+- add plain `tabulate` and `sequence` operations to the shared algorithm
+  catalog (`algorithms.hpp`; note this also updates the 77-op contract asserts
+  in `tests/catalog.cpp` and the sample sizes);
+- thrust::async scan variants that the ports did not cover: counting-iterator,
+  discard-output, stateful-operator, mixed-types, using-vs-adl, and the large
+  index pairs;
+- the two ROCm samples (`hip-saxpy`, `hsa-kernel-dispatch`) if the mini-app
+  matrix is not already their home; the mini-app README is the checklist.
 
-Toolchain overrides include `NVCC`, `CUDA_HOME`, `GEMSTONE_HIPCC`, `GEMSTONE_AMDGPU_CLANG`, `GEMSTONE_DPCPP`,
-`GEMSTONE_HSA_INCLUDE`, `GEMSTONE_ROCR_LIB`, and `GEMSTONE_OPENCL_LOADER`.
+### Step 3: edge-case skip-parity contract
 
-## Red-first iteration loop
+Add a test (Scala conformance or the unified runner contract) asserting the
+selected edge-case identity set is identical across host/CUDA/HIP/SYCL and that
+every SKIP names its capability or precondition. Fail on a platform-specific
+case set or an unnamed skip.
 
-For each named vendor red:
+### Step 4: retire the legacy lanes
 
-1. Keep the unchanged vendor-oracle run green. Record the command, environment, and first failure.
-2. Add the smallest focused Scala or native test reproducing the missing contract and observe it red.
-3. Classify ownership: facade/ABI, transport, loader/metadata, argument/pointer marshalling, queue/completion, or ISA
-   semantics.
-4. Implement at that owning layer. Do not hide ISA gaps in a host API special case.
-5. Run the focused test, the selected paired vendor case, the owning module, then its shard.
-6. Periodically run the whole lane and finish with `sbt check`.
+Order: (1) Scala legacy suites (`RocThrustConformanceSuite`, CUDA
+`ThrustConformanceSuite`) off the default gate; (2) drop the upstream source
+builds (build-pristine trees, googletest) and the vendor tarball pins; (3) drop
+the `--include-legacy-reds` binary lane; (4) keep the cached legacy binaries as
+an opt-in escape hatch for one release cycle. rocBLAS/oneDPL/OpenCL decisions
+are separate and are not part of this campaign.
 
-Useful first triage:
+### Step 5: ISA matrix with era-appropriate toolchains
 
-| Failure | First owner |
-| --- | --- |
-| Compile/link or missing symbol | generated API/native facade |
-| No virtual device/agent | public provider discovery and properties |
-| No attestation/authentication | native execution/CUDA RPC transport |
-| Module or code-object rejection | format loader and metadata decoder |
-| Wrong pointer/value | native marshalling and checked allocation identity |
-| Hung completion | queue/doorbell/command-list and cancellation |
-| Unsupported opcode or wrong output | owning ISA decoder/semantics |
+The unified suite is target-driven per device code object; the interpreter is
+target-agnostic (wave size from the family). One artifact carries many targets.
 
-## Recommended next order
+First per-target owning-layer work items (measured with the four-target
+artifact in step 1): DS/LDS instruction execution for GFX9 (`ds_max_i32` was
+the first named gap) and scalar SMEM load execution for RDNA3/4
+(`s_load_b32/b64`). Both are interpreter cases, not loader cases.
 
-1. Package and exercise `gemstone run` across all five provider libraries.
-2. Advance each public runtime from the smallest named vendor-suite red, preserving shared execution contracts.
-3. Advance each ISA from the smallest paired reds; use `conformance/unified` for compact cross-vendor semantic
-   comparisons before returning to the exhaustive upstream lane.
-4. Add a stronger Linux physical-device guard if provider isolation plus attestation is insufficient to prove that a
-   child cannot access `/dev/nvidia*`, `/dev/kfd`, or DRM render nodes after it has also contacted Gemstone.
+AMDGPU spread: rocThrust work is possible for any gfx the era toolchain can
+compile. Reference XMLs pin rdna1-4 and cdna1-5; the LLVM-MC oracle round-trips
+46 named targets (all families except CDNA5). CDNA5 has no Target and no
+oracle. The ISA-level gap list (interpreter execution fixtures beyond
+gfx900/gfx1036) and the per-target conformance sweep are the same workstream.
 
-## Files to read first
+| Target group | Toolchain era | Status/plan |
+|---|---|---|
+| gfx900-gfx1201 | pinned ROCm 7.1 (compiles all listed targets; verified locally) | primary matrix |
+| gfx906-era userspace | ROCm 5.7 | optional runtime-era check |
+| gfx600-gfx810 | ROCm 4.x containers | step 5 build |
+| sm_75+ | pinned CUDA 13.3 | primary matrix |
+| sm_50-72 | CUDA 12.9 containers | step 5 build |
+| sm_35/37 | CUDA 11.8 containers | step 5 build |
 
-- `GEMSTONE_PLAN.md`
-- `README.md`
-- `docs/API_TRANSPORT.md`
-- `docs/EXECUTION_PROTOCOL.md`
-- `docs/ISA_EXECUTION.md`
-- `docs/hsa/ROCR_BOUNDARY.md`
-- `docs/sycl/ARCHITECTURE.md`
-- `conformance/cuda/README.md`
-- `conformance/rocthrust/README.md`
-- `conformance/opencl/README.md`
-- `conformance/onedpl/README.md`
-- `conformance/unified/README.md`
+### Era toolchain availability (verified 2026-09-06)
 
-Generated sources are checked in. Change the owning generator, regenerate, format, and review generator plus output;
-never hand-edit generated API or instruction definitions.
+AMDGPU, pinned ROCm 7.1 host probe: `--offload-arch` compiles clean for gfx600,
+gfx601, gfx700, gfx701, gfx704, gfx801, gfx802, gfx803, gfx810, gfx900, gfx904,
+gfx906, gfx908, gfx90a, gfx940-950, gfx1010/1012, gfx1030/1036, gfx1100/1101,
+gfx1150/1151, gfx1200/1201. gfx800 and gfx1001 are not valid target IDs.
+
+ROCm containers (Docker Hub, amd64 only, pin digests): `dev-ubuntu-18.04` runs
+3.0-5.2.3; `dev-ubuntu-20.04` 3.7-6.3.4; `dev-ubuntu-22.04` from 5.3;
+`dev-ubuntu-24.04` from 6.2. `-complete` variants exist from 4.0. There is no
+`4.5.0` tag: `4.5` is 4.5.0 exactly; exact-version old picks are
+`4.1.1(-complete)` and `4.3.1(-complete)`. GCN1-3 and Polaris code still
+compiles with any clang, but no current ROCm runtime supports it, so old
+targets need era containers for their userspace. `hipcc` in ROCm 6.4 and
+earlier is Perl-scripted; flag assumptions (including `--offload-arch`) change
+at the 6.4/7.0 boundary.
+
+CUDA: `10.2` and `12.7` devel tags are pruned from Docker Hub. Available
+devel tags include `11.0.3` ... `11.8.0` (ubuntu18.04/20.04; `11.7.1`/`11.8.0`
+also ubuntu22.04), `12.0.1` ... `12.6.3`, and `12.8.2`/`12.9.2`
+(ubuntu20.04/22.04/24.04); 12.9.2 is the last ubuntu20.04 base. Kepler sm_35/37
+dies with CUDA 11.8 (removed in 12.0). Maxwell, Pascal, and Volta
+(sm_50-62, sm_70/72) are frozen in 12.8 and removed in 13.0. The pinned 13.3
+toolchain is sm_75+ only. The unified CUDA target links `CUDA::cublas`
+unconditionally; era-matched containers ship era-matched cuBLAS, at the cost of
+bundle size (`GEMSTONE_UNIFIED_BUNDLE_RUNTIME=0` skips bundling).
+
+Old-arch artifacts are therefore a container-image swap per era plus the
+multi-arch build plumbing already in step 1, not a new pipeline.
+
+## Diagnostics cheat sheet
+
+- `GEMSTONE_HSA_TRACE_PACKETS=1`: prints the dispatch failure message (this
+  identified both the budget exhaustion and the unmapped address).
+- `GEMSTONE_AMDGPU_TRACE_CONTROL=all`, `-TRACE_LOADS`, `-TRACE_STORES`,
+  `-TRACE_WAVE`, `-TRACE_F64`: interpreter traces.
+- `GEMSTONE_EXECUTION_MAX_INSTRUCTIONS=<n>`: per-process instruction budget
+  (default 100M, validated before launch); `GEMSTONE_EXECUTION_QUANTUM` selects
+  checkpoint granularity.
+- `GEMSTONE_EXECUTION_PARALLELISM`, `-PARALLEL_MIN_*`: bounded interpreter
+  parallelism (HIP default 2 workers).
+- `GEMSTONE_AMDGPU_TARGETS`, `GEMSTONE_AMDGPU_ORACLE_TARGET`: per-suite target
+  sweeps; `GEMSTONE_AMDGPU_TARGET`, `GEMSTONE_CUDA_TARGET_ARCH`: per-run
+  virtual target.
+- `GEMSTONE_HIP_TRACE_MODULES`, `-TRACE_ALLOCATIONS`: HIP facade traces.
+- `SBT_OPTS=-Xmx12G` is required for the cold Scala Native link.

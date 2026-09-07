@@ -25,6 +25,7 @@ unset CUDA_HOME CUDA_PATH CUDA_ROOT CUDA_TOOLKIT_ROOT_DIR \
 
 manifest="$artifact_directory/manifest.tsv"
 target_arch=""
+target_archs=""
 if [[ -f "$manifest" ]]; then
   manifest_backend="$(awk -F '\t' '$1 == "backend" { print $2; exit }' "$manifest")"
   if [[ -n "$manifest_backend" && "$manifest_backend" != "$backend" ]]; then
@@ -32,6 +33,19 @@ if [[ -f "$manifest" ]]; then
     exit 1
   fi
   target_arch="$(awk -F '\t' '$1 == "target-arch" { print $2; exit }' "$manifest")"
+  target_archs="$(awk -F '\t' '$1 == "target-archs" { print $2; exit }' "$manifest")"
+fi
+
+# A manifest naming several device targets leaves the per-run choice to the
+# caller; only a single-target artifact implies a default.
+manifest_targets=()
+if [[ -n "$target_archs" ]]; then
+  IFS=',;' read -r -a manifest_targets <<<"$target_archs"
+  if ((${#manifest_targets[@]} == 1)); then
+    target_arch="${manifest_targets[0]}"
+  elif ((${#manifest_targets[@]} > 1)); then
+    target_arch=""
+  fi
 fi
 
 executable="$artifact_directory/bin/unified_suite_${backend}"
@@ -62,13 +76,23 @@ case "$backend" in
     # CUDA's static runtime performs host-side architecture checks from the
     # driver function attributes. Preserve the build target in a relocated
     # artifact instead of relying on host GPU discovery.
-    if [[ -n "$target_arch" && -z "${GEMSTONE_CUDA_TARGET_ARCH:-}" ]]; then
-      export GEMSTONE_CUDA_TARGET_ARCH="$target_arch"
+    if [[ -z "${GEMSTONE_CUDA_TARGET_ARCH:-}" ]]; then
+      if [[ -n "$target_arch" ]]; then
+        export GEMSTONE_CUDA_TARGET_ARCH="$target_arch"
+      elif [[ -n "$target_archs" ]]; then
+        echo "artifact contains multiple device targets: $target_archs" >&2
+        echo "set GEMSTONE_CUDA_TARGET_ARCH to select one for this run" >&2
+      fi
     fi
     ;;
   hip)
-    if [[ -n "$target_arch" && -z "${GEMSTONE_AMDGPU_TARGET:-}" ]]; then
-      export GEMSTONE_AMDGPU_TARGET="$target_arch"
+    if [[ -z "${GEMSTONE_AMDGPU_TARGET:-}" ]]; then
+      if [[ -n "$target_arch" ]]; then
+        export GEMSTONE_AMDGPU_TARGET="$target_arch"
+      elif [[ -n "$target_archs" ]]; then
+        echo "artifact contains multiple device targets: $target_archs" >&2
+        echo "set GEMSTONE_AMDGPU_TARGET to select one for this run" >&2
+      fi
     fi
     # rocBLAS discovers Tensile kernels through a runtime path that is not
     # represented in DT_NEEDED.  Keep that lookup inside the relocated

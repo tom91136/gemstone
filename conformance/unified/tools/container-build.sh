@@ -16,8 +16,9 @@ Set GEMSTONE_UNIFIED_CONTAINER_DEVICES to a comma-separated list of Podman/
 Docker --device values when running CTest against a physical GPU.
 UNIFIED_SUITE_* cache variables are forwarded to the container configure.
 UNIFIED_SUITE_CUDA_ARCHITECTURES and UNIFIED_SUITE_HIP_ARCHITECTURES can pin
-the device code target explicitly (defaults are CUDA `75` and AMDGPU `gfx900`,
-so a build does not depend on GPU discovery on the host).
+the device code targets as a comma- or semicolon-separated list (defaults are
+CUDA `75` and AMDGPU `gfx900`, so a build does not depend on GPU discovery on
+the host).
 The build/run container has no network by default; set
 GEMSTONE_UNIFIED_CONTAINER_NETWORK to an engine-supported network mode only
 if a custom SDK requires it.
@@ -109,6 +110,7 @@ cmake_args=(
   -DUNIFIED_SUITE_INSTALL_RUNNERS=ON
 )
 target_arch_manifest=""
+target_archs_manifest=""
 case "$backend" in
   host)
     cmake_args+=(
@@ -123,6 +125,12 @@ case "$backend" in
     cuda_target="${cuda_architectures%%[;,]*}"
     cuda_target="${cuda_target%%-*}"
     target_arch_manifest="sm_${cuda_target#sm_}"
+    target_archs_manifest=""
+    IFS=',;' read -r -a cuda_architecture_list <<<"$cuda_architectures"
+    for cuda_architecture in "${cuda_architecture_list[@]}"; do
+      cuda_architecture="${cuda_architecture%%-*}"
+      target_archs_manifest="${target_archs_manifest:+${target_archs_manifest},}sm_${cuda_architecture#sm_}"
+    done
     cmake_args+=(
       -DUNIFIED_SUITE_BUILD_CUDA=ON
       -DCMAKE_CUDA_RUNTIME_LIBRARY=Static
@@ -132,6 +140,7 @@ case "$backend" in
   hip)
     hip_architectures="${UNIFIED_SUITE_HIP_ARCHITECTURES:-gfx900}"
     target_arch_manifest="${hip_architectures%%[;,]*}"
+    target_archs_manifest="${hip_architectures//;/,}"
     cmake_args+=(
       -DUNIFIED_SUITE_BUILD_HIP=ON
       -DCMAKE_HIP_COMPILER=/opt/rocm/llvm/bin/clang++
@@ -148,8 +157,8 @@ esac
 
 container_environment_args=()
 if [[ "$backend" == hip ]]; then
-  # The runner's HIP target is also needed when selecting the matching
-  # rocBLAS/Tensile data below.  Pass it as data rather than relying on the
+  # The runner's HIP targets are also needed when selecting the matching
+  # rocBLAS/Tensile data below.  Pass them as data rather than relying on the
   # host environment being visible inside the build container.
   container_environment_args+=(--env "GEMSTONE_UNIFIED_HIP_ARCHITECTURES=$hip_architectures")
 fi
@@ -245,38 +254,44 @@ if [[ "$bundle_runtime" == 1 && "$backend" != host ]]; then
     bundled_rocblas_library=/out/lib/rocblas/library
     mkdir -p "$bundled_rocblas_library"
     cp -a -- "$rocblas_library"/. "$bundled_rocblas_library/"
-    hip_target="${GEMSTONE_UNIFIED_HIP_ARCHITECTURES%%[;,]*}"
-    case "$hip_target" in
-      gfx103[0-9]) rocblas_target=gfx1030 ;;
-      gfx110[0-9]) rocblas_target=gfx1100 ;;
-      gfx115[01]) rocblas_target=gfx1150 ;;
-      gfx120[01]) rocblas_target=gfx1200 ;;
-      *) rocblas_target="$hip_target" ;;
-    esac
-    if [[ "$rocblas_target" != "$hip_target" ]]; then
-      for suffix in dat hsaco; do
-        source="$bundled_rocblas_library/TensileLibrary_lazy_${rocblas_target}.dat"
-        target="$bundled_rocblas_library/TensileLibrary_lazy_${hip_target}.dat"
-        if [[ "$suffix" == hsaco ]]; then
-          source="$bundled_rocblas_library/Kernels.so-000-${rocblas_target}.hsaco"
-          target="$bundled_rocblas_library/Kernels.so-000-${hip_target}.hsaco"
-        fi
-        [[ -e "$source" && ! -e "$target" ]] && ln -s -- "$(basename -- "$source")" "$target"
-      done
+    rocblas_target_for() {
+      case "$1" in
+        gfx103[0-9]) printf '%s\n' gfx1030 ;;
+        gfx110[0-9]) printf '%s\n' gfx1100 ;;
+        gfx115[01]) printf '%s\n' gfx1150 ;;
+        gfx120[01]) printf '%s\n' gfx1200 ;;
+        gfx940|gfx941) printf '%s\n' gfx942 ;;
+        *) printf '%s\n' "$1" ;;
+      esac
+    }
+    IFS=',;' read -r -a hip_target_list <<<"$GEMSTONE_UNIFIED_HIP_ARCHITECTURES"
+    for hip_target in "${hip_target_list[@]}"; do
+      rocblas_target="$(rocblas_target_for "$hip_target")"
+      if [[ "$rocblas_target" != "$hip_target" ]]; then
+        for suffix in dat hsaco; do
+          source="$bundled_rocblas_library/TensileLibrary_lazy_${rocblas_target}.dat"
+          target="$bundled_rocblas_library/TensileLibrary_lazy_${hip_target}.dat"
+          if [[ "$suffix" == hsaco ]]; then
+            source="$bundled_rocblas_library/Kernels.so-000-${rocblas_target}.hsaco"
+            target="$bundled_rocblas_library/Kernels.so-000-${hip_target}.hsaco"
+          fi
+          [[ -e "$source" && ! -e "$target" ]] && ln -s -- "$(basename -- "$source")" "$target"
+        done
 
-      # Tensile's lazy metadata names the per-operation files with the
-      # canonical architecture (for example, gfx1036), while ROCm ships the
-      # same ISA-compatible kernels under the first architecture in the
-      # family (gfx1030).  Relocation must provide those names as well as the
-      # top-level lazy database; otherwise rocBLAS silently reports an invalid
-      # device function after failing to open every selected kernel.
-      while IFS= read -r -d '' source; do
-        base="$(basename -- "$source")"
-        target_base="${base//${rocblas_target}/${hip_target}}"
-        target="$bundled_rocblas_library/$target_base"
-        [[ "$target_base" != "$base" && ! -e "$target" ]] && ln -s -- "$base" "$target"
-      done < <(find "$bundled_rocblas_library" -maxdepth 1 -type f -name "*${rocblas_target}*" -print0)
-    fi
+        # Tensile's lazy metadata names the per-operation files with the
+        # canonical architecture (for example, gfx1036), while ROCm ships the
+        # same ISA-compatible kernels under the first architecture in the
+        # family (gfx1030).  Relocation must provide those names as well as the
+        # top-level lazy database; otherwise rocBLAS silently reports an invalid
+        # device function after failing to open every selected kernel.
+        while IFS= read -r -d '' source; do
+          base="$(basename -- "$source")"
+          target_base="${base//${rocblas_target}/${hip_target}}"
+          target="$bundled_rocblas_library/$target_base"
+          [[ "$target_base" != "$base" && ! -e "$target" ]] && ln -s -- "$base" "$target"
+        done < <(find "$bundled_rocblas_library" -maxdepth 1 -type f -name "*${rocblas_target}*" -print0)
+      fi
+    done
   fi
   if [[ "$backend" == hip && -f /usr/share/libdrm/amdgpu.ids ]]; then
     # libdrm uses this ASIC table at runtime.  Newer libdrm can be pointed at
@@ -450,6 +465,9 @@ fi
   printf 'host-requirements\tlibc-loader-and-vendor-kernel-driver\n'
   if [[ -n "$target_arch_manifest" ]]; then
     printf 'target-arch\t%s\n' "$target_arch_manifest"
+  fi
+  if [[ -n "$target_archs_manifest" ]]; then
+    printf 'target-archs\t%s\n' "$target_archs_manifest"
   fi
   printf 'runner\tbin/unified_suite_%s\n' "$backend"
 } >"$output_directory/manifest.tsv"
