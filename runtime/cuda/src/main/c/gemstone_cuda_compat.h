@@ -4,6 +4,15 @@
 #include <stddef.h>
 #include <stdint.h>
 
+int32_t gemstone_cuda_track_device(uint64_t pointer, size_t size, void *module);
+int32_t gemstone_cuda_track_context(void *context);
+int gemstone_cuda_context_is_live(void *context);
+int32_t gemstone_cuda_activate_created_context(void *context);
+void *gemstone_cuda_rpc_context(void);
+void gemstone_cuda_untrack_device(uint64_t pointer);
+void gemstone_cuda_untrack_module(void *module);
+void gemstone_cuda_untrack_context(void *context);
+
 int32_t cuArray3DCreate_v2(void **handle, const void *descriptor);
 int32_t cuArray3DGetDescriptor_v2(void *descriptor, void *handle);
 int32_t cuArrayCreate_v2(void **handle, const void *descriptor);
@@ -41,6 +50,8 @@ void gemstone_cuda_managed_mark_device_dirty(void);
 int32_t gemstone_cuda_managed_synchronize_from_device(void);
 int32_t gemstone_register_global_remote(
     uint64_t module, const char *name, const void *initial, size_t size);
+int32_t gemstone_resolve_functions_remote(
+    uint64_t module, const char *const *names, uint32_t count, uint64_t *handles);
 int32_t cuMemAllocManaged(uint64_t *pointer, size_t size, uint32_t flags);
 int32_t cuMemAllocHost_v2(void **pointer, size_t size);
 int32_t cuMemAllocHost(void **pointer, size_t size);

@@ -6,7 +6,7 @@
 #include "unified_suite/blas.hpp"
 #include "unified_suite/config.hpp"
 #include "unified_suite/edge_cases.hpp"
-#include "unified_suite/legacy_reds.hpp"
+#include "unified_suite/regressions.hpp"
 #include "unified_suite/result.hpp"
 #include "unified_suite/runner.hpp"
 #include "unified_suite/stress.hpp"

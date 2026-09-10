@@ -35,7 +35,7 @@ final class PTXProgramExecutorSuite extends munit.FunSuite {
          |  ret;
          |}
          |""".stripMargin
-    val service    = ExecutionService(ISATypedProgramExecutor.default, _.run())
+    val service    = ExecutionService(RegisteredProgramExecutor.default, _.run())
     val allocation = AllocationId.fromLong(1L).toOption.get
     val output     = AllocationId.fromLong(2L).toOption.get
     assertEquals(service.registerAllocation(allocation, 16L, AllocationKind.Shared), Right(()))

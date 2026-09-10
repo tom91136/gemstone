@@ -1,0 +1,49 @@
+{
+  "suite": "opencl-cts",
+  "repository": "https://github.com/KhronosGroup/OpenCL-CTS",
+  "version": "v2026-07-09-00",
+  "revision": "726a6d94da0876cf69bf6198d20d42197b0392de",
+  "profile": "representative",
+  "categories": [
+    "api",
+    "basic",
+    "compiler",
+    "computeinfo",
+    "events"
+  ],
+  "archives": [
+    {
+      "name": "cts.tar.gz",
+      "url": "https://codeload.github.com/KhronosGroup/OpenCL-CTS/tar.gz/726a6d94da0876cf69bf6198d20d42197b0392de",
+      "sha256": "b859bda3045735883848c09b4e794c89058cb17ec54d749b5acc0e361afba8e2",
+      "directory": "OpenCL-CTS-726a6d94da0876cf69bf6198d20d42197b0392de",
+      "destination": "cts"
+    },
+    {
+      "name": "OpenCL-Headers-2026.05.29.zip",
+      "url": "https://github.com/KhronosGroup/OpenCL-Headers/archive/refs/tags/v2026.05.29.zip",
+      "sha256": "0bdef6f653c577827a75fac3e3f18b0bf000171e39fa65c2eb84ec804c822cab",
+      "directory": "OpenCL-Headers-2026.05.29",
+      "destination": "opencl-headers"
+    },
+    {
+      "name": "SPIRV-Headers-vulkan-sdk-1.4.357.0.zip",
+      "url": "https://github.com/KhronosGroup/SPIRV-Headers/archive/refs/tags/vulkan-sdk-1.4.357.0.zip",
+      "sha256": "7d40c8c1983c1aba6f6f2fcbcf7be345d33a5693aeee0cc5b8c579fb8e3f2fea",
+      "directory": "SPIRV-Headers-vulkan-sdk-1.4.357.0",
+      "destination": "spirv-headers"
+    }
+  ],
+  "default_cases": [
+    "api/get_platform_info",
+    "basic/host_numeric_constants",
+    "computeinfo/device_uuid",
+    "api/get_device_info_31",
+    "basic/intmath_int",
+    "basic/constant_source",
+    "api/binary_get",
+    "api/binary_create",
+    "compiler/execute_after_simple_compile_and_link",
+    "events/event_get_info"
+  ]
+}

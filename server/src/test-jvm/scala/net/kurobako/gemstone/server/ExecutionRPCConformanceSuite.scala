@@ -199,15 +199,71 @@ class ExecutionRPCConformanceSuite extends munit.FunSuite {
     } finally pool.close()
   }
 
-  test("execution parallelism defaults to one worker and rejects host oversubscription") {
+  test("nested dispatches can use every worker without exceeding the pool") {
+    val pool    = BoundedExecutionPool(4)
+    val arrived = java.util.concurrent.CountDownLatch(4)
+    val result  = java.util.concurrent.CompletableFuture[Either[ExecutionFailure, Unit]]()
+    try {
+      pool.schedule { () =>
+        val completed = pool.parallelFor(4L) { _ =>
+          arrived.countDown()
+          Either.cond(
+            arrived.await(5L, java.util.concurrent.TimeUnit.SECONDS),
+            (),
+            ExecutionFailure.Failed("a dispatch worker was left idle")
+          )
+        }
+        val _ = result.complete(completed)
+      }
+      assertEquals(result.get(10L, java.util.concurrent.TimeUnit.SECONDS), Right(()))
+    } finally pool.close()
+  }
+
+  test("a later job runs before a large grid drains") {
+    val pool        = BoundedExecutionPool(2)
+    val firstGroups = java.util.concurrent.CountDownLatch(2)
+    val release     = java.util.concurrent.CountDownLatch(1)
+    val completed   = AtomicInteger(0)
+    val heavy       = java.util.concurrent.CompletableFuture[Either[ExecutionFailure, Unit]]()
+    val small       = java.util.concurrent.CompletableFuture[Int]()
+    val caller      = Thread { () =>
+      val result = pool.parallelFor(100L) { index =>
+        if (index < 2L) {
+          firstGroups.countDown()
+          release.await()
+        }
+        completed.incrementAndGet()
+        Right(())
+      }
+      val _ = heavy.complete(result)
+    }
+    caller.setDaemon(true)
+    try {
+      caller.start()
+      assert(firstGroups.await(5L, java.util.concurrent.TimeUnit.SECONDS))
+      pool.schedule { () =>
+        val _ = small.complete(completed.get())
+      }
+      release.countDown()
+      assert(small.get(5L, java.util.concurrent.TimeUnit.SECONDS) < 100)
+      assertEquals(heavy.get(5L, java.util.concurrent.TimeUnit.SECONDS), Right(()))
+    } finally {
+      release.countDown()
+      pool.close()
+      caller.join(5000L)
+    }
+  }
+
+  test("execution parallelism has one shared default and rejects host oversubscription") {
     val defaultPool = BoundedExecutionPool.fromEnvironment(Map.empty)
     val hostBound   = math.min(64, math.max(1, Runtime.getRuntime.availableProcessors()))
     try assertEquals(defaultPool.parallelism, math.max(1, hostBound - 2))
     finally defaultPool.close()
 
-    val hipPool = BoundedExecutionPool.fromEnvironment(Map.empty, Some("hip"))
-    try assertEquals(hipPool.parallelism, math.min(math.max(1, hostBound - 2), 2))
-    finally hipPool.close()
+    val explicitPool =
+      BoundedExecutionPool.fromEnvironment(Map(BoundedExecutionPool.EnvironmentName -> hostBound.toString))
+    try assertEquals(explicitPool.parallelism, hostBound)
+    finally explicitPool.close()
 
     val invalidZero = intercept[IllegalArgumentException](BoundedExecutionPool.fromEnvironment(Map(
       BoundedExecutionPool.EnvironmentName -> "0"

@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+script_directory="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+source "$script_directory/../../tools/container-common.sh"
+conformance_fixture_lock "$@"
+
 usage() {
   cat >&2 <<'EOF'
 usage: container-build.sh <cuda|hip|opencl|sycl|openacc> <source-root> <output-directory> <app:model>...
@@ -17,31 +21,6 @@ backend="$1"
 source_directory="$(cd -- "$2" && pwd -P)"
 output_directory="$(mkdir -p -- "$3" && cd -- "$3" && pwd -P)"
 shift 3
-
-case "$backend" in
-  cuda)
-    default_image="docker.io/nvidia/cuda@sha256:69e9e39eb8fe2cda271654a0f5eac2f1bb946b2fb9c460eb19c7c3c155f4e64e"
-    ;;
-  hip)
-    default_image="docker.io/rocm/dev-ubuntu-24.04@sha256:92f309c51b52cef8762867848f1529dee821624f23cd5df38455e819538f762f"
-    ;;
-  opencl)
-    default_image="docker.io/library/ubuntu@sha256:1e0a86e57d247923571b75e0aaf48a1449cf8c543d51fb3e07a4a7d7bfa79316"
-    ;;
-  sycl)
-    default_image="docker.io/intel/oneapi-toolkit@sha256:e9db518398753434ee5aab9740a25f1d3134396a30be1569cfad8f8b0d90740c"
-    ;;
-  openacc)
-    # NVIDIA's HPC SDK image is intentionally supplied by the caller. There
-    # is no portable OpenACC base image, and silently selecting a different
-    # compiler would change the port being tested.
-    default_image=""
-    ;;
-  *)
-    echo "unsupported backend: $backend" >&2
-    usage
-    ;;
-esac
 
 for specification in "$@"; do
   case "$specification" in
@@ -61,81 +40,22 @@ for specification in "$@"; do
   esac
 done
 
-script_directory="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
-engine="${GEMSTONE_MINIAPP_CONTAINER_ENGINE:-${GEMSTONE_UNIFIED_CONTAINER_ENGINE:-podman}}"
-command -v "$engine" >/dev/null || {
-  echo "container engine not found: $engine" >&2
-  exit 1
-}
+conformance_container_init
+conformance_build_image
 
-image_variable="GEMSTONE_MINIAPP_${backend^^}_IMAGE"
-image="${!image_variable:-$default_image}"
-if [[ -z "$image" ]]; then
-  echo "OpenACC requires GEMSTONE_MINIAPP_OPENACC_IMAGE with an approved NVHPC base image" >&2
-  exit 2
-fi
-if [[ "$backend" == opencl && -z "${!image_variable:-}" ]]; then
-  image="${GEMSTONE_UNIFIED_HOST_IMAGE:-$image}"
-fi
-
-image_is_present=1
-if [[ "$engine" == podman ]]; then
-  "$engine" image exists "$image" >/dev/null 2>&1 || image_is_present=0
-else
-  "$engine" image inspect "$image" >/dev/null 2>&1 || image_is_present=0
-fi
-if [[ "$image_is_present" == 0 ]]; then
-  echo "pulling $image" >&2
-  "$engine" pull "$image"
-fi
-
-builder_image="localhost/gemstone-miniapps-builder:${backend}"
-builder_uid="$(id -u)"
-builder_gid="$(id -g)"
-build_pull_args=()
-if [[ "$engine" == podman ]]; then
-  build_pull_args+=(--pull=never)
-else
-  build_pull_args+=(--pull=false)
-fi
-install_opencl=0
-[[ "$backend" == opencl ]] && install_opencl=1
-"$engine" build \
-  "${build_pull_args[@]}" \
-  --build-arg "BASE_IMAGE=$image" \
-  --build-arg "BUILDER_UID=$builder_uid" \
-  --build-arg "BUILDER_GID=$builder_gid" \
-  --build-arg "INSTALL_OPENCL=$install_opencl" \
-  --tag "$builder_image" \
-  "$script_directory/../containers"
-
-cuda_architecture="${GEMSTONE_MINIAPP_CUDA_ARCH:-sm_75}"
-hip_architectures="${GEMSTONE_MINIAPP_HIP_ARCHITECTURES:-gfx900}"
-container_network="${GEMSTONE_MINIAPP_CONTAINER_NETWORK:-none}"
-container_userns_args=()
-if [[ "$engine" == podman ]]; then
-  container_userns_args+=(--userns=keep-id)
-fi
-container_device_args=()
-if [[ -n "${GEMSTONE_MINIAPP_CONTAINER_DEVICES:-}" ]]; then
-  IFS=',' read -r -a configured_devices <<<"$GEMSTONE_MINIAPP_CONTAINER_DEVICES"
-  for device in "${configured_devices[@]}"; do
-    [[ -n "$device" ]] && container_device_args+=(--device "$device")
-  done
-fi
-container_environment_args=()
-if [[ -n "${GEMSTONE_MINIAPP_BUILD_JOBS:-}" ]]; then
-  container_environment_args+=(--env GEMSTONE_MINIAPP_BUILD_JOBS)
-fi
-
+cuda_architecture="${GEMSTONE_CUDA_ARCH:-sm_75}"
+hip_architectures="${GEMSTONE_AMDGPU_TARGETS:-gfx900}"
 echo "building mini-apps ($backend) in $image" >&2
-"$engine" run --rm -i \
+"$engine" run --rm -i --name "$container_name" \
   "${container_userns_args[@]}" \
+  "${container_cgroup_args[@]}" \
   --user "$builder_uid:$builder_gid" \
   --security-opt label=disable \
   --network "$container_network" \
   "${container_device_args[@]}" \
   "${container_environment_args[@]}" \
+  --mount "type=bind,src=$script_directory/../../tools,dst=/gemstone-tools,ro" \
+  --mount "type=bind,src=$script_directory,dst=/miniapp-tools,ro" \
   --mount "type=bind,src=$source_directory,dst=/src,ro" \
   --mount "type=bind,src=$output_directory,dst=/out,rw" \
   "$builder_image" \
@@ -152,6 +72,10 @@ hip_extra_flags="-O2"
 IFS=',;' read -r -a configured_hip_architectures <<<"$hip_architectures"
 hip_target_architecture=""
 kokkos_arch_options=()
+requires_kokkos=0
+for specification in "$@"; do
+  if [[ "$specification" == *:kokkos ]]; then requires_kokkos=1; fi
+done
 clang_rt_builtins=""
 if [[ "$backend" == hip ]]; then
   clang_rt_builtins="$(find -L /opt/rocm/llvm/lib/clang -type f -name 'libclang_rt.builtins-x86_64.a' -print -quit)"
@@ -160,6 +84,7 @@ for hip_architecture in "${configured_hip_architectures[@]}"; do
   [[ -n "$hip_architecture" ]] || continue
   [[ -n "$hip_target_architecture" ]] || hip_target_architecture="$hip_architecture"
   hip_extra_flags+=" --offload-arch=$hip_architecture"
+  [[ "$requires_kokkos" == 1 ]] || continue
   case "$hip_architecture" in
     gfx90a) kokkos_arch_options+=( -DKokkos_ARCH_VEGA90A=ON ) ;;
     gfx908) kokkos_arch_options+=( -DKokkos_ARCH_VEGA908=ON ) ;;
@@ -217,13 +142,7 @@ fi
 mkdir -p /out/bin /out/lib /out/share/miniapps
 
 models=("$@")
-default_build_jobs="$(nproc)"
-((default_build_jobs > 8)) && default_build_jobs=8
-build_jobs="${GEMSTONE_MINIAPP_BUILD_JOBS:-$default_build_jobs}"
-[[ "$build_jobs" =~ ^[1-9][0-9]*$ ]] || {
-  echo "GEMSTONE_MINIAPP_BUILD_JOBS must be a positive integer: $build_jobs" >&2
-  exit 2
-}
+build_jobs="$CMAKE_BUILD_PARALLEL_LEVEL"
 
 build_one() {
   local specification="$1"
@@ -242,7 +161,7 @@ build_one() {
   esac
   build_model="$model"
   case "$app:$model" in
-    babelstream:omp-target|minibude:omp-target|cloverleaf:omp-target|tealeaf:omp-target)
+    babelstream:omp-target|minibude:omp-target|tealeaf:omp-target)
       build_model=omp
       ;;
     babelstream:std-indices)
@@ -272,17 +191,10 @@ build_one() {
       ;;
   esac
   source="/src/$app"
-  if [[ "$build_model" != omp || "$model" != omp-target ]]; then
-    [[ -d "$source/src/$build_model" ]] || {
-      echo "$app does not provide src/$build_model for public model $model" >&2
-      exit 1
-    }
-  else
-    [[ -d "$source/src/omp" ]] || {
-      echo "$app does not provide src/omp for OpenMP target model" >&2
-      exit 1
-    }
-  fi
+  [[ -d "$source/src/$build_model" ]] || {
+    echo "$app does not provide src/$build_model for public model $model" >&2
+    exit 1
+  }
   if [[ "$model" == kokkos ]]; then
     [[ -d /src/kokkos ]] || {
       echo "Kokkos model requires /src/kokkos in the read-only source root" >&2
@@ -345,6 +257,25 @@ build_one() {
       -e '/nvmlDevice_t nvmldev;/d' \
       -e '/NVML(nvmlDeviceGet/d' \
       "$build_source/src/cuda/CUDAStream.cu"
+  elif [[ "$backend" == hip && "$app" == tealeaf && "$model" == std-indices ]]; then
+    # rocPRIM replicates this row loop throughout its reduction kernels.
+    # ROCm 7.2's StructurizeCFG then spends ~16 minutes repairing the expanded
+    # control flow. Keep the row transform out of line: the arithmetic and
+    # reduction order are unchanged, and the full -O2 build takes ~35 seconds.
+    build_source="/work/source/$app/$model"
+    rm -rf "$build_source"
+    mkdir -p "$build_source"
+    cp -a -- "$source/." "$build_source/"
+    python3 - "$build_source/src/std-indices/solver_methods.cpp" <<'TEALEAF_PATCH'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+source = path.read_text()
+needle = "*norm += std::transform_reduce(EXEC_POLICY, it.begin(), it.end(), 0.0, std::plus<>(), [=](int jj) {"
+if source.count(needle) != 1:
+    raise SystemExit("TeaLeaf row-norm transform changed; review the HIP StdPar compiler workaround")
+path.write_text(source.replace(needle, needle[:-1] + "__attribute__((noinline)) {"))
+TEALEAF_PATCH
   elif [[ "$backend" == hip && "$app" == cloverleaf ]]; then
     # The pinned HIP port prints the architecture through the old gcnArch
     # field. ROCm 7 removed that field; gcnArchName is the portable HIP
@@ -425,16 +356,23 @@ build_one() {
         cmake_args+=(
           -DCMAKE_CXX_COMPILER="$model_host_cxx"
           "-DCXX_EXTRA_FLAGS=-O2 -ffile-prefix-map=/src=. -fdebug-prefix-map=/src=."
-          "-DOFFLOAD=AMD:${hip_target_architecture}"
+          -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+          -DOFFLOAD=ON
+          "-DOFFLOAD_FLAGS=-fopenmp=libomp -fopenmp-targets=amdgcn-amd-amdhsa -Xopenmp-target=amdgcn-amd-amdhsa -march=${hip_target_architecture}"
         )
       else
         hip_app_extra_flags="$hip_extra_flags"
         if [[ "$model" == std-indices ]]; then
           hip_app_extra_flags+=" --hipstdpar"
-          # On non-gfx9 devices ROCm's StdPar implementation needs managed
-          # allocation interposition for the host-visible algorithm buffers.
-          # This mirrors BabelStream's AMDGPU_TARGET_OFFLOAD setup.
-          [[ "$hip_target_architecture" == gfx9* ]] || hip_app_extra_flags+=" --hipstdpar-interpose-alloc"
+          # ROCm 7.2's V1 allocator uses untracked host malloc/advice. Keep the
+          # shipped V0 managed allocator, and hide app STL inline definitions so
+          # ROCclr initialization cannot re-enter the compiler's allocation pool.
+          # V0's sized-delete path bypasses its allocation header; use the
+          # shipped header-aware unsized delete instead.
+          hip_app_extra_flags+=" -U__HIPSTDPAR_INTERPOSE_ALLOC_V1__ -fvisibility=hidden -fvisibility-inlines-hidden -fno-sized-deallocation"
+          # The emulated HSA runtime lacks implicit HMM regardless of ISA;
+          # even gfx9 needs explicit allocation lifetime at this boundary.
+          hip_app_extra_flags+=" --hipstdpar-interpose-alloc"
         fi
         cmake_args+=(
           -DCMAKE_CXX_COMPILER="$model_host_cxx"
@@ -483,11 +421,25 @@ build_one() {
   esac
   cmake "${cmake_args[@]}"
   cmake --build "$build" --parallel "$build_jobs"
+  # The container is disposable; retain per-command timing and flags for
+  # diagnosing slow compilation without repeating an entire cold build.
+  mkdir -p "/out/share/miniapps/build/$app/$model"
+  cp -- "$build/.ninja_log" "/out/share/miniapps/build/$app/$model/ninja.log"
+  if [[ -f "$build/compile_commands.json" ]]; then
+    cp -- "$build/compile_commands.json" "/out/share/miniapps/build/$app/$model/compile_commands.json"
+  fi
   cmake --install "$build" --prefix "$install_root"
   [[ -x "$installed" ]] || {
     echo "install did not produce $installed" >&2
     exit 1
   }
+  if [[ "$model" == omp-target ]]; then
+    # The pinned vendor:arch model branch adds offload flags but omits the
+    # source activation defines. Verify actual target regions survived build.
+    python3 /miniapp-tools/verify-openmp-target.py "$app" "$installed" \
+      "$build/compile_commands.json" "$hip_target_architecture" \
+      > "/out/share/miniapps/build/$app/$model/offload.json"
+  fi
   cp -L -- "$installed" "$output"
   chmod 755 "$output"
 
@@ -502,57 +454,8 @@ if [[ -d /src/minibude/data ]]; then
   cp -a -- /src/minibude/data /out/share/miniapps/minibude/
 fi
 
-is_host_abi_library() {
-  local name="$(basename -- "$1")"
-  case "$name" in
-    libc.so*|ld-linux*.so*|libm.so*|libpthread.so*|libdl.so*|librt.so*|libresolv.so*|libutil.so*|libcrypt.so*|libnss_*.so*|libstdc++.so*|libgcc_s.so*|libOpenCL.so*|libze_loader.so*)
-      return 0
-      ;;
-    # Kernel-facing driver entry points, standardized compute loaders, and
-    # host ABI libraries remain supplied by the host. Vendor user-space
-    # runtimes are bundled below.
-    libcuda.so*|libnvidia-*.so*|libze_intel_gpu.so*)
-      return 0
-      ;;
-    *)
-      return 1
-      ;;
-  esac
-}
-
-is_bundle_library() {
-  local path="$1"
-  [[ "$path" == /opt/* || "$path" == /usr/local/cuda/* || "$path" == /usr/local/cuda-*/* || "$path" == /usr/lib/* || "$path" == /usr/lib64/* || "$path" == /lib/* || "$path" == /lib64/* ]] || return 1
-  is_host_abi_library "$path" && return 1
-  return 0
-}
-
-pending=()
-declare -A seen=()
-bundle_library() {
-  local dependency="$1"
-  local real="$(readlink -f -- "$dependency")"
-  [[ -f "$real" ]] || return 0
-  local real_name="$(basename -- "$real")"
-  if [[ -z "${seen[$real]+present}" ]]; then
-    seen["$real"]=1
-    cp -a -- "$real" "/out/lib/$real_name"
-    pending+=("$real")
-  fi
-  local soname
-  soname="$(readelf -d "$real" 2>/dev/null | sed -n 's/.*(SONAME).*\[\([^]]*\)\].*/\1/p' | head -1)"
-  if [[ -n "$soname" && "$soname" != "$real_name" ]]; then
-    ln -sfn -- "$real_name" "/out/lib/$soname"
-  fi
-  local dependency_name="$(basename -- "$dependency")"
-  if [[ "$dependency_name" != "$real_name" ]]; then
-    ln -sfn -- "$real_name" "/out/lib/$dependency_name"
-  fi
-}
-
-for executable in /out/bin/*; do
-  [[ -x "$executable" && ! -d "$executable" ]] && pending+=("$executable")
-done
+source /gemstone-tools/runtime-bundle.sh
+bundle_begin /out 0
 
 # HIP and SYCL load part of their user-space stack with dlopen. Seed those
 # libraries so the installed artifact does not depend on /opt/rocm or /opt/intel.
@@ -588,54 +491,8 @@ elif [[ "$backend" == openacc ]]; then
   done
 fi
 
-for pass in $(seq 1 32); do
-  current=("${pending[@]}")
-  pending=()
-  for file in "${current[@]}"; do
-    [[ -f "$file" ]] || continue
-    dependency_output="$(ldd "$file" 2>&1)"
-    while IFS= read -r unresolved; do
-      [[ -n "$unresolved" ]] || continue
-      IFS=$' \t' read -r unresolved_name _ <<<"$unresolved"
-      is_host_abi_library "$unresolved_name" && continue
-      echo "unresolved runtime dependency in $file: $unresolved" >&2
-      exit 1
-    done < <(grep 'not found' <<<"$dependency_output" || true)
-    while IFS= read -r dependency; do
-      [[ -n "$dependency" ]] || continue
-      is_bundle_library "$dependency" || continue
-      bundle_library "$dependency"
-    done < <(sed -nE 's/.*=> (\/[^ ]+).*/\1/p' <<<"$dependency_output")
-  done
-  ((${#pending[@]} == 0)) && break
-done
-(( ${#pending[@]} == 0 )) || {
-  echo "runtime dependency closure did not converge" >&2
-  exit 1
-}
-
-for shared_object in /out/lib/*; do
-  [[ -f "$shared_object" ]] || continue
-  file -b "$shared_object" | grep -q '^ELF ' || continue
-  patchelf --set-rpath '$ORIGIN' "$shared_object"
-done
-
-for executable in /out/bin/*; do
-  [[ -x "$executable" && ! -d "$executable" ]] || continue
-  patchelf --set-rpath '$ORIGIN/../lib' "$executable"
-  if readelf -d "$executable" | grep -Eq '/(src|work|opt/rocm|opt/intel|usr/local/cuda[^/]*)/'; then
-    echo "non-relocatable path embedded in $executable" >&2
-    exit 1
-  fi
-done
-for shared_object in /out/lib/*; do
-  [[ -f "$shared_object" ]] || continue
-  file -b "$shared_object" | grep -q '^ELF ' || continue
-  if readelf -d "$shared_object" | grep -Eq '/(src|work|opt/rocm|opt/intel|usr/local/cuda[^/]*)/'; then
-    echo "non-relocatable path embedded in $shared_object" >&2
-    exit 1
-  fi
-done
+bundle_resolve
+bundle_relocate /out
 
 {
   printf 'format\t1\n'
@@ -643,6 +500,6 @@ done
   printf 'cuda-arch\t%s\n' "$cuda_architecture"
   printf 'hip-architectures\t%s\n' "$hip_architectures"
   printf 'models\t%s\n' "$(printf '%s\n' "${models[@]}" | sort | paste -sd, -)"
-  printf 'host-requirements\tlibc-loader-and-vendor-kernel-driver\n'
+  printf 'host-requirements\tlibc-cxx-abi-and-vendor-kernel-driver\n'
 } > /out/manifest.tsv
 CONTAINER_SCRIPT

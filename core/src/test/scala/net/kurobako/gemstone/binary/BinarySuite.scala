@@ -19,6 +19,23 @@ class BinarySuite extends munit.FunSuite {
     assertEquals(Bits.byteCount(64), 8)
   }
 
+  test("bit reversal and population count respect every supported width") {
+    val values = Seq(0L, -1L, Long.MinValue, Long.MaxValue, 0x8877665544332211L)
+    (1 to 64).foreach { width =>
+      values.foreach { value =>
+        val digits          = java.lang.Long.toBinaryString(value).reverse.padTo(64, '0').take(width)
+        val expectedReverse = BigInt(digits, 2).longValue
+        assertEquals(Bits.reverseBits(value, width), expectedReverse)
+        assertEquals(Bits.bitCount(value, width), digits.count(_ == '1'))
+        assertEquals(Bits.reverseBits(Bits.reverseBits(value, width), width), Bits.truncate(value, width))
+      }
+    }
+    Seq(0, -1, 65).foreach { width =>
+      val _ = intercept[IllegalArgumentException](Bits.reverseBits(0L, width))
+      val _ = intercept[IllegalArgumentException](Bits.bitCount(0L, width))
+    }
+  }
+
   test("32-bit words slice and join without sign extension") {
     assertEquals(Bits.unsigned32(-1), Bits.Mask32)
     assertEquals(Bits.low16(0x12345L), 0x2345L)

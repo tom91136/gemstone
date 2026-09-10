@@ -107,4 +107,43 @@ class ExecutionSuite extends munit.FunSuite {
     assert(invalidMax.isLeft)
     assert(invalidQuantum.isLeft)
   }
+
+  test("concurrent instruction tickets preserve the exact budget") {
+    val budget    = ExecutionBudget.fromLong(10000L, threadSafe = true).toOption.get
+    val successes = java.util.concurrent.atomic.AtomicInteger()
+    val start     = java.util.concurrent.CountDownLatch(1)
+    val workers   = (0 until 8).map { _ =>
+      Thread { () =>
+        start.await()
+        (0 until 2000).foreach { _ =>
+          if (budget.consume().isRight) { val _ = successes.incrementAndGet() }
+        }
+      }
+    }
+    workers.foreach(_.start())
+    start.countDown()
+    workers.foreach(_.join())
+    assertEquals(successes.get(), 10000)
+    assertEquals(budget.used, 10000L)
+    assertEquals(budget.remaining, 0L)
+    assert(budget.consume(2).isLeft)
+    assertEquals(budget.used, 10000L)
+  }
+
+  test("instruction tickets and general costs share one exact counter") {
+    val budget = ExecutionBudget.fromLong(5L, threadSafe = true).toOption.get
+    assertEquals(budget.consume(), Right(()))
+    assertEquals(budget.consume(3), Right(()))
+    assert(budget.consume(2).isLeft)
+    assertEquals(budget.remaining, 1L)
+    assertEquals(budget.consume(), Right(()))
+    assert(budget.consume().isLeft)
+    assertEquals(budget.used, 5L)
+    val large = ExecutionBudget.fromLong(Int.MaxValue.toLong + 1L, threadSafe = true).toOption.get
+    assertEquals(large.consume(Int.MaxValue), Right(()))
+    assertEquals(large.consume(), Right(()))
+    assert(large.consume().isLeft)
+    assertEquals(large.remaining, 0L)
+  }
+
 }

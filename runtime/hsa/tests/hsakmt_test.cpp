@@ -3,6 +3,7 @@
 #include <array>
 #include <atomic>
 #include <cassert>
+#include <chrono>
 #include <cstdint>
 #include <cstring>
 #include <mutex>
@@ -28,6 +29,8 @@ using MemoryRead = MemoryWrite;
 struct MemoryTransport {
   std::mutex lock;
   std::unordered_map<uint64_t, std::vector<uint8_t>> allocations;
+  std::unordered_map<uint64_t, uint64_t> addresses;
+  bool reject_address = false;
   std::vector<MemoryWrite> writes;
   std::vector<MemoryRead> reads;
 };
@@ -39,9 +42,18 @@ int register_memory(void *context, uint64_t id, uint64_t size) {
   return transport.allocations.emplace(id, std::vector<uint8_t>(size)).second ? 0 : -1;
 }
 
+int register_address(void *context, uint64_t id, uint64_t base) {
+  auto &transport = *static_cast<MemoryTransport *>(context);
+  std::lock_guard<std::mutex> guard(transport.lock);
+  assert(transport.allocations.count(id) == 1);
+  if (transport.reject_address) return -1;
+  return transport.addresses.emplace(id, base).second ? 0 : -1;
+}
+
 int release_memory(void *context, uint64_t id) {
   auto &transport = *static_cast<MemoryTransport *>(context);
   std::lock_guard<std::mutex> guard(transport.lock);
+  transport.addresses.erase(id);
   return transport.allocations.erase(id) == 1 ? 0 : -1;
 }
 
@@ -78,6 +90,11 @@ struct ExecutorContext {
   std::atomic<bool> allow_completion{false};
   gemstone_hsa_dirty_range dirty_range{};
   std::vector<uint8_t> loaded_image;
+  bool matrix = false;
+  uint32_t workers = 1;
+  uint32_t expected_groups = 1;
+  uint32_t expected_width = 1;
+  uint32_t expected_global = 1;
 };
 
 int load_program(void *context, const void *image, uint32_t image_size, uint64_t *program) {
@@ -91,8 +108,9 @@ int unload_program(void *context, uint64_t) {
   ++static_cast<ExecutorContext *>(context)->unloads;
   return 0;
 }
-int launch(void *context, uint64_t, const char *, gemstone_hsa_dimensions, gemstone_hsa_dimensions, gemstone_hsa_dimensions,
-           uint32_t, uint32_t, const gemstone_hsa_argument *arguments, uint32_t argument_count, uint64_t *completion) {
+int launch(void *context, uint64_t, const char *, gemstone_hsa_dimensions group_size, gemstone_hsa_dimensions group_count,
+           gemstone_hsa_dimensions global_size, uint32_t, uint32_t, const gemstone_hsa_argument *arguments, uint32_t argument_count,
+           uint64_t *completion) {
   auto &executor = *static_cast<ExecutorContext *>(context);
   if (executor.reject_launch || executor.memory == nullptr || arguments == nullptr || argument_count != 3 || completion == nullptr)
     return -1;
@@ -105,13 +123,34 @@ int launch(void *context, uint64_t, const char *, gemstone_hsa_dimensions, gemst
   auto &output = executor.memory->allocations.at(arguments[1].allocation_id);
   for (auto &[id, allocation] : executor.memory->allocations)
     if (id != arguments[0].allocation_id && id != arguments[1].allocation_id) ++allocation[17];
-  int32_t value = 0;
   int32_t increment = 0;
-  std::memcpy(&value, input.data() + arguments[0].allocation_offset, sizeof(value));
   std::memcpy(&increment, arguments[2].scalar_bytes, sizeof(increment));
-  value += increment;
-  std::memcpy(output.data() + arguments[1].allocation_offset, &value, sizeof(value));
-  executor.dirty_range = {arguments[1].allocation_id, arguments[1].allocation_offset, sizeof(value)};
+  const uint32_t count = executor.matrix ? global_size.x : 1;
+  if (executor.matrix) {
+    assert(group_size.x == executor.expected_width && group_size.y == 1 && group_size.z == 1);
+    assert(group_count.x == executor.expected_groups && group_count.y == 1 && group_count.z == 1);
+    assert(global_size.x == executor.expected_global && global_size.y == 1 && global_size.z == 1);
+  }
+  std::atomic<uint32_t> next{0};
+  const auto execute_groups = [&] {
+    for (uint32_t group = next.fetch_add(1); group < group_count.x; group = next.fetch_add(1)) {
+      const uint32_t begin = group * group_size.x;
+      const uint32_t end = std::min(count, begin + group_size.x);
+      for (uint32_t index = begin; index < end; ++index) {
+        int32_t value = 0;
+        std::memcpy(&value, input.data() + arguments[0].allocation_offset + index * 4, 4);
+        value += increment + (executor.matrix ? static_cast<int32_t>(group * 17) : 0);
+        std::memcpy(output.data() + arguments[1].allocation_offset + index * 4, &value, 4);
+      }
+    }
+  };
+  std::vector<std::thread> workers;
+  for (uint32_t worker = 1; worker < executor.workers; ++worker)
+    workers.emplace_back(execute_groups);
+  execute_groups();
+  for (auto &worker : workers)
+    worker.join();
+  executor.dirty_range = {arguments[1].allocation_id, arguments[1].allocation_offset, count * 4};
   executor.completion_awaited = false;
   executor.completion_released = false;
   *completion = 1;
@@ -122,8 +161,11 @@ int await_completion(void *context, uint64_t) {
   if (executor.reject_launch) return -1;
   if (executor.block_completion.load(std::memory_order_acquire)) {
     executor.completion_waiting.store(true, std::memory_order_release);
-    while (!executor.allow_completion.load(std::memory_order_acquire))
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (!executor.allow_completion.load(std::memory_order_acquire)) {
+      assert(std::chrono::steady_clock::now() < deadline);
       std::this_thread::yield();
+    }
   }
   executor.completion_awaited = true;
   return 0;
@@ -190,12 +232,13 @@ void bootstrap_memory_events_and_direct_queue() {
   MemoryTransport transport;
   ExecutorContext executor_context;
   executor_context.memory = &transport;
-  const gemstone_hsa_executor executor{&executor_context,       load_program,       unload_program, launch, await_completion,
-                                       completion_dirty_ranges, release_completion, executor_error, nullptr, nullptr};
+  const gemstone_hsa_executor executor{
+      &executor_context,  load_program,   unload_program, launch,  await_completion, completion_dirty_ranges,
+      release_completion, executor_error, nullptr,        nullptr, nullptr};
   const auto signals = gemstone_hsa_rocr_signal_operations();
   auto *aql = gemstone_hsa_aql_runtime_create(&executor, &signals);
   assert(aql != nullptr);
-  const gemstone_hsakmt_memory_transport memory{&transport, register_memory, release_memory, write_memory, read_memory};
+  const gemstone_hsakmt_memory_transport memory{&transport, register_memory, release_memory, write_memory, read_memory, register_address};
   assert(gemstone_hsakmt_install_backend(aql, &memory) == 0);
 
   assert(hsaKmtOpenKFD() == HSAKMT_STATUS_SUCCESS);
@@ -263,7 +306,14 @@ void bootstrap_memory_events_and_direct_queue() {
   constexpr uint64_t upload_chunk = 64U * 1024U;
   constexpr uint64_t primary_allocation_size = 2 * upload_chunk;
   void *allocation = nullptr;
+  transport.reject_address = true;
+  const auto allocation_count = transport.allocations.size();
+  assert(hsaKmtAllocMemory(0, primary_allocation_size, flags, &allocation) != HSAKMT_STATUS_SUCCESS);
+  assert(transport.allocations.size() == allocation_count);
+  transport.reject_address = false;
   assert(hsaKmtAllocMemory(0, primary_allocation_size, flags, &allocation) == HSAKMT_STATUS_SUCCESS);
+  assert(std::any_of(transport.addresses.begin(), transport.addresses.end(),
+                     [&](const auto &entry) { return entry.second == reinterpret_cast<uint64_t>(allocation); }));
   assert(allocation != nullptr);
   auto *bytes = static_cast<uint8_t *>(allocation);
   bytes[17] = 0x5a;
@@ -449,6 +499,104 @@ void bootstrap_memory_events_and_direct_queue() {
   while (__atomic_load_n(queue.Queue_read_ptr_aql, __ATOMIC_ACQUIRE) != 6)
     std::this_thread::yield();
   assert(__atomic_load_n(&retained.value, __ATOMIC_ACQUIRE) == 0);
+
+  // Extend the existing real AQL/hsakmt copyback boundary across the P=4 group matrix.
+  // Remote work is completed before the held await returns; the host must still see poison until release.
+  executor_context.matrix = true;
+  uint64_t packet_index = 6;
+  const auto bounded_wait = [](const auto &ready) {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (!ready()) {
+      assert(std::chrono::steady_clock::now() < deadline);
+      std::this_thread::yield();
+    }
+  };
+  for (uint32_t workers : {1U, 4U})
+    for (uint32_t groups : {1U, 2U, 3U, 5U, 9U})
+      for (uint32_t width : {31U, 32U, 33U})
+        for (uint32_t tail : {0U, 1U})
+          for (int32_t epoch : {7, 29}) {
+            const uint32_t count = groups * width - tail;
+            executor_context.workers = workers;
+            executor_context.expected_groups = groups;
+            executor_context.expected_width = width;
+            executor_context.expected_global = count;
+            constexpr size_t matrix_input = 2048, matrix_output = 4096;
+            const uint64_t input_address = reinterpret_cast<uint64_t>(bytes + matrix_input);
+            const uint64_t output_address = reinterpret_cast<uint64_t>(bytes + matrix_output);
+            std::memcpy(bytes, &input_address, 8);
+            std::memcpy(bytes + 8, &output_address, 8);
+            std::memcpy(bytes + 16, &epoch, 4);
+            for (uint32_t index = 0; index <= count; ++index) {
+              const int32_t input = static_cast<int32_t>(index * 3) - 11;
+              const int32_t sentinel = -777;
+              std::memcpy(bytes + matrix_input + index * 4, &input, 4);
+              std::memcpy(bytes + matrix_output + index * 4, &sentinel, 4);
+            }
+            size_t reads_before = 0;
+            {
+              std::lock_guard<std::mutex> guard(transport.lock);
+              reads_before = transport.reads.size();
+            }
+            executor_context.completion_waiting.store(false, std::memory_order_release);
+            executor_context.allow_completion.store(false, std::memory_order_release);
+            SignalStorage matrix_completion;
+            auto packet = kernel_packet(UINT64_C(0x123400), reinterpret_cast<uint64_t>(bytes), matrix_completion);
+            write<uint16_t>(packet, 4, static_cast<uint16_t>(width));
+            write<uint32_t>(packet, 12, count);
+            ring[packet_index % ring.size()] = packet;
+            __atomic_store_n(queue.Queue_write_ptr_aql, packet_index + 1, __ATOMIC_RELEASE);
+            __atomic_store_n(queue.Queue_DoorBell_aql, packet_index, __ATOMIC_RELEASE);
+            bounded_wait([&] {
+              return executor_context.completion_waiting.load(std::memory_order_acquire)
+                     || __atomic_load_n(queue.Queue_read_ptr_aql, __ATOMIC_ACQUIRE) == packet_index + 1;
+            });
+            if (count < width) {
+              // Pinned HSA 7.2.4 hsa.h requires grid_size_x >= workgroup_size_x. Keep a rejection control.
+              assert(!executor_context.completion_waiting.load(std::memory_order_acquire));
+              assert(__atomic_load_n(&matrix_completion.value, __ATOMIC_ACQUIRE) < 0);
+              {
+                std::lock_guard<std::mutex> guard(transport.lock);
+                assert(transport.reads.size() == reads_before);
+              }
+              for (uint32_t index = 0; index <= count; ++index) {
+                int32_t observed = 0;
+                std::memcpy(&observed, bytes + matrix_output + index * 4, 4);
+                assert(observed == -777);
+              }
+              ++packet_index;
+              continue;
+            }
+            assert(executor_context.completion_waiting.load(std::memory_order_acquire));
+            assert(__atomic_load_n(&matrix_completion.value, __ATOMIC_ACQUIRE) == 1);
+            for (uint32_t index = 0; index <= count; ++index) {
+              int32_t observed = 0;
+              std::memcpy(&observed, bytes + matrix_output + index * 4, 4);
+              assert(observed == -777);
+            }
+            {
+              std::lock_guard<std::mutex> guard(transport.lock);
+              assert(transport.reads.size() == reads_before);
+            }
+            executor_context.allow_completion.store(true, std::memory_order_release);
+            bounded_wait([&] { return __atomic_load_n(queue.Queue_read_ptr_aql, __ATOMIC_ACQUIRE) == packet_index + 1; });
+            assert(__atomic_load_n(&matrix_completion.value, __ATOMIC_ACQUIRE) == 0);
+            for (uint32_t index = 0; index < count; ++index) {
+              int32_t observed = 0;
+              std::memcpy(&observed, bytes + matrix_output + index * 4, 4);
+              assert(observed == static_cast<int32_t>(index * 3) - 11 + epoch + static_cast<int32_t>((index / width) * 17));
+            }
+            int32_t guard_value = 0;
+            std::memcpy(&guard_value, bytes + matrix_output + count * 4, 4);
+            assert(guard_value == -777);
+            {
+              std::lock_guard<std::mutex> guard(transport.lock);
+              assert(transport.reads.size() == reads_before + 1);
+              assert(transport.reads.back().offset == matrix_output && transport.reads.back().size == count * 4);
+            }
+            assert(unrelated_bytes[17] == 0x33);
+            ++packet_index;
+          }
 
   assert(hsaKmtDestroyQueue(queue.QueueId) == HSAKMT_STATUS_SUCCESS);
   assert(hsaKmtDestroyEvent(event) == HSAKMT_STATUS_SUCCESS);

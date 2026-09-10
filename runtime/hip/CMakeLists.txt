@@ -2,16 +2,15 @@
 cmake_minimum_required(VERSION 3.25)
 project(gemstone-runtime-hip LANGUAGES CXX)
 
-# HIP is deliberately built on top of the public HSA provider. Keeping the
-# two providers in one CMake build gives the launcher a pair of ABI-correct
-# DSOs while ensuring the HIP path exercises the same HSA path as a native HSA
-# client.
+# HIP embeds the public HSA provider and shares its execution helpers. Keep
+# standalone HSA DSOs available as explicit targets, outside the HIP default
+# build; the embedded facade below avoids vendor HSA SONAME collisions.
 set(GEMSTONE_HIP_BUILD_TESTING OFF)
 if(BUILD_TESTING)
   set(GEMSTONE_HIP_BUILD_TESTING ON)
 endif()
 set(BUILD_TESTING OFF CACHE BOOL "Disable nested HSA tests" FORCE)
-add_subdirectory(../hsa hsa-runtime)
+add_subdirectory(../hsa hsa-runtime EXCLUDE_FROM_ALL)
 set(BUILD_TESTING ${GEMSTONE_HIP_BUILD_TESTING} CACHE BOOL "Build HIP tests" FORCE)
 
 find_path(HIP_INCLUDE_DIR hip/hip_runtime_api.h
@@ -54,5 +53,13 @@ if(BUILD_TESTING)
   target_include_directories(gemstone_hip_runtime_test PRIVATE ${HIP_INCLUDE_DIR} include)
   target_compile_definitions(gemstone_hip_runtime_test PRIVATE __HIP_PLATFORM_AMD__=1)
   target_link_libraries(gemstone_hip_runtime_test PRIVATE gemstone_hip_runtime)
+  if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+    target_compile_options(gemstone_hip_runtime_test PRIVATE -UNDEBUG)
+  endif()
   add_test(NAME gemstone-hip-runtime COMMAND gemstone_hip_runtime_test)
+  add_test(NAME gemstone-hip-host-copy COMMAND gemstone_hip_runtime_test host-copy)
+  add_test(NAME gemstone-hip-pointer-attributes COMMAND gemstone_hip_runtime_test pointer-attributes)
+  add_test(NAME gemstone-hip-device-reset COMMAND gemstone_hip_runtime_test device-reset)
+  set_tests_properties(gemstone-hip-host-copy gemstone-hip-pointer-attributes gemstone-hip-device-reset PROPERTIES TIMEOUT 30)
+  set_tests_properties(gemstone-hip-runtime PROPERTIES TIMEOUT 60)
 endif()

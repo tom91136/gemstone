@@ -6,19 +6,22 @@ BLAS cases through three normal vendor programming stacks:
 | Executable | Algorithms | Async dependencies | BLAS |
 | --- | --- | --- | --- |
 | `unified_suite_cuda` | NVIDIA Thrust | CUDA streams/events | cuBLAS |
-| `unified_suite_hip` | rocThrust | HIP streams/events | rocBLAS |
+| `unified_suite_hip*` | rocThrust | HIP streams/events | rocBLAS |
 | `unified_suite_sycl` | oneDPL device policies over SYCL USM | SYCL queues/events | oneMKL |
 
 The shared headers own case identities, problem generation, independent host references, validation, configuration,
-reporting, filtering, and sharding. Vendor adapters contain only allocation, transfer, synchronization, and matching
+reporting and exact case selection. Vendor adapters contain only allocation, transfer, synchronization, and matching
 library calls. The project does not vendor any vendor implementation or unit-test tree.
+
+HIP installs one runner per algorithm type and workload family. This keeps each process from mapping and registering
+the complete rocThrust/rocBLAS code-object set; CTest still exposes the same case names and schedules them together.
 
 This is intentionally a GPU workload-conformance suite, not a claim that it replaces every compile-time, overload,
 allocator, device-standard-library, or regression test in the upstream projects.
 
 ## Coverage
 
-The algorithm catalog contains 77 parameterized semantic forms. It covers copying, uninitialized construction,
+The algorithm catalog covers copying, uninitialized construction,
 generation, mutation, unary and binary transformation, replacement/removal, reductions, inner product, ordinary and
 transformed scans, sorting,
 keyed and stable sorting, uniqueness, counting/searching/logical queries, binary-search operations, merging,
@@ -55,24 +58,16 @@ The `stress` catalog is deliberately distinct. It repeats the dependency, primit
 workloads over larger sizes, but is bounded by explicit size and iteration parameters. Edge cases remain quick
 semantic checks; stress cases are the place for longer-running kernel and resource-lifetime pressure.
 
-All sizes, matrix shapes and scalar-type selections are runtime configurable. With default types and sizes, the
-portable catalog contains 1,812 stable cases: 1,386 algorithm, 141 BLAS, 98 portable async, 175 edge-case, and 12
-stress cases. The HIP target adds 72 HIP-specific async cases and 39 ROCm-specific iterator/set-operation probes, for
-1,923 listed HIP identities. These HIP-only forms are kept out of the CUDA, host, and SYCL counts because those
-overloads are not portable.
+All sizes, matrix shapes and scalar-type selections are runtime configurable. The executable's `--list`
+and exported `ctest-inventory.json` are authoritative. HIP-specific overloads/probes remain separate from
+portable identities; a documentation case count is not the inventory contract.
 
 This is broad runtime-semantic coverage, not a replacement for every upstream compile-time library test. Compile-time
 overload/SFINAE coverage and vendor regression tests that do not express portable runtime behavior remain upstream.
 
-### Legacy-suite retirement boundary
-
-The old vendor runners still carry coverage that has no honest unified equivalent: CUDA/HIP-specific async and
-allocator paths, device-pointer and iterator-type contracts, placeholder and functional-object compile-time checks,
-sequence and vector container tests, random-engine/distribution contracts, and vendor-specific keyed set-operation
-overloads. The imported `legacy-red/...` catalog below is a bounded regression inventory for the reds observed in the
-old emulator runs; it is not a claim that all of that vendor-specific coverage has been ported. These cases must either
-remain in an API-specific regression suite or be ported as explicit capability tests before the legacy runners are
-deleted.
+This catalog complements the miniapp matrix and pinned representative CTS profiles. Retired upstream test
+inventories are not implied coverage. The optional self-contained regression probes use `--include-regressions`.
+See [the shared conformance guide](../README.md) for paired execution and configuration.
 
 ## Build and relocation
 
@@ -97,7 +92,7 @@ Artifacts default to `target/unified-artifacts/<backend>`. The image names are p
 an approved local digest (useful on an air-gapped or GPU host):
 
 ```console
-GEMSTONE_UNIFIED_HIP_IMAGE=e52c187e7f93 \
+GEMSTONE_HIP_IMAGE=e52c187e7f93 \
   conformance/unified/tools/container-build.sh hip target/unified-artifacts/hip
 ```
 
@@ -108,42 +103,19 @@ conformance/unified/tools/run-relocated.sh target/unified-artifacts/hip hip --li
 conformance/unified/tools/run-relocated.sh target/unified-artifacts/hip hip \
   --suite=algorithms --algorithm-sizes=0,1,31 --quiet-pass
 
-# Emulator-only edge GEMMs use an explicit server-side budget profile. The
-# release profile uses n1024; n4096 is retained as a separately documented
-# throughput diagnostic and is not part of the normal matrix.
-GEMSTONE_EXECUTION_MAX_INSTRUCTIONS=500000000 \
-  gemstone run --api hip --hip-runtime "$PWD/target/out/jvm/scala-3.9.0/gemstone-runtime-hip/cmake/libamdhip64.so.7" \
-  --hsa-runtime "$PWD/target/out/jvm/scala-3.9.0/gemstone-runtime-hip/cmake/hsa-runtime/libhsa-runtime64.so.1" -- \
-  "$PWD/target/unified-hip-debug10/unified_suite_hip" \
-  --case=edge-cases/blas/padded-gemm/f32/n1024 --edge-case-sizes=1024 --edge-blas-types=f32
 ```
 
-Interpreter work-group parallelism is opt-in and bounded per Gemstone JVM
-server. `GEMSTONE_EXECUTION_PARALLELISM=N` shares one ForkJoinPool across all
-authenticated sessions, accepts values from `1` through the host's logical
-processor bound, and never creates one thread per work-group. The default is
-the host logical-processor count minus two (minimum one), leaving capacity for
-RPC, launcher, and GC work. HIP/HSA uses a two-worker execution pool by default
-because ROCm/HSA code-object installation is more memory-intensive; its matrix
-fan-out is one. CUDA and SYCL use the host-minus-two pool and fan-out. Start with
-`4` or `8` for a deliberately smaller run; the pool is also used for
-dispatch-queue submission, so separate sessions cannot multiply the configured
-worker count.
-`GEMSTONE_EXECUTION_PARALLEL_MIN_GROUPS` and
-`GEMSTONE_EXECUTION_PARALLEL_MIN_WORK_ITEMS` tune the profitability gate: a
-kernel is submitted to the pool only when it has enough groups or enough local
-work per group. Both default to conservative values derived from the worker
-count (`4*N` groups and 64 local work-items).
-The execution budget remains shared atomically across work-group workers, and
-SPIR-V global-memory/atomic bookkeeping is serialized at its owning memory
-state. This is a throughput feature, not a way to make one intrinsically
-large n4096 dispatch cheap.
+CTest schedules individual workload cases concurrently. `GEMSTONE_EXECUTION_PARALLELISM` controls the shared
+interpreter pool and the configured CTest job count. Without an override, CTest uses the available CPU count and
+the interpreter leaves two logical CPUs for RPC and GC, with at least one worker and at most 64. Scheduling
+thresholds are internal, derived from worker count. Oracle cases lock their physical GPU resource.
+See [configuration](../README.md) for the common build and execution controls.
 
 HIP fatbinary registration is lazy: the runtime records host-function bindings
 without installing every embedded code object. The selected module is loaded
 on first use, and the server reuses a bounded cache of immutable AMDGPU indexes
 while keeping mutable globals session-local. This is important for the HIP
-matrix because a typical shard registers dozens of fatbinaries but dispatches
+matrix because a typical invocation registers dozens of fatbinaries but dispatches
 only a few of them.
 
 For the SYCL artifact, the wrapper also sets `UR_ADAPTERS_FORCE_LOAD` to the
@@ -151,10 +123,10 @@ bundled Level Zero adapter. This is required because the oneAPI UR loader does
 not discover adapters from an arbitrary relocated directory; set that variable
 explicitly when selecting the bundled OpenCL adapter instead.
 
-Set `GEMSTONE_UNIFIED_CONTAINER_RUN_CTEST=1` to run the CTest shards in the build container before installation. This
+Set `GEMSTONE_UNIFIED_CONTAINER_RUN_CTEST=1` to run the individual CTest cases in the build container before installation. This
 is appropriate for the dependency-free host target and for a vendor oracle when the container is started with the
 required GPU devices. Pass those devices as a comma-separated
-`GEMSTONE_UNIFIED_CONTAINER_DEVICES` value (for example,
+`GEMSTONE_CONTAINER_DEVICES` value (for example,
 `/dev/kfd,/dev/dri` for ROCm or `nvidia.com/gpu=all` through Podman CDI). Gemstone/emulator runs use the relocated
 runner on the host, so the build container may be removed immediately after the artifact is produced.
 `GEMSTONE_UNIFIED_BUNDLE_RUNTIME=0` is available for deliberately host-supplied vendor runtimes, but the default
@@ -189,9 +161,25 @@ cmake --build target/unified-full --parallel
 ctest --test-dir target/unified-full --output-on-failure --parallel
 ```
 
-The full profile expands the configured sizes, matrix shapes, scalar types, and
-bounded stress inputs; it does not change the catalog or silently add host
-fallbacks. Backend capability differences remain explicit `SKIP` results.
+`Configuration` defines compact and full profile data once; direct runners accept `--profile=compact|full`, and
+CTest passes the selected profile to the same runner. Explicit size/type/shape overrides take precedence regardless
+of CLI order. CUDA, HIP and SYCL use identical portable matrices: full algorithms include both 1024 and 4096, and
+full edge BLAS includes 1023 and 1024. Unsupported capabilities produce explicit `SKIP` results.
+
+The `UNIFIED_SUITE_*` matrix cache settings are optional overrides, empty by default. Common overrides apply to every
+backend. `UNIFIED_SUITE_EDGE_BLAS_SIZES` can override edge BLAS specifically; otherwise it follows the common edge-case
+sizes/profile. The former `UNIFIED_SUITE_SYCL_ALGORITHM_SIZES`, `UNIFIED_SUITE_SYCL_EDGE_BLAS_SIZES`, and
+`UNIFIED_SUITE_CTEST_SHARDS` settings are rejected. Remove those entries when reusing an old CMake cache.
+
+The integration lifecycle checks portable case identities, parameters and deadlines across the available host,
+CUDA, HIP and SYCL artifacts before executing workloads. Backend API extensions and `edge-cases/runtime/...` probes
+are separate. Runtime probes have fixed geometry encoded in their names and carry CTest's `fixed-api-probe` label;
+they intentionally ignore the portable size/type options. The direct HSA/OpenCL runners provide these API probes;
+HIP and SYCL provide the corresponding portable algorithm/BLAS coverage.
+
+Full emulation qualification also needs an explicit server execution envelope. Large edge GEMMs exceed the compact
+100-million-instruction default; the aligned validation uses `GEMSTONE_EXECUTION_MAX_INSTRUCTIONS=2000000000` for
+all backends. This changes the emulator guard, not the problem sizes, data, tolerances or oracle execution.
 
 The vendor targets are intentionally separate build trees because CUDA, HIP, and SYCL have different compiler drivers;
 the container wrapper selects the corresponding compiler and SDK automatically. CUDA builds target `sm_75` and HIP
@@ -201,7 +189,7 @@ builds target `gfx900` by default, rather than discovering an architecture from 
 The SYCL target links the oneMKL BLAS component explicitly. It does not use the convenient `-qmkl=parallel` umbrella,
 which would add dynamic dependencies on unrelated DFT, LAPACK, RNG, sparse, statistics, VM, and data-fitting libraries.
 It also enables per-kernel SYCL device-code splitting. This is important for the large catalog: an exact case or CTest
-shard must not make the driver JIT every unrelated algorithm kernel in the executable.
+case must not make the driver JIT every unrelated algorithm kernel in the executable.
 
 The installed library remains header-only. The supplied integration executables are deliberately multi-translation-
 unit programs: algorithms, BLAS, edge cases, and bounded stress have independent catalog builders, and the especially
@@ -247,7 +235,7 @@ OverrideDefaultFP64Settings=1 IGC_EnableDPEmulation=1 \
   ./unified_suite_sycl --suite=edge-cases --edge-case-types=f64
 ```
 
-SYCL CTest shards set these variables by default. Configure with
+SYCL individual CTest cases set these variables by default. Configure with
 `-DUNIFIED_SUITE_SYCL_ENABLE_FP64_EMULATION=OFF` to disable that behavior; direct executable invocations still use
 the caller's environment.
 
@@ -260,164 +248,38 @@ closure (not an optional build-time cache): rocBLAS loads its Tensile kernels
 through this path at runtime, and a partial copy can fail before Gemstone sees
 the first dispatch.
 
-## Imported legacy reds
+## Migrated boundary cases
 
-The old CUDA Thrust and ROCm rocThrust runners produced a large number of
-Gemstone-only failures. The unified catalog carries only identities reproduced
-by the current container-built upstream binaries: all 48 imported CUDA Thrust
-identities are now recorded as fixed, and all 50 AMD rocThrust/HSA cases are
-recorded as strict regressions. The latest HIP emulation sweep passes 49/51;
-`random` and `unittest_static_assert` remain failures pending investigation.
-The two formerly failing CUDA identities are also decomposed into the
-eight tested 64-bit big-index magnitudes as ordinary semantic unified cases. The complete 317-entry AMD historical inventory is
-retained as `roc_historical`; 72 cases whose bounded probe timed out remain in
-`legacy_reds::deferred`. The formerly red rocBLAS half-precision AXPY case is
-carried as a direct unified BLAS call and now runs as a strict fixed regression.
-No upstream implementation is vendored into the new
-runner; the executable root is supplied explicitly for this regression probe.
-The CUDA big-index entries are reconstructed in the Thrust edge-case adapter
-so their iterator and launch contract is tested directly as well as through
-the original executable.
+The normal CUDA and HIP runtime catalogs share direct and indirect device-function calls over 257 lanes, with four
+per-lane indirect targets, signed inputs, and boundary canaries. SYCL adds buffer/accessor local-memory barriers and
+device-USM event/offset checks on both providers. Direct OpenCL probes compile, dispatch and reload program binaries;
+direct HSA probes load an embedded code object, submit an AQL packet and copy after completion. Native CUDA
+symbol-surface and invalid-token checks live under `runtime/cuda/test`.
 
-The CUDA mini-app reduction probes are also available as opt-in legacy-red
-regressions. They reproduce CloverLeaf's 256-thread shared-memory reduction,
-including the case where divergent cohorts reach the same `bar.sync` slot from
-different PTX program counters, and verify the result on the host. Both the
-physical CUDA oracle and the current Gemstone emulation path pass them. Run the
-focused probe with:
+Build direct runners with `container-build.sh opencl` and `container-build.sh hsa`.
+`UNIFIED_SUITE_HSA_ARCHITECTURE` selects the single embedded HSA target (default `gfx900`).
+All focused cases use `edge-cases/runtime/...` and have a dedicated CTest entry. The container exports its complete
+CTest inventory for sbt; see [shared conformance configuration](../README.md).
 
-```console
-./unified_suite_cuda --case=legacy-red/miniapp/cloverleaf/cuda-divergent-barrier-id \
-  --include-legacy-reds
-```
+## Coverage limits
 
-The original single-array reduction remains available as
-`legacy-red/miniapp/cloverleaf/cuda-shared-reduction`; both are strict
-diagnostics and report failures normally.
+Retained runtime probes cover device functions, HSA dispatch/copy, OpenCL compilation/binaries and SYCL
+USM/accessor dependencies. They do not replace upstream compile-only/SFINAE, allocator/container or
+random-distribution suites. Exhaustive image/sampler/interop, SVM ordering and CUDA array/pitched-copy/
+callback combinations are not asserted as equivalent coverage. Selected upstream CTS cases use the same
+[conformance pipeline](../README.md); their presence is not full CTS certification.
 
-The HIP runner also includes 48 ordinary `algorithms/roc-thrust-semantic/*`
-probes for keyed/descending/key-value set operations, duplicate handling,
-binary-search and gather variants, permutation/zip/pair/tuple iterators,
-async-adjacent reductions, larger stable workloads, the device-side random
-engine/distribution contract, and host-to-device global-symbol publishing.
-These are always selected with the HIP `i32` algorithm family; the exact upstream
-executables remain opt-in under `--include-legacy-reds`. The cases remain
-ordinary tests rather than an XFAIL mask, so future lookback/set/RNG regressions
-remain visible. Key/value cases compare keys only, with values validated as
-selected payloads, matching rocThrust's `key_value<Key, Value>` contract.
+Provider overrides must fail when their requested library is missing. Artifacts retain their runtime closure;
+source/container paths are not execution dependencies. Host C++ ABI libraries remain host-provided where
+required by the installed driver. Do not reinterpret skips or oracle-only/emulator-only runs as paired acceptance.
 
-The random probes reproduce the upstream `testing/random` contract on the
-device: engine validation of the 10,000th value, engine min/max bounds,
-engine equality, host-side engine and distribution save/restore, and 10,000-draw
-min/max bounds for every `uniform_int_distribution`, `uniform_real_distribution`
-and `normal_distribution` instantiation the upstream case covers. Each
-distribution is attempted even after a device error, so the failing
-instantiation is named rather than hidden. The device-global probe installs a
-device pointer in a `__device__` global with `hipMemcpyToSymbol`, publishes
-through it from a kernel, and reads the result back, which is the capability
-`testing/unittest_static_assert` depends on.
+## Regression probes
 
-The current emulator result for the complete probe catalog is 48/48 strict
-pass. Two cases were red when they were first ported,
-`random-distribution-min` and `random-distribution-max`, and both needed
-AMDGPU emulator fixes rather than a workload change: a wave32 vector comparison
-was clobbering the `vcc_hi` (s107) scratch register HIP kernels use for loop
-counters, so the ten-thousand-draw loop never terminated, and a device global
-reached through a `.got` slot was read without applying the code object's
-`R_AMDGPU_ABS64` relocation. Both are covered by focused regressions in
-`CodeObjectSuite`.
+`--include-regressions` adds self-contained CUDA big-index, CloverLeaf barrier/shared-reduction, and rocBLAS f16
+probes. Their identities start with `regressions/`. These run inside the same vendor-built runner; there is no
+external legacy-binary directory or imported test inventory. `--expect-reds` is a diagnostic mode and is never
+used by the paired acceptance runner.
 
-When included, oracle runs are strict and must pass these cases. The fixed CUDA
-identities and reconstructed edge cases are ordinary strict tests. The
-`--expect-reds` option remains available for future regressions:
-
-```console
-./unified_suite_cuda --suite=edge-cases --filter='^legacy-red/cuda-thrust/.*big-indexes/' \
-  --include-legacy-reds
-./unified_suite_hip --filter='^legacy-red/roc-thrust-fixed/' \
-  --include-legacy-reds --legacy-bin-root=/path/to/rocthrust/build/testing \
-  --algorithm-types=i32
-./unified_suite_hip --filter='^legacy-red/(roc-thrust-fixed|rocblas)/' \
-  --include-legacy-reds --legacy-bin-root=/path/to/rocthrust/build/testing \
-  --algorithm-types=i32 --blas-types=f16
-```
-
-For a failing imported executable, preserve its upstream GoogleTest output
-without flooding the unified runner log:
-
-```console
-./unified_suite_hip --filter='^legacy-red/roc-thrust-fixed/' \
-  --include-legacy-reds --legacy-bin-root=/path/to/rocthrust/build/testing \
-  --legacy-output-dir=target/legacy-reports
-```
-
-Each identity gets separate `.stdout` and `.stderr` files, making the
-individual upstream subtest failures available for porting and review.
-
-`XFAIL` means an imported case is still red as expected. `XPASS` (or `XSKIP`)
-is a regression in a future red manifest: the case no longer exercises the
-recorded failure and must be reviewed before removing or reclassifying it.
-The formerly red CUDA entries are no longer in the active manifest and their
-reconstructed cases run as ordinary strict tests.
-Running without `--expect-reds` keeps the normal strict behavior and is what
-the vendor oracle uses. A missing `--legacy-bin-root` is reported as an
-explicit skip, never as a semantic failure. The remaining CUDA and ROCm timeout entries are listed in
-`legacy_reds::deferred` and intentionally not run until their bounded behavior
-is understood.
-
-The captured Intel oneDPL/SYCL run had no emulator reds to import; its current
-unified smoke baseline is recorded in `CONFORMANCE_HANDOFF.md` rather than
-being represented by fabricated expected-failure cases.
-
-## CTest sharding
-
-Each enabled integration executable is registered as stable hash shards. The default is eight shards and can be
-changed through the container wrapper (all `UNIFIED_SUITE_*` cache variables are forwarded into its isolated CMake
-configure):
-
-```console
-UNIFIED_SUITE_CTEST_SHARDS=16 GEMSTONE_UNIFIED_CONTAINER_RUN_CTEST=1 \
-  conformance/unified/tools/container-build.sh host target/unified-artifacts/host
-```
-
-Each shard has a configurable timeout (`UNIFIED_SUITE_CTEST_TIMEOUT`, 120 seconds by default) so slow device JITs
-remain bounded in both the container CTest run and any low-level CMake build.
-
-The full profile keeps n1024 in the shared edge-algorithm matrix and for CUDA/HIP edge BLAS. SYCL uses the separate
-`UNIFIED_SUITE_SYCL_ALGORITHM_SIZES` default, which stops the linear algorithm matrix at n1024, and the separate
-`UNIFIED_SUITE_SYCL_EDGE_BLAS_SIZES` default, which stops edge BLAS at n257 for the CPU emulator. Override either
-explicitly when an Intel GPU or a deliberately long emulation diagnostic is available. These backend-specific bounds
-are workload limits, not capability skips: n4096 SYCL algorithm and n1024 SYCL GEMM probes remain reproducible opt-in
-diagnostics, while the smaller cases stay in the normal matrix.
-
-Algorithm, BLAS, async, edge-case, and stress shards are separate CTest tests. Their matrices are CMake cache settings; the
-container wrapper forwards the same variables while keeping the configure and compiler inside the image:
-
-```console
-UNIFIED_SUITE_CTEST_SHARDS=16 \
-UNIFIED_SUITE_ALGORITHM_SIZES=0,1,31,32,33,1021,1024,1025 \
-UNIFIED_SUITE_ALGORITHM_TYPES=i8,i32,i64,f32,f64 \
-UNIFIED_SUITE_BLAS_SIZES=1,64,1024 \
-UNIFIED_SUITE_MATRIX_SHAPES=2x2x3,31x17x65 \
-UNIFIED_SUITE_BLAS_TYPES=f16,f32,f64 \
-UNIFIED_SUITE_EDGE_CASE_SIZES=0,1,31,32,33,257 \
-UNIFIED_SUITE_EDGE_ALGORITHM_TYPES=i32,f32,f64 \
-UNIFIED_SUITE_EDGE_BLAS_TYPES=f32,f64 \
-UNIFIED_SUITE_STRESS_SIZES=4096,65536 \
-UNIFIED_SUITE_STRESS_TYPES=i32,f32 \
-UNIFIED_SUITE_STRESS_ITERATIONS=16 \
-  conformance/unified/tools/container-build.sh cuda target/unified-artifacts/cuda
-```
-
-A shard prints every skipped or failed case plus a summary. Any case can be reproduced independently with the exact
-`--case` name shown in its output. Stable-name hashing means adding a case does not shift unrelated cases between
-shards for a fixed shard count.
-
-## Adapter contracts
-
-Algorithm adapters are ordinary classes with templated operations over `std::vector` inputs. They return host-visible
-values after synchronizing the vendor operation. BLAS adapters are class templates over `ScalarType` and provide a
-move-only device buffer plus the BLAS operations. See the host adapters for minimal reference implementations
-and the vendor adapters for real integrations. Edge-case adapters add vendor-specific composed iterators, dependency
-graphs, group primitives, bitwise round trips, and recoverable runtime errors. The bounded stress suite deliberately
-reuses those adapter operations so it pressures the exact same paths without creating a second semantic vocabulary.
+CTest discovers cases using `--list` and invokes each with `--case=<exact-name>`. A single unsupported case returns
+77 (`SKIP_RETURN_CODE`). Hash partitions are no longer part of the runner or CTest inventory. Gemstone's integration
+bridge consumes the exported inventory and creates independent oracle/Gemstone CTest variants with host-profile GPU locks.

@@ -20,6 +20,9 @@ object AMDGPUExecutionBenchmark {
   def main(arguments: Array[String]): Unit = {
     val measured = arguments.headOption.fold(200)(_.toInt)
     val warmup   = arguments.lift(1).fold(math.max(20, measured / 10))(_.toInt)
+    val groups   = arguments.lift(2).fold(1)(_.toInt)
+    require(groups > 0 && groups <= 65536, s"group count out of range: $groups")
+    val elements = groups * 64
     require(measured > 0, s"measured dispatches must be positive: $measured")
     require(warmup >= 0, s"warmup dispatches must be non-negative: $warmup")
 
@@ -37,10 +40,10 @@ object AMDGPUExecutionBenchmark {
     val prepared =
       DispatchInterpreter.prepare(kernel).fold(failure => throw RuntimeException(failure.message), identity)
     val memory = BenchmarkMemory()
-    memory.allocate(InputId, 256)
-    memory.allocate(OutputId, 256)
+    memory.allocate(InputId, elements * 4)
+    memory.allocate(OutputId, elements * 4)
     memory.allocate(UnusedId, 256)
-    Array.tabulate(64)(index => index * 97 - 11).zipWithIndex.foreach { case (value, index) =>
+    Array.tabulate(elements)(index => index * 97 - 11).zipWithIndex.foreach { case (value, index) =>
       memory.putInt(InputId, index * 4, value)
     }
 
@@ -49,7 +52,7 @@ object AMDGPUExecutionBenchmark {
       ProgramId.fromLong(1L).toOption.get,
       "vector_copy",
       Dimensions.create(64, 1, 1).toOption.get,
-      Dimensions.One,
+      Dimensions.create(groups, 1, 1).toOption.get,
       Col(
         KernelArgument.Allocation(InputId, 0L),
         KernelArgument.Allocation(OutputId, 0L),
@@ -84,6 +87,11 @@ object AMDGPUExecutionBenchmark {
         Some(value)
       case _ => None
     }
+    val recording = sys.env.get("GEMSTONE_BENCHMARK_JFR").map { _ =>
+      val value = jdk.jfr.Recording(jdk.jfr.Configuration.getConfiguration("profile"))
+      value.start()
+      value
+    }
     val threadId        = Thread.currentThread().threadId()
     val allocatedBefore = bean.fold(0L)(_.getThreadAllocatedBytes(threadId))
     val started         = System.nanoTime()
@@ -94,12 +102,21 @@ object AMDGPUExecutionBenchmark {
     }
     val elapsed        = System.nanoTime() - started
     val allocatedAfter = bean.fold(0L)(_.getThreadAllocatedBytes(threadId))
-    val checksum       = Array.tabulate(64)(index => memory.getInt(OutputId, index * 4).toLong).sum
+    recording.foreach { value =>
+      value.stop()
+      value.dump(java.nio.file.Path.of(sys.env("GEMSTONE_BENCHMARK_JFR")))
+      value.close()
+    }
+    val checksum = Array.tabulate(elements) { index =>
+      val observed = memory.getInt(OutputId, index * 4)
+      require(observed == index * 97 - 11, s"copy mismatch at $index: $observed")
+      observed.toLong
+    }.sum
 
     val nanosPerDispatch = elapsed.toDouble / measured.toDouble
     val bytesPerDispatch = bean.fold(Double.NaN)(_ => (allocatedAfter - allocatedBefore).toDouble / measured.toDouble)
     println(
-      f"amdgpu-execution benchmark dispatches=$measured warmup=$warmup " +
+      f"amdgpu-execution benchmark dispatches=$measured warmup=$warmup groups=$groups " +
         f"elapsed_ms=${elapsed / 1000000.0}%.3f ns_per_dispatch=$nanosPerDispatch%.1f " +
         f"allocated_bytes_per_dispatch=$bytesPerDispatch%.1f checksum=$checksum"
     )
@@ -215,6 +232,11 @@ object AMDGPUALUExecutionBenchmark {
         Some(value)
       case _ => None
     }
+    val recording = sys.env.get("GEMSTONE_BENCHMARK_JFR").map { _ =>
+      val value = jdk.jfr.Recording(jdk.jfr.Configuration.getConfiguration("profile"))
+      value.start()
+      value
+    }
     val threadId        = Thread.currentThread().threadId()
     val allocatedBefore = bean.fold(0L)(_.getThreadAllocatedBytes(threadId))
     val started         = System.nanoTime()
@@ -225,6 +247,11 @@ object AMDGPUALUExecutionBenchmark {
     }
     val elapsed        = System.nanoTime() - started
     val allocatedAfter = bean.fold(0L)(_.getThreadAllocatedBytes(threadId))
+    recording.foreach { value =>
+      value.stop()
+      value.dump(java.nio.file.Path.of(sys.env("GEMSTONE_BENCHMARK_JFR")))
+      value.close()
+    }
     println(
       f"amdgpu-alu benchmark mode=$mode dispatches=$measured warmup=$warmup instructions_per_dispatch=${instructionCount +
           1} " +

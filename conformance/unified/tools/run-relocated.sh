@@ -2,17 +2,25 @@
 set -euo pipefail
 
 if [[ $# -lt 2 ]]; then
-  echo "usage: run-relocated.sh <artifact-directory> <host|cuda|hip|sycl> [runner arguments ...]" >&2
+  echo "usage: run-relocated.sh <artifact-directory> <host|cuda|hip|sycl|opencl|hsa> [runner arguments ...]" >&2
   exit 2
 fi
 
 artifact_directory="$(cd -- "$1" && pwd -P)"
 backend="$2"
 case "$backend" in
-  host|cuda|hip|sycl) ;;
+  host|cuda|hip|sycl|opencl|hsa) ;;
   *) echo "unsupported backend: $backend" >&2; exit 2 ;;
 esac
 shift 2
+
+runner="unified_suite_${backend}"
+if [[ "${1:-}" == --runner ]]; then
+  [[ $# -ge 2 ]] || { echo "--runner requires an executable name" >&2; exit 2; }
+  runner="$2"
+  [[ "$runner" =~ ^unified_suite_[A-Za-z0-9_]+$ ]] || { echo "invalid runner name: $runner" >&2; exit 2; }
+  shift 2
+fi
 
 # Do not let an inherited SDK/toolchain variable turn a missing optional
 # component into an accidental host ROCm/CUDA/oneAPI dependency. Device
@@ -48,7 +56,7 @@ if [[ -n "$target_archs" ]]; then
   fi
 fi
 
-executable="$artifact_directory/bin/unified_suite_${backend}"
+executable="$artifact_directory/bin/$runner"
 if [[ ! -x "$executable" ]]; then
   echo "relocated runner is missing or not executable: $executable" >&2
   exit 1
@@ -76,17 +84,17 @@ case "$backend" in
     # CUDA's static runtime performs host-side architecture checks from the
     # driver function attributes. Preserve the build target in a relocated
     # artifact instead of relying on host GPU discovery.
-    if [[ -z "${GEMSTONE_CUDA_TARGET_ARCH:-}" ]]; then
+    if [[ -n "${GEMSTONE_RPC_TOKEN:-}" && -z "${GEMSTONE_CUDA_TARGET:-${GEMSTONE_CUDA_TARGET_ARCH:-}}" ]]; then
       if [[ -n "$target_arch" ]]; then
-        export GEMSTONE_CUDA_TARGET_ARCH="$target_arch"
+        export GEMSTONE_CUDA_TARGET="$target_arch"
       elif [[ -n "$target_archs" ]]; then
         echo "artifact contains multiple device targets: $target_archs" >&2
-        echo "set GEMSTONE_CUDA_TARGET_ARCH to select one for this run" >&2
+        echo "set GEMSTONE_CUDA_TARGET to select one for this run" >&2
       fi
     fi
     ;;
-  hip)
-    if [[ -z "${GEMSTONE_AMDGPU_TARGET:-}" ]]; then
+  hip|hsa)
+    if [[ -n "${GEMSTONE_RPC_TOKEN:-}" && -z "${GEMSTONE_AMDGPU_TARGET:-}" ]]; then
       if [[ -n "$target_arch" ]]; then
         export GEMSTONE_AMDGPU_TARGET="$target_arch"
       elif [[ -n "$target_archs" ]]; then

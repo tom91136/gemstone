@@ -353,6 +353,8 @@ public:
   }
 
   template <class T> std::size_t lower_bound(const std::vector<T> &input, T value) {
+    // oneDPL leaves vector-search output untouched for an empty haystack.
+    if (input.empty()) return 0;
     onedpl_detail::Shared<T> source(queue_, input);
     onedpl_detail::Shared<T> needles(queue_, std::vector<T>{value});
     onedpl_detail::Shared<std::size_t> results(queue_, 1);
@@ -363,6 +365,8 @@ public:
   }
 
   template <class T> std::size_t upper_bound(const std::vector<T> &input, T value) {
+    // oneDPL leaves vector-search output untouched for an empty haystack.
+    if (input.empty()) return 0;
     onedpl_detail::Shared<T> source(queue_, input);
     onedpl_detail::Shared<T> needles(queue_, std::vector<T>{value});
     onedpl_detail::Shared<std::size_t> results(queue_, 1);
@@ -373,6 +377,8 @@ public:
   }
 
   template <class T> bool binary_search(const std::vector<T> &input, T value) {
+    // oneDPL leaves vector-search output untouched for an empty haystack.
+    if (input.empty()) return false;
     onedpl_detail::Shared<T> source(queue_, input);
     onedpl_detail::Shared<T> needles(queue_, std::vector<T>{value});
     onedpl_detail::Shared<std::uint8_t> results(queue_, 1);
@@ -383,6 +389,8 @@ public:
   }
 
   template <class T> algorithms::TwoPositions equal_range(const std::vector<T> &input, T value) {
+    // oneDPL leaves vector-search output untouched for an empty haystack.
+    if (input.empty()) return {0, 0};
     onedpl_detail::Shared<T> source(queue_, input);
     onedpl_detail::Shared<T> needles(queue_, std::vector<T>{value});
     onedpl_detail::Shared<std::size_t> lower(queue_, 1);

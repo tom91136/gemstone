@@ -34,6 +34,9 @@ object ISA {
     parse(source).leftMap(CompileError.Syntax.apply).flatMap { program =>
       program.statements.collectFirst { case entry: Statement.Entry => entry }
         .toRight(CompileError.MissingEntry)
-        .flatMap(lower(_).leftMap(CompileError.Lowering.apply))
+        .flatMap(entry =>
+          Lowering.lower(entry, program.statements.collect { case function: Statement.Function => function })
+            .leftMap(CompileError.Lowering.apply)
+        )
     }
 }

@@ -4,6 +4,7 @@
 #include "unified_suite/edge_cases.hpp"
 
 #include <thrust/device_vector.h>
+#include <thrust/copy.h>
 #include <thrust/device_malloc.h>
 #include <thrust/device_free.h>
 #include <thrust/adjacent_difference.h>
@@ -200,7 +201,9 @@ __global__ void block_scan_kernel(const T *input, T *output, std::size_t size) {
 #endif
 
 template <class T> std::vector<T> host(const thrust::device_vector<T> &input) {
-  return {input.begin(), input.end()};
+  std::vector<T> result(input.size());
+  if (!input.empty()) thrust::copy(input.begin(), input.end(), result.data());
+  return result;
 }
 
 } // namespace thrust_edge_detail

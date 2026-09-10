@@ -65,17 +65,8 @@ inline std::string name(const MatrixShape &shape) {
 }
 
 struct Configuration {
-  // The legacy-red inventory is an explicit regression probe. Keep it out of
-  // ordinary oracle/emulation catalogs unless the caller opts in.
-  bool include_legacy_reds = false;
-  // Optional root containing the container-built upstream test executables
-  // used by the imported legacy inventory. It is intentionally opt-in so the
-  // normal unified suite remains self-contained and does not depend on a
-  // vendor checkout or build tree.
-  std::string legacy_binary_root;
-  // Optional directory for preserving stdout/stderr from imported legacy
-  // executable cases. Empty keeps the normal quiet status-only behavior.
-  std::string legacy_output_directory;
+  // Additional self-contained probes retained from fixed emulator defects.
+  bool include_regressions = false;
   std::vector<std::size_t> algorithm_sizes{0, 1, 31, 32, 33, 63, 64, 65, 257};
   std::vector<std::size_t> blas_sizes{1, 31, 64, 257};
   std::vector<std::size_t> edge_case_sizes{0, 1, 7, 31, 32, 33, 257};
@@ -88,6 +79,27 @@ struct Configuration {
   std::vector<ScalarType> stress_types{ScalarType::i32, ScalarType::f32};
   std::size_t stress_iterations = 8;
 };
+
+// Profile data lives with the runner so direct execution and CTest use the same matrix.
+inline Configuration configuration_for_profile(std::string_view profile) {
+  Configuration result;
+  if (profile == "compact")
+    return result;
+  if (profile != "full")
+    throw std::invalid_argument("unknown workload profile: " + std::string(profile));
+  result.algorithm_sizes = {0, 1, 7, 15, 31, 32, 33, 63, 64, 65, 127, 128, 129, 257, 1023, 1024, 4096};
+  result.blas_sizes = {1, 2, 7, 31, 32, 64, 257, 1024};
+  result.edge_case_sizes = {0, 1, 2, 7, 15, 31, 32, 33, 63, 64, 257, 1023, 1024};
+  result.stress_sizes = {257, 4096, 16384};
+  result.matrix_shapes = {{1, 1, 1}, {2, 2, 3}, {3, 5, 7}, {7, 5, 9}, {17, 13, 19}};
+  result.algorithm_types = {ScalarType::i8,  ScalarType::i32, ScalarType::i64,
+                            ScalarType::f32, ScalarType::f64, ScalarType::f16};
+  result.blas_types = {ScalarType::i8, ScalarType::f32, ScalarType::f64, ScalarType::f16};
+  result.edge_algorithm_types = result.algorithm_types;
+  result.edge_blas_types = result.blas_types;
+  result.stress_types = {ScalarType::i8, ScalarType::i32, ScalarType::i64, ScalarType::f32, ScalarType::f64};
+  return result;
+}
 
 namespace detail {
 

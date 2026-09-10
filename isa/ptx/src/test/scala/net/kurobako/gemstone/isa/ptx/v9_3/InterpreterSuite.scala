@@ -8,6 +8,51 @@ import net.kurobako.gemstone.memory.GuestAddress
 import net.kurobako.gemstone.trace.TraceEvent
 
 final class InterpreterSuite extends munit.FunSuite {
+  test("atomics in device callees keep the complete grid sequential") {
+    val parallelCalls = java.util.concurrent.atomic.AtomicInteger(0)
+    final class RecordingParallelism extends ExecutionParallelism {
+      override val parallelism                                                            = 4
+      override def shouldParallel(tasks: Long, workItems: Long): Boolean                  = tasks > 1L
+      override def parallelFor(tasks: Long)(task: Long => Either[ExecutionFailure, Unit]) = {
+        parallelCalls.incrementAndGet()
+        ExecutionParallelism.Sequential.parallelFor(tasks)(task)
+      }
+    }
+    val source  = """.version 8.0
+      .target sm_80
+      .address_size 64
+      .func increment(.param .u64 pointer) {
+        .reg .u64 %p;
+        .reg .u32 %old;
+        ld.param.u64 %p, [pointer];
+        atom.global.add.u32 %old, [%p], 1;
+        ret;
+      }
+      .visible .entry count(.param .u64 output) {
+        .reg .u64 %p;
+        ld.param.u64 %p, [output];
+        { .param .u64 argument;
+          st.param.u64 [argument], %p;
+          call increment, (argument);
+        }
+        ret;
+      }"""
+    val kernel  = ISA.compile(source).fold(error => fail(error.toString), identity)
+    val memory  = ArrayCheckedMemory.allocate(4)
+    val control = ExecutionControl.create(parallelism = RecordingParallelism())
+    val result  = Interpreter.execute(
+      kernel,
+      geometry(4, 1),
+      Map("output" -> Argument(memory.allocation.start.value)),
+      memory,
+      control,
+      captureTrace = false
+    )
+    assert(result.isRight, result.toString)
+    assertEquals(memory.readInt32(memory.allocation.start), Right(4))
+    assertEquals(parallelCalls.get(), 0)
+  }
+
   private def geometry(blocks: Int, threads: Int): LaunchGeometry =
     LaunchGeometry.create(Dimensions.create(threads, 1, 1).toOption.get, Dimensions.create(blocks, 1, 1).toOption.get)
       .toOption.get

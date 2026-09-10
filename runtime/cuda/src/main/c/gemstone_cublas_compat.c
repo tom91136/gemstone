@@ -58,6 +58,25 @@ static GemstoneCublasStatus gemstone_cublas_copy_out(void *pointer, const void *
   return GEMSTONE_CUBLAS_SUCCESS;
 }
 
+/* Scalar location follows the handle mode, never the pointer's numeric range. */
+static GemstoneCublasStatus gemstone_cublas_scalar_in(
+    GemstoneCublasHandle handle, void *host, const void *pointer, size_t size) {
+  if (pointer == NULL) return GEMSTONE_CUBLAS_INVALID_VALUE;
+  if (handle->pointer_mode == 1)
+    return cuMemcpyDtoH_v2(host, (uint64_t)(uintptr_t)pointer, size);
+  memcpy(host, pointer, size);
+  return GEMSTONE_CUBLAS_SUCCESS;
+}
+
+static GemstoneCublasStatus gemstone_cublas_scalar_out(
+    GemstoneCublasHandle handle, void *pointer, const void *host, size_t size) {
+  if (pointer == NULL) return GEMSTONE_CUBLAS_INVALID_VALUE;
+  if (handle->pointer_mode == 1)
+    return cuMemcpyHtoD_v2((uint64_t)(uintptr_t)pointer, host, size);
+  memcpy(pointer, host, size);
+  return GEMSTONE_CUBLAS_SUCCESS;
+}
+
 static size_t gemstone_cublas_span(int count, int increment) {
   if (count <= 0) return 0;
   const size_t step = (size_t)(increment < 0 ? -increment : increment);
@@ -153,8 +172,10 @@ int cublasGetStream_v2(GemstoneCublasHandle handle, void **stream) {
     status = gemstone_cublas_copy_in(x_host, x, x_size * sizeof(type));                      \
     if (status == GEMSTONE_CUBLAS_SUCCESS)                                                   \
       status = gemstone_cublas_copy_in(y_host, y, y_size * sizeof(type));                   \
-    if (status == GEMSTONE_CUBLAS_SUCCESS) {                                                 \
-      const type scale = alpha == NULL ? (type)0 : *alpha;                                  \
+    type scale = (type)0;                                                                  \
+    if (status == GEMSTONE_CUBLAS_SUCCESS)                                                  \
+      status = gemstone_cublas_scalar_in(handle, &scale, alpha, sizeof(scale));             \
+    if (status == GEMSTONE_CUBLAS_SUCCESS) {                                                \
       for (int index = 0; index < count; ++index)                                            \
         y_host[gemstone_cublas_index(index, count, increment_y)] +=                         \
             scale * x_host[gemstone_cublas_index(index, count, increment_x)];               \
@@ -177,8 +198,10 @@ GEMSTONE_CUBLAS_AXPY(double, cublasDaxpy_v2)
     type *host = (type *)malloc(size * sizeof(type));                                      \
     if (host == NULL) return GEMSTONE_CUBLAS_ALLOC_FAILED;                                 \
     status = gemstone_cublas_copy_in(host, x, size * sizeof(type));                        \
-    if (status == GEMSTONE_CUBLAS_SUCCESS) {                                               \
-      const type scale = alpha == NULL ? (type)0 : *alpha;                                 \
+    type scale = (type)0;                                                                  \
+    if (status == GEMSTONE_CUBLAS_SUCCESS)                                                  \
+      status = gemstone_cublas_scalar_in(handle, &scale, alpha, sizeof(scale));             \
+    if (status == GEMSTONE_CUBLAS_SUCCESS) {                                                \
       for (int index = 0; index < count; ++index)                                          \
         host[gemstone_cublas_index(index, count, increment)] *= scale;                      \
       status = gemstone_cublas_copy_out(x, host, size * sizeof(type));                     \
@@ -252,7 +275,7 @@ GEMSTONE_CUBLAS_COPY(double, cublasDcopy_v2)
       free(x_host);                                                                         \
       free(y_host);                                                                         \
     }                                                                                       \
-    if (status == GEMSTONE_CUBLAS_SUCCESS) status = gemstone_cublas_copy_out(result, &value, sizeof(value)); \
+    if (status == GEMSTONE_CUBLAS_SUCCESS) status = gemstone_cublas_scalar_out(handle, result, &value, sizeof(value)); \
     return status;                                                                          \
   }
 
@@ -280,7 +303,7 @@ GEMSTONE_CUBLAS_DOT(double, cublasDdot_v2)
       }                                                                                    \
       free(host);                                                                          \
     }                                                                                       \
-    if (status == GEMSTONE_CUBLAS_SUCCESS) status = gemstone_cublas_copy_out(result, &value, sizeof(value)); \
+    if (status == GEMSTONE_CUBLAS_SUCCESS) status = gemstone_cublas_scalar_out(handle, result, &value, sizeof(value)); \
     return status;                                                                          \
   }
 
@@ -303,7 +326,7 @@ GEMSTONE_CUBLAS_NRM2(double, cublasDnrm2_v2)
           value += (type)fabs((double)host[gemstone_cublas_index(index, count, increment)]); \
       free(host);                                                                          \
     }                                                                                       \
-    if (status == GEMSTONE_CUBLAS_SUCCESS) status = gemstone_cublas_copy_out(result, &value, sizeof(value)); \
+    if (status == GEMSTONE_CUBLAS_SUCCESS) status = gemstone_cublas_scalar_out(handle, result, &value, sizeof(value)); \
     return status;                                                                          \
   }
 
@@ -339,9 +362,12 @@ GEMSTONE_CUBLAS_ASUM(double, cublasDasum_v2)
       status = gemstone_cublas_copy_in(x_host, x, x_size * sizeof(type));                  \
     if (status == GEMSTONE_CUBLAS_SUCCESS)                                                  \
       status = gemstone_cublas_copy_in(y_host, y, y_size * sizeof(type));                  \
+    type scale_a = (type)0, scale_b = (type)0;                                               \
+    if (status == GEMSTONE_CUBLAS_SUCCESS)                                                  \
+      status = gemstone_cublas_scalar_in(handle, &scale_a, alpha, sizeof(scale_a));         \
+    if (status == GEMSTONE_CUBLAS_SUCCESS)                                                  \
+      status = gemstone_cublas_scalar_in(handle, &scale_b, beta, sizeof(scale_b));           \
     if (status == GEMSTONE_CUBLAS_SUCCESS) {                                                \
-      const type scale_a = alpha == NULL ? (type)0 : *alpha;                               \
-      const type scale_b = beta == NULL ? (type)0 : *beta;                                 \
       for (int row = 0; row < y_count; ++row) {                                             \
         type sum = (type)0;                                                                 \
         for (int column = 0; column < x_count; ++column) {                                 \
@@ -457,9 +483,14 @@ static GemstoneCublasStatus gemstone_cublas_hgemm(
   GemstoneCublasStatus status = gemstone_cublas_copy_in(a_host, a, a_size * sizeof(*a_host));
   if (status == GEMSTONE_CUBLAS_SUCCESS) status = gemstone_cublas_copy_in(b_host, b, b_size * sizeof(*b_host));
   if (status == GEMSTONE_CUBLAS_SUCCESS) status = gemstone_cublas_copy_in(c_host, c, c_size * sizeof(*c_host));
+  GemstoneCublasHalf scalar_a = {0}, scalar_b = {0};
+  if (status == GEMSTONE_CUBLAS_SUCCESS)
+    status = gemstone_cublas_scalar_in(handle, &scalar_a, alpha, sizeof(scalar_a));
+  if (status == GEMSTONE_CUBLAS_SUCCESS)
+    status = gemstone_cublas_scalar_in(handle, &scalar_b, beta, sizeof(scalar_b));
   if (status == GEMSTONE_CUBLAS_SUCCESS) {
-    const float scale_a = alpha == NULL ? 0.0f : gemstone_cublas_half_to_float(alpha->bits);
-    const float scale_b = beta == NULL ? 0.0f : gemstone_cublas_half_to_float(beta->bits);
+    const float scale_a = gemstone_cublas_half_to_float(scalar_a.bits);
+    const float scale_b = gemstone_cublas_half_to_float(scalar_b.bits);
     for (int column = 0; column < n; ++column)
       for (int row = 0; row < m; ++row) {
         float sum = 0.0f;
@@ -558,9 +589,12 @@ int cublasHgemmStridedBatched(
     GemstoneCublasStatus status = gemstone_cublas_copy_in(a_host, a, a_size * sizeof(type)); \
     if (status == GEMSTONE_CUBLAS_SUCCESS) status = gemstone_cublas_copy_in(b_host, b, b_size * sizeof(type)); \
     if (status == GEMSTONE_CUBLAS_SUCCESS) status = gemstone_cublas_copy_in(c_host, c, c_size * sizeof(type)); \
-    if (status == GEMSTONE_CUBLAS_SUCCESS) {                                               \
-      const type scale_a = alpha == NULL ? (type)0 : *alpha;                               \
-      const type scale_b = beta == NULL ? (type)0 : *beta;                                 \
+    type scale_a = (type)0, scale_b = (type)0;                                               \
+    if (status == GEMSTONE_CUBLAS_SUCCESS)                                                  \
+      status = gemstone_cublas_scalar_in(handle, &scale_a, alpha, sizeof(scale_a));         \
+    if (status == GEMSTONE_CUBLAS_SUCCESS)                                                  \
+      status = gemstone_cublas_scalar_in(handle, &scale_b, beta, sizeof(scale_b));           \
+    if (status == GEMSTONE_CUBLAS_SUCCESS) {                                                \
       for (int column = 0; column < n; ++column)                                           \
         for (int row = 0; row < m; ++row) {                                                 \
           type sum = (type)0;                                                              \

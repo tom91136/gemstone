@@ -5,10 +5,12 @@ compile-once, run-twice conformance model:
 
 | application | pinned upstream revision | vendor ports exercised |
 | --- | --- | --- |
-| BabelStream | `UoB-HPC/BabelStream@17ab377b0e919e14fd3df2b67268761fdac8abb3` | CUDA, HIP, OpenCL, SYCL |
-| miniBUDE | `UoB-HPC/miniBUDE@570f66c1fd0c29b7f3ab6fa96fba87f4561aa44c` | CUDA, HIP, OpenCL, SYCL |
-| CloverLeaf | `UoB-HPC/CloverLeaf@3e10ff9268d3704a744e5a2a4ea3c62831078082` | CUDA, HIP, SYCL accessor, SYCL USM |
-| TeaLeaf | `UoB-HPC/TeaLeaf@e70261c0be40537da75b258108ed2898f84f3c58` | CUDA, HIP, SYCL accessor, SYCL USM |
+| BabelStream | `UoB-HPC/BabelStream@17ab377b0e919e14fd3df2b67268761fdac8abb3` | CUDA, HIP, OpenCL, SYCL, OpenMP target, Kokkos, OpenACC, StdPar |
+| miniBUDE | `UoB-HPC/miniBUDE@570f66c1fd0c29b7f3ab6fa96fba87f4561aa44c` | CUDA, HIP, OpenCL, SYCL, OpenMP target, Kokkos, OpenACC, StdPar |
+| CloverLeaf | `UoB-HPC/CloverLeaf@3e10ff9268d3704a744e5a2a4ea3c62831078082` | CUDA, HIP, SYCL accessor/USM, OpenMP target, Kokkos, StdPar |
+| TeaLeaf | `UoB-HPC/TeaLeaf@e70261c0be40537da75b258108ed2898f84f3c58` | CUDA, HIP, SYCL accessor/USM, OpenMP target, Kokkos, StdPar |
+
+CloverLeaf also has an optional OpenACC port. OpenACC models require an explicit NVHPC image; Kokkos requires a target supported by its pinned architecture map.
 
 The upstream trees are fetched into `target/conformance/miniapps`; they are
 not copied into this repository and are never edited. Each selected vendor
@@ -31,39 +33,38 @@ The HIP CloverLeaf builder likewise stages a private compatibility copy for
 ROCm 7, replacing its reporting-only use of the removed `gcnArch` property
 with `gcnArchName`; the pinned checkout is still read-only.
 
-CloverLeaf and TeaLeaf require double precision, which is not exposed by the
-Intel Arc GPU used by the SYCL oracle on this host. Their SYCL oracle command
-therefore uses the bundled OpenCL adapter with the host OpenCL CPU device;
-Gemstone still runs the requested SYCL/OpenCL or SYCL/Level-Zero provider.
+TeaLeaf's HIP StdPar build stages a compiler workaround for the row-norm
+transform: its lambda is marked `noinline` so rocPRIM does not duplicate the
+inner row loop throughout the reduction kernels. On the pinned ROCm compiler,
+that expansion caused pathological `StructurizeCFG` compilation time. The
+arithmetic and reduction remain unchanged, and normal `-O2` optimization is
+retained. The pinned source checkout is not modified.
 
-The lane is opt-in because its compiler matrix is necessarily host-dependent:
+Each artifact retains Ninja command timings and, where available, compile
+commands under `share/miniapps/build/<app>/<model>/`.
+
+CloverLeaf and TeaLeaf require double precision. Oracle selection is declared by the host profile; the harness does
+not silently substitute a CPU device for a configured GPU oracle. Unmatched hosts skip GPU oracle variants.
+
+Run this lane through the integration project, which prepares its vendor SDK artifacts and native providers:
 
 ```console
-GEMSTONE_MINIAPPS=1 \
 GEMSTONE_MINIAPP_PORTS=hip \
-GEMSTONE_NO_ORACLE=1 \
-sbt --server -batch \
-  'conformance / Test / testOnly net.kurobako.gemstone.conformance.MiniappsConformanceSuite'
+GEMSTONE_TEST_PROFILE=default \
+GEMSTONE_CONFORMANCE_BACKENDS= \
+sbt --server --batch \
+  conformanceIntegration/testFull
 ```
 
 Without `GEMSTONE_MINIAPP_PORTS`, every available vendor port is selected. The
 CUDA, HIP, OpenCL, and SYCL/Level Zero models are kept separate, including
 both Gemstone backends for the SYCL models when both providers are available.
-`GEMSTONE_MINIAPP_FILTER` and `GEMSTONE_MINIAPP_SHARD=index/count` filter the
-fully qualified identities. Runtime cases remain isolated and must use
-`GEMSTONE_MINIAPP_JOBS=1`; each model build uses bounded Ninja parallelism via
-`GEMSTONE_MINIAPP_BUILD_JOBS` (default: up to `8` host compile jobs). Model
-invocations themselves remain serialized so a large translation unit cannot be
-multiplied across applications. Set it to `1` for a fully serial build or
-lower it if the container host has limited memory.
-
-The build container is selected by `GEMSTONE_MINIAPP_CONTAINER_ENGINE` (or the
-existing `GEMSTONE_UNIFIED_CONTAINER_ENGINE`) and the pinned CUDA, HIP, OpenCL,
-and oneAPI images can be replaced with approved local images through
-`GEMSTONE_MINIAPP_<BACKEND>_IMAGE`. The host supplies only the ELF loader,
-libc, standard compute loaders, host C++ ABI, and the kernel-facing vendor
-driver at execution time. The generated
-relocatable artifacts live below `target/conformance/miniapps/artifacts`.
+`GEMSTONE_CONFORMANCE_FILTER` selects individual logical identities. CTest schedules independent cases concurrently; model builds remain serial. Compiler workers use `CMAKE_BUILD_PARALLEL_LEVEL`, with the common
+bounded default of at most eight. Both retained suites use the shared pinned container infrastructure and
+`GEMSTONE_CONTAINER_ENGINE` (`podman` or `docker`). Image overrides are `GEMSTONE_<BACKEND>_IMAGE`; OpenCL
+uses the host base image and OpenACC requires an explicit `GEMSTONE_OPENACC_IMAGE`.
+Relocatable artifacts live below `target/conformance/miniapps/artifacts`.
+See [the shared guide](../README.md) for provider paths and configuration.
 
 The default bounded inputs are deliberately small while retaining the
 mini-app's self-validation:
@@ -88,9 +89,6 @@ TeaLeaf's bounded defaults can be made stricter or shorter with
 `GEMSTONE_MINIAPP_TEA_TIMEOUT_SECONDS` (the defaults are `1e-8`, `1000`, and
 `300`, respectively). TeaLeaf validation checks both its fixed upstream
 reference and the actual value produced by the paired oracle run.
-The existing `GEMSTONE_NVCC`, `GEMSTONE_HIPCC`, and
-`GEMSTONE_SYCL_COMPILER` variables do not cause a host-side compile; use the
-container image overrides when a local image/toolchain is required.
 The existing `GEMSTONE_*_RUNTIME` provider variables are honored, with
 already-built providers under `target/conformance` and `target/out` used as
 fallbacks.

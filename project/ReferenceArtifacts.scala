@@ -27,6 +27,11 @@ import scala.util.control.NonFatal
 import scala.jdk.CollectionConverters.*
 
 object ReferenceArtifacts {
+  private def hasAncestorSegments(path: Path, segments: String*): Boolean =
+    (0 until path.getNameCount - segments.length).exists { start =>
+      segments.indices.forall(index => path.getName(start + index).toString == segments(index))
+    }
+
   final case class Pins(
       llvmVersion: String,
       llvmSha256: String,
@@ -202,17 +207,17 @@ object ReferenceArtifacts {
         extractDebXz(
           cached("nvidia-cuda-driver-dev"),
           stage.resolve("nvidia/cuda"),
-          relative => relative.toString.endsWith("/include/cuda.h") || relative.toString.contains("/share/doc/")
+          relative => relative.endsWith(Path.of("include", "cuda.h")) || hasAncestorSegments(relative, "share", "doc")
         )
         extractDebXz(
           cached("nvidia-cuda-runtime-dev"),
           stage.resolve("nvidia/cuda"),
-          relative => relative.toString.contains("/include/") || relative.toString.contains("/share/doc/")
+          relative => hasAncestorSegments(relative, "include") || hasAncestorSegments(relative, "share", "doc")
         )
         extractDebXz(
           cached("nvidia-cuda-crt"),
           stage.resolve("nvidia/cuda"),
-          relative => relative.toString.contains("/include/crt/") || relative.toString.contains("/share/doc/")
+          relative => hasAncestorSegments(relative, "include", "crt") || hasAncestorSegments(relative, "share", "doc")
         )
         extractTarGz(
           cached("amd-hip"),

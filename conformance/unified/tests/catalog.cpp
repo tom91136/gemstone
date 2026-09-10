@@ -2,7 +2,6 @@
 #include "unified_suite/adapters/host_blas.hpp"
 #include "unified_suite/adapters/host_edge_cases.hpp"
 #include "unified_suite/algorithms.hpp"
-#include "unified_suite/legacy_reds.hpp"
 #include "unified_suite/runner.hpp"
 
 #include <array>
@@ -23,12 +22,6 @@ static_assert(std::size(unified_suite::edge_cases::blas_operations) == 3);
 static_assert(std::size(unified_suite::stress::operations) == 3);
 static_assert(std::size(unified_suite::blas::matrix_operations) == 7);
 static_assert(std::size(unified_suite::blas::level1_negative_stride_operations) == 3);
-static_assert(std::size(unified_suite::legacy_reds::cuda_thrust) == 0);
-static_assert(std::size(unified_suite::legacy_reds::cuda_thrust_fixed) == 48);
-static_assert(std::size(unified_suite::legacy_reds::roc_thrust) == 0);
-static_assert(std::size(unified_suite::legacy_reds::roc_thrust_fixed) == 50);
-static_assert(std::size(unified_suite::legacy_reds::roc_historical) == 317);
-static_assert(std::size(unified_suite::legacy_reds::deferred) == 72);
 
 int main() {
   unified_suite::RunOptions options;

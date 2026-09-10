@@ -21,6 +21,7 @@
 
 #include "gemstone/hsa/code_object_metadata.hpp"
 #include "gemstone/hsa/hsakmt_runtime.h"
+#include "gemstone/hsa/trace.h"
 #include "gemstone/hsa/target.h"
 #include "gemstone/hsa/virtual_kfd.h"
 #include "gemstone_execution_rpc.h"
@@ -131,6 +132,10 @@ int environment_register(void *context, uint64_t id, uint64_t size) {
   return gemstone_execution_register_allocation(static_cast<gemstone_execution_client *>(context), id, size, GEMSTONE_ALLOCATION_SHARED);
 }
 
+int environment_register_address(void *context, uint64_t id, uint64_t base) {
+  return gemstone_execution_register_allocation_address(static_cast<gemstone_execution_client *>(context), id, base);
+}
+
 int environment_release(void *context, uint64_t id) {
   return gemstone_execution_release_allocation(static_cast<gemstone_execution_client *>(context), id);
 }
@@ -238,7 +243,7 @@ bool notify_signal_event(uint64_t signal) {
   if (signal == 0) return false;
   const auto *view = reinterpret_cast<const SignalAbiView *>(static_cast<uintptr_t>(signal));
   const uint32_t event_id = __atomic_load_n(&view->event_id, __ATOMIC_ACQUIRE);
-  const bool trace_packets = std::getenv("GEMSTONE_HSA_TRACE_PACKETS") != nullptr;
+  const bool trace_packets = gemstone::hsa::trace_enabled("packets");
   if (event_id == 0) {
     if (trace_packets) std::fprintf(stderr, "Gemstone completion signal=%lu has no event\n", signal);
     return true;
@@ -264,7 +269,7 @@ bool notify_signal_event(uint64_t signal) {
 
 gemstone_hsa_packet_result consume_packet(uint64_t queue_id, uint64_t packet_id, const void *packet, size_t packet_size, void *) {
   auto &runtime = state();
-  const bool trace_packets = std::getenv("GEMSTONE_HSA_TRACE_PACKETS") != nullptr;
+  const bool trace_packets = gemstone::hsa::trace_enabled("packets");
   if (trace_packets) std::fprintf(stderr, "Gemstone consuming AQL queue=%lu packet=%lu\n", queue_id, packet_id);
   gemstone_hsa_aql_packet decoded{};
   const auto decode = gemstone_hsa_decode_aql_packet(packet, packet_size, &decoded);
@@ -408,7 +413,9 @@ HSAKMT_STATUS register_allocation(void *base, uint64_t size, HsaMemFlags flags, 
     id = runtime.next_allocation++;
   }
   if (runtime.memory.register_allocation(runtime.memory.context, id, size) != 0) return HSAKMT_STATUS_KERNEL_COMMUNICATION_ERROR;
-  if (gemstone_hsa_aql_runtime_register_allocation(runtime.runtime, reinterpret_cast<uint64_t>(base), size, id) != 0) {
+  if ((runtime.memory.register_allocation_address != nullptr
+       && runtime.memory.register_allocation_address(runtime.memory.context, id, reinterpret_cast<uint64_t>(base)) != 0)
+      || gemstone_hsa_aql_runtime_register_allocation(runtime.runtime, reinterpret_cast<uint64_t>(base), size, id) != 0) {
     runtime.memory.release_allocation(runtime.memory.context, id);
     return HSAKMT_STATUS_ERROR;
   }
@@ -541,7 +548,7 @@ extern "C" int gemstone_hsakmt_notify_code_object(const void *code_object, uint6
   }
   for (uint32_t index : pending) {
     const auto &loaded = kernels[index];
-    if (std::getenv("GEMSTONE_HSA_TRACE_LOADERS") != nullptr)
+    if (gemstone::hsa::trace_enabled("loaders"))
       std::fprintf(stderr, "Gemstone installed AMDGPU kernel name=%s kernel_object=0x%lx\n", loaded.name, loaded.kernel_object);
   }
 
@@ -632,7 +639,7 @@ extern "C" int gemstone_hsakmt_notify_internal_kernel(const void *code_object, u
     runtime.notified_kernels.insert(kernel_object);
     runtime.loader_error.clear();
   }
-  if (std::getenv("GEMSTONE_HSA_TRACE_LOADERS") != nullptr)
+  if (gemstone::hsa::trace_enabled("loaders"))
     std::fprintf(stderr, "Gemstone installed ROCr internal kernel target=%s name=%s kernel_object=0x%lx\n", target, name, kernel_object);
   return 0;
 }
@@ -670,7 +677,7 @@ extern "C" HSAKMT_STATUS hsaKmtOpenKFD(void) {
       return HSAKMT_STATUS_KERNEL_IO_CHANNEL_NOT_OPENED;
     }
     runtime.memory =
-        gemstone_hsakmt_memory_transport{runtime.client, environment_register, environment_release, environment_write, environment_read};
+        gemstone_hsakmt_memory_transport{runtime.client, environment_register, environment_release, environment_write, environment_read, environment_register_address};
   }
   runtime.kfd = gemstone_hsa_virtual_kfd_create(128);
   if (runtime.kfd == nullptr) {
@@ -934,7 +941,7 @@ extern "C" HSAKMT_STATUS hsaKmtFreeMemory(void *address, HSAuint64 size) {
     std::lock_guard<std::mutex> guard(runtime.lock);
     const auto found = runtime.allocations.find(address);
     if (found == runtime.allocations.end() || !found->second->owned || found->second->size != size) {
-      if (std::getenv("GEMSTONE_HSA_TRACE_PACKETS") != nullptr)
+      if (gemstone::hsa::trace_enabled("packets"))
         std::fprintf(stderr, "Gemstone rejected free address=%p bytes=%lu registered=%d owned=%d registered_bytes=%lu\n", address, size,
                      found != runtime.allocations.end(), found != runtime.allocations.end() && found->second->owned,
                      found == runtime.allocations.end() ? 0 : found->second->size);

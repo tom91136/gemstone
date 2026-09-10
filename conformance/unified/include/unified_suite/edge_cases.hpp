@@ -15,6 +15,7 @@
 #include <iterator>
 #include <limits>
 #include <numeric>
+#include <sstream>
 #include <string>
 #include <type_traits>
 #include <vector>
@@ -295,7 +296,12 @@ template <class T, class Backend> void execute(Backend &backend, Operation opera
     for (std::size_t index = 0; index < actual.keys.size(); ++index) {
       const auto source = static_cast<std::size_t>(actual.values[index]);
       require(source < size, "stable-sort-payload: payload out of range");
-      require(actual.keys[index] == keys[source], "stable-sort-payload: association lost");
+      if (!(actual.keys[index] == keys[source])) {
+        std::ostringstream message;
+        message << "stable-sort-payload: association lost at index " << index << ": payload "
+                << actual.values[index] << " expected key " << +keys[source] << ", got " << +actual.keys[index];
+        require(false, message.str());
+      }
       if (index != 0 && actual.keys[index] == actual.keys[index - 1])
         require(actual.values[index - 1] < actual.values[index], "stable-sort-payload: unstable order");
     }

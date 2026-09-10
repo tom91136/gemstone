@@ -1,25 +1,26 @@
 # PTX ISA
 
-The public API is versioned as `net.kurobako.gemstone.isa.ptx.v9_3`. `Parser` parses PTX modules and individual
-statements into the `Program`/`Statement` syntax tree, and `Printer` emits a deterministic representation for
-parse-print-parse transformations. `Instruction` is a generated enum: each concrete PTX operation has a named case
-with concise named operand fields, modifiers, and optional predication. Every case references one singleton
-`InstructionDef`, which owns its canonical opcode, decoder, and specification `Metadata`; the instruction exposes
-those values together with `qualifiedOpcode`, flattened `operands`, `mods`, and `pred`. `Instruction.decode` derives
-its dispatch from `InstructionDef.values`, safely rejecting missing, invalid, or ambiguous forms rather than using a
-second generated mnemonic match. Unknown operations are not representable as instructions.
+The public package is `net.kurobako.gemstone.isa.ptx.v9_3`. PTX language version and
+module `sm_*` target are distinct: targets are validation inputs, not duplicate parser packages.
 
-`v9_3` is the PTX language/ISA version. An `sm_*` value is a module target selected by its `.target` directive, not
-the PTX ISA version: the 9.3 document describes many targets through `sm_121*`. Target-specific validity will
-therefore remain a validation concern rather than another copy of the parser package.
+`Parser` builds the typed syntax tree; `Printer` provides canonical rendering; `Validator`
+checks implemented version/target constraints. `Lowering` produces PTX kernels and device
+functions, and `Interpreter`, `Semantics` and `StateEffects` own execution and staged writes.
+See [shared execution contracts](../../docs/ISA_EXECUTION.md).
 
-The `ptx` source generators read the pinned CUDA PTX HTML prepared by `codegen / prepareISAReferences`. They emit:
+Generated instruction definitions own names, forms, operand metadata and decoding. Unknown or
+ambiguous instructions cannot enter the typed AST. Parsing or a generated descriptor does not
+establish executable support; unsupported execution fails explicitly.
 
-- `src/generated/main/scala/.../Instruction.scala`, containing the enums and the companion-owned `version` and
-  `definitions` for 195 concrete operations; and
-- `src/generated/test/scala/.../DocumentationSuite.scala`, containing 892 complete example statements extracted from
-  the document and checked for typed parsing and AST-preserving canonical round-trips.
+The generators consume [pinned NVIDIA references](../../codegen/ISA_REFERENCES.md) and retain
+reviewable instruction sources and documentation examples under `src/generated`. Change the
+generator, not its output. Missing references may require cache preparation during a cold build.
 
-Generated files are checked in so ISA changes are reviewable and normal compilation is offline. The explicit
-`generatePTXSources` and `generatePTXReferenceTests` tasks update them from the pinned source. The small execution
-engine in `Execution.scala` lowers its supported subset directly from the generated enum cases.
+```console
+sbt --server --batch 'ptx/generatePTXSources; ptx/generatePTXReferenceTests'
+```
+
+Runtime regressions cover supported control flow, memory, reductions and cross-workgroup
+behavior separately from parse/print examples. A reduction mask cannot invent a value for a
+nonparticipating lane; vector publication does not imply a grid-wide barrier or general hardware
+128-bit atomicity. Shared-owner memory bounds, coherence and lifetime must survive fast-path changes.

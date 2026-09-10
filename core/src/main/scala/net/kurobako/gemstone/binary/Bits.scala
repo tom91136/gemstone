@@ -11,6 +11,15 @@ object Bits {
 
   inline def truncate(value: Long, width: Int): Long = value & mask(width)
 
+  /** Count set bits in the low `width` bits, ignoring any upper register bits. */
+  inline def bitCount(value: Long, width: Int): Int = java.lang.Long.bitCount(truncate(value, width))
+
+  /** Reverse only the low `width` bits and return a zero-extended result. */
+  inline def reverseBits(value: Long, width: Int): Long = {
+    require(width >= 1 && width <= 64, s"bit width must be in [1, 64], found $width")
+    java.lang.Long.reverse(value) >>> (64 - width)
+  }
+
   inline def unsigned32(value: Int): Long = value.toLong & Mask32
 
   inline def low16(value: Long): Long = value & Mask16

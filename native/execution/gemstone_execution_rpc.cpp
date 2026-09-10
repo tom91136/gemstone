@@ -1,4 +1,5 @@
 #define _POSIX_C_SOURCE 200112L
+#include "gemstone_process_identity.h"
 
 #include "gemstone_execution_rpc.h"
 
@@ -48,7 +49,9 @@ enum Operation : uint32_t {
   LaunchWithGeometry = 12,
   LaunchWithGeometryAndRelocations = 13,
   CompletionPointerRelocations = 14,
-  WriteProgramGlobal = 15
+  WriteProgramGlobal = 15,
+  BindProgramGlobal = 16,
+  RegisterAllocationAddress = 17
 };
 
 void put_u32(std::vector<uint8_t> &output, uint32_t value) {
@@ -121,9 +124,7 @@ struct gemstone_execution_client {
 namespace {
 
 std::pair<uint64_t, uint64_t> process_session() {
-  static const uint64_t seed = static_cast<uint64_t>(std::chrono::steady_clock::now().time_since_epoch().count());
-  const uint64_t process = static_cast<uint64_t>(static_cast<uint32_t>(getpid()));
-  return {process, seed == 0 ? UINT64_C(1) : seed};
+  return {static_cast<uint64_t>(static_cast<uint32_t>(getpid())), gemstone_process_incarnation()};
 }
 
 void disconnect(gemstone_execution_client *client) {
@@ -277,6 +278,21 @@ int launch_request(gemstone_execution_client *client, Operation operation, uint6
       (relocation_count != 0 && relocations == nullptr) || (has_geometry && (work_dim < 1 || work_dim > 3))) return -1;
   const size_t name_size = strlen(kernel_name);
   if (name_size > 4096 || name_size > std::numeric_limits<uint32_t>::max()) return -1;
+  // Check the whole wire size before touching scalar payloads or relocation entries.
+  uint64_t encoded_size = 8U + 4U + name_size + 36U + (has_geometry ? 16U : 0U) + 8U + 4U;
+  if (has_relocations) encoded_size += 4ULL + 40ULL * relocation_count;
+  if (encoded_size > kMaximumPayload || argument_count > (kMaximumPayload - encoded_size) / 8U)
+    return fail(client, "execution request exceeds the payload limit");
+  for (uint32_t index = 0; index < argument_count; ++index) {
+    const auto &argument = arguments[index];
+    switch (argument.kind) {
+      case GEMSTONE_ARGUMENT_SCALAR: encoded_size += 8ULL + argument.scalar_size; break;
+      case GEMSTONE_ARGUMENT_ALLOCATION: encoded_size += 20U; break;
+      case GEMSTONE_ARGUMENT_LOCAL: encoded_size += 12U; break;
+      default: return fail(client, "invalid execution argument kind");
+    }
+    if (encoded_size > kMaximumPayload) return fail(client, "execution request exceeds the payload limit");
+  }
   std::vector<uint8_t> payload = identity_payload(program_id);
   put_u32(payload, static_cast<uint32_t>(name_size));
   payload.insert(payload.end(), kernel_name, kernel_name + name_size);
@@ -321,10 +337,11 @@ int launch_request(gemstone_execution_client *client, Operation operation, uint6
 extern "C" gemstone_execution_client *gemstone_execution_client_create_from_environment(void) {
   const char *token = getenv("GEMSTONE_RPC_TOKEN");
   if (!valid_token(token)) return nullptr;
+  const auto session = process_session();
+  if (session.second == 0) return nullptr;
   auto *client = new (std::nothrow) gemstone_execution_client();
   if (client == nullptr) return nullptr;
   memcpy(client->token, token, kTokenSize);
-  const auto session = process_session();
   client->session_high = session.first;
   client->session_low = session.second;
   return client;
@@ -359,6 +376,15 @@ extern "C" int gemstone_execution_register_allocation(gemstone_execution_client 
   return exchange(client, RegisterAllocation, payload, response);
 }
 
+extern "C" int gemstone_execution_register_allocation_address(gemstone_execution_client *client, uint64_t allocation_id,
+                                                               uint64_t native_base) {
+  if (client == nullptr || allocation_id == 0 || native_base == 0) return -1;
+  std::vector<uint8_t> payload = identity_payload(allocation_id);
+  put_u64(payload, native_base);
+  std::vector<uint8_t> response;
+  return exchange(client, RegisterAllocationAddress, payload, response);
+}
+
 extern "C" int gemstone_execution_release_allocation(gemstone_execution_client *client, uint64_t allocation_id) {
   if (client == nullptr || allocation_id == 0) return -1;
   std::vector<uint8_t> response;
@@ -368,6 +394,7 @@ extern "C" int gemstone_execution_release_allocation(gemstone_execution_client *
 extern "C" int gemstone_execution_write_allocation(gemstone_execution_client *client, uint64_t allocation_id,
                                                      uint64_t offset, const void *bytes, uint32_t size) {
   if (client == nullptr || allocation_id == 0 || (size != 0 && bytes == nullptr)) return -1;
+  if (size > kMaximumPayload - 20U) return fail(client, "execution request exceeds the payload limit");
   std::vector<uint8_t> payload;
   payload.reserve(20ULL + size);
   put_u64(payload, allocation_id);
@@ -382,6 +409,7 @@ extern "C" int gemstone_execution_write_allocation(gemstone_execution_client *cl
 extern "C" int gemstone_execution_read_allocation(gemstone_execution_client *client, uint64_t allocation_id,
                                                     uint64_t offset, void *bytes, uint32_t size) {
   if (client == nullptr || allocation_id == 0 || (size != 0 && bytes == nullptr)) return -1;
+  if (size > kMaximumPayload) return fail(client, "execution response exceeds the payload limit");
   std::vector<uint8_t> payload = identity_payload(allocation_id);
   put_u64(payload, offset);
   put_u32(payload, size);
@@ -395,6 +423,7 @@ extern "C" int gemstone_execution_read_allocation(gemstone_execution_client *cli
 extern "C" int gemstone_execution_load_program(gemstone_execution_client *client, gemstone_program_format format,
                                                  const void *image, uint32_t image_size, uint64_t *program_id) {
   if (client == nullptr || program_id == nullptr || (image_size != 0 && image == nullptr)) return -1;
+  if (image_size > kMaximumPayload - 8U) return fail(client, "execution request exceeds the payload limit");
   std::vector<uint8_t> payload;
   payload.reserve(8ULL + image_size);
   put_u32(payload, static_cast<uint32_t>(format));
@@ -419,6 +448,7 @@ extern "C" int gemstone_execution_write_program_global(gemstone_execution_client
   if (client == nullptr || program_id == 0 || name == nullptr || name[0] == '\0' || strlen(name) > 4096 ||
       (size != 0 && bytes == nullptr))
     return -1;
+  if (size > kMaximumPayload - 24U - strlen(name)) return fail(client, "execution request exceeds the payload limit");
   std::vector<uint8_t> payload = identity_payload(program_id);
   const size_t name_size = strlen(name);
   put_u32(payload, static_cast<uint32_t>(name_size));
@@ -429,6 +459,19 @@ extern "C" int gemstone_execution_write_program_global(gemstone_execution_client
   if (size != 0) payload.insert(payload.end(), input, input + size);
   std::vector<uint8_t> response;
   return exchange(client, WriteProgramGlobal, payload, response);
+}
+
+extern "C" int gemstone_execution_bind_program_global(gemstone_execution_client *client, uint64_t program_id, const char *name,
+                                                      uint64_t allocation_id, uint64_t offset) {
+  if (client == nullptr || program_id == 0 || allocation_id == 0 || name == nullptr || name[0] == '\0' || strlen(name) > 4096) return -1;
+  std::vector<uint8_t> payload = identity_payload(program_id);
+  const size_t name_size = strlen(name);
+  put_u32(payload, static_cast<uint32_t>(name_size));
+  payload.insert(payload.end(), name, name + name_size);
+  put_u64(payload, allocation_id);
+  put_u64(payload, offset);
+  std::vector<uint8_t> response;
+  return exchange(client, BindProgramGlobal, payload, response);
 }
 
 extern "C" int gemstone_execution_launch(gemstone_execution_client *client, uint64_t program_id,

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "gemstone/hsa/doorbell_monitor.h"
+#include "gemstone/hsa/trace.h"
 
 #include <algorithm>
 #include <atomic>
@@ -112,7 +113,7 @@ struct gemstone_hsa_doorbell_monitor {
     uint64_t next = load(q.read_index, __ATOMIC_ACQUIRE);
     uint64_t end = load(q.write_index, __ATOMIC_ACQUIRE);
     const bool first_trace =
-        std::getenv("GEMSTONE_HSA_TRACE_PACKETS") != nullptr && !queue.traced_armed.exchange(true, std::memory_order_relaxed);
+        gemstone::hsa::trace_enabled("packets") && !queue.traced_armed.exchange(true, std::memory_order_relaxed);
     if (first_trace) {
       const auto *packet = static_cast<const unsigned char *>(q.ring_base) + ((next & (q.ring_size_packets - 1)) * q.packet_size);
       const uint16_t header = load(reinterpret_cast<const uint16_t *>(packet + q.packet_header_offset), __ATOMIC_ACQUIRE);
@@ -148,7 +149,7 @@ struct gemstone_hsa_doorbell_monitor {
       store(header_address, invalid, __ATOMIC_RELEASE);
       ++next;
       store(q.read_index, next, __ATOMIC_RELEASE);
-      if (std::getenv("GEMSTONE_HSA_TRACE_PACKETS") != nullptr)
+      if (gemstone::hsa::trace_enabled("packets"))
         std::fprintf(stderr, "Gemstone advanced AQL queue=%lu read=%lu\n", q.queue_id, next);
       progressed = true;
     }

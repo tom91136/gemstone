@@ -12,7 +12,13 @@ import cats.syntax.all.*
 object SPIRVProgramLoader extends ProgramLoader {
   override val format: ProgramFormat = ProgramFormat.SPIRV
 
+  private val prepared = PreparedCache[Col[Byte], Either[ExecutionFailure, Interpreter.PreparedProgram]](8)
+
   override def load(image: Col[Byte]): Either[ExecutionFailure, LoadedProgram] =
+    (if (image.length > 8 * 1024 * 1024) prepare(image) else prepared.get(image)(prepare(image)))
+      .map(SPIRVLoadedProgram.apply)
+
+  private def prepare(image: Col[Byte]): Either[ExecutionFailure, Interpreter.PreparedProgram] =
     ISA.decode(image)
       .leftMap(error => ExecutionFailure.InvalidRequest(error.message))
       .flatMap { module =>
@@ -24,7 +30,6 @@ object SPIRVProgramLoader extends ProgramLoader {
           if (entryPointModels.isEmpty) Environment.OpenCLLibrary else Environment.OpenCLCompute
         )
       }
-      .map(SPIRVLoadedProgram.apply)
 
   private final class SPIRVLoadedProgram(program: Interpreter.PreparedProgram) extends LoadedProgram {
     override def launch(

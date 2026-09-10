@@ -62,6 +62,27 @@ object IEEE754 {
     encoded.toLong & Bits.Mask16
   }
 
+  /** One round-to-nearest, ties-to-even step from the full binary64 significand. */
+  def doubleToBinary16(value: Double): Long = {
+    val bits        = java.lang.Double.doubleToRawLongBits(value)
+    val sign        = (bits >>> 48) & 0x8000L
+    val rawExponent = ((bits >>> 52) & 0x7ffL).toInt
+    val fraction    = bits & 0x000fffffffffffffL
+    val exponent    = rawExponent - 1023
+    if (rawExponent == 0x7ff) sign | (if (fraction == 0L) 0x7c00L else 0x7e00L)
+    else if (exponent > 15) sign | 0x7c00L
+    else if (exponent < -25) sign
+    else {
+      val significand = fraction | 0x0010000000000000L
+      val shift       = if (exponent < -14) 28 - exponent else 42
+      val retained    = significand >>> shift
+      val discarded   = significand & ((1L << shift) - 1L)
+      val halfway     = 1L << (shift - 1)
+      val rounded = retained + (if (discarded > halfway || (discarded == halfway && (retained & 1L) != 0L)) 1L else 0L)
+      sign | (if (exponent < -14) rounded else ((exponent + 14).toLong << 10) + rounded)
+    }
+  }
+
   def toDouble(bits: Long, width: Int): Double = width match {
     case 16 => binary16ToFloat(bits).toDouble
     case 32 => binary32ToFloat(bits).toDouble
@@ -70,7 +91,7 @@ object IEEE754 {
   }
 
   def fromDouble(value: Double, width: Int): Long = width match {
-    case 16 => floatToBinary16(value.toFloat)
+    case 16 => doubleToBinary16(value)
     case 32 => floatToBinary32(value.toFloat)
     case 64 => doubleToBinary64(value)
     case _  => throw IllegalArgumentException(s"floating-point width must be 16, 32, or 64, found $width")

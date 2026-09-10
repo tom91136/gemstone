@@ -70,22 +70,29 @@ object GenerateAMDGPUISA {
 
   private val MaximumDefinitionSourceCharacters = 750000
 
-  def main(arguments: Array[String]): Unit = arguments.toVector match {
-    case Vector(references, exporter, output) =>
-      val result  = extract(Paths.get(references), Paths.get(exporter))
-      val catalog = Paths.get(output)
-      write(catalog, render(result.records, result.acoCount, result.xmlCount, result.sopp))
-      val instructions    = renderInstructions(result.records)
-      val instructionRoot = catalog.getParent
-      write(instructionRoot.resolve("Instruction.scala"), instructions.main)
-      val definitionsRoot = instructionRoot.resolve("definitions")
-      deleteScalaFiles(definitionsRoot)
-      instructions.definitions.foreach { case (name, content) => write(definitionsRoot.resolve(name), content) }
-      write(instructionRoot.resolve("Architectures.scala"), renderArchitectures())
-    case _ =>
-      throw IllegalArgumentException(
-        "usage: GenerateAMDGPUISA <prepared-references> <aco-exporter.py> <output.scala>"
-      )
+  def main(arguments: Array[String]): Unit = {
+    val (python, positional) = arguments.toVector match {
+      case Vector("--python", executable, rest*) => (executable, rest.toVector)
+      case other                                 => ("python3", other)
+    }
+    positional match {
+      case Vector(references, exporter, output) =>
+        val result  = extract(Paths.get(references), Paths.get(exporter), python)
+        val catalog = Paths.get(output)
+        write(catalog, render(result.records, result.acoCount, result.xmlCount, result.sopp))
+        val instructions    = renderInstructions(result.records)
+        val instructionRoot = catalog.getParent
+        write(instructionRoot.resolve("Instruction.scala"), instructions.main)
+        val definitionsRoot = instructionRoot.resolve("definitions")
+        deleteScalaFiles(definitionsRoot)
+        instructions.definitions.foreach { case (name, content) => write(definitionsRoot.resolve(name), content) }
+        write(instructionRoot.resolve("Architectures.scala"), renderArchitectures())
+      case _ =>
+        throw IllegalArgumentException(
+          "usage: GenerateAMDGPUISA [--python <executable>] <prepared-references> <aco-exporter.py> <output.scala>"
+        )
+    }
+
   }
 
   private[codegen] def generate(references: Path, exporter: Path): String = {
@@ -93,7 +100,7 @@ object GenerateAMDGPUISA {
     render(result.records, result.acoCount, result.xmlCount, result.sopp)
   }
 
-  private def extract(references: Path, exporter: Path): Extracted = {
+  private def extract(references: Path, exporter: Path, python: String = "python3"): Extracted = {
     require(
       Files.isRegularFile(references.resolve("MANIFEST.tsv")),
       s"not a prepared ISA reference directory: $references"
@@ -107,7 +114,7 @@ object GenerateAMDGPUISA {
     require(xmlFiles.size == 10, s"expected ten AMD ISA XML files, found ${xmlFiles.size}")
 
     val official = xmlFiles.flatMap(parseOfficialXML)
-    val aco      = parseACO(references.resolve("mesa/src/amd/compiler/aco_opcodes.py"), exporter)
+    val aco      = parseACO(references.resolve("mesa/src/amd/compiler/aco_opcodes.py"), exporter, python)
     val sopp     = parseACOSOPPRule(references.resolve("mesa/src/amd/compiler"))
     val records  = (aco ++ official)
       .sortBy(record => (record.name, record.generation, record.target, record.format, record.opcode))
@@ -154,10 +161,10 @@ object GenerateAMDGPUISA {
     }.flatten
   }
 
-  private def parseACO(source: Path, exporter: Path): Vector[Instruction] = {
+  private def parseACO(source: Path, exporter: Path, python: String): Vector[Instruction] = {
     require(Files.isRegularFile(source), s"missing Mesa ACO opcode source: $source")
     require(Files.isRegularFile(exporter), s"missing ACO exporter: $exporter")
-    val process = ProcessBuilder("python3", exporter.toString, source.toString)
+    val process = ProcessBuilder(python, "-B", exporter.toString, source.toString)
       .redirectError(ProcessBuilder.Redirect.INHERIT)
       .start()
     val lines = scala.io.Source.fromInputStream(process.getInputStream, "UTF-8")

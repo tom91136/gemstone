@@ -69,6 +69,7 @@ typedef struct gemstone_hsa_executor {
   // Optional host-to-device copy for a named program global. Older test
   // executors may leave this null; regular RPC-backed execution supplies it.
   int (*write_global)(void *context, uint64_t program_id, const char *name, uint64_t offset, const void *bytes, uint32_t size);
+  int (*bind_global)(void *context, uint64_t program_id, const char *name, uint64_t allocation_id, uint64_t offset);
 } gemstone_hsa_executor;
 
 typedef struct gemstone_hsa_signal_operations {
@@ -106,6 +107,8 @@ int gemstone_hsa_aql_runtime_remove_kernel(gemstone_hsa_aql_runtime *runtime, ui
 
 // Updates a named global belonging to the code object that owns kernel_object.
 // This is used by HIP's symbol-copy API for constant-memory launch state.
+int gemstone_hsa_aql_runtime_bind_global(gemstone_hsa_aql_runtime *runtime, uint64_t kernel_object, const char *name,
+                                         uint64_t allocation_id, uint64_t offset);
 int gemstone_hsa_aql_runtime_write_global(gemstone_hsa_aql_runtime *runtime, uint64_t kernel_object, const char *name,
                                           uint64_t offset, const void *bytes, uint32_t size);
 

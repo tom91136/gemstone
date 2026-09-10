@@ -32,9 +32,10 @@ import java.util.regex.Pattern
 /** Textual-PTX CUDA module backend. Images and launch arguments have already been copied out of the native process when
   * they reach this class.
   */
-final class PTXCUDAKernelExecution extends CUDAKernelExecution {
-  private val representativeGridBlockThreshold = 4096
-
+final class PTXCUDAKernelExecution(
+    executionControl: () => net.kurobako.gemstone.execution.ExecutionControl =
+      () => net.kurobako.gemstone.execution.ExecutionControl.default
+) extends CUDAKernelExecution {
   private val ignoredFunctionDirectives = Pattern.compile(
     "\\.(?:maxntid|reqntid|minnctapersm|maxnreg|maxclusterrank|explicitcluster|noreturn)" +
       "[^\\r\\n\\{;]*(\\r?\\n|[\\{;])"
@@ -54,7 +55,7 @@ final class PTXCUDAKernelExecution extends CUDAKernelExecution {
   }
 
   private final case class LoadedModule(
-      source: String,
+      program: Program,
       entries: Set[String],
       globals: Map[String, LoadedGlobal],
       shared: Map[String, Long]
@@ -75,7 +76,6 @@ final class PTXCUDAKernelExecution extends CUDAKernelExecution {
 
   private val state              = AtomicReference(State(Map.empty, Map.empty, 1L, 1L))
   private val dynamicMemoryState = DynamicAddressMemory.State()
-  private val recentProgram      = AtomicReference(Option.empty[(Long, Program)])
 
   override def cuModuleLoadData(image: ModuleImage): CUDAResult[CUDAModule] =
     loadModule(image, None)
@@ -93,8 +93,7 @@ final class PTXCUDAKernelExecution extends CUDAKernelExecution {
     val sourceResult = decodeUtf8(image.bytes)
     sourceResult.flatMap { source =>
       val parsedSource = stripIgnoredFunctionDirectives(source)
-      recentProgram.set(None)
-      val parsed = if (parsedSource.isEmpty) Right(Program(Col.empty)) else Parser.parse(parsedSource)
+      val parsed = if (parsedSource.isEmpty) Right(Program(Col.empty)) else PTXCUDAKernelExecution.parse(parsedSource)
       parsed match {
         case Left(error)    => failure(200, s"invalid PTX module: $error")
         case Right(program) =>
@@ -123,10 +122,9 @@ final class PTXCUDAKernelExecution extends CUDAKernelExecution {
             // the missing entry in the usual way.
             val current = state.get()
             val handle  = current.nextModuleHandle
-            recentProgram.set(Some(handle -> program))
             state.set(
               current.copy(
-                modules = current.modules.updated(handle, LoadedModule(parsedSource, entries, globals, shared)),
+                modules = current.modules.updated(handle, LoadedModule(program, entries, globals, shared)),
                 nextModuleHandle = Math.addExact(handle, 1L)
               )
             )
@@ -189,63 +187,48 @@ final class PTXCUDAKernelExecution extends CUDAKernelExecution {
       case None         => failure(201, s"invalid CUDA module handle: ${module.handle}")
       case Some(loaded) =>
         if (!loaded.entries.contains(name.value)) failure(500, s"PTX entry point not found: ${name.value}")
-        else
-          moduleProgram(module.handle, loaded).flatMap { program =>
-            entryDefinition(program, name.value) match {
-              case None        => failure(500, s"PTX entry point not found: ${name.value}")
-              case Some(entry) =>
-                Lowering.parameters(entry) match {
-                  case Left(error)       => failure(801, error.message)
-                  case Right(parameters) =>
-                    val handle = current.nextFunctionHandle
-                    state.set(
-                      current.copy(
-                        functions = current.functions.updated(
-                          handle,
-                          LoadedFunction(module, name.value, None)
-                        ),
-                        nextFunctionHandle = Math.addExact(handle, 1L)
-                      )
+        else {
+          entryDefinition(loaded.program, name.value) match {
+            case None        => failure(500, s"PTX entry point not found: ${name.value}")
+            case Some(entry) =>
+              Lowering.parameters(entry) match {
+                case Left(error)       => failure(801, error.message)
+                case Right(parameters) =>
+                  val handle = current.nextFunctionHandle
+                  state.set(
+                    current.copy(
+                      functions = current.functions.updated(
+                        handle,
+                        LoadedFunction(module, name.value, None)
+                      ),
+                      nextFunctionHandle = Math.addExact(handle, 1L)
                     )
-                    success(KernelFunction(CUDAFunction(handle), parameters.map(_.widthBytes)))
-                }
-            }
+                  )
+                  success(KernelFunction(CUDAFunction(handle), parameters.map(_.widthBytes)))
+              }
           }
+        }
     }
   }
 
-  private def moduleProgram(handle: Long, module: LoadedModule): CUDAResult[Program] = {
-    val parsed = recentProgram.get().filter(_._1 == handle).map(pair => Right(pair._2)).getOrElse {
-      recentProgram.set(None)
-      Parser.parse(module.source).map { program =>
-        recentProgram.set(Some(handle -> program))
-        program
-      }
-    }
-    parsed match {
-      case Left(error)    => failure(200, s"invalid cached PTX module: $error")
-      case Right(program) => success(program)
+  private def lowerFunction(module: LoadedModule, name: String): CUDAResult[Kernel] = {
+    val program = module.program
+    val entries = program.statements.collect { case entry: Statement.Entry => entry }
+    entryDefinition(program, name) match {
+      case None        => failure(500, s"PTX entry point not found: $name")
+      case Some(entry) =>
+        Lowering.lower(
+          entry,
+          program.statements.collect { case function: Statement.Function => function },
+          module.globals.view.mapValues(_.address).toMap,
+          module.shared,
+          entries
+        ) match {
+          case Left(error)   => failure(801, error.message)
+          case Right(kernel) => success(kernel)
+        }
     }
   }
-
-  private def lowerFunction(handle: Long, module: LoadedModule, name: String): CUDAResult[Kernel] =
-    moduleProgram(handle, module).flatMap { program =>
-      val entries = program.statements.collect { case entry: Statement.Entry => entry }
-      entryDefinition(program, name) match {
-        case None        => failure(500, s"PTX entry point not found: $name")
-        case Some(entry) =>
-          Lowering.lower(
-            entry,
-            program.statements.collect { case function: Statement.Function => function },
-            module.globals.view.mapValues(_.address).toMap,
-            module.shared,
-            entries
-          ) match {
-            case Left(error)   => failure(801, error.message)
-            case Right(kernel) => success(kernel)
-          }
-      }
-    }
 
   override def cuModuleUnload(module: CUDAModule): CUDAResult[Unit] = synchronized {
     val current = state.get()
@@ -253,7 +236,6 @@ final class PTXCUDAKernelExecution extends CUDAKernelExecution {
       case None         => failure(201, s"invalid CUDA module handle: ${module.handle}")
       case Some(loaded) =>
         val released = releaseGlobals(loaded.globals.valuesIterator.toCol)
-        if (recentProgram.get().exists(_._1 == module.handle)) recentProgram.set(None)
         state.set(
           current.copy(
             modules = current.modules.removed(module.handle),
@@ -273,25 +255,6 @@ final class PTXCUDAKernelExecution extends CUDAKernelExecution {
     entries.find(_.body.nonEmpty).orElse(entries.headOption)
   }
 
-  /** CUB's counting-iterator implementations of for_each and adjacent_difference are tile-local. The upstream
-    * 64-bit-index canaries intentionally launch 2^30..2^33 logical elements, which would require billions of
-    * interpreter lanes even though their only observable operation is a boundary check. Preserve the full virtual
-    * geometry (so blockIdx/gridDim and 64-bit index arithmetic remain real) while evaluating the first and last tile.
-    * Other kernels, including reductions and user code, retain ordinary complete-grid execution.
-    */
-  private def representativeBlocks(kernel: Kernel, geometry: LaunchGeometry): Option[Col[Int]] = {
-    val groups                    = geometry.groupCount.volumeInt.toOption
-    val cubCountingBoundaryKernel =
-      (kernel.name.startsWith("_ZN3cub") || kernel.name.startsWith("_ZN6thrust8cuda_cub")) &&
-        kernel.name.contains("counting_iterator") &&
-        (kernel.name.contains("for_each") || kernel.name.contains("adjacent_difference"))
-    groups
-      .filter(_ > representativeGridBlockThreshold)
-      .filter(_ > 1)
-      .filter(_ => cubCountingBoundaryKernel)
-      .map(last => Col(0, last - 1))
-  }
-
   override def cuLaunchKernel(
       function: CUDAFunction,
       launch: KernelLaunch,
@@ -307,7 +270,7 @@ final class PTXCUDAKernelExecution extends CUDAKernelExecution {
             current.modules.get(loaded.module.handle) match {
               case None         => failure(201, s"invalid CUDA module handle: ${loaded.module.handle}")
               case Some(module) =>
-                lowerFunction(loaded.module.handle, module, loaded.name).map { kernel =>
+                lowerFunction(module, loaded.name).map { kernel =>
                   val latest = state.get()
                   state.set(
                     latest.copy(functions =
@@ -349,14 +312,13 @@ final class PTXCUDAKernelExecution extends CUDAKernelExecution {
                 geometry match {
                   case Left(error)  => failure(1, error)
                   case Right(value) =>
-                    val blockSelection = representativeBlocks(kernel, value)
-                    val execution      = Interpreter.execute(
+                    val execution = Interpreter.execute(
                       kernel,
                       value,
                       arguments,
                       DynamicAddressMemory(memory, state = dynamicMemoryState),
-                      captureTrace = false,
-                      blockIndices = blockSelection
+                      control = executionControl(),
+                      captureTrace = false
                     )
                     execution match {
                       case Left(error) => failure(700, error.message)
@@ -487,4 +449,13 @@ final class PTXCUDAKernelExecution extends CUDAKernelExecution {
   private def success[A](value: A): CUDAResult[A]                   = CUDAResult.Success(value)
   private def failure[A](code: Int, message: String): CUDAResult[A] =
     CUDAResult.Failure(CUDAError(code, message))
+}
+
+object PTXCUDAKernelExecution {
+  // Multi-translation-unit CUDA programs register all their PTX images at startup. Keep their
+  // working set across client sessions; images above 8 Mi characters still bypass the cache.
+  private val parsed = PreparedCache[String, Either[net.kurobako.gemstone.isa.ptx.v9_3.ParseError, Program]](12)
+  private[server] def parse(source: String): Either[net.kurobako.gemstone.isa.ptx.v9_3.ParseError, Program] =
+    if (source.length > 8 * 1024 * 1024) Parser.parse(source)
+    else parsed.get(source)(Parser.parse(source))
 }

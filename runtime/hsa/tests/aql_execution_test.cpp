@@ -155,8 +155,9 @@ const char *executor_error(void *context) { return static_cast<FakeExecutor *>(c
 void destroy_executor(void *) {}
 
 gemstone_hsa_executor executor_operations(FakeExecutor &executor) {
-  return gemstone_hsa_executor{&executor,          load_program,   unload_program,  launch, await_completion, completion_dirty_ranges,
-                               release_completion, executor_error, destroy_executor, write_global};
+  return gemstone_hsa_executor{
+      &executor,          load_program,   unload_program,   launch,       await_completion, completion_dirty_ranges,
+      release_completion, executor_error, destroy_executor, write_global, nullptr};
 }
 
 struct FakeSignals {

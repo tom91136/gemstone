@@ -381,4 +381,42 @@ class ExecutionServiceSuite extends munit.FunSuite {
     assert(stopped.get(), "running dispatch did not observe session cancellation")
     assert(!worker.get().get.isAlive, "execution worker remained alive after cancellation")
   }
+
+  for (groups <- Vector(1, 2, 3, 5, 9))
+    test(s"$groups queued follow-up launches keep separate budgets and continue after a failed dispatch") {
+      val scheduled = mutable.ArrayBuffer.empty[Runnable]
+      val accepted  = mutable.ArrayBuffer.empty[(String, Long)]
+      val backend   = TestExecutor(
+        (_, _, _) => Right(()),
+        _ => Right(()),
+        (dispatch, _, control) => {
+          val requested = if (dispatch.kernelName == "exhaust") groups * 7 + 1 else groups * 7
+          val result    = (0 until requested).foldLeft[Either[ExecutionFailure, Unit]](Right(())) { (result, _) =>
+            result.flatMap(_ => control.checkpoint().left.map(fault => ExecutionFailure.Failed(fault.message)))
+          }
+          accepted += dispatch.kernelName -> control.usedInstructions
+          result
+        }
+      )
+      val service = ExecutionService(backend, scheduled += _, ExecutionLimits(groups * 7, 1))
+      try {
+        val program     = service.load(ProgramFormat.SPIRV, Col.empty).toOption.get
+        val names       = Vector("exhaust") ++ Vector.tabulate(groups)(i => s"next-$i")
+        val completions = names.map { name =>
+          val dispatch = KernelDispatch.create(program, name, Dimensions.One, Dimensions.One, Col.empty).toOption.get
+          service.launch(dispatch).toOption.get
+        }
+        assertEquals(scheduled.size, 1)
+        completions.foreach(id => assertEquals(service.completion(id), Right(CompletionStatus.Pending)))
+        scheduled.head.run()
+        assert(service.completion(completions.head).exists {
+          case CompletionStatus.Failed(_) => true
+          case _                          => false
+        })
+        completions.tail.foreach(id => assertEquals(service.completion(id), Right(CompletionStatus.Succeeded)))
+        assertEquals(accepted.toVector, names.map(_ -> (groups * 7).toLong))
+        completions.foreach(id => assertEquals(service.releaseCompletion(id), Right(())))
+      } finally service.close()
+    }
+
 }

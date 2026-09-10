@@ -35,12 +35,9 @@ struct RunOptions {
   bool quiet_pass = false;
   bool timing = false;
   bool expect_reds = false;
-  bool allow_empty_shard = false;
   bool allow_all_skipped = false;
   std::optional<std::string> exact_case;
   std::optional<std::regex> filter;
-  std::size_t shard_index = 0;
-  std::size_t shard_count = 1;
 };
 
 using CaseBuilder = std::vector<Case> (*)(const Configuration &);
@@ -60,6 +57,7 @@ inline void print_usage(std::ostream &output, std::string_view executable) {
          << "  --filter=REGEX                      select case names by regular expression\n"
          << "  --suite=all|algorithms|blas|edge-cases|async|stress\n"
          << "                                      select a suite\n"
+         << "  --profile=compact|full              select shared workload defaults\n"
          << "  --sizes=N,N,...                     set sizes for every suite\n"
          << "  --algorithm-sizes=N,N,...           set algorithm sizes\n"
          << "  --blas-sizes=N,N,...                set level-1 BLAS sizes\n"
@@ -74,15 +72,11 @@ inline void print_usage(std::ostream &output, std::string_view executable) {
          << "  --edge-algorithm-types=TYPE,...     set edge algorithm scalar types\n"
          << "  --edge-blas-types=TYPE,...          set edge BLAS scalar types\n"
          << "  --stress-types=TYPE,...             set bounded stress scalar types\n"
-         << "  --include-legacy-reds               include the imported old-suite red inventory\n"
-         << "  --legacy-bin-root=PATH              run imported identities from upstream binaries at PATH\n"
-         << "  --legacy-output-dir=PATH            preserve imported legacy stdout/stderr under PATH\n"
-         << "  --shard-index=N --shard-count=N     run a stable hash shard\n"
+         << "  --include-regressions               include additional self-contained regression probes\n"
          << "  --fail-fast                         stop after the first failure\n"
          << "  --quiet-pass                        print only skips, failures and summary\n"
          << "  --timing                            print per-case wall-clock timing\n"
-         << "  --expect-reds                       require expected legacy-red cases to fail\n"
-         << "  --allow-empty-shard                 permit an empty hash shard\n"
+         << "  --expect-reds                       require expected regression cases to fail\n"
          << "  --allow-all-skipped                 permit a selected run with zero passes\n"
          << "  --help                              show this help\n"
          << "types: i8,i32,i64,f16,f32,f64\n";
@@ -101,21 +95,12 @@ inline std::size_t option_size(std::string_view argument, std::string_view optio
   return unified_suite::detail::parse_size(value(argument, option));
 }
 
-inline std::uint64_t stable_hash(std::string_view value) {
-  std::uint64_t result = UINT64_C(14695981039346656037);
-  for (const auto byte : value) {
-    result ^= static_cast<unsigned char>(byte);
-    result *= UINT64_C(1099511628211);
-  }
-  return result;
-}
-
 inline bool selected(const Case &test_case, const RunOptions &options) {
   if (options.exact_case && test_case.name != *options.exact_case)
     return false;
   if (options.filter && !std::regex_search(test_case.name, *options.filter))
     return false;
-  return stable_hash(test_case.name) % options.shard_count == options.shard_index;
+  return true;
 }
 
 template <class AlgorithmBackend> std::vector<Case> algorithm_cases(const Configuration &configuration) {
@@ -142,12 +127,20 @@ inline std::optional<RunOptions> parse_options(int argc, char **argv, std::ostre
                                                std::ostream &errors) {
   RunOptions result;
   try {
+    // Apply the selected profile first, so explicit overrides win in either argv order.
+    for (int index = 1; index < argc; ++index) {
+      const std::string_view argument(argv[index]);
+      if (argument.starts_with("--profile="))
+        result.configuration = configuration_for_profile(detail::value(argument, "--profile"));
+    }
     for (int index = 1; index < argc; ++index) {
       const std::string_view argument(argv[index]);
       if (argument == "--help") {
         print_usage(output, argv[0]);
         return std::nullopt;
       }
+      if (argument.starts_with("--profile="))
+        continue;
       if (argument == "--list")
         result.list = true;
       else if (argument == "--fail-fast")
@@ -158,15 +151,8 @@ inline std::optional<RunOptions> parse_options(int argc, char **argv, std::ostre
         result.timing = true;
       else if (argument == "--expect-reds")
         result.expect_reds = true;
-      else if (argument == "--include-legacy-reds")
-        result.configuration.include_legacy_reds = true;
-      else if (argument.starts_with("--legacy-bin-root="))
-        result.configuration.legacy_binary_root = std::string(detail::value(argument, "--legacy-bin-root"));
-      else if (argument.starts_with("--legacy-output-dir="))
-        result.configuration.legacy_output_directory =
-            std::string(detail::value(argument, "--legacy-output-dir"));
-      else if (argument == "--allow-empty-shard")
-        result.allow_empty_shard = true;
+      else if (argument == "--include-regressions")
+        result.configuration.include_regressions = true;
       else if (argument == "--allow-all-skipped")
         result.allow_all_skipped = true;
       else if (argument.starts_with("--case="))
@@ -230,17 +216,9 @@ inline std::optional<RunOptions> parse_options(int argc, char **argv, std::ostre
             parse_scalar_types(detail::value(argument, "--edge-blas-types"));
       else if (argument.starts_with("--stress-types="))
         result.configuration.stress_types = parse_scalar_types(detail::value(argument, "--stress-types"));
-      else if (argument.starts_with("--shard-index="))
-        result.shard_index = detail::option_size(argument, "--shard-index");
-      else if (argument.starts_with("--shard-count="))
-        result.shard_count = detail::option_size(argument, "--shard-count");
       else
         throw std::invalid_argument("unknown option: " + std::string(argument));
     }
-    if (result.shard_count == 0)
-      throw std::invalid_argument("shard count must be positive");
-    if (result.shard_index >= result.shard_count)
-      throw std::invalid_argument("shard index must be less than shard count");
     validate_configuration(result.configuration);
     return result;
   } catch (const std::exception &error) {
@@ -303,10 +281,6 @@ std::vector<Case> catalog(const RunOptions &options) {
 inline int run(const RunOptions &options, const CatalogProvider &provider, std::ostream &output = std::cout,
                std::ostream &errors = std::cerr) {
   try {
-    if (options.shard_count == 0)
-      throw std::invalid_argument("shard count must be positive");
-    if (options.shard_index >= options.shard_count)
-      throw std::invalid_argument("shard index must be less than shard count");
     validate_configuration(options.configuration);
   } catch (const std::invalid_argument &error) {
     errors << "configuration error: " << error.what() << '\n';
@@ -324,11 +298,6 @@ inline int run(const RunOptions &options, const CatalogProvider &provider, std::
     return 0;
   }
   if (selected.empty()) {
-    if (options.allow_empty_shard) {
-      output << "SUMMARY pass=0 skip=0 fail=0 selected=0 shard=" << options.shard_index << '/'
-             << options.shard_count << '\n';
-      return 0;
-    }
     errors << "no cases selected\n";
     return 2;
   }
@@ -346,8 +315,8 @@ inline int run(const RunOptions &options, const CatalogProvider &provider, std::
   for (const auto *test_case : selected) {
     const auto case_started = std::chrono::steady_clock::now();
     const auto result = test_case->execute();
-    const auto case_time =
-        std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - case_started);
+    const auto case_time = std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::steady_clock::now() - case_started);
     ++executed;
     total_case_time += case_time;
     longest_case_time = std::max(longest_case_time, case_time);
@@ -386,8 +355,7 @@ inline int run(const RunOptions &options, const CatalogProvider &provider, std::
   }
   output << "SUMMARY pass=" << passed << " skip=" << skipped << " fail=" << failed
          << " xfail=" << expected_failed << " xpass=" << unexpected_pass << " xskip=" << unexpected_skip
-         << " selected=" << selected.size() << " shard=" << options.shard_index << '/' << options.shard_count
-         << '\n';
+         << " selected=" << selected.size() << '\n';
   if (options.timing) {
     const auto elapsed =
         std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - run_started);
@@ -397,6 +365,8 @@ inline int run(const RunOptions &options, const CatalogProvider &provider, std::
   }
   if (failed != 0)
     return 1;
+  if (options.exact_case && executed == 1 && skipped == 1)
+    return 77;
   if (passed == 0 && expected_failed == 0 && !options.allow_all_skipped) {
     errors << "no selected case passed; use --allow-all-skipped only for an intentional capability probe\n";
     return 1;

@@ -60,6 +60,7 @@ if(BUILD_TESTING)
   target_link_libraries(gemstone_levelzero_rpc_test PRIVATE "${LEVEL_ZERO_LOADER_LIBRARY}" pthread)
   add_test(NAME gemstone-levelzero-execution-rpc COMMAND gemstone_levelzero_rpc_test)
   set_tests_properties(gemstone-levelzero-execution-rpc PROPERTIES
+    TIMEOUT 30
     ENVIRONMENT "ZE_ENABLE_ALT_DRIVERS=$<TARGET_FILE:gemstone_levelzero>;ZE_ENABLE_LOADER_DEBUG_TRACE=0"
   )
 endif()

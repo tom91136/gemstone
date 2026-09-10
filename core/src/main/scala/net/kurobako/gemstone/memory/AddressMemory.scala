@@ -15,6 +15,32 @@ trait AddressMemory {
   def writeInt8(address: GuestAddress, value: Byte): Either[MemoryError, Unit]
   def writeInt32(address: GuestAddress, value: Int): Either[MemoryError, Unit]
 
+  /** A byte-range transfer. Defaults serialize transfers on this backing owner; views must delegate the complete
+    * operation to their shared owner rather than rely on a view-local monitor.
+    */
+  def readBytes(address: GuestAddress, size: Int): Either[MemoryError, Col[Byte]] = synchronized {
+    require(size >= 0, s"memory byte count must be non-negative, found $size")
+    val bytes = Col.newBuilder[Byte]
+    @scala.annotation.tailrec
+    def read(index: Int): Either[MemoryError, Col[Byte]] =
+      if (index == size) Right(bytes.result())
+      else readInt8(address.offset(index.toLong)) match {
+        case Left(error) => Left(error)
+        case Right(byte) =>
+          val _ = bytes += byte
+          read(index + 1)
+      }
+    read(0)
+  }
+
+  def writeBytes(address: GuestAddress, bytes: Col[Byte]): Either[MemoryError, Unit] = synchronized {
+    validateRange(address, bytes.size).flatMap { _ =>
+      bytes.zipWithIndex.foldLeft[Either[MemoryError, Unit]](Right(())) { case (result, (byte, index)) =>
+        result.flatMap(_ => writeInt8(address.offset(index.toLong), byte))
+      }
+    }
+  }
+
   @SuppressWarnings(Array("scalafix:DisableSyntax.var", "scalafix:DisableSyntax.return"))
   final def validateRange(address: GuestAddress, size: Int): Either[MemoryError, Unit] = {
     require(size >= 0, s"memory range size must be non-negative, found $size")
@@ -30,7 +56,7 @@ trait AddressMemory {
   }
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  final def readLittleEndian(address: GuestAddress, size: Int): Either[MemoryError, Long] = {
+  def readLittleEndian(address: GuestAddress, size: Int): Either[MemoryError, Long] = {
     var failure: Option[MemoryError] = None
     val value                        = LittleEndian.decode(size) { index =>
       failure.fold(
@@ -46,7 +72,7 @@ trait AddressMemory {
   }
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  final def writeLittleEndian(address: GuestAddress, value: Long, size: Int): Either[MemoryError, Unit] =
+  def writeLittleEndian(address: GuestAddress, value: Long, size: Int): Either[MemoryError, Unit] =
     validateRange(address, size).flatMap { _ =>
       var failure: Option[MemoryError] = None
       LittleEndian.write(value, size) { (index, byte) =>
@@ -56,6 +82,12 @@ trait AddressMemory {
     }
 }
 
+/** Optional device-side allocation capability used by instruction-level malloc/free calls. */
+trait DeviceAllocationMemory extends AddressMemory {
+  def allocate(size: Long): Long
+  def free(address: Long): Unit
+}
+
 final case class AddressBinding(base: GuestAddress, allocation: AllocationId, offset: Long, span: Long)
 
 /** Process-neutral allocation IDs projected into a per-dispatch virtual address space. */
@@ -63,17 +95,32 @@ final class ExecutionAddressSpace private (
     memory: ExecutionMemory,
     bindings: Col[AddressBinding]
 ) extends AddressMemory {
+  override def readBytes(address: GuestAddress, size: Int): Either[MemoryError, Col[Byte]]    = read(address, size)
+  override def writeBytes(address: GuestAddress, bytes: Col[Byte]): Either[MemoryError, Unit] = write(address, bytes)
+
   override def readInt8(address: GuestAddress): Either[MemoryError, Byte] =
-    read(address, 1).map(_.head)
+    readLittleEndian(address, 1).map(_.toByte)
 
   override def readInt32(address: GuestAddress): Either[MemoryError, Int] =
-    read(address, 4).map(bytes => LittleEndian.decode(bytes, 0, 4).toInt)
+    readLittleEndian(address, 4).map(_.toInt)
 
   override def writeInt8(address: GuestAddress, value: Byte): Either[MemoryError, Unit] =
-    write(address, Col(value))
+    writeLittleEndian(address, value.toLong, 1)
 
   override def writeInt32(address: GuestAddress, value: Int): Either[MemoryError, Unit] =
-    write(address, LittleEndian.toCol(value.toLong, 4))
+    writeLittleEndian(address, value.toLong, 4)
+
+  override def readLittleEndian(address: GuestAddress, size: Int): Either[MemoryError, Long] =
+    resolve(address, size).flatMap { case (binding, relative) =>
+      memory.readValue(binding.allocation, Math.addExact(binding.offset, relative), size)
+        .leftMap(toMemoryError(address, size, _))
+    }
+
+  override def writeLittleEndian(address: GuestAddress, value: Long, size: Int): Either[MemoryError, Unit] =
+    resolve(address, size).flatMap { case (binding, relative) =>
+      memory.writeValue(binding.allocation, Math.addExact(binding.offset, relative), value, size)
+        .leftMap(toMemoryError(address, size, _))
+    }
 
   private def read(address: GuestAddress, size: Int): Either[MemoryError, Col[Byte]] =
     resolve(address, size).flatMap { case (binding, relative) =>

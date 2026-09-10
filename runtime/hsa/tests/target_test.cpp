@@ -1,11 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "gemstone/hsa/target.h"
+#include "gemstone/hsa/trace.h"
 
 #include <cassert>
 #include <cstdlib>
 #include <cstring>
 
 int main() {
+  unsetenv("GEMSTONE_HSA_TRACE");
+  assert(!gemstone::hsa::trace_enabled("api"));
+  assert(setenv("GEMSTONE_HSA_TRACE", "api,packets", 1) == 0);
+  assert(gemstone::hsa::trace_enabled("api"));
+  assert(gemstone::hsa::trace_enabled("packets"));
+  assert(!gemstone::hsa::trace_enabled("memory"));
+  assert(setenv("GEMSTONE_HSA_TRACE", "all", 1) == 0);
+  assert(gemstone::hsa::trace_enabled("loaders"));
   unsetenv("GEMSTONE_AMDGPU_TARGET");
   assert(std::strcmp(gemstone::hsa::target_arch(), "gfx900") == 0);
   const auto default_version = gemstone::hsa::target_version();

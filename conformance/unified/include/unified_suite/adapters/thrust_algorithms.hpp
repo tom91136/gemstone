@@ -621,7 +621,9 @@ public:
 
 private:
   template <class T> static std::vector<T> host(const thrust::device_vector<T> &input) {
-    return std::vector<T>(input.begin(), input.end());
+    std::vector<T> result(input.size());
+    if (!input.empty()) thrust::copy(input.begin(), input.end(), result.data());
+    return result;
   }
 };
 

@@ -1,14 +1,32 @@
+#define CL_USE_DEPRECATED_OPENCL_1_1_APIS
 #include <CL/cl.h>
+#include "../../../native/execution/test/rpc_fixture.hpp"
+#include <string>
+#include <cstdlib>
 
 #include <cassert>
+#include <array>
 #include <cstdint>
 #include <cstring>
 
 int main() {
+  gemstone_test::RpcFixture server;
+  const auto port = std::to_string(server.port());
+  assert(setenv("GEMSTONE_RPC_PORT", port.c_str(), 1) == 0);
+  assert(setenv("GEMSTONE_RPC_TOKEN", gemstone_test::RpcFixture::token, 1) == 0);
+
   cl_platform_id platform = nullptr;
   cl_uint platform_count = 0;
   assert(clGetPlatformIDs(1, &platform, &platform_count) == CL_SUCCESS);
   assert(platform != nullptr && platform_count == 1);
+
+  // The Khronos loader discovers an ICD through this extension lookup, not only dlsym.
+  using GetPlatforms = cl_int(CL_API_CALL *)(cl_uint, cl_platform_id *, cl_uint *);
+  auto get_platforms = reinterpret_cast<GetPlatforms>(clGetExtensionFunctionAddress("clIcdGetPlatformIDsKHR"));
+  assert(get_platforms != nullptr);
+  cl_platform_id discovered = nullptr;
+  assert(get_platforms(1, &discovered, nullptr) == CL_SUCCESS);
+  assert(discovered == platform);
 
   cl_device_id device = nullptr;
   cl_uint device_count = 0;
@@ -47,6 +65,19 @@ int main() {
   assert(context != nullptr && error == CL_SUCCESS);
   cl_command_queue queue = clCreateCommandQueueWithProperties(context, device, nullptr, &error);
   assert(queue != nullptr && error == CL_SUCCESS);
+  cl_context other_context = clCreateContext(nullptr, 1, &device, nullptr, nullptr, &error);
+  assert(other_context != nullptr && error == CL_SUCCESS);
+  cl_mem foreign_buffer = clCreateBuffer(other_context, CL_MEM_READ_WRITE, 16, nullptr, &error);
+  assert(foreign_buffer != nullptr && error == CL_SUCCESS);
+  std::array<uint8_t, 16> foreign_bytes{};
+  assert(clEnqueueReadBuffer(queue, foreign_buffer, CL_TRUE, 0, foreign_bytes.size(), foreign_bytes.data(),
+                             0, nullptr, nullptr) == CL_INVALID_CONTEXT);
+  // The attached memory object retains its context after the application's reference is released.
+  assert(clReleaseContext(other_context) == CL_SUCCESS);
+  size_t foreign_size = 0;
+  assert(clGetMemObjectInfo(foreign_buffer, CL_MEM_SIZE, sizeof(foreign_size), &foreign_size, nullptr) == CL_SUCCESS);
+  assert(foreign_size == foreign_bytes.size());
+  assert(clReleaseMemObject(foreign_buffer) == CL_SUCCESS);
 
   const char *unbuilt_source = "__kernel void unbuilt() {}";
   cl_program unbuilt_program = clCreateProgramWithSource(context, 1, &unbuilt_source, nullptr, &error);
@@ -109,8 +140,56 @@ int main() {
   for (size_t index = 8; index < 24; ++index) assert(svm[index] == 0x5a);
   for (size_t index = 24; index < 64; ++index) assert(svm[index] == 0);
 
+  cl_program program = clCreateProgramWithIL(context, server.spirv, sizeof(server.spirv), &error);
+  assert(program != nullptr && error == CL_SUCCESS);
+  assert(server.programLoads() == 0);
+  assert(clBuildProgram(program, 1, &device, nullptr, nullptr, nullptr) == CL_SUCCESS);
+  assert(server.programLoads() == 1);
+  cl_kernel kernel = clCreateKernel(program, "groups", &error);
+  assert(kernel != nullptr && error == CL_SUCCESS);
+  constexpr size_t capacity = 9 * 33 + 2;
+  auto *memory = static_cast<uint32_t *>(clSVMAlloc(context, CL_MEM_READ_WRITE, capacity * 4, 8));
+  assert(memory != nullptr);
+  assert(clSetKernelArgSVMPointer(kernel, 0, memory + 1) == CL_SUCCESS);
+  for (bool implicit_local : {false, true})
+    for (uint32_t groups : {1U, 2U, 3U, 5U, 9U})
+      for (uint32_t chosen : {31U, 32U, 33U}) {
+        if (implicit_local && chosen != 32) continue;
+        const size_t local = chosen;
+        const size_t count = groups * local - (implicit_local ? 1 : 0);
+        const size_t origin = 7;
+        for (uint32_t seed : {17U, 91U}) {
+          assert(clEnqueueSVMMap(queue, CL_TRUE, CL_MAP_WRITE, memory, capacity * 4, 0, nullptr, nullptr) == CL_SUCCESS);
+          std::fill(memory, memory + capacity, 0U);
+          assert(clEnqueueSVMUnmap(queue, memory, 0, nullptr, nullptr) == CL_SUCCESS);
+          assert(clFinish(queue) == CL_SUCCESS);
+          server.expect({chosen, groups, static_cast<uint32_t>(count), 7, seed});
+          assert(clSetKernelArg(kernel, 1, sizeof(seed), &seed) == CL_SUCCESS);
+          cl_event event = nullptr;
+          assert(clEnqueueNDRangeKernel(queue, kernel, 1, &origin, &count, implicit_local ? nullptr : &local, 0, nullptr, &event)
+                 == CL_SUCCESS);
+          assert(event != nullptr && clWaitForEvents(1, &event) == CL_SUCCESS);
+          cl_int status = CL_QUEUED;
+          assert(clGetEventInfo(event, CL_EVENT_COMMAND_EXECUTION_STATUS, sizeof(status), &status, nullptr) == CL_SUCCESS);
+          assert(status == CL_COMPLETE);
+          assert(clEnqueueSVMMap(queue, CL_TRUE, CL_MAP_READ, memory, capacity * 4, 0, nullptr, nullptr) == CL_SUCCESS);
+          for (size_t index = 0; index < count; ++index)
+            assert(memory[index + 1] == seed + origin + index);
+          assert(memory[0] == 0);
+          assert(std::all_of(memory + count + 1, memory + capacity, [](uint32_t value) { return value == 0; }));
+          assert(clEnqueueSVMUnmap(queue, memory, 0, nullptr, nullptr) == CL_SUCCESS);
+          assert(clFinish(queue) == CL_SUCCESS);
+          assert(clReleaseEvent(event) == CL_SUCCESS);
+        }
+      }
+  assert(clReleaseKernel(kernel) == CL_SUCCESS);
+  assert(clReleaseProgram(program) == CL_SUCCESS);
+  clSVMFree(context, memory);
+
   clSVMFree(context, svm);
   assert(clReleaseCommandQueue(queue) == CL_SUCCESS);
   assert(clReleaseContext(context) == CL_SUCCESS);
+  assert(server.launches() == 40);
+  server.check();
   return 0;
 }

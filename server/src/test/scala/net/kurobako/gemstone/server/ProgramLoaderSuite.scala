@@ -37,7 +37,7 @@ final class ProgramLoaderSuite extends munit.FunSuite {
   test("the composite routes each format through an isolated loader") {
     val ptx      = RecordingLoader(ProgramFormat.PTX, "ptx")
     val spirv    = RecordingLoader(ProgramFormat.SPIRV, "spirv")
-    val executor = ISATypedProgramExecutor.create(Col(ptx, spirv)).toOption.get
+    val executor = RegisteredProgramExecutor.create(Col(ptx, spirv)).toOption.get
     val ptxId    = ProgramId.fromLong(1L).toOption.get
     val spirvId  = ProgramId.fromLong(2L).toOption.get
 
@@ -56,7 +56,7 @@ final class ProgramLoaderSuite extends munit.FunSuite {
   }
 
   test("duplicate format ownership is rejected before programs can load") {
-    val result = ISATypedProgramExecutor.create(
+    val result = RegisteredProgramExecutor.create(
       Col(RecordingLoader(ProgramFormat.PTX, "first"), RecordingLoader(ProgramFormat.PTX, "second"))
     )
     assert(result.left.exists(_.contains("PTX")))
@@ -64,7 +64,7 @@ final class ProgramLoaderSuite extends munit.FunSuite {
 
   test("a duplicate program ID is rejected before preparing another program") {
     val loads    = AtomicInteger()
-    val executor = ISATypedProgramExecutor.create(Col(CountingLoader(loads))).toOption.get
+    val executor = RegisteredProgramExecutor.create(Col(CountingLoader(loads))).toOption.get
     val id       = ProgramId.fromLong(1L).toOption.get
 
     assertEquals(executor.load(id, ProgramFormat.PTX, Col.empty), Right(()))

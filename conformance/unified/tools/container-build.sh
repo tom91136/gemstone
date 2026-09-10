@@ -1,18 +1,22 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+script_directory="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+source "$script_directory/../../tools/container-common.sh"
+conformance_fixture_lock "$@"
+
 usage() {
   cat >&2 <<'EOF'
-usage: container-build.sh <host|cuda|hip|sycl> [output-directory]
+usage: container-build.sh <host|cuda|hip|sycl|opencl|hsa> [output-directory]
 
 Build the unified suite in a pinned vendor container and install a relocatable
 artifact on the host.  The output directory must be empty or absent.
 
-Images can be overridden with GEMSTONE_UNIFIED_<BACKEND>_IMAGE.  The default
-engine is podman (set GEMSTONE_UNIFIED_CONTAINER_ENGINE to use docker).
+Images can be overridden with GEMSTONE_<BACKEND>_IMAGE.  The default
+engine is podman (set GEMSTONE_CONTAINER_ENGINE to use docker).
 Set GEMSTONE_UNIFIED_CONTAINER_RUN_CTEST=1 to run CTest in the build container.
 Set GEMSTONE_UNIFIED_BUNDLE_RUNTIME=0 to omit vendor user-space libraries.
-Set GEMSTONE_UNIFIED_CONTAINER_DEVICES to a comma-separated list of Podman/
+Set GEMSTONE_CONTAINER_DEVICES to a comma-separated list of Podman/
 Docker --device values when running CTest against a physical GPU.
 UNIFIED_SUITE_* cache variables are forwarded to the container configure.
 UNIFIED_SUITE_CUDA_ARCHITECTURES and UNIFIED_SUITE_HIP_ARCHITECTURES can pin
@@ -20,7 +24,7 @@ the device code targets as a comma- or semicolon-separated list (defaults are
 CUDA `75` and AMDGPU `gfx900`, so a build does not depend on GPU discovery on
 the host).
 The build/run container has no network by default; set
-GEMSTONE_UNIFIED_CONTAINER_NETWORK to an engine-supported network mode only
+GEMSTONE_CONTAINER_NETWORK to an engine-supported network mode only
 if a custom SDK requires it.
 EOF
   exit 2
@@ -28,33 +32,11 @@ EOF
 
 [[ $# -ge 1 && $# -le 2 ]] || usage
 backend="$1"
-case "$backend" in
-  host)
-    # Ubuntu 24.04 base, digest-pinned.
-    default_image="docker.io/library/ubuntu@sha256:1e0a86e57d247923571b75e0aaf48a1449cf8c543d51fb3e07a4a7d7bfa79316"
-    ;;
-  cuda)
-    # NVIDIA CUDA 13.3 devel, Ubuntu 24.04, digest-pinned.
-    default_image="docker.io/nvidia/cuda@sha256:69e9e39eb8fe2cda271654a0f5eac2f1bb946b2fb9c460eb19c7c3c155f4e64e"
-    ;;
-  hip)
-    # ROCm 7.2.4 development image, Ubuntu 24.04, digest-pinned.
-    default_image="docker.io/rocm/dev-ubuntu-24.04@sha256:92f309c51b52cef8762867848f1529dee821624f23cd5df38455e819538f762f"
-    ;;
-  sycl)
-    # Intel oneAPI toolkit 2026.1 image, Ubuntu 24.04, digest-pinned.
-    default_image="docker.io/intel/oneapi-toolkit@sha256:e9db518398753434ee5aab9740a25f1d3134396a30be1569cfad8f8b0d90740c"
-    ;;
-  *)
-    echo "unsupported backend: $backend" >&2
-    usage
-    ;;
-esac
+case "$backend" in host|cuda|hip|sycl|opencl|hsa) ;; *) usage ;; esac
 
-script_directory="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 source_directory="$(cd -- "$script_directory/.." && pwd -P)"
 repository_directory="$(cd -- "$source_directory/../.." && pwd -P)"
-output_directory="${2:-${GEMSTONE_UNIFIED_OUTPUT:-$repository_directory/target/unified-artifacts/$backend}}"
+output_directory="${2:-$repository_directory/target/unified-artifacts/$backend}"
 output_directory="$(mkdir -p -- "$output_directory" && cd -- "$output_directory" && pwd -P)"
 
 if [[ -n "$(find "$output_directory" -mindepth 1 -maxdepth 1 -print -quit)" ]]; then
@@ -63,41 +45,15 @@ if [[ -n "$(find "$output_directory" -mindepth 1 -maxdepth 1 -print -quit)" ]]; 
   exit 1
 fi
 
-engine="${GEMSTONE_UNIFIED_CONTAINER_ENGINE:-podman}"
-command -v "$engine" >/dev/null || {
-  echo "container engine not found: $engine" >&2
-  exit 1
-}
+for retired in UNIFIED_SUITE_CTEST_SHARDS UNIFIED_SUITE_SYCL_ALGORITHM_SIZES UNIFIED_SUITE_SYCL_EDGE_BLAS_SIZES; do
+  if [[ -v "$retired" ]]; then
+    echo "$retired is retired; use the common matrix settings" >&2
+    exit 2
+  fi
+done
 
-image_variable="GEMSTONE_UNIFIED_${backend^^}_IMAGE"
-image="${!image_variable:-$default_image}"
-image_is_present=1
-if [[ "$engine" == podman ]]; then
-  "$engine" image exists "$image" >/dev/null 2>&1 || image_is_present=0
-else
-  "$engine" image inspect "$image" >/dev/null 2>&1 || image_is_present=0
-fi
-if [[ "$image_is_present" == 0 ]]; then
-  echo "pulling $image" >&2
-  "$engine" pull "$image"
-fi
-
-builder_image="localhost/gemstone-unified-builder:${backend}"
-builder_uid="$(id -u)"
-builder_gid="$(id -g)"
-build_pull_args=()
-if [[ "$engine" == podman ]]; then
-  build_pull_args+=(--pull=never)
-else
-  build_pull_args+=(--pull=false)
-fi
-"$engine" build \
-  "${build_pull_args[@]}" \
-  --build-arg "BASE_IMAGE=$image" \
-  --build-arg "BUILDER_UID=$builder_uid" \
-  --build-arg "BUILDER_GID=$builder_gid" \
-  --tag "$builder_image" \
-  "$script_directory/../containers"
+conformance_container_init
+conformance_build_image
 
 cmake_args=(
   -DCMAKE_BUILD_TYPE=Release
@@ -107,6 +63,8 @@ cmake_args=(
   -DUNIFIED_SUITE_BUILD_CUDA=OFF
   -DUNIFIED_SUITE_BUILD_HIP=OFF
   -DUNIFIED_SUITE_BUILD_SYCL=OFF
+  -DUNIFIED_SUITE_BUILD_OPENCL=OFF
+  -DUNIFIED_SUITE_BUILD_HSA=OFF
   -DUNIFIED_SUITE_INSTALL_RUNNERS=ON
 )
 target_arch_manifest=""
@@ -121,7 +79,9 @@ case "$backend" in
     )
     ;;
   cuda)
-    cuda_architectures="${UNIFIED_SUITE_CUDA_ARCHITECTURES:-75}"
+    cuda_architectures="${UNIFIED_SUITE_CUDA_ARCHITECTURES:-${GEMSTONE_CUDA_ARCH:-75}}"
+    cuda_architectures="${cuda_architectures//sm_/}"
+    cuda_architectures="${cuda_architectures//,/;}"
     cuda_target="${cuda_architectures%%[;,]*}"
     cuda_target="${cuda_target%%-*}"
     target_arch_manifest="sm_${cuda_target#sm_}"
@@ -138,7 +98,8 @@ case "$backend" in
     )
     ;;
   hip)
-    hip_architectures="${UNIFIED_SUITE_HIP_ARCHITECTURES:-gfx900}"
+    hip_architectures="${UNIFIED_SUITE_HIP_ARCHITECTURES:-${GEMSTONE_AMDGPU_TARGETS:-gfx900}}"
+    hip_architectures="${hip_architectures//,/;}"
     target_arch_manifest="${hip_architectures%%[;,]*}"
     target_archs_manifest="${hip_architectures//;/,}"
     cmake_args+=(
@@ -146,6 +107,15 @@ case "$backend" in
       -DCMAKE_HIP_COMPILER=/opt/rocm/llvm/bin/clang++
       "-DCMAKE_HIP_ARCHITECTURES=${hip_architectures}"
     )
+    ;;
+  opencl)
+    cmake_args+=(-DUNIFIED_SUITE_BUILD_OPENCL=ON)
+    ;;
+  hsa)
+    hsa_targets="${GEMSTONE_AMDGPU_TARGETS:-gfx900}"
+    target_arch_manifest="${UNIFIED_SUITE_HSA_ARCHITECTURE:-${GEMSTONE_AMDGPU_ORACLE_TARGET:-${hsa_targets%%[;,]*}}}"
+    target_archs_manifest="$target_arch_manifest"
+    cmake_args+=(-DUNIFIED_SUITE_BUILD_HSA=ON "-DUNIFIED_SUITE_HSA_ARCHITECTURE=$target_arch_manifest")
     ;;
   sycl)
     cmake_args+=(
@@ -155,7 +125,6 @@ case "$backend" in
     ;;
 esac
 
-container_environment_args=()
 if [[ "$backend" == hip ]]; then
   # The runner's HIP targets are also needed when selecting the matching
   # rocBLAS/Tensile data below.  Pass them as data rather than relying on the
@@ -167,16 +136,14 @@ fi
 # CTest matrix to be changed without reintroducing a host-side CMake configure.
 # Values are passed as data (one cache variable per environment variable), not
 # through eval or a shell command string.
+
 for cache_variable in \
-  UNIFIED_SUITE_CTEST_SHARDS \
   UNIFIED_SUITE_CTEST_TIMEOUT \
   UNIFIED_SUITE_CTEST_PROFILE \
   UNIFIED_SUITE_ALGORITHM_SIZES \
-  UNIFIED_SUITE_SYCL_ALGORITHM_SIZES \
   UNIFIED_SUITE_BLAS_SIZES \
   UNIFIED_SUITE_EDGE_CASE_SIZES \
   UNIFIED_SUITE_EDGE_BLAS_SIZES \
-  UNIFIED_SUITE_SYCL_EDGE_BLAS_SIZES \
   UNIFIED_SUITE_STRESS_SIZES \
   UNIFIED_SUITE_STRESS_ITERATIONS \
   UNIFIED_SUITE_MATRIX_SHAPES \
@@ -193,27 +160,16 @@ done
 
 bundle_runtime="${GEMSTONE_UNIFIED_BUNDLE_RUNTIME:-1}"
 run_ctest="${GEMSTONE_UNIFIED_CONTAINER_RUN_CTEST:-0}"
-container_userns_args=()
-if [[ "$engine" == podman ]]; then
-  container_userns_args+=(--userns=keep-id)
-fi
-container_device_args=()
-if [[ -n "${GEMSTONE_UNIFIED_CONTAINER_DEVICES:-}" ]]; then
-  IFS=',' read -r -a configured_devices <<<"$GEMSTONE_UNIFIED_CONTAINER_DEVICES"
-  for device in "${configured_devices[@]}"; do
-    [[ -n "$device" ]] && container_device_args+=(--device "$device")
-  done
-fi
-container_network="${GEMSTONE_UNIFIED_CONTAINER_NETWORK:-none}"
-
 echo "building $backend in $image" >&2
-"$engine" run --rm -i \
+"$engine" run --rm -i --name "$container_name" \
   "${container_userns_args[@]}" \
+  "${container_cgroup_args[@]}" \
   --user "$builder_uid:$builder_gid" \
   --security-opt label=disable \
   --network "$container_network" \
   "${container_environment_args[@]}" \
   "${container_device_args[@]}" \
+  --mount "type=bind,src=$script_directory/../../tools,dst=/gemstone-tools,ro" \
   --mount "type=bind,src=$source_directory,dst=/src,ro" \
   --mount "type=bind,src=$output_directory,dst=/out,rw" \
   "$builder_image" \
@@ -235,11 +191,12 @@ if [[ "$backend" == sycl && -f /opt/intel/oneapi/setvars.sh ]]; then
   source /opt/intel/oneapi/setvars.sh >/dev/null 2>&1 || true
 fi
 cmake -S /src -B /work/build -G Ninja "$@"
-cmake --build /work/build --parallel
+cmake --build /work/build --parallel "$CMAKE_BUILD_PARALLEL_LEVEL"
 if [[ "$run_ctest" == 1 ]]; then
-  ctest --test-dir /work/build --output-on-failure --parallel
+  ctest --test-dir /work/build --output-on-failure --parallel 1
 fi
 cmake --install /work/build --prefix /out
+ctest --test-dir /work/build --show-only=json-v1 > /out/ctest-inventory.json
 
 if [[ "$bundle_runtime" == 1 && "$backend" != host ]]; then
   mkdir -p /out/lib
@@ -300,63 +257,9 @@ if [[ "$bundle_runtime" == 1 && "$backend" != host ]]; then
     cp -a -- /usr/share/libdrm/amdgpu.ids /out/share/libdrm/
   fi
 
-  is_host_abi_library() {
-    local name="$(basename -- "$1")"
-    case "$name" in
-      libc.so*|ld-linux*.so*|libm.so*|libpthread.so*|libdl.so*|librt.so*|libresolv.so*|libutil.so*|libcrypt.so*|libnss_*.so*)
-        return 0
-        ;;
-      # CUDA and Level Zero driver entry points are supplied by the host.  They
-      # are ABI boundaries, rather than SDK user-space libraries.
-      libcuda.so*|libnvidia-*.so*|libze_intel_gpu.so*)
-        return 0
-        ;;
-      *)
-        return 1
-        ;;
-    esac
-  }
-
-  # Resolve the complete ELF closure, not just libraries whose names look
-  # vendor-specific.  Ordinary userspace dependencies (zstd, libelf, libdrm,
-  # libnuma, ...) are part of the artifact; only the host ABI/driver allow-list
-  # above remains external.
-  is_bundle_library() {
-    local path="$1"
-    [[ "$path" == /opt/* || "$path" == /usr/local/cuda/* || "$path" == /usr/local/cuda-*/* || "$path" == /usr/lib/* || "$path" == /usr/lib64/* || "$path" == /lib/* || "$path" == /lib64/* ]] || return 1
-    is_host_abi_library "$path" && return 1
-    return 0
-  }
-
-  pending=()
-  declare -A seen=()
-  bundle_library() {
-    local dependency="$1"
-    local real="$(readlink -f -- "$dependency")"
-    [[ -f "$real" ]] || return 0
-    local real_name="$(basename -- "$real")"
-    if [[ -z "${seen[$real]+present}" ]]; then
-      seen["$real"]=1
-      cp -a -- "$real" "/out/lib/$real_name"
-      pending+=("$real")
-    fi
-    if command -v readelf >/dev/null; then
-      local soname
-      soname="$(readelf -d "$real" 2>/dev/null | sed -n 's/.*(SONAME).*\[\([^]]*\)\].*/\1/p' | head -1)"
-      if [[ -n "$soname" && "$soname" != "$real_name" ]]; then
-        ln -sfn -- "$real_name" "/out/lib/$soname"
-      fi
-    fi
-    local dependency_name="$(basename -- "$dependency")"
-    if [[ "$dependency_name" != "$real_name" ]]; then
-      ln -sfn -- "$real_name" "/out/lib/$dependency_name"
-    fi
-  }
-
-  for executable in /out/bin/*; do
-    [[ -x "$executable" && ! -d "$executable" ]] && pending+=("$executable")
-  done
-  if [[ "$backend" == hip ]]; then
+  source /gemstone-tools/runtime-bundle.sh
+  bundle_begin /out 1
+  if [[ "$backend" == hip || "$backend" == hsa ]]; then
     # ROCr discovers these components with dlopen rather than DT_NEEDED.  Seed
     # the closure explicitly so a relocated run never falls back to /opt/rocm.
     for plugin in \
@@ -384,68 +287,12 @@ if [[ "$bundle_runtime" == 1 && "$backend" != host ]]; then
       bundle_library "$plugin"
     done
   fi
-  for pass in $(seq 1 32); do
-    current=("${pending[@]}")
-    pending=()
-    for file in "${current[@]}"; do
-      [[ -f "$file" ]] || continue
-      dependency_output="$(ldd "$file" 2>&1)"
-      while IFS= read -r unresolved; do
-        [[ -n "$unresolved" ]] || continue
-        unresolved_name="${unresolved%% *}"
-        # A build container normally has no physical GPU, so its ldd output
-        # may legitimately omit the host driver ABI.  Every other unresolved
-        # dependency is a packaging error and must stop the build.
-        is_host_abi_library "$unresolved_name" && continue
-        echo "unresolved runtime dependency in $file: $unresolved" >&2
-        exit 1
-      done < <(grep 'not found' <<<"$dependency_output" || true)
-      while IFS= read -r dependency; do
-        [[ -n "$dependency" ]] || continue
-        is_bundle_library "$dependency" || continue
-        bundle_library "$dependency"
-      done < <(sed -nE 's/.*=> (\/[^ ]+).*/\1/p' <<<"$dependency_output")
-    done
-    ((${#pending[@]} == 0)) && break
-  done
+  bundle_resolve
 
-  # Every copied shared object is flat in /out/lib.  Rewrite its search path
-  # to that directory so no build-image /opt or /work path survives relocation.
-  if command -v patchelf >/dev/null; then
-    for shared_object in /out/lib/*; do
-      [[ -f "$shared_object" ]] || continue
-      file -b "$shared_object" | grep -q '^ELF ' || continue
-      patchelf --set-rpath '$ORIGIN' "$shared_object"
-    done
-  fi
 fi
 
-for executable in /out/bin/*; do
-  [[ -x "$executable" && ! -d "$executable" ]] || continue
-  # Vendor compiler drivers commonly append their implicit library directory
-  # to the install RPATH.  That directory is inside the build image and would
-  # make the artifact accidentally container-dependent, even when its library
-  # was copied above.  Keep only the relative bundle path.
-  if command -v patchelf >/dev/null; then
-    patchelf --set-rpath '$ORIGIN/../lib' "$executable"
-  fi
-  if command -v readelf >/dev/null &&
-      readelf -d "$executable" | grep -Eq '/(src|work|opt/rocm|opt/intel|usr/local/cuda[^/]*)/'; then
-    echo "non-relocatable path embedded in $executable" >&2
-    exit 1
-  fi
-done
-
-if command -v readelf >/dev/null; then
-  for shared_object in /out/lib/*; do
-    [[ -f "$shared_object" ]] || continue
-    file -b "$shared_object" | grep -q '^ELF ' || continue
-    if readelf -d "$shared_object" | grep -Eq '/(src|work|opt/rocm|opt/intel|usr/local/cuda[^/]*)/'; then
-      echo "non-relocatable path embedded in $shared_object" >&2
-      exit 1
-    fi
-  done
-fi
+source /gemstone-tools/runtime-bundle.sh
+bundle_relocate /out
 CONTAINER_SCRIPT
 
 commit="unknown"
@@ -453,7 +300,7 @@ if git -C "$repository_directory" rev-parse --verify HEAD >/dev/null 2>&1; then
   commit="$(git -C "$repository_directory" rev-parse HEAD)"
 fi
 if [[ ! -x "$output_directory/bin/unified_suite_${backend}" ]]; then
-  echo "container build did not produce the installed runner" >&2
+  echo "container build did not produce its installed runner" >&2
   exit 1
 fi
 {
@@ -462,14 +309,16 @@ fi
   printf 'build-image\t%s\n' "$image"
   printf 'source-commit\t%s\n' "$commit"
   printf 'runtime-libraries\t%s\n' "$bundle_runtime"
-  printf 'host-requirements\tlibc-loader-and-vendor-kernel-driver\n'
+  printf 'host-requirements\tlibc-cxx-abi-and-vendor-kernel-driver\n'
   if [[ -n "$target_arch_manifest" ]]; then
     printf 'target-arch\t%s\n' "$target_arch_manifest"
   fi
   if [[ -n "$target_archs_manifest" ]]; then
     printf 'target-archs\t%s\n' "$target_archs_manifest"
   fi
-  printf 'runner\tbin/unified_suite_%s\n' "$backend"
+  while IFS= read -r runner; do
+    printf 'runner\t%s\n' "${runner#"$output_directory/"}"
+  done < <(find "$output_directory/bin" -maxdepth 1 -type f -perm -u+x -name "unified_suite_${backend}*" | sort)
 } >"$output_directory/manifest.tsv"
 
 echo "relocated artifact: $output_directory" >&2

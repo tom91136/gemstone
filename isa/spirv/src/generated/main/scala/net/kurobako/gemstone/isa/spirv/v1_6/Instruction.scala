@@ -24319,17 +24319,8 @@ enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
       modsB: Option[Operand]
   ) extends Instruction(
         InstructionDef.UntypedGroupAsyncCopyKHR,
-        (Col(
-          resultType,
-          dest,
-          execution,
-          destination,
-          src,
-          elementNumBytes,
-          numElements,
-          stride,
-          event
-        ) ++ modsA.toCol ++ modsB.toCol)*
+        (Col(resultType, dest, execution, destination, src, elementNumBytes, numElements, stride, event) ++
+          modsA.toCol ++ modsB.toCol)*
       )
   case TraceRayKHR(
       accel: Operand,

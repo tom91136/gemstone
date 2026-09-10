@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <algorithm>
 #include <chrono>
+#include <condition_variable>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -22,6 +23,7 @@
 #include "gemstone/hsa/code_object_metadata.hpp"
 #include "gemstone/hsa/global.h"
 #include "gemstone/hsa/target.h"
+#include "gemstone/hsa/trace.h"
 #include "gemstone/hsa/virtual_kfd.h"
 #include "gemstone_execution_rpc.h"
 #include <hsa/hsa.h>
@@ -37,6 +39,8 @@ constexpr uint64_t kCpuRegion = 1;
 constexpr uint64_t kGpuRegion = 2;
 constexpr uint64_t kCpuPool = 1;
 constexpr uint64_t kGpuPool = 2;
+constexpr uint64_t kGroupPool = 3;
+constexpr size_t kGroupMemorySize = 64 * 1024;
 constexpr uint32_t kQueueMinimum = 1;
 constexpr uint32_t kQueueMaximum = 4096;
 constexpr uint64_t kVirtualMemorySize = UINT64_C(1) * 1024 * 1024 * 1024;
@@ -47,6 +51,7 @@ struct Signal {
   uint64_t kind = 0;
   alignas(8) int64_t value = 0;
   uint64_t *doorbell = nullptr;
+  std::atomic_bool live{true};
 };
 static_assert(offsetof(Signal, value) == 8);
 
@@ -56,6 +61,25 @@ struct Allocation {
   uint64_t id = 0;
   uint64_t pool = 0;
   bool owned = false;
+  // Transfers borrow the native storage while free/deregister retires it.
+  std::mutex transfer_lock;
+  bool retired = false;
+  std::vector<uint8_t> host_snapshot;
+
+  Allocation(void *base_value, size_t size_value, uint64_t id_value, uint64_t pool_value, bool owned_value)
+      : base(base_value), size(size_value), id(id_value), pool(pool_value), owned(owned_value) {}
+
+  bool prepare_host_snapshot() {
+    if (pool != kCpuPool || !host_snapshot.empty()) return true;
+    try {
+      // RegisterAllocation creates zero-filled remote storage. Subsequent
+      // uploads and copy-back keep this snapshot equal to its remote bytes.
+      host_snapshot.resize(size, 0);
+      return true;
+    } catch (...) {
+      return false;
+    }
+  }
 };
 using AllocationRef = std::shared_ptr<Allocation>;
 
@@ -69,11 +93,21 @@ struct Kernel {
 };
 using KernelRef = std::shared_ptr<Kernel>;
 
+struct GlobalStorage {
+  AllocationRef allocation;
+  uint64_t elf_address = 0;
+  size_t size = 0;
+  uint64_t kernel_object = 0;
+  std::vector<size_t> pointer_offsets;
+};
+using GlobalStorageRef = std::shared_ptr<GlobalStorage>;
+
 struct Global {
   uint64_t object = 0;
   std::string name;
   uint32_t size = 0;
   void *address = nullptr;
+  GlobalStorageRef storage;
 };
 using GlobalRef = std::shared_ptr<Global>;
 
@@ -81,7 +115,9 @@ struct Executable {
   uint64_t handle = 0;
   bool frozen = false;
   std::vector<KernelRef> kernels;
+  std::unordered_map<std::string, KernelRef> kernel_names;
   std::vector<GlobalRef> globals;
+  std::vector<GlobalStorageRef> global_storage;
 };
 using ExecutableRef = std::shared_ptr<Executable>;
 
@@ -102,6 +138,14 @@ struct Queue {
 };
 using QueueRef = std::shared_ptr<Queue>;
 
+struct AsyncHandler {
+  std::shared_ptr<Signal> signal;
+  hsa_signal_condition_t condition;
+  hsa_signal_value_t compare;
+  hsa_amd_signal_handler handler;
+  void *argument;
+};
+
 struct RuntimeState {
   std::mutex lock;
   uint32_t references = 0;
@@ -119,9 +163,15 @@ struct RuntimeState {
   std::unordered_map<uint64_t, ExecutableRef> executables;
   std::unordered_map<uint64_t, KernelRef> kernels;
   std::unordered_map<uint64_t, GlobalRef> globals;
+  std::unordered_map<uint64_t, GlobalStorageRef> global_storage;
+  std::condition_variable async_changed;
+  std::vector<std::shared_ptr<AsyncHandler>> async_handlers;
+  std::vector<std::thread> async_workers;
+  bool async_stopping = false;
 };
 
 int mirror_back(RuntimeState &runtime);
+void run_async_handlers(RuntimeState &runtime);
 
 RuntimeState &state() {
   // The public runtime can be reached from DSO finalizers. Keep the state alive
@@ -140,15 +190,8 @@ bool valid_agent(hsa_agent_t agent) { return agent.handle == kCpuAgent || agent.
 bool valid_gpu(hsa_agent_t agent) { return agent.handle == kGpuAgent; }
 bool valid_isa(hsa_isa_t isa) { return isa.handle == kGpuIsa; }
 bool valid_region(hsa_region_t region) { return region.handle == kCpuRegion || region.handle == kGpuRegion; }
-bool valid_pool(hsa_amd_memory_pool_t pool) { return pool.handle == kCpuPool || pool.handle == kGpuPool; }
+bool valid_pool(hsa_amd_memory_pool_t pool) { return pool.handle == kCpuPool || pool.handle == kGpuPool || pool.handle == kGroupPool; }
 
-uint32_t known_global_size(const std::string &name) {
-  if (name == "__omp_rtl_device_memory_pool_tracker") return 32;
-  if (name == "__omp_rtl_device_memory_pool") return 16;
-  if (name == "__omp_rtl_device_environment") return 48;
-  if (name == "llvm_omp_target_device_environment") return 48;
-  return 0;
-}
 
 template <typename T> bool copy_value(void *destination, const T &value) {
   if (destination == nullptr) return false;
@@ -166,7 +209,7 @@ void copy_name(void *destination, const char *name) {
 std::string isa_name() { return std::string("amdgcn-amd-amdhsa--") + gemstone::hsa::target_arch(); }
 
 bool trace_api() {
-  static const bool enabled = std::getenv("GEMSTONE_HSA_TRACE_API") != nullptr;
+  static const bool enabled = gemstone::hsa::trace_enabled("api");
   return enabled;
 }
 
@@ -228,6 +271,7 @@ int public_signal_complete(void *context, uint64_t handle) {
     return 0;
   }
   __atomic_fetch_sub(&signal->value, INT64_C(1), __ATOMIC_RELEASE);
+  runtime.async_changed.notify_all();
   return 0;
 }
 
@@ -242,17 +286,21 @@ int public_signal_fail(void *context, uint64_t handle, int32_t error_code) {
   if (!signal) return -1;
   const int64_t value = error_code < 0 ? error_code : -static_cast<int64_t>(error_code) - 1;
   __atomic_store_n(&signal->value, value, __ATOMIC_RELEASE);
+  runtime.async_changed.notify_all();
   return 0;
 }
 
 AllocationRef find_allocation(RuntimeState &runtime, const void *pointer, size_t size = 0) {
   const auto address = reinterpret_cast<uintptr_t>(pointer);
+  AllocationRef endpoint;
   for (const auto &[_, allocation] : runtime.allocations) {
     const auto base = reinterpret_cast<uintptr_t>(allocation->base);
     if (address < base || address - base > allocation->size) continue;
-    if (size <= allocation->size - (address - base)) return allocation;
+    if (size > allocation->size - (address - base)) continue;
+    if (address - base < allocation->size) return allocation;
+    endpoint = allocation;
   }
-  return {};
+  return endpoint;
 }
 
 AllocationRef find_allocation_id(RuntimeState &runtime, uint64_t id) {
@@ -260,9 +308,41 @@ AllocationRef find_allocation_id(RuntimeState &runtime, uint64_t id) {
   return found == runtime.allocation_ids.end() ? AllocationRef{} : found->second;
 }
 
-int upload(const RuntimeState &runtime, const AllocationRef &allocation, size_t offset, size_t size) {
-  const bool trace_all = std::getenv("GEMSTONE_HSA_TRACE_MEMORY_ALL") != nullptr;
-  const bool trace = std::getenv("GEMSTONE_HSA_TRACE_MEMORY") != nullptr && (trace_all || allocation->id == 4);
+uint64_t native_global_pointer(RuntimeState &runtime, const GlobalStorage &storage, uint64_t pointer) {
+  for (const auto &[_, target] : runtime.global_storage) {
+    if (target->kernel_object != storage.kernel_object || pointer < target->elf_address) continue;
+    if (pointer - target->elf_address <= target->size)
+      return reinterpret_cast<uint64_t>(target->allocation->base) + pointer - target->elf_address;
+  }
+  constexpr uint64_t base = UINT64_C(0x400000000000), span = UINT64_C(0x100000000);
+  if (pointer >= base) {
+    const uint64_t id = (pointer - base) / span + 1;
+    const uint64_t offset = (pointer - base) % span;
+    const auto allocation = find_allocation_id(runtime, id);
+    if (allocation && offset <= allocation->size) return reinterpret_cast<uint64_t>(allocation->base) + offset;
+  }
+  return pointer;
+}
+
+void restore_global_pointers(RuntimeState &runtime, const AllocationRef &allocation, size_t offset, size_t size) {
+  std::lock_guard<std::mutex> guard(runtime.lock);
+  const auto found = runtime.global_storage.find(allocation->id);
+  if (found == runtime.global_storage.end()) return;
+  for (size_t position : found->second->pointer_offsets) {
+    if (position < offset || position - offset > size || size - (position - offset) < sizeof(uint64_t)) continue;
+    auto *address = static_cast<uint8_t *>(allocation->base) + position;
+    uint64_t pointer = 0;
+    std::memcpy(&pointer, address, sizeof(pointer));
+    pointer = native_global_pointer(runtime, *found->second, pointer);
+    std::memcpy(address, &pointer, sizeof(pointer));
+  }
+}
+
+int upload(RuntimeState &runtime, const AllocationRef &allocation, size_t offset, size_t size, bool optional = false) {
+  std::lock_guard<std::mutex> transfer(allocation->transfer_lock);
+  if (allocation->retired) return optional ? 0 : -1;
+  if (!allocation->prepare_host_snapshot()) return -1;
+  const bool trace = gemstone::hsa::trace_enabled("memory");
   const size_t start = offset;
   const size_t requested = size;
   if (trace) {
@@ -270,18 +350,40 @@ int upload(const RuntimeState &runtime, const AllocationRef &allocation, size_t 
     const auto *sample = static_cast<const uint8_t *>(allocation->base) + offset;
     for (size_t index = 0; index < std::min<size_t>(16, size); ++index) std::fprintf(stderr, "%02x", sample[index]);
     std::fprintf(stderr, "\n");
-    for (size_t probe : {size_t(1280), size_t(1536), size_t(1552), size_t(1792)})
-      if (probe >= offset && probe + 8 <= offset + size) {
-        std::fprintf(stderr, "Gemstone HSA upload probe allocation=%lu offset=%zu bytes=", allocation->id, probe);
-        for (size_t index = 0; index < 8; ++index)
-          std::fprintf(stderr, "%02x", static_cast<const uint8_t *>(allocation->base)[probe + index]);
-        std::fprintf(stderr, "\n");
-      }
   }
   auto *bytes = static_cast<const uint8_t *>(allocation->base) + offset;
+  std::vector<uint8_t> relocated;
+  {
+    std::lock_guard<std::mutex> guard(runtime.lock);
+    const auto global = runtime.global_storage.find(allocation->id);
+    if (global != runtime.global_storage.end()) {
+      relocated.assign(bytes, bytes + size);
+      for (size_t position = 0; position + sizeof(uint64_t) <= size; ++position) {
+        uint64_t pointer = 0;
+        std::memcpy(&pointer, relocated.data() + position, sizeof(pointer));
+        const auto target = find_allocation(runtime, reinterpret_cast<void *>(pointer));
+        if (!target) continue;
+        const uint64_t relative = pointer - reinterpret_cast<uint64_t>(target->base);
+        const auto bound = runtime.global_storage.find(target->id);
+        // Ordinary allocations retain their registered native address, matching typed kernel arguments.
+        const uint64_t encoded = bound != runtime.global_storage.end() && bound->second->kernel_object == global->second->kernel_object
+                                         && relative <= bound->second->size
+                                     ? bound->second->elf_address + relative
+                                     : pointer;
+        std::memcpy(relocated.data() + position, &encoded, sizeof(encoded));
+        auto &fields = global->second->pointer_offsets;
+        if (std::find(fields.begin(), fields.end(), offset + position) == fields.end()) fields.push_back(offset + position);
+        position += sizeof(uint64_t) - 1;
+      }
+      bytes = relocated.data();
+    }
+  }
   while (size != 0) {
     const uint32_t chunk = static_cast<uint32_t>(std::min<size_t>(size, kTransferChunk));
-    if (gemstone_execution_write_allocation(runtime.client, allocation->id, offset, bytes, chunk) != 0) return -1;
+    if (allocation->host_snapshot.empty() || std::memcmp(allocation->host_snapshot.data() + offset, bytes, chunk) != 0) {
+      if (gemstone_execution_write_allocation(runtime.client, allocation->id, offset, bytes, chunk) != 0) return -1;
+      if (!allocation->host_snapshot.empty()) std::memcpy(allocation->host_snapshot.data() + offset, bytes, chunk);
+    }
     offset += chunk;
     bytes += chunk;
     size -= chunk;
@@ -290,9 +392,10 @@ int upload(const RuntimeState &runtime, const AllocationRef &allocation, size_t 
   return 0;
 }
 
-int download(const RuntimeState &runtime, const AllocationRef &allocation, size_t offset, size_t size) {
-  const bool trace_all = std::getenv("GEMSTONE_HSA_TRACE_MEMORY_ALL") != nullptr;
-  const bool trace = std::getenv("GEMSTONE_HSA_TRACE_MEMORY") != nullptr && (trace_all || allocation->id == 4);
+int download(RuntimeState &runtime, const AllocationRef &allocation, size_t offset, size_t size) {
+  std::lock_guard<std::mutex> transfer(allocation->transfer_lock);
+  if (allocation->retired || !allocation->prepare_host_snapshot()) return -1;
+  const bool trace = gemstone::hsa::trace_enabled("memory");
   const size_t start = offset;
   const size_t requested = size;
   if (trace)
@@ -301,10 +404,12 @@ int download(const RuntimeState &runtime, const AllocationRef &allocation, size_
   while (size != 0) {
     const uint32_t chunk = static_cast<uint32_t>(std::min<size_t>(size, kTransferChunk));
     if (gemstone_execution_read_allocation(runtime.client, allocation->id, offset, bytes, chunk) != 0) return -1;
+    if (!allocation->host_snapshot.empty()) std::memcpy(allocation->host_snapshot.data() + offset, bytes, chunk);
     offset += chunk;
     bytes += chunk;
     size -= chunk;
   }
+  restore_global_pointers(runtime, allocation, start, requested);
   if (trace) {
     const auto *sample = static_cast<const uint8_t *>(allocation->base) + start;
     std::fprintf(stderr, "Gemstone HSA download end allocation=%lu sample=", allocation->id);
@@ -328,23 +433,28 @@ int upload_dispatch_allocations(RuntimeState &runtime, const void *packet, size_
   if (count != 0 && gemstone_hsa_aql_runtime_dispatch_allocations(runtime.aql, packet, packet_size, ids.data(), count, &count) != 0) {
     return -1;
   }
-  std::vector<AllocationRef> allocations;
+  std::vector<std::pair<AllocationRef, bool>> allocations;
   {
     std::lock_guard<std::mutex> guard(runtime.lock);
-    allocations.reserve(ids.size());
+    allocations.reserve(ids.size() + runtime.allocations.size());
     for (uint64_t id : ids) {
       auto allocation = find_allocation_id(runtime, id);
       if (!allocation) {
         return -1;
       }
-      allocations.push_back(std::move(allocation));
+      allocations.emplace_back(std::move(allocation), false);
     }
+    // Fine-grained CPU pools and registered host memory can be reached through
+    // native pointer data without appearing as direct kernargs. Refresh those
+    // mirrors too; unrelated device-only buffers remain remote-authoritative.
+    for (const auto &[_, allocation] : runtime.allocations)
+      if (allocation->pool == kCpuPool && std::find(ids.begin(), ids.end(), allocation->id) == ids.end())
+        allocations.emplace_back(allocation, true);
   }
-  for (const auto &allocation : allocations) {
-    if (std::getenv("GEMSTONE_HSA_TRACE_MEMORY_ALL") != nullptr ||
-        (std::getenv("GEMSTONE_HSA_TRACE_MEMORY") != nullptr && allocation->id == 4))
+  for (const auto &[allocation, optional] : allocations) {
+    if (gemstone::hsa::trace_enabled("memory"))
       std::fprintf(stderr, "Gemstone HSA dispatch upload allocation=%lu size=%zu\n", allocation->id, allocation->size);
-    if (upload(runtime, allocation, 0, allocation->size) != 0) {
+    if (upload(runtime, allocation, 0, allocation->size, optional) != 0) {
       return -1;
     }
   }
@@ -354,7 +464,7 @@ int upload_dispatch_allocations(RuntimeState &runtime, const void *packet, size_
 int mirror_back(RuntimeState &runtime) {
   uint32_t count = 0;
   if (gemstone_hsa_aql_runtime_take_dirty_ranges(runtime.aql, nullptr, 0, &count) != 0) return -1;
-  if (std::getenv("GEMSTONE_HSA_TRACE_MEMORY") != nullptr)
+  if (gemstone::hsa::trace_enabled("memory"))
     std::fprintf(stderr, "Gemstone HSA mirror query count=%u\n", count);
   std::vector<gemstone_hsa_dirty_range> ranges(count);
   if (count != 0 && gemstone_hsa_aql_runtime_take_dirty_ranges(runtime.aql, ranges.data(), count, &count) != 0) return -1;
@@ -365,7 +475,9 @@ int mirror_back(RuntimeState &runtime) {
       allocation = find_allocation_id(runtime, range.allocation_id);
     }
     if (!allocation || range.offset > allocation->size || range.size > allocation->size - range.offset) return -1;
-    if (std::getenv("GEMSTONE_HSA_TRACE_MEMORY_ALL") != nullptr || std::getenv("GEMSTONE_HSA_TRACE_MEMORY") != nullptr)
+    std::lock_guard<std::mutex> transfer(allocation->transfer_lock);
+    if (allocation->retired || !allocation->prepare_host_snapshot()) return -1;
+    if (gemstone::hsa::trace_enabled("memory"))
       std::fprintf(stderr, "Gemstone HSA mirror range allocation=%lu offset=%lu size=%u\n", range.allocation_id, range.offset, range.size);
     auto *bytes = static_cast<uint8_t *>(allocation->base) + range.offset;
     size_t offset = range.offset;
@@ -373,11 +485,13 @@ int mirror_back(RuntimeState &runtime) {
     while (remaining != 0) {
       const uint32_t chunk = static_cast<uint32_t>(std::min<size_t>(remaining, kTransferChunk));
       if (gemstone_execution_read_allocation(runtime.client, allocation->id, offset, bytes, chunk) != 0) return -1;
+      if (!allocation->host_snapshot.empty()) std::memcpy(allocation->host_snapshot.data() + offset, bytes, chunk);
       offset += chunk;
       bytes += chunk;
       remaining -= chunk;
     }
-    if (std::getenv("GEMSTONE_HSA_TRACE_MEMORY") != nullptr && allocation->id == 4)
+    restore_global_pointers(runtime, allocation, range.offset, range.size);
+    if (gemstone::hsa::trace_enabled("memory"))
       for (size_t probe : {size_t(1280), size_t(1536), size_t(1552), size_t(1792)})
         if (probe >= range.offset && probe + 8 <= range.offset + range.size) {
           std::fprintf(stderr, "Gemstone HSA mirror probe allocation=%lu offset=%zu bytes=", allocation->id, probe);
@@ -419,6 +533,13 @@ gemstone_hsa_packet_result consume(uint64_t queue_id, uint64_t packet_id, const 
     return GEMSTONE_HSA_PACKET_ACCEPTED;
   }
   const auto result = gemstone_hsa_aql_runtime_consume(queue_id, packet_id, stable, packet_size, runtime.aql);
+  // A completion signal is optional. Keep mirrors current before the queue
+  // advances, otherwise the next dispatch uploads stale host bytes over this
+  // dispatch's writes. Signalled packets already mirrored before notification.
+  if (result == GEMSTONE_HSA_PACKET_ACCEPTED && mirror_back(runtime) != 0) {
+    fail_packet(runtime, stable, packet_size, -3);
+    return GEMSTONE_HSA_PACKET_FATAL;
+  }
   return result;
 }
 
@@ -430,6 +551,29 @@ bool signal_condition(int64_t value, hsa_signal_condition_t condition, int64_t c
     case HSA_SIGNAL_CONDITION_GTE: return value >= compare;
   }
   return false;
+}
+
+void run_async_handlers(RuntimeState &runtime) {
+  std::unique_lock<std::mutex> lock(runtime.lock);
+  while (!runtime.async_stopping) {
+    runtime.async_changed.wait_for(lock, std::chrono::microseconds(100));
+    if (runtime.async_stopping) break;
+    const auto ready = std::find_if(runtime.async_handlers.begin(), runtime.async_handlers.end(), [](const auto &entry) {
+      const auto current = __atomic_load_n(&entry->signal->value, __ATOMIC_ACQUIRE);
+      return entry->signal->live.load(std::memory_order_acquire) &&
+             signal_condition(current, entry->condition, entry->compare);
+    });
+    if (ready == runtime.async_handlers.end()) continue;
+    const auto entry = *ready;
+    runtime.async_handlers.erase(ready);
+    lock.unlock();
+    const auto current = __atomic_load_n(&entry->signal->value, __ATOMIC_ACQUIRE);
+    const bool keep = entry->handler(current, entry->argument);
+    lock.lock();
+    if (keep && !runtime.async_stopping && entry->signal->live.load(std::memory_order_acquire))
+      runtime.async_handlers.push_back(entry);
+    runtime.async_changed.notify_all();
+  }
 }
 
 hsa_signal_value_t wait_signal(hsa_signal_t signal, hsa_signal_condition_t condition, hsa_signal_value_t compare, uint64_t timeout_hint) {
@@ -490,13 +634,14 @@ hsa_status_t allocate(RuntimeState &runtime, uint64_t pool, size_t requested, vo
     std::free(memory);
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
-  if (gemstone_hsa_aql_runtime_register_allocation(runtime.aql, reinterpret_cast<uint64_t>(memory), size, id) != 0) {
+  if (gemstone_execution_register_allocation_address(runtime.client, id, reinterpret_cast<uint64_t>(memory)) != 0
+      || gemstone_hsa_aql_runtime_register_allocation(runtime.aql, reinterpret_cast<uint64_t>(memory), size, id) != 0) {
     gemstone_execution_release_allocation(runtime.client, id);
     std::free(memory);
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
   try {
-    auto allocation = std::make_shared<Allocation>(Allocation{memory, size, id, pool, owned});
+    auto allocation = std::make_shared<Allocation>(memory, size, id, pool, owned);
     std::lock_guard<std::mutex> guard(runtime.lock);
     runtime.allocations.emplace(memory, allocation);
     runtime.allocation_ids.emplace(id, allocation);
@@ -518,13 +663,20 @@ hsa_status_t free_allocation(RuntimeState &runtime, void *pointer, bool require_
     const auto found = runtime.allocations.find(pointer);
     if (found == runtime.allocations.end() || (require_owned && !found->second->owned)) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
     allocation = found->second;
-    runtime.allocations.erase(found);
+    if (runtime.global_storage.count(allocation->id) != 0) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+  }
+  std::lock_guard<std::mutex> transfer(allocation->transfer_lock);
+  if (allocation->retired) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+  if (gemstone_execution_release_allocation(runtime.client, allocation->id) != 0) return HSA_STATUS_ERROR;
+  allocation->retired = true;
+  {
+    std::lock_guard<std::mutex> guard(runtime.lock);
+    runtime.allocations.erase(pointer);
     runtime.allocation_ids.erase(allocation->id);
   }
   gemstone_hsa_aql_runtime_unregister_allocation(runtime.aql, reinterpret_cast<uint64_t>(allocation->base));
-  const int released = gemstone_execution_release_allocation(runtime.client, allocation->id);
   if (allocation->owned) std::free(allocation->base);
-  return released == 0 ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR;
+  return HSA_STATUS_SUCCESS;
 }
 
 bool valid_power_of_two(uint32_t value) { return value >= kQueueMinimum && value <= kQueueMaximum && (value & (value - 1U)) == 0; }
@@ -579,13 +731,10 @@ extern "C" hsa_status_t hsa_system_get_info(hsa_system_info_t attribute, void *v
       return copy_value(value, HSA_ENDIANNESS_LITTLE) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
     case HSA_SYSTEM_INFO_MACHINE_MODEL:
       return copy_value(value, HSA_MACHINE_MODEL_LARGE) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
-    case HSA_SYSTEM_INFO_EXTENSIONS:
-      std::memset(value, 0, 128);
-      return HSA_STATUS_SUCCESS;
-    case HSA_AMD_SYSTEM_INFO_SVM_SUPPORTED:
-      return copy_value(value, true) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    case HSA_SYSTEM_INFO_EXTENSIONS: std::memset(value, 0, 128); return HSA_STATUS_SUCCESS;
+    case HSA_AMD_SYSTEM_INFO_SVM_SUPPORTED: return copy_value(value, false) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
     case HSA_AMD_SYSTEM_INFO_SVM_ACCESSIBLE_BY_DEFAULT:
-      return copy_value(value, true) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
+      return copy_value(value, false) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
     case HSA_AMD_SYSTEM_INFO_EXT_VERSION_MAJOR:
       return copy_value(value, uint16_t(HSA_AMD_INTERFACE_VERSION_MAJOR)) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
     case HSA_AMD_SYSTEM_INFO_EXT_VERSION_MINOR:
@@ -594,10 +743,18 @@ extern "C" hsa_status_t hsa_system_get_info(hsa_system_info_t attribute, void *v
   }
 }
 
+// No public extension tables are advertised by HSA_SYSTEM_INFO_EXTENSIONS yet.
+// Callers may probe an optional table; reject it without publishing null function pointers as supported.
+extern "C" hsa_status_t hsa_system_get_major_extension_table(uint16_t extension, uint16_t version_major, size_t, void *) {
+  trace_api_call("hsa_system_get_major_extension_table", extension, version_major);
+  if (const auto status = require_initialized(state()); status != HSA_STATUS_SUCCESS) return status;
+  return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+}
+
 extern "C" hsa_status_t hsa_init() {
   trace_api_call("hsa_init");
   auto &runtime = state();
-  std::lock_guard<std::mutex> guard(runtime.lock);
+  std::unique_lock<std::mutex> guard(runtime.lock);
   if (runtime.references == std::numeric_limits<uint32_t>::max()) return HSA_STATUS_ERROR_REFCOUNT_OVERFLOW;
   if (runtime.references++ != 0) return HSA_STATUS_SUCCESS;
   runtime.client = gemstone_execution_client_create_from_environment();
@@ -622,13 +779,34 @@ extern "C" hsa_status_t hsa_init() {
     trace_api_result("hsa_init", HSA_STATUS_ERROR_OUT_OF_RESOURCES);
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
+  runtime.async_stopping = false;
+  try {
+    for (size_t index = 0; index < 4; ++index)
+      runtime.async_workers.emplace_back(run_async_handlers, std::ref(runtime));
+  } catch (...) {
+    runtime.async_stopping = true;
+    runtime.async_changed.notify_all();
+    guard.unlock();
+    for (auto &worker : runtime.async_workers)
+      if (worker.joinable()) worker.join();
+    runtime.async_workers.clear();
+    guard.lock();
+    gemstone_hsa_virtual_kfd_destroy(runtime.kfd);
+    gemstone_hsa_aql_runtime_destroy(runtime.aql);
+    gemstone_execution_client_destroy(runtime.client);
+    runtime.kfd = nullptr;
+    runtime.aql = nullptr;
+    runtime.client = nullptr;
+    runtime.references = 0;
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  }
   trace_api_result("hsa_init", HSA_STATUS_SUCCESS);
   return HSA_STATUS_SUCCESS;
 }
 
 extern "C" hsa_status_t hsa_shut_down() {
   auto &runtime = state();
-  std::lock_guard<std::mutex> guard(runtime.lock);
+  std::unique_lock<std::mutex> guard(runtime.lock);
   if (runtime.references == 0) return HSA_STATUS_ERROR_NOT_INITIALIZED;
   if (runtime.references > 1) {
     --runtime.references;
@@ -637,6 +815,13 @@ extern "C" hsa_status_t hsa_shut_down() {
   if (!runtime.queues.empty() || !runtime.allocations.empty() || !runtime.signals.empty() || !runtime.readers.empty()
       || !runtime.executables.empty())
     return HSA_STATUS_ERROR_INVALID_RUNTIME_STATE;
+  runtime.async_stopping = true;
+  runtime.async_changed.notify_all();
+  guard.unlock();
+  for (auto &worker : runtime.async_workers)
+    if (worker.joinable()) worker.join();
+  runtime.async_workers.clear();
+  guard.lock();
   gemstone_hsa_virtual_kfd_destroy(runtime.kfd);
   gemstone_hsa_aql_runtime_destroy(runtime.aql);
   gemstone_execution_client_destroy(runtime.client);
@@ -671,13 +856,47 @@ extern "C" hsa_status_t hsa_agent_get_info(hsa_agent_t agent, hsa_agent_info_t a
   if (!valid_agent(agent)) return HSA_STATUS_ERROR_INVALID_AGENT;
   if (value == nullptr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   const bool gpu = valid_gpu(agent);
+  // Software agents have no physical PCI identity or HDP registers. ROCclr
+  // queries these properties during discovery even when it does not use them.
+  if (attribute == static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_CHIP_ID)
+      || attribute == static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_BDFID)
+      || attribute == static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_DOMAIN)
+      || attribute == static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_MEMORY_WIDTH)
+      || attribute == static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_ASIC_REVISION))
+    return copy_value(value, uint32_t(0)) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  if (attribute == static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_COOPERATIVE_QUEUES))
+    return copy_value(value, false) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  if (attribute == static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_HDP_FLUSH))
+    return copy_value(value, hsa_amd_hdp_flush_t{nullptr, nullptr}) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
   if (attribute == static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_PRODUCT_NAME)) {
     copy_name(value, gpu ? gemstone::hsa::target_arch() : "Gemstone CPU");
     return HSA_STATUS_SUCCESS;
   }
   if (attribute == static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_TIMESTAMP_FREQUENCY))
     return copy_value(value, uint64_t(1000000000)) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
-  if (attribute == static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_COMPUTE_UNIT_COUNT))
+  if (attribute == static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_CACHELINE_SIZE))
+    return copy_value(value, uint32_t(64)) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  // These are software execution engines, with no device or VRAM clock.
+  if (attribute == static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_MAX_CLOCK_FREQUENCY)
+      || attribute == static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_MEMORY_MAX_FREQUENCY))
+    return copy_value(value, uint32_t(0)) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  if (attribute == static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_DRIVER_NODE_ID))
+    return copy_value(value, uint32_t(gpu ? 1 : 0)) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  if (attribute == static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_SCRATCH_LIMIT_MAX))
+    return copy_value(value, uint64_t(0)) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  if (attribute == static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_MEMORY_PROPERTIES)) {
+    std::memset(value, 0, 8);
+    return HSA_STATUS_SUCCESS;
+  }
+  if (attribute == static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_COMPUTE_UNIT_COUNT)
+      || attribute == static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_COOPERATIVE_COMPUTE_UNIT_COUNT)) {
+    // Report one schedulable unit: RDNA's WGP consists of two CUs. ROCclr
+    // divides this count by two in WGP mode when sizing its copy dispatches.
+    const std::string target = gemstone::hsa::target_arch();
+    const bool wgp = target.rfind("gfx10", 0) == 0 || target.rfind("gfx11", 0) == 0 || target.rfind("gfx12", 0) == 0;
+    return copy_value(value, uint32_t(gpu ? (wgp ? 2 : 1) : 0)) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+  if (attribute == static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_NUM_SIMDS_PER_CU))
     return copy_value(value, uint32_t(gpu ? 1 : 0)) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
   if (attribute == static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_MAX_WAVES_PER_CU))
     return copy_value(value, uint32_t(gpu ? 10 : 0)) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
@@ -696,8 +915,9 @@ extern "C" hsa_status_t hsa_agent_get_info(hsa_agent_t agent, hsa_agent_info_t a
                                                                                                  : HSA_STATUS_ERROR_INVALID_ARGUMENT;
     case HSA_AGENT_INFO_MACHINE_MODEL:
       return copy_value(value, HSA_MACHINE_MODEL_LARGE) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
-    case HSA_AGENT_INFO_PROFILE:
-      return copy_value(value, gpu ? HSA_PROFILE_FULL : HSA_PROFILE_BASE) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    // Device pointers must be registered; arbitrary host pointers are not
+    // executable memory, so advertising the full profile would bypass registration.
+    case HSA_AGENT_INFO_PROFILE: return copy_value(value, HSA_PROFILE_BASE) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
     case HSA_AGENT_INFO_DEFAULT_FLOAT_ROUNDING_MODE:
       return copy_value(value, HSA_DEFAULT_FLOAT_ROUNDING_MODE_NEAR) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
     case HSA_AGENT_INFO_WAVEFRONT_SIZE:
@@ -908,7 +1128,10 @@ extern "C" hsa_status_t hsa_memory_copy(void *dst, const void *src, size_t size)
   // GPU-pool allocations are remote-authoritative after a dispatch.  Pull the
   // source range back before exposing it through the ordinary host pointer;
   // otherwise DtoH and DtoD copies observe stale malloc backing storage.
-  if (source_allocation != nullptr && download(runtime, source_allocation, source_offset, size) != 0)
+  // Registered/pinned CPU storage is host-authoritative between commands. Downloading it
+  // here would erase the application's writes before an ordinary HtoD copy can consume them.
+  if (source_allocation != nullptr && source_allocation->pool == kGpuPool
+      && download(runtime, source_allocation, source_offset, size) != 0)
     return HSA_STATUS_ERROR;
   std::memmove(dst, src, size);
   if (destination) {
@@ -933,12 +1156,13 @@ extern "C" hsa_status_t hsa_memory_register(void *ptr, size_t size) {
   }
   if (gemstone_execution_register_allocation(runtime.client, id, size, GEMSTONE_ALLOCATION_SHARED) != 0)
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
-  if (gemstone_hsa_aql_runtime_register_allocation(runtime.aql, reinterpret_cast<uint64_t>(ptr), size, id) != 0) {
+  if (gemstone_execution_register_allocation_address(runtime.client, id, reinterpret_cast<uint64_t>(ptr)) != 0
+      || gemstone_hsa_aql_runtime_register_allocation(runtime.aql, reinterpret_cast<uint64_t>(ptr), size, id) != 0) {
     gemstone_execution_release_allocation(runtime.client, id);
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
   try {
-    auto allocation = std::make_shared<Allocation>(Allocation{ptr, size, id, kCpuPool, false});
+    auto allocation = std::make_shared<Allocation>(ptr, size, id, kCpuPool, false);
     std::lock_guard<std::mutex> guard(runtime.lock);
     runtime.allocations.emplace(ptr, allocation);
     runtime.allocation_ids.emplace(id, allocation);
@@ -1001,7 +1225,14 @@ extern "C" hsa_status_t hsa_signal_destroy(hsa_signal_t signal) {
   std::lock_guard<std::mutex> guard(runtime.lock);
   const auto found = runtime.signals.find(signal.handle);
   if (found == runtime.signals.end() || found->second->doorbell != nullptr) return HSA_STATUS_ERROR_INVALID_SIGNAL;
+  const auto value = found->second;
+  value->live.store(false, std::memory_order_release);
   runtime.signals.erase(found);
+  runtime.async_handlers.erase(
+      std::remove_if(runtime.async_handlers.begin(), runtime.async_handlers.end(),
+                     [&](const auto &entry) { return entry->signal == value; }),
+      runtime.async_handlers.end());
+  runtime.async_changed.notify_all();
   return HSA_STATUS_SUCCESS;
 }
 
@@ -1033,18 +1264,20 @@ extern "C" void hsa_signal_store_relaxed(hsa_signal_t signal, hsa_signal_value_t
   if (!target) return;
   __atomic_store_n(&target->value, value, __ATOMIC_RELAXED);
   if (target->doorbell != nullptr) __atomic_store_n(target->doorbell, static_cast<uint64_t>(value), __ATOMIC_RELEASE);
+  runtime.async_changed.notify_all();
 }
 
 extern "C" void hsa_signal_store_screlease(hsa_signal_t signal, hsa_signal_value_t value) {
   auto &runtime = state();
   std::lock_guard<std::mutex> guard(runtime.lock);
   const auto target = find_signal(runtime, signal);
-  if (std::getenv("GEMSTONE_HSA_TRACE_PACKETS") != nullptr)
+  if (gemstone::hsa::trace_enabled("packets"))
     std::fprintf(stderr, "Gemstone HSA signal store handle=%lu value=%ld found=%d doorbell=%p\n", signal.handle,
                  static_cast<int64_t>(value), target ? 1 : 0, target ? static_cast<void *>(target->doorbell) : nullptr);
   if (!target) return;
   __atomic_store_n(&target->value, value, __ATOMIC_RELEASE);
   if (target->doorbell != nullptr) __atomic_store_n(target->doorbell, static_cast<uint64_t>(value), __ATOMIC_RELEASE);
+  runtime.async_changed.notify_all();
 }
 
 extern "C" void hsa_signal_subtract_screlease(hsa_signal_t signal, hsa_signal_value_t value) {
@@ -1054,6 +1287,14 @@ extern "C" void hsa_signal_subtract_screlease(hsa_signal_t signal, hsa_signal_va
   if (!target) return;
   const auto result = __atomic_fetch_sub(&target->value, value, __ATOMIC_RELEASE) - value;
   if (target->doorbell != nullptr) __atomic_store_n(target->doorbell, static_cast<uint64_t>(result), __ATOMIC_RELEASE);
+  runtime.async_changed.notify_all();
+}
+
+// Silent stores may notify waiters; the software signal implementation uses the
+// same polling mechanism for both forms and preserves the specified ordering.
+extern "C" void hsa_signal_silent_store_relaxed(hsa_signal_t signal, hsa_signal_value_t value) { hsa_signal_store_relaxed(signal, value); }
+extern "C" void hsa_signal_silent_store_screlease(hsa_signal_t signal, hsa_signal_value_t value) {
+  hsa_signal_store_screlease(signal, value);
 }
 
 extern "C" void hsa_signal_store_release(hsa_signal_t signal, hsa_signal_value_t value) { hsa_signal_store_screlease(signal, value); }
@@ -1083,13 +1324,10 @@ extern "C" hsa_status_t hsa_amd_signal_async_handler(hsa_signal_t signal, hsa_si
   }
   if (!value) return HSA_STATUS_ERROR_INVALID_SIGNAL;
   try {
-    std::thread([value = std::move(value), condition, compare, handler, arg] {
-      for (;;) {
-        const auto current = __atomic_load_n(&value->value, __ATOMIC_ACQUIRE);
-        if (signal_condition(current, condition, compare) && !handler(current, arg)) return;
-        std::this_thread::yield();
-      }
-    }).detach();
+    auto entry = std::make_shared<AsyncHandler>(AsyncHandler{std::move(value), condition, compare, handler, arg});
+    std::lock_guard<std::mutex> guard(runtime.lock);
+    runtime.async_handlers.push_back(std::move(entry));
+    runtime.async_changed.notify_all();
   } catch (...) {
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
@@ -1129,7 +1367,7 @@ extern "C" hsa_status_t hsa_queue_create(hsa_agent_t agent, uint32_t size, hsa_q
       queue->callback_data = data;
       runtime.queues.emplace(&queue->value, queue);
       *result = &queue->value;
-      if (std::getenv("GEMSTONE_HSA_TRACE_PACKETS") != nullptr)
+      if (gemstone::hsa::trace_enabled("packets"))
         std::fprintf(stderr, "Gemstone HSA queue create queue=%p id=%lu ring=%p read=%p write=%p doorbell=%p signal=%lu\n",
                      static_cast<void *>(&queue->value), queue->resource.queue_id, queue->ring,
                      static_cast<void *>(queue->resource.read_pointer), static_cast<void *>(queue->resource.write_pointer),
@@ -1187,12 +1425,12 @@ extern "C" uint64_t hsa_queue_add_write_index_relaxed(const hsa_queue_t *queue, 
   std::lock_guard<std::mutex> guard(runtime.lock);
   const auto found = runtime.queues.find(const_cast<hsa_queue_t *>(queue));
   if (found == runtime.queues.end()) {
-    if (std::getenv("GEMSTONE_HSA_TRACE_PACKETS") != nullptr)
+    if (gemstone::hsa::trace_enabled("packets"))
       std::fprintf(stderr, "Gemstone HSA queue reserve queue=%p found=0 increment=%lu\n", static_cast<const void *>(queue), value);
     return 0;
   }
   const uint64_t previous = __atomic_fetch_add(found->second->resource.write_pointer, value, __ATOMIC_RELAXED);
-  if (std::getenv("GEMSTONE_HSA_TRACE_PACKETS") != nullptr)
+  if (gemstone::hsa::trace_enabled("packets"))
     std::fprintf(stderr, "Gemstone HSA queue reserve queue=%p found=1 previous=%lu next=%lu write=%p\n", static_cast<const void *>(queue),
                  previous, previous + value, static_cast<void *>(found->second->resource.write_pointer));
   return previous;
@@ -1323,6 +1561,21 @@ extern "C" hsa_status_t hsa_executable_load_agent_code_object(hsa_executable_t e
   if (!gemstone::hsa::parse_code_object_metadata(reader_value->bytes.data(), reader_value->bytes.size(), metadata, error)
       || metadata.empty())
     return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+  std::vector<gemstone::hsa::CodeObjectVariable> variables;
+  if (!gemstone::hsa::parse_code_object_variables(reader_value->bytes.data(), reader_value->bytes.size(), variables, error))
+    return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+  variables.erase(std::remove_if(variables.begin(), variables.end(),
+                                 [&](const auto &variable) {
+                                   return std::any_of(metadata.begin(), metadata.end(),
+                                                      [&](const auto &kernel) { return variable.name == kernel.symbol; });
+                                 }),
+                  variables.end());
+  {
+    std::lock_guard<std::mutex> guard(runtime.lock);
+    for (const auto &variable : variables)
+      for (const auto &global : executable_value->globals)
+        if (global->name == variable.name) return HSA_STATUS_ERROR_VARIABLE_ALREADY_DEFINED;
+  }
   std::vector<KernelRef> kernels;
   std::vector<gemstone_hsa_kernel_binding> bindings;
   try {
@@ -1349,6 +1602,96 @@ extern "C" hsa_status_t hsa_executable_load_agent_code_object(hsa_executable_t e
     std::fprintf(stderr, "hsa install failed: %s\n", gemstone_hsa_aql_runtime_error(runtime.aql));
     return HSA_STATUS_ERROR_INCOMPATIBLE_ARGUMENTS;
   }
+  std::vector<GlobalStorageRef> global_storage;
+  std::vector<GlobalRef> globals;
+  const auto rollback = [&]() {
+    for (const auto &kernel : kernels)
+      (void)gemstone_hsa_aql_runtime_remove_kernel(runtime.aql, kernel->object);
+    for (const auto &storage : global_storage) {
+      {
+        std::lock_guard<std::mutex> guard(runtime.lock);
+        runtime.global_storage.erase(storage->allocation->id);
+      }
+      (void)free_allocation(runtime, storage->allocation->base, true);
+    }
+  };
+  try {
+    std::sort(variables.begin(), variables.end(), [](const auto &left, const auto &right) { return left.address < right.address; });
+    std::vector<std::pair<uint64_t, uint64_t>> ranges;
+    for (const auto &variable : variables) {
+      if (variable.size == 0) continue;
+      if (variable.address > UINT64_MAX - variable.size) {
+        rollback();
+        return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+      }
+      const uint64_t end = variable.address + variable.size;
+      if (ranges.empty() || variable.address > ranges.back().second) ranges.emplace_back(variable.address, end);
+      else ranges.back().second = std::max(ranges.back().second, end);
+    }
+    for (const auto &[begin, end] : ranges) {
+      void *address = nullptr;
+      if (end - begin > kVirtualMemorySize || allocate(runtime, kGpuPool, end - begin, &address, true) != HSA_STATUS_SUCCESS) {
+        rollback();
+        return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+      }
+      auto storage = std::make_shared<GlobalStorage>();
+      {
+        std::lock_guard<std::mutex> guard(runtime.lock);
+        storage->allocation = find_allocation(runtime, address);
+      }
+      storage->elf_address = begin;
+      storage->size = end - begin;
+      storage->kernel_object = kernels.front()->object;
+      global_storage.push_back(storage);
+      {
+        std::lock_guard<std::mutex> guard(runtime.lock);
+        runtime.global_storage.emplace(storage->allocation->id, storage);
+      }
+    }
+    for (const auto &variable : variables) {
+      auto global = std::make_shared<Global>();
+      {
+        std::lock_guard<std::mutex> guard(runtime.lock);
+        global->object = runtime.next_kernel++;
+      }
+      global->name = variable.name;
+      global->size = variable.size;
+      if (variable.size != 0) {
+        const auto found = std::find_if(global_storage.begin(), global_storage.end(), [&](const auto &storage) {
+          return variable.address >= storage->elf_address && variable.address - storage->elf_address < storage->size;
+        });
+        if (found == global_storage.end()) {
+          rollback();
+          return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+        }
+        global->storage = *found;
+        const auto relative = variable.address - global->storage->elf_address;
+        global->address = static_cast<uint8_t *>(global->storage->allocation->base) + relative;
+        for (uint32_t offset : variable.pointer_offsets) {
+          auto &fields = global->storage->pointer_offsets;
+          if (std::find(fields.begin(), fields.end(), relative + offset) == fields.end()) fields.push_back(relative + offset);
+        }
+        if (gemstone_hsa_aql_runtime_bind_global(runtime.aql, kernels.front()->object, variable.name.c_str(),
+                                                 global->storage->allocation->id, relative)
+            != 0) {
+          std::fprintf(stderr, "hsa global binding failed: %s\n", gemstone_hsa_aql_runtime_error(runtime.aql));
+          rollback();
+          return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+        }
+      }
+      globals.push_back(global);
+    }
+    // Bind initializes from the server's relocated linked image. All aliases
+    // share one allocation, so host and kernel writes cannot diverge.
+    for (const auto &storage : global_storage)
+      if (download(runtime, storage->allocation, 0, storage->size) != 0) {
+        rollback();
+        return HSA_STATUS_ERROR;
+      }
+  } catch (...) {
+    rollback();
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  }
   {
     std::lock_guard<std::mutex> guard(runtime.lock);
     for (const auto &kernel : kernels) {
@@ -1356,6 +1699,18 @@ extern "C" hsa_status_t hsa_executable_load_agent_code_object(hsa_executable_t e
       runtime.kernels.emplace(kernel->object, kernel);
     }
     executable_value->kernels.insert(executable_value->kernels.end(), kernels.begin(), kernels.end());
+    for (const auto &kernel : kernels) {
+      executable_value->kernel_names.emplace(kernel->metadata.name, kernel);
+      executable_value->kernel_names.emplace(kernel->metadata.symbol, kernel);
+      if (kernel->metadata.symbol.size() > 3 &&
+          kernel->metadata.symbol.compare(kernel->metadata.symbol.size() - 3, 3, ".kd") == 0)
+        executable_value->kernel_names.emplace(
+            kernel->metadata.symbol.substr(0, kernel->metadata.symbol.size() - 3), kernel);
+    }
+    executable_value->globals.insert(executable_value->globals.end(), globals.begin(), globals.end());
+    executable_value->global_storage.insert(executable_value->global_storage.end(), global_storage.begin(), global_storage.end());
+    for (const auto &global : globals)
+      runtime.globals.emplace(global->object, global);
   }
   if (loaded != nullptr) loaded->handle = executable_handle.handle;
   return HSA_STATUS_SUCCESS;
@@ -1408,8 +1763,13 @@ extern "C" hsa_status_t hsa_executable_destroy(hsa_executable_t executable_handl
   }
   for (const auto &kernel : value->kernels)
     if (gemstone_hsa_aql_runtime_remove_kernel(runtime.aql, kernel->object) != 0) return HSA_STATUS_ERROR;
-  for (const auto &global : globals)
-    if (free_allocation(runtime, global->address, true) != HSA_STATUS_SUCCESS) return HSA_STATUS_ERROR;
+  for (const auto &storage : value->global_storage) {
+    {
+      std::lock_guard<std::mutex> guard(runtime.lock);
+      runtime.global_storage.erase(storage->allocation->id);
+    }
+    if (free_allocation(runtime, storage->allocation->base, true) != HSA_STATUS_SUCCESS) return HSA_STATUS_ERROR;
+  }
   return HSA_STATUS_SUCCESS;
 }
 
@@ -1419,16 +1779,27 @@ extern "C" hsa_status_t gemstone_hsa_executable_write_global(hsa_executable_t ex
   if (const auto status = require_initialized(runtime); status != HSA_STATUS_SUCCESS) return status;
   if (name == nullptr || name[0] == '\0' || (size != 0 && bytes == nullptr) || size > UINT32_MAX)
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-  uint64_t kernel_object = 0;
+  GlobalRef global;
   {
     std::lock_guard<std::mutex> guard(runtime.lock);
     const auto value = executable(runtime, executable_handle);
     if (!value) return HSA_STATUS_ERROR_INVALID_EXECUTABLE;
-    if (!value->frozen || value->kernels.empty()) return HSA_STATUS_ERROR_INVALID_EXECUTABLE_SYMBOL;
-    kernel_object = value->kernels.front()->object;
+    if (!value->frozen) return HSA_STATUS_ERROR_INVALID_EXECUTABLE_SYMBOL;
+    for (const auto &candidate : value->globals)
+      if (candidate->name == name) {
+        global = candidate;
+        break;
+      }
   }
-  const int result = gemstone_hsa_aql_runtime_write_global(runtime.aql, kernel_object, name, offset, bytes, static_cast<uint32_t>(size));
-  return result == 0 ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_SYMBOL_NAME;
+  if (!global) return HSA_STATUS_ERROR_INVALID_SYMBOL_NAME;
+  if (offset > global->size || size > global->size - offset) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  if (size == 0) return HSA_STATUS_SUCCESS;
+  // This extension is explicitly a host-to-device copy. Registered host
+  // buffers may have been modified since their last upload; downloading the
+  // source here would erase the caller's newly written bytes.
+  std::memmove(static_cast<uint8_t *>(global->address) + offset, bytes, size);
+  const auto relative = static_cast<uint8_t *>(global->address) - static_cast<uint8_t *>(global->storage->allocation->base) + offset;
+  return upload(runtime, global->storage->allocation, relative, size) == 0 ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR;
 }
 
 extern "C" hsa_status_t hsa_executable_get_symbol_by_name(hsa_executable_t executable_handle, const char *name, const hsa_agent_t *agent,
@@ -1444,11 +1815,10 @@ extern "C" hsa_status_t hsa_executable_get_symbol_by_name(hsa_executable_t execu
     value = executable(runtime, executable_handle);
     if (!value) return HSA_STATUS_ERROR_INVALID_EXECUTABLE;
     if (!value->frozen) return HSA_STATUS_ERROR_INVALID_EXECUTABLE_SYMBOL;
-    for (const auto &kernel : value->kernels) {
-      if (kernel->metadata.name == requested || kernel->metadata.symbol == requested || (kernel->metadata.symbol == requested + ".kd")) {
-        symbol->handle = kernel->object;
-        return HSA_STATUS_SUCCESS;
-      }
+    const auto kernel = value->kernel_names.find(requested);
+    if (kernel != value->kernel_names.end()) {
+      symbol->handle = kernel->second->object;
+      return HSA_STATUS_SUCCESS;
     }
     for (const auto &global : value->globals) {
       if (global->name == requested) {
@@ -1458,26 +1828,7 @@ extern "C" hsa_status_t hsa_executable_get_symbol_by_name(hsa_executable_t execu
     }
   }
 
-  const uint32_t size = known_global_size(requested);
-  if (size == 0) return HSA_STATUS_ERROR_INVALID_SYMBOL_NAME;
-  void *address = nullptr;
-  if (allocate(runtime, kGpuPool, size, &address, true) != HSA_STATUS_SUCCESS)
-    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
-  try {
-    auto global = std::make_shared<Global>();
-    std::lock_guard<std::mutex> guard(runtime.lock);
-    global->object = runtime.next_kernel++;
-    global->name = requested;
-    global->size = size;
-    global->address = address;
-    value->globals.push_back(global);
-    runtime.globals.emplace(global->object, global);
-    symbol->handle = global->object;
-    return HSA_STATUS_SUCCESS;
-  } catch (...) {
-    (void)free_allocation(runtime, address, true);
-    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
-  }
+  return HSA_STATUS_ERROR_INVALID_SYMBOL_NAME;
 }
 
 extern "C" hsa_status_t hsa_executable_symbol_get_info(hsa_executable_symbol_t symbol_handle, hsa_executable_symbol_info_t attribute,
@@ -1527,7 +1878,8 @@ extern "C" hsa_status_t hsa_amd_agent_iterate_memory_pools(hsa_agent_t agent, hs
   if (const auto status = require_initialized(runtime); status != HSA_STATUS_SUCCESS) return status;
   if (!valid_agent(agent)) return HSA_STATUS_ERROR_INVALID_AGENT;
   if (callback == nullptr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-  const auto status = callback(hsa_amd_memory_pool_t{agent.handle == kCpuAgent ? kCpuPool : kGpuPool}, data);
+  auto status = callback(hsa_amd_memory_pool_t{agent.handle == kCpuAgent ? kCpuPool : kGpuPool}, data);
+  if (status == HSA_STATUS_SUCCESS && valid_gpu(agent)) status = callback(hsa_amd_memory_pool_t{kGroupPool}, data);
   trace_api_result("hsa_amd_agent_iterate_memory_pools", status);
   return status;
 }
@@ -1538,7 +1890,25 @@ extern "C" hsa_status_t hsa_amd_memory_pool_get_info(hsa_amd_memory_pool_t pool,
   if (const auto status = require_initialized(runtime); status != HSA_STATUS_SUCCESS) return status;
   if (!valid_pool(pool)) return static_cast<hsa_status_t>(HSA_STATUS_ERROR_INVALID_MEMORY_POOL);
   if (value == nullptr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-  const uint32_t flags = HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_KERNARG_INIT
+  // LDS is allocated per workgroup by the executor, never by the host allocator.
+  if (pool.handle == kGroupPool) {
+    switch (attribute) {
+      case HSA_AMD_MEMORY_POOL_INFO_SEGMENT:
+        return copy_value(value, HSA_AMD_SEGMENT_GROUP) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
+      // ROCr returns a zero mask for non-global pools. LLVM queries this
+      // property before deciding whether to retain a pool for allocation.
+      case HSA_AMD_MEMORY_POOL_INFO_GLOBAL_FLAGS:
+        return copy_value(value, uint32_t(0)) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
+      case HSA_AMD_MEMORY_POOL_INFO_SIZE:
+        return copy_value(value, kGroupMemorySize) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
+      case HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_ALLOWED:
+      case HSA_AMD_MEMORY_POOL_INFO_ACCESSIBLE_BY_ALL:
+        return copy_value(value, false) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
+      default: return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    }
+  }
+  const uint32_t flags =
+      HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_KERNARG_INIT
       | (pool.handle == kCpuPool ? HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_FINE_GRAINED : HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_COARSE_GRAINED);
   switch (attribute) {
     case HSA_AMD_MEMORY_POOL_INFO_SEGMENT:
@@ -1568,7 +1938,9 @@ extern "C" hsa_status_t hsa_amd_memory_pool_allocate(hsa_amd_memory_pool_t pool,
   auto &runtime = state();
   if (const auto status = require_initialized(runtime); status != HSA_STATUS_SUCCESS) return status;
   if (!valid_pool(pool)) return static_cast<hsa_status_t>(HSA_STATUS_ERROR_INVALID_MEMORY_POOL);
-  if (flags != 0) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  // Executable means device code; the interpreter never executes host pages.
+  if ((flags & ~uint32_t(HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG)) != 0) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  if (pool.handle == kGroupPool) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
   return allocate(runtime, pool.handle, size, ptr, true);
 }
 
@@ -1631,6 +2003,21 @@ extern "C" hsa_status_t hsa_amd_memory_async_copy(void *dst, hsa_agent_t dst_age
   return complete_signal(completion) == 0 ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_SIGNAL;
 }
 
+extern "C" hsa_status_t hsa_amd_memory_copy_engine_status(hsa_agent_t dst_agent, hsa_agent_t src_agent, uint32_t *engine_ids_mask) {
+  auto &runtime = state();
+  if (const auto status = require_initialized(runtime); status != HSA_STATUS_SUCCESS) return status;
+  if (!valid_agent(dst_agent) || !valid_agent(src_agent)) return HSA_STATUS_ERROR_INVALID_AGENT;
+  if (engine_ids_mask == nullptr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  // One software copy engine, implemented by memory_async_copy_on_engine.
+  *engine_ids_mask = HSA_AMD_SDMA_ENGINE_0;
+  return HSA_STATUS_SUCCESS;
+}
+
+extern "C" hsa_status_t hsa_amd_memory_get_preferred_copy_engine(hsa_agent_t dst_agent, hsa_agent_t src_agent,
+                                                                 uint32_t *recommended_ids_mask) {
+  return hsa_amd_memory_copy_engine_status(dst_agent, src_agent, recommended_ids_mask);
+}
+
 extern "C" hsa_status_t hsa_amd_memory_async_copy_on_engine(void *dst, hsa_agent_t dst_agent, const void *src, hsa_agent_t src_agent,
                                                             size_t size, uint32_t dependency_count, const hsa_signal_t *dependencies,
                                                             hsa_signal_t completion, hsa_amd_sdma_engine_id_t, bool) {
@@ -1645,7 +2032,10 @@ extern "C" hsa_status_t hsa_amd_agent_memory_pool_get_info(hsa_agent_t agent, hs
   if (value == nullptr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   switch (attribute) {
     case HSA_AMD_AGENT_MEMORY_POOL_INFO_ACCESS:
-      return copy_value(value, HSA_AMD_MEMORY_POOL_ACCESS_ALLOWED_BY_DEFAULT) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
+      return copy_value(value, pool.handle == kGroupPool && !valid_gpu(agent) ? HSA_AMD_MEMORY_POOL_ACCESS_NEVER_ALLOWED
+                                                                              : HSA_AMD_MEMORY_POOL_ACCESS_ALLOWED_BY_DEFAULT)
+                 ? HSA_STATUS_SUCCESS
+                 : HSA_STATUS_ERROR_INVALID_ARGUMENT;
     case HSA_AMD_AGENT_MEMORY_POOL_INFO_NUM_LINK_HOPS:
       return copy_value(value, uint32_t(0)) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ARGUMENT;
     default: return HSA_STATUS_ERROR_INVALID_ARGUMENT;

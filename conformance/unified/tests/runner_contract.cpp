@@ -43,9 +43,9 @@ std::vector<unified_suite::Case> async_cases(const unified_suite::Configuration 
 }
 
 std::vector<unified_suite::Case> red_contract_cases(const unified_suite::Configuration &) {
-  return {{"legacy-red/contract/fails", [] { return unified_suite::Result::fail("known emulator defect"); },
+  return {{"regressions/contract/fails", [] { return unified_suite::Result::fail("known emulator defect"); },
            true},
-          {"legacy-red/contract/passes", [] { return unified_suite::Result::pass(); }, true}};
+          {"regressions/contract/passes", [] { return unified_suite::Result::pass(); }, true}};
 }
 
 template <class Operation> bool throws_invalid_argument(Operation operation) {
@@ -76,6 +76,25 @@ int run(unified_suite::RunOptions options) {
 } // namespace
 
 int main() {
+  const auto full = unified_suite::configuration_for_profile("full");
+  if (std::find(full.algorithm_sizes.begin(), full.algorithm_sizes.end(), 1024) ==
+          full.algorithm_sizes.end() ||
+      std::find(full.algorithm_sizes.begin(), full.algorithm_sizes.end(), 4096) ==
+          full.algorithm_sizes.end() ||
+      full.edge_case_sizes.back() != 1024 || full.stress_sizes.back() != 16384)
+    return 20;
+  if (!throws_invalid_argument([] { (void)unified_suite::configuration_for_profile("unknown"); }))
+    return 21;
+  for (bool profile_first : {false, true}) {
+    char executable[] = "runner", profile[] = "--profile=full", sizes[] = "--sizes=16384";
+    char *args[] = {executable, profile_first ? profile : sizes, profile_first ? sizes : profile};
+    std::ostringstream out, errors;
+    const auto options = unified_suite::parse_options(3, args, out, errors);
+    if (!options || options->configuration.algorithm_sizes != std::vector<std::size_t>{16384} ||
+        options->configuration.edge_case_sizes != std::vector<std::size_t>{16384} ||
+        options->configuration.stress_sizes != std::vector<std::size_t>{16384})
+      return 22;
+  }
   if (!throws_invalid_argument([] { (void)unified_suite::parse_sizes("-1"); }))
     return 1;
   if (!throws_exception([] { (void)unified_suite::parse_matrix_shapes("18446744073709551615x2x1"); }))
@@ -112,12 +131,9 @@ int main() {
       }))
     return 6;
 
-  unified_suite::RunOptions empty_shard;
-  empty_shard.suite = unified_suite::SuiteSelection::stress;
-  empty_shard.shard_count = 8;
-  empty_shard.shard_index = 1;
-  empty_shard.allow_empty_shard = true;
-  if (run(empty_shard) != 0)
+  unified_suite::RunOptions missing_case;
+  missing_case.exact_case = "not-a-case";
+  if (run(missing_case) != 2)
     return 7;
 
   unified_suite::RunOptions all_skipped;
@@ -130,16 +146,15 @@ int main() {
   if (run(all_skipped) != 0)
     return 9;
 
-  unified_suite::RunOptions invalid_shard;
-  invalid_shard.shard_count = 0;
-  if (run(invalid_shard) == 0)
+  all_skipped.exact_case = "algorithms/copy/f16/n1";
+  if (run(all_skipped) != 77)
     return 10;
 
   const unified_suite::CatalogProvider red_provider{red_contract_cases, red_contract_cases,
                                                     red_contract_cases, red_contract_cases};
   unified_suite::RunOptions red_options;
   red_options.suite = unified_suite::SuiteSelection::algorithms;
-  red_options.filter = std::regex("^legacy-red/contract/fails$");
+  red_options.filter = std::regex("^regressions/contract/fails$");
   std::ostringstream red_output;
   std::ostringstream red_errors;
   if (unified_suite::run(red_options, red_provider, red_output, red_errors) == 0)
@@ -147,22 +162,18 @@ int main() {
   red_options.expect_reds = true;
   if (unified_suite::run(red_options, red_provider, red_output, red_errors) != 0)
     return 12;
-  red_options.filter = std::regex("^legacy-red/contract/passes$");
+  red_options.filter = std::regex("^regressions/contract/passes$");
   if (unified_suite::run(red_options, red_provider, red_output, red_errors) == 0)
     return 13;
 
   char executable[] = "runner";
-  char include_reds[] = "--include-legacy-reds";
-  char legacy_root[] = "--legacy-bin-root=/tmp/legacy";
-  char legacy_output[] = "--legacy-output-dir=/tmp/legacy-reports";
+  char include_reds[] = "--include-regressions";
   char expect_reds[] = "--expect-reds";
-  char *red_arguments[] = {executable, include_reds, legacy_root, legacy_output, expect_reds};
+  char *red_arguments[] = {executable, include_reds, expect_reds};
   std::ostringstream parse_output;
   std::ostringstream parse_errors;
-  const auto parsed = unified_suite::parse_options(5, red_arguments, parse_output, parse_errors);
-  if (!parsed || !parsed->configuration.include_legacy_reds ||
-      parsed->configuration.legacy_binary_root != "/tmp/legacy" ||
-      parsed->configuration.legacy_output_directory != "/tmp/legacy-reports" || !parsed->expect_reds)
+  const auto parsed = unified_suite::parse_options(3, red_arguments, parse_output, parse_errors);
+  if (!parsed || !parsed->configuration.include_regressions || !parsed->expect_reds)
     return 14;
 
   char timing[] = "--timing";

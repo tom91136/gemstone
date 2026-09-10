@@ -12,6 +12,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <deque>
 #include <fcntl.h>
 #include <fstream>
 #include <functional>
@@ -35,6 +36,23 @@ namespace {
 
 constexpr uint64_t kMagic = UINT64_C(0x47454d53544f4e45);
 constexpr uint32_t kPointerRelocationSentinel = std::numeric_limits<uint32_t>::max();
+
+bool trace_opencl(const char *category) {
+  const char *value = std::getenv("GEMSTONE_OPENCL_TRACE");
+  if (value == nullptr) return false;
+  const size_t wanted = std::strlen(category);
+  while (*value != '\0') {
+    while (*value == ',' || *value == ' ') ++value;
+    const char *end = value;
+    while (*end != '\0' && *end != ',') ++end;
+    const size_t size = static_cast<size_t>(end - value);
+    if ((size == wanted && std::memcmp(value, category, size) == 0) ||
+        (size == 3 && std::memcmp(value, "all", 3) == 0))
+      return true;
+    value = end;
+  }
+  return false;
+}
 
 enum class Kind : uint32_t { Platform, Device, Context, Queue, Memory, Program, Kernel, Event };
 
@@ -99,7 +117,8 @@ struct BufferMapping {
   size_t offset = 0;
   size_t size = 0;
   void *pointer = nullptr;
-  bool release_pointer = false;
+  std::shared_ptr<void> storage;
+  bool unmapping = false;
 };
 
 struct Allocation {
@@ -118,6 +137,15 @@ struct Allocation {
   std::map<size_t, std::pair<std::shared_ptr<Allocation>, size_t>> pointer_relocations;
 };
 
+struct PendingCommand {
+  std::vector<cl_event> dependencies;
+  cl_event completion = nullptr;
+  std::function<cl_int()> execute;
+  bool wait_prior = false;
+  bool fence = false;
+  std::function<void(cl_int)> finish;
+};
+
 struct _cl_command_queue {
   const cl_icd_dispatch *dispatch = nullptr;
   Header header{Kind::Queue};
@@ -129,6 +157,8 @@ struct _cl_command_queue {
   std::condition_variable pending_condition;
   size_t pending_commands = 0;
   bool pending_failed = false;
+  bool worker_running = false;
+  std::deque<PendingCommand> commands;
 };
 
 struct _cl_mem {
@@ -142,7 +172,7 @@ struct _cl_mem {
   _cl_mem *parent = nullptr;
   size_t origin = 0;
   size_t size = 0;
-  std::map<uintptr_t, BufferMapping> mappings;
+  std::multimap<uintptr_t, std::shared_ptr<BufferMapping>> mappings;
   std::vector<std::pair<void (CL_CALLBACK *)(cl_mem, void *), void *>> destructor_callbacks;
 };
 
@@ -166,6 +196,7 @@ struct KernelArgument {
   enum class Kind { Scalar, Allocation, Local, SVM } kind = Kind::Scalar;
   std::vector<uint8_t> bytes;
   std::shared_ptr<Allocation> allocation;
+  _cl_mem *memory = nullptr; // Non-owning until an enqueue snapshots and retains it.
   size_t offset = 0;
 };
 
@@ -234,7 +265,7 @@ std::mutex events_mutex;
 std::condition_variable events_condition;
 std::map<uintptr_t, std::shared_ptr<Allocation>> allocations;
 std::map<uintptr_t, std::weak_ptr<Allocation>> allocation_history;
-std::map<uintptr_t, BufferMapping> svm_mappings;
+std::map<uintptr_t, std::shared_ptr<BufferMapping>> svm_mappings;
 std::vector<_cl_event *> live_events;
 std::atomic_uint64_t next_allocation{1};
 std::once_flag dispatch_initialized;
@@ -438,7 +469,7 @@ std::shared_ptr<Allocation> allocate(size_t size, cl_int *error, size_t requeste
     }
     allocation_history[key] = result;
   }
-  if (std::getenv("GEMSTONE_OPENCL_TRACE_ALLOC") != nullptr)
+  if (trace_opencl("allocations"))
     std::fprintf(stderr, "gemstone alloc base=%p id=%llu size=%zu\n", base,
                  static_cast<unsigned long long>(result->id), size);
   return result;
@@ -1524,8 +1555,6 @@ cl_int wait_list(_cl_command_queue *queue, cl_uint count, const cl_event *events
 cl_int validate_wait_list(_cl_command_queue *queue, cl_uint count, const cl_event *events) {
   if (count != 0 && events == nullptr) return CL_INVALID_EVENT_WAIT_LIST;
   if (count == 0 && events != nullptr) return queue == nullptr ? CL_INVALID_VALUE : CL_INVALID_EVENT_WAIT_LIST;
-  const auto queue_result = wait_queue(queue);
-  if (queue_result != CL_SUCCESS) return queue_result;
   std::lock_guard lock(events_mutex);
   for (cl_uint index = 0; index < count; ++index) {
     auto *event = checked(reinterpret_cast<_cl_event *>(events[index]), Kind::Event);
@@ -1559,14 +1588,238 @@ _cl_event *make_event(_cl_command_queue *queue, cl_command_type command, cl_even
   return event;
 }
 
+enum class PendingStep { Blocked, Progressed, Finished };
+
+PendingStep run_pending_once(_cl_command_queue *queue) {
+  PendingCommand command;
+  {
+    std::lock_guard event_lock(events_mutex);
+    std::lock_guard queue_lock(queue->pending_mutex);
+    if (queue->commands.empty()) {
+      queue->worker_running = false;
+      return PendingStep::Finished;
+    }
+    auto ready = queue->commands.end();
+    for (auto it = queue->commands.begin(); it != queue->commands.end(); ++it) {
+      if ((!it->wait_prior || it == queue->commands.begin()) &&
+          std::all_of(it->dependencies.begin(), it->dependencies.end(), [](cl_event value) {
+            return reinterpret_cast<_cl_event *>(value)->status <= CL_COMPLETE;
+          })) {
+        ready = it;
+        break;
+      }
+      if (it->fence || (queue->properties & CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE) == 0) break;
+    }
+    if (ready == queue->commands.end()) return PendingStep::Blocked;
+    command = std::move(*ready);
+    queue->commands.erase(ready);
+  }
+  cl_int result = CL_SUCCESS;
+  {
+    std::lock_guard lock(events_mutex);
+    for (auto dependency : command.dependencies)
+      if (reinterpret_cast<_cl_event *>(dependency)->status < 0)
+        result = CL_EXEC_STATUS_ERROR_FOR_EVENTS_IN_WAIT_LIST;
+  }
+  if (result == CL_SUCCESS) {
+    try { result = command.execute(); }
+    catch (const std::bad_alloc &) { result = CL_OUT_OF_HOST_MEMORY; }
+    catch (...) { result = CL_OUT_OF_RESOURCES; }
+  }
+  if (command.finish) command.finish(result);
+  command.finish = {};
+  command.execute = {};
+  for (auto dependency : command.dependencies) clReleaseEvent(dependency);
+  if (command.completion != nullptr) {
+    std::lock_guard lock(events_mutex);
+    auto *completion = reinterpret_cast<_cl_event *>(command.completion);
+    completion->status = result == CL_SUCCESS ? CL_COMPLETE : result;
+    completion->ended = now_nanos();
+  }
+  {
+    std::lock_guard lock(queue->pending_mutex);
+    queue->pending_failed = queue->pending_failed || result != CL_SUCCESS;
+    --queue->pending_commands;
+  }
+  queue->pending_condition.notify_all();
+  events_condition.notify_all();
+  if (command.completion != nullptr) {
+    notify_event_callbacks(reinterpret_cast<_cl_event *>(command.completion));
+    clReleaseEvent(command.completion);
+  }
+  return PendingStep::Progressed;
+}
+
+class QueueScheduler {
+public:
+  QueueScheduler() : worker_([this] { run(); }) {}
+  ~QueueScheduler() {
+    {
+      std::lock_guard lock(mutex_);
+      stopping_ = true;
+    }
+    changed_.notify_all();
+    worker_.join();
+    for (auto *queue : queues_)
+      clReleaseCommandQueue(reinterpret_cast<cl_command_queue>(queue));
+  }
+  void submit(_cl_command_queue *queue) {
+    std::lock_guard lock(mutex_);
+    queues_.push_back(queue);
+    changed_.notify_one();
+  }
+
+private:
+  void run() {
+    size_t blocked = 0;
+    for (;;) {
+      _cl_command_queue *queue = nullptr;
+      size_t scheduled = 0;
+      {
+        std::unique_lock lock(mutex_);
+        changed_.wait(lock, [&] { return stopping_ || !queues_.empty(); });
+        if (stopping_) return;
+        queue = queues_.front();
+        queues_.pop_front();
+        scheduled = queues_.size() + 1;
+      }
+      const auto step = run_pending_once(queue);
+      if (step == PendingStep::Finished) {
+        blocked = 0;
+        clReleaseCommandQueue(reinterpret_cast<cl_command_queue>(queue));
+      } else {
+        {
+          std::lock_guard lock(mutex_);
+          queues_.push_back(queue);
+        }
+        blocked = step == PendingStep::Blocked ? blocked + 1 : 0;
+        if (blocked >= scheduled) {
+          std::unique_lock lock(mutex_);
+          changed_.wait_for(lock, std::chrono::microseconds(100));
+          blocked = 0;
+        }
+      }
+    }
+  }
+
+  std::mutex mutex_;
+  std::condition_variable changed_;
+  std::deque<_cl_command_queue *> queues_;
+  bool stopping_ = false;
+  std::thread worker_;
+};
+
+QueueScheduler &queue_scheduler() {
+  static QueueScheduler scheduler;
+  return scheduler;
+}
+
+cl_int enqueue_pending(_cl_command_queue *queue, cl_command_type type,
+                       std::vector<cl_event> dependencies, std::function<cl_int()> execute,
+                       cl_event *output, bool wait_prior = false, bool fence = false,
+                       std::function<void(cl_int)> finish = {}) {
+  cl_event completion = nullptr;
+  if (output != nullptr) {
+    auto *created = make_event(queue, type, &completion);
+    if (created == nullptr) {
+      if (finish) finish(CL_OUT_OF_HOST_MEMORY);
+      return CL_OUT_OF_HOST_MEMORY;
+    }
+    std::lock_guard lock(events_mutex);
+    created->status = CL_QUEUED;
+    retain(created); // Separate caller and worker references before publication.
+  }
+  for (auto dependency : dependencies) clRetainEvent(dependency);
+  cl_int error = CL_SUCCESS;
+  {
+    std::lock_guard lock(queue->pending_mutex);
+    try {
+      queue->commands.push_back({dependencies, completion, std::move(execute), wait_prior, fence, finish});
+      ++queue->pending_commands;
+      if (!queue->worker_running) {
+        retain(queue);
+        queue->worker_running = true;
+        try {
+          queue_scheduler().submit(queue);
+        } catch (...) {
+          queue->worker_running = false;
+          clReleaseCommandQueue(reinterpret_cast<cl_command_queue>(queue));
+          queue->commands.pop_back();
+          --queue->pending_commands;
+          throw;
+        }
+      }
+    } catch (...) { error = CL_OUT_OF_HOST_MEMORY; }
+  }
+  if (error != CL_SUCCESS) {
+    if (finish) finish(error);
+    for (auto dependency : dependencies) clReleaseEvent(dependency);
+    if (completion != nullptr) { clReleaseEvent(completion); clReleaseEvent(completion); }
+    return error;
+  }
+  // Acquire the same mutex as the readiness check to avoid lost notifications.
+  {
+    std::lock_guard lock(events_mutex);
+    if (output != nullptr) *output = completion;
+    events_condition.notify_all();
+  }
+  return CL_SUCCESS;
+}
+
+std::shared_ptr<_cl_mem> retain_memory(_cl_mem *memory) {
+  retain(memory);
+  return {memory, [](_cl_mem *value) { clReleaseMemObject(reinterpret_cast<cl_mem>(value)); }};
+}
+
+cl_int submit_command(_cl_command_queue *queue, cl_command_type type, bool blocking,
+                      cl_uint count, const cl_event *waits, std::function<cl_int()> execute,
+                      cl_event *output, bool wait_prior = false, bool fence = false,
+                       std::function<void(cl_int)> finish = {}) {
+  if (queue == nullptr) { if (finish) finish(CL_INVALID_COMMAND_QUEUE); return CL_INVALID_COMMAND_QUEUE; }
+  auto result = validate_wait_list(queue, count, waits);
+  if (result != CL_SUCCESS) { if (finish) finish(result); return result; }
+  bool pending = false;
+  {
+    std::lock_guard lock(events_mutex);
+    for (cl_uint index = 0; index < count; ++index)
+      pending = pending || reinterpret_cast<_cl_event *>(waits[index])->status > CL_COMPLETE;
+  }
+  {
+    std::lock_guard lock(queue->pending_mutex);
+    pending = pending || queue->pending_commands != 0;
+  }
+  if (!pending) {
+    try { result = execute(); }
+    catch (const std::bad_alloc &) { result = CL_OUT_OF_HOST_MEMORY; }
+    catch (...) { result = CL_OUT_OF_RESOURCES; }
+    if (finish) finish(result);
+    if (result == CL_SUCCESS && output != nullptr && make_event(queue, type, output) == nullptr)
+      return CL_OUT_OF_HOST_MEMORY;
+    return result;
+  }
+  try {
+    std::vector<cl_event> dependencies;
+    for (cl_uint index = 0; index < count; ++index) dependencies.push_back(waits[index]);
+    cl_event completion = nullptr;
+    result = enqueue_pending(queue, type, std::move(dependencies), std::move(execute),
+                             blocking ? &completion : output, wait_prior, fence, finish);
+    if (!blocking || result != CL_SUCCESS) return result;
+    result = clWaitForEvents(1, &completion);
+    if (output != nullptr) *output = completion;
+    else clReleaseEvent(completion);
+    return result;
+  } catch (...) {
+    if (finish) finish(CL_OUT_OF_HOST_MEMORY);
+    return CL_OUT_OF_HOST_MEMORY;
+  }
+}
+
 cl_int complete_event(_cl_command_queue *queue, cl_command_type command, cl_uint count, const cl_event *waits,
                       cl_event *output) {
-  const auto checked_queue = checked(queue, Kind::Queue);
-  if (checked_queue == nullptr) return CL_INVALID_COMMAND_QUEUE;
-  const auto waited = wait_list(checked_queue, count, waits);
-  if (waited != CL_SUCCESS) return waited;
-  if (output != nullptr && make_event(checked_queue, command, output) == nullptr) return CL_OUT_OF_HOST_MEMORY;
-  return CL_SUCCESS;
+  const bool marker = command == CL_COMMAND_MARKER;
+  const bool barrier = command == CL_COMMAND_BARRIER;
+  return submit_command(queue, command, false, count, waits, [] { return CL_SUCCESS; }, output,
+                        (marker || barrier) && count == 0, barrier);
 }
 
 struct MirrorResult {
@@ -1605,6 +1858,12 @@ std::vector<gemstone_pointer_relocation> collect_relocations(uint64_t &scanned_b
     const auto *bytes = static_cast<const uint8_t *>(source->base);
     for (auto it = source->pointer_relocations.begin(); it != source->pointer_relocations.end();) {
       const auto &target = it->second;
+      // Typed relocation metadata must not keep a freed target registered on
+      // the next launch. Leave its raw dangling pointer bytes untouched.
+      if (target.first == nullptr || target.first->released.load(std::memory_order_acquire)) {
+        it = source->pointer_relocations.erase(it);
+        continue;
+      }
       const auto target_address = reinterpret_cast<uintptr_t>(target.first->base) + target.second;
       uint64_t value = 0;
       const bool in_range = it->first <= source->size && sizeof(value) <= source->size - it->first;
@@ -1810,7 +2069,9 @@ cl_int finish_remote(_cl_command_queue *queue, _cl_kernel *kernel, size_t work_d
                  static_cast<unsigned long long>(downloaded_bytes), static_cast<unsigned long long>(scanned_bytes),
                  static_cast<unsigned long long>(relocations.size()),
                  static_cast<unsigned long long>((now_nanos() - started) / 1000));
-  return complete_event(queue, CL_COMMAND_NDRANGE_KERNEL, 0, nullptr, output);
+  if (output != nullptr && make_event(queue, CL_COMMAND_NDRANGE_KERNEL, output) == nullptr)
+    return CL_OUT_OF_HOST_MEMORY;
+  return CL_SUCCESS;
 }
 
 } // namespace
@@ -1934,7 +2195,8 @@ CL_API_ENTRY cl_int CL_API_CALL clGetDeviceInfo(cl_device_id value, cl_device_in
   switch (name) {
     case CL_DEVICE_TYPE: { cl_device_type v = CL_DEVICE_TYPE_GPU; return output_scalar(size, output, written, v); }
     case CL_DEVICE_VENDOR_ID: { cl_uint v = 0x8086; return output_scalar(size, output, written, v); }
-    case CL_DEVICE_IP_VERSION_INTEL: { cl_uint v = 0x00010000; return output_scalar(size, output, written, v); }
+    // Keep the IP version consistent with the Arc device ID advertised below.
+    case CL_DEVICE_IP_VERSION_INTEL: { cl_uint v = 0x030dc008; return output_scalar(size, output, written, v); }
     case CL_DEVICE_ID_INTEL: { cl_uint v = 22177; return output_scalar(size, output, written, v); }
     case CL_DEVICE_NUM_SLICES_INTEL: { cl_uint v = 1; return output_scalar(size, output, written, v); }
     case CL_DEVICE_NUM_SUB_SLICES_PER_SLICE_INTEL: { cl_uint v = 2; return output_scalar(size, output, written, v); }
@@ -2494,12 +2756,29 @@ CL_API_ENTRY cl_int CL_API_CALL clGetMemObjectInfo(cl_mem value, cl_mem_info nam
     case CL_MEM_CONTEXT: { cl_context v = reinterpret_cast<cl_context>(mem->context); return output_scalar(size, output, written, v); }
     case CL_MEM_ASSOCIATED_MEMOBJECT: { cl_mem v = reinterpret_cast<cl_mem>(mem->parent); return output_scalar(size, output, written, v); }
     case CL_MEM_OFFSET: return output_scalar(size, output, written, mem->origin);
-    case CL_MEM_MAP_COUNT: { cl_uint v = static_cast<cl_uint>(mem->mappings.size()); return output_scalar(size, output, written, v); }
+    case CL_MEM_MAP_COUNT: { std::lock_guard lock(allocations_mutex); cl_uint v = static_cast<cl_uint>(mem->mappings.size()); return output_scalar(size, output, written, v); }
     case CL_MEM_PROPERTIES:
       return output_bytes(size, output, written, mem->properties.data(),
                           mem->properties.size() * sizeof(cl_mem_properties));
     default: return CL_INVALID_VALUE;
   }
+}
+
+cl_int load_program_il(_cl_program *program) {
+  if (program->remote_id != 0) return CL_SUCCESS;
+  if (program->il.empty() || program->il.size() > std::numeric_limits<uint32_t>::max()) return CL_INVALID_BINARY;
+  auto &state = remote_state();
+  if (!state.ready) {
+    program->build_log = remote_error();
+    return CL_OUT_OF_RESOURCES;
+  }
+  std::lock_guard lock(remote_mutex);
+  if (gemstone_execution_load_program(state.client, GEMSTONE_PROGRAM_SPIRV, program->il.data(),
+                                       static_cast<uint32_t>(program->il.size()), &program->remote_id) != 0) {
+    program->build_log = remote_error();
+    return CL_INVALID_BINARY;
+  }
+  return CL_SUCCESS;
 }
 
 CL_API_ENTRY cl_program CL_API_CALL clCreateProgramWithIL(cl_context value, const void *il, size_t length, cl_int *error) {
@@ -2512,13 +2791,6 @@ CL_API_ENTRY cl_program CL_API_CALL clCreateProgramWithIL(cl_context value, cons
   program->il.assign(static_cast<const uint8_t *>(il), static_cast<const uint8_t *>(il) + length);
   program->kernel_names = extract_kernel_names(program->il);
   retain(context);
-  auto &state = remote_state();
-  if (state.ready) {
-    std::lock_guard lock(remote_mutex);
-    if (gemstone_execution_load_program(state.client, GEMSTONE_PROGRAM_SPIRV, program->il.data(), static_cast<uint32_t>(program->il.size()), &program->remote_id) != 0) {
-      unregister_live_object(program); delete program; clReleaseContext(reinterpret_cast<cl_context>(context)); if (error) *error = CL_INVALID_BINARY; return nullptr;
-    }
-  }
   if (error) *error = CL_SUCCESS;
   return reinterpret_cast<cl_program>(program);
 }
@@ -2536,8 +2808,17 @@ CL_API_ENTRY cl_program CL_API_CALL clCreateProgramWithBinary(cl_context context
   if (!decode_program_binary(binaries[0], lengths[0], &binary_type, &source, &il)) {
     auto result = clCreateProgramWithIL(context, binaries[0], lengths[0], error);
     if (result != nullptr) {
-      reinterpret_cast<_cl_program *>(result)->binary_type = CL_PROGRAM_BINARY_TYPE_EXECUTABLE;
-      if (binary_status) binary_status[0] = CL_SUCCESS;
+      auto *program = reinterpret_cast<_cl_program *>(result);
+      const auto loaded = load_program_il(program);
+      if (loaded == CL_SUCCESS) {
+        program->build_status = CL_BUILD_SUCCESS;
+        program->binary_type = CL_PROGRAM_BINARY_TYPE_EXECUTABLE;
+        if (binary_status) binary_status[0] = CL_SUCCESS;
+      } else {
+        clReleaseProgram(result);
+        result = nullptr;
+        if (error) *error = loaded;
+      }
     }
     return result;
   }
@@ -2554,24 +2835,13 @@ CL_API_ENTRY cl_program CL_API_CALL clCreateProgramWithBinary(cl_context context
   program->binary_type = binary_type;
   program->build_status = CL_BUILD_SUCCESS;
   retain(context_value);
-  auto &state = remote_state();
-  if (!state.ready) {
+  const auto loaded = load_program_il(program);
+  if (loaded != CL_SUCCESS) {
     unregister_live_object(program);
     delete program;
     clReleaseContext(context);
-    if (error) *error = CL_INVALID_BINARY;
+    if (error) *error = loaded;
     return nullptr;
-  }
-  {
-    std::lock_guard lock(remote_mutex);
-    if (gemstone_execution_load_program(state.client, GEMSTONE_PROGRAM_SPIRV, program->il.data(),
-                                         static_cast<uint32_t>(program->il.size()), &program->remote_id) != 0) {
-      unregister_live_object(program);
-      delete program;
-      clReleaseContext(context);
-      if (error) *error = CL_INVALID_BINARY;
-      return nullptr;
-    }
   }
   if (binary_status) binary_status[0] = CL_SUCCESS;
   if (error) *error = CL_SUCCESS;
@@ -2650,6 +2920,13 @@ CL_API_ENTRY cl_int CL_API_CALL clBuildProgram(cl_program value, cl_uint count, 
         if (notify) notify(value, user);
         return CL_BUILD_PROGRAM_FAILURE;
       }
+    }
+  }
+  if (source.empty() && !program->il.empty() && program->remote_id == 0) {
+    if (load_program_il(program) != CL_SUCCESS) {
+      program->build_status = CL_BUILD_ERROR;
+      if (notify) notify(value, user);
+      return CL_BUILD_PROGRAM_FAILURE;
     }
   }
   program->build_status = program->remote_id == 0 && program->kernel_names.empty() ? CL_BUILD_SUCCESS
@@ -2774,6 +3051,11 @@ CL_API_ENTRY cl_program CL_API_CALL clLinkProgram(cl_context context_value, cl_u
       : CL_PROGRAM_BINARY_TYPE_EXECUTABLE;
     linked->build_options = std::move(build_options);
     linked->build_log = std::move(link_log);
+    if (load_program_il(linked) != CL_SUCCESS) {
+      clReleaseProgram(reinterpret_cast<cl_program>(linked));
+      if (error) *error = CL_BUILD_PROGRAM_FAILURE;
+      return nullptr;
+    }
     if (notify != nullptr) notify(reinterpret_cast<cl_program>(linked), user);
     if (error) *error = CL_SUCCESS;
     return reinterpret_cast<cl_program>(linked);
@@ -2803,6 +3085,11 @@ CL_API_ENTRY cl_program CL_API_CALL clLinkProgram(cl_context context_value, cl_u
       : CL_PROGRAM_BINARY_TYPE_EXECUTABLE;
     linked->build_options = std::move(build_options);
     linked->build_log = std::move(link_log);
+    if (load_program_il(linked) != CL_SUCCESS) {
+      clReleaseProgram(reinterpret_cast<cl_program>(linked));
+      if (error) *error = CL_BUILD_PROGRAM_FAILURE;
+      return nullptr;
+    }
     if (notify != nullptr) notify(reinterpret_cast<cl_program>(linked), user);
     if (error) *error = CL_SUCCESS;
     return reinterpret_cast<cl_program>(linked);
@@ -2822,24 +3109,13 @@ CL_API_ENTRY cl_program CL_API_CALL clLinkProgram(cl_context context_value, cl_u
       ? CL_PROGRAM_BINARY_TYPE_LIBRARY
       : CL_PROGRAM_BINARY_TYPE_EXECUTABLE;
     retain(context);
-    auto &state = remote_state();
-    if (!state.ready) {
+    const auto loaded = load_program_il(linked);
+    if (loaded != CL_SUCCESS) {
       unregister_live_object(linked);
       delete linked;
       clReleaseContext(context);
-      if (error) *error = CL_INVALID_BINARY;
+      if (error) *error = loaded;
       return nullptr;
-    }
-    {
-      std::lock_guard lock(remote_mutex);
-      if (gemstone_execution_load_program(state.client, GEMSTONE_PROGRAM_SPIRV, linked->il.data(),
-                                           static_cast<uint32_t>(linked->il.size()), &linked->remote_id) != 0) {
-        unregister_live_object(linked);
-        delete linked;
-        clReleaseContext(context);
-        if (error) *error = CL_BUILD_PROGRAM_FAILURE;
-        return nullptr;
-      }
     }
     if (notify != nullptr) notify(reinterpret_cast<cl_program>(linked), user);
     if (error) *error = CL_SUCCESS;
@@ -3015,6 +3291,13 @@ CL_API_ENTRY cl_int CL_API_CALL clSetKernelArg(cl_kernel value, cl_uint index, s
   if (index >= kernel->expected_arguments) return CL_INVALID_ARG_INDEX;
   if (argument == nullptr && size == 0) return CL_INVALID_ARG_SIZE;
   if (argument != nullptr && size == 0) return CL_INVALID_ARG_SIZE;
+  if (std::getenv("GEMSTONE_PERF_TRACE") != nullptr)
+    std::fprintf(stderr, "Gemstone OpenCL argument kernel=%s index=%u size=%zu expected=%zu local=%d aggregate=%d null=%d\n",
+                 kernel->name.c_str(), index, size,
+                 index < kernel->expected_argument_sizes.size() ? kernel->expected_argument_sizes[index] : 0,
+                 index < kernel->parameter_metadata.size() && kernel->parameter_metadata[index].local,
+                 index < kernel->parameter_metadata.size() && kernel->parameter_metadata[index].pointer_aggregate,
+                 argument == nullptr);
   auto &output = kernel->arguments[index];
   const bool pointer_aggregate = index < kernel->parameter_metadata.size() &&
                                  kernel->parameter_metadata[index].pointer_aggregate;
@@ -3024,7 +3307,8 @@ CL_API_ENTRY cl_int CL_API_CALL clSetKernelArg(cl_kernel value, cl_uint index, s
       output.allocation.reset();
       output.offset = 0;
       output.bytes.assign(sizeof(cl_mem), 0);
-      kernel->arguments_set[index] = true;
+      output.memory = nullptr;
+    kernel->arguments_set[index] = true;
     return CL_SUCCESS;
   }
   if (argument == nullptr) {
@@ -3033,6 +3317,7 @@ CL_API_ENTRY cl_int CL_API_CALL clSetKernelArg(cl_kernel value, cl_uint index, s
     output.bytes.clear();
     output.allocation.reset();
     output.offset = size;
+    output.memory = nullptr;
     kernel->arguments_set[index] = true;
     return CL_SUCCESS;
   }
@@ -3042,6 +3327,7 @@ CL_API_ENTRY cl_int CL_API_CALL clSetKernelArg(cl_kernel value, cl_uint index, s
     if (mem != nullptr) {
       if (size != sizeof(cl_mem)) return CL_INVALID_ARG_SIZE;
       output.kind = KernelArgument::Kind::Allocation; output.allocation = mem->allocation; output.offset = mem->origin; output.bytes.clear();
+      output.memory = mem;
       kernel->arguments_set[index] = true;
       return CL_SUCCESS;
     }
@@ -3056,29 +3342,42 @@ CL_API_ENTRY cl_int CL_API_CALL clSetKernelArg(cl_kernel value, cl_uint index, s
       output.allocation = std::move(allocation);
       output.offset = pointer_offset;
       output.bytes.clear();
+      output.memory = nullptr;
       kernel->arguments_set[index] = true;
       return CL_SUCCESS;
     }
   }
-  if (index < kernel->expected_argument_sizes.size() && kernel->expected_argument_sizes[index] != 0 &&
-      size != kernel->expected_argument_sizes[index] && !pointer_aggregate) {
-    // DPC++ passes the host ABI size for pointer-bearing aggregates.  The
-    // physical SPIR-V type may include storage-class padding that is absent
-    // from that ABI blob; aggregate arguments are materialized by the
-    // execution service with the missing trailing bytes.
-    return CL_INVALID_ARG_SIZE;
-  }
+  const size_t expected = index < kernel->expected_argument_sizes.size() ? kernel->expected_argument_sizes[index] : 0;
+  const bool scalar_argument = index < kernel->parameter_metadata.size() &&
+                               !kernel->parameter_metadata[index].contains_pointer;
+  if (expected != 0 && !pointer_aggregate &&
+      (size < expected || (size != expected && !scalar_argument))) return CL_INVALID_ARG_SIZE;
+  // Match the Intel OpenCL scalar ABI: callers may supply a wider host slot,
+  // and the driver consumes only the declared scalar width. oneMKL uses this
+  // for 64-bit host slots carrying 32-bit SPIR-V offsets. Pointer arguments
+  // still require their exact width; pointer-bearing aggregates retain their
+  // host representation for relocation by the execution service.
+  const size_t copied_size = scalar_argument && expected != 0 ? expected : size;
   output.kind = KernelArgument::Kind::Scalar; output.allocation.reset(); output.offset = 0;
-  output.bytes.assign(static_cast<const uint8_t *>(argument), static_cast<const uint8_t *>(argument) + size);
+  output.bytes.assign(static_cast<const uint8_t *>(argument), static_cast<const uint8_t *>(argument) + copied_size);
+  output.memory = nullptr;
   kernel->arguments_set[index] = true;
   return CL_SUCCESS;
 }
 CL_API_ENTRY cl_int CL_API_CALL clSetKernelArgSVMPointer(cl_kernel value, cl_uint index, const void *argument) {
   auto *kernel = checked(reinterpret_cast<_cl_kernel *>(value), Kind::Kernel); if (!kernel) return CL_INVALID_KERNEL;
-  size_t offset = 0; auto allocation = find_pointer(argument, &offset); if (!allocation) return CL_INVALID_ARG_VALUE;
+  if (index >= kernel->expected_arguments) return CL_INVALID_ARG_INDEX;
+  if (argument == nullptr) return clSetKernelArg(value, index, sizeof(void *), nullptr);
+  size_t offset = 0; auto allocation = find_pointer(argument, &offset);
+  if (!allocation) {
+    if (std::getenv("GEMSTONE_PERF_TRACE") != nullptr)
+      std::fprintf(stderr, "Gemstone OpenCL SVM argument kernel=%s index=%u pointer=%p\n", kernel->name.c_str(), index, argument);
+    return CL_INVALID_ARG_VALUE;
+  }
   if (index >= kernel->expected_arguments) return CL_INVALID_ARG_INDEX;
   auto &output = kernel->arguments[index]; output.kind = KernelArgument::Kind::SVM; output.allocation = std::move(allocation); output.offset = offset;
   output.bytes.resize(sizeof(uint64_t)); const uint64_t pointer = reinterpret_cast<uintptr_t>(argument); std::memcpy(output.bytes.data(), &pointer, sizeof(pointer));
+  output.memory = nullptr;
   kernel->arguments_set[index] = true;
   return CL_SUCCESS;
 }
@@ -3250,23 +3549,39 @@ CL_API_ENTRY cl_int CL_API_CALL clFinish(cl_command_queue value) {
   return failed ? CL_EXEC_STATUS_ERROR_FOR_EVENTS_IN_WAIT_LIST : CL_SUCCESS;
 }
 
-CL_API_ENTRY cl_int CL_API_CALL clEnqueueReadBuffer(cl_command_queue queue_value, cl_mem mem_value, cl_bool, size_t offset, size_t size,
-                                                    void *output, cl_uint count, const cl_event *waits, cl_event *event) {
-  auto *queue = checked(reinterpret_cast<_cl_command_queue *>(queue_value), Kind::Queue); auto *mem = checked(reinterpret_cast<_cl_mem *>(mem_value), Kind::Memory);
-  auto result = validate_wait_list(queue, count, waits); if (result != CL_SUCCESS) return result;
-  if (mem == nullptr || mem->context != queue->context || !valid_mem_range(mem, offset, size)) return CL_INVALID_VALUE;
-  if (!host_read_allowed(mem)) return CL_INVALID_OPERATION;
-  result = read_allocation(mem->allocation, allocation_offset(mem, offset), output, size); if (result != CL_SUCCESS) return result;
-  return complete_event(queue, CL_COMMAND_READ_BUFFER, 0, nullptr, event);
+cl_int enqueue_buffer_transfer(_cl_command_queue *queue, _cl_mem *mem, bool reading, cl_bool blocking,
+                               size_t offset, size_t size, void *pointer, cl_uint count,
+                               const cl_event *waits, cl_event *event) {
+  if (queue == nullptr) return CL_INVALID_COMMAND_QUEUE;
+  auto result = validate_wait_list(queue, count, waits);
+  if (result != CL_SUCCESS) return result;
+  if (mem == nullptr || pointer == nullptr || !valid_mem_range(mem, offset, size)) return CL_INVALID_VALUE;
+  if (mem->context != queue->context) return CL_INVALID_CONTEXT;
+  if (reading ? !host_read_allowed(mem) : !host_write_allowed(mem)) return CL_INVALID_OPERATION;
+  const auto type = reading ? CL_COMMAND_READ_BUFFER : CL_COMMAND_WRITE_BUFFER;
+  auto execute = [=] {
+    return reading ? read_allocation(mem->allocation, allocation_offset(mem, offset), pointer, size)
+                   : write_allocation(mem->allocation, allocation_offset(mem, offset), pointer, size);
+  };
+  try {
+    auto retained = retain_memory(mem);
+    return submit_command(queue, type, blocking, count, waits, [execute, retained] { (void)retained; return execute(); }, event);
+  } catch (...) { return CL_OUT_OF_HOST_MEMORY; }
 }
-CL_API_ENTRY cl_int CL_API_CALL clEnqueueWriteBuffer(cl_command_queue queue_value, cl_mem mem_value, cl_bool, size_t offset, size_t size,
-                                                     const void *input, cl_uint count, const cl_event *waits, cl_event *event) {
-  auto *queue = checked(reinterpret_cast<_cl_command_queue *>(queue_value), Kind::Queue); auto *mem = checked(reinterpret_cast<_cl_mem *>(mem_value), Kind::Memory);
-  auto result = validate_wait_list(queue, count, waits); if (result != CL_SUCCESS) return result;
-  if (mem == nullptr || mem->context != queue->context || !valid_mem_range(mem, offset, size)) return CL_INVALID_VALUE;
-  if (!host_write_allowed(mem)) return CL_INVALID_OPERATION;
-  result = write_allocation(mem->allocation, allocation_offset(mem, offset), input, size); if (result != CL_SUCCESS) return result;
-  return complete_event(queue, CL_COMMAND_WRITE_BUFFER, 0, nullptr, event);
+
+CL_API_ENTRY cl_int CL_API_CALL clEnqueueReadBuffer(cl_command_queue queue_value, cl_mem mem_value, cl_bool blocking,
+                                                    size_t offset, size_t size, void *output, cl_uint count,
+                                                    const cl_event *waits, cl_event *event) {
+  return enqueue_buffer_transfer(checked(reinterpret_cast<_cl_command_queue *>(queue_value), Kind::Queue),
+                                  checked(reinterpret_cast<_cl_mem *>(mem_value), Kind::Memory), true, blocking,
+                                  offset, size, output, count, waits, event);
+}
+CL_API_ENTRY cl_int CL_API_CALL clEnqueueWriteBuffer(cl_command_queue queue_value, cl_mem mem_value, cl_bool blocking,
+                                                     size_t offset, size_t size, const void *input, cl_uint count,
+                                                     const cl_event *waits, cl_event *event) {
+  return enqueue_buffer_transfer(checked(reinterpret_cast<_cl_command_queue *>(queue_value), Kind::Queue),
+                                  checked(reinterpret_cast<_cl_mem *>(mem_value), Kind::Memory), false, blocking,
+                                  offset, size, const_cast<void *>(input), count, waits, event);
 }
 
 bool rect_pitch(size_t requested_row, size_t requested_slice, const size_t region[3], size_t *row, size_t *slice) {
@@ -3293,11 +3608,12 @@ bool rect_end(const size_t origin[3], const size_t region[3], size_t row, size_t
   return true;
 }
 
-cl_int enqueue_read_buffer_rect(_cl_command_queue *queue, _cl_mem *mem, const size_t buffer_origin[3],
+cl_int enqueue_read_buffer_rect(_cl_command_queue *queue, _cl_mem *mem, bool blocking, const size_t buffer_origin[3],
                                 const size_t host_origin[3], const size_t region[3], size_t buffer_row_pitch,
                                 size_t buffer_slice_pitch, size_t host_row_pitch, size_t host_slice_pitch,
                                 void *output, cl_uint count, const cl_event *waits, cl_event *event) {
-  auto result = complete_event(queue, CL_COMMAND_READ_BUFFER, count, waits, nullptr);
+  if (queue == nullptr) return CL_INVALID_COMMAND_QUEUE;
+  auto result = validate_wait_list(queue, count, waits);
   if (result != CL_SUCCESS) return result;
   if (mem == nullptr || mem->context != queue->context || output == nullptr || buffer_origin == nullptr ||
       host_origin == nullptr || region == nullptr)
@@ -3310,25 +3626,38 @@ cl_int enqueue_read_buffer_rect(_cl_command_queue *queue, _cl_mem *mem, const si
       !rect_end(host_origin, region, target_row, target_slice, &target_end) ||
       source_end > mem->size)
     return CL_INVALID_VALUE;
-  std::vector<uint8_t> row(region[0]);
-  for (size_t z = 0; z < region[2]; ++z) {
-    for (size_t y = 0; y < region[1]; ++y) {
-      const size_t source_offset = mem->origin + (buffer_origin[2] + z) * source_slice +
-                                   (buffer_origin[1] + y) * source_row + buffer_origin[0];
-      const size_t target_offset = (host_origin[2] + z) * target_slice + (host_origin[1] + y) * target_row + host_origin[0];
-      result = read_allocation(mem->allocation, source_offset, row.data(), row.size());
-      if (result != CL_SUCCESS) return result;
-      std::memcpy(static_cast<uint8_t *>(output) + target_offset, row.data(), row.size());
+  const std::array<size_t, 3> copied_buffer_origin{buffer_origin[0], buffer_origin[1], buffer_origin[2]};
+  const std::array<size_t, 3> copied_host_origin{host_origin[0], host_origin[1], host_origin[2]};
+  const std::array<size_t, 3> copied_region{region[0], region[1], region[2]};
+  auto retained_memory = retain_memory(mem);
+  auto execute = [=] {
+    (void)retained_memory;
+    const auto *buffer_origin = copied_buffer_origin.data();
+    const auto *host_origin = copied_host_origin.data();
+    const auto *region = copied_region.data();
+    cl_int result = CL_SUCCESS;
+    std::vector<uint8_t> row(region[0]);
+    for (size_t z = 0; z < region[2]; ++z) {
+      for (size_t y = 0; y < region[1]; ++y) {
+        const size_t source_offset = mem->origin + (buffer_origin[2] + z) * source_slice +
+                                     (buffer_origin[1] + y) * source_row + buffer_origin[0];
+        const size_t target_offset = (host_origin[2] + z) * target_slice + (host_origin[1] + y) * target_row + host_origin[0];
+        result = read_allocation(mem->allocation, source_offset, row.data(), row.size());
+        if (result != CL_SUCCESS) return result;
+        std::memcpy(static_cast<uint8_t *>(output) + target_offset, row.data(), row.size());
+      }
     }
-  }
-  return complete_event(queue, CL_COMMAND_READ_BUFFER, 0, nullptr, event);
+    return CL_SUCCESS;
+  };
+  return submit_command(queue, CL_COMMAND_READ_BUFFER_RECT, blocking, count, waits, std::move(execute), event);
 }
 
-cl_int enqueue_write_buffer_rect(_cl_command_queue *queue, _cl_mem *mem, const size_t buffer_origin[3],
+cl_int enqueue_write_buffer_rect(_cl_command_queue *queue, _cl_mem *mem, bool blocking, const size_t buffer_origin[3],
                                  const size_t host_origin[3], const size_t region[3], size_t buffer_row_pitch,
                                  size_t buffer_slice_pitch, size_t host_row_pitch, size_t host_slice_pitch,
                                  const void *input, cl_uint count, const cl_event *waits, cl_event *event) {
-  auto result = complete_event(queue, CL_COMMAND_WRITE_BUFFER, count, waits, nullptr);
+  if (queue == nullptr) return CL_INVALID_COMMAND_QUEUE;
+  auto result = validate_wait_list(queue, count, waits);
   if (result != CL_SUCCESS) return result;
   if (mem == nullptr || mem->context != queue->context || input == nullptr || buffer_origin == nullptr ||
       host_origin == nullptr || region == nullptr)
@@ -3344,25 +3673,38 @@ cl_int enqueue_write_buffer_rect(_cl_command_queue *queue, _cl_mem *mem, const s
       !rect_end(host_origin, region, source_row, source_slice, &source_end) ||
       target_end > mem->size)
     return CL_INVALID_VALUE;
-  std::vector<uint8_t> row(region[0]);
-  for (size_t z = 0; z < region[2]; ++z) {
-    for (size_t y = 0; y < region[1]; ++y) {
-      const size_t source_offset = (host_origin[2] + z) * source_slice + (host_origin[1] + y) * source_row + host_origin[0];
-      const size_t target_offset = mem->origin + (buffer_origin[2] + z) * target_slice +
-                                   (buffer_origin[1] + y) * target_row + buffer_origin[0];
-      std::memcpy(row.data(), static_cast<const uint8_t *>(input) + source_offset, row.size());
-      result = write_allocation(mem->allocation, target_offset, row.data(), row.size());
-      if (result != CL_SUCCESS) return result;
+  const std::array<size_t, 3> copied_buffer_origin{buffer_origin[0], buffer_origin[1], buffer_origin[2]};
+  const std::array<size_t, 3> copied_host_origin{host_origin[0], host_origin[1], host_origin[2]};
+  const std::array<size_t, 3> copied_region{region[0], region[1], region[2]};
+  auto retained_memory = retain_memory(mem);
+  auto execute = [=] {
+    (void)retained_memory;
+    const auto *buffer_origin = copied_buffer_origin.data();
+    const auto *host_origin = copied_host_origin.data();
+    const auto *region = copied_region.data();
+    cl_int result = CL_SUCCESS;
+    std::vector<uint8_t> row(region[0]);
+    for (size_t z = 0; z < region[2]; ++z) {
+      for (size_t y = 0; y < region[1]; ++y) {
+        const size_t source_offset = (host_origin[2] + z) * source_slice + (host_origin[1] + y) * source_row + host_origin[0];
+        const size_t target_offset = mem->origin + (buffer_origin[2] + z) * target_slice +
+                                     (buffer_origin[1] + y) * target_row + buffer_origin[0];
+        std::memcpy(row.data(), static_cast<const uint8_t *>(input) + source_offset, row.size());
+        result = write_allocation(mem->allocation, target_offset, row.data(), row.size());
+        if (result != CL_SUCCESS) return result;
+      }
     }
-  }
-  return complete_event(queue, CL_COMMAND_WRITE_BUFFER, 0, nullptr, event);
+    return CL_SUCCESS;
+  };
+  return submit_command(queue, CL_COMMAND_WRITE_BUFFER_RECT, blocking, count, waits, std::move(execute), event);
 }
 
 cl_int enqueue_copy_buffer_rect(_cl_command_queue *queue, _cl_mem *source, _cl_mem *target,
                                 const size_t source_origin[3], const size_t target_origin[3], const size_t region[3],
                                 size_t source_row_pitch, size_t source_slice_pitch, size_t target_row_pitch,
                                 size_t target_slice_pitch, cl_uint count, const cl_event *waits, cl_event *event) {
-  auto result = complete_event(queue, CL_COMMAND_COPY_BUFFER, count, waits, nullptr);
+  if (queue == nullptr) return CL_INVALID_COMMAND_QUEUE;
+  auto result = validate_wait_list(queue, count, waits);
   if (result != CL_SUCCESS) return result;
   if (source == nullptr || target == nullptr || source->context != queue->context || target->context != queue->context ||
       source_origin == nullptr || target_origin == nullptr || region == nullptr)
@@ -3376,53 +3718,65 @@ cl_int enqueue_copy_buffer_rect(_cl_command_queue *queue, _cl_mem *source, _cl_m
     return CL_INVALID_VALUE;
   const size_t row_count = region[1] * region[2];
   if (region[0] != 0 && row_count > std::numeric_limits<size_t>::max() / region[0]) return CL_INVALID_VALUE;
-  std::vector<uint8_t> packed(region[0] * row_count);
-  size_t packed_offset = 0;
-  for (size_t z = 0; z < region[2]; ++z) {
-    for (size_t y = 0; y < region[1]; ++y) {
-      const size_t source_offset = source->origin + (source_origin[2] + z) * source_slice +
-                                   (source_origin[1] + y) * source_row + source_origin[0];
-      result = read_allocation(source->allocation, source_offset, packed.data() + packed_offset, region[0]);
-      if (result != CL_SUCCESS) return result;
-      packed_offset += region[0];
+  const std::array<size_t, 3> copied_source_origin{source_origin[0], source_origin[1], source_origin[2]};
+  const std::array<size_t, 3> copied_target_origin{target_origin[0], target_origin[1], target_origin[2]};
+  const std::array<size_t, 3> copied_region{region[0], region[1], region[2]};
+  auto retained_source = retain_memory(source), retained_target = retain_memory(target);
+  auto execute = [=] {
+    (void)retained_source; (void)retained_target;
+    const auto *source_origin = copied_source_origin.data();
+    const auto *target_origin = copied_target_origin.data();
+    const auto *region = copied_region.data();
+    cl_int result = CL_SUCCESS;
+    std::vector<uint8_t> packed(region[0] * row_count);
+    size_t packed_offset = 0;
+    for (size_t z = 0; z < region[2]; ++z) {
+      for (size_t y = 0; y < region[1]; ++y) {
+        const size_t source_offset = source->origin + (source_origin[2] + z) * source_slice +
+                                     (source_origin[1] + y) * source_row + source_origin[0];
+        result = read_allocation(source->allocation, source_offset, packed.data() + packed_offset, region[0]);
+        if (result != CL_SUCCESS) return result;
+        packed_offset += region[0];
+      }
     }
-  }
-  packed_offset = 0;
-  for (size_t z = 0; z < region[2]; ++z) {
-    for (size_t y = 0; y < region[1]; ++y) {
-      const size_t source_offset = source->origin + (source_origin[2] + z) * source_slice +
-                                   (source_origin[1] + y) * source_row + source_origin[0];
-      const size_t target_offset = target->origin + (target_origin[2] + z) * target_slice +
-                                   (target_origin[1] + y) * target_row + target_origin[0];
-      result = write_allocation(target->allocation, target_offset, packed.data() + packed_offset, region[0]);
-      if (result != CL_SUCCESS) return result;
-      copy_pointer_relocations(source->allocation, source_offset, target->allocation, target_offset, region[0]);
-      packed_offset += region[0];
+    packed_offset = 0;
+    for (size_t z = 0; z < region[2]; ++z) {
+      for (size_t y = 0; y < region[1]; ++y) {
+        const size_t source_offset = source->origin + (source_origin[2] + z) * source_slice +
+                                     (source_origin[1] + y) * source_row + source_origin[0];
+        const size_t target_offset = target->origin + (target_origin[2] + z) * target_slice +
+                                     (target_origin[1] + y) * target_row + target_origin[0];
+        result = write_allocation(target->allocation, target_offset, packed.data() + packed_offset, region[0]);
+        if (result != CL_SUCCESS) return result;
+        copy_pointer_relocations(source->allocation, source_offset, target->allocation, target_offset, region[0]);
+        packed_offset += region[0];
+      }
     }
-  }
-  return complete_event(queue, CL_COMMAND_COPY_BUFFER, 0, nullptr, event);
+    return CL_SUCCESS;
+  };
+  return submit_command(queue, CL_COMMAND_COPY_BUFFER_RECT, false, count, waits, std::move(execute), event);
 }
 
-CL_API_ENTRY cl_int CL_API_CALL clEnqueueReadBufferRect(cl_command_queue queue_value, cl_mem mem_value, cl_bool,
+CL_API_ENTRY cl_int CL_API_CALL clEnqueueReadBufferRect(cl_command_queue queue_value, cl_mem mem_value, cl_bool blocking,
                                                         const size_t *buffer_origin, const size_t *host_origin,
                                                         const size_t *region, size_t buffer_row_pitch,
                                                         size_t buffer_slice_pitch, size_t host_row_pitch,
                                                         size_t host_slice_pitch, void *output, cl_uint count,
                                                         const cl_event *waits, cl_event *event) {
   return enqueue_read_buffer_rect(checked(reinterpret_cast<_cl_command_queue *>(queue_value), Kind::Queue),
-                                  checked(reinterpret_cast<_cl_mem *>(mem_value), Kind::Memory), buffer_origin,
+                                  checked(reinterpret_cast<_cl_mem *>(mem_value), Kind::Memory), blocking, buffer_origin,
                                   host_origin, region, buffer_row_pitch, buffer_slice_pitch, host_row_pitch,
                                   host_slice_pitch, output, count, waits, event);
 }
 
-CL_API_ENTRY cl_int CL_API_CALL clEnqueueWriteBufferRect(cl_command_queue queue_value, cl_mem mem_value, cl_bool,
+CL_API_ENTRY cl_int CL_API_CALL clEnqueueWriteBufferRect(cl_command_queue queue_value, cl_mem mem_value, cl_bool blocking,
                                                          const size_t *buffer_origin, const size_t *host_origin,
                                                          const size_t *region, size_t buffer_row_pitch,
                                                          size_t buffer_slice_pitch, size_t host_row_pitch,
                                                          size_t host_slice_pitch, const void *input, cl_uint count,
                                                          const cl_event *waits, cl_event *event) {
   return enqueue_write_buffer_rect(checked(reinterpret_cast<_cl_command_queue *>(queue_value), Kind::Queue),
-                                   checked(reinterpret_cast<_cl_mem *>(mem_value), Kind::Memory), buffer_origin,
+                                   checked(reinterpret_cast<_cl_mem *>(mem_value), Kind::Memory), blocking, buffer_origin,
                                    host_origin, region, buffer_row_pitch, buffer_slice_pitch, host_row_pitch,
                                    host_slice_pitch, input, count, waits, event);
 }
@@ -3440,32 +3794,50 @@ CL_API_ENTRY cl_int CL_API_CALL clEnqueueCopyBufferRect(cl_command_queue queue_v
                                   target_slice_pitch, count, waits, event);
 }
 
-CL_API_ENTRY cl_int CL_API_CALL clEnqueueCopyBuffer(cl_command_queue queue_value, cl_mem src_value, cl_mem dst_value, size_t src_offset,
-                                                    size_t dst_offset, size_t size, cl_uint count, const cl_event *waits, cl_event *event) {
-  auto *queue = checked(reinterpret_cast<_cl_command_queue *>(queue_value), Kind::Queue); auto *src = checked(reinterpret_cast<_cl_mem *>(src_value), Kind::Memory); auto *dst = checked(reinterpret_cast<_cl_mem *>(dst_value), Kind::Memory);
-  auto result = complete_event(queue, CL_COMMAND_COPY_BUFFER, count, waits, nullptr); if (result != CL_SUCCESS) return result;
+CL_API_ENTRY cl_int CL_API_CALL clEnqueueCopyBuffer(cl_command_queue queue_value, cl_mem src_value, cl_mem dst_value,
+                                                    size_t src_offset, size_t dst_offset, size_t size,
+                                                    cl_uint count, const cl_event *waits, cl_event *event) {
+  auto *queue = checked(reinterpret_cast<_cl_command_queue *>(queue_value), Kind::Queue);
+  auto *src = checked(reinterpret_cast<_cl_mem *>(src_value), Kind::Memory);
+  auto *dst = checked(reinterpret_cast<_cl_mem *>(dst_value), Kind::Memory);
+  if (queue == nullptr) return CL_INVALID_COMMAND_QUEUE;
+  auto result = validate_wait_list(queue, count, waits);
+  if (result != CL_SUCCESS) return result;
   if (!src || !dst || src->context != queue->context || dst->context != queue->context ||
       !valid_mem_range(src, src_offset, size) || !valid_mem_range(dst, dst_offset, size)) return CL_INVALID_VALUE;
-  const size_t source_offset = allocation_offset(src, src_offset);
-  const size_t target_offset = allocation_offset(dst, dst_offset);
-  std::memmove(static_cast<uint8_t *>(dst->allocation->base) + target_offset,
-               static_cast<uint8_t *>(src->allocation->base) + source_offset, size);
-  result = write_allocation(dst->allocation, target_offset, static_cast<uint8_t *>(dst->allocation->base) + target_offset, size); if (result != CL_SUCCESS) return result;
-  copy_pointer_relocations(src->allocation, source_offset, dst->allocation, target_offset, size);
-  return complete_event(queue, CL_COMMAND_COPY_BUFFER, 0, nullptr, event);
+  const size_t source_offset = allocation_offset(src, src_offset), target_offset = allocation_offset(dst, dst_offset);
+  auto source = retain_memory(src), target = retain_memory(dst);
+  return submit_command(queue, CL_COMMAND_COPY_BUFFER, false, count, waits, [=] {
+    std::memmove(static_cast<uint8_t *>(target->allocation->base) + target_offset,
+                 static_cast<uint8_t *>(source->allocation->base) + source_offset, size);
+    const auto result = write_allocation(target->allocation, target_offset,
+                                         static_cast<uint8_t *>(target->allocation->base) + target_offset, size);
+    if (result == CL_SUCCESS)
+      copy_pointer_relocations(source->allocation, source_offset, target->allocation, target_offset, size);
+    return result;
+  }, event);
 }
-CL_API_ENTRY cl_int CL_API_CALL clEnqueueFillBuffer(cl_command_queue queue_value, cl_mem mem_value, const void *pattern, size_t pattern_size,
-                                                    size_t offset, size_t size, cl_uint count, const cl_event *waits, cl_event *event) {
-  auto *queue = checked(reinterpret_cast<_cl_command_queue *>(queue_value), Kind::Queue); auto *mem = checked(reinterpret_cast<_cl_mem *>(mem_value), Kind::Memory);
-  auto result = validate_wait_list(queue, count, waits); if (result != CL_SUCCESS) return result;
-  if (!mem || mem->context != queue->context || pattern == nullptr || pattern_size == 0 || size % pattern_size != 0 || !valid_mem_range(mem, offset, size)) return CL_INVALID_VALUE;
+CL_API_ENTRY cl_int CL_API_CALL clEnqueueFillBuffer(cl_command_queue queue_value, cl_mem mem_value, const void *pattern,
+                                                    size_t pattern_size, size_t offset, size_t size,
+                                                    cl_uint count, const cl_event *waits, cl_event *event) {
+  auto *queue = checked(reinterpret_cast<_cl_command_queue *>(queue_value), Kind::Queue);
+  auto *mem = checked(reinterpret_cast<_cl_mem *>(mem_value), Kind::Memory);
+  if (queue == nullptr) return CL_INVALID_COMMAND_QUEUE;
+  auto result = validate_wait_list(queue, count, waits);
+  if (result != CL_SUCCESS) return result;
+  if (!mem || mem->context != queue->context || pattern == nullptr || pattern_size == 0 ||
+      size % pattern_size != 0 || !valid_mem_range(mem, offset, size)) return CL_INVALID_VALUE;
   const size_t target_offset = allocation_offset(mem, offset);
-  auto *bytes = static_cast<uint8_t *>(mem->allocation->base); for (size_t index = 0; index < size; ++index) bytes[target_offset + index] = static_cast<const uint8_t *>(pattern)[index % pattern_size];
-  result = write_allocation(mem->allocation, target_offset, bytes + target_offset, size); if (result != CL_SUCCESS) return result;
-  return complete_event(queue, CL_COMMAND_FILL_BUFFER, 0, nullptr, event);
+  auto retained = retain_memory(mem);
+  std::vector<uint8_t> copied_pattern(static_cast<const uint8_t *>(pattern), static_cast<const uint8_t *>(pattern) + pattern_size);
+  return submit_command(queue, CL_COMMAND_FILL_BUFFER, false, count, waits, [=] {
+    auto *bytes = static_cast<uint8_t *>(retained->allocation->base);
+    for (size_t index = 0; index < size; ++index) bytes[target_offset + index] = copied_pattern[index % pattern_size];
+    return write_allocation(retained->allocation, target_offset, bytes + target_offset, size);
+  }, event);
 }
 
-CL_API_ENTRY void *CL_API_CALL clEnqueueMapBuffer(cl_command_queue queue_value, cl_mem mem_value, cl_bool,
+CL_API_ENTRY void *CL_API_CALL clEnqueueMapBuffer(cl_command_queue queue_value, cl_mem mem_value, cl_bool blocking,
                                                   cl_map_flags flags, size_t offset, size_t size, cl_uint count,
                                                   const cl_event *waits, cl_event *event, cl_int *error) {
   auto *queue = checked(reinterpret_cast<_cl_command_queue *>(queue_value), Kind::Queue);
@@ -3473,8 +3845,7 @@ CL_API_ENTRY void *CL_API_CALL clEnqueueMapBuffer(cl_command_queue queue_value, 
   if (queue == nullptr) { if (error) *error = CL_INVALID_COMMAND_QUEUE; return nullptr; }
   if (mem == nullptr || mem->context != queue->context) { if (error) *error = CL_INVALID_MEM_OBJECT; return nullptr; }
   if ((flags & ~(CL_MAP_READ | CL_MAP_WRITE | CL_MAP_WRITE_INVALIDATE_REGION)) != 0 ||
-      (flags & (CL_MAP_READ | CL_MAP_WRITE | CL_MAP_WRITE_INVALIDATE_REGION)) == 0 ||
-      !valid_mem_range(mem, offset, size)) {
+      (flags & (CL_MAP_READ | CL_MAP_WRITE | CL_MAP_WRITE_INVALIDATE_REGION)) == 0 || !valid_mem_range(mem, offset, size)) {
     if (error) *error = CL_INVALID_VALUE;
     return nullptr;
   }
@@ -3483,25 +3854,32 @@ CL_API_ENTRY void *CL_API_CALL clEnqueueMapBuffer(cl_command_queue queue_value, 
     if (error) *error = CL_INVALID_OPERATION;
     return nullptr;
   }
-  cl_int result = validate_wait_list(queue, count, waits);
+  auto result = validate_wait_list(queue, count, waits);
   if (result != CL_SUCCESS) { if (error) *error = result; return nullptr; }
-  const size_t global_offset = allocation_offset(mem, offset);
   const bool direct_mapping = mem->host_ptr != nullptr && (mem->flags & CL_MEM_USE_HOST_PTR) != 0;
-  void *pointer = direct_mapping
-    ? static_cast<uint8_t *>(mem->host_ptr) + offset
-    : std::malloc(size == 0 ? 1 : size);
+  auto mapping = std::make_shared<BufferMapping>();
+  void *pointer = direct_mapping ? static_cast<uint8_t *>(mem->host_ptr) + offset : std::malloc(size == 0 ? 1 : size);
   if (pointer == nullptr) { if (error) *error = CL_OUT_OF_HOST_MEMORY; return nullptr; }
-  if ((flags & CL_MAP_WRITE_INVALIDATE_REGION) == 0) {
-    result = read_allocation(mem->allocation, global_offset, pointer, size);
-    if (result != CL_SUCCESS) { if (!direct_mapping) std::free(pointer); if (error) *error = result; return nullptr; }
+  mapping->offset = allocation_offset(mem, offset);
+  mapping->size = size;
+  mapping->pointer = pointer;
+  mapping->storage = std::shared_ptr<void>(pointer, [direct_mapping](void *value) { if (!direct_mapping) std::free(value); });
+  auto retained = retain_memory(mem);
+  const auto key = reinterpret_cast<uintptr_t>(pointer);
+  {
+    std::lock_guard lock(allocations_mutex);
+    mem->mappings.emplace(key, mapping);
   }
-  mem->mappings.emplace(reinterpret_cast<uintptr_t>(pointer),
-                        BufferMapping{global_offset, size, pointer, !direct_mapping});
-  result = complete_event(queue, CL_COMMAND_MAP_BUFFER, 0, nullptr, event);
-  if (result != CL_SUCCESS) {
-    mem->mappings.erase(reinterpret_cast<uintptr_t>(pointer));
-    if (!direct_mapping) std::free(pointer);
-  }
+  result = submit_command(queue, CL_COMMAND_MAP_BUFFER, blocking, count, waits, [=] {
+    return (flags & CL_MAP_WRITE_INVALIDATE_REGION) != 0 ? CL_SUCCESS
+      : read_allocation(retained->allocation, mapping->offset, mapping->pointer, mapping->size);
+  }, event, false, false, [=](cl_int status) {
+    if (status == CL_SUCCESS) return;
+    std::lock_guard lock(allocations_mutex);
+    const auto [begin, end] = retained->mappings.equal_range(key);
+    const auto found = std::find_if(begin, end, [&](const auto &entry) { return entry.second == mapping; });
+    if (found != end) retained->mappings.erase(found);
+  });
   if (error) *error = result;
   return result == CL_SUCCESS ? pointer : nullptr;
 }
@@ -3513,16 +3891,30 @@ CL_API_ENTRY cl_int CL_API_CALL clEnqueueUnmapMemObject(cl_command_queue queue_v
   auto *mem = checked(reinterpret_cast<_cl_mem *>(mem_value), Kind::Memory);
   if (queue == nullptr) return CL_INVALID_COMMAND_QUEUE;
   if (mem == nullptr || mem->context != queue->context || pointer == nullptr) return CL_INVALID_MEM_OBJECT;
-  cl_int result = validate_wait_list(queue, count, waits);
+  auto result = validate_wait_list(queue, count, waits);
   if (result != CL_SUCCESS) return result;
-  const auto mapping = mem->mappings.find(reinterpret_cast<uintptr_t>(pointer));
-  if (mapping == mem->mappings.end()) return CL_INVALID_VALUE;
-  const auto mapped = mapping->second;
-  result = write_allocation(mem->allocation, mapped.offset, mapped.pointer, mapped.size);
-  if (result != CL_SUCCESS) return result;
-  mem->mappings.erase(mapping);
-  if (mapped.release_pointer) std::free(mapped.pointer);
-  return complete_event(queue, CL_COMMAND_UNMAP_MEM_OBJECT, 0, nullptr, event);
+  std::shared_ptr<BufferMapping> mapping;
+  const auto key = reinterpret_cast<uintptr_t>(pointer);
+  {
+    std::lock_guard lock(allocations_mutex);
+    const auto [begin, end] = mem->mappings.equal_range(key);
+    const auto found = std::find_if(begin, end, [](const auto &entry) { return !entry.second->unmapping; });
+    if (found == end) return CL_INVALID_VALUE;
+    mapping = found->second;
+    mapping->unmapping = true;
+  }
+  auto retained = retain_memory(mem);
+  return submit_command(queue, CL_COMMAND_UNMAP_MEM_OBJECT, false, count, waits, [=] {
+    return write_allocation(retained->allocation, mapping->offset, mapping->pointer, mapping->size);
+  }, event, false, false, [=](cl_int status) {
+    std::lock_guard lock(allocations_mutex);
+    const auto [begin, end] = retained->mappings.equal_range(key);
+    const auto found = std::find_if(begin, end, [&](const auto &entry) { return entry.second == mapping; });
+    if (found != end) {
+      if (status == CL_SUCCESS) retained->mappings.erase(found);
+      else mapping->unmapping = false;
+    }
+  });
 }
 
 CL_API_ENTRY cl_int CL_API_CALL clEnqueueMigrateMemObjects(cl_command_queue queue_value, cl_uint count,
@@ -3531,9 +3923,15 @@ CL_API_ENTRY cl_int CL_API_CALL clEnqueueMigrateMemObjects(cl_command_queue queu
   auto *queue = checked(reinterpret_cast<_cl_command_queue *>(queue_value), Kind::Queue);
   if (queue == nullptr) return CL_INVALID_COMMAND_QUEUE;
   if (count == 0 || mem_objects == nullptr) return CL_INVALID_VALUE;
-  for (cl_uint index = 0; index < count; ++index)
-    if (checked(reinterpret_cast<_cl_mem *>(mem_objects[index]), Kind::Memory) == nullptr) return CL_INVALID_MEM_OBJECT;
-  return complete_event(queue, CL_COMMAND_MIGRATE_MEM_OBJECTS, wait_count, waits, event);
+  std::vector<std::shared_ptr<_cl_mem>> retained;
+  for (cl_uint index = 0; index < count; ++index) {
+    auto *memory = checked(reinterpret_cast<_cl_mem *>(mem_objects[index]), Kind::Memory);
+    if (memory == nullptr) return CL_INVALID_MEM_OBJECT;
+    if (memory->context != queue->context) return CL_INVALID_CONTEXT;
+    retained.push_back(retain_memory(memory));
+  }
+  return submit_command(queue, CL_COMMAND_MIGRATE_MEM_OBJECTS, false, wait_count, waits,
+                        [retained] { (void)retained; return CL_SUCCESS; }, event);
 }
 
 CL_API_ENTRY cl_int CL_API_CALL clEnqueueNDRangeKernel(cl_command_queue queue_value, cl_kernel kernel_value, cl_uint work_dim,
@@ -3551,6 +3949,11 @@ CL_API_ENTRY cl_int CL_API_CALL clEnqueueNDRangeKernel(cl_command_queue queue_va
         if (local[index] == 0) return CL_INVALID_WORK_GROUP_SIZE;
     }
     return complete_event(queue, CL_COMMAND_NDRANGE_KERNEL, count, waits, event);
+  }
+  for (cl_uint index = 0; index < work_dim; ++index) {
+    if (global[index] > std::numeric_limits<uint32_t>::max()) return CL_INVALID_GLOBAL_WORK_SIZE;
+    if (offset != nullptr && offset[index] > std::numeric_limits<uint32_t>::max()) return CL_INVALID_GLOBAL_OFFSET;
+    if (local != nullptr && local[index] > std::numeric_limits<uint32_t>::max()) return CL_INVALID_WORK_GROUP_SIZE;
   }
   if (local != nullptr && global != nullptr) {
     for (cl_uint index = 0; index < work_dim; ++index)
@@ -3574,8 +3977,6 @@ CL_API_ENTRY cl_int CL_API_CALL clEnqueueNDRangeKernel(cl_command_queue queue_va
     if (dependency->context != queue->context) return CL_INVALID_CONTEXT;
     dependencies.push_back(dependency);
   }
-  const auto prior = wait_queue(queue);
-  if (prior != CL_SUCCESS) return prior;
   bool pending = false;
   {
     std::lock_guard lock(events_mutex);
@@ -3584,17 +3985,24 @@ CL_API_ENTRY cl_int CL_API_CALL clEnqueueNDRangeKernel(cl_command_queue queue_va
       pending = pending || dependency->status != CL_COMPLETE;
     }
   }
-  if (pending) {
-    _cl_event *completion = nullptr;
-    if (event != nullptr) {
-      completion = make_event(queue, CL_COMMAND_NDRANGE_KERNEL, event);
-      if (completion == nullptr) return CL_OUT_OF_HOST_MEMORY;
-      {
-        std::lock_guard lock(events_mutex);
-        completion->status = CL_SUBMITTED;
-      }
-      retain(completion);
-    }
+  {
+    std::lock_guard lock(queue->pending_mutex);
+    pending = pending || queue->pending_commands != 0;
+  }
+  if (!pending) return finish_remote(queue, kernel, work_dim, offset, global, local, event);
+  try {
+    cl_int error = CL_SUCCESS;
+    auto clone = clCloneKernel(kernel_value, &error);
+    if (clone == nullptr) return error;
+    for (const auto &argument : reinterpret_cast<_cl_kernel *>(clone)->arguments)
+      if (argument.memory != nullptr) retain(argument.memory);
+    std::shared_ptr<_cl_kernel> snapshot(reinterpret_cast<_cl_kernel *>(clone), [](_cl_kernel *value) {
+      // Drop allocation references before releasing retained memory objects.
+      for (auto &argument : value->arguments) argument.allocation.reset();
+      for (const auto &argument : value->arguments)
+        if (argument.memory != nullptr) clReleaseMemObject(reinterpret_cast<cl_mem>(argument.memory));
+      clReleaseKernel(reinterpret_cast<cl_kernel>(value));
+    });
     const bool has_offset = offset != nullptr;
     const bool has_local = local != nullptr;
     std::array<size_t, 3> deferred_offset{0, 0, 0};
@@ -3605,48 +4013,14 @@ CL_API_ENTRY cl_int CL_API_CALL clEnqueueNDRangeKernel(cl_command_queue queue_va
       deferred_global[index] = global[index];
       if (has_local) deferred_local[index] = local[index];
     }
-    retain(queue);
-    retain(kernel);
-    for (auto *dependency : dependencies) retain(dependency);
-    {
-      std::lock_guard lock(queue->pending_mutex);
-      ++queue->pending_commands;
-    }
-    std::thread([queue, kernel, work_dim, dependencies = std::move(dependencies), completion, has_offset,
-                 has_local, deferred_offset, deferred_global, deferred_local]() {
-      std::vector<cl_event> waits;
-      waits.reserve(dependencies.size());
-      for (auto *dependency : dependencies) waits.push_back(reinterpret_cast<cl_event>(dependency));
-      cl_int result = wait_list(nullptr, static_cast<cl_uint>(waits.size()), waits.data());
-      if (result == CL_SUCCESS)
-        result = finish_remote(queue, kernel, work_dim, has_offset ? deferred_offset.data() : nullptr,
-                               deferred_global.data(), has_local ? deferred_local.data() : nullptr, nullptr);
-      if (completion != nullptr) {
-        {
-          std::lock_guard lock(events_mutex);
-          completion->status = result == CL_SUCCESS ? CL_COMPLETE : result;
-          completion->ended = now_nanos();
-        }
-        events_condition.notify_all();
-        notify_event_callbacks(completion);
-        clReleaseEvent(reinterpret_cast<cl_event>(completion));
-      }
-      for (auto *dependency : dependencies) clReleaseEvent(reinterpret_cast<cl_event>(dependency));
-      {
-        std::lock_guard lock(queue->pending_mutex);
-        queue->pending_failed = queue->pending_failed || result != CL_SUCCESS;
-        --queue->pending_commands;
-      }
-      queue->pending_condition.notify_all();
-      clReleaseKernel(reinterpret_cast<cl_kernel>(kernel));
-      clReleaseCommandQueue(reinterpret_cast<cl_command_queue>(queue));
-    }).detach();
-    return CL_SUCCESS;
-  }
-  auto result = wait_list(queue, count, waits); if (result != CL_SUCCESS) return result;
-  result = finish_remote(queue, kernel, work_dim, offset, global, local, event);
-  if (result == CL_SUCCESS && event != nullptr) reinterpret_cast<_cl_event *>(*event)->queue = queue;
-  return result;
+    std::vector<cl_event> retained_waits;
+    for (auto *dependency : dependencies) retained_waits.push_back(reinterpret_cast<cl_event>(dependency));
+    return enqueue_pending(queue, CL_COMMAND_NDRANGE_KERNEL, std::move(retained_waits),
+      [queue, snapshot, work_dim, has_offset, has_local, deferred_offset, deferred_global, deferred_local] {
+        return finish_remote(queue, snapshot.get(), work_dim, has_offset ? deferred_offset.data() : nullptr,
+                             deferred_global.data(), has_local ? deferred_local.data() : nullptr, nullptr);
+      }, event);
+  } catch (...) { return CL_OUT_OF_HOST_MEMORY; }
 }
 CL_API_ENTRY cl_int CL_API_CALL clEnqueueTask(cl_command_queue queue, cl_kernel kernel, cl_uint count, const cl_event *waits, cl_event *event) {
   const size_t global = 1;
@@ -3684,14 +4058,16 @@ CL_API_ENTRY void CL_API_CALL clSVMFree(cl_context, void *pointer) {
   }
   release_allocation(allocation, true);
 }
-CL_API_ENTRY cl_int CL_API_CALL clEnqueueSVMMemcpy(cl_command_queue queue_value, cl_bool, void *dst, const void *src, size_t size, cl_uint count, const cl_event *waits, cl_event *event) {
-  auto *queue = checked(reinterpret_cast<_cl_command_queue *>(queue_value), Kind::Queue); if (!queue) return CL_INVALID_COMMAND_QUEUE; auto result = wait_list(queue, count, waits); if (result != CL_SUCCESS) return result;
+CL_API_ENTRY cl_int CL_API_CALL clEnqueueSVMMemcpy(cl_command_queue queue_value, cl_bool blocking, void *dst, const void *src, size_t size, cl_uint count, const cl_event *waits, cl_event *event) {
+  auto *queue = checked(reinterpret_cast<_cl_command_queue *>(queue_value), Kind::Queue); if (!queue) return CL_INVALID_COMMAND_QUEUE; auto result = validate_wait_list(queue, count, waits); if (result != CL_SUCCESS) return result;
   size_t dst_offset = 0, src_offset = 0;
   auto dst_allocation = find_pointer(dst, &dst_offset);
   auto src_allocation = find_pointer(src, &src_offset);
   if (dst_allocation != nullptr && !valid_range(dst_allocation, dst_offset, size)) return CL_INVALID_VALUE;
   if (src_allocation != nullptr && !valid_range(src_allocation, src_offset, size)) return CL_INVALID_VALUE;
   if (dst_allocation == nullptr && src_allocation == nullptr) return CL_INVALID_VALUE;
+  return submit_command(queue, CL_COMMAND_SVM_MEMCPY, blocking, count, waits, [=] {
+    cl_int result = CL_SUCCESS;
   // For an SVM-to-host copy, the remote mirror is the source of truth after a
   // kernel has written the allocation.  Keep the host-visible bytes as the
   // source for SVM-to-SVM copies; those are commonly used to upload host-side
@@ -3710,58 +4086,78 @@ CL_API_ENTRY cl_int CL_API_CALL clEnqueueSVMMemcpy(cl_command_queue queue_value,
   } else {
     std::memmove(dst, static_cast<const uint8_t *>(src_allocation->base) + src_offset, size);
   }
-  return complete_event(queue, CL_COMMAND_SVM_MEMCPY, 0, nullptr, event);
+    return CL_SUCCESS;
+  }, event);
 }
 CL_API_ENTRY cl_int CL_API_CALL clEnqueueSVMMemFill(cl_command_queue queue_value, void *pointer, const void *pattern, size_t pattern_size, size_t size, cl_uint count, const cl_event *waits, cl_event *event) {
   auto *queue = checked(reinterpret_cast<_cl_command_queue *>(queue_value), Kind::Queue);
   if (!queue) return CL_INVALID_COMMAND_QUEUE;
-  auto waited = wait_list(queue, count, waits);
+  auto waited = validate_wait_list(queue, count, waits);
   if (waited != CL_SUCCESS) return waited;
   size_t offset = 0; auto allocation = find_pointer(pointer, &offset); if (!allocation || pattern == nullptr || pattern_size == 0 || size % pattern_size != 0 || !valid_range(allocation, offset, size)) return CL_INVALID_VALUE;
-  auto *bytes = static_cast<uint8_t *>(allocation->base); for (size_t index = 0; index < size; ++index) bytes[offset + index] = static_cast<const uint8_t *>(pattern)[index % pattern_size];
+  std::vector<uint8_t> copied_pattern(static_cast<const uint8_t *>(pattern), static_cast<const uint8_t *>(pattern) + pattern_size);
+  return submit_command(queue, CL_COMMAND_SVM_MEMFILL, false, count, waits, [=] {
+  auto *bytes = static_cast<uint8_t *>(allocation->base); for (size_t index = 0; index < size; ++index) bytes[offset + index] = copied_pattern[index % pattern_size];
   auto result = write_allocation(allocation, offset, bytes + offset, size); if (result != CL_SUCCESS) return result;
-  return complete_event(queue, CL_COMMAND_SVM_MEMFILL, 0, nullptr, event);
+    return CL_SUCCESS;
+  }, event);
 }
-CL_API_ENTRY cl_int CL_API_CALL clEnqueueSVMMap(cl_command_queue queue_value, cl_bool, cl_map_flags, void *pointer, size_t size, cl_uint count, const cl_event *waits, cl_event *event) {
+CL_API_ENTRY cl_int CL_API_CALL clEnqueueSVMMap(cl_command_queue queue_value, cl_bool blocking, cl_map_flags,
+                                               void *pointer, size_t size, cl_uint count,
+                                               const cl_event *waits, cl_event *event) {
   auto *queue = checked(reinterpret_cast<_cl_command_queue *>(queue_value), Kind::Queue);
   if (!queue) return CL_INVALID_COMMAND_QUEUE;
-  auto waited = wait_list(queue, count, waits);
-  if (waited != CL_SUCCESS) return waited;
-  size_t offset = 0; auto allocation = find_pointer(pointer, &offset);
+  auto result = validate_wait_list(queue, count, waits);
+  if (result != CL_SUCCESS) return result;
+  size_t offset = 0;
+  auto allocation = find_pointer(pointer, &offset);
   if (!valid_range(allocation, offset, size)) return CL_INVALID_VALUE;
+  auto mapping = std::make_shared<BufferMapping>();
+  mapping->offset = offset;
+  mapping->size = size;
+  mapping->pointer = pointer;
+  const auto key = reinterpret_cast<uintptr_t>(pointer);
   {
     std::lock_guard lock(allocations_mutex);
-    if (svm_mappings.find(reinterpret_cast<uintptr_t>(pointer)) != svm_mappings.end()) return CL_INVALID_OPERATION;
+    if (!svm_mappings.emplace(key, mapping).second) return CL_INVALID_OPERATION;
   }
-  auto result = read_allocation(allocation, offset, static_cast<uint8_t *>(allocation->base) + offset, size);
-  if (result != CL_SUCCESS) return result;
-  {
+  return submit_command(queue, CL_COMMAND_SVM_MAP, blocking, count, waits, [=] {
+    return read_allocation(allocation, offset, pointer, size);
+  }, event, false, false, [=](cl_int status) {
+    if (status == CL_SUCCESS) return;
     std::lock_guard lock(allocations_mutex);
-    svm_mappings[reinterpret_cast<uintptr_t>(pointer)] = BufferMapping{offset, size, pointer};
-  }
-  return complete_event(queue, CL_COMMAND_SVM_MAP, 0, nullptr, event);
+    const auto found = svm_mappings.find(key);
+    if (found != svm_mappings.end() && found->second == mapping) svm_mappings.erase(found);
+  });
 }
-CL_API_ENTRY cl_int CL_API_CALL clEnqueueSVMUnmap(cl_command_queue queue_value, void *pointer, cl_uint count, const cl_event *waits, cl_event *event) {
+CL_API_ENTRY cl_int CL_API_CALL clEnqueueSVMUnmap(cl_command_queue queue_value, void *pointer, cl_uint count,
+                                                 const cl_event *waits, cl_event *event) {
   auto *queue = checked(reinterpret_cast<_cl_command_queue *>(queue_value), Kind::Queue);
   if (!queue) return CL_INVALID_COMMAND_QUEUE;
-  auto waited = wait_list(queue, count, waits);
-  if (waited != CL_SUCCESS) return waited;
-  BufferMapping mapping;
-  {
-    std::lock_guard lock(allocations_mutex);
-    auto found = svm_mappings.find(reinterpret_cast<uintptr_t>(pointer));
-    if (found == svm_mappings.end()) return CL_INVALID_VALUE;
-    mapping = found->second;
-  }
-  size_t offset = 0; auto allocation = find_pointer(pointer, &offset);
-  if (!valid_range(allocation, mapping.offset, mapping.size) || offset != mapping.offset) return CL_INVALID_VALUE;
-  auto result = write_allocation(allocation, mapping.offset, static_cast<uint8_t *>(allocation->base) + mapping.offset, mapping.size);
+  auto result = validate_wait_list(queue, count, waits);
   if (result != CL_SUCCESS) return result;
+  size_t offset = 0;
+  auto allocation = find_pointer(pointer, &offset);
+  std::shared_ptr<BufferMapping> mapping;
+  const auto key = reinterpret_cast<uintptr_t>(pointer);
   {
     std::lock_guard lock(allocations_mutex);
-    svm_mappings.erase(reinterpret_cast<uintptr_t>(pointer));
+    const auto found = svm_mappings.find(key);
+    if (found == svm_mappings.end() || found->second->unmapping) return CL_INVALID_VALUE;
+    mapping = found->second;
+    if (!valid_range(allocation, mapping->offset, mapping->size) || offset != mapping->offset) return CL_INVALID_VALUE;
+    mapping->unmapping = true;
   }
-  return complete_event(queue, CL_COMMAND_SVM_UNMAP, 0, nullptr, event);
+  return submit_command(queue, CL_COMMAND_SVM_UNMAP, false, count, waits, [=] {
+    return write_allocation(allocation, mapping->offset, mapping->pointer, mapping->size);
+  }, event, false, false, [=](cl_int status) {
+    std::lock_guard lock(allocations_mutex);
+    const auto found = svm_mappings.find(key);
+    if (found != svm_mappings.end() && found->second == mapping) {
+      if (status == CL_SUCCESS) svm_mappings.erase(found);
+      else mapping->unmapping = false;
+    }
+  });
 }
 
 CL_API_ENTRY void *CL_API_CALL clHostMemAllocINTEL(cl_context context, const cl_mem_properties_intel *, size_t size, cl_uint alignment, cl_int *error) {
@@ -3808,6 +4204,7 @@ CL_API_ENTRY cl_int CL_API_CALL clEnqueueMemAdviseINTEL(cl_command_queue queue, 
 CL_API_ENTRY void *CL_API_CALL clGetExtensionFunctionAddress(const char *name) {
   if (name == nullptr) return nullptr;
 #define GEMSTONE_EXTENSION(function) if (std::strcmp(name, #function) == 0) return reinterpret_cast<void *>(&function)
+  GEMSTONE_EXTENSION(clIcdGetPlatformIDsKHR);
   GEMSTONE_EXTENSION(clHostMemAllocINTEL); GEMSTONE_EXTENSION(clDeviceMemAllocINTEL); GEMSTONE_EXTENSION(clSharedMemAllocINTEL);
   GEMSTONE_EXTENSION(clMemFreeINTEL); GEMSTONE_EXTENSION(clMemBlockingFreeINTEL); GEMSTONE_EXTENSION(clGetMemAllocInfoINTEL);
   GEMSTONE_EXTENSION(clSetKernelArgMemPointerINTEL); GEMSTONE_EXTENSION(clEnqueueMemFillINTEL); GEMSTONE_EXTENSION(clEnqueueMemcpyINTEL);

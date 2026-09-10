@@ -17,6 +17,8 @@ typedef struct gemstone_hsakmt_memory_transport {
   int (*release_allocation)(void *context, uint64_t allocation_id);
   int (*write_allocation)(void *context, uint64_t allocation_id, uint64_t offset, const void *bytes, uint32_t size);
   int (*read_allocation)(void *context, uint64_t allocation_id, uint64_t offset, void *bytes, uint32_t size);
+  // Optional for embedding transports; the environment transport always registers native addresses.
+  int (*register_allocation_address)(void *context, uint64_t allocation_id, uint64_t native_base);
 } gemstone_hsakmt_memory_transport;
 
 int gemstone_hsakmt_install_backend(gemstone_hsa_aql_runtime *runtime, const gemstone_hsakmt_memory_transport *memory);

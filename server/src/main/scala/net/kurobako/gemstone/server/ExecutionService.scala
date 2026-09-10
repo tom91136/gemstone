@@ -24,12 +24,13 @@ final class ExecutionService(
     * hot data path; rebuilding a multi-megabyte immutable collection for every mirrored chunk creates unbounded GC
     * latency. Neither the array nor a mutable view crosses the ExecutionMemory boundary.
     */
-  private final case class RemoteAllocation(kind: AllocationKind, bytes: Array[Byte])
+  private final case class RemoteAllocation(kind: AllocationKind, bytes: Array[Byte], address: Option[Long] = None)
   private final case class CompletionRecord(
       status: CompletionStatus,
       program: ProgramId,
       allocations: Set[AllocationId],
       pointerRelocations: Col[PointerRelocation],
+      allocationAddresses: Col[AllocationAddress],
       control: ExecutionControl
   )
   private final case class State(
@@ -47,6 +48,8 @@ final class ExecutionService(
   private val programLifecycleLock     = Object()
   private var executionWorkerScheduled = false
   private var closed                   = false
+  private var boundAllocations         = Map.empty[ProgramId, Set[AllocationId]]
+  private var bindingPrograms          = Set.empty[ProgramId]
 
   def registerAllocation(
       id: AllocationId,
@@ -66,10 +69,39 @@ final class ExecutionService(
     }
   }
 
+  /** Register an immutable client-address alias; storage and lifetime remain owned by the allocation. */
+  def registerAllocationAddress(id: AllocationId, address: Long): Either[ExecutionFailure, Unit] = synchronized {
+    val current = state.get()
+    if (closed) Left(ExecutionFailure.Failed("execution session is closed"))
+    else current.allocations.get(id).toRight(
+      ExecutionFailure.NotFound(s"allocation ${id.toLong} is not registered")
+    ).flatMap { allocation =>
+      val size = allocation.bytes.length.toLong
+      if (address <= 0 || size == 0 || address > Long.MaxValue - size)
+        Left(ExecutionFailure.InvalidRequest("allocation address alias has an invalid or overflowing range"))
+      else if (allocation.address.contains(address)) Right(())
+      else if (allocation.address.nonEmpty)
+        Left(ExecutionFailure.InvalidRequest("allocation address alias cannot be remapped"))
+      else if (
+        current.allocations.valuesIterator.exists(other =>
+          other.address.exists(base =>
+            address < base + other.bytes.length && base < address + size
+          )
+        )
+      ) Left(ExecutionFailure.InvalidRequest("allocation address aliases overlap"))
+      else {
+        state.set(current.copy(allocations = current.allocations.updated(id, allocation.copy(address = Some(address)))))
+        Right(())
+      }
+    }
+  }
+
   def releaseAllocation(id: AllocationId): Either[ExecutionFailure, Unit] = synchronized {
     val current = state.get()
     if (!current.allocations.contains(id))
       Left(ExecutionFailure.NotFound(s"allocation ${id.toLong} is not registered"))
+    else if (boundAllocations.valuesIterator.exists(_.contains(id)))
+      Left(ExecutionFailure.InvalidRequest(s"allocation ${id.toLong} is retained by a program global"))
     else if (current.completions.valuesIterator.exists(_.allocations.contains(id)))
       Left(ExecutionFailure.InvalidRequest(s"allocation ${id.toLong} is retained by completion"))
     else {
@@ -121,6 +153,8 @@ final class ExecutionService(
     val reserved = synchronized {
       val current = state.get()
       if (!current.programs.contains(id)) Left(ExecutionFailure.NotFound(s"program ${id.toLong} is not loaded"))
+      else if (bindingPrograms.contains(id))
+        Left(ExecutionFailure.InvalidRequest(s"program ${id.toLong} has a global binding in progress"))
       else if (
         current.completions.valuesIterator.exists(record =>
           record.program == id && record.status == CompletionStatus.Pending
@@ -134,6 +168,7 @@ final class ExecutionService(
     }
     reserved.flatMap { _ =>
       val result = programLifecycleLock.synchronized(executor.unload(id))
+      if (result.isRight) synchronized(boundAllocations -= id)
       if (result.isLeft) {
         synchronized {
           val current = state.get()
@@ -145,6 +180,61 @@ final class ExecutionService(
       }
       result
     }
+  }
+
+  /** Bind outside the service monitor while reserving program/allocation ownership across backend preparation. */
+  def bindGlobal(
+      id: ProgramId,
+      name: String,
+      allocation: AllocationId,
+      offset: Long
+  ): Either[ExecutionFailure, Unit] = {
+    val result = programLifecycleLock.synchronized {
+      val reserved = synchronized {
+        val current = state.get()
+        if (closed) Left(ExecutionFailure.Failed("execution session is closed"))
+        else if (!current.programs.contains(id)) Left(ExecutionFailure.NotFound(s"program ${id.toLong} is not loaded"))
+        else if (name.isEmpty || name.contains('\u0000') || name.length > 4096)
+          Left(ExecutionFailure.InvalidRequest("global name must be nonempty, NUL-free and at most 4096 characters"))
+        else if (
+          current.completions.valuesIterator.exists(r => r.program == id && r.status == CompletionStatus.Pending)
+        )
+          Left(ExecutionFailure.InvalidRequest("cannot bind globals during pending execution"))
+        else current.allocations.get(allocation).toRight(
+          ExecutionFailure.NotFound(s"allocation ${allocation.toLong} is not registered")
+        ).flatMap { value =>
+          if (offset < 0L || offset > value.bytes.length.toLong)
+            Left(ExecutionFailure.InvalidRequest("global binding offset exceeds allocation"))
+          else {
+            val previous = boundAllocations.getOrElse(id, Set.empty)
+            boundAllocations = boundAllocations.updated(id, previous + allocation)
+            bindingPrograms += id
+            Right(value.bytes.length.toLong -> previous)
+          }
+        }
+      }
+      reserved.flatMap { case (size, previous) =>
+        val attempted = try executor.bindGlobal(id, name, allocation, offset, size, BindingMemory)
+        catch { case scala.util.control.NonFatal(error) => Left(ExecutionFailure.Failed(error.toString)) }
+        synchronized {
+          bindingPrograms -= id
+          if (attempted.isLeft || closed) {
+            if (previous.isEmpty) boundAllocations -= id
+            else boundAllocations = boundAllocations.updated(id, previous)
+          }
+          if (closed) Left(ExecutionFailure.Failed("execution session is closed")) else attempted
+        }
+      }
+    }
+    cleanupClosedSession()
+    result
+  }
+
+  private object BindingMemory extends ExecutionMemory {
+    override def read(id: AllocationId, offset: Long, size: Int)         = ExecutionService.this.read(id, offset, size)
+    override def write(id: AllocationId, offset: Long, bytes: Col[Byte]) =
+      ExecutionService.this.write(id, offset, bytes)
+    override def recordPointerRelocation(relocation: PointerRelocation): Unit = ()
   }
 
   def writeGlobal(
@@ -168,8 +258,15 @@ final class ExecutionService(
       if (closed) Left(ExecutionFailure.Failed("execution session is closed"))
       else if (!current.programs.contains(dispatch.program))
         Left(ExecutionFailure.NotFound(s"program ${dispatch.program.toLong} is not loaded"))
+      else if (bindingPrograms.contains(dispatch.program))
+        Left(ExecutionFailure.InvalidRequest("program global binding is in progress"))
       else
         validateDispatch(dispatch, current).map { _ =>
+          val addresses = if (current.allocations.valuesIterator.exists(_.address.nonEmpty))
+            Col.from(current.allocations.iterator.map { case (id, allocation) =>
+              AllocationAddress(id, allocation.bytes.length.toLong, allocation.address)
+            })
+          else Col.empty[AllocationAddress]
           val id      = CompletionId.unsafe(current.nextCompletion)
           val control = ExecutionControl.create(
             executionLimits,
@@ -183,13 +280,16 @@ final class ExecutionService(
                 CompletionRecord(
                   CompletionStatus.Pending,
                   dispatch.program,
-                  dispatch.arguments.collect { case KernelArgument.Allocation(allocation, _) => allocation }.toSet ++
+                  addresses.iterator.filter(_.address.nonEmpty).map(_.allocation).toSet ++
+                    boundAllocations.getOrElse(dispatch.program, Set.empty) ++
+                    dispatch.arguments.collect { case KernelArgument.Allocation(allocation, _) => allocation }.toSet ++
                     dispatch.pointerRelocations.foldLeft(Set.empty[AllocationId]) { (allocations, relocation) =>
                       relocation.sourceAllocation.fold(allocations + relocation.target)(source =>
                         allocations + relocation.target + source
                       )
                     },
                   Col.empty,
+                  addresses,
                   control
                 )
               ),
@@ -212,7 +312,7 @@ final class ExecutionService(
       if (startWorker)
         try schedule(() => runPendingExecutions())
         catch {
-          case error: Throwable => failPendingExecutions(
+          case scala.util.control.NonFatal(error) => failPendingExecutions(
               ExecutionFailure.Failed(
                 s"cannot schedule execution: ${Option(error.getMessage).getOrElse(error.getClass.getName)}"
               )
@@ -239,7 +339,7 @@ final class ExecutionService(
           }
             .fold(CompletionStatus.Failed.apply, _ => CompletionStatus.Succeeded)
         catch {
-          case error: Throwable =>
+          case scala.util.control.NonFatal(error) =>
             CompletionStatus.Failed(
               ExecutionFailure.Failed(
                 s"program executor failed: ${Option(error.getMessage).getOrElse(error.getClass.getName)}"
@@ -297,11 +397,12 @@ final class ExecutionService(
 
   private def cleanupClosedSession(): Unit = {
     val programs = synchronized {
-      if (!closed || executionWorkerScheduled) Set.empty[ProgramId]
+      if (!closed || executionWorkerScheduled || bindingPrograms.nonEmpty) Set.empty[ProgramId]
       else {
         val current = state.get()
         state.set(current.copy(allocations = Map.empty, programs = Set.empty, completions = Map.empty))
         dirtyChunks.clear()
+        boundAllocations = Map.empty
         current.programs
       }
     }
@@ -401,6 +502,9 @@ final class ExecutionService(
   ): Either[ExecutionFailure, Unit] = writeValue(id, offset, value, size, null)
 
   private final class CompletionMemory(completion: CompletionId) extends ExecutionMemory {
+    override def allocationAddresses: Col[AllocationAddress] =
+      state.get().completions.get(completion).fold(Col.empty[AllocationAddress])(_.allocationAddresses)
+
     override def read(id: AllocationId, offset: Long, size: Int): Either[ExecutionFailure, Col[Byte]] =
       ExecutionService.this.read(id, offset, size)
 

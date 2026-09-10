@@ -103,10 +103,10 @@ enum Axis {
 final case class LaunchGeometry private (
     groupSize: Dimensions,
     groupCount: Dimensions,
-    globalSize: Dimensions,
+    globalSizeIntSaturated: Dimensions,
     workDim: Int,
     globalOffset: Coordinates,
-    private val globalSizeLong: LongCoordinates
+    globalExtent: LongCoordinates
 ) {
   def localCoordinates(index: Int): Coordinates = coordinates(index.toLong, groupSize)
 
@@ -136,17 +136,14 @@ final case class LaunchGeometry private (
     )
 
   def containsGlobal(coordinates: Coordinates): Boolean =
-    coordinates.x >= globalOffset.x && coordinates.x - globalOffset.x < globalSize.x &&
-      coordinates.y >= globalOffset.y && coordinates.y - globalOffset.y < globalSize.y &&
-      coordinates.z >= globalOffset.z && coordinates.z - globalOffset.z < globalSize.z
+    coordinates.x >= globalOffset.x && coordinates.x - globalOffset.x < globalExtent.x &&
+      coordinates.y >= globalOffset.y && coordinates.y - globalOffset.y < globalExtent.y &&
+      coordinates.z >= globalOffset.z && coordinates.z - globalOffset.z < globalExtent.z
 
   def containsGlobal(coordinates: LongCoordinates): Boolean =
-    coordinates.x >= globalOffset.x.toLong && coordinates.x - globalOffset.x.toLong < globalSizeLong.x &&
-      coordinates.y >= globalOffset.y.toLong && coordinates.y - globalOffset.y.toLong < globalSizeLong.y &&
-      coordinates.z >= globalOffset.z.toLong && coordinates.z - globalOffset.z.toLong < globalSizeLong.z
-
-  /** The exact long-width padded global extent, including virtual launches larger than Int.MaxValue. */
-  def globalSizeLongValue: LongCoordinates = globalSizeLong
+    coordinates.x >= globalOffset.x.toLong && coordinates.x - globalOffset.x.toLong < globalExtent.x &&
+      coordinates.y >= globalOffset.y.toLong && coordinates.y - globalOffset.y.toLong < globalExtent.y &&
+      coordinates.z >= globalOffset.z.toLong && coordinates.z - globalOffset.z.toLong < globalExtent.z
 
   private def coordinates(index: Long, dimensions: Dimensions): Coordinates = {
     val volume = dimensions.volume.fold(message => throw IllegalArgumentException(message), identity)
@@ -190,8 +187,8 @@ object LaunchGeometry {
   )
 
   /** Build a padded geometry when the per-axis global extent exceeds the legacy Int-sized Dimensions representation.
-    * The legacy [[LaunchGeometry.globalSize]] field is saturated for diagnostics; execution uses the exact long-width
-    * extent exposed through [[LaunchGeometry.containsGlobal(LongCoordinates)]].
+    * The legacy [[LaunchGeometry.globalSizeIntSaturated]] field is saturated for diagnostics; execution uses the exact
+    * long-width extent exposed through [[LaunchGeometry.containsGlobal(LongCoordinates)]].
     */
   def createVirtual(
       groupSize: Dimensions,
@@ -308,7 +305,14 @@ enum CompletionStatus {
 
 final case class DirtyRange(allocation: AllocationId, offset: Long, size: Int)
 
+/** Immutable dispatch snapshot of a live allocation and its optional client address alias. */
+final case class AllocationAddress(allocation: AllocationId, size: Long, address: Option[Long])
+
 trait ExecutionMemory {
+
+  /** Empty unless address aliases are enabled; consumers snapshot this once before execution. */
+  def allocationAddresses: Col[AllocationAddress] = Col.empty
+
   def read(id: AllocationId, offset: Long, size: Int): Either[ExecutionFailure, Col[Byte]]
   def write(id: AllocationId, offset: Long, bytes: Col[Byte]): Either[ExecutionFailure, Unit]
 
@@ -329,6 +333,14 @@ trait ExecutionMemory {
 }
 
 trait LoadedProgram {
+  def bindGlobal(
+      name: String,
+      allocation: AllocationId,
+      offset: Long,
+      allocationSize: Long,
+      memory: ExecutionMemory
+  ): Either[ExecutionFailure, Unit] =
+    Left(ExecutionFailure.Unsupported("program globals cannot be bound to allocations"))
 
   /** Copy bytes into a named device global, when the program format exposes one. */
   def writeGlobal(name: String, offset: Long, bytes: Col[Byte]): Either[ExecutionFailure, Unit] =
@@ -347,6 +359,16 @@ trait ProgramLoader {
 }
 
 trait ProgramExecutor {
+  def bindGlobal(
+      id: ProgramId,
+      name: String,
+      allocation: AllocationId,
+      offset: Long,
+      allocationSize: Long,
+      memory: ExecutionMemory
+  ): Either[ExecutionFailure, Unit] =
+    Left(ExecutionFailure.Unsupported("program globals cannot be bound to allocations"))
+
   def load(id: ProgramId, format: ProgramFormat, image: Col[Byte]): Either[ExecutionFailure, Unit]
   def unload(id: ProgramId): Either[ExecutionFailure, Unit]
   def writeGlobal(id: ProgramId, name: String, offset: Long, bytes: Col[Byte]): Either[ExecutionFailure, Unit] =

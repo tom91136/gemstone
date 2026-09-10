@@ -66,6 +66,9 @@ int gemstone_execution_attest(gemstone_execution_client *client);
 
 int gemstone_execution_register_allocation(gemstone_execution_client *client, uint64_t allocation_id,
                                             uint64_t size, gemstone_allocation_kind kind);
+// Register an immutable native address for an existing allocation. Released with the allocation.
+int gemstone_execution_register_allocation_address(gemstone_execution_client *client, uint64_t allocation_id, uint64_t native_base);
+
 int gemstone_execution_release_allocation(gemstone_execution_client *client, uint64_t allocation_id);
 int gemstone_execution_write_allocation(gemstone_execution_client *client, uint64_t allocation_id,
                                          uint64_t offset, const void *bytes, uint32_t size);
@@ -77,6 +80,10 @@ int gemstone_execution_load_program(gemstone_execution_client *client, gemstone_
 int gemstone_execution_unload_program(gemstone_execution_client *client, uint64_t program_id);
 int gemstone_execution_write_program_global(gemstone_execution_client *client, uint64_t program_id,
                                              const char *name, uint64_t offset, const void *bytes, uint32_t size);
+// Alias a linked device global to one registered allocation range. The server
+// initializes that range from its relocated image and retains it until unload.
+int gemstone_execution_bind_program_global(gemstone_execution_client *client, uint64_t program_id, const char *name, uint64_t allocation_id,
+                                           uint64_t offset);
 int gemstone_execution_launch(gemstone_execution_client *client, uint64_t program_id,
                                const char *kernel_name, gemstone_dimensions group_size,
                                gemstone_dimensions group_count, gemstone_dimensions global_size,

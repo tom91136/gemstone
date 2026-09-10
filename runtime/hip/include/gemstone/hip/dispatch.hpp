@@ -4,6 +4,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 
 #include <hip/hip_runtime_api.h>
 
@@ -16,6 +17,14 @@ constexpr uint16_t dispatch_dimensions(dim3 grid, dim3 block) {
 struct LaunchBuffer {
   const void *data = nullptr;
   size_t size = 0;
+
+  bool copy_to(void *destination, size_t capacity, size_t required) const {
+    if (required > capacity || size < required || (size != 0 && data == nullptr)) return false;
+    // HIP consumes the declared kernargs, not unused bytes at the end of a caller's packed buffer.
+    // Tensile can append a four-byte trailer to an otherwise complete argument record.
+    if (required != 0) std::memcpy(destination, data, required);
+    return true;
+  }
 };
 
 inline bool parse_launch_buffer(void **extra, LaunchBuffer &buffer) {

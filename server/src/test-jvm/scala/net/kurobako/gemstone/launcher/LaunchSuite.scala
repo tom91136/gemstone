@@ -6,6 +6,15 @@ import java.io.File
 import java.nio.file.Path
 
 final class LaunchSuite extends munit.FunSuite {
+  test("the effective launch environment configures the execution pool") {
+    val error = intercept[IllegalArgumentException] {
+      GemstoneProcess.injected(ComputeAPI.CUDA, RuntimeLayout(), Map("GEMSTONE_EXECUTION_PARALLELISM" -> "0"))(_ =>
+        fail("invalid worker count reached the child process")
+      )
+    }
+    assert(error.getMessage.contains("GEMSTONE_EXECUTION_PARALLELISM"))
+  }
+
   private val endpoint = Endpoint(43123, "a" * 64)
   private val root     = Path.of("/opt/gemstone")
   private val layout   = RuntimeLayout(
@@ -34,11 +43,63 @@ final class LaunchSuite extends munit.FunSuite {
     assertEquals(hip.environment.set("LD_PRELOAD"), root.resolve("hip/libamdhip64.so").toString)
     assertEquals(
       hip.environment.set("LD_LIBRARY_PATH"),
-      s"${root.resolve("hip")}:${root.resolve("hsa")}"
+      root.resolve("hip").toString
     )
     assertEquals(hsa.environment.set("LD_PRELOAD"), root.resolve("hsa/libhsa-runtime64.so.1").toString)
     assert(hip.environment.unset.contains("HSA_ENABLE_DTIF"))
     assert(hsa.environment.unset.contains("HSA_TOOLS_LIB"))
+  }
+
+  test("HIP route eligibility excludes HSA on Windows and keeps direct HIP independent of HSA") {
+    assertEquals(RuntimePlatform.fromOSName("Windows 11"), RuntimePlatform.Windows)
+    assertEquals(RuntimePlatform.fromOSName("Linux"), RuntimePlatform.Linux)
+    assertEquals(HIPRuntimeRoute.supported(RuntimePlatform.Windows).toVector, Vector(HIPRuntimeRoute.GemstoneHIP))
+    assertEquals(HIPRuntimeRoute.supported(RuntimePlatform.Linux).toVector, HIPRuntimeRoute.values.toVector)
+    assert(!HIPRuntimeRoute.GemstoneHIP.requiresHSA)
+    assert(HIPRuntimeRoute.VendorHIPOnHSA.requiresHSA)
+    assert(Launch.plan(ComputeAPI.HIP, layout.copy(hsaRuntime = None), endpoint, Map.empty).isRight)
+    assert(Launch.plan(
+      ComputeAPI.HIP,
+      layout.copy(hipRoute = HIPRuntimeRoute.VendorHIPOnHSA),
+      endpoint,
+      Map.empty,
+      RuntimePlatform.Windows
+    ).isLeft)
+    assert(HIPRuntimeRoute.parse("hsa").isLeft)
+  }
+
+  test("vendor HIP over HSA pins both selected libraries and preserves the application API") {
+    val vendor   = root.resolve("vendor/libamdhip64.so.7")
+    val selected = layout.copy(hipRuntime = Some(vendor), hipRoute = HIPRuntimeRoute.VendorHIPOnHSA)
+    val plan     = Launch.plan(
+      ComputeAPI.HIP,
+      selected,
+      endpoint,
+      Map("LD_PRELOAD" -> "/wrong/libamdhip64.so.7", "LD_LIBRARY_PATH" -> "/artifact/lib"),
+      RuntimePlatform.Linux
+    )
+      .fold(error => fail(error.message), identity)
+    assertEquals(plan.api, ComputeAPI.HIP)
+    assertEquals(plan.environment.set("LD_PRELOAD"), s"${root.resolve("hsa/libhsa-runtime64.so.1")}:$vendor")
+    assertEquals(
+      plan.environment.set("LD_LIBRARY_PATH"),
+      s"${root.resolve("hsa")}:${root.resolve("vendor")}:/artifact/lib"
+    )
+    assertEquals(plan.requiredEvidence, RequiredEvidence.Execution)
+    assert(Launch.plan(
+      ComputeAPI.HIP,
+      selected.copy(hsaRuntime = None),
+      endpoint,
+      Map.empty,
+      RuntimePlatform.Linux
+    ).isLeft)
+    assert(Launch.plan(
+      ComputeAPI.HIP,
+      selected.copy(hipRuntime = None),
+      endpoint,
+      Map.empty,
+      RuntimePlatform.Linux
+    ).isLeft)
   }
 
   test("OpenCL and Level Zero use their standard provider discovery") {
@@ -86,7 +147,6 @@ final class LaunchSuite extends munit.FunSuite {
       val plan = Launch.plan(api, selectedLayout, endpoint, Map.empty).fold(error => fail(error.message), identity)
       assertEquals(plan.environment.set("GEMSTONE_RPC_PORT"), endpoint.port.toString)
       assertEquals(plan.environment.set("GEMSTONE_RPC_TOKEN"), endpoint.token)
-      assertEquals(plan.environment.set("GEMSTONE_REQUIRED"), "1")
       assert(plan.environment.unset.contains("HSA_ENABLE_DTIF"))
       assert(plan.environment.unset.contains("HSA_TOOLS_LIB"))
     }

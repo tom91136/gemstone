@@ -2,6 +2,7 @@ package net.kurobako.gemstone.isa.spirv.v1_6
 
 import net.kurobako.gemstone.Col
 
+import net.kurobako.gemstone.binary.Bits.bitCount
 import net.kurobako.gemstone.binary.Bits.mask
 import net.kurobako.gemstone.binary.Bits.signExtend
 import net.kurobako.gemstone.binary.ByteRange
@@ -326,13 +327,15 @@ object Interpreter {
       arrayStrides: Map[Int, Int],
       memberOffsets: Map[(Int, Int), Int],
       packedStructures: Set[Int],
+      byValueParameters: Set[Int],
       saturatedConversions: Set[Int],
       extendedInstructionSets: Map[Int, String],
       entryPoints: Map[String, Int],
       subgroupSizes: Map[Int, Int],
       functions: Map[Int, FunctionInfo],
       functionNames: Map[Int, String],
-      collectiveFunctions: Set[Int]
+      collectiveFunctions: Set[Int],
+      atomicFunctions: Set[Int]
   ) {
     val typeSizeCache: TrieMap[Int, Int]                                  = TrieMap.empty
     val typeAlignmentCache: TrieMap[Int, Int]                             = TrieMap.empty
@@ -350,6 +353,28 @@ object Interpreter {
 
     def contains(offset: Int): Boolean =
       (dirty(offset >>> 6) & (1L << (offset & 63))) != 0L
+
+    def nextDirtyByte(from: Int): Int = {
+      var word = from >>> 6
+      if (word >= dirty.length) return bytes.length
+      var remaining = dirty(word) & (-1L << (from & 63))
+      while (remaining == 0L && word + 1 < dirty.length) {
+        word += 1
+        remaining = dirty(word)
+      }
+      (word << 6) + java.lang.Long.numberOfTrailingZeros(remaining)
+    }
+
+    def nextCleanByte(from: Int): Int = {
+      var word = from >>> 6
+      if (word >= dirty.length) return bytes.length
+      var remaining = ~dirty(word) & (-1L << (from & 63))
+      while (remaining == 0L && word + 1 < dirty.length) {
+        word += 1
+        remaining = ~dirty(word)
+      }
+      (word << 6) + java.lang.Long.numberOfTrailingZeros(remaining)
+    }
   }
 
   private final class MemoryState(
@@ -559,19 +584,22 @@ object Interpreter {
       case Region.Internal(bytes) =>
         checkedRange(bytes.length, pointer.offset, size).map(start => LittleEndian.decode(bytes, start, size))
       case Region.External(id) =>
-        memory.read(id, pointer.offset, size) match {
+        memory.readValue(id, pointer.offset, size) match {
           case Left(error)   => Left(error)
           case Right(source) =>
-            val pending = writes.get(id)
-            val value   = LittleEndian.decode(source.length) { index =>
-              val absolute   = pointer.offset + index.toLong
-              val pageOffset = (absolute & 4095L).toInt
-              pending match {
-                case Some(pages) => pages.get(absolute >>> 12) match {
-                    case Some(page) if page.contains(pageOffset) => page.bytes(pageOffset)
-                    case _                                       => source(index)
-                  }
-                case None => source(index)
+            var value = source
+            writes.get(id).foreach { pages =>
+              var index = 0
+              while (index < size) {
+                val absolute   = pointer.offset + index.toLong
+                val pageOffset = (absolute & 4095L).toInt
+                pages.get(absolute >>> 12) match {
+                  case Some(page) if page.contains(pageOffset) =>
+                    val shift = index * 8
+                    value = (value & ~(0xffL << shift)) | ((page.bytes(pageOffset).toLong & 0xffL) << shift)
+                  case _ => ()
+                }
+                index += 1
               }
             }
             Right(value)
@@ -678,10 +706,10 @@ object Interpreter {
           val (number, page) = pages(pageIndex)
           var offset         = 0
           while (offset < page.bytes.length) {
-            while (offset < page.bytes.length && !page.contains(offset)) offset += 1
+            offset = page.nextDirtyByte(offset)
             if (offset < page.bytes.length) {
               val start = offset
-              while (offset < page.bytes.length && page.contains(offset)) offset += 1
+              offset = page.nextCleanByte(start)
               memory.write(
                 id,
                 (number << 12) + start.toLong,
@@ -705,7 +733,7 @@ object Interpreter {
         .toRight(ExecutionFailure.InvalidRequest(s"internal byte range $offset + $size exceeds $length"))
   }
 
-  def prepare(module: Module): Either[ExecutionFailure, PreparedProgram] =
+  def prepareUnchecked(module: Module): Either[ExecutionFailure, PreparedProgram] =
     try compile(module).map(PreparedProgram(_))
     catch {
       case NonFatal(error) =>
@@ -721,7 +749,7 @@ object Interpreter {
     */
   def prepare(module: Module, environment: Environment): Either[ExecutionFailure, PreparedProgram] =
     Validator.validate(module, environment) match {
-      case ValidationResult.Valid           => prepare(module)
+      case ValidationResult.Valid           => prepareUnchecked(module)
       case ValidationResult.Invalid(issues) =>
         Left(ExecutionFailure.InvalidRequest(issues.map(_.message).mkString("invalid SPIR-V module: ", "; ", "")))
       case ValidationResult.Unsupported(issues) =>
@@ -775,8 +803,8 @@ object Interpreter {
     } finally if (metrics != null) metrics.recordElapsed(System.nanoTime() - started)
   }
 
-  def run(module: Module, dispatch: KernelDispatch, memory: ExecutionMemory): Either[ExecutionFailure, Unit] =
-    prepare(module).flatMap(run(_, dispatch, memory))
+  def runUnchecked(module: Module, dispatch: KernelDispatch, memory: ExecutionMemory): Either[ExecutionFailure, Unit] =
+    prepareUnchecked(module).flatMap(run(_, dispatch, memory))
 
   private def runValidated(
       program: DispatchProgram,
@@ -810,6 +838,7 @@ object Interpreter {
     val arrayStrides            = mutable.HashMap.empty[Int, Int]
     val memberOffsets           = mutable.HashMap.empty[(Int, Int), Int]
     val packedStructures        = mutable.HashSet.empty[Int]
+    val byValueParameters       = mutable.HashSet.empty[Int]
     val saturatedConversions    = mutable.HashSet.empty[Int]
     val extendedInstructionSets = mutable.HashMap.empty[Int, String]
     val entryPoints             = mutable.HashMap.empty[String, Int]
@@ -899,6 +928,9 @@ object Interpreter {
           arrayStrides.update(id(target), Math.toIntExact(decoration.words(1).toUnsigned))
         case Instruction.Decorate(target, decoration) if unsigned(decoration) == 10L =>
           val _ = packedStructures.add(id(target))
+        case Instruction.Decorate(target, decoration)
+            if decoration.words.size >= 2 && unsigned(decoration) == 38L && decoration.words(1).toUnsigned == 2L =>
+          val _ = byValueParameters.add(id(target)) // FuncParamAttr ByVal
         case Instruction.Decorate(target, decoration) if unsigned(decoration) == 28L =>
           val _ = saturatedConversions.add(id(target))
         case Instruction.MemberDecorate(structureType, member, decoration)
@@ -944,6 +976,8 @@ object Interpreter {
       }
       index += 1
     }
+    val definedFunctions = functions.toMap
+    val definedNames     = functionNames.toMap
     Right(
       DispatchProgram(
         module,
@@ -954,28 +988,45 @@ object Interpreter {
         arrayStrides.toMap,
         memberOffsets.toMap,
         packedStructures.toSet,
+        byValueParameters.toSet,
         saturatedConversions.toSet,
         extendedInstructionSets.toMap,
         entryPoints.toMap,
         subgroupSizes.toMap,
-        functions.toMap,
-        functionNames.toMap,
-        reachableCollectiveFunctions(module, functions.toMap, functionNames.toMap)
+        definedFunctions,
+        definedNames,
+        reachableFunctions(
+          module,
+          definedFunctions,
+          instruction => isDirectCollective(instruction, definedNames)
+        ),
+        reachableFunctions(module, definedFunctions, isAtomic)
       )
     )
   }
 
-  private def reachableCollectiveFunctions(
+  private def isAtomic(instruction: Instruction): Boolean = instruction match {
+    case _: Instruction.AtomicStore | _: Instruction.AtomicLoad | _: Instruction.AtomicExchange |
+        _: Instruction.AtomicCompareExchange | _: Instruction.AtomicCompareExchangeWeak |
+        _: Instruction.AtomicFAddEXT | _: Instruction.AtomicFMinEXT | _: Instruction.AtomicFMaxEXT |
+        _: Instruction.AtomicIAdd | _: Instruction.AtomicUMin | _: Instruction.AtomicIIncrement |
+        _: Instruction.AtomicIDecrement | _: Instruction.AtomicISub | _: Instruction.AtomicSMin |
+        _: Instruction.AtomicSMax | _: Instruction.AtomicUMax | _: Instruction.AtomicAnd |
+        _: Instruction.AtomicOr | _: Instruction.AtomicXor => true
+    case _ => false
+  }
+
+  private def reachableFunctions(
       module: Module,
       functions: Map[Int, FunctionInfo],
-      functionNames: Map[Int, String]
+      matches: Instruction => Boolean
   ): Set[Int] = {
     val result = mutable.HashSet.empty[Int]
     functions.valuesIterator.foreach { function =>
       var pc     = function.start + 1
       var direct = false
       while (pc < function.end && !direct) {
-        direct = isDirectCollective(module.instructions(pc), functionNames)
+        direct = matches(module.instructions(pc))
         pc += 1
       }
       if (direct) result += function.id
@@ -1137,17 +1188,8 @@ object Interpreter {
     val totalLocal     = Math.multiplyExact(Math.multiplyExact(sx, sy), sz)
     val subgroup       = program.subgroupSizes.getOrElse(function.id, math.max(1, math.min(32, totalLocal)))
     val hasCollectives = program.collectiveFunctions.contains(function.id)
-    val hasAtomics     = program.module.instructions.exists {
-      case _: Instruction.AtomicStore | _: Instruction.AtomicLoad | _: Instruction.AtomicExchange |
-          _: Instruction.AtomicCompareExchange | _: Instruction.AtomicCompareExchangeWeak |
-          _: Instruction.AtomicFAddEXT | _: Instruction.AtomicFMinEXT | _: Instruction.AtomicFMaxEXT |
-          _: Instruction.AtomicIAdd | _: Instruction.AtomicUMin | _: Instruction.AtomicIIncrement |
-          _: Instruction.AtomicIDecrement | _: Instruction.AtomicISub | _: Instruction.AtomicSMin |
-          _: Instruction.AtomicSMax | _: Instruction.AtomicUMax | _: Instruction.AtomicAnd |
-          _: Instruction.AtomicOr | _: Instruction.AtomicXor => true
-      case _ => false
-    }
-    val baseScalars = BaseScalarValues(program.constants, globalValues, program.module.header.bound.toUnsigned)
+    val hasAtomics     = program.atomicFunctions.contains(function.id)
+    val baseScalars    = BaseScalarValues(program.constants, globalValues, program.module.header.bound.toUnsigned)
     if (metrics != null) metrics.recordDispatch(hasCollectives)
     val groupCount = Math.multiplyExact(Math.multiplyExact(gx.toLong, gy.toLong), gz.toLong)
     // A large number of one-invocation groups is common in oneDPL. For those
@@ -1218,8 +1260,8 @@ object Interpreter {
             val relativeGlobalY = groupY.toLong * sy + localY
             val relativeGlobalZ = groupZ.toLong * sz + localZ
             if (
-              relativeGlobalX < dispatch.geometry.globalSize.x && relativeGlobalY < dispatch.geometry.globalSize.y &&
-              relativeGlobalZ < dispatch.geometry.globalSize.z
+              relativeGlobalX < dispatch.geometry.globalExtent.x && relativeGlobalY < dispatch.geometry.globalExtent.y &&
+              relativeGlobalZ < dispatch.geometry.globalExtent.z
             ) {
               if (groupMetrics != null) groupMetrics.recordInvocation()
               val globalX       = Math.addExact(dispatch.geometry.globalOffset.x.toLong, relativeGlobalX)
@@ -1239,9 +1281,9 @@ object Interpreter {
                 globalX = globalX,
                 globalY = globalY,
                 globalZ = globalZ,
-                globalSizeX = dispatch.geometry.globalSize.x.toLong,
-                globalSizeY = dispatch.geometry.globalSize.y.toLong,
-                globalSizeZ = dispatch.geometry.globalSize.z.toLong,
+                globalSizeX = dispatch.geometry.globalExtent.x.toLong,
+                globalSizeY = dispatch.geometry.globalExtent.y.toLong,
+                globalSizeZ = dispatch.geometry.globalExtent.z.toLong,
                 globalOffsetX = dispatch.geometry.globalOffset.x.toLong,
                 globalOffsetY = dispatch.geometry.globalOffset.y.toLong,
                 globalOffsetZ = dispatch.geometry.globalOffset.z.toLong,
@@ -1501,6 +1543,7 @@ object Interpreter {
       bindArgument(
         program,
         parameterType,
+        program.byValueParameters.contains(parameterId),
         arguments(parameterIndex),
         shared.get(parameterIndex),
         parameterIndex,
@@ -1533,6 +1576,10 @@ object Interpreter {
     Right(execution)
   }
 
+  private val InstructionCompleted: Either[ExecutionFailure, Unit] = Right(())
+
+  // Keep the loop and semantic families below HotSpot's huge-method threshold.
+  // Invocation state is explicit so calls, returns and collective suspension share one path.
   private def resumeInvocation(
       program: DispatchProgram,
       execution: InvocationExecution,
@@ -1540,2026 +1587,2403 @@ object Interpreter {
       control: ExecutionControl,
       metrics: PerformanceMetrics | Null
   ): Either[ExecutionFailure, Unit] = {
-    val values           = execution.values
-    var currentFunction  = execution.currentFunction
-    var pc               = execution.pc
-    var currentLabel     = execution.currentLabel
-    var predecessor      = execution.predecessor
-    var instructionCount = execution.instructionCount
-    val calls            = execution.calls
-    while (pc < currentFunction.end) {
-      instructionCount += 1L
+    while (execution.pc < execution.currentFunction.end) {
+      execution.instructionCount += 1L
       if (metrics != null) metrics.recordInstruction()
       control.checkpoint() match {
         case Left(fault) => return Left(ExecutionFailure.Failed(fault.message))
         case Right(())   => ()
       }
-      val instruction = program.module.instructions(pc)
-      instruction match {
-        case Instruction.FunctionParameter(_, _) => pc += 1
-        case Instruction.Label(label)            =>
-          currentLabel = id(label)
-          pc += 1
-        case Instruction.Phi(_, _, _) =>
-          val updates = mutable.ArrayBuffer.empty[(Int, RuntimeValue)]
-          var phiPc   = pc
-          while (phiPc < currentFunction.end && program.module.instructions(phiPc).isInstanceOf[Instruction.Phi]) {
-            program.module.instructions(phiPc) match {
-              case Instruction.Phi(resultType, dest, incoming) =>
-                phiIncoming(incoming, predecessor) match {
-                  case Left(error)          => return Left(error)
-                  case Right(Some(valueId)) =>
-                    values.get(valueId.toLong) match {
-                      case Some(value) => updates += id(dest) -> retag(value, id(resultType))
-                      case None        =>
-                        return Left(
-                          ExecutionFailure.InvalidRequest(
-                            s"OpPhi %${id(dest)} has no incoming value for label %$predecessor"
-                          )
+      executeInstruction(program, execution, memory, program.module.instructions(execution.pc)) match {
+        case Left(error) => return Left(error)
+        case Right(())   => ()
+      }
+      if (execution.completed || execution.suspended.nonEmpty) return InstructionCompleted
+    }
+    Left(ExecutionFailure.InvalidRequest(
+      s"SPIR-V function %${execution.currentFunction.id} " +
+        s"(${program.functionNames.getOrElse(execution.currentFunction.id, "unnamed")}) " +
+        "reached OpFunctionEnd without OpReturn"
+    ))
+  }
+
+  private def executeInstruction(
+      program: DispatchProgram,
+      execution: InvocationExecution,
+      memory: MemoryState,
+      instruction: Instruction
+  ): Either[ExecutionFailure, Unit] = instruction match {
+    case _: Instruction.FunctionParameter | _: Instruction.Label | _: Instruction.Phi =>
+      executePhi(program, execution, instruction)
+    case _: Instruction.Variable | _: Instruction.Load | _: Instruction.Store | _: Instruction.CopyMemory | _: Instruction.CopyMemorySized | _: Instruction.GroupAsyncCopy | _: Instruction.GroupWaitEvents =>
+      executeMemory(program, execution, memory, instruction)
+    case _: Instruction.Bitcast | _: Instruction.BitCount | _: Instruction.PtrCastToGeneric | _: Instruction.GenericCastToPtr | _: Instruction.GenericCastToPtrExplicit | _: Instruction.PtrAccessChain | _: Instruction.InBoundsPtrAccessChain | _: Instruction.AccessChain | _: Instruction.InBoundsAccessChain | _: Instruction.CompositeExtract | _: Instruction.CompositeConstruct | _: Instruction.CompositeInsert | _: Instruction.VectorExtractDynamic | _: Instruction.VectorInsertDynamic =>
+      executeComposite(program, execution, memory, instruction)
+    case _: Instruction.VectorShuffle | _: Instruction.ExtInst =>
+      executeExtended(program, execution, memory, instruction)
+    case _: Instruction.UConvert | _: Instruction.SConvert | _: Instruction.ConvertPtrToU | _: Instruction.ConvertUToPtr | _: Instruction.ConvertSToF | _: Instruction.ConvertUToF | _: Instruction.ConvertFToS | _: Instruction.ConvertFToU | _: Instruction.FConvert | _: Instruction.Undef | _: Instruction.CopyObject | _: Instruction.LifetimeStart | _: Instruction.LifetimeStop =>
+      executeConversion(program, execution, memory, instruction)
+    case _: Instruction.IAdd | _: Instruction.ISub | _: Instruction.IMul | _: Instruction.UDiv | _: Instruction.UMod | _: Instruction.SDiv | _: Instruction.SRem =>
+      executeInteger(program, execution, instruction)
+    case _: Instruction.AtomicStore | _: Instruction.AtomicLoad | _: Instruction.AtomicExchange | _: Instruction.AtomicCompareExchange | _: Instruction.AtomicCompareExchangeWeak | _: Instruction.AtomicFAddEXT | _: Instruction.AtomicFMinEXT | _: Instruction.AtomicFMaxEXT | _: Instruction.AtomicIAdd | _: Instruction.AtomicUMin | _: Instruction.AtomicIIncrement | _: Instruction.AtomicIDecrement | _: Instruction.AtomicISub | _: Instruction.AtomicSMin | _: Instruction.AtomicSMax | _: Instruction.AtomicUMax | _: Instruction.AtomicAnd | _: Instruction.AtomicOr | _: Instruction.AtomicXor | _: Instruction.FAdd | _: Instruction.FSub | _: Instruction.FMul | _: Instruction.Dot | _: Instruction.FDiv =>
+      executeAtomic(program, execution, memory, instruction)
+    case _: Instruction.FNegate | _: Instruction.ShiftLeftLogical =>
+      executeAtomicXor(program, execution, instruction)
+    case _: Instruction.ShiftRightLogical | _: Instruction.ShiftRightArithmetic | _: Instruction.BitwiseOr | _: Instruction.BitwiseXor | _: Instruction.BitwiseAnd | _: Instruction.Not | _: Instruction.IEqual | _: Instruction.INotEqual | _: Instruction.LogicalEqual | _: Instruction.LogicalNotEqual | _: Instruction.LogicalOr | _: Instruction.LogicalAnd | _: Instruction.LogicalNot | _: Instruction.Any | _: Instruction.All | _: Instruction.FOrdEqual | _: Instruction.FOrdNotEqual | _: Instruction.FUnordEqual | _: Instruction.FUnordNotEqual | _: Instruction.FUnordLessThan | _: Instruction.FUnordGreaterThan | _: Instruction.FUnordLessThanEqual | _: Instruction.FUnordGreaterThanEqual | _: Instruction.Unordered | _: Instruction.Ordered | _: Instruction.FOrdLessThanEqual | _: Instruction.FOrdLessThan | _: Instruction.FOrdGreaterThan | _: Instruction.FOrdGreaterThanEqual | _: Instruction.IsInf | _: Instruction.IsNan | _: Instruction.IsFinite =>
+      executeArithmetic(program, execution, instruction)
+    case _: Instruction.IsNormal | _: Instruction.SignBitSet | _: Instruction.ULessThan | _: Instruction.UGreaterThan | _: Instruction.ULessThanEqual | _: Instruction.UGreaterThanEqual | _: Instruction.SGreaterThan | _: Instruction.SGreaterThanEqual | _: Instruction.SLessThan | _: Instruction.SLessThanEqual | _: Instruction.Select =>
+      executeComparison(program, execution, instruction)
+    case _: Instruction.ControlBarrier | _: Instruction.MemoryBarrier | _: Instruction.GroupAny | _: Instruction.GroupAll | _: Instruction.GroupUMin | _: Instruction.GroupUMax | _: Instruction.GroupSMin | _: Instruction.GroupSMax | _: Instruction.GroupIAdd | _: Instruction.GroupIMulKHR | _: Instruction.GroupFAdd | _: Instruction.GroupFMin | _: Instruction.GroupFMax | _: Instruction.GroupFMulKHR | _: Instruction.SubgroupShuffleINTEL | _: Instruction.SubgroupShuffleUpINTEL | _: Instruction.SubgroupShuffleDownINTEL | _: Instruction.GroupBroadcast =>
+      executeCollective(program, execution, instruction)
+    case _: Instruction.FunctionCall =>
+      executeCall(program, execution, memory, instruction)
+    case _: Instruction.Branch | _: Instruction.BranchConditional | _: Instruction.Switch | _: Instruction.ReturnValue | _: Instruction.Return | _: Instruction.AssumeTrueKHR | _: Instruction.LoopMerge | _: Instruction.SelectionMerge =>
+      executeBranch(program, execution, instruction)
+    case other => Left(ExecutionFailure.Unsupported(s"${other.opcode} execution is not implemented"))
+  }
+
+  private def executePhi(
+      program: DispatchProgram,
+      execution: InvocationExecution,
+      instruction: Instruction
+  ): Either[ExecutionFailure, Unit] = {
+    val values = execution.values
+    instruction match {
+      case Instruction.FunctionParameter(_, _) => execution.pc += 1
+      case Instruction.Label(label)            =>
+        execution.currentLabel = id(label)
+        execution.pc += 1
+      case Instruction.Phi(_, _, _) =>
+        val updates = mutable.ArrayBuffer.empty[(Int, RuntimeValue)]
+        var phiPc   = execution.pc
+        while (
+          phiPc < execution.currentFunction.end && program.module.instructions(phiPc).isInstanceOf[Instruction.Phi]
+        ) {
+          program.module.instructions(phiPc) match {
+            case Instruction.Phi(resultType, dest, incoming) =>
+              phiIncoming(incoming, execution.predecessor) match {
+                case Left(error)          => return Left(error)
+                case Right(Some(valueId)) =>
+                  values.get(valueId.toLong) match {
+                    case Some(value) => updates += id(dest) -> retag(value, id(resultType))
+                    case None        =>
+                      return Left(
+                        ExecutionFailure.InvalidRequest(
+                          s"OpPhi %${id(dest)} has no incoming value for label %${execution.predecessor}"
                         )
-                    }
-                  case Right(None) =>
-                    return Left(
-                      ExecutionFailure.InvalidRequest(
-                        s"OpPhi %${id(dest)} has no incoming value for label %$predecessor"
                       )
+                  }
+                case Right(None) =>
+                  return Left(
+                    ExecutionFailure.InvalidRequest(
+                      s"OpPhi %${id(dest)} has no incoming value for label %${execution.predecessor}"
                     )
+                  )
+              }
+            case _ => ()
+          }
+          phiPc += 1
+        }
+        updates.foreach { case (destination, value) => values.update(destination, value) }
+        execution.pc = phiPc
+      case other => return Left(ExecutionFailure.Unsupported(s"${other.opcode} execution is not implemented"))
+    }
+    InstructionCompleted
+  }
+
+  private def executeMemory(
+      program: DispatchProgram,
+      execution: InvocationExecution,
+      memory: MemoryState,
+      instruction: Instruction
+  ): Either[ExecutionFailure, Unit] = {
+    val values = execution.values
+    instruction match {
+      case Instruction.Variable(resultType, dest, storageClass, initializer) =>
+        val pointee = pointerPointee(program, id(resultType))
+        val buffer  = Array.ofDim[Byte](typeSize(program, pointee))
+        val slots   = mutable.LongMap.empty[(Int, Pointer)]
+        pointerLeafOffsets(program, pointee, 0L).toOption.foreach(_.foreach { case (offset, pointerType) =>
+          program.types.get(pointerType) match {
+            case Some(RuntimeType.Pointer(pointerStorage, pointerPointee)) =>
+              slots.update(offset, pointerType -> Pointer(Region.Null, 0L, pointerPointee, pointerStorage))
+            case _ => ()
+          }
+        })
+        initializer.flatMap(value => values.get(id(value))).foreach(value =>
+          System.arraycopy(
+            encode(program, value),
+            0,
+            buffer,
+            0,
+            math.min(buffer.length, encode(program, value).length)
+          )
+        )
+        values.update(
+          id(dest),
+          RuntimeValue.Address(
+            id(resultType),
+            Pointer(
+              Region.Internal(buffer),
+              0L,
+              pointee,
+              unsigned(storageClass).toInt,
+              Option.when(slots.nonEmpty)(slots)
+            )
+          )
+        )
+        execution.pc += 1
+      case Instruction.Load(resultType, dest, pointer, _) =>
+        address(values, pointer) match {
+          case Left(error)   => return Left(error)
+          case Right(source) =>
+            program.types.get(id(resultType)) match {
+              case Some(RuntimeType.Pointer(_, _)) =>
+                loadPointer(program, memory, source, id(resultType)) match {
+                  case Left(error)  => return Left(error)
+                  case Right(value) =>
+                    values.update(id(dest), value)
+                    execution.pc += 1
                 }
-              case _ => ()
+              case Some(RuntimeType.Bool) | Some(RuntimeType.Integer(_, _)) | Some(RuntimeType.Floating(_)) =>
+                memory.readScalar(source, typeSize(program, id(resultType))) match {
+                  case Left(error) => return Left(error)
+                  case Right(bits) =>
+                    values.updateScalar(id(dest), id(resultType), bits)
+                    execution.pc += 1
+                }
+              case _ => memory.read(source, typeSize(program, id(resultType))) match {
+                  case Left(error)  => return Left(error)
+                  case Right(bytes) =>
+                    values.update(id(dest), decode(program, id(resultType), bytes))
+                    execution.pc += 1
+                }
             }
-            phiPc += 1
-          }
-          updates.foreach { case (destination, value) => values.update(destination, value) }
-          pc = phiPc
-        case Instruction.Variable(resultType, dest, storageClass, initializer) =>
-          val pointee = pointerPointee(program, id(resultType))
-          val buffer  = Array.ofDim[Byte](typeSize(program, pointee))
-          val slots   = mutable.LongMap.empty[(Int, Pointer)]
-          pointerLeafOffsets(program, pointee, 0L).toOption.foreach(_.foreach { case (offset, pointerType) =>
-            program.types.get(pointerType) match {
-              case Some(RuntimeType.Pointer(pointerStorage, pointerPointee)) =>
-                slots.update(offset, pointerType -> Pointer(Region.Null, 0L, pointerPointee, pointerStorage))
-              case _ => ()
-            }
-          })
-          initializer.flatMap(value => values.get(id(value))).foreach(value =>
-            System.arraycopy(
-              encode(program, value),
-              0,
-              buffer,
-              0,
-              math.min(buffer.length, encode(program, value).length)
-            )
-          )
-          values.update(
-            id(dest),
-            RuntimeValue.Address(
-              id(resultType),
-              Pointer(
-                Region.Internal(buffer),
-                0L,
-                pointee,
-                unsigned(storageClass).toInt,
-                Option.when(slots.nonEmpty)(slots)
-              )
-            )
-          )
-          pc += 1
-        case Instruction.Load(resultType, dest, pointer, _) =>
-          address(values, pointer) match {
-            case Left(error)   => return Left(error)
-            case Right(source) =>
-              program.types.get(id(resultType)) match {
-                case Some(RuntimeType.Pointer(_, _)) =>
-                  loadPointer(program, memory, source, id(resultType)) match {
-                    case Left(error)  => return Left(error)
-                    case Right(value) =>
-                      values.update(id(dest), value)
-                      pc += 1
-                  }
-                case Some(RuntimeType.Bool) | Some(RuntimeType.Integer(_, _)) | Some(RuntimeType.Floating(_)) =>
-                  memory.readScalar(source, typeSize(program, id(resultType))) match {
-                    case Left(error) => return Left(error)
-                    case Right(bits) =>
-                      values.updateScalar(id(dest), id(resultType), bits)
-                      pc += 1
-                  }
-                case _ => memory.read(source, typeSize(program, id(resultType))) match {
-                    case Left(error)  => return Left(error)
-                    case Right(bytes) =>
-                      values.update(id(dest), decode(program, id(resultType), bytes))
-                      pc += 1
-                  }
-              }
-          }
-        case Instruction.Store(pointer, source, _) =>
-          address(values, pointer) match {
-            case Right(target) if values.scalarType(id(source)) >= 0 =>
-              val sourceType = values.scalarType(id(source))
-              memory.writeScalar(target, values.scalarBits(id(source)), typeSize(program, sourceType)) match {
-                case Left(error) => return Left(withExecutionContext(error, currentFunction, pc, instruction))
-                case Right(())   =>
-                  if (typeSize(program, sourceType) == 8)
-                    target.slots.flatMap(_.get(target.offset)).foreach { case (pointerType, template) =>
-                      memory.integerPointer(
-                        values.scalarBits(id(source)),
-                        template.pointee,
-                        template.storageClass
-                      ).toOption.foreach {
-                        pointer => target.slots.foreach(_.update(target.offset, pointerType -> pointer))
-                      }
+        }
+      case Instruction.Store(pointer, source, _) =>
+        address(values, pointer) match {
+          case Right(target) if values.scalarType(id(source)) >= 0 =>
+            val sourceType = values.scalarType(id(source))
+            memory.writeScalar(target, values.scalarBits(id(source)), typeSize(program, sourceType)) match {
+              case Left(error) =>
+                return Left(withExecutionContext(error, execution.currentFunction, execution.pc, instruction))
+              case Right(()) =>
+                if (typeSize(program, sourceType) == 8)
+                  target.slots.flatMap(_.get(target.offset)).foreach { case (pointerType, template) =>
+                    memory.integerPointer(
+                      values.scalarBits(id(source)),
+                      template.pointee,
+                      template.storageClass
+                    ).toOption.foreach {
+                      pointer => target.slots.foreach(_.update(target.offset, pointerType -> pointer))
                     }
-                  pc += 1
-              }
-            case Right(target) => values.get(id(source)) match {
-                case Some(RuntimeValue.Address(sourceType, value)) =>
-                  storePointer(program, memory, target, sourceType, value) match {
-                    case Left(error) => return Left(error)
-                    case Right(())   => pc += 1
                   }
-                case Some(value) => memory.write(target, encode(program, value)) match {
-                    case Left(error) => return Left(withExecutionContext(error, currentFunction, pc, instruction))
-                    case Right(())   => pc += 1
-                  }
-                case None => return Left(undefined(source))
-              }
-            case Left(error) => return Left(error)
-          }
-        case Instruction.CopyMemory(target, source, _, _) =>
-          (address(values, target), address(values, source)) match {
-            case (Right(destination), Right(origin)) =>
-              val size = typeSize(program, origin.pointee)
-              memory.read(origin, size) match {
-                case Left(error)  => return Left(error)
-                case Right(bytes) =>
-                  memory.write(destination, bytes).flatMap(_ =>
-                    memory.copySlots(destination, origin, size.toLong)
-                  ) match {
-                    case Left(error) => return Left(error)
-                    case Right(())   => pc += 1
-                  }
-              }
-            case (Left(error), _) => return Left(error)
-            case (_, Left(error)) => return Left(error)
-          }
-        case Instruction.CopyMemorySized(target, source, size, _, _) =>
-          (address(values, target), address(values, source), scalar(values, size)) match {
-            case (Right(destination), Right(origin), Right(rawSize)) if rawSize <= Int.MaxValue.toLong =>
-              val byteCount = rawSize.toInt
-              memory.read(origin, byteCount) match {
-                case Left(error)  => return Left(error)
-                case Right(bytes) =>
-                  memory.write(destination, bytes).flatMap(_ =>
-                    memory.copySlots(destination, origin, byteCount.toLong)
-                  ) match {
-                    case Left(error) => return Left(error)
-                    case Right(())   => pc += 1
-                  }
-              }
-            case (Right(_), Right(_), Right(rawSize)) =>
-              return Left(ExecutionFailure.InvalidRequest(s"OpCopyMemorySized byte count $rawSize is too large"))
-            case (Left(error), _, _) => return Left(error)
-            case (_, Left(error), _) => return Left(error)
-            case (_, _, Left(error)) => return Left(error)
-          }
-        case Instruction.GroupAsyncCopy(
-              resultType,
-              dest,
-              executionScope,
-              destination,
-              source,
-              numElements,
-              stride,
-              _
-            ) =>
-          groupAsyncCopy(
-            program,
-            values,
-            memory,
-            execution.invocation,
+                execution.pc += 1
+            }
+          case Right(target) => values.get(id(source)) match {
+              case Some(RuntimeValue.Address(sourceType, value)) =>
+                storePointer(program, memory, target, sourceType, value) match {
+                  case Left(error) => return Left(error)
+                  case Right(())   => execution.pc += 1
+                }
+              case Some(value) => memory.write(target, encode(program, value)) match {
+                  case Left(error) =>
+                    return Left(withExecutionContext(error, execution.currentFunction, execution.pc, instruction))
+                  case Right(()) => execution.pc += 1
+                }
+              case None => return Left(undefined(source))
+            }
+          case Left(error) => return Left(error)
+        }
+      case Instruction.CopyMemory(target, source, _, _) =>
+        (address(values, target), address(values, source)) match {
+          case (Right(destination), Right(origin)) =>
+            val size = typeSize(program, origin.pointee)
+            memory.read(origin, size) match {
+              case Left(error)  => return Left(error)
+              case Right(bytes) =>
+                memory.write(destination, bytes).flatMap(_ =>
+                  memory.copySlots(destination, origin, size.toLong)
+                ) match {
+                  case Left(error) => return Left(error)
+                  case Right(())   => execution.pc += 1
+                }
+            }
+          case (Left(error), _) => return Left(error)
+          case (_, Left(error)) => return Left(error)
+        }
+      case Instruction.CopyMemorySized(target, source, size, _, _) =>
+        (address(values, target), address(values, source), scalar(values, size)) match {
+          case (Right(destination), Right(origin), Right(rawSize)) if rawSize <= Int.MaxValue.toLong =>
+            val byteCount = rawSize.toInt
+            memory.read(origin, byteCount) match {
+              case Left(error)  => return Left(error)
+              case Right(bytes) =>
+                memory.write(destination, bytes).flatMap(_ =>
+                  memory.copySlots(destination, origin, byteCount.toLong)
+                ) match {
+                  case Left(error) => return Left(error)
+                  case Right(())   => execution.pc += 1
+                }
+            }
+          case (Right(_), Right(_), Right(rawSize)) =>
+            return Left(ExecutionFailure.InvalidRequest(s"OpCopyMemorySized byte count $rawSize is too large"))
+          case (Left(error), _, _) => return Left(error)
+          case (_, Left(error), _) => return Left(error)
+          case (_, _, Left(error)) => return Left(error)
+        }
+      case Instruction.GroupAsyncCopy(
             resultType,
             dest,
             executionScope,
             destination,
             source,
             numElements,
-            stride
-          ) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.GroupWaitEvents(executionScope, numEvents, eventsList) =>
-          (for {
-            scope <- scalar(values, executionScope)
-            count <- scalar(values, numEvents)
-            _     <- address(values, eventsList)
-            _     <- Either.cond(
-              scope == 2L,
-              (),
-              ExecutionFailure.Unsupported(s"OpGroupWaitEvents execution scope $scope is not Workgroup")
-            )
-            _ <- Either.cond(
-              count >= 0L,
-              (),
-              ExecutionFailure.InvalidRequest(s"OpGroupWaitEvents has invalid event count $count")
-            )
-          } yield ()) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.Bitcast(resultType, dest, source) =>
-          values.get(id(source)) match {
-            case Some(RuntimeValue.Address(_, pointer)) =>
-              val pointee = pointerPointee(program, id(resultType))
-              values.update(id(dest), RuntimeValue.Address(id(resultType), pointer.copy(pointee = pointee)))
-              pc += 1
-            case Some(value) =>
-              value match {
-                case RuntimeValue.Bits(sourceType, lanes) =>
-                  bitcast(program, sourceType, id(resultType), lanes) match {
-                    case Left(error)   => return Left(error)
-                    case Right(result) =>
-                      values.update(id(dest), RuntimeValue.Bits(id(resultType), result))
-                      pc += 1
-                  }
-                case RuntimeValue.Address(_, pointer) =>
-                  val pointee = pointerPointee(program, id(resultType))
-                  values.update(id(dest), RuntimeValue.Address(id(resultType), pointer.copy(pointee = pointee)))
-                  pc += 1
-              }
-            case None => return Left(undefined(source))
-          }
-        case Instruction.BitCount(resultType, dest, base) =>
-          integerBitCount(program, values, resultType, dest, base) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.PtrCastToGeneric(resultType, dest, source) =>
-          (program.types.get(id(resultType)), values.get(id(source))) match {
-            case (Some(RuntimeType.Pointer(8, pointee)), Some(RuntimeValue.Address(sourceType, pointer))) =>
-              program.types.get(sourceType) match {
-                case Some(RuntimeType.Pointer(storageClass, sourcePointee))
-                    if Col(4, 5, 7).contains(storageClass) && sourcePointee == pointee &&
-                      pointer.pointee == pointee && (pointer.region == Region.Null || pointer.storageClass == storageClass) =>
-                  values.update(id(dest), RuntimeValue.Address(id(resultType), pointer))
-                  pc += 1
-                case Some(RuntimeType.Pointer(storageClass, sourcePointee)) =>
-                  return Left(
-                    ExecutionFailure.InvalidRequest(
-                      s"OpPtrCastToGeneric cannot cast storage class $storageClass pointee %$sourcePointee to %$pointee"
-                    )
-                  )
-                case _ =>
-                  return Left(ExecutionFailure.InvalidRequest("OpPtrCastToGeneric source type is not a pointer"))
-              }
-            case (Some(RuntimeType.Pointer(storageClass, _)), _) =>
-              return Left(
-                ExecutionFailure.InvalidRequest(
-                  s"OpPtrCastToGeneric result pointer has storage class $storageClass instead of Generic"
-                )
-              )
-            case (None, _) =>
-              return Left(
-                ExecutionFailure.InvalidRequest(s"OpPtrCastToGeneric result type %${id(resultType)} is undefined")
-              )
-            case (_, None) => return Left(undefined(source))
-            case _         => return Left(ExecutionFailure.InvalidRequest("OpPtrCastToGeneric source is not a pointer"))
-          }
-        case Instruction.GenericCastToPtr(resultType, dest, source) =>
-          genericCastToPointer(program, values, resultType, dest, source) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.GenericCastToPtrExplicit(resultType, dest, source, storage) =>
-          genericCastToPointerExplicit(program, values, resultType, dest, source, storage) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.PtrAccessChain(resultType, dest, base, element, indexes) =>
-          accessChain(program, values, memory, resultType, dest, base, Some(element), indexes) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.InBoundsPtrAccessChain(resultType, dest, base, element, indexes) =>
-          accessChain(program, values, memory, resultType, dest, base, Some(element), indexes) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.AccessChain(resultType, dest, base, indexes) =>
-          accessChain(program, values, memory, resultType, dest, base, None, indexes) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.InBoundsAccessChain(resultType, dest, base, indexes) =>
-          accessChain(program, values, memory, resultType, dest, base, None, indexes) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.CompositeExtract(resultType, dest, composite, indexes) =>
-          compositeExtract(program, values, resultType, dest, composite, indexes) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.CompositeConstruct(resultType, dest, constituents) =>
-          val lanes = Array.newBuilder[Long]
-          var index = 0
-          while (index < constituents.size) {
-            values.get(id(constituents(index))) match {
-              case Some(RuntimeValue.Bits(_, value)) => lanes ++= value
-              case Some(_)                           =>
+            stride,
+            _
+          ) =>
+        groupAsyncCopy(
+          program,
+          values,
+          memory,
+          execution.invocation,
+          resultType,
+          dest,
+          executionScope,
+          destination,
+          source,
+          numElements,
+          stride
+        ) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.GroupWaitEvents(executionScope, numEvents, eventsList) =>
+        (for {
+          scope <- scalar(values, executionScope)
+          count <- scalar(values, numEvents)
+          _     <- address(values, eventsList)
+          _     <- Either.cond(
+            scope == 2L,
+            (),
+            ExecutionFailure.Unsupported(s"OpGroupWaitEvents execution scope $scope is not Workgroup")
+          )
+          _ <- Either.cond(
+            count >= 0L,
+            (),
+            ExecutionFailure.InvalidRequest(s"OpGroupWaitEvents has invalid event count $count")
+          )
+        } yield ()) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case other => return Left(ExecutionFailure.Unsupported(s"${other.opcode} execution is not implemented"))
+    }
+    InstructionCompleted
+  }
+
+  private def executeComposite(
+      program: DispatchProgram,
+      execution: InvocationExecution,
+      memory: MemoryState,
+      instruction: Instruction
+  ): Either[ExecutionFailure, Unit] = {
+    val values = execution.values
+    instruction match {
+      case Instruction.Bitcast(resultType, dest, source) =>
+        values.get(id(source)) match {
+          case Some(RuntimeValue.Address(_, pointer)) =>
+            val pointee = pointerPointee(program, id(resultType))
+            values.update(id(dest), RuntimeValue.Address(id(resultType), pointer.copy(pointee = pointee)))
+            execution.pc += 1
+          case Some(value) =>
+            value match {
+              case RuntimeValue.Bits(sourceType, lanes) =>
+                bitcast(program, sourceType, id(resultType), lanes) match {
+                  case Left(error)   => return Left(error)
+                  case Right(result) =>
+                    values.update(id(dest), RuntimeValue.Bits(id(resultType), result))
+                    execution.pc += 1
+                }
+              case RuntimeValue.Address(_, pointer) =>
+                val pointee = pointerPointee(program, id(resultType))
+                values.update(id(dest), RuntimeValue.Address(id(resultType), pointer.copy(pointee = pointee)))
+                execution.pc += 1
+            }
+          case None => return Left(undefined(source))
+        }
+      case Instruction.BitCount(resultType, dest, base) =>
+        integerBitCount(program, values, resultType, dest, base) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.PtrCastToGeneric(resultType, dest, source) =>
+        (program.types.get(id(resultType)), values.get(id(source))) match {
+          case (Some(RuntimeType.Pointer(8, pointee)), Some(RuntimeValue.Address(sourceType, pointer))) =>
+            program.types.get(sourceType) match {
+              case Some(RuntimeType.Pointer(storageClass, sourcePointee))
+                  if Col(4, 5, 7).contains(storageClass) && sourcePointee == pointee &&
+                    pointer.pointee == pointee && (pointer.region == Region.Null || pointer.storageClass == storageClass) =>
+                values.update(id(dest), RuntimeValue.Address(id(resultType), pointer))
+                execution.pc += 1
+              case Some(RuntimeType.Pointer(storageClass, sourcePointee)) =>
                 return Left(
                   ExecutionFailure.InvalidRequest(
-                    s"OpCompositeConstruct constituent %${id(constituents(index))} is a pointer"
+                    s"OpPtrCastToGeneric cannot cast storage class $storageClass pointee %$sourcePointee to %$pointee"
                   )
                 )
-              case None => return Left(undefined(constituents(index)))
+              case _ =>
+                return Left(ExecutionFailure.InvalidRequest("OpPtrCastToGeneric source type is not a pointer"))
             }
-            index += 1
-          }
-          val result = lanes.result()
-          scalarLeafCount(program, id(resultType)) match {
-            case Right(expected) if result.length == expected =>
-              values.update(id(dest), RuntimeValue.Bits(id(resultType), result))
-              pc += 1
-            case Right(expected) =>
-              return Left(
-                ExecutionFailure.InvalidRequest(
-                  s"OpCompositeConstruct %${id(dest)} has ${result.length} scalar leaves, expected $expected"
-                )
-              )
-            case Left(error) => return Left(error)
-          }
-        case Instruction.CompositeInsert(resultType, dest, source, composite, indexes) =>
-          compositeInsert(program, values, resultType, dest, source, composite, indexes) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.VectorExtractDynamic(resultType, dest, vector, index) =>
-          (values.get(id(vector)), values.get(id(index))) match {
-            case (Some(RuntimeValue.Bits(_, lanes)), Some(RuntimeValue.Bits(_, Array(component)))) =>
-              val selected = component.toInt
-              if (selected < 0 || selected >= lanes.length)
-                return Left(ExecutionFailure.InvalidRequest(s"OpVectorExtractDynamic index $selected is out of range"))
-              values.update(id(dest), RuntimeValue.Bits(id(resultType), Array(lanes(selected))))
-              pc += 1
-            case (None, _) => return Left(undefined(vector))
-            case (_, None) => return Left(undefined(index))
-            case _ => return Left(ExecutionFailure.Unsupported("OpVectorExtractDynamic requires a scalar index"))
-          }
-        case Instruction.VectorInsertDynamic(resultType, dest, vector, component, index) =>
-          (values.get(id(vector)), values.get(id(component)), scalar(values, index)) match {
-            case (Some(RuntimeValue.Bits(_, lanes)), Some(RuntimeValue.Bits(_, Array(value))), Right(selected)) =>
-              val position = selected.toInt
-              if (position < 0 || position >= lanes.length)
-                return Left(ExecutionFailure.InvalidRequest(s"OpVectorInsertDynamic index $position is out of range"))
-              val result = lanes.clone()
-              result(position) = value
-              values.update(id(dest), RuntimeValue.Bits(id(resultType), result))
-              pc += 1
-            case (None, _, _)        => return Left(undefined(vector))
-            case (_, None, _)        => return Left(undefined(component))
-            case (_, _, Left(error)) => return Left(error)
-            case _ => return Left(ExecutionFailure.InvalidRequest("OpVectorInsertDynamic requires scalar component"))
-          }
-        case Instruction.VectorShuffle(resultType, dest, vector1, vector2, components) =>
-          (values.get(id(vector1)), values.get(id(vector2))) match {
-            case (Some(RuntimeValue.Bits(_, left)), Some(RuntimeValue.Bits(_, right))) =>
-              scalarLeafCount(program, id(resultType)) match {
-                case Right(expected) if expected == components.size =>
-                  val combined = left ++ right
-                  val result   = Array.ofDim[Long](components.size)
-                  var index    = 0
-                  while (index < components.size) {
-                    val selected = unsigned(components(index))
-                    result(index) =
-                      if (selected == 0xffffffffL) 0L
-                      else if (selected < combined.length.toLong) combined(selected.toInt)
-                      else
-                        return Left(
-                          ExecutionFailure.InvalidRequest(
-                            s"OpVectorShuffle component $selected is outside ${combined.length} lanes"
-                          )
-                        )
-                    index += 1
-                  }
-                  values.update(id(dest), RuntimeValue.Bits(id(resultType), result))
-                  pc += 1
-                case Right(expected) =>
-                  return Left(
-                    ExecutionFailure.InvalidRequest(
-                      s"OpVectorShuffle result has ${components.size} components, expected $expected scalar leaves"
-                    )
-                  )
-                case Left(error) => return Left(error)
-              }
-            case (None, _) => return Left(undefined(vector1))
-            case (_, None) => return Left(undefined(vector2))
-            case _ => return Left(ExecutionFailure.InvalidRequest("OpVectorShuffle operands must be numeric vectors"))
-          }
-        case Instruction.ExtInst(resultType, dest, set, inst, sources) =>
-          extendedInstruction(program, values, memory, resultType, dest, set, inst, sources) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.UConvert(resultType, dest, source) =>
-          val sourceId = id(source)
-          if (values.scalarType(sourceId) >= 0) {
-            val width = scalarWidth(program, id(resultType))
-            values.updateScalar(id(dest), id(resultType), values.scalarBits(sourceId) & mask(width))
-            pc += 1
-          } else
-            values.get(sourceId) match {
-              case Some(RuntimeValue.Bits(_, lanes)) =>
-                val width = scalarWidth(program, id(resultType))
-                values.update(id(dest), RuntimeValue.Bits(id(resultType), lanes.map(_ & mask(width))))
-                pc += 1
-              case Some(_) => return Left(ExecutionFailure.InvalidRequest("OpUConvert cannot convert a pointer"))
-              case None    => return Left(undefined(source))
-            }
-        case Instruction.SConvert(resultType, dest, source) =>
-          signedConvert(program, values, resultType, dest, source) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.ConvertPtrToU(resultType, dest, pointer) =>
-          val resultWidth = integerShape(program, id(resultType)) match {
-            case Some((width, 1)) => width
-            case _                =>
-              return Left(ExecutionFailure.InvalidRequest("OpConvertPtrToU requires a scalar integer result"))
-          }
-          address(values, pointer).flatMap(memory.pointerInteger) match {
-            case Left(error)  => return Left(error)
-            case Right(value) =>
-              values.update(id(dest), RuntimeValue.Bits(id(resultType), Array(value & mask(resultWidth))))
-              pc += 1
-          }
-        case Instruction.ConvertUToPtr(resultType, dest, integerValue) =>
-          (program.types.get(id(resultType)), values.get(id(integerValue))) match {
-            case (
-                  Some(RuntimeType.Pointer(storageClass, pointee)),
-                  Some(RuntimeValue.Bits(integerType, Array(rawAddress)))
-                ) if integerShape(program, integerType).exists(_._2 == 1) =>
-              memory.integerPointer(rawAddress & mask(scalarWidth(program, integerType)), pointee, storageClass) match {
-                case Left(error) =>
-                  return Left(
-                    ExecutionFailure.InvalidRequest(
-                      s"${error.message} at OpConvertUToPtr function %${currentFunction.id}, pc $pc, " +
-                        s"source %${id(integerValue)}, result %${id(dest)}"
-                    )
-                  )
-                case Right(pointer) =>
-                  values.update(id(dest), RuntimeValue.Address(id(resultType), pointer))
-                  pc += 1
-              }
-            case (Some(RuntimeType.Pointer(_, _)), Some(_)) =>
-              return Left(ExecutionFailure.InvalidRequest("OpConvertUToPtr requires a scalar integer operand"))
-            case (_, None)    => return Left(undefined(integerValue))
-            case (Some(_), _) =>
-              return Left(ExecutionFailure.InvalidRequest("OpConvertUToPtr requires a pointer result type"))
-            case (None, _) =>
-              return Left(
-                ExecutionFailure.InvalidRequest(s"OpConvertUToPtr result type %${id(resultType)} is undefined")
-              )
-          }
-        case Instruction.ConvertSToF(resultType, dest, source) =>
-          convertSignedToFloat(program, values, resultType, dest, source) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.ConvertUToF(resultType, dest, source) =>
-          convertUnsignedToFloat(program, values, resultType, dest, source) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.ConvertFToS(resultType, dest, source) =>
-          convertFloatToSigned(program, values, resultType, dest, source) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.ConvertFToU(resultType, dest, source) =>
-          convertFloatToUnsigned(program, values, resultType, dest, source) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.FConvert(resultType, dest, source) =>
-          convertFloating(program, values, resultType, dest, source) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.Undef(resultType, dest) =>
-          zeroValue(program.types, resultType, dest, "OpUndef") match {
-            case Left(error)  => return Left(error)
-            case Right(value) =>
-              values.update(id(dest), value)
-              pc += 1
-          }
-        case Instruction.CopyObject(resultType, dest, source) =>
-          values.get(id(source)) match {
-            case Some(value) =>
-              values.update(id(dest), retag(value, id(resultType)))
-              pc += 1
-            case None => return Left(undefined(source))
-          }
-        case Instruction.LifetimeStart(pointer, size) =>
-          validateLifetime(program, values, "OpLifetimeStart", pointer, size) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.LifetimeStop(pointer, size) =>
-          validateLifetime(program, values, "OpLifetimeStop", pointer, size) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.IAdd(resultType, dest, left, right) =>
-          binary(program, values, resultType, dest, left, right)(_ + _) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.ISub(resultType, dest, left, right) =>
-          binary(program, values, resultType, dest, left, right)(_ - _) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.IMul(resultType, dest, left, right) =>
-          binary(program, values, resultType, dest, left, right)(_ * _) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.UDiv(resultType, dest, left, right) =>
-          unsignedIntegerArithmetic(
-            program,
-            values,
-            resultType,
-            dest,
-            left,
-            right,
-            UnsignedIntegerOperation.Divide
-          ) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.UMod(resultType, dest, left, right) =>
-          unsignedIntegerArithmetic(
-            program,
-            values,
-            resultType,
-            dest,
-            left,
-            right,
-            UnsignedIntegerOperation.Remainder
-          ) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.SDiv(resultType, dest, left, right) =>
-          signedIntegerArithmetic(
-            program,
-            values,
-            resultType,
-            dest,
-            left,
-            right,
-            SignedIntegerOperation.Divide
-          ) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.SRem(resultType, dest, left, right) =>
-          signedIntegerArithmetic(
-            program,
-            values,
-            resultType,
-            dest,
-            left,
-            right,
-            SignedIntegerOperation.Remainder
-          ) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.AtomicStore(pointer, scope, semantics, value) =>
-          atomicStore(program, values, memory, pointer, scope, semantics, value) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.AtomicLoad(resultType, dest, pointer, scope, semantics) =>
-          atomicLoad(program, values, memory, resultType, dest, pointer, scope, semantics) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.AtomicExchange(resultType, dest, pointer, scope, semantics, value) =>
-          atomicExchange(program, values, memory, resultType, dest, pointer, scope, semantics, value) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.AtomicCompareExchange(resultType, dest, pointer, scope, equal, unequal, value, comparator) =>
-          atomicCompareExchange(
-            program,
-            values,
-            memory,
-            resultType,
-            dest,
-            pointer,
-            scope,
-            equal,
-            unequal,
-            value,
-            comparator
-          ) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.AtomicCompareExchangeWeak(
-              resultType,
-              dest,
-              pointer,
-              scope,
-              equal,
-              unequal,
-              value,
-              comparator
-            ) =>
-          atomicCompareExchange(
-            program,
-            values,
-            memory,
-            resultType,
-            dest,
-            pointer,
-            scope,
-            equal,
-            unequal,
-            value,
-            comparator
-          ) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.AtomicFAddEXT(resultType, dest, pointer, memoryScope, semantics, value) =>
-          atomicFloatingAdd(
-            program,
-            values,
-            memory,
-            resultType,
-            dest,
-            pointer,
-            memoryScope,
-            semantics,
-            value
-          ) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.AtomicFMinEXT(resultType, dest, pointer, memoryScope, semantics, value) =>
-          atomicFloatingMinMax(
-            program,
-            values,
-            memory,
-            resultType,
-            dest,
-            pointer,
-            memoryScope,
-            semantics,
-            value,
-            maximum = false
-          ) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.AtomicFMaxEXT(resultType, dest, pointer, memoryScope, semantics, value) =>
-          atomicFloatingMinMax(
-            program,
-            values,
-            memory,
-            resultType,
-            dest,
-            pointer,
-            memoryScope,
-            semantics,
-            value,
-            maximum = true
-          ) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.AtomicIAdd(resultType, dest, pointer, scope, semantics, value) =>
-          atomicInteger(
-            program,
-            values,
-            memory,
-            resultType,
-            dest,
-            pointer,
-            scope,
-            semantics,
-            Some(value),
-            AtomicIntegerOperation.Add
-          ) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.AtomicUMin(resultType, dest, pointer, scope, semantics, value) =>
-          atomicInteger(
-            program,
-            values,
-            memory,
-            resultType,
-            dest,
-            pointer,
-            scope,
-            semantics,
-            Some(value),
-            AtomicIntegerOperation.UnsignedMinimum
-          ) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.AtomicIIncrement(resultType, dest, pointer, scope, semantics) =>
-          atomicInteger(
-            program,
-            values,
-            memory,
-            resultType,
-            dest,
-            pointer,
-            scope,
-            semantics,
-            None,
-            AtomicIntegerOperation.Increment
-          ) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.AtomicIDecrement(resultType, dest, pointer, scope, semantics) =>
-          atomicInteger(
-            program,
-            values,
-            memory,
-            resultType,
-            dest,
-            pointer,
-            scope,
-            semantics,
-            None,
-            AtomicIntegerOperation.Decrement
-          ) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.AtomicISub(resultType, dest, pointer, scope, semantics, value) =>
-          atomicInteger(
-            program,
-            values,
-            memory,
-            resultType,
-            dest,
-            pointer,
-            scope,
-            semantics,
-            Some(value),
-            AtomicIntegerOperation.Subtract
-          ) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.AtomicSMin(resultType, dest, pointer, scope, semantics, value) =>
-          atomicInteger(
-            program,
-            values,
-            memory,
-            resultType,
-            dest,
-            pointer,
-            scope,
-            semantics,
-            Some(value),
-            AtomicIntegerOperation.SignedMinimum
-          ) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.AtomicSMax(resultType, dest, pointer, scope, semantics, value) =>
-          atomicInteger(
-            program,
-            values,
-            memory,
-            resultType,
-            dest,
-            pointer,
-            scope,
-            semantics,
-            Some(value),
-            AtomicIntegerOperation.SignedMaximum
-          ) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.AtomicUMax(resultType, dest, pointer, scope, semantics, value) =>
-          atomicInteger(
-            program,
-            values,
-            memory,
-            resultType,
-            dest,
-            pointer,
-            scope,
-            semantics,
-            Some(value),
-            AtomicIntegerOperation.UnsignedMaximum
-          ) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.AtomicAnd(resultType, dest, pointer, scope, semantics, value) =>
-          atomicInteger(
-            program,
-            values,
-            memory,
-            resultType,
-            dest,
-            pointer,
-            scope,
-            semantics,
-            Some(value),
-            AtomicIntegerOperation.And
-          ) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.AtomicOr(resultType, dest, pointer, scope, semantics, value) =>
-          atomicInteger(
-            program,
-            values,
-            memory,
-            resultType,
-            dest,
-            pointer,
-            scope,
-            semantics,
-            Some(value),
-            AtomicIntegerOperation.Or
-          ) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.AtomicXor(resultType, dest, pointer, scope, semantics, value) =>
-          atomicInteger(
-            program,
-            values,
-            memory,
-            resultType,
-            dest,
-            pointer,
-            scope,
-            semantics,
-            Some(value),
-            AtomicIntegerOperation.Xor
-          ) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.FAdd(resultType, dest, left, right) =>
-          floatingBinary(program, values, resultType, dest, left, right, FloatingOperation.Add) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.FSub(resultType, dest, left, right) =>
-          floatingBinary(program, values, resultType, dest, left, right, FloatingOperation.Subtract) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.FMul(resultType, dest, left, right) =>
-          floatingBinary(program, values, resultType, dest, left, right, FloatingOperation.Multiply) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.Dot(resultType, dest, left, right) =>
-          floatingDot(program, values, resultType, dest, left, right) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.FDiv(resultType, dest, left, right) =>
-          floatingBinary(program, values, resultType, dest, left, right, FloatingOperation.Divide) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.FNegate(resultType, dest, source) =>
-          floatingNegate(program, values, resultType, dest, source) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.ShiftLeftLogical(resultType, dest, base, shift) =>
-          integerShift(program, values, resultType, dest, base, shift, "OpShiftLeftLogical") {
-            (value, amount, width) =>
-              if (java.lang.Long.compareUnsigned(amount, width.toLong) >= 0) 0L
-              else value << amount.toInt
-          } match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.ShiftRightLogical(resultType, dest, base, shift) =>
-          integerShift(program, values, resultType, dest, base, shift, "OpShiftRightLogical") {
-            (value, amount, width) =>
-              if (java.lang.Long.compareUnsigned(amount, width.toLong) >= 0) 0L
-              else (value & mask(width)) >>> amount.toInt
-          } match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.ShiftRightArithmetic(resultType, dest, base, shift) =>
-          integerShift(program, values, resultType, dest, base, shift, "OpShiftRightArithmetic") {
-            (value, amount, width) =>
-              val signed = signExtend(value, width)
-              if (java.lang.Long.compareUnsigned(amount, width.toLong) >= 0) {
-                if (signed < 0L) -1L else 0L
-              } else signed >> amount.toInt
-          } match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.BitwiseOr(resultType, dest, left, right) =>
-          integerBitwise(program, values, resultType, dest, left, right, "OpBitwiseOr")(_ | _) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.BitwiseXor(resultType, dest, left, right) =>
-          integerBitwise(program, values, resultType, dest, left, right, "OpBitwiseXor")(_ ^ _) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.BitwiseAnd(resultType, dest, left, right) =>
-          integerBitwise(program, values, resultType, dest, left, right, "OpBitwiseAnd")(_ & _) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.Not(resultType, dest, source) =>
-          integerNot(program, values, resultType, dest, source) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.IEqual(resultType, dest, left, right) =>
-          integerEquality(program, values, resultType, dest, left, right, "OpIEqual")(_ == _) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.INotEqual(resultType, dest, left, right) =>
-          integerEquality(program, values, resultType, dest, left, right, "OpINotEqual")(_ != _) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.LogicalEqual(resultType, dest, left, right) =>
-          logicalBinary(program, values, resultType, dest, left, right, "OpLogicalEqual")(_ == _) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.LogicalNotEqual(resultType, dest, left, right) =>
-          logicalBinary(program, values, resultType, dest, left, right, "OpLogicalNotEqual")(_ != _) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.LogicalOr(resultType, dest, left, right) =>
-          logicalBinary(program, values, resultType, dest, left, right, "OpLogicalOr")(_ || _) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.LogicalAnd(resultType, dest, left, right) =>
-          logicalBinary(program, values, resultType, dest, left, right, "OpLogicalAnd")(_ && _) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.LogicalNot(resultType, dest, source) =>
-          logicalNot(program, values, resultType, dest, source) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.Any(resultType, dest, source) =>
-          logicalReduction(program, values, resultType, dest, source, all = false) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.All(resultType, dest, source) =>
-          logicalReduction(program, values, resultType, dest, source, all = true) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.FOrdEqual(resultType, dest, left, right) =>
-          floatingCompare(program, values, resultType, dest, left, right, FloatingComparison.OrderedEqual) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.FOrdNotEqual(resultType, dest, left, right) =>
-          floatingCompare(program, values, resultType, dest, left, right, FloatingComparison.OrderedNotEqual) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.FUnordEqual(resultType, dest, left, right) =>
-          floatingCompare(program, values, resultType, dest, left, right, FloatingComparison.UnorderedEqual) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.FUnordNotEqual(resultType, dest, left, right) =>
-          floatingCompare(program, values, resultType, dest, left, right, FloatingComparison.UnorderedNotEqual) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.FUnordLessThan(resultType, dest, left, right) =>
-          floatingCompare(program, values, resultType, dest, left, right, FloatingComparison.UnorderedLessThan) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.FUnordGreaterThan(resultType, dest, left, right) =>
-          floatingCompare(
-            program,
-            values,
-            resultType,
-            dest,
-            left,
-            right,
-            FloatingComparison.UnorderedGreaterThan
-          ) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.FUnordLessThanEqual(resultType, dest, left, right) =>
-          floatingCompare(
-            program,
-            values,
-            resultType,
-            dest,
-            left,
-            right,
-            FloatingComparison.UnorderedLessThanEqual
-          ) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.FUnordGreaterThanEqual(resultType, dest, left, right) =>
-          floatingCompare(
-            program,
-            values,
-            resultType,
-            dest,
-            left,
-            right,
-            FloatingComparison.UnorderedGreaterThanEqual
-          ) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.Unordered(resultType, dest, left, right) =>
-          floatingCompare(program, values, resultType, dest, left, right, FloatingComparison.Unordered) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.Ordered(resultType, dest, left, right) =>
-          floatingCompare(program, values, resultType, dest, left, right, FloatingComparison.Ordered) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.FOrdLessThanEqual(resultType, dest, left, right) =>
-          floatingCompare(
-            program,
-            values,
-            resultType,
-            dest,
-            left,
-            right,
-            FloatingComparison.OrderedLessThanEqual
-          ) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.FOrdLessThan(resultType, dest, left, right) =>
-          floatingCompare(program, values, resultType, dest, left, right, FloatingComparison.OrderedLessThan) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.FOrdGreaterThan(resultType, dest, left, right) =>
-          floatingCompare(program, values, resultType, dest, left, right, FloatingComparison.OrderedGreaterThan) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.FOrdGreaterThanEqual(resultType, dest, left, right) =>
-          floatingCompare(
-            program,
-            values,
-            resultType,
-            dest,
-            left,
-            right,
-            FloatingComparison.OrderedGreaterThanEqual
-          ) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.IsInf(resultType, dest, value) =>
-          floatingClassify(program, values, resultType, dest, value, FloatingClassification.Infinite) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.IsNan(resultType, dest, value) =>
-          floatingClassify(program, values, resultType, dest, value, FloatingClassification.NaN) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.IsFinite(resultType, dest, value) =>
-          floatingClassify(program, values, resultType, dest, value, FloatingClassification.Finite) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.IsNormal(resultType, dest, value) =>
-          floatingClassify(program, values, resultType, dest, value, FloatingClassification.Normal) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.SignBitSet(resultType, dest, value) =>
-          floatingClassify(program, values, resultType, dest, value, FloatingClassification.Signed) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.ULessThan(resultType, dest, left, right) =>
-          compare(values, resultType, dest, left, right)(java.lang.Long.compareUnsigned(_, _) < 0) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.UGreaterThan(resultType, dest, left, right) =>
-          compare(values, resultType, dest, left, right)(java.lang.Long.compareUnsigned(_, _) > 0) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.ULessThanEqual(resultType, dest, left, right) =>
-          compare(values, resultType, dest, left, right)(java.lang.Long.compareUnsigned(_, _) <= 0) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.UGreaterThanEqual(resultType, dest, left, right) =>
-          compare(values, resultType, dest, left, right)(java.lang.Long.compareUnsigned(_, _) >= 0) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.SGreaterThan(resultType, dest, left, right) =>
-          signedCompare(program, values, resultType, dest, left, right, "OpSGreaterThan")(_ > _) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.SGreaterThanEqual(resultType, dest, left, right) =>
-          signedCompare(program, values, resultType, dest, left, right, "OpSGreaterThanEqual")(_ >= _) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.SLessThan(resultType, dest, left, right) =>
-          signedCompare(program, values, resultType, dest, left, right, "OpSLessThan")(_ < _) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.SLessThanEqual(resultType, dest, left, right) =>
-          signedCompare(program, values, resultType, dest, left, right, "OpSLessThanEqual")(_ <= _) match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.Select(resultType, dest, condition, whenTrue, whenFalse) =>
-          val trueId  = id(whenTrue)
-          val falseId = id(whenFalse)
-          (values.get(id(condition)), values.get(trueId), values.get(falseId)) match {
-            case (
-                  Some(RuntimeValue.Bits(conditionType, conditionLanes)),
-                  Some(RuntimeValue.Bits(_, trueLanes)),
-                  Some(RuntimeValue.Bits(_, falseLanes))
-                ) =>
-              (booleanLanes(program, conditionType), scalarLeafCount(program, id(resultType))) match {
-                case (Some(conditionCount), Right(resultCount))
-                    if trueLanes.length == resultCount && falseLanes.length == resultCount &&
-                      (conditionCount == 1 || conditionCount == resultCount) =>
-                  val result = Array.tabulate(resultCount) { index =>
-                    val selected = if (conditionLanes(if (conditionCount == 1) 0 else index) != 0L) trueLanes
-                    else falseLanes
-                    selected(index)
-                  }
-                  values.update(id(dest), RuntimeValue.Bits(id(resultType), result))
-                  pc += 1
-                case (None, _) =>
-                  return Left(ExecutionFailure.InvalidRequest(s"OpSelect condition %${id(condition)} is not boolean"))
-                case (_, Left(error)) => return Left(error)
-                case _                =>
-                  return Left(
-                    ExecutionFailure.InvalidRequest(
-                      s"OpSelect condition/value shapes are incompatible: condition ${conditionLanes.length}, " +
-                        s"true ${trueLanes.length}, false ${falseLanes.length}"
-                    )
-                  )
-              }
-            case (Some(RuntimeValue.Bits(conditionType, conditionLanes)), Some(yes), Some(no))
-                if booleanLanes(program, conditionType).contains(1) && conditionLanes.length == 1 =>
-              values.update(id(dest), retag(if (conditionLanes(0) != 0L) yes else no, id(resultType)))
-              pc += 1
-            case (None, _, _) =>
-              return Left(ExecutionFailure.InvalidRequest(s"OpSelect condition %${id(condition)} is not boolean"))
-            case (_, None, _) => return Left(undefined(whenTrue))
-            case (_, _, None) => return Left(undefined(whenFalse))
-            case _            =>
-              return Left(ExecutionFailure.InvalidRequest(s"OpSelect condition %${id(condition)} is invalid"))
-          }
-        case Instruction.ControlBarrier(executionScope, memoryScope, semantics) =>
-          controlBarrier(values, currentFunction.id, pc, executionScope, memoryScope, semantics) match {
-            case Left(error)    => return Left(error)
-            case Right(request) =>
-              suspend(execution, currentFunction, pc, currentLabel, predecessor, instructionCount, request)
-              return Right(())
-          }
-        case Instruction.MemoryBarrier(memoryScope, semantics) =>
-          validateAtomicControls(values, memoryScope, semantics, "OpMemoryBarrier") match {
-            case Left(error) => return Left(error)
-            case Right(())   => pc += 1
-          }
-        case Instruction.GroupAny(resultType, dest, executionScope, pred) =>
-          collectiveAny(program, values, currentFunction.id, pc, resultType, dest, executionScope, pred) match {
-            case Left(error)    => return Left(error)
-            case Right(request) =>
-              suspend(execution, currentFunction, pc, currentLabel, predecessor, instructionCount, request)
-              return Right(())
-          }
-        case Instruction.GroupAll(resultType, dest, executionScope, pred) =>
-          collectiveBoolean(
-            program,
-            values,
-            currentFunction.id,
-            pc,
-            resultType,
-            dest,
-            executionScope,
-            pred,
-            CollectiveKind.All,
-            "OpGroupAll"
-          ) match {
-            case Left(error)    => return Left(error)
-            case Right(request) =>
-              suspend(execution, currentFunction, pc, currentLabel, predecessor, instructionCount, request)
-              return Right(())
-          }
-        case Instruction.GroupUMin(resultType, dest, executionScope, operation, value) =>
-          collectiveIntegerExtremum(
-            program,
-            values,
-            currentFunction.id,
-            pc,
-            resultType,
-            dest,
-            executionScope,
-            operation,
-            value,
-            CollectiveKind.UnsignedMin,
-            "OpGroupUMin"
-          ) match {
-            case Left(error)    => return Left(error)
-            case Right(request) =>
-              suspend(execution, currentFunction, pc, currentLabel, predecessor, instructionCount, request)
-              return Right(())
-          }
-        case Instruction.GroupUMax(resultType, dest, executionScope, operation, value) =>
-          collectiveIntegerExtremum(
-            program,
-            values,
-            currentFunction.id,
-            pc,
-            resultType,
-            dest,
-            executionScope,
-            operation,
-            value,
-            CollectiveKind.UnsignedMax,
-            "OpGroupUMax"
-          ) match {
-            case Left(error)    => return Left(error)
-            case Right(request) =>
-              suspend(execution, currentFunction, pc, currentLabel, predecessor, instructionCount, request)
-              return Right(())
-          }
-        case Instruction.GroupSMin(resultType, dest, executionScope, operation, value) =>
-          collectiveIntegerExtremum(
-            program,
-            values,
-            currentFunction.id,
-            pc,
-            resultType,
-            dest,
-            executionScope,
-            operation,
-            value,
-            CollectiveKind.SignedMin,
-            "OpGroupSMin"
-          ) match {
-            case Left(error)    => return Left(error)
-            case Right(request) =>
-              suspend(execution, currentFunction, pc, currentLabel, predecessor, instructionCount, request)
-              return Right(())
-          }
-        case Instruction.GroupSMax(resultType, dest, executionScope, operation, value) =>
-          collectiveIntegerExtremum(
-            program,
-            values,
-            currentFunction.id,
-            pc,
-            resultType,
-            dest,
-            executionScope,
-            operation,
-            value,
-            CollectiveKind.SignedMax,
-            "OpGroupSMax"
-          ) match {
-            case Left(error)    => return Left(error)
-            case Right(request) =>
-              suspend(execution, currentFunction, pc, currentLabel, predecessor, instructionCount, request)
-              return Right(())
-          }
-        case Instruction.GroupIAdd(resultType, dest, executionScope, operation, value) =>
-          collectiveIntegerAdd(
-            program,
-            values,
-            currentFunction.id,
-            pc,
-            resultType,
-            dest,
-            executionScope,
-            operation,
-            value
-          ) match {
-            case Left(error)    => return Left(error)
-            case Right(request) =>
-              suspend(execution, currentFunction, pc, currentLabel, predecessor, instructionCount, request)
-              return Right(())
-          }
-        case Instruction.GroupIMulKHR(resultType, dest, executionScope, operation, value) =>
-          collectiveIntegerMultiply(
-            program,
-            values,
-            currentFunction.id,
-            pc,
-            resultType,
-            dest,
-            executionScope,
-            operation,
-            value
-          ) match {
-            case Left(error)    => return Left(error)
-            case Right(request) =>
-              suspend(execution, currentFunction, pc, currentLabel, predecessor, instructionCount, request)
-              return Right(())
-          }
-        case Instruction.GroupFAdd(resultType, dest, executionScope, operation, value) =>
-          collectiveFloatingAdd(
-            program,
-            values,
-            currentFunction.id,
-            pc,
-            resultType,
-            dest,
-            executionScope,
-            operation,
-            value
-          ) match {
-            case Left(error)    => return Left(error)
-            case Right(request) =>
-              suspend(execution, currentFunction, pc, currentLabel, predecessor, instructionCount, request)
-              return Right(())
-          }
-        case Instruction.GroupFMin(resultType, dest, executionScope, operation, value) =>
-          collectiveFloatingExtremum(
-            program,
-            values,
-            currentFunction.id,
-            pc,
-            resultType,
-            dest,
-            executionScope,
-            operation,
-            value,
-            CollectiveKind.FloatingMin,
-            "OpGroupFMin"
-          ) match {
-            case Left(error)    => return Left(error)
-            case Right(request) =>
-              suspend(execution, currentFunction, pc, currentLabel, predecessor, instructionCount, request)
-              return Right(())
-          }
-        case Instruction.GroupFMax(resultType, dest, executionScope, operation, value) =>
-          collectiveFloatingExtremum(
-            program,
-            values,
-            currentFunction.id,
-            pc,
-            resultType,
-            dest,
-            executionScope,
-            operation,
-            value,
-            CollectiveKind.FloatingMax,
-            "OpGroupFMax"
-          ) match {
-            case Left(error)    => return Left(error)
-            case Right(request) =>
-              suspend(execution, currentFunction, pc, currentLabel, predecessor, instructionCount, request)
-              return Right(())
-          }
-        case Instruction.GroupFMulKHR(resultType, dest, executionScope, operation, value) =>
-          collectiveFloatingMultiply(
-            program,
-            values,
-            currentFunction.id,
-            pc,
-            resultType,
-            dest,
-            executionScope,
-            operation,
-            value
-          ) match {
-            case Left(error)    => return Left(error)
-            case Right(request) =>
-              suspend(execution, currentFunction, pc, currentLabel, predecessor, instructionCount, request)
-              return Right(())
-          }
-        case Instruction.SubgroupShuffleINTEL(resultType, dest, data, invocationId) =>
-          collectiveShuffle(values, currentFunction.id, pc, resultType, dest, data, invocationId) match {
-            case Left(error)    => return Left(error)
-            case Right(request) =>
-              suspend(execution, currentFunction, pc, currentLabel, predecessor, instructionCount, request)
-              return Right(())
-          }
-        case Instruction.SubgroupShuffleUpINTEL(resultType, dest, previous, current, delta) =>
-          collectiveShuffleUp(values, currentFunction.id, pc, resultType, dest, previous, current, delta) match {
-            case Left(error)    => return Left(error)
-            case Right(request) =>
-              suspend(execution, currentFunction, pc, currentLabel, predecessor, instructionCount, request)
-              return Right(())
-          }
-        case Instruction.SubgroupShuffleDownINTEL(resultType, dest, current, next, delta) =>
-          collectiveShuffleDown(values, currentFunction.id, pc, resultType, dest, current, next, delta) match {
-            case Left(error)    => return Left(error)
-            case Right(request) =>
-              suspend(execution, currentFunction, pc, currentLabel, predecessor, instructionCount, request)
-              return Right(())
-          }
-        case Instruction.GroupBroadcast(resultType, dest, executionScope, value, localId) =>
-          collectiveBroadcast(
-            program,
-            values,
-            currentFunction.id,
-            pc,
-            resultType,
-            dest,
-            executionScope,
-            value,
-            localId
-          ) match {
-            case Left(error)    => return Left(error)
-            case Right(request) =>
-              suspend(execution, currentFunction, pc, currentLabel, predecessor, instructionCount, request)
-              return Right(())
-          }
-        case Instruction.FunctionCall(resultType, dest, called, arguments) =>
-          val callee = program.functions.get(id(called)) match {
-            case Some(value) => value
-            case None        =>
-              return Left(
-                ExecutionFailure.InvalidRequest(s"OpFunctionCall references undefined function %${id(called)}")
-              )
-          }
-          if (arguments.size != callee.parameters.size)
+          case (Some(RuntimeType.Pointer(storageClass, _)), _) =>
             return Left(
               ExecutionFailure.InvalidRequest(
-                s"OpFunctionCall %${id(called)} expects ${callee.parameters.size} arguments, received ${arguments.size}"
+                s"OpPtrCastToGeneric result pointer has storage class $storageClass instead of Generic"
               )
             )
-          program.functionNames.get(id(called)) match {
-            case Some("_Z12get_local_idj") =>
-              scalar(values, arguments.head) match {
-                case Left(error)                                           => return Left(error)
-                case Right(dimension) if dimension >= 0L && dimension < 3L =>
-                  integerShape(program, id(resultType)) match {
-                    case Some((width, 1)) =>
-                      values.update(
-                        id(dest),
-                        RuntimeValue.Bits(
-                          id(resultType),
-                          Array(execution.invocation.local(dimension.toInt) & mask(width))
-                        )
-                      )
-                      pc += 1
-                    case _ =>
-                      return Left(
-                        ExecutionFailure.InvalidRequest(
-                          s"OpenCL get_local_id result type %${id(resultType)} is not an integer scalar"
-                        )
-                      )
-                  }
-                case Right(dimension) =>
-                  return Left(ExecutionFailure.InvalidRequest(s"OpenCL get_local_id dimension $dimension is invalid"))
-              }
-            case Some("_Z12get_group_idj") | Some("_Z14get_local_sizej") =>
-              scalar(values, arguments.head) match {
-                case Left(error)                                           => return Left(error)
-                case Right(dimension) if dimension >= 0L && dimension < 3L =>
-                  integerShape(program, id(resultType)) match {
-                    case Some((width, 1)) =>
-                      val source = program.functionNames.get(id(called)) match {
-                        case Some("_Z12get_group_idj")   => execution.invocation.group(dimension.toInt)
-                        case Some("_Z14get_local_sizej") => execution.invocation.workgroupSize(dimension.toInt)
-                        case _                           => 0L
-                      }
-                      values.update(id(dest), RuntimeValue.Bits(id(resultType), Array(source & mask(width))))
-                      pc += 1
-                    case _ =>
-                      return Left(
-                        ExecutionFailure.InvalidRequest(
-                          s"OpenCL ${program.functionNames.getOrElse(id(called), "builtin")} result type " +
-                            s"%${id(resultType)} is not an integer scalar"
-                        )
-                      )
-                  }
-                case Right(dimension) =>
-                  return Left(
-                    ExecutionFailure.InvalidRequest(
-                      s"OpenCL ${program.functionNames.getOrElse(id(called), "builtin")} dimension $dimension is invalid"
-                    )
-                  )
-              }
-            case Some("_Z13get_global_idj") =>
-              scalar(values, arguments.head) match {
-                case Left(error)                                           => return Left(error)
-                case Right(dimension) if dimension >= 0L && dimension < 3L =>
-                  integerShape(program, id(resultType)) match {
-                    case Some((width, 1)) =>
-                      values.update(
-                        id(dest),
-                        RuntimeValue.Bits(
-                          id(resultType),
-                          Array(execution.invocation.global(dimension.toInt) & mask(width))
-                        )
-                      )
-                      pc += 1
-                    case _ =>
-                      return Left(
-                        ExecutionFailure.InvalidRequest(
-                          "OpenCL get_global_id result type is not an integer scalar"
-                        )
-                      )
-                  }
-                case Right(dimension) =>
-                  return Left(ExecutionFailure.InvalidRequest(s"OpenCL get_global_id dimension $dimension is invalid"))
-              }
-            case Some("_Z15get_global_sizej") | Some("_Z17get_global_offsetj") | Some("_Z14get_num_groupsj") =>
-              scalar(values, arguments.head) match {
-                case Left(error)                                           => return Left(error)
-                case Right(dimension) if dimension >= 0L && dimension < 3L =>
-                  integerShape(program, id(resultType)) match {
-                    case Some((width, 1)) =>
-                      val source = program.functionNames.get(id(called)) match {
-                        case Some("_Z15get_global_sizej")   => execution.invocation.globalSize(dimension.toInt)
-                        case Some("_Z17get_global_offsetj") => execution.invocation.globalOffset(dimension.toInt)
-                        case Some("_Z14get_num_groupsj")    => execution.invocation.numWorkgroups(dimension.toInt)
-                        case _                              => 0L
-                      }
-                      values.update(id(dest), RuntimeValue.Bits(id(resultType), Array(source & mask(width))))
-                      pc += 1
-                    case _ =>
-                      return Left(
-                        ExecutionFailure.InvalidRequest(
-                          s"OpenCL ${program.functionNames.getOrElse(id(called), "builtin")} result type is not an integer scalar"
-                        )
-                      )
-                  }
-                case Right(dimension) =>
-                  return Left(
-                    ExecutionFailure.InvalidRequest(
-                      s"OpenCL ${program.functionNames.getOrElse(id(called), "builtin")} dimension $dimension is invalid"
-                    )
-                  )
-              }
-            case Some("_Z18get_sub_group_sizev") | Some("_Z22get_sub_group_local_idv") |
-                Some("_Z16get_sub_group_idv") | Some("_Z18get_num_sub_groupsv") =>
-              integerShape(program, id(resultType)) match {
-                case Some((width, 1)) =>
-                  val source = program.functionNames.get(id(called)) match {
-                    case Some("_Z18get_sub_group_sizev")     => execution.invocation.subgroupSize.toLong
-                    case Some("_Z22get_sub_group_local_idv") => execution.invocation.subgroupLocal.toLong
-                    case Some("_Z16get_sub_group_idv")       => execution.invocation.subgroupIndex.toLong
-                    case Some("_Z18get_num_sub_groupsv")     => execution.invocation.numSubgroups
-                    case _                                   => 0L
-                  }
-                  values.update(id(dest), RuntimeValue.Bits(id(resultType), Array(source & mask(width))))
-                  pc += 1
-                case _ =>
-                  return Left(
-                    ExecutionFailure.InvalidRequest(
-                      s"OpenCL ${program.functionNames.getOrElse(id(called), "builtin")} result type " +
-                        s"%${id(resultType)} is not an integer scalar"
-                    )
-                  )
-              }
-            case Some("_Z3minmm") =>
-              (
-                scalar(values, arguments(0)),
-                scalar(values, arguments(1)),
-                integerShape(program, id(resultType))
-              ) match {
-                case (Right(left), Right(right), Some((width, 1))) =>
-                  val result = if (java.lang.Long.compareUnsigned(left, right) <= 0) left else right
-                  values.update(id(dest), RuntimeValue.Bits(id(resultType), Array(result & mask(width))))
-                  pc += 1
-                case (Left(error), _, _) => return Left(error)
-                case (_, Left(error), _) => return Left(error)
-                case (_, _, _)           =>
-                  return Left(
-                    ExecutionFailure.InvalidRequest("OpenCL min requires integer scalar arguments and result")
-                  )
-              }
-            case Some("_Z3ctzi") =>
-              val sourceType = values.scalarType(id(arguments.head))
-              (
-                scalar(values, arguments.head),
-                integerShape(program, sourceType),
-                integerShape(program, id(resultType))
-              ) match {
-                case (Right(value), Some((sourceWidth, 1)), Some((resultWidth, 1))) =>
-                  val bits  = value & mask(sourceWidth)
-                  val count = if (bits == 0L) sourceWidth.toLong else java.lang.Long.numberOfTrailingZeros(bits).toLong
-                  values.update(id(dest), RuntimeValue.Bits(id(resultType), Array(count & mask(resultWidth))))
-                  pc += 1
-                case (Left(error), _, _) => return Left(error)
-                case _                   =>
-                  return Left(
-                    ExecutionFailure.InvalidRequest("OpenCL ctz requires integer scalar arguments and result")
-                  )
-              }
-            case Some(name) if name.startsWith("_Z26intel_sub_group_shuffle_up") =>
-              if (arguments.size != 3)
-                return Left(
-                  ExecutionFailure.InvalidRequest(
-                    s"OpenCL $name expects current, next, and delta arguments"
-                  )
+          case (None, _) =>
+            return Left(
+              ExecutionFailure.InvalidRequest(s"OpPtrCastToGeneric result type %${id(resultType)} is undefined")
+            )
+          case (_, None) => return Left(undefined(source))
+          case _         => return Left(ExecutionFailure.InvalidRequest("OpPtrCastToGeneric source is not a pointer"))
+        }
+      case Instruction.GenericCastToPtr(resultType, dest, source) =>
+        genericCastToPointer(program, values, resultType, dest, source) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.GenericCastToPtrExplicit(resultType, dest, source, storage) =>
+        genericCastToPointerExplicit(program, values, resultType, dest, source, storage) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.PtrAccessChain(resultType, dest, base, element, indexes) =>
+        accessChain(program, values, memory, resultType, dest, base, Some(element), indexes) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.InBoundsPtrAccessChain(resultType, dest, base, element, indexes) =>
+        accessChain(program, values, memory, resultType, dest, base, Some(element), indexes) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.AccessChain(resultType, dest, base, indexes) =>
+        accessChain(program, values, memory, resultType, dest, base, None, indexes) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.InBoundsAccessChain(resultType, dest, base, indexes) =>
+        accessChain(program, values, memory, resultType, dest, base, None, indexes) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.CompositeExtract(resultType, dest, composite, indexes) =>
+        compositeExtract(program, values, resultType, dest, composite, indexes) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.CompositeConstruct(resultType, dest, constituents) =>
+        val lanes = Array.newBuilder[Long]
+        var index = 0
+        while (index < constituents.size) {
+          values.get(id(constituents(index))) match {
+            case Some(RuntimeValue.Bits(_, value)) => lanes ++= value
+            case Some(_)                           =>
+              return Left(
+                ExecutionFailure.InvalidRequest(
+                  s"OpCompositeConstruct constituent %${id(constituents(index))} is a pointer"
                 )
-              (values.get(id(arguments(0))), values.get(id(arguments(1))), scalar(values, arguments(2))) match {
-                case (
-                      previousValue @ Some(RuntimeValue.Bits(previousType, previousLanes)),
-                      currentValue @ Some(RuntimeValue.Bits(currentType, currentLanes)),
-                      Right(delta)
-                    )
-                    if previousType == id(resultType) && currentType == id(resultType) &&
-                      previousLanes.length == currentLanes.length && delta >= 0L =>
-                  suspend(
-                    execution,
-                    currentFunction,
-                    pc,
-                    currentLabel,
-                    predecessor,
-                    instructionCount,
-                    CollectiveRequest(
-                      CollectiveKind.ShuffleUp,
-                      currentFunction.id,
-                      pc,
-                      3,
-                      CollectivePayload.ShuffleUp(
-                        id(resultType),
-                        id(dest),
-                        previousValue.get,
-                        currentValue.get,
-                        delta
-                      )
-                    )
-                  )
-                  return Right(())
-                case (Some(_), Some(_), Right(delta)) if delta < 0L =>
-                  return Left(ExecutionFailure.InvalidRequest("OpenCL subgroup shuffle-up delta must be non-negative"))
-                case (Some(_), Some(_), Right(_)) =>
-                  return Left(ExecutionFailure.InvalidRequest(
-                    "OpenCL subgroup shuffle-up requires matching result and operand types"
-                  ))
-                case (None, _, _)        => return Left(undefined(arguments(0)))
-                case (_, None, _)        => return Left(undefined(arguments(1)))
-                case (_, _, Left(error)) => return Left(error)
-              }
-            case Some("__devicelib_ConvertFToBF16INTEL") =>
-              if (arguments.size != 1)
-                return Left(
-                  ExecutionFailure.InvalidRequest(
-                    s"__devicelib_ConvertFToBF16INTEL expects one pointer argument, received ${arguments.size}"
-                  )
-                )
-              values.get(id(arguments.head)) match {
-                case Some(RuntimeValue.Address(_, pointer)) =>
-                  memory.readScalar(pointer, 4) match {
-                    case Left(error) => return Left(error)
-                    case Right(raw)  =>
-                      values.update(
-                        id(dest),
-                        RuntimeValue.Bits(id(resultType), Array(float32ToBfloat16Bits(raw)))
-                      )
-                      pc += 1
-                  }
-                case Some(_) =>
-                  return Left(
-                    ExecutionFailure.InvalidRequest("__devicelib_ConvertFToBF16INTEL argument is not a pointer")
-                  )
-                case None => return Left(undefined(arguments.head))
-              }
-            case Some("__devicelib_ConvertBF16ToFINTEL") =>
-              if (arguments.size != 1)
-                return Left(
-                  ExecutionFailure.InvalidRequest(
-                    s"__devicelib_ConvertBF16ToFINTEL expects one pointer argument, received ${arguments.size}"
-                  )
-                )
-              values.get(id(arguments.head)) match {
-                case Some(RuntimeValue.Address(_, pointer)) =>
-                  memory.readScalar(pointer, 2) match {
-                    case Left(error) => return Left(error)
-                    case Right(raw)  =>
-                      values.update(
-                        id(dest),
-                        RuntimeValue.Bits(id(resultType), Array(bfloat16ToFloat32Bits(raw)))
-                      )
-                      pc += 1
-                  }
-                case Some(_) =>
-                  return Left(
-                    ExecutionFailure.InvalidRequest("__devicelib_ConvertBF16ToFINTEL argument is not a pointer")
-                  )
-                case None => return Left(undefined(arguments.head))
-              }
-            case Some("__to_global") =>
-              (values.get(id(arguments.head)), program.types.get(id(resultType))) match {
-                case (Some(RuntimeValue.Address(_, pointer)), Some(RuntimeType.Pointer(storageClass, pointee))) =>
-                  values.update(
-                    id(dest),
-                    RuntimeValue.Address(
-                      id(resultType),
-                      pointer.copy(pointee = pointee, storageClass = storageClass)
-                    )
-                  )
-                  pc += 1
-                case (Some(RuntimeValue.Address(_, _)), _) =>
-                  return Left(ExecutionFailure.InvalidRequest("OpenCL __to_global result is not a pointer"))
-                case (Some(_), _) =>
-                  return Left(ExecutionFailure.InvalidRequest("OpenCL __to_global source is not a pointer"))
-                case (None, _) => return Left(undefined(arguments.head))
-              }
-            case Some("_Z5isnanf") =>
-              values.get(id(arguments.head)) match {
-                case Some(RuntimeValue.Bits(sourceType, Array(raw))) =>
-                  (floatingShape(program, sourceType), integerShape(program, id(resultType))) match {
-                    case (Some((width, 1)), Some((resultWidth, 1))) =>
-                      val (exponentMask, fractionMask) = width match {
-                        case 16 => (0x7c00L, 0x03ffL)
-                        case 32 => (0x7f800000L, 0x007fffffL)
-                        case 64 => (0x7ff0000000000000L, 0x000fffffffffffffL)
-                      }
-                      val bits  = raw & mask(width)
-                      val isNan = (bits & exponentMask) == exponentMask && (bits & fractionMask) != 0L
-                      values.update(
-                        id(dest),
-                        RuntimeValue.Bits(id(resultType), Array((if (isNan) 1L else 0L) & mask(resultWidth)))
-                      )
-                      pc += 1
-                    case (None, _) =>
-                      return Left(ExecutionFailure.InvalidRequest("OpenCL isnan source is not a floating-point scalar"))
-                    case (_, None) =>
-                      return Left(ExecutionFailure.InvalidRequest("OpenCL isnan result is not an integer scalar"))
-                    case _ =>
-                      return Left(
-                        ExecutionFailure.InvalidRequest("OpenCL isnan requires scalar source and result types")
-                      )
-                  }
-                case Some(_) =>
-                  return Left(ExecutionFailure.InvalidRequest("OpenCL isnan source is not numeric"))
-                case None => return Left(undefined(arguments.head))
-              }
-            case Some("_Z7barrierj") =>
-              scalar(values, arguments.head) match {
-                case Left(error)  => return Left(error)
-                case Right(flags) =>
-                  suspend(
-                    execution,
-                    currentFunction,
-                    pc,
-                    currentLabel,
-                    predecessor,
-                    instructionCount,
-                    CollectiveRequest(
-                      CollectiveKind.Barrier,
-                      currentFunction.id,
-                      pc,
-                      2,
-                      CollectivePayload.Barrier(2, flags)
-                    )
-                  )
-                  return Right(())
-              }
-            case Some("_Z29work_group_scan_exclusive_addi") =>
-              values.get(id(arguments.head)) match {
-                case Some(value @ RuntimeValue.Bits(sourceType, lanes))
-                    if lanes.length == 1 && integerShape(program, sourceType).isDefined &&
-                      integerShape(program, sourceType) == integerShape(program, id(resultType)) =>
-                  suspend(
-                    execution,
-                    currentFunction,
-                    pc,
-                    currentLabel,
-                    predecessor,
-                    instructionCount,
-                    CollectiveRequest(
-                      CollectiveKind.IntegerAdd,
-                      currentFunction.id,
-                      pc,
-                      2,
-                      CollectivePayload.Value(id(resultType), id(dest), value),
-                      operation = 2
-                    )
-                  )
-                  return Right(())
-                case Some(_) =>
-                  return Left(
-                    ExecutionFailure.InvalidRequest(
-                      "OpenCL work_group_scan_exclusive_add requires matching integer scalar types"
-                    )
-                  )
-                case None => return Left(undefined(arguments.head))
-              }
-            case Some("_Z29work_group_scan_exclusive_addl") | Some("_Z28sub_group_scan_exclusive_addi") =>
-              values.get(id(arguments.head)) match {
-                case Some(value @ RuntimeValue.Bits(sourceType, lanes))
-                    if lanes.length == 1 && integerShape(program, sourceType).isDefined &&
-                      integerShape(program, sourceType) == integerShape(program, id(resultType)) =>
-                  val scope = program.functionNames.get(id(called)) match {
-                    case Some("_Z28sub_group_scan_exclusive_addi") => 3
-                    case _                                         => 2
-                  }
-                  suspend(
-                    execution,
-                    currentFunction,
-                    pc,
-                    currentLabel,
-                    predecessor,
-                    instructionCount,
-                    CollectiveRequest(
-                      CollectiveKind.IntegerAdd,
-                      currentFunction.id,
-                      pc,
-                      scope,
-                      CollectivePayload.Value(id(resultType), id(dest), value),
-                      operation = 2
-                    )
-                  )
-                  return Right(())
-                case Some(_) =>
-                  return Left(
-                    ExecutionFailure.InvalidRequest(
-                      "OpenCL scan requires matching integer scalar types"
-                    )
-                  )
-                case None => return Left(undefined(arguments.head))
-              }
-            case Some(name)
-                if openCLBroadcastScope(name).isDefined =>
-              (
-                values.get(id(arguments(0))),
-                scalar(values, arguments(1)),
-                integerShape(program, id(resultType))
-              ) match {
-                case (Some(value @ RuntimeValue.Bits(sourceType, lanes)), Right(localId), Some((width, count)))
-                    if lanes.length == count && integerShape(program, sourceType) == Some((width, count)) =>
-                  val scope = openCLBroadcastScope(name).get
-                  suspend(
-                    execution,
-                    currentFunction,
-                    pc,
-                    currentLabel,
-                    predecessor,
-                    instructionCount,
-                    CollectiveRequest(
-                      CollectiveKind.Broadcast,
-                      currentFunction.id,
-                      pc,
-                      scope,
-                      CollectivePayload.Value(id(resultType), id(dest), value),
-                      selector = Col(localId & mask(width))
-                    )
-                  )
-                  return Right(())
-                case (None, _, _)        => return Left(undefined(arguments(0)))
-                case (_, Left(error), _) => return Left(error)
-                case _                   =>
-                  return Left(
-                    ExecutionFailure.InvalidRequest(
-                      "OpenCL broadcast requires matching integer scalar arguments and result"
-                    )
-                  )
-              }
-            case _ =>
-              if (calls.size >= 128)
-                return Left(ExecutionFailure.Failed("SPIR-V function call depth exceeds 128 frames"))
-              var argumentIndex = 0
-              while (argumentIndex < arguments.size) {
-                values.get(id(arguments(argumentIndex))) match {
-                  case Some(value) =>
-                    val (parameterId, parameterType) = callee.parameters(argumentIndex)
-                    values.update(parameterId, retag(value, parameterType))
-                  case None => return Left(undefined(arguments(argumentIndex)))
-                }
-                argumentIndex += 1
-              }
-              calls.append(
-                CallFrame(currentFunction, pc + 1, currentLabel, predecessor, id(resultType), id(dest))
               )
-              currentFunction = callee
-              pc = callee.start + 1
-              currentLabel = -1
-              predecessor = -1
+            case None => return Left(undefined(constituents(index)))
           }
-        case Instruction.Branch(target) =>
-          predecessor = currentLabel
-          pc = label(currentFunction, target)
-        case Instruction.BranchConditional(condition, whenTrue, whenFalse, _) =>
-          scalar(values, condition) match {
-            case Left(error) => return Left(error)
-            case Right(test) =>
-              predecessor = currentLabel
-              pc = label(currentFunction, if (test != 0L) whenTrue else whenFalse)
-          }
-        case Instruction.Switch(selector, default, targets) =>
-          scalar(values, selector) match {
-            case Left(error)  => return Left(error)
-            case Right(value) =>
-              var target = default
-              var index  = 0
-              while (index < targets.size) {
-                val pair    = targets(index)
-                val literal = pair.words match {
-                  case Col(low, _) =>
-                    if (pair.kind != "PairLiteralIntegerIdRef")
-                      return Left(ExecutionFailure.InvalidRequest("OpSwitch target is not a literal/label pair"))
-                    low.toUnsigned
-                  case Col(low, high, _) =>
-                    if (pair.kind != "PairLiteralIntegerIdRef")
-                      return Left(ExecutionFailure.InvalidRequest("OpSwitch target is not a literal/label pair"))
-                    low.toUnsigned | (high.toUnsigned << 32)
-                  case _ =>
-                    return Left(ExecutionFailure.InvalidRequest("OpSwitch has an incomplete literal/label pair"))
+          index += 1
+        }
+        val result = lanes.result()
+        scalarLeafCount(program, id(resultType)) match {
+          case Right(expected) if result.length == expected =>
+            values.update(id(dest), RuntimeValue.Bits(id(resultType), result))
+            execution.pc += 1
+          case Right(expected) =>
+            return Left(
+              ExecutionFailure.InvalidRequest(
+                s"OpCompositeConstruct %${id(dest)} has ${result.length} scalar leaves, expected $expected"
+              )
+            )
+          case Left(error) => return Left(error)
+        }
+      case Instruction.CompositeInsert(resultType, dest, source, composite, indexes) =>
+        compositeInsert(program, values, resultType, dest, source, composite, indexes) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.VectorExtractDynamic(resultType, dest, vector, index) =>
+        (values.get(id(vector)), values.get(id(index))) match {
+          case (Some(RuntimeValue.Bits(_, lanes)), Some(RuntimeValue.Bits(_, Array(component)))) =>
+            val selected = component.toInt
+            if (selected < 0 || selected >= lanes.length)
+              return Left(ExecutionFailure.InvalidRequest(s"OpVectorExtractDynamic index $selected is out of range"))
+            values.update(id(dest), RuntimeValue.Bits(id(resultType), Array(lanes(selected))))
+            execution.pc += 1
+          case (None, _) => return Left(undefined(vector))
+          case (_, None) => return Left(undefined(index))
+          case _         => return Left(ExecutionFailure.Unsupported("OpVectorExtractDynamic requires a scalar index"))
+        }
+      case Instruction.VectorInsertDynamic(resultType, dest, vector, component, index) =>
+        (values.get(id(vector)), values.get(id(component)), scalar(values, index)) match {
+          case (Some(RuntimeValue.Bits(_, lanes)), Some(RuntimeValue.Bits(_, Array(value))), Right(selected)) =>
+            val position = selected.toInt
+            if (position < 0 || position >= lanes.length)
+              return Left(ExecutionFailure.InvalidRequest(s"OpVectorInsertDynamic index $position is out of range"))
+            val result = lanes.clone()
+            result(position) = value
+            values.update(id(dest), RuntimeValue.Bits(id(resultType), result))
+            execution.pc += 1
+          case (None, _, _)        => return Left(undefined(vector))
+          case (_, None, _)        => return Left(undefined(component))
+          case (_, _, Left(error)) => return Left(error)
+          case _ => return Left(ExecutionFailure.InvalidRequest("OpVectorInsertDynamic requires scalar component"))
+        }
+      case other => return Left(ExecutionFailure.Unsupported(s"${other.opcode} execution is not implemented"))
+    }
+    InstructionCompleted
+  }
+
+  private def executeExtended(
+      program: DispatchProgram,
+      execution: InvocationExecution,
+      memory: MemoryState,
+      instruction: Instruction
+  ): Either[ExecutionFailure, Unit] = {
+    val values = execution.values
+    instruction match {
+      case Instruction.VectorShuffle(resultType, dest, vector1, vector2, components) =>
+        (values.get(id(vector1)), values.get(id(vector2))) match {
+          case (Some(RuntimeValue.Bits(_, left)), Some(RuntimeValue.Bits(_, right))) =>
+            scalarLeafCount(program, id(resultType)) match {
+              case Right(expected) if expected == components.size =>
+                val combined = left ++ right
+                val result   = Array.ofDim[Long](components.size)
+                var index    = 0
+                while (index < components.size) {
+                  val selected = unsigned(components(index))
+                  result(index) =
+                    if (selected == 0xffffffffL) 0L
+                    else if (selected < combined.length.toLong) combined(selected.toInt)
+                    else
+                      return Left(
+                        ExecutionFailure.InvalidRequest(
+                          s"OpVectorShuffle component $selected is outside ${combined.length} lanes"
+                        )
+                      )
+                  index += 1
                 }
-                if (pair.words.size != 2 && pair.words.size != 3)
-                  return Left(ExecutionFailure.InvalidRequest("OpSwitch has an incomplete literal/label pair"))
-                val label = pair.words.last
-                if (literal == value)
-                  target = Operand("IdRef", Col(label))
-                index += 1
-              }
-              predecessor = currentLabel
-              pc = label(currentFunction, target)
+                values.update(id(dest), RuntimeValue.Bits(id(resultType), result))
+                execution.pc += 1
+              case Right(expected) =>
+                return Left(
+                  ExecutionFailure.InvalidRequest(
+                    s"OpVectorShuffle result has ${components.size} components, expected $expected scalar leaves"
+                  )
+                )
+              case Left(error) => return Left(error)
+            }
+          case (None, _) => return Left(undefined(vector1))
+          case (_, None) => return Left(undefined(vector2))
+          case _ => return Left(ExecutionFailure.InvalidRequest("OpVectorShuffle operands must be numeric vectors"))
+        }
+      case Instruction.ExtInst(resultType, dest, set, inst, sources) =>
+        extendedInstruction(program, values, memory, resultType, dest, set, inst, sources) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case other => return Left(ExecutionFailure.Unsupported(s"${other.opcode} execution is not implemented"))
+    }
+    InstructionCompleted
+  }
+
+  private def executeConversion(
+      program: DispatchProgram,
+      execution: InvocationExecution,
+      memory: MemoryState,
+      instruction: Instruction
+  ): Either[ExecutionFailure, Unit] = {
+    val values = execution.values
+    instruction match {
+      case Instruction.UConvert(resultType, dest, source) =>
+        val sourceId = id(source)
+        if (values.scalarType(sourceId) >= 0) {
+          val width = scalarWidth(program, id(resultType))
+          values.updateScalar(id(dest), id(resultType), values.scalarBits(sourceId) & mask(width))
+          execution.pc += 1
+        } else
+          values.get(sourceId) match {
+            case Some(RuntimeValue.Bits(_, lanes)) =>
+              val width = scalarWidth(program, id(resultType))
+              values.update(id(dest), RuntimeValue.Bits(id(resultType), lanes.map(_ & mask(width))))
+              execution.pc += 1
+            case Some(_) => return Left(ExecutionFailure.InvalidRequest("OpUConvert cannot convert a pointer"))
+            case None    => return Left(undefined(source))
           }
-        case Instruction.ReturnValue(value) =>
-          val returned = values.get(id(value)) match {
-            case Some(result) => result
-            case None         => return Left(undefined(value))
-          }
-          calls.removeLastOption() match {
-            case None        => return Left(ExecutionFailure.InvalidRequest("SPIR-V entry point returned a value"))
-            case Some(frame) =>
-              values.update(frame.destination, retag(returned, frame.resultType))
-              currentFunction = frame.function
-              pc = frame.pc
-              currentLabel = frame.currentLabel
-              predecessor = frame.predecessor
-          }
-        case Instruction.Return() => calls.removeLastOption() match {
-            case None =>
-              execution.completed = true
-              return Right(())
-            case Some(frame) => program.types.get(frame.resultType) match {
-                case Some(RuntimeType.Void) =>
-                  currentFunction = frame.function
-                  pc = frame.pc
-                  currentLabel = frame.currentLabel
-                  predecessor = frame.predecessor
-                case _ =>
-                  return Left(
-                    ExecutionFailure.InvalidRequest(
-                      s"SPIR-V function %${currentFunction.id} returned no value to %${frame.destination}"
+      case Instruction.SConvert(resultType, dest, source) =>
+        signedConvert(program, values, resultType, dest, source) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.ConvertPtrToU(resultType, dest, pointer) =>
+        val resultWidth = integerShape(program, id(resultType)) match {
+          case Some((width, 1)) => width
+          case _                =>
+            return Left(ExecutionFailure.InvalidRequest("OpConvertPtrToU requires a scalar integer result"))
+        }
+        address(values, pointer).flatMap(memory.pointerInteger) match {
+          case Left(error)  => return Left(error)
+          case Right(value) =>
+            values.update(id(dest), RuntimeValue.Bits(id(resultType), Array(value & mask(resultWidth))))
+            execution.pc += 1
+        }
+      case Instruction.ConvertUToPtr(resultType, dest, integerValue) =>
+        (program.types.get(id(resultType)), values.get(id(integerValue))) match {
+          case (
+                Some(RuntimeType.Pointer(storageClass, pointee)),
+                Some(RuntimeValue.Bits(integerType, Array(rawAddress)))
+              ) if integerShape(program, integerType).exists(_._2 == 1) =>
+            memory.integerPointer(rawAddress & mask(scalarWidth(program, integerType)), pointee, storageClass) match {
+              case Left(error) =>
+                return Left(
+                  ExecutionFailure.InvalidRequest(
+                    s"${error.message} at OpConvertUToPtr function %${execution.currentFunction.id}, execution.pc ${execution.pc}, " +
+                      s"source %${id(integerValue)}, result %${id(dest)}"
+                  )
+                )
+              case Right(pointer) =>
+                values.update(id(dest), RuntimeValue.Address(id(resultType), pointer))
+                execution.pc += 1
+            }
+          case (Some(RuntimeType.Pointer(_, _)), Some(_)) =>
+            return Left(ExecutionFailure.InvalidRequest("OpConvertUToPtr requires a scalar integer operand"))
+          case (_, None)    => return Left(undefined(integerValue))
+          case (Some(_), _) =>
+            return Left(ExecutionFailure.InvalidRequest("OpConvertUToPtr requires a pointer result type"))
+          case (None, _) =>
+            return Left(
+              ExecutionFailure.InvalidRequest(s"OpConvertUToPtr result type %${id(resultType)} is undefined")
+            )
+        }
+      case Instruction.ConvertSToF(resultType, dest, source) =>
+        convertSignedToFloat(program, values, resultType, dest, source) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.ConvertUToF(resultType, dest, source) =>
+        convertUnsignedToFloat(program, values, resultType, dest, source) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.ConvertFToS(resultType, dest, source) =>
+        convertFloatToSigned(program, values, resultType, dest, source) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.ConvertFToU(resultType, dest, source) =>
+        convertFloatToUnsigned(program, values, resultType, dest, source) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.FConvert(resultType, dest, source) =>
+        convertFloating(program, values, resultType, dest, source) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.Undef(resultType, dest) =>
+        zeroValue(program.types, resultType, dest, "OpUndef") match {
+          case Left(error)  => return Left(error)
+          case Right(value) =>
+            values.update(id(dest), value)
+            execution.pc += 1
+        }
+      case Instruction.CopyObject(resultType, dest, source) =>
+        values.get(id(source)) match {
+          case Some(value) =>
+            values.update(id(dest), retag(value, id(resultType)))
+            execution.pc += 1
+          case None => return Left(undefined(source))
+        }
+      case Instruction.LifetimeStart(pointer, size) =>
+        validateLifetime(program, values, "OpLifetimeStart", pointer, size) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.LifetimeStop(pointer, size) =>
+        validateLifetime(program, values, "OpLifetimeStop", pointer, size) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case other => return Left(ExecutionFailure.Unsupported(s"${other.opcode} execution is not implemented"))
+    }
+    InstructionCompleted
+  }
+
+  private def executeInteger(
+      program: DispatchProgram,
+      execution: InvocationExecution,
+      instruction: Instruction
+  ): Either[ExecutionFailure, Unit] = {
+    val values = execution.values
+    instruction match {
+      case Instruction.IAdd(resultType, dest, left, right) =>
+        binary(program, values, resultType, dest, left, right)(_ + _) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.ISub(resultType, dest, left, right) =>
+        binary(program, values, resultType, dest, left, right)(_ - _) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.IMul(resultType, dest, left, right) =>
+        binary(program, values, resultType, dest, left, right)(_ * _) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.UDiv(resultType, dest, left, right) =>
+        unsignedIntegerArithmetic(
+          program,
+          values,
+          resultType,
+          dest,
+          left,
+          right,
+          UnsignedIntegerOperation.Divide
+        ) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.UMod(resultType, dest, left, right) =>
+        unsignedIntegerArithmetic(
+          program,
+          values,
+          resultType,
+          dest,
+          left,
+          right,
+          UnsignedIntegerOperation.Remainder
+        ) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.SDiv(resultType, dest, left, right) =>
+        signedIntegerArithmetic(
+          program,
+          values,
+          resultType,
+          dest,
+          left,
+          right,
+          SignedIntegerOperation.Divide
+        ) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.SRem(resultType, dest, left, right) =>
+        signedIntegerArithmetic(
+          program,
+          values,
+          resultType,
+          dest,
+          left,
+          right,
+          SignedIntegerOperation.Remainder
+        ) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case other => return Left(ExecutionFailure.Unsupported(s"${other.opcode} execution is not implemented"))
+    }
+    InstructionCompleted
+  }
+
+  private def executeAtomic(
+      program: DispatchProgram,
+      execution: InvocationExecution,
+      memory: MemoryState,
+      instruction: Instruction
+  ): Either[ExecutionFailure, Unit] = {
+    val values = execution.values
+    instruction match {
+      case Instruction.AtomicStore(pointer, scope, semantics, value) =>
+        atomicStore(program, values, memory, pointer, scope, semantics, value) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.AtomicLoad(resultType, dest, pointer, scope, semantics) =>
+        atomicLoad(program, values, memory, resultType, dest, pointer, scope, semantics) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.AtomicExchange(resultType, dest, pointer, scope, semantics, value) =>
+        atomicExchange(program, values, memory, resultType, dest, pointer, scope, semantics, value) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.AtomicCompareExchange(resultType, dest, pointer, scope, equal, unequal, value, comparator) =>
+        atomicCompareExchange(
+          program,
+          values,
+          memory,
+          resultType,
+          dest,
+          pointer,
+          scope,
+          equal,
+          unequal,
+          value,
+          comparator
+        ) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.AtomicCompareExchangeWeak(
+            resultType,
+            dest,
+            pointer,
+            scope,
+            equal,
+            unequal,
+            value,
+            comparator
+          ) =>
+        atomicCompareExchange(
+          program,
+          values,
+          memory,
+          resultType,
+          dest,
+          pointer,
+          scope,
+          equal,
+          unequal,
+          value,
+          comparator
+        ) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.AtomicFAddEXT(resultType, dest, pointer, memoryScope, semantics, value) =>
+        atomicFloatingAdd(
+          program,
+          values,
+          memory,
+          resultType,
+          dest,
+          pointer,
+          memoryScope,
+          semantics,
+          value
+        ) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.AtomicFMinEXT(resultType, dest, pointer, memoryScope, semantics, value) =>
+        atomicFloatingMinMax(
+          program,
+          values,
+          memory,
+          resultType,
+          dest,
+          pointer,
+          memoryScope,
+          semantics,
+          value,
+          maximum = false
+        ) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.AtomicFMaxEXT(resultType, dest, pointer, memoryScope, semantics, value) =>
+        atomicFloatingMinMax(
+          program,
+          values,
+          memory,
+          resultType,
+          dest,
+          pointer,
+          memoryScope,
+          semantics,
+          value,
+          maximum = true
+        ) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.AtomicIAdd(resultType, dest, pointer, scope, semantics, value) =>
+        atomicInteger(
+          program,
+          values,
+          memory,
+          resultType,
+          dest,
+          pointer,
+          scope,
+          semantics,
+          Some(value),
+          AtomicIntegerOperation.Add
+        ) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.AtomicUMin(resultType, dest, pointer, scope, semantics, value) =>
+        atomicInteger(
+          program,
+          values,
+          memory,
+          resultType,
+          dest,
+          pointer,
+          scope,
+          semantics,
+          Some(value),
+          AtomicIntegerOperation.UnsignedMinimum
+        ) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.AtomicIIncrement(resultType, dest, pointer, scope, semantics) =>
+        atomicInteger(
+          program,
+          values,
+          memory,
+          resultType,
+          dest,
+          pointer,
+          scope,
+          semantics,
+          None,
+          AtomicIntegerOperation.Increment
+        ) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.AtomicIDecrement(resultType, dest, pointer, scope, semantics) =>
+        atomicInteger(
+          program,
+          values,
+          memory,
+          resultType,
+          dest,
+          pointer,
+          scope,
+          semantics,
+          None,
+          AtomicIntegerOperation.Decrement
+        ) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.AtomicISub(resultType, dest, pointer, scope, semantics, value) =>
+        atomicInteger(
+          program,
+          values,
+          memory,
+          resultType,
+          dest,
+          pointer,
+          scope,
+          semantics,
+          Some(value),
+          AtomicIntegerOperation.Subtract
+        ) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.AtomicSMin(resultType, dest, pointer, scope, semantics, value) =>
+        atomicInteger(
+          program,
+          values,
+          memory,
+          resultType,
+          dest,
+          pointer,
+          scope,
+          semantics,
+          Some(value),
+          AtomicIntegerOperation.SignedMinimum
+        ) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.AtomicSMax(resultType, dest, pointer, scope, semantics, value) =>
+        atomicInteger(
+          program,
+          values,
+          memory,
+          resultType,
+          dest,
+          pointer,
+          scope,
+          semantics,
+          Some(value),
+          AtomicIntegerOperation.SignedMaximum
+        ) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.AtomicUMax(resultType, dest, pointer, scope, semantics, value) =>
+        atomicInteger(
+          program,
+          values,
+          memory,
+          resultType,
+          dest,
+          pointer,
+          scope,
+          semantics,
+          Some(value),
+          AtomicIntegerOperation.UnsignedMaximum
+        ) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.AtomicAnd(resultType, dest, pointer, scope, semantics, value) =>
+        atomicInteger(
+          program,
+          values,
+          memory,
+          resultType,
+          dest,
+          pointer,
+          scope,
+          semantics,
+          Some(value),
+          AtomicIntegerOperation.And
+        ) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.AtomicOr(resultType, dest, pointer, scope, semantics, value) =>
+        atomicInteger(
+          program,
+          values,
+          memory,
+          resultType,
+          dest,
+          pointer,
+          scope,
+          semantics,
+          Some(value),
+          AtomicIntegerOperation.Or
+        ) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.AtomicXor(resultType, dest, pointer, scope, semantics, value) =>
+        atomicInteger(
+          program,
+          values,
+          memory,
+          resultType,
+          dest,
+          pointer,
+          scope,
+          semantics,
+          Some(value),
+          AtomicIntegerOperation.Xor
+        ) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.FAdd(resultType, dest, left, right) =>
+        floatingBinary(program, values, resultType, dest, left, right, FloatingOperation.Add) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.FSub(resultType, dest, left, right) =>
+        floatingBinary(program, values, resultType, dest, left, right, FloatingOperation.Subtract) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.FMul(resultType, dest, left, right) =>
+        floatingBinary(program, values, resultType, dest, left, right, FloatingOperation.Multiply) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.Dot(resultType, dest, left, right) =>
+        floatingDot(program, values, resultType, dest, left, right) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.FDiv(resultType, dest, left, right) =>
+        floatingBinary(program, values, resultType, dest, left, right, FloatingOperation.Divide) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case other => return Left(ExecutionFailure.Unsupported(s"${other.opcode} execution is not implemented"))
+    }
+    InstructionCompleted
+  }
+
+  private def executeAtomicXor(
+      program: DispatchProgram,
+      execution: InvocationExecution,
+      instruction: Instruction
+  ): Either[ExecutionFailure, Unit] = {
+    val values = execution.values
+    instruction match {
+      case Instruction.FNegate(resultType, dest, source) =>
+        floatingNegate(program, values, resultType, dest, source) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.ShiftLeftLogical(resultType, dest, base, shift) =>
+        integerShift(program, values, resultType, dest, base, shift, "OpShiftLeftLogical") {
+          (value, amount, width) =>
+            if (java.lang.Long.compareUnsigned(amount, width.toLong) >= 0) 0L
+            else value << amount.toInt
+        } match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case other => return Left(ExecutionFailure.Unsupported(s"${other.opcode} execution is not implemented"))
+    }
+    InstructionCompleted
+  }
+
+  private def executeArithmetic(
+      program: DispatchProgram,
+      execution: InvocationExecution,
+      instruction: Instruction
+  ): Either[ExecutionFailure, Unit] = {
+    val values = execution.values
+    instruction match {
+      case Instruction.ShiftRightLogical(resultType, dest, base, shift) =>
+        integerShift(program, values, resultType, dest, base, shift, "OpShiftRightLogical") {
+          (value, amount, width) =>
+            if (java.lang.Long.compareUnsigned(amount, width.toLong) >= 0) 0L
+            else (value & mask(width)) >>> amount.toInt
+        } match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.ShiftRightArithmetic(resultType, dest, base, shift) =>
+        integerShift(program, values, resultType, dest, base, shift, "OpShiftRightArithmetic") {
+          (value, amount, width) =>
+            val signed = signExtend(value, width)
+            if (java.lang.Long.compareUnsigned(amount, width.toLong) >= 0) {
+              if (signed < 0L) -1L else 0L
+            } else signed >> amount.toInt
+        } match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.BitwiseOr(resultType, dest, left, right) =>
+        integerBitwise(program, values, resultType, dest, left, right, "OpBitwiseOr")(_ | _) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.BitwiseXor(resultType, dest, left, right) =>
+        integerBitwise(program, values, resultType, dest, left, right, "OpBitwiseXor")(_ ^ _) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.BitwiseAnd(resultType, dest, left, right) =>
+        integerBitwise(program, values, resultType, dest, left, right, "OpBitwiseAnd")(_ & _) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.Not(resultType, dest, source) =>
+        integerNot(program, values, resultType, dest, source) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.IEqual(resultType, dest, left, right) =>
+        integerEquality(program, values, resultType, dest, left, right, "OpIEqual")(_ == _) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.INotEqual(resultType, dest, left, right) =>
+        integerEquality(program, values, resultType, dest, left, right, "OpINotEqual")(_ != _) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.LogicalEqual(resultType, dest, left, right) =>
+        logicalBinary(program, values, resultType, dest, left, right, "OpLogicalEqual")(_ == _) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.LogicalNotEqual(resultType, dest, left, right) =>
+        logicalBinary(program, values, resultType, dest, left, right, "OpLogicalNotEqual")(_ != _) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.LogicalOr(resultType, dest, left, right) =>
+        logicalBinary(program, values, resultType, dest, left, right, "OpLogicalOr")(_ || _) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.LogicalAnd(resultType, dest, left, right) =>
+        logicalBinary(program, values, resultType, dest, left, right, "OpLogicalAnd")(_ && _) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.LogicalNot(resultType, dest, source) =>
+        logicalNot(program, values, resultType, dest, source) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.Any(resultType, dest, source) =>
+        logicalReduction(program, values, resultType, dest, source, all = false) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.All(resultType, dest, source) =>
+        logicalReduction(program, values, resultType, dest, source, all = true) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.FOrdEqual(resultType, dest, left, right) =>
+        floatingCompare(program, values, resultType, dest, left, right, FloatingComparison.OrderedEqual) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.FOrdNotEqual(resultType, dest, left, right) =>
+        floatingCompare(program, values, resultType, dest, left, right, FloatingComparison.OrderedNotEqual) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.FUnordEqual(resultType, dest, left, right) =>
+        floatingCompare(program, values, resultType, dest, left, right, FloatingComparison.UnorderedEqual) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.FUnordNotEqual(resultType, dest, left, right) =>
+        floatingCompare(program, values, resultType, dest, left, right, FloatingComparison.UnorderedNotEqual) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.FUnordLessThan(resultType, dest, left, right) =>
+        floatingCompare(program, values, resultType, dest, left, right, FloatingComparison.UnorderedLessThan) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.FUnordGreaterThan(resultType, dest, left, right) =>
+        floatingCompare(
+          program,
+          values,
+          resultType,
+          dest,
+          left,
+          right,
+          FloatingComparison.UnorderedGreaterThan
+        ) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.FUnordLessThanEqual(resultType, dest, left, right) =>
+        floatingCompare(
+          program,
+          values,
+          resultType,
+          dest,
+          left,
+          right,
+          FloatingComparison.UnorderedLessThanEqual
+        ) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.FUnordGreaterThanEqual(resultType, dest, left, right) =>
+        floatingCompare(
+          program,
+          values,
+          resultType,
+          dest,
+          left,
+          right,
+          FloatingComparison.UnorderedGreaterThanEqual
+        ) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.Unordered(resultType, dest, left, right) =>
+        floatingCompare(program, values, resultType, dest, left, right, FloatingComparison.Unordered) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.Ordered(resultType, dest, left, right) =>
+        floatingCompare(program, values, resultType, dest, left, right, FloatingComparison.Ordered) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.FOrdLessThanEqual(resultType, dest, left, right) =>
+        floatingCompare(
+          program,
+          values,
+          resultType,
+          dest,
+          left,
+          right,
+          FloatingComparison.OrderedLessThanEqual
+        ) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.FOrdLessThan(resultType, dest, left, right) =>
+        floatingCompare(program, values, resultType, dest, left, right, FloatingComparison.OrderedLessThan) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.FOrdGreaterThan(resultType, dest, left, right) =>
+        floatingCompare(program, values, resultType, dest, left, right, FloatingComparison.OrderedGreaterThan) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.FOrdGreaterThanEqual(resultType, dest, left, right) =>
+        floatingCompare(
+          program,
+          values,
+          resultType,
+          dest,
+          left,
+          right,
+          FloatingComparison.OrderedGreaterThanEqual
+        ) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.IsInf(resultType, dest, value) =>
+        floatingClassify(program, values, resultType, dest, value, FloatingClassification.Infinite) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.IsNan(resultType, dest, value) =>
+        floatingClassify(program, values, resultType, dest, value, FloatingClassification.NaN) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.IsFinite(resultType, dest, value) =>
+        floatingClassify(program, values, resultType, dest, value, FloatingClassification.Finite) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case other => return Left(ExecutionFailure.Unsupported(s"${other.opcode} execution is not implemented"))
+    }
+    InstructionCompleted
+  }
+
+  private def executeComparison(
+      program: DispatchProgram,
+      execution: InvocationExecution,
+      instruction: Instruction
+  ): Either[ExecutionFailure, Unit] = {
+    val values = execution.values
+    instruction match {
+      case Instruction.IsNormal(resultType, dest, value) =>
+        floatingClassify(program, values, resultType, dest, value, FloatingClassification.Normal) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.SignBitSet(resultType, dest, value) =>
+        floatingClassify(program, values, resultType, dest, value, FloatingClassification.Signed) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.ULessThan(resultType, dest, left, right) =>
+        compare(values, resultType, dest, left, right)(java.lang.Long.compareUnsigned(_, _) < 0) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.UGreaterThan(resultType, dest, left, right) =>
+        compare(values, resultType, dest, left, right)(java.lang.Long.compareUnsigned(_, _) > 0) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.ULessThanEqual(resultType, dest, left, right) =>
+        compare(values, resultType, dest, left, right)(java.lang.Long.compareUnsigned(_, _) <= 0) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.UGreaterThanEqual(resultType, dest, left, right) =>
+        compare(values, resultType, dest, left, right)(java.lang.Long.compareUnsigned(_, _) >= 0) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.SGreaterThan(resultType, dest, left, right) =>
+        signedCompare(program, values, resultType, dest, left, right, "OpSGreaterThan")(_ > _) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.SGreaterThanEqual(resultType, dest, left, right) =>
+        signedCompare(program, values, resultType, dest, left, right, "OpSGreaterThanEqual")(_ >= _) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.SLessThan(resultType, dest, left, right) =>
+        signedCompare(program, values, resultType, dest, left, right, "OpSLessThan")(_ < _) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.SLessThanEqual(resultType, dest, left, right) =>
+        signedCompare(program, values, resultType, dest, left, right, "OpSLessThanEqual")(_ <= _) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.Select(resultType, dest, condition, whenTrue, whenFalse) =>
+        val trueId  = id(whenTrue)
+        val falseId = id(whenFalse)
+        (values.get(id(condition)), values.get(trueId), values.get(falseId)) match {
+          case (
+                Some(RuntimeValue.Bits(conditionType, conditionLanes)),
+                Some(RuntimeValue.Bits(_, trueLanes)),
+                Some(RuntimeValue.Bits(_, falseLanes))
+              ) =>
+            (booleanLanes(program, conditionType), scalarLeafCount(program, id(resultType))) match {
+              case (Some(conditionCount), Right(resultCount))
+                  if trueLanes.length == resultCount && falseLanes.length == resultCount &&
+                    (conditionCount == 1 || conditionCount == resultCount) =>
+                val result = Array.tabulate(resultCount) { index =>
+                  val selected = if (conditionLanes(if (conditionCount == 1) 0 else index) != 0L) trueLanes
+                  else falseLanes
+                  selected(index)
+                }
+                values.update(id(dest), RuntimeValue.Bits(id(resultType), result))
+                execution.pc += 1
+              case (None, _) =>
+                return Left(ExecutionFailure.InvalidRequest(s"OpSelect condition %${id(condition)} is not boolean"))
+              case (_, Left(error)) => return Left(error)
+              case _                =>
+                return Left(
+                  ExecutionFailure.InvalidRequest(
+                    s"OpSelect condition/value shapes are incompatible: condition ${conditionLanes.length}, " +
+                      s"true ${trueLanes.length}, false ${falseLanes.length}"
+                  )
+                )
+            }
+          case (Some(RuntimeValue.Bits(conditionType, conditionLanes)), Some(yes), Some(no))
+              if booleanLanes(program, conditionType).contains(1) && conditionLanes.length == 1 =>
+            values.update(id(dest), retag(if (conditionLanes(0) != 0L) yes else no, id(resultType)))
+            execution.pc += 1
+          case (None, _, _) =>
+            return Left(ExecutionFailure.InvalidRequest(s"OpSelect condition %${id(condition)} is not boolean"))
+          case (_, None, _) => return Left(undefined(whenTrue))
+          case (_, _, None) => return Left(undefined(whenFalse))
+          case _            =>
+            return Left(ExecutionFailure.InvalidRequest(s"OpSelect condition %${id(condition)} is invalid"))
+        }
+      case other => return Left(ExecutionFailure.Unsupported(s"${other.opcode} execution is not implemented"))
+    }
+    InstructionCompleted
+  }
+
+  private def executeCollective(
+      program: DispatchProgram,
+      execution: InvocationExecution,
+      instruction: Instruction
+  ): Either[ExecutionFailure, Unit] = {
+    val values = execution.values
+    instruction match {
+      case Instruction.ControlBarrier(executionScope, memoryScope, semantics) =>
+        controlBarrier(
+          values,
+          execution.currentFunction.id,
+          execution.pc,
+          executionScope,
+          memoryScope,
+          semantics
+        ) match {
+          case Left(error)    => return Left(error)
+          case Right(request) =>
+            suspend(
+              execution,
+              execution.currentFunction,
+              execution.pc,
+              execution.currentLabel,
+              execution.predecessor,
+              execution.instructionCount,
+              request
+            )
+            return Right(())
+        }
+      case Instruction.MemoryBarrier(memoryScope, semantics) =>
+        validateAtomicControls(values, memoryScope, semantics, "OpMemoryBarrier") match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.GroupAny(resultType, dest, executionScope, pred) =>
+        collectiveAny(
+          program,
+          values,
+          execution.currentFunction.id,
+          execution.pc,
+          resultType,
+          dest,
+          executionScope,
+          pred
+        ) match {
+          case Left(error)    => return Left(error)
+          case Right(request) =>
+            suspend(
+              execution,
+              execution.currentFunction,
+              execution.pc,
+              execution.currentLabel,
+              execution.predecessor,
+              execution.instructionCount,
+              request
+            )
+            return Right(())
+        }
+      case Instruction.GroupAll(resultType, dest, executionScope, pred) =>
+        collectiveBoolean(
+          program,
+          values,
+          execution.currentFunction.id,
+          execution.pc,
+          resultType,
+          dest,
+          executionScope,
+          pred,
+          CollectiveKind.All,
+          "OpGroupAll"
+        ) match {
+          case Left(error)    => return Left(error)
+          case Right(request) =>
+            suspend(
+              execution,
+              execution.currentFunction,
+              execution.pc,
+              execution.currentLabel,
+              execution.predecessor,
+              execution.instructionCount,
+              request
+            )
+            return Right(())
+        }
+      case Instruction.GroupUMin(resultType, dest, executionScope, operation, value) =>
+        collectiveIntegerExtremum(
+          program,
+          values,
+          execution.currentFunction.id,
+          execution.pc,
+          resultType,
+          dest,
+          executionScope,
+          operation,
+          value,
+          CollectiveKind.UnsignedMin,
+          "OpGroupUMin"
+        ) match {
+          case Left(error)    => return Left(error)
+          case Right(request) =>
+            suspend(
+              execution,
+              execution.currentFunction,
+              execution.pc,
+              execution.currentLabel,
+              execution.predecessor,
+              execution.instructionCount,
+              request
+            )
+            return Right(())
+        }
+      case Instruction.GroupUMax(resultType, dest, executionScope, operation, value) =>
+        collectiveIntegerExtremum(
+          program,
+          values,
+          execution.currentFunction.id,
+          execution.pc,
+          resultType,
+          dest,
+          executionScope,
+          operation,
+          value,
+          CollectiveKind.UnsignedMax,
+          "OpGroupUMax"
+        ) match {
+          case Left(error)    => return Left(error)
+          case Right(request) =>
+            suspend(
+              execution,
+              execution.currentFunction,
+              execution.pc,
+              execution.currentLabel,
+              execution.predecessor,
+              execution.instructionCount,
+              request
+            )
+            return Right(())
+        }
+      case Instruction.GroupSMin(resultType, dest, executionScope, operation, value) =>
+        collectiveIntegerExtremum(
+          program,
+          values,
+          execution.currentFunction.id,
+          execution.pc,
+          resultType,
+          dest,
+          executionScope,
+          operation,
+          value,
+          CollectiveKind.SignedMin,
+          "OpGroupSMin"
+        ) match {
+          case Left(error)    => return Left(error)
+          case Right(request) =>
+            suspend(
+              execution,
+              execution.currentFunction,
+              execution.pc,
+              execution.currentLabel,
+              execution.predecessor,
+              execution.instructionCount,
+              request
+            )
+            return Right(())
+        }
+      case Instruction.GroupSMax(resultType, dest, executionScope, operation, value) =>
+        collectiveIntegerExtremum(
+          program,
+          values,
+          execution.currentFunction.id,
+          execution.pc,
+          resultType,
+          dest,
+          executionScope,
+          operation,
+          value,
+          CollectiveKind.SignedMax,
+          "OpGroupSMax"
+        ) match {
+          case Left(error)    => return Left(error)
+          case Right(request) =>
+            suspend(
+              execution,
+              execution.currentFunction,
+              execution.pc,
+              execution.currentLabel,
+              execution.predecessor,
+              execution.instructionCount,
+              request
+            )
+            return Right(())
+        }
+      case Instruction.GroupIAdd(resultType, dest, executionScope, operation, value) =>
+        collectiveIntegerAdd(
+          program,
+          values,
+          execution.currentFunction.id,
+          execution.pc,
+          resultType,
+          dest,
+          executionScope,
+          operation,
+          value
+        ) match {
+          case Left(error)    => return Left(error)
+          case Right(request) =>
+            suspend(
+              execution,
+              execution.currentFunction,
+              execution.pc,
+              execution.currentLabel,
+              execution.predecessor,
+              execution.instructionCount,
+              request
+            )
+            return Right(())
+        }
+      case Instruction.GroupIMulKHR(resultType, dest, executionScope, operation, value) =>
+        collectiveIntegerMultiply(
+          program,
+          values,
+          execution.currentFunction.id,
+          execution.pc,
+          resultType,
+          dest,
+          executionScope,
+          operation,
+          value
+        ) match {
+          case Left(error)    => return Left(error)
+          case Right(request) =>
+            suspend(
+              execution,
+              execution.currentFunction,
+              execution.pc,
+              execution.currentLabel,
+              execution.predecessor,
+              execution.instructionCount,
+              request
+            )
+            return Right(())
+        }
+      case Instruction.GroupFAdd(resultType, dest, executionScope, operation, value) =>
+        collectiveFloatingAdd(
+          program,
+          values,
+          execution.currentFunction.id,
+          execution.pc,
+          resultType,
+          dest,
+          executionScope,
+          operation,
+          value
+        ) match {
+          case Left(error)    => return Left(error)
+          case Right(request) =>
+            suspend(
+              execution,
+              execution.currentFunction,
+              execution.pc,
+              execution.currentLabel,
+              execution.predecessor,
+              execution.instructionCount,
+              request
+            )
+            return Right(())
+        }
+      case Instruction.GroupFMin(resultType, dest, executionScope, operation, value) =>
+        collectiveFloatingExtremum(
+          program,
+          values,
+          execution.currentFunction.id,
+          execution.pc,
+          resultType,
+          dest,
+          executionScope,
+          operation,
+          value,
+          CollectiveKind.FloatingMin,
+          "OpGroupFMin"
+        ) match {
+          case Left(error)    => return Left(error)
+          case Right(request) =>
+            suspend(
+              execution,
+              execution.currentFunction,
+              execution.pc,
+              execution.currentLabel,
+              execution.predecessor,
+              execution.instructionCount,
+              request
+            )
+            return Right(())
+        }
+      case Instruction.GroupFMax(resultType, dest, executionScope, operation, value) =>
+        collectiveFloatingExtremum(
+          program,
+          values,
+          execution.currentFunction.id,
+          execution.pc,
+          resultType,
+          dest,
+          executionScope,
+          operation,
+          value,
+          CollectiveKind.FloatingMax,
+          "OpGroupFMax"
+        ) match {
+          case Left(error)    => return Left(error)
+          case Right(request) =>
+            suspend(
+              execution,
+              execution.currentFunction,
+              execution.pc,
+              execution.currentLabel,
+              execution.predecessor,
+              execution.instructionCount,
+              request
+            )
+            return Right(())
+        }
+      case Instruction.GroupFMulKHR(resultType, dest, executionScope, operation, value) =>
+        collectiveFloatingMultiply(
+          program,
+          values,
+          execution.currentFunction.id,
+          execution.pc,
+          resultType,
+          dest,
+          executionScope,
+          operation,
+          value
+        ) match {
+          case Left(error)    => return Left(error)
+          case Right(request) =>
+            suspend(
+              execution,
+              execution.currentFunction,
+              execution.pc,
+              execution.currentLabel,
+              execution.predecessor,
+              execution.instructionCount,
+              request
+            )
+            return Right(())
+        }
+      case Instruction.SubgroupShuffleINTEL(resultType, dest, data, invocationId) =>
+        collectiveShuffle(
+          values,
+          execution.currentFunction.id,
+          execution.pc,
+          resultType,
+          dest,
+          data,
+          invocationId
+        ) match {
+          case Left(error)    => return Left(error)
+          case Right(request) =>
+            suspend(
+              execution,
+              execution.currentFunction,
+              execution.pc,
+              execution.currentLabel,
+              execution.predecessor,
+              execution.instructionCount,
+              request
+            )
+            return Right(())
+        }
+      case Instruction.SubgroupShuffleUpINTEL(resultType, dest, previous, current, delta) =>
+        collectiveShuffleUp(
+          values,
+          execution.currentFunction.id,
+          execution.pc,
+          resultType,
+          dest,
+          previous,
+          current,
+          delta
+        ) match {
+          case Left(error)    => return Left(error)
+          case Right(request) =>
+            suspend(
+              execution,
+              execution.currentFunction,
+              execution.pc,
+              execution.currentLabel,
+              execution.predecessor,
+              execution.instructionCount,
+              request
+            )
+            return Right(())
+        }
+      case Instruction.SubgroupShuffleDownINTEL(resultType, dest, current, next, delta) =>
+        collectiveShuffleDown(
+          values,
+          execution.currentFunction.id,
+          execution.pc,
+          resultType,
+          dest,
+          current,
+          next,
+          delta
+        ) match {
+          case Left(error)    => return Left(error)
+          case Right(request) =>
+            suspend(
+              execution,
+              execution.currentFunction,
+              execution.pc,
+              execution.currentLabel,
+              execution.predecessor,
+              execution.instructionCount,
+              request
+            )
+            return Right(())
+        }
+      case Instruction.GroupBroadcast(resultType, dest, executionScope, value, localId) =>
+        collectiveBroadcast(
+          program,
+          values,
+          execution.currentFunction.id,
+          execution.pc,
+          resultType,
+          dest,
+          executionScope,
+          value,
+          localId
+        ) match {
+          case Left(error)    => return Left(error)
+          case Right(request) =>
+            suspend(
+              execution,
+              execution.currentFunction,
+              execution.pc,
+              execution.currentLabel,
+              execution.predecessor,
+              execution.instructionCount,
+              request
+            )
+            return Right(())
+        }
+      case other => return Left(ExecutionFailure.Unsupported(s"${other.opcode} execution is not implemented"))
+    }
+    InstructionCompleted
+  }
+
+  private def executeCall(
+      program: DispatchProgram,
+      execution: InvocationExecution,
+      memory: MemoryState,
+      instruction: Instruction
+  ): Either[ExecutionFailure, Unit] = {
+    val values = execution.values
+    instruction match {
+      case Instruction.FunctionCall(resultType, dest, called, arguments) =>
+        val callee = program.functions.get(id(called)) match {
+          case Some(value) => value
+          case None        =>
+            return Left(
+              ExecutionFailure.InvalidRequest(s"OpFunctionCall references undefined function %${id(called)}")
+            )
+        }
+        if (arguments.size != callee.parameters.size)
+          return Left(
+            ExecutionFailure.InvalidRequest(
+              s"OpFunctionCall %${id(called)} expects ${callee.parameters.size} arguments, received ${arguments.size}"
+            )
+          )
+        program.functionNames.get(id(called)) match {
+          case Some("_Z12get_local_idj") =>
+            scalar(values, arguments.head) match {
+              case Left(error)                                           => return Left(error)
+              case Right(dimension) if dimension >= 0L && dimension < 3L =>
+                integerShape(program, id(resultType)) match {
+                  case Some((width, 1)) =>
+                    values.update(
+                      id(dest),
+                      RuntimeValue.Bits(
+                        id(resultType),
+                        Array(execution.invocation.local(dimension.toInt) & mask(width))
+                      )
+                    )
+                    execution.pc += 1
+                  case _ =>
+                    return Left(
+                      ExecutionFailure.InvalidRequest(
+                        s"OpenCL get_local_id result type %${id(resultType)} is not an integer scalar"
+                      )
+                    )
+                }
+              case Right(dimension) =>
+                return Left(ExecutionFailure.InvalidRequest(s"OpenCL get_local_id dimension $dimension is invalid"))
+            }
+          case Some("_Z12get_group_idj") | Some("_Z14get_local_sizej") =>
+            scalar(values, arguments.head) match {
+              case Left(error)                                           => return Left(error)
+              case Right(dimension) if dimension >= 0L && dimension < 3L =>
+                integerShape(program, id(resultType)) match {
+                  case Some((width, 1)) =>
+                    val source = program.functionNames.get(id(called)) match {
+                      case Some("_Z12get_group_idj")   => execution.invocation.group(dimension.toInt)
+                      case Some("_Z14get_local_sizej") => execution.invocation.workgroupSize(dimension.toInt)
+                      case _                           => 0L
+                    }
+                    values.update(id(dest), RuntimeValue.Bits(id(resultType), Array(source & mask(width))))
+                    execution.pc += 1
+                  case _ =>
+                    return Left(
+                      ExecutionFailure.InvalidRequest(
+                        s"OpenCL ${program.functionNames.getOrElse(id(called), "builtin")} result type " +
+                          s"%${id(resultType)} is not an integer scalar"
+                      )
+                    )
+                }
+              case Right(dimension) =>
+                return Left(
+                  ExecutionFailure.InvalidRequest(
+                    s"OpenCL ${program.functionNames.getOrElse(id(called), "builtin")} dimension $dimension is invalid"
+                  )
+                )
+            }
+          case Some("_Z13get_global_idj") =>
+            scalar(values, arguments.head) match {
+              case Left(error)                                           => return Left(error)
+              case Right(dimension) if dimension >= 0L && dimension < 3L =>
+                integerShape(program, id(resultType)) match {
+                  case Some((width, 1)) =>
+                    values.update(
+                      id(dest),
+                      RuntimeValue.Bits(
+                        id(resultType),
+                        Array(execution.invocation.global(dimension.toInt) & mask(width))
+                      )
+                    )
+                    execution.pc += 1
+                  case _ =>
+                    return Left(
+                      ExecutionFailure.InvalidRequest(
+                        "OpenCL get_global_id result type is not an integer scalar"
+                      )
+                    )
+                }
+              case Right(dimension) =>
+                return Left(ExecutionFailure.InvalidRequest(s"OpenCL get_global_id dimension $dimension is invalid"))
+            }
+          case Some("_Z15get_global_sizej") | Some("_Z17get_global_offsetj") | Some("_Z14get_num_groupsj") =>
+            scalar(values, arguments.head) match {
+              case Left(error)                                           => return Left(error)
+              case Right(dimension) if dimension >= 0L && dimension < 3L =>
+                integerShape(program, id(resultType)) match {
+                  case Some((width, 1)) =>
+                    val source = program.functionNames.get(id(called)) match {
+                      case Some("_Z15get_global_sizej")   => execution.invocation.globalSize(dimension.toInt)
+                      case Some("_Z17get_global_offsetj") => execution.invocation.globalOffset(dimension.toInt)
+                      case Some("_Z14get_num_groupsj")    => execution.invocation.numWorkgroups(dimension.toInt)
+                      case _                              => 0L
+                    }
+                    values.update(id(dest), RuntimeValue.Bits(id(resultType), Array(source & mask(width))))
+                    execution.pc += 1
+                  case _ =>
+                    return Left(
+                      ExecutionFailure.InvalidRequest(
+                        s"OpenCL ${program.functionNames.getOrElse(id(called), "builtin")} result type is not an integer scalar"
+                      )
+                    )
+                }
+              case Right(dimension) =>
+                return Left(
+                  ExecutionFailure.InvalidRequest(
+                    s"OpenCL ${program.functionNames.getOrElse(id(called), "builtin")} dimension $dimension is invalid"
+                  )
+                )
+            }
+          case Some("_Z18get_sub_group_sizev") | Some("_Z22get_sub_group_local_idv") |
+              Some("_Z16get_sub_group_idv") | Some("_Z18get_num_sub_groupsv") =>
+            integerShape(program, id(resultType)) match {
+              case Some((width, 1)) =>
+                val source = program.functionNames.get(id(called)) match {
+                  case Some("_Z18get_sub_group_sizev")     => execution.invocation.subgroupSize.toLong
+                  case Some("_Z22get_sub_group_local_idv") => execution.invocation.subgroupLocal.toLong
+                  case Some("_Z16get_sub_group_idv")       => execution.invocation.subgroupIndex.toLong
+                  case Some("_Z18get_num_sub_groupsv")     => execution.invocation.numSubgroups
+                  case _                                   => 0L
+                }
+                values.update(id(dest), RuntimeValue.Bits(id(resultType), Array(source & mask(width))))
+                execution.pc += 1
+              case _ =>
+                return Left(
+                  ExecutionFailure.InvalidRequest(
+                    s"OpenCL ${program.functionNames.getOrElse(id(called), "builtin")} result type " +
+                      s"%${id(resultType)} is not an integer scalar"
+                  )
+                )
+            }
+          case Some("_Z3minmm") =>
+            (
+              scalar(values, arguments(0)),
+              scalar(values, arguments(1)),
+              integerShape(program, id(resultType))
+            ) match {
+              case (Right(left), Right(right), Some((width, 1))) =>
+                val result = if (java.lang.Long.compareUnsigned(left, right) <= 0) left else right
+                values.update(id(dest), RuntimeValue.Bits(id(resultType), Array(result & mask(width))))
+                execution.pc += 1
+              case (Left(error), _, _) => return Left(error)
+              case (_, Left(error), _) => return Left(error)
+              case (_, _, _)           =>
+                return Left(
+                  ExecutionFailure.InvalidRequest("OpenCL min requires integer scalar arguments and result")
+                )
+            }
+          case Some("_Z3ctzi") =>
+            val sourceType = values.scalarType(id(arguments.head))
+            (
+              scalar(values, arguments.head),
+              integerShape(program, sourceType),
+              integerShape(program, id(resultType))
+            ) match {
+              case (Right(value), Some((sourceWidth, 1)), Some((resultWidth, 1))) =>
+                val bits  = value & mask(sourceWidth)
+                val count = if (bits == 0L) sourceWidth.toLong else java.lang.Long.numberOfTrailingZeros(bits).toLong
+                values.update(id(dest), RuntimeValue.Bits(id(resultType), Array(count & mask(resultWidth))))
+                execution.pc += 1
+              case (Left(error), _, _) => return Left(error)
+              case _                   =>
+                return Left(
+                  ExecutionFailure.InvalidRequest("OpenCL ctz requires integer scalar arguments and result")
+                )
+            }
+          case Some(name) if name.startsWith("_Z26intel_sub_group_shuffle_up") =>
+            if (arguments.size != 3)
+              return Left(
+                ExecutionFailure.InvalidRequest(
+                  s"OpenCL $name expects current, next, and delta arguments"
+                )
+              )
+            (values.get(id(arguments(0))), values.get(id(arguments(1))), scalar(values, arguments(2))) match {
+              case (
+                    previousValue @ Some(RuntimeValue.Bits(previousType, previousLanes)),
+                    currentValue @ Some(RuntimeValue.Bits(currentType, currentLanes)),
+                    Right(delta)
+                  )
+                  if previousType == id(resultType) && currentType == id(resultType) &&
+                    previousLanes.length == currentLanes.length && delta >= 0L =>
+                suspend(
+                  execution,
+                  execution.currentFunction,
+                  execution.pc,
+                  execution.currentLabel,
+                  execution.predecessor,
+                  execution.instructionCount,
+                  CollectiveRequest(
+                    CollectiveKind.ShuffleUp,
+                    execution.currentFunction.id,
+                    execution.pc,
+                    3,
+                    CollectivePayload.ShuffleUp(
+                      id(resultType),
+                      id(dest),
+                      previousValue.get,
+                      currentValue.get,
+                      delta
                     )
                   )
+                )
+                return Right(())
+              case (Some(_), Some(_), Right(delta)) if delta < 0L =>
+                return Left(ExecutionFailure.InvalidRequest("OpenCL subgroup shuffle-up delta must be non-negative"))
+              case (Some(_), Some(_), Right(_)) =>
+                return Left(ExecutionFailure.InvalidRequest(
+                  "OpenCL subgroup shuffle-up requires matching result and operand types"
+                ))
+              case (None, _, _)        => return Left(undefined(arguments(0)))
+              case (_, None, _)        => return Left(undefined(arguments(1)))
+              case (_, _, Left(error)) => return Left(error)
+            }
+          case Some("__devicelib_ConvertFToBF16INTEL") =>
+            if (arguments.size != 1)
+              return Left(
+                ExecutionFailure.InvalidRequest(
+                  s"__devicelib_ConvertFToBF16INTEL expects one pointer argument, received ${arguments.size}"
+                )
+              )
+            values.get(id(arguments.head)) match {
+              case Some(RuntimeValue.Address(_, pointer)) =>
+                memory.readScalar(pointer, 4) match {
+                  case Left(error) => return Left(error)
+                  case Right(raw)  =>
+                    values.update(
+                      id(dest),
+                      RuntimeValue.Bits(id(resultType), Array(float32ToBfloat16Bits(raw)))
+                    )
+                    execution.pc += 1
+                }
+              case Some(_) =>
+                return Left(
+                  ExecutionFailure.InvalidRequest("__devicelib_ConvertFToBF16INTEL argument is not a pointer")
+                )
+              case None => return Left(undefined(arguments.head))
+            }
+          case Some("__devicelib_ConvertBF16ToFINTEL") =>
+            if (arguments.size != 1)
+              return Left(
+                ExecutionFailure.InvalidRequest(
+                  s"__devicelib_ConvertBF16ToFINTEL expects one pointer argument, received ${arguments.size}"
+                )
+              )
+            values.get(id(arguments.head)) match {
+              case Some(RuntimeValue.Address(_, pointer)) =>
+                memory.readScalar(pointer, 2) match {
+                  case Left(error) => return Left(error)
+                  case Right(raw)  =>
+                    values.update(
+                      id(dest),
+                      RuntimeValue.Bits(id(resultType), Array(bfloat16ToFloat32Bits(raw)))
+                    )
+                    execution.pc += 1
+                }
+              case Some(_) =>
+                return Left(
+                  ExecutionFailure.InvalidRequest("__devicelib_ConvertBF16ToFINTEL argument is not a pointer")
+                )
+              case None => return Left(undefined(arguments.head))
+            }
+          case Some("__to_global") =>
+            (values.get(id(arguments.head)), program.types.get(id(resultType))) match {
+              case (Some(RuntimeValue.Address(_, pointer)), Some(RuntimeType.Pointer(storageClass, pointee))) =>
+                values.update(
+                  id(dest),
+                  RuntimeValue.Address(
+                    id(resultType),
+                    pointer.copy(pointee = pointee, storageClass = storageClass)
+                  )
+                )
+                execution.pc += 1
+              case (Some(RuntimeValue.Address(_, _)), _) =>
+                return Left(ExecutionFailure.InvalidRequest("OpenCL __to_global result is not a pointer"))
+              case (Some(_), _) =>
+                return Left(ExecutionFailure.InvalidRequest("OpenCL __to_global source is not a pointer"))
+              case (None, _) => return Left(undefined(arguments.head))
+            }
+          case Some("_Z5isnanf") =>
+            values.get(id(arguments.head)) match {
+              case Some(RuntimeValue.Bits(sourceType, Array(raw))) =>
+                (floatingShape(program, sourceType), integerShape(program, id(resultType))) match {
+                  case (Some((width, 1)), Some((resultWidth, 1))) =>
+                    val (exponentMask, fractionMask) = width match {
+                      case 16 => (0x7c00L, 0x03ffL)
+                      case 32 => (0x7f800000L, 0x007fffffL)
+                      case 64 => (0x7ff0000000000000L, 0x000fffffffffffffL)
+                    }
+                    val bits  = raw & mask(width)
+                    val isNan = (bits & exponentMask) == exponentMask && (bits & fractionMask) != 0L
+                    values.update(
+                      id(dest),
+                      RuntimeValue.Bits(id(resultType), Array((if (isNan) 1L else 0L) & mask(resultWidth)))
+                    )
+                    execution.pc += 1
+                  case (None, _) =>
+                    return Left(ExecutionFailure.InvalidRequest("OpenCL isnan source is not a floating-point scalar"))
+                  case (_, None) =>
+                    return Left(ExecutionFailure.InvalidRequest("OpenCL isnan result is not an integer scalar"))
+                  case _ =>
+                    return Left(
+                      ExecutionFailure.InvalidRequest("OpenCL isnan requires scalar source and result types")
+                    )
+                }
+              case Some(_) =>
+                return Left(ExecutionFailure.InvalidRequest("OpenCL isnan source is not numeric"))
+              case None => return Left(undefined(arguments.head))
+            }
+          case Some("_Z7barrierj") =>
+            scalar(values, arguments.head) match {
+              case Left(error)  => return Left(error)
+              case Right(flags) =>
+                suspend(
+                  execution,
+                  execution.currentFunction,
+                  execution.pc,
+                  execution.currentLabel,
+                  execution.predecessor,
+                  execution.instructionCount,
+                  CollectiveRequest(
+                    CollectiveKind.Barrier,
+                    execution.currentFunction.id,
+                    execution.pc,
+                    2,
+                    CollectivePayload.Barrier(2, flags)
+                  )
+                )
+                return Right(())
+            }
+          case Some("_Z29work_group_scan_exclusive_addi") =>
+            values.get(id(arguments.head)) match {
+              case Some(value @ RuntimeValue.Bits(sourceType, lanes))
+                  if lanes.length == 1 && integerShape(program, sourceType).isDefined &&
+                    integerShape(program, sourceType) == integerShape(program, id(resultType)) =>
+                suspend(
+                  execution,
+                  execution.currentFunction,
+                  execution.pc,
+                  execution.currentLabel,
+                  execution.predecessor,
+                  execution.instructionCount,
+                  CollectiveRequest(
+                    CollectiveKind.IntegerAdd,
+                    execution.currentFunction.id,
+                    execution.pc,
+                    2,
+                    CollectivePayload.Value(id(resultType), id(dest), value),
+                    operation = 2
+                  )
+                )
+                return Right(())
+              case Some(_) =>
+                return Left(
+                  ExecutionFailure.InvalidRequest(
+                    "OpenCL work_group_scan_exclusive_add requires matching integer scalar types"
+                  )
+                )
+              case None => return Left(undefined(arguments.head))
+            }
+          case Some("_Z29work_group_scan_exclusive_addl") | Some("_Z28sub_group_scan_exclusive_addi") =>
+            values.get(id(arguments.head)) match {
+              case Some(value @ RuntimeValue.Bits(sourceType, lanes))
+                  if lanes.length == 1 && integerShape(program, sourceType).isDefined &&
+                    integerShape(program, sourceType) == integerShape(program, id(resultType)) =>
+                val scope = program.functionNames.get(id(called)) match {
+                  case Some("_Z28sub_group_scan_exclusive_addi") => 3
+                  case _                                         => 2
+                }
+                suspend(
+                  execution,
+                  execution.currentFunction,
+                  execution.pc,
+                  execution.currentLabel,
+                  execution.predecessor,
+                  execution.instructionCount,
+                  CollectiveRequest(
+                    CollectiveKind.IntegerAdd,
+                    execution.currentFunction.id,
+                    execution.pc,
+                    scope,
+                    CollectivePayload.Value(id(resultType), id(dest), value),
+                    operation = 2
+                  )
+                )
+                return Right(())
+              case Some(_) =>
+                return Left(
+                  ExecutionFailure.InvalidRequest(
+                    "OpenCL scan requires matching integer scalar types"
+                  )
+                )
+              case None => return Left(undefined(arguments.head))
+            }
+          case Some(name)
+              if openCLBroadcastScope(name).isDefined =>
+            (
+              values.get(id(arguments(0))),
+              scalar(values, arguments(1)),
+              integerShape(program, id(resultType))
+            ) match {
+              case (Some(value @ RuntimeValue.Bits(sourceType, lanes)), Right(localId), Some((width, count)))
+                  if lanes.length == count && integerShape(program, sourceType) == Some((width, count)) =>
+                val scope = openCLBroadcastScope(name).get
+                suspend(
+                  execution,
+                  execution.currentFunction,
+                  execution.pc,
+                  execution.currentLabel,
+                  execution.predecessor,
+                  execution.instructionCount,
+                  CollectiveRequest(
+                    CollectiveKind.Broadcast,
+                    execution.currentFunction.id,
+                    execution.pc,
+                    scope,
+                    CollectivePayload.Value(id(resultType), id(dest), value),
+                    selector = Col(localId & mask(width))
+                  )
+                )
+                return Right(())
+              case (None, _, _)        => return Left(undefined(arguments(0)))
+              case (_, Left(error), _) => return Left(error)
+              case _                   =>
+                return Left(
+                  ExecutionFailure.InvalidRequest(
+                    "OpenCL broadcast requires matching integer scalar arguments and result"
+                  )
+                )
+            }
+          case _ =>
+            if (execution.calls.size >= 128)
+              return Left(ExecutionFailure.Failed("SPIR-V function call depth exceeds 128 frames"))
+            var argumentIndex = 0
+            while (argumentIndex < arguments.size) {
+              values.get(id(arguments(argumentIndex))) match {
+                case Some(value) =>
+                  val (parameterId, parameterType) = callee.parameters(argumentIndex)
+                  values.update(parameterId, retag(value, parameterType))
+                case None => return Left(undefined(arguments(argumentIndex)))
               }
-          }
-        case Instruction.AssumeTrueKHR(_) | Instruction.LoopMerge(_, _, _) | Instruction.SelectionMerge(_, _) =>
-          pc += 1
-        case instruction =>
-          return Left(ExecutionFailure.Unsupported(s"${instruction.opcode} execution is not implemented"))
-      }
+              argumentIndex += 1
+            }
+            execution.calls.append(
+              CallFrame(
+                execution.currentFunction,
+                execution.pc + 1,
+                execution.currentLabel,
+                execution.predecessor,
+                id(resultType),
+                id(dest)
+              )
+            )
+            execution.currentFunction = callee
+            execution.pc = callee.start + 1
+            execution.currentLabel = -1
+            execution.predecessor = -1
+        }
+      case other => return Left(ExecutionFailure.Unsupported(s"${other.opcode} execution is not implemented"))
     }
-    Left(
-      ExecutionFailure.InvalidRequest(
-        s"SPIR-V function %${currentFunction.id} " +
-          s"(${program.functionNames.getOrElse(currentFunction.id, "unnamed")}) " +
-          "reached OpFunctionEnd without OpReturn"
-      )
-    )
+    InstructionCompleted
+  }
+
+  private def executeBranch(
+      program: DispatchProgram,
+      execution: InvocationExecution,
+      instruction: Instruction
+  ): Either[ExecutionFailure, Unit] = {
+    val values = execution.values
+    instruction match {
+      case Instruction.Branch(target) =>
+        execution.predecessor = execution.currentLabel
+        execution.pc = label(execution.currentFunction, target)
+      case Instruction.BranchConditional(condition, whenTrue, whenFalse, _) =>
+        scalar(values, condition) match {
+          case Left(error) => return Left(error)
+          case Right(test) =>
+            execution.predecessor = execution.currentLabel
+            execution.pc = label(execution.currentFunction, if (test != 0L) whenTrue else whenFalse)
+        }
+      case Instruction.Switch(selector, default, targets) =>
+        scalar(values, selector) match {
+          case Left(error)  => return Left(error)
+          case Right(value) =>
+            var target = default
+            var index  = 0
+            while (index < targets.size) {
+              val pair    = targets(index)
+              val literal = pair.words match {
+                case Col(low, _) =>
+                  if (pair.kind != "PairLiteralIntegerIdRef")
+                    return Left(ExecutionFailure.InvalidRequest("OpSwitch target is not a literal/label pair"))
+                  low.toUnsigned
+                case Col(low, high, _) =>
+                  if (pair.kind != "PairLiteralIntegerIdRef")
+                    return Left(ExecutionFailure.InvalidRequest("OpSwitch target is not a literal/label pair"))
+                  low.toUnsigned | (high.toUnsigned << 32)
+                case _ =>
+                  return Left(ExecutionFailure.InvalidRequest("OpSwitch has an incomplete literal/label pair"))
+              }
+              if (pair.words.size != 2 && pair.words.size != 3)
+                return Left(ExecutionFailure.InvalidRequest("OpSwitch has an incomplete literal/label pair"))
+              val label = pair.words.last
+              if (literal == value)
+                target = Operand("IdRef", Col(label))
+              index += 1
+            }
+            execution.predecessor = execution.currentLabel
+            execution.pc = label(execution.currentFunction, target)
+        }
+      case Instruction.ReturnValue(value) =>
+        val returned = values.get(id(value)) match {
+          case Some(result) => result
+          case None         => return Left(undefined(value))
+        }
+        execution.calls.removeLastOption() match {
+          case None        => return Left(ExecutionFailure.InvalidRequest("SPIR-V entry point returned a value"))
+          case Some(frame) =>
+            values.update(frame.destination, retag(returned, frame.resultType))
+            execution.currentFunction = frame.function
+            execution.pc = frame.pc
+            execution.currentLabel = frame.currentLabel
+            execution.predecessor = frame.predecessor
+        }
+      case Instruction.Return() => execution.calls.removeLastOption() match {
+          case None =>
+            execution.completed = true
+            return Right(())
+          case Some(frame) => program.types.get(frame.resultType) match {
+              case Some(RuntimeType.Void) =>
+                execution.currentFunction = frame.function
+                execution.pc = frame.pc
+                execution.currentLabel = frame.currentLabel
+                execution.predecessor = frame.predecessor
+              case _ =>
+                return Left(
+                  ExecutionFailure.InvalidRequest(
+                    s"SPIR-V function %${execution.currentFunction.id} returned no value to %${frame.destination}"
+                  )
+                )
+            }
+        }
+      case Instruction.AssumeTrueKHR(_) | Instruction.LoopMerge(_, _, _) | Instruction.SelectionMerge(_, _) =>
+        execution.pc += 1
+      case other => return Left(ExecutionFailure.Unsupported(s"${other.opcode} execution is not implemented"))
+    }
+    InstructionCompleted
   }
 
   private def suspend(
@@ -4688,6 +5112,7 @@ object Interpreter {
   private def bindArgument(
       program: DispatchProgram,
       parameterType: Int,
+      byValue: Boolean,
       argument: KernelArgument,
       shared: Option[Region],
       argumentIndex: Int,
@@ -4714,14 +5139,16 @@ object Interpreter {
               case Left(error) => Left(error)
             }
           case KernelArgument.Scalar(bytes)
-              if bytes.toArray.forall(_ == 0) &&
+              if !byValue && bytes.toArray.forall(_ == 0) &&
                 !program.types.get(pointee).exists {
                   case RuntimeType.Structure(_) | RuntimeType.Array(_, _) => true
                   case _                                                  => false
                 } =>
             Right(RuntimeValue.Address(parameterType, Pointer(Region.Null, 0L, pointee, storageClass)))
           case KernelArgument.Scalar(bytes)
-              if memory.argumentRelocation(argumentIndex, 0L).isDefined &&
+              // A ByVal aggregate can contain a pointer in opaque byte-array storage at offset zero.
+              // That relocation belongs inside the private copy, not to the parameter pointer itself.
+              if !byValue && memory.argumentRelocation(argumentIndex, 0L).isDefined &&
                 (pointerLeafOffsets(program, pointee, 0L).toOption.exists(_.isEmpty) ||
                   typeSize(program, pointee) > bytes.size) =>
             memory.argumentRelocation(argumentIndex, 0L) match {
@@ -4826,7 +5253,7 @@ object Interpreter {
       module: Module,
       typeId: Int
   ): Either[ExecutionFailure, Col[(Long, Int)]] =
-    prepare(module).flatMap(program => pointerLeafOffsets(program.value, typeId, 0L))
+    prepareUnchecked(module).flatMap(program => pointerLeafOffsets(program.value, typeId, 0L))
 
   private def pointerLeafOffsets(
       program: DispatchProgram,
@@ -7130,7 +7557,7 @@ object Interpreter {
     case Some(RuntimeType.Structure(members))           => members.map(typeAlignment(program, _)).maxOption.getOrElse(1)
     case Some(RuntimeType.Array(element, _))            => typeAlignment(program, element)
     case Some(RuntimeType.VectorType(component, count)) =>
-      math.min(16, typeAlignment(program, component) * (if (count == 3) 4 else count))
+      Math.multiplyExact(typeAlignment(program, component), if (count == 3) 4 else count)
     case Some(RuntimeType.Pointer(_, _)) => 8
     case _                               => math.max(1, typeSize(program, typeId))
   }
@@ -7603,7 +8030,7 @@ object Interpreter {
               case 64 => IEEE754.binary64ToDouble(raw)
             }
             resultWidth match {
-              case 16 => IEEE754.floatToBinary16(value.toFloat).toLong
+              case 16 => IEEE754.doubleToBinary16(value)
               case 32 => IEEE754.floatToBinary32(value.toFloat).toLong & 0xffffffffL
               case 64 => IEEE754.doubleToBinary64(value)
             }
@@ -7940,8 +8367,7 @@ object Interpreter {
         Left(ExecutionFailure.InvalidRequest(s"OpBitCount result type %$resultId is not an integer scalar or vector"))
       case Some((width, count)) =>
         val operation: Long => Long = value =>
-          if (width <= 32) java.lang.Integer.bitCount((value & mask(width)).toInt).toLong
-          else java.lang.Long.bitCount(value & mask(width)).toLong
+          bitCount(value, width).toLong
         if (count == 1 && values.scalarType(baseId) == resultId) {
           values.updateScalar(id(destination), resultId, operation(values.scalarBits(baseId)) & mask(width))
           Right(())

@@ -27,7 +27,7 @@ final class ExecutionSuite extends munit.FunSuite {
       ),
       Endianness.Little
     )
-    assertEquals(Interpreter.prepare(module).map(_ => ()), Right(()))
+    assertEquals(Interpreter.prepareUnchecked(module).map(_ => ()), Right(()))
   }
 
   test("dispatch binds built-ins and typed arguments without exposing native pointers") {
@@ -79,15 +79,62 @@ final class ExecutionSuite extends munit.FunSuite {
       .toOption
       .get
 
-    val prepared = Interpreter.prepare(module).toOption.get
+    val prepared = Interpreter.prepareUnchecked(module).toOption.get
     val limited  = ExecutionControl.create(ExecutionLimits(maxInstructions = 1L, quantum = 1))
     assert(
       Interpreter.run(prepared, dispatch, memory, limited).left.exists(_.message.contains("instruction budget of 1"))
     )
-    assertEquals(Interpreter.run(module, dispatch, memory), Right(()))
+    assertEquals(Interpreter.runUnchecked(module, dispatch, memory), Right(()))
     assertEquals(memory.bytes.take(4), Col.fill(4)(0.toByte))
     assertEquals(memory.bytes.slice(4, 36), Col.fill(8)(LittleEndian.toCol(0x12345678L, 4)).flatten)
     assertEquals(memory.bytes.drop(36), Col.fill(4)(0.toByte))
+
+    val parallelCalls = java.util.concurrent.atomic.AtomicInteger(0)
+    final class RecordingParallelism extends net.kurobako.gemstone.execution.ExecutionParallelism {
+      override val parallelism                                                            = 4
+      override def shouldParallel(tasks: Long, workItems: Long): Boolean                  = tasks > 1L
+      override def parallelFor(tasks: Long)(task: Long => Either[ExecutionFailure, Unit]) = {
+        parallelCalls.incrementAndGet()
+        net.kurobako.gemstone.execution.ExecutionParallelism.Sequential.parallelFor(tasks)(task)
+      }
+    }
+    val unrelatedAtomic = module.copy(
+      header = module.header.copy(bound = Word(128)),
+      instructions = module.instructions.take(10) ++ Col(
+        Instruction.Constant(u32, operand("IdResult", 103), operand("LiteralContextDependentNumber", 1)),
+        Instruction.Constant(u32, operand("IdResult", 104), operand("LiteralContextDependentNumber", 0))
+      ) ++ module.instructions.drop(10) ++ Col(
+        Instruction.Function(
+          operand("IdResultType", 1),
+          operand("IdResult", 100),
+          operand("FunctionControl", 0),
+          operand("IdRef", 7)
+        ),
+        Instruction.FunctionParameter(operand("IdResultType", 6), operand("IdResult", 101)),
+        Instruction.FunctionParameter(u32, operand("IdResult", 102)),
+        Instruction.Label(operand("IdResult", 105)),
+        Instruction.AtomicStore(
+          operand("IdRef", 101),
+          operand("IdScope", 103),
+          operand("IdMemorySemantics", 104),
+          operand("IdRef", 102)
+        ),
+        Instruction.Return(),
+        Instruction.FunctionEnd()
+      )
+    )
+    val parallelMemory = ArrayMemory(allocation, 40)
+    assertEquals(
+      Interpreter.run(
+        Interpreter.prepareUnchecked(unrelatedAtomic).toOption.get,
+        dispatch,
+        parallelMemory,
+        ExecutionControl.create(parallelism = RecordingParallelism())
+      ),
+      Right(())
+    )
+    assertEquals(parallelMemory.bytes, memory.bytes)
+    assertEquals(parallelCalls.get(), 1)
 
     val workgroupSizeModule = module.copy(instructions =
       module.instructions.updated(
@@ -110,7 +157,7 @@ final class ExecutionSuite extends munit.FunSuite {
       )
       .toOption
       .get
-    assertEquals(Interpreter.run(workgroupSizeModule, workgroupDispatch, workgroupMemory), Right(()))
+    assertEquals(Interpreter.runUnchecked(workgroupSizeModule, workgroupDispatch, workgroupMemory), Right(()))
     assertEquals(workgroupMemory.bytes.slice(20, 24), LittleEndian.toCol(0x12345678L, 4))
     assertEquals(
       workgroupMemory.bytes.take(20) ++ workgroupMemory.bytes.drop(24),
@@ -123,7 +170,7 @@ final class ExecutionSuite extends munit.FunSuite {
         Instruction.TypeVector(operand("IdResult", 4), u64, operand("LiteralInteger", 2))
       )
     )
-    Interpreter.run(malformed, dispatch, memory) match {
+    Interpreter.runUnchecked(malformed, dispatch, memory) match {
       case Left(ExecutionFailure.InvalidRequest(message)) =>
         assertEquals(message, "SPIR-V BuiltIn 28 requires 3 integer lanes, result type %4 has 2")
       case result => fail(s"expected typed malformed BuiltIn shape failure, found $result")
@@ -195,7 +242,7 @@ final class ExecutionSuite extends munit.FunSuite {
       .get
     val memory = ArrayMemory(allocation, 256)
 
-    assertEquals(Interpreter.run(module, dispatch, memory), Right(()))
+    assertEquals(Interpreter.runUnchecked(module, dispatch, memory), Right(()))
     assertEquals(
       memory.bytes,
       Col.fill(32)(LittleEndian.toCol(0L, 4)).flatten ++ Col.fill(32)(LittleEndian.toCol(1L, 4)).flatten
@@ -203,7 +250,7 @@ final class ExecutionSuite extends munit.FunSuite {
 
     val defaultSubgroupModule = module.copy(instructions = instructions.patch(14, Col.empty, 1))
     val defaultSubgroupMemory = ArrayMemory(allocation, 256)
-    assertEquals(Interpreter.run(defaultSubgroupModule, dispatch, defaultSubgroupMemory), Right(()))
+    assertEquals(Interpreter.runUnchecked(defaultSubgroupModule, dispatch, defaultSubgroupMemory), Right(()))
     assertEquals(
       defaultSubgroupMemory.bytes,
       Col.fill(32)(LittleEndian.toCol(0L, 4)).flatten ++ Col.fill(32)(LittleEndian.toCol(1L, 4)).flatten
@@ -216,14 +263,14 @@ final class ExecutionSuite extends munit.FunSuite {
       )
     )
     val numSubgroupsMemory = ArrayMemory(allocation, 256)
-    assertEquals(Interpreter.run(numSubgroupsModule, dispatch, numSubgroupsMemory), Right(()))
+    assertEquals(Interpreter.runUnchecked(numSubgroupsModule, dispatch, numSubgroupsMemory), Right(()))
     assertEquals(numSubgroupsMemory.bytes, Col.fill(64)(LittleEndian.toCol(2L, 4)).flatten)
 
     val undefModule = module.copy(instructions =
       instructions.updated(22, Instruction.Store(destination, undefValue, None))
     )
     val undefMemory = ArrayMemory(allocation, 256)
-    assertEquals(Interpreter.run(undefModule, dispatch, undefMemory), Right(()))
+    assertEquals(Interpreter.runUnchecked(undefModule, dispatch, undefMemory), Right(()))
     assertEquals(undefMemory.bytes, Col.fill(256)(0.toByte))
   }
 
@@ -285,7 +332,7 @@ final class ExecutionSuite extends munit.FunSuite {
       .toOption
       .get
 
-    assertEquals(Interpreter.run(module, dispatch, memory), Right(()))
+    assertEquals(Interpreter.runUnchecked(module, dispatch, memory), Right(()))
     assertEquals(memory.bytes, LittleEndian.toCol(29L, 4))
   }
 
@@ -338,7 +385,10 @@ final class ExecutionSuite extends munit.FunSuite {
       )
       .toOption
       .get
-    assertEquals(Interpreter.run(module(4, "workgroup_lifetime"), workgroupDispatch, workgroupMemory), Right(()))
+    assertEquals(
+      Interpreter.runUnchecked(module(4, "workgroup_lifetime"), workgroupDispatch, workgroupMemory),
+      Right(())
+    )
     assertEquals(workgroupMemory.bytes, LittleEndian.toCol(7L, 4))
 
     val privateMemory   = ArrayMemory(allocation, 4)
@@ -352,7 +402,7 @@ final class ExecutionSuite extends munit.FunSuite {
       )
       .toOption
       .get
-    assertEquals(Interpreter.run(module(6, "private_lifetime"), privateDispatch, privateMemory), Right(()))
+    assertEquals(Interpreter.runUnchecked(module(6, "private_lifetime"), privateDispatch, privateMemory), Right(()))
     assertEquals(privateMemory.bytes, LittleEndian.toCol(7L, 4))
   }
 
@@ -418,7 +468,7 @@ final class ExecutionSuite extends munit.FunSuite {
       .toOption
       .get
 
-    assertEquals(Interpreter.run(module, dispatch, memory), Right(()))
+    assertEquals(Interpreter.runUnchecked(module, dispatch, memory), Right(()))
     val expected = Array.fill[Byte](96)(0)
     for (base <- Col(0, 48)) {
       LittleEndian.write(5L, expected, base, 4)
@@ -499,7 +549,7 @@ final class ExecutionSuite extends munit.FunSuite {
       .toOption
       .get
 
-    assertEquals(Interpreter.run(module, dispatch, memory), Right(()))
+    assertEquals(Interpreter.runUnchecked(module, dispatch, memory), Right(()))
     assertEquals(memory.bytes(32), 1.toByte)
   }
 
@@ -526,6 +576,77 @@ final class ExecutionSuite extends munit.FunSuite {
       Interpreter.pointerLeafOffsetsForTest(module, 5),
       Right(Col(0L -> 3, 16L -> 3))
     )
+  }
+
+  test("ByVal byte-array aggregates retain their private layout when their first word is relocated") {
+    def result(value: Int) = operand("IdResult", value)
+    val module             = Module(
+      Header(ISA.version, Word(0), Word(34), Word(0)),
+      Col(
+        Instruction.TypeVoid(result(1)),
+        Instruction.TypeInt(result(2), operand("LiteralInteger", 64), operand("LiteralInteger", 0)),
+        Instruction.TypeInt(result(3), operand("LiteralInteger", 8), operand("LiteralInteger", 0)),
+        Instruction.TypeInt(result(4), operand("LiteralInteger", 32), operand("LiteralInteger", 0)),
+        Instruction.Constant(result(2), result(5), operand("LiteralContextDependentNumber", 8, 0)),
+        Instruction.TypeArray(result(6), result(3), result(5)),
+        Instruction.TypeStruct(result(7), Col(result(6), result(2))),
+        Instruction.Decorate(result(7), operand("Decoration", 10)),
+        Instruction.TypePointer(result(8), operand("StorageClass", 7), result(7)),
+        Instruction.TypePointer(result(9), operand("StorageClass", 7), result(2)),
+        Instruction.TypePointer(result(10), operand("StorageClass", 5), result(2)),
+        Instruction.TypePointer(result(11), operand("StorageClass", 8), result(4)),
+        Instruction.TypeFunction(result(14), result(1), Col(result(8), result(10))),
+        Instruction.Constant(result(2), result(15), operand("LiteralContextDependentNumber", 1, 0)),
+        Instruction.Decorate(result(21), operand("Decoration", 38, 2)), // FuncParamAttr ByVal
+        Instruction.EntryPoint(operand("ExecutionModel", 6), result(20), stringOperand("byval_bytes"), Col.empty),
+        Instruction.Function(result(1), result(20), operand("FunctionControl", 0), result(14)),
+        Instruction.FunctionParameter(result(8), result(21)),
+        Instruction.FunctionParameter(result(10), result(22)),
+        Instruction.Label(result(23)),
+        Instruction.Bitcast(result(9), result(24), result(21)),
+        Instruction.PtrAccessChain(result(9), result(25), result(24), result(15), Col.empty),
+        Instruction.Load(result(2), result(26), result(25), None),
+        Instruction.Store(result(22), result(26), None),
+        Instruction.Load(result(2), result(27), result(24), None),
+        Instruction.ConvertUToPtr(result(11), result(28), result(27)),
+        Instruction.Load(result(4), result(29), result(28), None),
+        Instruction.UConvert(result(2), result(30), result(29)),
+        Instruction.PtrAccessChain(result(10), result(31), result(22), result(15), Col.empty),
+        Instruction.Store(result(31), result(30), None),
+        Instruction.Return(),
+        Instruction.FunctionEnd()
+      ),
+      Endianness.Little
+    )
+    for (base <- Col(1L, 9007199254740993L)) {
+      val needle = AllocationId.fromLong(base).toOption.get
+      val output = AllocationId.fromLong(base + 2L).toOption.get
+      final class Memory extends ExecutionMemory {
+        val storage = Map(needle -> LittleEndian.toArray(7L, 4), output -> Array.ofDim[Byte](16))
+        def read(id: AllocationId, offset: Long, size: Int): Either[ExecutionFailure, Col[Byte]] =
+          if (offset < 0 || size < 0 || offset > storage(id).length - size)
+            Left(ExecutionFailure.InvalidRequest("test read exceeds allocation"))
+          else Right(Col.from(storage(id).slice(offset.toInt, offset.toInt + size)))
+        def write(id: AllocationId, offset: Long, bytes: Col[Byte]): Either[ExecutionFailure, Unit] = {
+          val _ = bytes.copyToArray(storage(id), offset.toInt, bytes.size); Right(())
+        }
+        def recordPointerRelocation(value: PointerRelocation): Unit = ()
+      }
+      val memory    = Memory()
+      val aggregate = LittleEndian.toCol(0x12345678L, 8) ++ LittleEndian.toCol(99L, 8)
+      val dispatch  = KernelDispatch.create(
+        ProgramId.fromLong(1).toOption.get,
+        "byval_bytes",
+        Dimensions.One,
+        Dimensions.One,
+        Col(KernelArgument.Scalar(aggregate), KernelArgument.Allocation(output, 0)),
+        pointerRelocations = Col(PointerRelocation(None, Some(0), 0L, needle, 0L))
+      ).toOption.get
+      assertEquals(Interpreter.runUnchecked(module, dispatch, memory), Right(()))
+      assertEquals(LittleEndian.decode(memory.storage(output), 0, 8), 99L)
+      assertEquals(LittleEndian.decode(memory.storage(output), 8, 8), 7L)
+      assertEquals(LittleEndian.decode(memory.storage(needle), 0, 4), 7L)
+    }
   }
 
   test("pointer-sized relocated arguments bind externally when their aggregate pointee is larger") {
@@ -576,7 +697,7 @@ final class ExecutionSuite extends munit.FunSuite {
       .toOption
       .get
 
-    assertEquals(Interpreter.run(module, dispatch, memory), Right(()))
+    assertEquals(Interpreter.runUnchecked(module, dispatch, memory), Right(()))
     assertEquals(memory.bytes.drop(8), LittleEndian.toCol(42L, 4))
   }
 
@@ -660,7 +781,7 @@ final class ExecutionSuite extends munit.FunSuite {
       .toOption
       .get
 
-    assertEquals(Interpreter.run(module, dispatch, memory), Right(()), "floating atomic min/max execution")
+    assertEquals(Interpreter.runUnchecked(module, dispatch, memory), Right(()), "floating atomic min/max execution")
     assertEquals(
       memory.bytes,
       LittleEndian.toCol(maximumBits, 4) ++
@@ -710,7 +831,7 @@ final class ExecutionSuite extends munit.FunSuite {
       .toOption
       .get
 
-    assertEquals(Interpreter.run(module, dispatch, memory), Right(()))
+    assertEquals(Interpreter.runUnchecked(module, dispatch, memory), Right(()))
     assertEquals(
       relocated.get(),
       Some(PointerRelocation(Some(allocation), None, 8L, allocation, 0L))
@@ -781,12 +902,12 @@ final class ExecutionSuite extends munit.FunSuite {
       .toOption
       .get
 
-    assertEquals(Interpreter.run(module, dispatch, memory), Right(()))
+    assertEquals(Interpreter.runUnchecked(module, dispatch, memory), Right(()))
     assertEquals(memory.bytes, Col.fill(8)(0.toByte))
 
     val invalidNull =
       module.copy(instructions = instructions.updated(7, Instruction.ConstantNull(voidType, nullPointer)))
-    Interpreter.run(invalidNull, dispatch, memory) match {
+    Interpreter.runUnchecked(invalidNull, dispatch, memory) match {
       case Left(ExecutionFailure.InvalidRequest(message)) =>
         assertEquals(
           message,
@@ -800,7 +921,7 @@ final class ExecutionSuite extends munit.FunSuite {
         .updated(7, Instruction.ConstantNull(globalBytePointer, nullPointer))
         .updated(14, Instruction.GenericCastToPtr(globalBytePointer, castPointer, nullPointer))
     )
-    Interpreter.run(invalidCast, dispatch, memory) match {
+    Interpreter.runUnchecked(invalidCast, dispatch, memory) match {
       case Left(ExecutionFailure.InvalidRequest(message)) =>
         assertEquals(message, "OpGenericCastToPtr cannot cast storage class 5 pointee %2 to storage class 5 pointee %2")
       case result => fail(s"expected typed invalid generic cast failure, found $result")
@@ -872,13 +993,13 @@ final class ExecutionSuite extends munit.FunSuite {
       .toOption
       .get
 
-    assertEquals(Interpreter.run(module, dispatch, memory), Right(()))
+    assertEquals(Interpreter.runUnchecked(module, dispatch, memory), Right(()))
     assertEquals(memory.bytes, Col.fill(8)(0.toByte))
 
     val workgroupAny = module.copy(instructions =
       instructions.updated(21, Instruction.GroupAny(bool, any, workgroupScope, pred))
     )
-    assertEquals(Interpreter.run(workgroupAny, dispatch, memory), Right(()))
+    assertEquals(Interpreter.runUnchecked(workgroupAny, dispatch, memory), Right(()))
 
     val barrierModule = module.copy(instructions =
       instructions.patch(
@@ -901,7 +1022,7 @@ final class ExecutionSuite extends munit.FunSuite {
       )
       .toOption
       .get
-    assertEquals(Interpreter.run(barrierModule, barrierDispatch, barrierMemory), Right(()))
+    assertEquals(Interpreter.runUnchecked(barrierModule, barrierDispatch, barrierMemory), Right(()))
     assertEquals(barrierMemory.bytes, Col.fill(8)(0.toByte))
 
     val scanDestination  = operand("IdResult", 23)
@@ -928,7 +1049,7 @@ final class ExecutionSuite extends munit.FunSuite {
       .toOption
       .get
     val scanMemory = ArrayMemory(allocation, 64)
-    assertEquals(Interpreter.run(scanModule, scanDispatch, scanMemory), Right(()))
+    assertEquals(Interpreter.runUnchecked(scanModule, scanDispatch, scanMemory), Right(()))
     assertEquals(
       scanMemory.bytes,
       Col.from(Col(0L, 1L, 3L, 6L, 10L, 15L, 21L, 28L).iterator.flatMap(LittleEndian.toCol(_, 8)))
@@ -941,7 +1062,7 @@ final class ExecutionSuite extends munit.FunSuite {
       )
     )
     val reductionMemory = ArrayMemory(allocation, 64)
-    assertEquals(Interpreter.run(reductionModule, scanDispatch, reductionMemory), Right(()))
+    assertEquals(Interpreter.runUnchecked(reductionModule, scanDispatch, reductionMemory), Right(()))
     assertEquals(reductionMemory.bytes, Col.fill(8)(LittleEndian.toCol(28L, 8)).flatten)
 
     val multiplicationModule = scanModule.copy(instructions =
@@ -951,7 +1072,7 @@ final class ExecutionSuite extends munit.FunSuite {
       )
     )
     val multiplicationMemory = ArrayMemory(allocation, 64)
-    assertEquals(Interpreter.run(multiplicationModule, scanDispatch, multiplicationMemory), Right(()))
+    assertEquals(Interpreter.runUnchecked(multiplicationModule, scanDispatch, multiplicationMemory), Right(()))
     assertEquals(multiplicationMemory.bytes, Col.fill(8)(LittleEndian.toCol(6561L, 8)).flatten)
 
     val f32                      = operand("IdResult", 25)
@@ -980,7 +1101,7 @@ final class ExecutionSuite extends munit.FunSuite {
       header = module.header.copy(bound = Word(28))
     )
     val floatingScanMemory = ArrayMemory(allocation, 64)
-    assertEquals(Interpreter.run(floatingScanModule, scanDispatch, floatingScanMemory), Right(()))
+    assertEquals(Interpreter.runUnchecked(floatingScanModule, scanDispatch, floatingScanMemory), Right(()))
     assertEquals(
       floatingScanMemory.bytes,
       Col.from((1 to 8).iterator.flatMap(index =>
@@ -994,7 +1115,10 @@ final class ExecutionSuite extends munit.FunSuite {
       )
     )
     val floatingMultiplicationMemory = ArrayMemory(allocation, 64)
-    assertEquals(Interpreter.run(floatingMultiplicationModule, scanDispatch, floatingMultiplicationMemory), Right(()))
+    assertEquals(
+      Interpreter.runUnchecked(floatingMultiplicationModule, scanDispatch, floatingMultiplicationMemory),
+      Right(())
+    )
     assertEquals(
       floatingMultiplicationMemory.bytes,
       Col.from((1 to 8).iterator.flatMap(index =>
@@ -1026,7 +1150,7 @@ final class ExecutionSuite extends munit.FunSuite {
       )
     )
     val exclusiveMemory = ArrayMemory(allocation, 64)
-    assertEquals(Interpreter.run(exclusiveModule, scanDispatch, exclusiveMemory), Right(()))
+    assertEquals(Interpreter.runUnchecked(exclusiveModule, scanDispatch, exclusiveMemory), Right(()))
     assertEquals(
       exclusiveMemory.bytes,
       Col.from(Col(0L, 0L, 1L, 3L, 6L, 10L, 15L, 21L).iterator.flatMap(LittleEndian.toCol(_, 8)))
@@ -1044,7 +1168,7 @@ final class ExecutionSuite extends munit.FunSuite {
       header = module.header.copy(bound = Word(25))
     )
     val broadcastMemory = ArrayMemory(allocation, 64)
-    assertEquals(Interpreter.run(broadcastModule, scanDispatch, broadcastMemory), Right(()))
+    assertEquals(Interpreter.runUnchecked(broadcastModule, scanDispatch, broadcastMemory), Right(()))
     assertEquals(broadcastMemory.bytes, Col.fill(8)(LittleEndian.toCol(6L, 8)).flatten)
 
     val subgroupBroadcastModule = broadcastModule.copy(instructions =
@@ -1065,7 +1189,7 @@ final class ExecutionSuite extends munit.FunSuite {
       .get
     val subgroupBroadcastMemory = ArrayMemory(allocation, 128)
     assertEquals(
-      Interpreter.run(subgroupBroadcastModule, subgroupBroadcastDispatch, subgroupBroadcastMemory),
+      Interpreter.runUnchecked(subgroupBroadcastModule, subgroupBroadcastDispatch, subgroupBroadcastMemory),
       Right(())
     )
     assertEquals(subgroupBroadcastMemory.bytes, Col.fill(16)(LittleEndian.toCol(6L, 8)).flatten)
@@ -1075,7 +1199,7 @@ final class ExecutionSuite extends munit.FunSuite {
         .updated(8, Instruction.Constant(u32, subgroupScope, operand("LiteralContextDependentNumber", 1)))
         .updated(21, Instruction.GroupAny(bool, any, subgroupScope, pred))
     )
-    Interpreter.run(invalidScope, dispatch, memory) match {
+    Interpreter.runUnchecked(invalidScope, dispatch, memory) match {
       case Left(ExecutionFailure.Unsupported(message)) =>
         assertEquals(message, "OpGroupAny execution scope 1 is not Subgroup or Workgroup")
       case result => fail(s"expected typed unsupported collective scope failure, found $result")
@@ -1084,7 +1208,7 @@ final class ExecutionSuite extends munit.FunSuite {
     val malformedLogical = module.copy(instructions =
       instructions.updated(22, Instruction.LogicalNotEqual(u64, notAll, any, trueValue))
     )
-    Interpreter.run(malformedLogical, dispatch, memory) match {
+    Interpreter.runUnchecked(malformedLogical, dispatch, memory) match {
       case Left(ExecutionFailure.InvalidRequest(message)) =>
         assertEquals(message, "OpLogicalNotEqual requires matching boolean scalar or vector operand and result types")
       case result => fail(s"expected typed malformed logical operation failure, found $result")
@@ -1137,7 +1261,7 @@ final class ExecutionSuite extends munit.FunSuite {
     val programId  = ProgramId.fromLong(240L).toOption.get
     val allocation = AllocationId.fromLong(240L).toOption.get
     val geometry   = Dimensions.create(8, 1, 1).toOption.get
-    val prepared   = Interpreter.prepare(module).toOption.get
+    val prepared   = Interpreter.prepareUnchecked(module).toOption.get
 
     def dispatch(name: String): KernelDispatch =
       KernelDispatch.create(programId, name, geometry, Dimensions.One, Col.empty).toOption.get
@@ -1216,7 +1340,7 @@ final class ExecutionSuite extends munit.FunSuite {
       .toOption
       .get
 
-    assertEquals(Interpreter.run(module, dispatch, memory), Right(()))
+    assertEquals(Interpreter.runUnchecked(module, dispatch, memory), Right(()))
     assertEquals(memory.bytes, LittleEndian.toCol(42L, 4))
   }
 
@@ -1269,7 +1393,7 @@ final class ExecutionSuite extends munit.FunSuite {
       .toOption
       .get
 
-    assertEquals(Interpreter.run(module, dispatch, memory), Right(()))
+    assertEquals(Interpreter.runUnchecked(module, dispatch, memory), Right(()))
     assertEquals(memory.bytes, LittleEndian.toCol(java.lang.Double.doubleToRawLongBits(5.0), 8))
   }
 
@@ -1319,7 +1443,7 @@ final class ExecutionSuite extends munit.FunSuite {
       .toOption
       .get
 
-    assertEquals(Interpreter.run(module, dispatch, memory), Right(()))
+    assertEquals(Interpreter.runUnchecked(module, dispatch, memory), Right(()))
     assertEquals(memory.bytes, LittleEndian.toCol(java.lang.Float.floatToRawIntBits(0.25f).toLong, 4))
   }
 
@@ -1369,7 +1493,7 @@ final class ExecutionSuite extends munit.FunSuite {
       .toOption
       .get
 
-    assertEquals(Interpreter.run(module, dispatch, memory), Right(()))
+    assertEquals(Interpreter.runUnchecked(module, dispatch, memory), Right(()))
     val actual = java.lang.Float.intBitsToFloat(LittleEndian.decode(memory.bytes, 0, 4).toInt)
     assert(math.abs(actual - 0.47942555f) < 1.0e-6f)
   }
@@ -1420,7 +1544,7 @@ final class ExecutionSuite extends munit.FunSuite {
       .toOption
       .get
 
-    assertEquals(Interpreter.run(module, dispatch, memory), Right(()))
+    assertEquals(Interpreter.runUnchecked(module, dispatch, memory), Right(()))
     val actual = java.lang.Float.intBitsToFloat(LittleEndian.decode(memory.bytes, 0, 4).toInt)
     assert(math.abs(actual - 0.87758255f) < 1.0e-6f)
   }
@@ -1488,7 +1612,7 @@ final class ExecutionSuite extends munit.FunSuite {
       .get
 
     val decoded = ISA.decode(ISA.encode(module).toOption.get).toOption.get
-    assertEquals(Interpreter.run(decoded, dispatch, memory), Right(()))
+    assertEquals(Interpreter.runUnchecked(decoded, dispatch, memory), Right(()))
     assertEquals(memory.bytes.take(4), Col.fill(4)(0.toByte))
     assertEquals(memory.bytes.drop(4), Col.from((0L until 8L).flatMap(LittleEndian.toCol(_, 4))))
   }
@@ -1543,7 +1667,7 @@ final class ExecutionSuite extends munit.FunSuite {
       .toOption
       .get
 
-    assertEquals(Interpreter.run(module, dispatch, memory), Right(()))
+    assertEquals(Interpreter.runUnchecked(module, dispatch, memory), Right(()))
     assertEquals(memory.bytes, LittleEndian.toCol(0x12345678L, 4))
 
     val malformed = module.copy(instructions =
@@ -1552,7 +1676,7 @@ final class ExecutionSuite extends munit.FunSuite {
         Instruction.LifetimeStart(bytePointer, operand("LiteralInteger", 4, 0))
       )
     )
-    Interpreter.run(malformed, dispatch, memory) match {
+    Interpreter.runUnchecked(malformed, dispatch, memory) match {
       case Left(ExecutionFailure.InvalidRequest(message)) =>
         assertEquals(message, "OpLifetimeStart size must contain one word, found 2")
       case result => fail(s"expected typed malformed lifetime marker failure, found $result")
@@ -1623,7 +1747,7 @@ final class ExecutionSuite extends munit.FunSuite {
       .toOption
       .get
 
-    assertEquals(Interpreter.run(module, dispatch, memory), Right(()))
+    assertEquals(Interpreter.runUnchecked(module, dispatch, memory), Right(()))
     assertEquals(
       memory.bytes,
       LittleEndian.toCol(java.lang.Float.floatToRawIntBits(-2.0f).toLong, 4) ++
@@ -1636,7 +1760,7 @@ final class ExecutionSuite extends munit.FunSuite {
         Instruction.ConvertSToF(u32, converted, input)
       )
     )
-    Interpreter.run(malformed, dispatch, memory) match {
+    Interpreter.runUnchecked(malformed, dispatch, memory) match {
       case Left(ExecutionFailure.InvalidRequest(message)) =>
         assertEquals(message, "OpConvertSToF result type %2 is not a floating-point scalar or vector")
       case result => fail(s"expected typed conversion result failure, found $result")
@@ -1648,7 +1772,7 @@ final class ExecutionSuite extends munit.FunSuite {
         Instruction.FSub(u32, subtracted, added, rhs)
       )
     )
-    Interpreter.run(malformedSubtract, dispatch, memory) match {
+    Interpreter.runUnchecked(malformedSubtract, dispatch, memory) match {
       case Left(ExecutionFailure.InvalidRequest(message)) =>
         assertEquals(message, "OpFSub result type %2 is not a floating-point scalar or vector")
       case value => fail(s"expected typed floating subtraction failure, found $value")
@@ -1660,7 +1784,7 @@ final class ExecutionSuite extends munit.FunSuite {
         Instruction.FAdd(u32, added, converted, rhs)
       )
     )
-    Interpreter.run(malformedAdd, dispatch, memory) match {
+    Interpreter.runUnchecked(malformedAdd, dispatch, memory) match {
       case Left(ExecutionFailure.InvalidRequest(message)) =>
         assertEquals(message, "OpFAdd result type %2 is not a floating-point scalar or vector")
       case value => fail(s"expected typed floating addition failure, found $value")
@@ -1672,7 +1796,7 @@ final class ExecutionSuite extends munit.FunSuite {
         Instruction.FMul(u32, multiplied, subtracted, rhs)
       )
     )
-    Interpreter.run(malformedMultiply, dispatch, memory) match {
+    Interpreter.runUnchecked(malformedMultiply, dispatch, memory) match {
       case Left(ExecutionFailure.InvalidRequest(message)) =>
         assertEquals(message, "OpFMul result type %2 is not a floating-point scalar or vector")
       case value => fail(s"expected typed floating multiplication failure, found $value")
@@ -1684,7 +1808,7 @@ final class ExecutionSuite extends munit.FunSuite {
         Instruction.ConvertFToS(resultType, integerValue, divided)
       )
     )
-    Interpreter.run(malformedFloatToSigned, dispatch, memory) match {
+    Interpreter.runUnchecked(malformedFloatToSigned, dispatch, memory) match {
       case Left(ExecutionFailure.InvalidRequest(message)) =>
         assertEquals(message, "OpConvertFToS result type %5 is not an integer scalar or vector")
       case value => fail(s"expected typed floating-to-signed conversion failure, found $value")
@@ -1696,7 +1820,7 @@ final class ExecutionSuite extends munit.FunSuite {
         Instruction.FDiv(u32, divided, multiplied, rhs)
       )
     )
-    Interpreter.run(malformedDivide, dispatch, memory) match {
+    Interpreter.runUnchecked(malformedDivide, dispatch, memory) match {
       case Left(ExecutionFailure.InvalidRequest(message)) =>
         assertEquals(message, "OpFDiv result type %2 is not a floating-point scalar or vector")
       case value => fail(s"expected typed floating division failure, found $value")
@@ -1723,7 +1847,7 @@ final class ExecutionSuite extends munit.FunSuite {
       )
       .toOption
       .get
-    assertEquals(Interpreter.run(halfModule, halfDispatch, halfMemory), Right(()))
+    assertEquals(Interpreter.runUnchecked(halfModule, halfDispatch, halfMemory), Right(()))
     assertEquals(halfMemory.bytes, LittleEndian.toCol(0L, 2) ++ LittleEndian.toCol(0x4200L, 2))
   }
 
@@ -1776,41 +1900,41 @@ final class ExecutionSuite extends munit.FunSuite {
       .toOption
       .get
 
-    assertEquals(Interpreter.run(module, dispatch, memory), Right(()))
+    assertEquals(Interpreter.runUnchecked(module, dispatch, memory), Right(()))
     assertEquals(memory.bytes, LittleEndian.toCol(0xffffffffL, 4))
 
     val divided = module.copy(instructions = instructions.updated(11, Instruction.SDiv(u32, remainder, left, right)))
-    assertEquals(Interpreter.run(divided, dispatch, memory), Right(()))
+    assertEquals(Interpreter.runUnchecked(divided, dispatch, memory), Right(()))
     assertEquals(memory.bytes, LittleEndian.toCol(0xfffffffeL, 4))
 
     val xor = module.copy(instructions = instructions.updated(11, Instruction.BitwiseXor(u32, remainder, left, right)))
-    assertEquals(Interpreter.run(xor, dispatch, memory), Right(()))
+    assertEquals(Interpreter.runUnchecked(xor, dispatch, memory), Right(()))
     assertEquals(memory.bytes, LittleEndian.toCol(0xfffffffaL, 4))
 
     val shiftedRight = module.copy(instructions =
       instructions.updated(11, Instruction.ShiftRightLogical(u32, remainder, left, right))
     )
-    assertEquals(Interpreter.run(shiftedRight, dispatch, memory), Right(()))
+    assertEquals(Interpreter.runUnchecked(shiftedRight, dispatch, memory), Right(()))
     assertEquals(memory.bytes, LittleEndian.toCol(0x1fffffffL, 4))
 
     val shiftedLeft = module.copy(instructions =
       instructions.updated(11, Instruction.ShiftLeftLogical(u32, remainder, left, right))
     )
-    assertEquals(Interpreter.run(shiftedLeft, dispatch, memory), Right(()))
+    assertEquals(Interpreter.runUnchecked(shiftedLeft, dispatch, memory), Right(()))
     assertEquals(memory.bytes, LittleEndian.toCol(0xffffffc8L, 4))
 
     val not = module.copy(instructions = instructions.updated(11, Instruction.Not(u32, remainder, left)))
-    assertEquals(Interpreter.run(not, dispatch, memory), Right(()))
+    assertEquals(Interpreter.runUnchecked(not, dispatch, memory), Right(()))
     assertEquals(memory.bytes, LittleEndian.toCol(6L, 4))
 
     val signedLess =
       module.copy(instructions = instructions.updated(12, Instruction.SLessThan(bool, equal, left, right)))
-    assertEquals(Interpreter.run(signedLess, dispatch, memory), Right(()))
+    assertEquals(Interpreter.runUnchecked(signedLess, dispatch, memory), Right(()))
     assertEquals(memory.bytes, LittleEndian.toCol(0xfffffff9L, 4))
 
     val signedGreater =
       module.copy(instructions = instructions.updated(12, Instruction.SGreaterThan(bool, equal, left, right)))
-    assertEquals(Interpreter.run(signedGreater, dispatch, memory), Right(()))
+    assertEquals(Interpreter.runUnchecked(signedGreater, dispatch, memory), Right(()))
     assertEquals(memory.bytes, LittleEndian.toCol(0xffffffffL, 4))
 
     val malformed = module.copy(instructions =
@@ -1819,7 +1943,7 @@ final class ExecutionSuite extends munit.FunSuite {
         Instruction.IEqual(u32, equal, remainder, right)
       )
     )
-    Interpreter.run(malformed, dispatch, memory) match {
+    Interpreter.runUnchecked(malformed, dispatch, memory) match {
       case Left(ExecutionFailure.InvalidRequest(message)) =>
         assertEquals(message, "OpIEqual result type %2 is not a boolean scalar or vector")
       case value => fail(s"expected typed integer equality failure, found $value")
@@ -1831,7 +1955,7 @@ final class ExecutionSuite extends munit.FunSuite {
         Instruction.SRem(bool, remainder, left, right)
       )
     )
-    Interpreter.run(malformedRemainder, dispatch, memory) match {
+    Interpreter.runUnchecked(malformedRemainder, dispatch, memory) match {
       case Left(ExecutionFailure.InvalidRequest(message)) =>
         assertEquals(message, "OpSRem result type %3 is not an integer scalar or vector")
       case value => fail(s"expected typed signed remainder failure, found $value")
@@ -1843,7 +1967,7 @@ final class ExecutionSuite extends munit.FunSuite {
         Instruction.SDiv(bool, remainder, left, right)
       )
     )
-    Interpreter.run(malformedDivision, dispatch, memory) match {
+    Interpreter.runUnchecked(malformedDivision, dispatch, memory) match {
       case Left(ExecutionFailure.InvalidRequest(message)) =>
         assertEquals(message, "OpSDiv result type %3 is not an integer scalar or vector")
       case value => fail(s"expected typed signed division failure, found $value")
@@ -1902,7 +2026,7 @@ final class ExecutionSuite extends munit.FunSuite {
         )
         .toOption
         .get
-      assertEquals(Interpreter.run(module, dispatch, memory), Right(()))
+      assertEquals(Interpreter.runUnchecked(module, dispatch, memory), Right(()))
       memory.bytes
     }
 
@@ -1931,7 +2055,7 @@ final class ExecutionSuite extends munit.FunSuite {
       )
       .toOption
       .get
-    Interpreter.run(malformed, dispatch, ArrayMemory(allocation, 4)) match {
+    Interpreter.runUnchecked(malformed, dispatch, ArrayMemory(allocation, 4)) match {
       case Left(ExecutionFailure.InvalidRequest(message)) =>
         assertEquals(message, "OpFOrdEqual result type %2 is not a boolean scalar or vector")
       case value => fail(s"expected typed ordered equality failure, found $value")
@@ -1943,7 +2067,7 @@ final class ExecutionSuite extends munit.FunSuite {
         Instruction.FOrdLessThanEqual(f32, lessEqual, left, right)
       )
     )
-    Interpreter.run(malformedLessEqual, dispatch, ArrayMemory(allocation, 4)) match {
+    Interpreter.runUnchecked(malformedLessEqual, dispatch, ArrayMemory(allocation, 4)) match {
       case Left(ExecutionFailure.InvalidRequest(message)) =>
         assertEquals(message, "OpFOrdLessThanEqual result type %2 is not a boolean scalar or vector")
       case value => fail(s"expected typed ordered less-than-or-equal failure, found $value")
@@ -1994,7 +2118,7 @@ final class ExecutionSuite extends munit.FunSuite {
         )
         .toOption
         .get
-      Interpreter.run(module, dispatch, memory).map(_ => memory.bytes)
+      Interpreter.runUnchecked(module, dispatch, memory).map(_ => memory.bytes)
     }
 
     assertEquals(run(13L, 255.75), Right(LittleEndian.toCol(255L, 8)))
@@ -2020,7 +2144,7 @@ final class ExecutionSuite extends munit.FunSuite {
       )
       .toOption
       .get
-    Interpreter.run(malformed, dispatch, ArrayMemory(allocation, 8)) match {
+    Interpreter.runUnchecked(malformed, dispatch, ArrayMemory(allocation, 8)) match {
       case Left(ExecutionFailure.InvalidRequest(message)) =>
         assertEquals(message, "OpConvertFToU result type %3 is not an integer scalar or vector")
       case value => fail(s"expected typed unsigned conversion failure, found $value")
@@ -2089,7 +2213,7 @@ final class ExecutionSuite extends munit.FunSuite {
       .toOption
       .get
 
-    assertEquals(Interpreter.run(module, dispatch, memory), Right(()))
+    assertEquals(Interpreter.runUnchecked(module, dispatch, memory), Right(()))
     assertEquals(memory.bytes, LittleEndian.toCol(7L, 8) ++ LittleEndian.toCol(7L, 8) ++ LittleEndian.toCol(10L, 8))
   }
 
@@ -2144,7 +2268,7 @@ final class ExecutionSuite extends munit.FunSuite {
         )
         .toOption
         .get
-      assertEquals(Interpreter.run(module, dispatch, memory), Right(()))
+      assertEquals(Interpreter.runUnchecked(module, dispatch, memory), Right(()))
       assertEquals(memory.bytes, LittleEndian.toCol(updated, 4) ++ LittleEndian.toCol(initial, 4))
     }
 
@@ -2221,7 +2345,7 @@ final class ExecutionSuite extends munit.FunSuite {
       )
       .toOption
       .get
-    assertEquals(Interpreter.run(module, dispatch, memory), Right(()))
+    assertEquals(Interpreter.runUnchecked(module, dispatch, memory), Right(()))
     assertEquals(
       memory.bytes,
       LittleEndian.toCol(secondBits.toLong, 4) ++
@@ -2229,10 +2353,169 @@ final class ExecutionSuite extends munit.FunSuite {
     )
   }
 
+  test("dirty-page flush preserves sparse runs and writes crossing bitmap and page boundaries") {
+    val offsets      = Col(0L, 8L, 62L, 66L, 4094L, 8191L)
+    val parameters   = offsets.indices.map(index => operand("IdResult", 10 + index))
+    val voidType     = operand("IdResult", 1)
+    val u32          = operand("IdResult", 2)
+    val pointerType  = operand("IdResult", 3)
+    val functionType = operand("IdResult", 4)
+    val function     = operand("IdResult", 5)
+    val value        = operand("IdResult", 6)
+    val module       = Module(
+      Header(ISA.version, Word(0), Word(32), Word(0)),
+      Col[Instruction](
+        Instruction.TypeVoid(voidType),
+        Instruction.TypeInt(u32, operand("LiteralInteger", 32), operand("LiteralInteger", 0)),
+        Instruction.TypePointer(pointerType, operand("StorageClass", 5), u32),
+        Instruction.TypeFunction(functionType, voidType, Col.fill(offsets.size)(pointerType)),
+        Instruction.Constant(u32, value, operand("LiteralContextDependentNumber", 0x12345678)),
+        Instruction.EntryPoint(operand("ExecutionModel", 6), function, stringOperand("sparse"), Col.empty),
+        Instruction.Function(voidType, function, operand("FunctionControl", 0), functionType)
+      ) ++ Col.from(parameters.map(Instruction.FunctionParameter(pointerType, _))) ++
+        Col[Instruction](Instruction.Label(operand("IdResult", 20))) ++
+        Col.from(parameters.map(Instruction.Store(_, value, None))) ++
+        Col[Instruction](
+          Instruction.Load(u32, operand("IdResult", 21), parameters(2), None),
+          Instruction.Store(parameters(0), operand("IdRef", 21), None),
+          Instruction.Load(u32, operand("IdResult", 22), parameters(4), None),
+          Instruction.Store(parameters(1), operand("IdRef", 22), None),
+          Instruction.Return(),
+          Instruction.FunctionEnd()
+        ),
+      Endianness.Little
+    )
+    val allocation = AllocationId.fromLong(200L).toOption.get
+    val writes     = AtomicReference(Col.empty[(Long, Int)])
+    val memory     = ArrayMemory(
+      allocation,
+      8200,
+      written = (offset, size) => {
+        writes.updateAndGet(_ :+ (offset -> size))
+        ()
+      }
+    )
+    val dispatch = KernelDispatch.create(
+      ProgramId.fromLong(200L).toOption.get,
+      "sparse",
+      Dimensions.One,
+      Dimensions.One,
+      offsets.map(KernelArgument.Allocation(allocation, _))
+    ).toOption.get
+    assertEquals(Interpreter.runUnchecked(module, dispatch, memory), Right(()))
+    assertEquals(writes.get(), Col(0L -> 4, 8L -> 4, 62L -> 8, 4094L -> 2, 4096L -> 2, 8191L -> 1, 8192L -> 3))
+    val expected = Array.ofDim[Byte](8200)
+    offsets.foreach(offset => LittleEndian.write(0x12345678L, expected, offset.toInt, 4))
+    assertEquals(memory.bytes, Col.from(expected))
+  }
+
+  test("cross-workgroup IDs, partial extents and workgroup barriers stay isolated across launches") {
+    for {
+      groups   <- CrossWorkgroupFixture.groups
+      local    <- Col(31, 32, 33)
+      parallel <- Col(false, true)
+      barrier  <- Col(false, true)
+      producer <- if (barrier) Col(2, local - 1) else Col(2)
+    } {
+      val count      = local * groups - (if (barrier) 0 else 1)
+      val offset     = 7
+      val allocation = AllocationId.fromLong(300L).toOption.get
+      val memory     = ArrayMemory(allocation, (offset + count + 2) * 4)
+      val prepared   = Interpreter.prepareUnchecked(CrossWorkgroupFixture.geometry(barrier, producer)).toOption.get
+      for (seed <- Col(1, 9)) {
+        val schedule = CrossWorkgroupFixture.Interleaving()
+        val control  = if (parallel) ExecutionControl.create(cancellation = schedule, parallelism = schedule)
+        else ExecutionControl.default
+        val dispatch = KernelDispatch.create(
+          ProgramId.fromLong(300L).toOption.get,
+          "groups",
+          Dimensions.create(local, 1, 1).toOption.get,
+          Dimensions.create(groups, 1, 1).toOption.get,
+          Col(
+            KernelArgument.Allocation(allocation, 4L),
+            KernelArgument.Scalar(LittleEndian.toCol(seed.toLong, 4)),
+            KernelArgument.Local(4L)
+          ),
+          globalSize = Some(Dimensions.create(count, 1, 1).toOption.get),
+          globalOffset = net.kurobako.gemstone.execution.Coordinates(offset, 0, 0)
+        ).toOption.get
+        assertEquals(
+          Interpreter.run(prepared, dispatch, memory, control),
+          Right(()),
+          s"groups=$groups local=$local parallel=$parallel barrier=$barrier"
+        )
+        assertEquals(schedule.calls.get(), if (parallel && groups > 1) 1 else 0)
+        val expected = Col.from(0 until count).flatMap { index =>
+          LittleEndian.toCol((index / local + seed) * 1000L + (index % local) * 10L + offset + index, 4)
+        }
+        assertEquals(memory.bytes, Col.fill((offset + 1) * 4)(0.toByte) ++ expected ++ Col.fill(4)(0.toByte))
+      }
+    }
+  }
+
+  test("device-scope atomic election publishes a payload across workgroups without waiting for all groups") {
+    val prepared = Interpreter.prepareUnchecked(CrossWorkgroupFixture.publication).toOption.get
+    for {
+      groups   <- CrossWorkgroupFixture.groups
+      parallel <- Col(false, true)
+    } {
+      val allocation = AllocationId.fromLong(301L).toOption.get
+      val memory     = ArrayMemory(allocation, 12 + groups * 8)
+      for (seed <- Col(17L, 91L)) {
+        assertEquals(memory.write(allocation, 0L, Col.fill(12 + groups * 8)(0.toByte)), Right(()))
+        val schedule = CrossWorkgroupFixture.Interleaving()
+        val control  = if (parallel) ExecutionControl.create(cancellation = schedule, parallelism = schedule)
+        else ExecutionControl.default
+        val dispatch = KernelDispatch.create(
+          ProgramId.fromLong(301L).toOption.get,
+          "publish",
+          Dimensions.One,
+          Dimensions.create(groups, 1, 1).toOption.get,
+          Col(
+            KernelArgument.Allocation(allocation, 12L),
+            KernelArgument.Allocation(allocation, 0L),
+            KernelArgument.Allocation(allocation, 4L),
+            KernelArgument.Allocation(allocation, 8L),
+            KernelArgument.Scalar(LittleEndian.toCol(seed, 4))
+          )
+        ).toOption.get
+        assertEquals(Interpreter.run(prepared, dispatch, memory, control), Right(()))
+        val words = memory.bytes.grouped(4).map(x => LittleEndian.decode(x, 0, 4)).toVector
+        assertEquals(words.take(3), Vector(groups.toLong, seed, 1L))
+        assertEquals(words.drop(3).grouped(2).map(_.head).toVector.sorted, (0L until groups.toLong).toVector)
+        val observations = words.drop(3).grouped(2).map(_(1)).toVector
+        assert(observations.forall(x => x == 0L || x == seed))
+        assert(observations.contains(seed))
+        // Atomic-containing dispatches currently use the conservative serial
+        // policy. A policy change must deliberately revisit this first-launch proof.
+        if (parallel) assertEquals(schedule.calls.get(), 0)
+        if (groups > 1) {
+          val consumers = words.drop(3).grouped(2).filter(_.head != 0L).toVector
+          assert(consumers.nonEmpty)
+          assert(consumers.forall(_(1) == seed))
+        }
+        // A completed producer phase guarantees readiness without requiring
+        // simultaneously resident workgroups or a spinning in-kernel observer.
+        val observeControl = if (parallel)
+          ExecutionControl.create(cancellation = schedule, parallelism = schedule)
+        else ExecutionControl.default
+        assertEquals(Interpreter.run(prepared, dispatch, memory, observeControl), Right(()))
+        val consumed = memory.bytes.grouped(4).map(x => LittleEndian.decode(x, 0, 4)).toVector
+        assertEquals(consumed.take(3), Vector(groups.toLong * 2, seed, 1L))
+        assertEquals(
+          consumed.drop(3).grouped(2).map(_.head).toVector.sorted,
+          (groups.toLong until groups.toLong * 2).toVector
+        )
+        assert(consumed.drop(3).grouped(2).forall(_(1) == seed))
+      }
+    }
+  }
+
   private final class ArrayMemory(
       expectedId: AllocationId,
       size: Int,
-      relocation: PointerRelocation => Unit = _ => ()
+      relocation: PointerRelocation => Unit = _ => (),
+      written: (Long, Int) => Unit = (_, _) => ()
   ) extends ExecutionMemory {
     private val content = AtomicReference(Col.fill(size)(0.toByte))
 
@@ -2243,6 +2526,7 @@ final class ExecutionSuite extends munit.FunSuite {
 
     override def write(id: AllocationId, offset: Long, bytes: Col[Byte]): Either[ExecutionFailure, Unit] =
       checked(id, offset, bytes.size).map { start =>
+        written(offset, bytes.size)
         content.updateAndGet(current =>
           Col.from(current.take(start).iterator ++ bytes.iterator ++ current.drop(start + bytes.size))
         )

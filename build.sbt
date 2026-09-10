@@ -1,6 +1,6 @@
-import scala.sys.process.Process
-
-Global / onChangedBuildSource := ReloadOnSourceChanges
+// Each Native linker can consume gigabytes; use the plugin's standard scheduling tag.
+Global / concurrentRestrictions +=
+  Tags.limit(scala.scalanative.sbtplugin.ScalaNativePlugin.autoImport.NativeTags.Link, 1)
 
 lazy val scala3Version = "3.9.0"
 // Bump whenever Col's backing type changes so cached JVM/Native products cannot retain the previous ABI.
@@ -28,19 +28,6 @@ lazy val spirvHeadersVersion  = "vulkan-sdk-1.4.357.0"
 lazy val spirvToolsVersion    = "vulkan-sdk-1.4.357.0"
 lazy val spirvVersion         = "1.6"
 lazy val spirvPackage         = "v" + spirvVersion.replace('.', '_')
-lazy val rocThrustCommit      = "ed551d53d9bac8fd55b2a7fc62683946e33060a0"
-lazy val rocThrustSha256      = "e9b656bc5ab7568b07347825c4fc00d2940c1ca31ee4926e5862b0f6b9fb31e4"
-lazy val rocBLASCommit         = "9eee14a3340e00fb8385e9035c6c15521396dcc6"
-lazy val rocBLASSha256         = "a1a2f748b7de4d2b7b8d5df4f8990b7d4f56a4ca8679fefdca90e71b5c406ad2"
-lazy val rocmExamplesCommit   = "143ead779346e6e7179100cf7c56d9f3562554ae"
-lazy val rocmExamplesSha256   = "566b19aedd133dc913cb25d4b97c60f01ef24f03668e86c4d45ca855e97f14cd"
-lazy val oneDPLCommit         = "3e0e05b32bf53850816f6a6bb09bcfded4f7edb7"
-lazy val oneDPLSha256         = "ce130630653c88a49844409a4ab307f54d2e5ace356499819556eb4d9c6106e3"
-lazy val googleTestVersion    = "release-1.11.0"
-lazy val googleTestSha256     = "b4870bf121ff7795ba20d20bcdd8627b8e088f2d1dab299a031c1034eddc93d5"
-lazy val openCLCTSVersion     = "v2026-07-09-00"
-lazy val openCLCTSSha256      = "019a552f018b78e205baa010e8365db7dcd7bc22538cc79fc72ecbd1fcf7055d"
-lazy val ThrustTest = config("thrust").extend(Test)
 
 lazy val llvmSourceSha256     = "ab1f0e3ec52448c33e8782eaf0422504b87c7b016b22514653ee0d8fcee479ff"
 lazy val mesaSourceSha256     = "c47e81bddc4760360a41ac3c5acec38acb81f9d750ecef47e7f3adc7021a4442"
@@ -56,38 +43,21 @@ lazy val levelZeroSha256      = "9f6872a84106bdb686131c231396eca67631e1c47081ef5
 lazy val spirvHeadersSha256   = "7d40c8c1983c1aba6f6f2fcbcf7be345d33a5693aeee0cc5b8c579fb8e3f2fea"
 lazy val spirvToolsSha256     = "09f70a9197d9cd28e1e10a2fca5ffde8c5e269f363eed9afa838ad88ed2649c9"
 
-lazy val isaReferenceManifestMarkers = Vector(
-  "format\t2\n",
-  s"llvm-version\t$llvmVersion\n",
-  s"mesa-version\t$mesaVersion\n",
-  s"cuda-ptx-version\t$cudaPTXVersion\n",
-  s"cuda-api-version\t$cudaAPIVersion\n",
-  s"cuda-api-package\t$cudaAPIPackage\n",
-  s"cuda-crt-package\t$cudaCRTPackage\n",
-  s"hip-version\t$hipVersion\n",
-  s"hsa-version\t$hsaVersion\n",
-  s"amd-xml-version\t$amdISAXMLVersion\n",
-  s"opencl-headers-version\t$openCLHeadersVersion\n",
-  s"level-zero-version\t$levelZeroVersion\n",
-  s"spirv-headers-version\t$spirvHeadersVersion\n",
-  s"spirv-tools-version\t$spirvToolsVersion\n"
-)
-
 lazy val isaReferenceCacheDirectory = settingKey[File]("Persistent cache for pinned ISA reference artifacts.")
-lazy val prepareISAReferences       = taskKey[Unit]("Download, verify, and selectively extract pinned ISA references.")
+lazy val prepareISAReferences       = taskKey[File]("Download, verify, and selectively extract pinned ISA references.")
 lazy val generateAPIValidationManifest =
   taskKey[File]("Record normalized declarations from pinned official API headers.")
-lazy val validateAPISurfaces = taskKey[Unit]("Validate checked-in API declarations against pinned official headers.")
-lazy val checkGeneratedAPISources      = taskKey[Unit]("Verify checked-in generated ABI and RPC files are current.")
-lazy val generatePTXSources = taskKey[Seq[File]]("Update checked-in PTX instruction metadata.")
+lazy val checkAPISurfaces = taskKey[Unit]("Validate checked-in API declarations against pinned official headers.")
+lazy val checkGeneratedAPISources  = taskKey[Unit]("Verify checked-in generated ABI and RPC files are current.")
+lazy val generatePTXSources        = taskKey[Seq[File]]("Update checked-in PTX instruction metadata.")
 lazy val generatePTXReferenceTests =
   taskKey[Seq[File]]("Update checked-in PTX documentation conformance tests.")
-lazy val generateAMDGPUSources = taskKey[Seq[File]]("Update checked-in normalized AMDGPU metadata.")
-lazy val generateAMDGPUOracle  =
+lazy val generateAMDGPUSources         = taskKey[Seq[File]]("Update checked-in normalized AMDGPU metadata.")
+lazy val generateAMDGPUOracleResources =
   taskKey[Seq[File]]("Update the checked-in, bounded LLVM AMDGPU oracle fixtures.")
 lazy val generateAPISources =
   taskKey[Seq[File]]("Bootstrap checked-in CUDA, HIP, HSA, Level Zero, and OpenCL API surfaces.")
-lazy val generateSPIRVSources = taskKey[Seq[File]]("Update checked-in SPIR-V grammar metadata.")
+lazy val generateSPIRVSources        = taskKey[Seq[File]]("Update checked-in SPIR-V grammar metadata.")
 lazy val generateSPIRVReferenceTests =
   taskKey[Seq[File]]("Update checked-in SPIRV-Tools-derived tests.")
 
@@ -96,15 +66,6 @@ Global / isaReferenceCacheDirectory := {
     .getOrElse(file(sys.props("user.home")) / ".cache")
   cacheRoot / "gemstone" / "isa-references"
 }
-
-def preparedReferenceView(referenceRoot: File, purpose: String): File =
-  (referenceRoot * DirectoryFilter).get().filter { directory =>
-    val manifest = directory / "MANIFEST.tsv"
-    manifest.isFile && isaReferenceManifestMarkers.forall(IO.read(manifest).contains)
-  }.toVector match {
-    case Vector(directory) => directory
-    case found             => sys.error(s"expected one prepared $purpose reference view, found ${found.size}")
-  }
 
 lazy val commonSettings = Seq(
   organization := "net.kurobako",
@@ -170,50 +131,52 @@ lazy val qualityRules = project
         .cross(CrossVersion.for3Use2_13)
   )
 
-lazy val api = projectMatrix
+lazy val generatorClang     = settingKey[String]("Clang executable for official header extraction.")
+lazy val generatorPython    = settingKey[String]("Python executable for the pinned ACO exporter.")
+lazy val generatorClasspath = taskKey[Seq[File]]("Classpath used by development generators.")
+lazy val generateRPCSources = taskKey[Seq[File]]("Generate CUDA transport and server dispatch sources.")
+
+lazy val generatorSettings = Seq(
+  generatorClang     := "clang",
+  generatorPython    := "python3",
+  scalafixConfig     := Some(file("quality/codegen.scalafix.conf")),
+  generatorClasspath := Def.uncached {
+    val converter = fileConverter.value
+    (Compile / fullClasspath).value.map(entry => converter.toPath(entry.data).toFile)
+  }
+)
+
+lazy val apiModel = projectMatrix.in(file("api/model"))
   .dependsOn(core)
+  .dependsOn(qualityRules % ScalafixConfig)
+  .settings(commonSettings, name := "gemstone-api-model")
+  .jvmPlatform(scalaVersions = Seq(scala3Version), settings = catsCoreJVMSettings)
+  .nativePlatform(scalaVersions = Seq(scala3Version), settings = skipSharedSourceFormatting ++ catsCoreNativeSettings)
+
+lazy val api = projectMatrix
+  .dependsOn(apiModel)
   .dependsOn(qualityRules % ScalafixConfig)
   .settings(
     commonSettings,
     checkedInGeneratedSources("api"),
-    name        := "gemstone-api",
-    Test / test := (Test / test)
-      .dependsOn(
-        LocalProject("codegen") / validateAPISurfaces,
-        LocalProject("codegen") / checkGeneratedAPISources
-      )
-      .evaluated,
-    Test / testFull := Def.uncached {
-      (Test / testFull)
-        .dependsOn(
-          LocalProject("codegen") / validateAPISurfaces,
-          LocalProject("codegen") / checkGeneratedAPISources
-        )
-        .value
-    }
+    name := "gemstone-api",
+    Compile / sourceGenerators += (codegen.jvm(scala3Version) / generateAPISources).taskValue
   )
   .jvmPlatform(scalaVersions = Seq(scala3Version), settings = catsCoreJVMSettings)
-  .nativePlatform(
-    scalaVersions = Seq(scala3Version),
-    settings = skipSharedSourceFormatting ++ catsCoreNativeSettings
-  )
+  .nativePlatform(scalaVersions = Seq(scala3Version), settings = skipSharedSourceFormatting ++ catsCoreNativeSettings)
 
 lazy val codegen = projectMatrix
-  .dependsOn(api)
+  .dependsOn(apiModel)
   .dependsOn(qualityRules % ScalafixConfig)
   .settings(
     commonSettings,
+    generatorSettings,
     name                                  := "gemstone-codegen",
-    scalafixConfig                        := Some(file("quality/codegen.scalafix.conf")),
-    Compile / mainClass                   := Some("net.kurobako.gemstone.codegen.GenerateAPI"),
-    Compile / run / fork                  := false,
-    Test / unmanagedResourceDirectories +=
-      (LocalRootProject / baseDirectory).value / "api" / "src" / "generated" / "manifest",
     libraryDependencies += "org.jsoup"     % "jsoup"                 % jsoupVersion,
     libraryDependencies += "com.lihaoyi"  %% "upickle"               % upickleVersion,
     libraryDependencies += "org.scalameta" % "scalafmt-dynamic_2.13" % scalafmtVersion,
-    prepareISAReferences := Def.uncached {
-      val _ = ReferenceArtifacts.prepare(
+    prepareISAReferences                  := Def.uncached {
+      ReferenceArtifacts.prepare(
         cacheDirectory = (Global / isaReferenceCacheDirectory).value,
         outputRoot = target.value / "isa-references",
         pins = ReferenceArtifacts.Pins(
@@ -248,188 +211,155 @@ lazy val codegen = projectMatrix
         log = streams.value.log
       )
     },
+    generateAPIValidationManifest := Def.uncached {
+      val references = prepareISAReferences.value
+      val output     = (LocalRootProject / baseDirectory).value / "api/src/generated/manifest/official-api-headers.json"
+      val clang      = Generator.executable(generatorClang.value)
+      Generator.run(
+        "net.kurobako.gemstone.codegen.GenerateOfficialAPIManifest",
+        generatorClasspath.value,
+        Seq("--clang", clang.getAbsolutePath, references.getAbsolutePath, output.getAbsolutePath),
+        Seq(
+          references / "MANIFEST.tsv",
+          references / "nvidia/cuda",
+          references / "amd/hip",
+          references / "amd/hsa",
+          references / "khronos/opencl",
+          references / "oneapi/level-zero"
+        ),
+        Seq(output),
+        target.value / "generators/api-manifest",
+        streams.value.log,
+        tools = Seq(clang)
+      )
+      output
+    },
     generateAPISources := Def.uncached {
       val root     = (LocalRootProject / baseDirectory).value
       val manifest = generateAPIValidationManifest.value
-      val outputs  = Vector(
-        root / "api" / "src" / "generated" / "main" / "scala" / "net" / "kurobako" / "gemstone" / "cuda" / "CUDASurface.scala",
-        root / "api" / "src" / "generated" / "main" / "scala" / "net" / "kurobako" / "gemstone" / "hip" / "HIPSurface.scala",
-        root / "api" / "src" / "generated" / "main" / "scala" / "net" / "kurobako" / "gemstone" / "hsa" / "HSASurface.scala",
-        root / "api" / "src" / "generated" / "main" / "scala" / "net" / "kurobako" / "gemstone" / "opencl" / "OpenCLSurface.scala",
-        root / "api" / "src" / "generated" / "main" / "scala" / "net" / "kurobako" / "gemstone" / "levelzero" / "LevelZeroSurface.scala"
+      val output   = (LocalRootProject / baseDirectory).value / "api/src/generated/main/scala"
+      Generator.run(
+        "net.kurobako.gemstone.codegen.GenerateAPISurfaces",
+        generatorClasspath.value,
+        Seq(
+          manifest.getAbsolutePath,
+          output.getAbsolutePath,
+          cudaAPIVersion,
+          hipVersion,
+          hsaVersion,
+          levelZeroVersion,
+          openCLHeadersVersion
+        ),
+        Seq(manifest, root / ".scalafmt.conf"),
+        (output ** "*Surface.scala").get(),
+        target.value / "generators/api-surfaces",
+        streams.value.log
       )
-      val sourceRoot = root / "api" / "src" / "generated" / "main" / "scala"
-      val converter  = fileConverter.value
-      val classpath  = (Compile / fullClasspath).value.map(entry => converter.toPath(entry.data).toString)
-      val java       = file(sys.props("java.home")) / "bin" / "java"
-      val exit       = Process(Seq(
-        java.getAbsolutePath,
-        "-cp",
-        classpath.mkString(sys.props("path.separator")),
-        "net.kurobako.gemstone.codegen.GenerateAPISurfaces",
-        manifest.getAbsolutePath,
-        sourceRoot.getAbsolutePath,
-        cudaAPIVersion,
-        hipVersion,
-        hsaVersion,
-        levelZeroVersion,
-        openCLHeadersVersion
-      )).!
-      require(exit == 0, s"API surface bootstrap exited with $exit")
-      outputs
+    }
+  ).jvmPlatform(scalaVersions = Seq(scala3Version), settings = catsCoreJVMSettings)
+
+lazy val rpcCodegen = project.in(file("codegen/rpc"))
+  .dependsOn(api.jvm(scala3Version), codegen.jvm(scala3Version), qualityRules % ScalafixConfig)
+  .settings(
+    commonSettings,
+    generatorSettings,
+    name := "gemstone-rpc-codegen",
+    Test / unmanagedResourceDirectories += (LocalRootProject / baseDirectory).value / "api/src/generated/manifest",
+    generateRPCSources := Def.uncached {
+      val root        = (LocalRootProject / baseDirectory).value
+      val output      = root / "runtime/cuda/generated"
+      val scalaOutput = root / "server/src/generated/main/scala"
+      val manifest    = (codegen.jvm(scala3Version) / generateAPIValidationManifest).value
+      Generator.run(
+        "net.kurobako.gemstone.codegen.GenerateCUDABindings",
+        generatorClasspath.value,
+        Seq(output.getAbsolutePath, scalaOutput.getAbsolutePath, manifest.getAbsolutePath),
+        Seq(manifest, root / ".scalafmt.conf"),
+        (output ** "*").get().filter(_.isFile) ++ (scalaOutput ** "*.scala").get(),
+        target.value / "generators/rpc",
+        streams.value.log
+      )
+      (scalaOutput ** "*.scala").get()
     },
-    generateAPIValidationManifest := Def.uncached {
-      val root          = (LocalRootProject / baseDirectory).value
-      val _             = prepareISAReferences.value
-      val referenceRoot = target.value / "isa-references"
-      val references    = preparedReferenceView(referenceRoot, "API")
-      val output        = root / "api" / "src" / "generated" / "manifest" / "official-api-headers.json"
-      val converter     = fileConverter.value
-      val classpath     = (Compile / fullClasspath).value.map(entry => converter.toPath(entry.data).toString)
-      val java          = file(sys.props("java.home")) / "bin" / "java"
-      val exit          = Process(Seq(
-        java.getAbsolutePath,
-        "-cp",
-        classpath.mkString(sys.props("path.separator")),
-        "net.kurobako.gemstone.codegen.ValidateAPIs",
-        references.getAbsolutePath,
-        output.getAbsolutePath
-      )).!
-      require(exit == 0, s"API header probe exited with $exit")
-      output
-    },
-    validateAPISurfaces := Def.uncached {
-      val root          = (LocalRootProject / baseDirectory).value
-      val _             = prepareISAReferences.value
-      val referenceRoot = target.value / "isa-references"
-      val references    = preparedReferenceView(referenceRoot, "API")
-      val output        = root / "api" / "src" / "generated" / "manifest" / "official-api-headers.json"
-      val converter     = fileConverter.value
-      val classpath     = (Compile / fullClasspath).value.map(entry => converter.toPath(entry.data).toString)
-      val java          = file(sys.props("java.home")) / "bin" / "java"
-      val exit          = Process(Seq(
-        java.getAbsolutePath,
-        "-cp",
-        classpath.mkString(sys.props("path.separator")),
-        "net.kurobako.gemstone.codegen.ValidateAPIs",
-        "--check",
-        references.getAbsolutePath,
-        output.getAbsolutePath
-      )).!
-      require(exit == 0, s"API header validation exited with $exit")
-      val scalaExit = Process(Seq(
-        java.getAbsolutePath,
-        "-cp",
-        classpath.mkString(sys.props("path.separator")),
-        "net.kurobako.gemstone.codegen.ValidateScalaAPIs",
-        output.getAbsolutePath
-      )).!
-      require(scalaExit == 0, s"Scala API validation exited with $scalaExit")
-      val surfaceExit = Process(Seq(
-        java.getAbsolutePath,
-        "-cp",
-        classpath.mkString(sys.props("path.separator")),
-        "net.kurobako.gemstone.codegen.GenerateAPISurfaces",
-        "--check",
-        output.getAbsolutePath,
-        (root / "api" / "src" / "generated" / "main" / "scala").getAbsolutePath,
-        cudaAPIVersion,
-        hipVersion,
-        hsaVersion,
-        levelZeroVersion,
-        openCLHeadersVersion
-      )).!
-      require(surfaceExit == 0, s"generated Scala API surface validation exited with $surfaceExit")
+    checkAPISurfaces := Def.uncached {
+      val manifest  = (LocalRootProject / baseDirectory).value / "api/src/generated/manifest/official-api-headers.json"
+      val marker    = target.value / "generators/api-validation/complete"
+      val classpath = generatorClasspath.value
+      Generator.run(
+        "net.kurobako.gemstone.codegen.CheckAPISurfaces",
+        classpath,
+        Seq(manifest.getAbsolutePath),
+        Seq(manifest),
+        { IO.write(marker, "validated"); Seq(marker) },
+        target.value / "generators/api-validation",
+        streams.value.log
+      )
+      ()
     },
     checkGeneratedAPISources := Def.uncached {
-      val root      = (LocalRootProject / baseDirectory).value
-      val converter = fileConverter.value
-      val classpath = (Compile / fullClasspath).value.map(entry => converter.toPath(entry.data).toString)
-      val java      = file(sys.props("java.home")) / "bin" / "java"
-      val exit      = Process(Seq(
-        java.getAbsolutePath,
-        "-cp",
-        classpath.mkString(sys.props("path.separator")),
-        "net.kurobako.gemstone.codegen.GenerateAPI",
-        "--check",
-        (root / "runtime" / "cuda" / "generated").getAbsolutePath,
-        (root / "api" / "src" / "generated" / "main" / "scala").getAbsolutePath,
-        (root / "api" / "src" / "generated" / "manifest" / "official-api-headers.json").getAbsolutePath
-      )).!
-      require(exit == 0, s"generated API validation exited with $exit")
+      val root    = (LocalRootProject / baseDirectory).value
+      val outputs = (root / "runtime/cuda/generated" ** "*").get().filter(_.isFile) ++
+        (root / "server/src/generated/main/scala" ** "*.scala").get()
+      val manifest = root / "api/src/generated/manifest/official-api-headers.json"
+      val marker   = target.value / "generators/rpc-check/complete"
+      Generator.run(
+        "net.kurobako.gemstone.codegen.GenerateCUDABindings",
+        generatorClasspath.value,
+        Seq(
+          "--check",
+          (root / "runtime/cuda/generated").getAbsolutePath,
+          (root / "server/src/generated/main/scala").getAbsolutePath,
+          manifest.getAbsolutePath
+        ),
+        outputs ++ Seq(manifest, root / ".scalafmt.conf"),
+        { IO.write(marker, "validated"); Seq(marker) },
+        target.value / "generators/rpc-check",
+        streams.value.log
+      )
+      ()
     }
   )
-  .jvmPlatform(scalaVersions = Seq(scala3Version), settings = catsCoreJVMSettings)
 
 lazy val core = projectMatrix
   .dependsOn(qualityRules % ScalafixConfig)
-  .settings(
-    commonSettings,
-    name := "gemstone-core"
-  )
+  .settings(commonSettings, name := "gemstone-core")
   .jvmPlatform(scalaVersions = Seq(scala3Version), settings = catsCoreJVMSettings)
-  .nativePlatform(
-    scalaVersions = Seq(scala3Version),
-    settings = skipSharedSourceFormatting ++ catsCoreNativeSettings
-  )
+  .nativePlatform(scalaVersions = Seq(scala3Version), settings = skipSharedSourceFormatting ++ catsCoreNativeSettings)
 
-lazy val hsa = project
-  .in(file("runtime/hsa"))
+lazy val hsa = project.in(file("runtime/hsa"))
+  .dependsOn(qualityRules % ScalafixConfig)
+  .settings(commonSettings, NativeBuild.settings, name := "gemstone-runtime-hsa")
+
+lazy val hip = project.in(file("runtime/hip"))
+  .dependsOn(qualityRules % ScalafixConfig)
+  .settings(commonSettings, NativeBuild.settings, name := "gemstone-runtime-hip")
+
+lazy val levelzero = project.in(file("runtime/levelzero"))
+  .dependsOn(qualityRules % ScalafixConfig)
+  .settings(commonSettings, NativeBuild.settings, name := "gemstone-runtime-levelzero")
+
+lazy val opencl = project.in(file("runtime/opencl"))
+  .dependsOn(qualityRules % ScalafixConfig)
+  .settings(commonSettings, NativeBuild.settings, name := "gemstone-runtime-opencl")
+
+lazy val cuda = project.in(file("runtime/cuda"))
   .dependsOn(qualityRules % ScalafixConfig)
   .settings(
     commonSettings,
-    name := "gemstone-runtime-hsa",
-    CMakeTest.ctest := Def.uncached {
-      CMakeTest.run(baseDirectory.value, target.value / "cmake", Seq("-DBUILD_TESTING=ON"), streams.value.log)
-    },
-    Test / test := (Test / test).dependsOn(CMakeTest.ctest).evaluated,
-    Test / testFull := Def.uncached {
-      (Test / testFull).dependsOn(CMakeTest.ctest).value
-    }
-  )
-
-lazy val hip = project
-  .in(file("runtime/hip"))
-  .dependsOn(qualityRules % ScalafixConfig)
-  .settings(
-    commonSettings,
-    name := "gemstone-runtime-hip",
-    CMakeTest.ctest := Def.uncached {
-      CMakeTest.run(baseDirectory.value, target.value / "cmake", Seq("-DBUILD_TESTING=ON"), streams.value.log)
-    },
-    Test / test := (Test / test).dependsOn(CMakeTest.ctest).evaluated,
-    Test / testFull := Def.uncached {
-      (Test / testFull).dependsOn(CMakeTest.ctest).value
-    }
-  )
-
-lazy val levelzero = project
-  .in(file("runtime/levelzero"))
-  .dependsOn(qualityRules % ScalafixConfig)
-  .settings(
-    commonSettings,
-    name := "gemstone-runtime-levelzero",
-    CMakeTest.ctest := Def.uncached {
-      CMakeTest.run(baseDirectory.value, target.value / "cmake", Seq("-DBUILD_TESTING=ON"), streams.value.log)
-    },
-    Test / test := (Test / test).dependsOn(CMakeTest.ctest).evaluated,
-    Test / testFull := Def.uncached {
-      (Test / testFull).dependsOn(CMakeTest.ctest).value
-    }
-  )
-
-lazy val opencl = project
-  .in(file("runtime/opencl"))
-  .dependsOn(qualityRules % ScalafixConfig)
-  .settings(
-    commonSettings,
-    name := "gemstone-runtime-opencl",
-    CMakeTest.ctest := Def.uncached {
-      CMakeTest.run(baseDirectory.value, target.value / "cmake", Seq("-DBUILD_TESTING=ON"), streams.value.log)
-    },
-    Test / test := (Test / test).dependsOn(CMakeTest.ctest).evaluated,
-    Test / testFull := Def.uncached {
-      (Test / testFull).dependsOn(CMakeTest.ctest).value
+    NativeBuild.settings,
+    name                                 := "gemstone-runtime-cuda",
+    NativeBuild.nativeConfigureArguments := Def.uncached {
+      val _          = (rpcCodegen / generateRPCSources).value
+      val references = (codegen.jvm(scala3Version) / prepareISAReferences).value
+      val headers    = (references / "nvidia/cuda" ** "cuda.h").get().filter { path =>
+        val segments = path.toPath
+        (0 until segments.getNameCount - 1).exists { index =>
+          segments.getName(index).toString == s"cuda-$cudaAPIVersion" &&
+          segments.getName(index + 1).toString == "targets"
+        }
+      }
+      require(headers.size == 1, s"expected one pinned CUDA header, found ${headers.size}")
+      Seq(s"-DCUDA_INCLUDE_DIR=${headers.head.getParent}")
     }
   )
 
@@ -439,65 +369,61 @@ lazy val ptx = projectMatrix
   .dependsOn(qualityRules % ScalafixConfig)
   .settings(
     commonSettings,
+    Compile / sourceGenerators += (LocalProject("ptx") / generatePTXSources).taskValue,
+    Test / sourceGenerators += (LocalProject("ptx") / generatePTXReferenceTests).taskValue,
     checkedInGeneratedSources("isa/ptx"),
     name               := "gemstone-isa-ptx",
     generatePTXSources := Def.uncached {
-      val root          = (LocalRootProject / baseDirectory).value
-      val _             = (codegen.jvm(scala3Version) / prepareISAReferences).value
-      val referenceRoot = (codegen.jvm(scala3Version) / target).value / "isa-references"
-      val references    = preparedReferenceView(referenceRoot, "ISA")
-      val input         = references / "nvidia" / "ptx" / "index.html"
-      val output = root / "isa" / "ptx" / "src" / "generated" / "main" / "scala" / "net" / "kurobako" / "gemstone" /
+      val root       = (LocalRootProject / baseDirectory).value
+      val references = (codegen.jvm(scala3Version) / prepareISAReferences).value
+      val input      = references / "nvidia" / "ptx" / "index.html"
+      val output     = root / "isa" / "ptx" / "src" / "generated" / "main" / "scala" / "net" / "kurobako" / "gemstone" /
         "isa" / "ptx" / ptxISAPackage / "Instruction.scala"
-      val converter = fileConverter.value
-      val classpath = (codegen.jvm(scala3Version) / Compile / fullClasspath).value
-        .map(entry => converter.toPath(entry.data).toString)
-      val java = file(sys.props("java.home")) / "bin" / "java"
-      val exit = Process(Seq(
-        java.getAbsolutePath,
-        "-cp",
-        classpath.mkString(sys.props("path.separator")),
+      Generator.run(
         "net.kurobako.gemstone.codegen.GeneratePTXISA",
-        "instructions",
-        input.getAbsolutePath,
-        output.getAbsolutePath,
-        ptxISAVersion,
-        ptxISAPackage
-      )).!
-      require(exit == 0, s"PTX metadata generator exited with $exit")
-      Seq(output)
+        (codegen.jvm(scala3Version) / generatorClasspath).value,
+        Seq(
+          "instructions",
+          input.getAbsolutePath,
+          output.getAbsolutePath,
+          ptxISAVersion,
+          ptxISAPackage
+        ),
+        Seq(input, references / "MANIFEST.tsv", (LocalRootProject / baseDirectory).value / ".scalafmt.conf"),
+        Seq(output),
+        (codegen.jvm(scala3Version) / target).value / "generators/ptx-sources",
+        streams.value.log
+      )
     },
     generatePTXReferenceTests := Def.uncached {
-      val root          = (LocalRootProject / baseDirectory).value
-      val _             = (codegen.jvm(scala3Version) / prepareISAReferences).value
-      val referenceRoot = (codegen.jvm(scala3Version) / target).value / "isa-references"
-      val references    = preparedReferenceView(referenceRoot, "ISA")
-      val input         = references / "nvidia" / "ptx" / "index.html"
-      val output = root / "isa" / "ptx" / "src" / "generated" / "test" / "scala" / "net" / "kurobako" / "gemstone" /
+      val root       = (LocalRootProject / baseDirectory).value
+      val references = (codegen.jvm(scala3Version) / prepareISAReferences).value
+      val input      = references / "nvidia" / "ptx" / "index.html"
+      val output     = root / "isa" / "ptx" / "src" / "generated" / "test" / "scala" / "net" / "kurobako" / "gemstone" /
         "isa" / "ptx" / ptxISAPackage / "DocumentationSuite.scala"
-      val converter = fileConverter.value
-      val classpath = (codegen.jvm(scala3Version) / Compile / fullClasspath).value
-        .map(entry => converter.toPath(entry.data).toString)
-      val java = file(sys.props("java.home")) / "bin" / "java"
-      val exit = Process(Seq(
-        java.getAbsolutePath,
-        "-cp",
-        classpath.mkString(sys.props("path.separator")),
+      Generator.run(
         "net.kurobako.gemstone.codegen.GeneratePTXISA",
-        "tests",
-        input.getAbsolutePath,
-        output.getAbsolutePath,
-        ptxISAVersion,
-        ptxISAPackage
-      )).!
-      require(exit == 0, s"PTX reference-test generator exited with $exit")
-      Seq(output)
+        (codegen.jvm(scala3Version) / generatorClasspath).value,
+        Seq(
+          "tests",
+          input.getAbsolutePath,
+          output.getAbsolutePath,
+          ptxISAVersion,
+          ptxISAPackage
+        ),
+        Seq(input, references / "MANIFEST.tsv", (LocalRootProject / baseDirectory).value / ".scalafmt.conf"),
+        Seq(output),
+        (codegen.jvm(scala3Version) / target).value / "generators/ptx-tests",
+        streams.value.log
+      )
     }
   )
   .jvmPlatform(
     scalaVersions = Seq(scala3Version),
     settings = catsCoreJVMSettings ++ Seq(
-      libraryDependencies += "org.typelevel" %% "cats-parse" % catsParseVersion
+      libraryDependencies += "org.typelevel" %% "cats-parse" % catsParseVersion,
+      Test / unmanagedSourceDirectories +=
+        (LocalRootProject / baseDirectory).value / "isa" / "ptx" / "src" / "test-jvm" / "scala"
     )
   )
   .nativePlatform(
@@ -513,55 +439,59 @@ lazy val amdgpu = projectMatrix
   .dependsOn(qualityRules % ScalafixConfig)
   .settings(
     commonSettings,
+    Compile / sourceGenerators += (LocalProject("amdgpu") / generateAMDGPUSources).taskValue,
+    Test / resourceGenerators += (LocalProject("amdgpu") / generateAMDGPUOracleResources).taskValue,
     checkedInGeneratedSources("isa/amdgpu"),
     name                  := "gemstone-isa-amdgpu",
     generateAMDGPUSources := Def.uncached {
-      val root          = (LocalRootProject / baseDirectory).value
-      val _             = (codegen.jvm(scala3Version) / prepareISAReferences).value
-      val referenceRoot = (codegen.jvm(scala3Version) / target).value / "isa-references"
-      val references    = preparedReferenceView(referenceRoot, "ISA")
-      val exporter      = root / "codegen" / "amdgpu" / "export_aco.py"
+      val root       = (LocalRootProject / baseDirectory).value
+      val references = (codegen.jvm(scala3Version) / prepareISAReferences).value
+      val exporter   = root / "codegen" / "amdgpu" / "export_aco.py"
+      val python     = Generator.executable((codegen.jvm(scala3Version) / generatorPython).value)
       val output = root / "isa" / "amdgpu" / "src" / "generated" / "main" / "scala" / "net" / "kurobako" / "gemstone" /
         "isa" / "amdgpu" / "EncodingConstants.scala"
       val instructions  = output.getParentFile / "Instruction.scala"
       val architectures = instructions.getParentFile / "Architectures.scala"
-      val converter     = fileConverter.value
-      val classpath     =
-        (codegen.jvm(scala3Version) / Compile / fullClasspath).value.map(entry => converter.toPath(entry.data).toString)
-      val java = file(sys.props("java.home")) / "bin" / "java"
-      val exit = Process(Seq(
-        java.getAbsolutePath,
-        "-cp",
-        classpath.mkString(sys.props("path.separator")),
+      Generator.run(
         "net.kurobako.gemstone.codegen.GenerateAMDGPUISA",
-        references.getAbsolutePath,
-        exporter.getAbsolutePath,
-        output.getAbsolutePath
-      )).!
-      require(exit == 0, s"AMDGPU metadata generator exited with $exit")
-      Seq(output, instructions, architectures) ++ ((instructions.getParentFile / "definitions") ** "*.scala").get()
+        (codegen.jvm(scala3Version) / generatorClasspath).value,
+        Seq(
+          "--python",
+          python.getAbsolutePath,
+          references.getAbsolutePath,
+          exporter.getAbsolutePath,
+          output.getAbsolutePath
+        ),
+        Seq(
+          references / "MANIFEST.tsv",
+          references / "amd/xml",
+          references / "mesa/src/amd/compiler",
+          root / ".scalafmt.conf",
+          exporter
+        ),
+        Seq(output, instructions, architectures) ++ ((instructions.getParentFile / "definitions") ** "*.scala").get(),
+        (codegen.jvm(scala3Version) / target).value / "generators/amdgpu",
+        streams.value.log,
+        tools = Seq(python)
+      )
     },
-    generateAMDGPUOracle := Def.uncached {
-      val root          = (LocalRootProject / baseDirectory).value
-      val _             = (codegen.jvm(scala3Version) / prepareISAReferences).value
-      val referenceRoot = (codegen.jvm(scala3Version) / target).value / "isa-references"
-      val references    = preparedReferenceView(referenceRoot, "ISA")
-      val output        = root / "isa" / "amdgpu" / "src" / "generated" / "test" / "resources" / "net" / "kurobako" /
+    generateAMDGPUOracleResources := Def.uncached {
+      val root       = (LocalRootProject / baseDirectory).value
+      val references = (codegen.jvm(scala3Version) / prepareISAReferences).value
+      val output     = root / "isa" / "amdgpu" / "src" / "generated" / "test" / "resources" / "net" / "kurobako" /
         "gemstone" / "isa" / "amdgpu" / "llvm-oracle"
-      val converter = fileConverter.value
-      val classpath =
-        (codegen.jvm(scala3Version) / Compile / fullClasspath).value.map(entry => converter.toPath(entry.data).toString)
-      val java = file(sys.props("java.home")) / "bin" / "java"
-      val exit = Process(Seq(
-        java.getAbsolutePath,
-        "-cp",
-        classpath.mkString(sys.props("path.separator")),
+      Generator.run(
         "net.kurobako.gemstone.codegen.GenerateAMDGPUOracle",
-        references.getAbsolutePath,
-        output.getAbsolutePath
-      )).!
-      require(exit == 0, s"AMDGPU oracle generator exited with $exit")
-      Seq(output / "manifest.txt") ++ ((output * "*.s").get())
+        (codegen.jvm(scala3Version) / generatorClasspath).value,
+        Seq(
+          references.getAbsolutePath,
+          output.getAbsolutePath
+        ),
+        Seq(references / "MANIFEST.tsv", references / "llvm/llvm/test/MC/AMDGPU", root / ".scalafmt.conf"),
+        Seq(output / "manifest.txt") ++ ((output * "*.s").get()),
+        (codegen.jvm(scala3Version) / target).value / "generators/amdgpu-oracle",
+        streams.value.log
+      )
     }
   )
   .jvmPlatform(
@@ -588,61 +518,49 @@ lazy val spirv = projectMatrix
   .dependsOn(qualityRules % ScalafixConfig)
   .settings(
     commonSettings,
+    Compile / sourceGenerators += (LocalProject("spirv") / generateSPIRVSources).taskValue,
+    Test / sourceGenerators += (LocalProject("spirv") / generateSPIRVReferenceTests).taskValue,
     checkedInGeneratedSources("isa/spirv"),
     name                 := "gemstone-isa-spirv",
     generateSPIRVSources := Def.uncached {
-      val root          = (LocalRootProject / baseDirectory).value
-      val _             = (codegen.jvm(scala3Version) / prepareISAReferences).value
-      val referenceRoot = (codegen.jvm(scala3Version) / target).value / "isa-references"
-      val references    = preparedReferenceView(referenceRoot, "SPIR-V")
+      val root       = (LocalRootProject / baseDirectory).value
+      val references = (codegen.jvm(scala3Version) / prepareISAReferences).value
       val output = root / "isa" / "spirv" / "src" / "generated" / "main" / "scala" / "net" / "kurobako" / "gemstone" /
         "isa" / "spirv" / spirvPackage / "Instruction.scala"
-      val converter = fileConverter.value
-      val classpath = (codegen.jvm(scala3Version) / Compile / fullClasspath).value
-        .map(entry => converter.toPath(entry.data).toString)
-      val java    = file(sys.props("java.home")) / "bin" / "java"
       val grammar = references / "khronos" / "spirv-headers" / "include" / "spirv" / "unified1" /
         "spirv.core.grammar.json"
-      val exit = Process(Seq(
-        java.getAbsolutePath,
-        "-cp",
-        classpath.mkString(sys.props("path.separator")),
+      Generator.run(
         "net.kurobako.gemstone.codegen.GenerateSPIRVISA",
-        "instructions",
-        grammar.getAbsolutePath,
-        output.getAbsolutePath,
-        spirvPackage
-      )).!
-      require(exit == 0, s"SPIR-V metadata generator exited with $exit")
-      Seq(output)
+        (codegen.jvm(scala3Version) / generatorClasspath).value,
+        Seq(
+          "instructions",
+          grammar.getAbsolutePath,
+          output.getAbsolutePath,
+          spirvPackage
+        ),
+        Seq(grammar, references / "MANIFEST.tsv", (LocalRootProject / baseDirectory).value / ".scalafmt.conf"),
+        Seq(output),
+        (codegen.jvm(scala3Version) / target).value / "generators/spirv-sources",
+        streams.value.log
+      )
     },
     generateSPIRVReferenceTests := Def.uncached {
-      val root          = (LocalRootProject / baseDirectory).value
-      val _             = (codegen.jvm(scala3Version) / prepareISAReferences).value
-      val referenceRoot = (codegen.jvm(scala3Version) / target).value / "isa-references"
-      val references    = preparedReferenceView(referenceRoot, "SPIR-V test")
+      val root       = (LocalRootProject / baseDirectory).value
+      val references = (codegen.jvm(scala3Version) / prepareISAReferences).value
       val output = root / "isa" / "spirv" / "src" / "generated" / "test" / "scala" / "net" / "kurobako" / "gemstone" /
         "isa" / "spirv" / spirvPackage / "ReferenceSuite.scala"
-      val converter = fileConverter.value
-      val classpath = (codegen.jvm(scala3Version) / Compile / fullClasspath).value
-        .map(entry => converter.toPath(entry.data).toString)
-      val java    = file(sys.props("java.home")) / "bin" / "java"
       val grammar = references / "khronos" / "spirv-headers" / "include" / "spirv" / "unified1" /
         "spirv.core.grammar.json"
       val tests = references / "khronos" / "spirv-tools" / "test"
-      val exit  = Process(Seq(
-        java.getAbsolutePath,
-        "-cp",
-        classpath.mkString(sys.props("path.separator")),
+      Generator.run(
         "net.kurobako.gemstone.codegen.GenerateSPIRVISA",
-        "tests",
-        grammar.getAbsolutePath,
-        tests.getAbsolutePath,
-        output.getAbsolutePath,
-        spirvPackage
-      )).!
-      require(exit == 0, s"SPIR-V reference-test generator exited with $exit")
-      Seq(output)
+        (codegen.jvm(scala3Version) / generatorClasspath).value,
+        Seq("tests", grammar.getAbsolutePath, tests.getAbsolutePath, output.getAbsolutePath, spirvPackage),
+        Seq(grammar, tests, references / "MANIFEST.tsv", root / ".scalafmt.conf"),
+        Seq(output),
+        (codegen.jvm(scala3Version) / target).value / "generators/spirv-tests",
+        streams.value.log
+      )
     }
   )
   .jvmPlatform(scalaVersions = Seq(scala3Version), settings = catsCoreJVMSettings)
@@ -656,7 +574,10 @@ lazy val server = projectMatrix
   .dependsOn(qualityRules % ScalafixConfig)
   .settings(
     commonSettings,
-    name := "gemstone-server"
+    checkedInGeneratedSources("server"),
+    Compile / sourceGenerators += (rpcCodegen / generateRPCSources).taskValue,
+    name                := "gemstone-server",
+    Compile / mainClass := Some("net.kurobako.gemstone.server.GemstoneRPCServer")
   )
   .jvmPlatform(
     scalaVersions = Seq(scala3Version),
@@ -669,139 +590,93 @@ lazy val server = projectMatrix
   )
   .nativePlatform(
     scalaVersions = Seq(scala3Version),
-    settings = skipSharedSourceFormatting ++ catsCoreNativeSettings
+    settings = skipSharedSourceFormatting ++ catsCoreNativeSettings ++ Seq(
+      Compile / nativeConfig ~= (_.withMode(scala.scalanative.build.Mode.releaseFast)),
+      Compile / unmanagedSourceDirectories +=
+        (LocalRootProject / baseDirectory).value / "server" / "src" / "main-native" / "scala"
+    )
   )
 
-lazy val cuda = project
-  .in(file("runtime/cuda"))
-  .configs(ThrustTest)
-  .dependsOn(server.jvm(scala3Version), qualityRules % ScalafixConfig)
-  .settings(
-    commonSettings,
-    inConfig(ThrustTest)(Defaults.testSettings),
-    org.scalafmt.sbt.ScalafmtPlugin.scalafmtConfigSettings(ThrustTest),
-    name                           := "gemstone-runtime-cuda",
-    ThrustTest / scalaSource       := baseDirectory.value / "src" / "thrust" / "scala",
-    ThrustTest / resourceDirectory := baseDirectory.value / "src" / "thrust" / "resources",
-    ThrustTest / parallelExecution := true,
-    ThrustTest / test / fork       := false,
-    ThrustTest / scalafixConfig    := Some(file("quality/test.scalafix.conf")),
-    Test / test                    := (Test / test)
-      .dependsOn(
-        codegen.jvm(scala3Version) / prepareISAReferences,
-        codegen.jvm(scala3Version) / checkGeneratedAPISources
-      )
-      .evaluated,
-    Test / testFull := Def.uncached {
-      (Test / testFull)
-        .dependsOn(
-          codegen.jvm(scala3Version) / prepareISAReferences,
-          codegen.jvm(scala3Version) / checkGeneratedAPISources
-        )
-        .value
-    },
-    ThrustTest / test := (ThrustTest / test)
-      .dependsOn(
-        codegen.jvm(scala3Version) / prepareISAReferences,
-        codegen.jvm(scala3Version) / checkGeneratedAPISources
-      )
-      .evaluated,
-    libraryDependencies += "org.scalameta" %% "munit" % munitVersion % ThrustTest
-  )
-
-lazy val isa = project
-  .in(file("isa"))
+lazy val isa = project.in(file("isa"))
   .aggregate((ptx.projectRefs ++ amdgpu.projectRefs ++ spirv.projectRefs) *)
   .dependsOn(qualityRules % ScalafixConfig)
   .settings(commonSettings, name := "gemstone-isa")
 
-lazy val runtime = project
-  .in(file("runtime"))
+lazy val runtime = project.in(file("runtime"))
   .aggregate(cuda, hip, hsa, levelzero, opencl)
   .dependsOn(qualityRules % ScalafixConfig)
   .settings(commonSettings, name := "gemstone-runtime")
 
-lazy val conformance = project
-  .in(file("conformance"))
-  .dependsOn(server.jvm(scala3Version))
-  .dependsOn(qualityRules % ScalafixConfig)
+lazy val conformance = project.in(file("conformance"))
+  .dependsOn(server.jvm(scala3Version), qualityRules % ScalafixConfig)
   .settings(
     commonSettings,
-    name                     := "gemstone-conformance",
-    Test / parallelExecution := true,
-    Test / test / fork       := false,
-    Test / resourceGenerators += Def.task {
-      val output = (Test / resourceManaged).value / "gemstone-conformance.properties"
-      IO.writeLines(
-        output,
-        Seq(
-          s"rocthrust.commit=$rocThrustCommit",
-          s"rocthrust.sha256=$rocThrustSha256",
-          s"rocblas.commit=$rocBLASCommit",
-          s"rocblas.sha256=$rocBLASSha256",
-          s"rocm-examples.commit=$rocmExamplesCommit",
-          s"rocm-examples.sha256=$rocmExamplesSha256",
-          s"onedpl.commit=$oneDPLCommit",
-          s"onedpl.sha256=$oneDPLSha256",
-          s"googletest.version=$googleTestVersion",
-          s"googletest.sha256=$googleTestSha256",
-          s"opencl-cts.version=$openCLCTSVersion",
-          s"opencl-cts.sha256=$openCLCTSSha256",
-          s"opencl-headers.version=$openCLHeadersVersion",
-          s"opencl-headers.sha256=$openCLHeadersSha256",
-          s"spirv-headers.version=$spirvHeadersVersion",
-          s"spirv-headers.sha256=$spirvHeadersSha256"
-        )
-      )
-      Seq(output)
-    }.taskValue,
+    name                                 := "gemstone-conformance-support",
+    publish / skip                       := true,
     libraryDependencies += "com.lihaoyi" %% "upickle" % upickleVersion % Test
   )
 
-lazy val gemstone = project
-  .in(file("."))
+def nativeRuntimeDirectories = Def.task {
+  Seq(
+    "cuda"      -> (cuda / NativeBuild.nativeBuild).value,
+    "hip"       -> (hip / NativeBuild.nativeBuild).value,
+    "hsa"       -> (hsa / NativeBuild.nativeBuild).value,
+    "opencl"    -> (opencl / NativeBuild.nativeBuild).value,
+    "levelzero" -> (levelzero / NativeBuild.nativeBuild).value
+  )
+}
+
+lazy val nativeRuntimeResources = taskKey[Seq[File]]("Write current native integration runtime paths.")
+
+lazy val integrationSettings = Seq(
+  publish / skip           := true,
+  Test / parallelExecution := false,
+  Test / fork              := true,
+  Test / javaOptions ++= Def.uncached {
+    val projectName = name.value
+    sys.env.get("GEMSTONE_CONFORMANCE_REPORT_DIR").toSeq.map { directory =>
+      IO.createDirectory(file(directory))
+      s"-XX:StartFlightRecording=filename=$directory/$projectName.jfr,settings=profile,maxsize=256m,dumponexit=true"
+    }
+  },
+  nativeRuntimeResources := Def.uncached {
+    val output = (Test / resourceManaged).value / "native-runtimes.properties"
+    NativeBuild.writeRuntimeProperties(output, nativeRuntimeDirectories.value)
+    Seq(output)
+  },
+  Test / resourceGenerators += nativeRuntimeResources.taskValue
+)
+
+lazy val conformanceIntegration = project.in(file("conformance/integration"))
+  .dependsOn(conformance % "test->test", qualityRules % ScalafixConfig)
+  .settings(commonSettings, integrationSettings, name := "gemstone-conformance-integration")
+
+lazy val nativeIntegration = project.in(file("integration/native"))
+  .dependsOn(conformance % "test->test", qualityRules % ScalafixConfig)
+  .settings(commonSettings, integrationSettings, name := "gemstone-native-integration")
+
+lazy val integration = project.in(file("integration"))
+  .aggregate(nativeIntegration, conformanceIntegration)
+  .dependsOn(qualityRules % ScalafixConfig)
+  .settings(commonSettings, name := "gemstone-integration", publish / skip := true)
+
+lazy val gemstone = project.in(file("."))
+  .aggregate(apiModel.projectRefs *)
   .aggregate(api.projectRefs *)
   .aggregate(codegen.projectRefs *)
   .aggregate(core.projectRefs *)
   .aggregate(server.projectRefs *)
-  .aggregate(qualityRules, isa, runtime)
+  .aggregate(qualityRules, rpcCodegen, isa, runtime, conformance)
   .dependsOn(qualityRules % ScalafixConfig)
   .settings(
     commonSettings,
     name           := "gemstone",
-    publish / skip := true
+    publish / skip := true,
+    // Keep standard sbt output paths; root clean also owns shared fixture and report outputs.
+    cleanFiles += baseDirectory.value / "target"
   )
 
-addCommandAlias("check", ";scalafmtCheckAll;scalafixAll --check;testFull")
 addCommandAlias(
-  "testAPIConformance",
-  ";codegen / Test / testOnly net.kurobako.gemstone.codegen.APIConformanceSuite"
-)
-addCommandAlias(
-  "testCUDAConformance",
-  ";cuda / testFull;cuda / Thrust / testFull"
-)
-addCommandAlias(
-  "testROCmConformance",
-  ";hsa / testFull;hip / testFull;conformance / Test / testOnly net.kurobako.gemstone.conformance.RocThrustConformanceSuite net.kurobako.gemstone.conformance.RocBLASConformanceSuite"
-)
-addCommandAlias(
-  "testSYCLConformance",
-  ";levelzero / testFull;conformance / Test / testOnly net.kurobako.gemstone.conformance.OneDPLConformanceSuite"
-)
-addCommandAlias(
-  "testMiniappsConformance",
-  ";conformance / Test / testOnly net.kurobako.gemstone.conformance.MiniappsConformanceSuite"
-)
-addCommandAlias(
-  "testOpenCLConformance",
-  ";opencl / testFull;conformance / Test / testOnly net.kurobako.gemstone.conformance.OpenCLCTSConformanceSuite"
-)
-addCommandAlias(
-  "testExecutionProtocol",
-  ";server / Test / testOnly net.kurobako.gemstone.server.ExecutionRPCConformanceSuite"
-)
-addCommandAlias(
-  "testConformance",
-  ";testExecutionProtocol;testAPIConformance;testCUDAConformance;testROCmConformance;testOpenCLConformance;testSYCLConformance;testMiniappsConformance"
+  "check",
+  ";rpcCodegen/checkAPISurfaces;rpcCodegen/checkGeneratedAPISources;scalafmtCheckAll;integration/scalafmtCheckAll;scalafixAll --check;integration/scalafixAll --check;testFull;integration/testFull"
 )

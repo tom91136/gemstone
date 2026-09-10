@@ -1,0 +1,9 @@
+ARG BASE_IMAGE=localhost/gemstone-conformance-builder:opencl
+FROM ${BASE_IMAGE}
+USER root
+ARG BUILDER_UID=1000
+ARG BUILDER_GID=1000
+# Upstream test_compiler assembles its bundled SPIR-V input fixtures at build time.
+RUN apt-get update && apt-get install --no-install-recommends --yes spirv-tools && rm -rf /var/lib/apt/lists/*
+USER ${BUILDER_UID}:${BUILDER_GID}
+WORKDIR /work

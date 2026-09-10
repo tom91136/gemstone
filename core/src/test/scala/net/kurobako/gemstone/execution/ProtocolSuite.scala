@@ -55,7 +55,9 @@ class ProtocolSuite extends munit.FunSuite {
     val groupCount = Dimensions.create(16777216, 1, 1).toOption.get
     val geometry   = LaunchGeometry.createVirtual(groupSize, groupCount).toOption.get
 
-    assertEquals(geometry.globalSizeLongValue, LongCoordinates(4294967296L, 1L, 1L))
+    assertEquals(geometry.globalExtent, LongCoordinates(4294967296L, 1L, 1L))
+    assertEquals(geometry.globalSizeIntSaturated.x, Int.MaxValue)
+    assert(geometry.containsGlobal(Coordinates(Int.MaxValue, 0, 0)))
     val last = geometry.globalCoordinatesLong(Coordinates(16777215, 0, 0), Coordinates(255, 0, 0))
     assertEquals(last, LongCoordinates(4294967295L, 0L, 0L))
     assert(geometry.containsGlobal(last))

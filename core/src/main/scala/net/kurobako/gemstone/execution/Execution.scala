@@ -336,11 +336,11 @@ object ExecutionLimits {
 
 @SuppressWarnings(Array("scalafix:DisableSyntax.var", "scalafix:DisableSyntax.return"))
 final class ExecutionBudget private (val limit: Long, threadSafe: Boolean) {
-  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  private var sequentialUsed = 0L
-  private val usedValue      = java.util.concurrent.atomic.AtomicLong(0L)
+  private var sequentialUsed                         = 0L
+  private val usedValue                              = java.util.concurrent.atomic.AtomicLong(0L)
+  private val consumed: Either[ExecutionFault, Unit] = Right(())
 
-  def used: Long      = if (threadSafe) usedValue.get() else sequentialUsed
+  def used: Long      = if (threadSafe) math.min(limit, usedValue.get()) else sequentialUsed
   def remaining: Long = limit - used
 
   def consume(cost: Int = 1): Either[ExecutionFault, Unit] =
@@ -351,8 +351,15 @@ final class ExecutionBudget private (val limit: Long, threadSafe: Boolean) {
         if (increment > limit - sequentialUsed) Left(ExecutionFault.BudgetExceeded(limit))
         else {
           sequentialUsed += increment
-          Right(())
+          consumed
         }
+      } else if (cost == 1 && limit <= Int.MaxValue.toLong) {
+        // One atomic ticket per instruction avoids retry storms between workgroups.
+        // Racing tickets beyond the limit fail; they never execute an instruction.
+        // Keep ample counter headroom for those tickets, and use CAS for larger limits.
+        if (usedValue.get() >= limit || usedValue.getAndIncrement() >= limit)
+          Left(ExecutionFault.BudgetExceeded(limit))
+        else consumed
       } else {
         var current  = usedValue.get()
         var complete = false
@@ -361,7 +368,7 @@ final class ExecutionBudget private (val limit: Long, threadSafe: Boolean) {
           complete = usedValue.compareAndSet(current, current + increment)
           if (!complete) current = usedValue.get()
         }
-        Right(())
+        consumed
       }
     }
 }

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -9,6 +10,7 @@
 #include <vector>
 
 #include "gemstone/hsa/aql_execution.h"
+#include "gemstone/hsa/trace.h"
 #include "gemstone_execution_rpc.h"
 
 namespace {
@@ -23,7 +25,7 @@ int load_program(void *context, const void *image, uint32_t image_size, uint64_t
   const auto format = image != nullptr && image_size >= sizeof(raw_magic) && std::memcmp(image, raw_magic, sizeof(raw_magic)) == 0
                           ? GEMSTONE_PROGRAM_AMDGPU_RAW_KERNEL
                           : GEMSTONE_PROGRAM_AMDGPU_CODE_OBJECT;
-  if (std::getenv("GEMSTONE_HSA_TRACE_PACKETS") != nullptr)
+  if (gemstone::hsa::trace_enabled("packets"))
     std::fprintf(stderr, "Gemstone loading execution program format=%d bytes=%u\n", format, image_size);
   return gemstone_execution_load_program(executor->client, format, image, image_size, program_id);
 }
@@ -31,6 +33,11 @@ int load_program(void *context, const void *image, uint32_t image_size, uint64_t
 int unload_program(void *context, uint64_t program_id) {
   auto *executor = static_cast<EnvironmentExecutor *>(context);
   return gemstone_execution_unload_program(executor->client, program_id);
+}
+
+int bind_global(void *context, uint64_t program_id, const char *name, uint64_t allocation_id, uint64_t offset) {
+  auto *executor = static_cast<EnvironmentExecutor *>(context);
+  return gemstone_execution_bind_program_global(executor->client, program_id, name, allocation_id, offset);
 }
 
 int write_global(void *context, uint64_t program_id, const char *name, uint64_t offset, const void *bytes, uint32_t size) {
@@ -67,10 +74,15 @@ int launch(void *context, uint64_t program_id, const char *kernel_name, gemstone
 
 int await_completion(void *context, uint64_t completion_id) {
   auto *executor = static_cast<EnvironmentExecutor *>(context);
+  auto delay = std::chrono::microseconds(50);
+  unsigned pending_polls = 0;
   for (;;) {
     const int result = gemstone_execution_query_completion(executor->client, completion_id);
     if (result <= 0) return result;
-    std::this_thread::sleep_for(std::chrono::microseconds(50));
+    // Keep the first status immediate and short completions responsive, while
+    // avoiding thousands of RPCs per second for a long-running kernel.
+    std::this_thread::sleep_for(delay);
+    if (++pending_polls >= 8) delay = std::min(delay * 2, std::chrono::microseconds(1000));
   }
 }
 
@@ -118,8 +130,8 @@ extern "C" gemstone_hsa_aql_runtime *gemstone_hsa_aql_runtime_create_from_enviro
     return nullptr;
   }
   const gemstone_hsa_executor operations{
-      executor, load_program, unload_program, launch, await_completion, completion_dirty_ranges, release_completion, error, destroy,
-      write_global};
+      executor,           load_program, unload_program, launch,       await_completion, completion_dirty_ranges,
+      release_completion, error,        destroy,        write_global, bind_global};
   auto *runtime = gemstone_hsa_aql_runtime_create(&operations, signals);
   if (runtime == nullptr) destroy(executor);
   return runtime;

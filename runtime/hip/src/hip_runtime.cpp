@@ -13,6 +13,7 @@
 #include <string_view>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -29,6 +30,31 @@
 #include <hsa/hsa_ext_amd.h>
 
 namespace {
+
+constexpr uint32_t kMaxBlockThreads = 1024;
+constexpr uint32_t kMaxGridDimension = std::numeric_limits<int32_t>::max();
+
+bool trace_hip(const char *category) {
+  const char *value = std::getenv("GEMSTONE_HIP_TRACE");
+  if (value == nullptr) return false;
+  const size_t wanted = std::strlen(category);
+  while (*value != '\0') {
+    while (*value == ',' || *value == ' ') ++value;
+    const char *end = value;
+    while (*end != '\0' && *end != ',') ++end;
+    const size_t size = static_cast<size_t>(end - value);
+    if ((size == wanted && std::memcmp(value, category, size) == 0) ||
+        (size == 3 && std::memcmp(value, "all", 3) == 0))
+      return true;
+    value = end;
+  }
+  return false;
+}
+
+bool valid_block(dim3 block) {
+  return block.x != 0 && block.y != 0 && block.z != 0 && block.x <= kMaxBlockThreads && block.y <= kMaxBlockThreads
+         && block.z <= kMaxBlockThreads && uint64_t(block.x) * block.y * block.z <= kMaxBlockThreads;
+}
 
 constexpr char kBundleMagic[] = "__CLANG_OFFLOAD_BUNDLE__";
 constexpr size_t kBundleMagicSize = sizeof(kBundleMagic) - 1U;
@@ -61,6 +87,7 @@ struct Module {
   // The address of this member is the opaque value passed back to the HIP
   // compiler's registration callbacks.
   void *token = nullptr;
+  const void *fatbin = nullptr;
   const void *image = nullptr;
   size_t image_size = 0;
   hsa_code_object_reader_t reader{};
@@ -72,10 +99,15 @@ struct Module {
   std::unordered_map<std::string, std::shared_ptr<Kernel>> kernels;
   std::vector<const void *> variables;
 
-  ~Module() {
+  void reset() {
     if (executable.handle != 0) hsa_executable_destroy(executable);
     if (reader.handle != 0) hsa_code_object_reader_destroy(reader);
+    executable = {};
+    reader = {};
+    kernels.clear();
+    loaded = false;
   }
+  ~Module() { reset(); }
 };
 
 struct FunctionBinding {
@@ -105,6 +137,10 @@ struct State {
   std::unordered_map<const void *, FunctionBinding> kernels;
   std::unordered_map<const void *, Variable> variables;
   std::unordered_map<void *, size_t> host_allocations;
+  std::unordered_map<void *, size_t> managed_allocations;
+  std::unordered_map<void *, size_t> device_allocations;
+  std::unordered_set<hipStream_t> streams;
+  std::unordered_set<hipEvent_t> events;
 };
 
 struct LaunchConfiguration {
@@ -119,6 +155,12 @@ bool trace_modules();
 State &state() {
   static State *value = new State();
   return *value;
+}
+
+bool valid_stream(hipStream_t stream) {
+  if (stream == nullptr || stream == hipStreamLegacy || stream == hipStreamPerThread) return true;
+  std::lock_guard<std::mutex> guard(state().lock);
+  return state().streams.count(stream) == 1;
 }
 
 thread_local hipError_t last_error = hipSuccess;
@@ -394,6 +436,12 @@ std::shared_ptr<Module> find_module(void **token) {
 
 bool load_module(Module &module) {
   if (module.loaded) return true;
+  if (module.image == nullptr && module.fatbin != nullptr) {
+    if (!select_bundle(module.fatbin, &module.image, &module.image_size, &module.decompressed_image)) {
+      module.error = std::string("HIP fatbinary has no ") + gemstone::hsa::target_arch() + " bundle";
+      return false;
+    }
+  }
   if (module.image == nullptr || module.image_size == 0) {
     module.error = "HIP fatbinary has no AMDGPU code object";
     return false;
@@ -412,38 +460,48 @@ bool load_module(Module &module) {
   const hsa_status_t load = executable == HSA_STATUS_SUCCESS
                                 ? hsa_executable_load_agent_code_object(module.executable, state().gpu, module.reader, nullptr, nullptr)
                                 : HSA_STATUS_ERROR;
+  const hsa_status_t reader_destroy = module.reader.handle == 0 ? HSA_STATUS_SUCCESS : hsa_code_object_reader_destroy(module.reader);
+  module.reader = {};
   const hsa_status_t freeze = load == HSA_STATUS_SUCCESS ? hsa_executable_freeze(module.executable, nullptr) : HSA_STATUS_ERROR;
-  if (reader != HSA_STATUS_SUCCESS || executable != HSA_STATUS_SUCCESS || load != HSA_STATUS_SUCCESS || freeze != HSA_STATUS_SUCCESS) {
+  if (reader != HSA_STATUS_SUCCESS || executable != HSA_STATUS_SUCCESS || load != HSA_STATUS_SUCCESS ||
+      reader_destroy != HSA_STATUS_SUCCESS || freeze != HSA_STATUS_SUCCESS) {
     module.error = "public HSA rejected the HIP code object";
     if (module.executable.handle != 0) hsa_executable_destroy(module.executable);
-    if (module.reader.handle != 0) hsa_code_object_reader_destroy(module.reader);
     module.executable = {};
-    module.reader = {};
     return false;
   }
-  for (const auto &metadata : module.metadata) {
-    hsa_executable_symbol_t symbol{};
-    hsa_status_t status = hsa_executable_get_symbol_by_name(module.executable, metadata.name.c_str(), &state().gpu, &symbol);
-    if (status != HSA_STATUS_SUCCESS)
-      status = hsa_executable_get_symbol_by_name(module.executable, metadata.symbol.c_str(), &state().gpu, &symbol);
-    if (status != HSA_STATUS_SUCCESS) continue;
-    uint64_t object = 0;
-    uint32_t kernarg_size = 0;
-    if (hsa_executable_symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT, &object) != HSA_STATUS_SUCCESS
-        || hsa_executable_symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_KERNARG_SEGMENT_SIZE, &kernarg_size)
-               != HSA_STATUS_SUCCESS)
-      continue;
-    auto kernel = std::make_shared<Kernel>();
-    kernel->object = object;
-    kernel->kernarg_size = kernarg_size;
-    kernel->explicit_argument_count = metadata.explicit_argument_count;
-    kernel->fields = metadata.fields;
-    module.kernels.emplace(metadata.name, kernel);
-    module.kernels.emplace(metadata.symbol, kernel);
-  }
-  module.loaded = !module.kernels.empty();
-  if (!module.loaded) module.error = "HIP code object contains no resolvable kernels";
-  return module.loaded;
+  module.loaded = true;
+  return true;
+}
+
+std::shared_ptr<Kernel> resolve_module_kernel(Module &module, const std::string &name) {
+  std::lock_guard<std::mutex> guard(module.lock);
+  if (!module.loaded) return {};
+  if (const auto cached = module.kernels.find(name); cached != module.kernels.end()) return cached->second;
+  const auto metadata = std::find_if(module.metadata.begin(), module.metadata.end(), [&](const auto &candidate) {
+    return candidate.name == name || candidate.symbol == name ||
+           (candidate.symbol.size() > 3 && candidate.symbol.compare(candidate.symbol.size() - 3, 3, ".kd") == 0 &&
+            candidate.symbol.compare(0, candidate.symbol.size() - 3, name) == 0 && name.size() == candidate.symbol.size() - 3);
+  });
+  if (metadata == module.metadata.end()) return {};
+  hsa_executable_symbol_t symbol{};
+  if (hsa_executable_get_symbol_by_name(module.executable, name.c_str(), &state().gpu, &symbol) != HSA_STATUS_SUCCESS)
+    return {};
+  uint64_t object = 0;
+  uint32_t kernarg_size = 0;
+  if (hsa_executable_symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT, &object) != HSA_STATUS_SUCCESS ||
+      hsa_executable_symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_KERNARG_SEGMENT_SIZE, &kernarg_size) != HSA_STATUS_SUCCESS)
+    return {};
+  auto kernel = std::make_shared<Kernel>();
+  kernel->object = object;
+  kernel->kernarg_size = kernarg_size;
+  kernel->explicit_argument_count = metadata->explicit_argument_count;
+  kernel->fields = metadata->fields;
+  module.kernels.emplace(metadata->name, kernel);
+  module.kernels.emplace(metadata->symbol, kernel);
+  if (metadata->symbol.size() > 3 && metadata->symbol.compare(metadata->symbol.size() - 3, 3, ".kd") == 0)
+    module.kernels.emplace(metadata->symbol.substr(0, metadata->symbol.size() - 3), kernel);
+  return kernel;
 }
 
 bool ensure_module_loaded(const std::shared_ptr<Module> &module) {
@@ -463,16 +521,7 @@ std::shared_ptr<Kernel> resolve_kernel(const void *function_address) {
   }
   if (binding.kernel) return binding.kernel;
   if (!ensure_module_loaded(binding.module)) return {};
-  std::shared_ptr<Kernel> kernel;
-  {
-    std::lock_guard<std::mutex> guard(binding.module->lock);
-    const auto found = binding.module->kernels.find(binding.name);
-    if (found != binding.module->kernels.end()) kernel = found->second;
-    else if (binding.name.size() > 3 && binding.name.compare(binding.name.size() - 3, 3, ".kd") == 0) {
-      const auto candidate = binding.module->kernels.find(binding.name.substr(0, binding.name.size() - 3));
-      if (candidate != binding.module->kernels.end()) kernel = candidate->second;
-    }
-  }
+  const auto kernel = resolve_module_kernel(*binding.module, binding.name);
   if (!kernel) return {};
   {
     std::lock_guard<std::mutex> guard(runtime.lock);
@@ -483,9 +532,10 @@ std::shared_ptr<Kernel> resolve_kernel(const void *function_address) {
   return kernel;
 }
 
-hipError_t dispatch_kernel(const std::shared_ptr<Kernel> &kernel, dim3 grid, dim3 block, void **args, size_t shared, hipStream_t,
-                           const gemstone::hip::LaunchBuffer &launch_buffer = {}) {
+hipError_t dispatch_kernel(const std::shared_ptr<Kernel> &kernel, dim3 grid, dim3 block, void **args, size_t shared, hipStream_t stream,
+                           const gemstone::hip::LaunchBuffer &launch_buffer = {}, const dim3 *global_work_items = nullptr) {
   if (!ensure_initialized()) return remember(hipErrorNoDevice);
+  if (!valid_stream(stream)) return remember(hipErrorInvalidResourceHandle);
   if (!kernel || (args == nullptr && launch_buffer.data == nullptr && kernel->explicit_argument_count != 0)) {
     if (trace_modules())
       std::fprintf(stderr, "Gemstone HIP dispatch rejected kernel=%p args=%p\n", static_cast<const void *>(kernel.get()),
@@ -493,22 +543,32 @@ hipError_t dispatch_kernel(const std::shared_ptr<Kernel> &kernel, dim3 grid, dim
     return remember(hipErrorInvalidDeviceFunction);
   }
   if (trace_modules())
-    std::fprintf(stderr, "Gemstone HIP dispatch kernel=%p object=%llu explicit=%u kernarg=%u shared=%zu\n", static_cast<const void *>(kernel.get()),
-                 static_cast<unsigned long long>(kernel->object), kernel->explicit_argument_count, kernel->kernarg_size, shared);
-  if (grid.x == 0 || grid.y == 0 || grid.z == 0 || block.x == 0 || block.y == 0 || block.z == 0
-      || grid.x > std::numeric_limits<uint32_t>::max() / block.x || grid.y > std::numeric_limits<uint32_t>::max() / block.y
-      || grid.z > std::numeric_limits<uint32_t>::max() / block.z || shared > std::numeric_limits<uint32_t>::max())
+    std::fprintf(stderr, "Gemstone HIP dispatch kernel=%p object=%llu explicit=%u kernarg=%u shared=%zu\n",
+                 static_cast<const void *>(kernel.get()), static_cast<unsigned long long>(kernel->object), kernel->explicit_argument_count,
+                 kernel->kernarg_size, shared);
+  if (grid.x == 0 || grid.y == 0 || grid.z == 0 || grid.x > kMaxGridDimension || grid.y > kMaxGridDimension || grid.z > kMaxGridDimension
+      || !valid_block(block)
+      || (global_work_items == nullptr
+          && (grid.x > std::numeric_limits<uint32_t>::max() / block.x || grid.y > std::numeric_limits<uint32_t>::max() / block.y
+              || grid.z > std::numeric_limits<uint32_t>::max() / block.z))
+      || shared > std::numeric_limits<uint32_t>::max())
     return remember(hipErrorInvalidConfiguration);
+  const dim3 global = global_work_items == nullptr ? dim3(grid.x * block.x, grid.y * block.y, grid.z * block.z) : *global_work_items;
+  if (global.x < block.x || global.y < block.y || global.z < block.z) return remember(hipErrorInvalidConfiguration);
   void *kernarg = nullptr;
   hsa_status_t status = hsa_memory_allocate(state().kernarg_region, kernel->kernarg_size, &kernarg);
   if (status != HSA_STATUS_SUCCESS) return remember(map_hsa(status));
   std::memset(kernarg, 0, kernel->kernarg_size);
   if (launch_buffer.data != nullptr) {
-    if (launch_buffer.size > kernel->kernarg_size) {
+    size_t required = 0;
+    for (size_t argument = 0; argument < kernel->explicit_argument_count; ++argument) {
+      const auto &field = kernel->fields[argument];
+      required = std::max(required, static_cast<size_t>(field.offset) + field.size);
+    }
+    if (!launch_buffer.copy_to(kernarg, kernel->kernarg_size, required)) {
       hsa_memory_free(kernarg);
       return remember(hipErrorInvalidValue);
     }
-    std::memcpy(kernarg, launch_buffer.data, launch_buffer.size);
   } else {
     size_t argument = 0;
     for (const auto &field : kernel->fields) {
@@ -550,15 +610,16 @@ hipError_t dispatch_kernel(const std::shared_ptr<Kernel> &kernel, dim3 grid, dim
     const auto &first_hidden = kernel->fields[kernel->explicit_argument_count];
     if (first_hidden.size == sizeof(uint32_t)) {
       const uint32_t hidden = first_hidden.offset;
-      write_u32(hidden + 0, static_cast<uint32_t>(grid.x));
-      write_u32(hidden + 4, static_cast<uint32_t>(grid.y));
-      write_u32(hidden + 8, static_cast<uint32_t>(grid.z));
+      // V5 counts complete groups separately from the work-items in a partial final group.
+      write_u32(hidden + 0, global.x / block.x);
+      write_u32(hidden + 4, global.y / block.y);
+      write_u32(hidden + 8, global.z / block.z);
       write_u16(hidden + 12, static_cast<uint32_t>(block.x));
       write_u16(hidden + 14, static_cast<uint32_t>(block.y));
       write_u16(hidden + 16, static_cast<uint32_t>(block.z));
-      write_u16(hidden + 18, static_cast<uint32_t>((grid.x * block.x) % block.x));
-      write_u16(hidden + 20, static_cast<uint32_t>((grid.y * block.y) % block.y));
-      write_u16(hidden + 22, static_cast<uint32_t>((grid.z * block.z) % block.z));
+      write_u16(hidden + 18, static_cast<uint32_t>(global.x % block.x));
+      write_u16(hidden + 20, static_cast<uint32_t>(global.y % block.y));
+      write_u16(hidden + 22, static_cast<uint32_t>(global.z % block.z));
       write_u16(hidden + 64, gemstone::hip::dispatch_dimensions(grid, block));
     }
   }
@@ -576,9 +637,9 @@ hipError_t dispatch_kernel(const std::shared_ptr<Kernel> &kernel, dim3 grid, dim
     packet->workgroup_size_x = static_cast<uint16_t>(block.x);
     packet->workgroup_size_y = static_cast<uint16_t>(block.y);
     packet->workgroup_size_z = static_cast<uint16_t>(block.z);
-    packet->grid_size_x = grid.x * block.x;
-    packet->grid_size_y = grid.y * block.y;
-    packet->grid_size_z = grid.z * block.z;
+    packet->grid_size_x = global.x;
+    packet->grid_size_y = global.y;
+    packet->grid_size_z = global.z;
     packet->group_segment_size = static_cast<uint32_t>(shared);
     packet->kernel_object = kernel->object;
     packet->kernarg_address = kernarg;
@@ -613,7 +674,7 @@ FunctionHandle *function_handle(hipFunction_t function) { return reinterpret_cas
 ModuleHandle *module_handle(hipModule_t module) { return reinterpret_cast<ModuleHandle *>(module); }
 
 bool trace_modules() {
-  static const bool enabled = std::getenv("GEMSTONE_HIP_TRACE_MODULES") != nullptr;
+  static const bool enabled = trace_hip("modules");
   return enabled;
 }
 
@@ -682,7 +743,23 @@ extern "C" hipError_t hipDeviceGet(hipDevice_t *device, int ordinal) {
 }
 
 extern "C" hipError_t hipDeviceSynchronize(void) { return remember(ensure_initialized() ? hipSuccess : hipErrorNoDevice); }
-extern "C" hipError_t hipDeviceReset(void) { return remember(hipSuccess); }
+extern "C" hipError_t hipDeviceReset(void) {
+  auto &runtime = state();
+  if (!ensure_initialized()) return remember(hipErrorNoDevice);
+  std::lock_guard<std::mutex> guard(runtime.lock);
+  for (const auto &[pointer, _] : runtime.device_allocations) (void)hsa_memory_free(pointer);
+  runtime.device_allocations.clear();
+  runtime.managed_allocations.clear();
+  for (auto stream : runtime.streams) delete[] reinterpret_cast<unsigned char *>(stream);
+  for (auto event : runtime.events) delete[] reinterpret_cast<unsigned char *>(event);
+  runtime.streams.clear();
+  runtime.events.clear();
+  for (auto &module : runtime.driver_modules)
+    if (auto live = module.lock()) live->reset();
+  runtime.kernels.clear();
+  runtime.variables.clear();
+  return remember(hipSuccess);
+}
 
 extern "C" hipError_t hipDeviceComputeCapability(int *major, int *minor, hipDevice_t device) {
   if (major == nullptr || minor == nullptr || device != 0) return remember(hipErrorInvalidValue);
@@ -751,15 +828,15 @@ extern "C" hipError_t hipGetDevicePropertiesR0600(hipDeviceProp_tR0600 *properti
   properties->totalGlobalMem = size_t(1) << 30U;
   properties->sharedMemPerBlock = 64U * 1024U;
   properties->warpSize = 64;
-  properties->maxThreadsPerBlock = 1024;
+  properties->maxThreadsPerBlock = kMaxBlockThreads;
   properties->maxThreadsPerMultiProcessor = 1024;
   properties->maxSharedMemoryPerMultiProcessor = 64U * 1024U;
-  properties->maxThreadsDim[0] = 1024;
-  properties->maxThreadsDim[1] = 1024;
-  properties->maxThreadsDim[2] = 1024;
-  properties->maxGridSize[0] = std::numeric_limits<int>::max();
-  properties->maxGridSize[1] = std::numeric_limits<int>::max();
-  properties->maxGridSize[2] = std::numeric_limits<int>::max();
+  properties->maxThreadsDim[0] = kMaxBlockThreads;
+  properties->maxThreadsDim[1] = kMaxBlockThreads;
+  properties->maxThreadsDim[2] = kMaxBlockThreads;
+  properties->maxGridSize[0] = kMaxGridDimension;
+  properties->maxGridSize[1] = kMaxGridDimension;
+  properties->maxGridSize[2] = kMaxGridDimension;
   const auto version = gemstone::hsa::target_version(target.c_str());
   properties->major = static_cast<int>(version.major);
   properties->minor = static_cast<int>(version.minor);
@@ -775,8 +852,12 @@ extern "C" hipError_t hipMalloc(void **pointer, size_t size) {
   }
   if (!ensure_initialized()) return remember(hipErrorNoDevice);
   const hsa_status_t status = hsa_memory_allocate(state().kernarg_region, size, pointer);
-  if (std::getenv("GEMSTONE_HIP_TRACE_ALLOCATIONS") != nullptr)
+  if (trace_hip("allocations"))
     std::fprintf(stderr, "Gemstone HIP malloc size=%zu status=%d pointer=%p\n", size, int(status), pointer == nullptr ? nullptr : *pointer);
+  if (status == HSA_STATUS_SUCCESS) {
+    std::lock_guard<std::mutex> guard(state().lock);
+    state().device_allocations.emplace(*pointer, size);
+  }
   return remember(map_hsa(status));
 }
 
@@ -784,6 +865,11 @@ extern "C" hipError_t hipFree(void *pointer) {
   if (pointer == nullptr) return remember(hipSuccess);
   if (!ensure_initialized()) return remember(hipErrorNoDevice);
   const hsa_status_t status = hsa_memory_free(pointer);
+  if (status == HSA_STATUS_SUCCESS) {
+    std::lock_guard<std::mutex> guard(state().lock);
+    state().managed_allocations.erase(pointer);
+    state().device_allocations.erase(pointer);
+  }
   return remember(map_hsa(status));
 }
 
@@ -843,8 +929,9 @@ extern "C" hipError_t hipMemcpyToSymbol(const void *symbol, const void *source, 
 }
 
 extern "C" hipError_t hipMemcpyToSymbolAsync(const void *symbol, const void *source, size_t size, size_t offset, hipMemcpyKind kind,
-                                             hipStream_t) {
-  return hipMemcpyToSymbol(symbol, source, size, offset, kind);
+                                             hipStream_t stream) {
+  return valid_stream(stream) ? hipMemcpyToSymbol(symbol, source, size, offset, kind)
+                              : remember(hipErrorInvalidResourceHandle);
 }
 
 extern "C" hipError_t hipMemcpyFromSymbol(void *destination, const void *symbol, size_t size, size_t offset, hipMemcpyKind kind) {
@@ -855,12 +942,13 @@ extern "C" hipError_t hipMemcpyFromSymbol(void *destination, const void *symbol,
 }
 
 extern "C" hipError_t hipMemcpyFromSymbolAsync(void *destination, const void *symbol, size_t size, size_t offset, hipMemcpyKind kind,
-                                               hipStream_t) {
-  return hipMemcpyFromSymbol(destination, symbol, size, offset, kind);
+                                               hipStream_t stream) {
+  return valid_stream(stream) ? hipMemcpyFromSymbol(destination, symbol, size, offset, kind)
+                              : remember(hipErrorInvalidResourceHandle);
 }
 
-extern "C" hipError_t hipMemcpyAsync(void *destination, const void *source, size_t size, hipMemcpyKind kind, hipStream_t) {
-  return hipMemcpy(destination, source, size, kind);
+extern "C" hipError_t hipMemcpyAsync(void *destination, const void *source, size_t size, hipMemcpyKind kind, hipStream_t stream) {
+  return valid_stream(stream) ? hipMemcpy(destination, source, size, kind) : remember(hipErrorInvalidResourceHandle);
 }
 extern "C" hipError_t hipMemcpy2D(void *destination, size_t destination_pitch, const void *source, size_t source_pitch, size_t width,
                                   size_t height, hipMemcpyKind kind) {
@@ -874,11 +962,12 @@ extern "C" hipError_t hipMemcpy2D(void *destination, size_t destination_pitch, c
   return remember(hipSuccess);
 }
 extern "C" hipError_t hipMemcpy2DAsync(void *destination, size_t destination_pitch, const void *source, size_t source_pitch, size_t width,
-                                       size_t height, hipMemcpyKind kind, hipStream_t) {
-  return hipMemcpy2D(destination, destination_pitch, source, source_pitch, width, height, kind);
+                                       size_t height, hipMemcpyKind kind, hipStream_t stream) {
+  return valid_stream(stream) ? hipMemcpy2D(destination, destination_pitch, source, source_pitch, width, height, kind)
+                              : remember(hipErrorInvalidResourceHandle);
 }
-extern "C" hipError_t hipMemcpyWithStream(void *destination, const void *source, size_t size, hipMemcpyKind kind, hipStream_t) {
-  return hipMemcpy(destination, source, size, kind);
+extern "C" hipError_t hipMemcpyWithStream(void *destination, const void *source, size_t size, hipMemcpyKind kind, hipStream_t stream) {
+  return valid_stream(stream) ? hipMemcpy(destination, source, size, kind) : remember(hipErrorInvalidResourceHandle);
 }
 extern "C" hipError_t hipMemcpyHtoD(hipDeviceptr_t destination, const void *source, size_t size) {
   return hipMemcpy(reinterpret_cast<void *>(destination), source, size, hipMemcpyHostToDevice);
@@ -890,7 +979,19 @@ extern "C" hipError_t hipMemcpyDtoD(hipDeviceptr_t destination, hipDeviceptr_t s
   return hipMemcpy(reinterpret_cast<void *>(destination), reinterpret_cast<const void *>(source), size, hipMemcpyDeviceToDevice);
 }
 
-extern "C" hipError_t hipMallocManaged(void **pointer, size_t size, unsigned int) { return hipMalloc(pointer, size); }
+extern "C" hipError_t hipMallocManaged(void **pointer, size_t size, unsigned int) {
+  const auto status = hipMalloc(pointer, size);
+  if (status != hipSuccess || *pointer == nullptr) return status;
+  try {
+    std::lock_guard<std::mutex> guard(state().lock);
+    state().managed_allocations.emplace(*pointer, size);
+  } catch (...) {
+    (void)hipFree(*pointer);
+    *pointer = nullptr;
+    return remember(hipErrorOutOfMemory);
+  }
+  return remember(hipSuccess);
+}
 extern "C" hipError_t hipMemAdvise(const void *pointer, size_t size, hipMemoryAdvise advice, int device) {
   if ((pointer == nullptr && size != 0) || device != 0) return remember(hipErrorInvalidValue);
   if (!ensure_initialized()) return remember(hipErrorNoDevice);
@@ -931,11 +1032,33 @@ extern "C" hipError_t hipHostUnregister(void *pointer) {
 
 extern "C" hipError_t hipPointerGetAttributes(hipPointerAttribute_t *attributes, const void *pointer) {
   if (attributes == nullptr || pointer == nullptr) return remember(hipErrorInvalidValue);
+  if (!ensure_initialized()) return remember(hipErrorNoDevice);
+  hsa_amd_pointer_info_t info{};
+  info.size = sizeof(info);
+  const auto status = hsa_amd_pointer_info(pointer, &info, nullptr, nullptr, nullptr);
+  if (status != HSA_STATUS_SUCCESS) return remember(map_hsa(status));
+  if (info.type == HSA_EXT_POINTER_TYPE_UNKNOWN) return remember(hipErrorInvalidValue);
+  hsa_device_type_t owner{};
+  if (hsa_agent_get_info(info.agentOwner, HSA_AGENT_INFO_DEVICE, &owner) != HSA_STATUS_SUCCESS)
+    return remember(hipErrorInvalidDevice);
   std::memset(attributes, 0, sizeof(*attributes));
-  attributes->type = hipMemoryTypeDevice;
+  attributes->type = owner == HSA_DEVICE_TYPE_CPU ? hipMemoryTypeHost : hipMemoryTypeDevice;
   attributes->device = 0;
   attributes->devicePointer = const_cast<void *>(pointer);
-  attributes->hostPointer = const_cast<void *>(pointer);
+  attributes->hostPointer = owner == HSA_DEVICE_TYPE_CPU ? const_cast<void *>(pointer) : nullptr;
+  {
+    std::lock_guard<std::mutex> guard(state().lock);
+    for (const auto &[base, size] : state().managed_allocations) {
+      const auto address = reinterpret_cast<uintptr_t>(pointer);
+      const auto begin = reinterpret_cast<uintptr_t>(base);
+      if (address >= begin && address - begin < size) {
+        attributes->isManaged = 1;
+        attributes->type = hipMemoryTypeManaged;
+        attributes->hostPointer = const_cast<void *>(pointer);
+        break;
+      }
+    }
+  }
   return remember(hipSuccess);
 }
 
@@ -954,7 +1077,9 @@ extern "C" hipError_t hipMemsetD32(hipDeviceptr_t destination, int value, size_t
   if (!ensure_initialized()) return remember(hipErrorNoDevice);
   return remember(map_hsa(hsa_amd_memory_fill(reinterpret_cast<void *>(destination), static_cast<uint32_t>(value), count)));
 }
-extern "C" hipError_t hipMemsetAsync(void *destination, int value, size_t size, hipStream_t) { return hipMemset(destination, value, size); }
+extern "C" hipError_t hipMemsetAsync(void *destination, int value, size_t size, hipStream_t stream) {
+  return valid_stream(stream) ? hipMemset(destination, value, size) : remember(hipErrorInvalidResourceHandle);
+}
 
 extern "C" hipError_t __hipPushCallConfiguration(dim3 grid, dim3 block, size_t shared, hipStream_t stream) {
   launch_configuration = LaunchConfiguration{grid, block, shared, stream};
@@ -978,7 +1103,7 @@ extern "C" hipError_t hipFuncGetAttributes(struct hipFuncAttributes *attributes,
   if (!resolve_kernel(function_address)) return remember(hipErrorInvalidDeviceFunction);
   std::memset(attributes, 0, sizeof(*attributes));
   attributes->binaryVersion = 900;
-  attributes->maxThreadsPerBlock = 1024;
+  attributes->maxThreadsPerBlock = kMaxBlockThreads;
   return remember(hipSuccess);
 }
 
@@ -1004,28 +1129,49 @@ extern "C" const char *hipGetErrorString(hipError_t error) { return hipGetErrorN
 extern "C" hipError_t hipStreamCreate(hipStream_t *stream) {
   if (stream == nullptr) return remember(hipErrorInvalidValue);
   *stream = reinterpret_cast<hipStream_t>(new (std::nothrow) unsigned char[1]);
-  return remember(*stream == nullptr ? hipErrorOutOfMemory : hipSuccess);
+  if (*stream == nullptr) return remember(hipErrorOutOfMemory);
+  {
+    std::lock_guard<std::mutex> guard(state().lock);
+    state().streams.insert(*stream);
+  }
+  return remember(hipSuccess);
 }
 extern "C" hipError_t hipStreamCreateWithFlags(hipStream_t *stream, unsigned int) { return hipStreamCreate(stream); }
 extern "C" hipError_t hipStreamCreateWithPriority(hipStream_t *stream, unsigned int, int) { return hipStreamCreate(stream); }
 extern "C" hipError_t hipStreamDestroy(hipStream_t stream) {
-  if (stream != nullptr && stream != hipStreamLegacy && stream != hipStreamPerThread) delete[] reinterpret_cast<unsigned char *>(stream);
+  if (stream != nullptr && stream != hipStreamLegacy && stream != hipStreamPerThread) {
+    std::lock_guard<std::mutex> guard(state().lock);
+    if (state().streams.erase(stream) != 1) return remember(hipErrorInvalidResourceHandle);
+    delete[] reinterpret_cast<unsigned char *>(stream);
+  }
   return remember(hipSuccess);
 }
 extern "C" hipError_t hipStreamSynchronize(hipStream_t stream) {
   if (stream == hipStreamLegacy || stream == hipStreamPerThread) return remember(hipErrorInvalidResourceHandle);
+  if (stream != nullptr) {
+    std::lock_guard<std::mutex> guard(state().lock);
+    if (state().streams.count(stream) != 1) return remember(hipErrorInvalidResourceHandle);
+  }
   return hipDeviceSynchronize();
 }
 extern "C" hipError_t hipStreamQuery(hipStream_t stream) {
   if (stream == hipStreamLegacy || stream == hipStreamPerThread) return remember(hipErrorInvalidResourceHandle);
-  return remember(hipSuccess);
+  std::lock_guard<std::mutex> guard(state().lock);
+  return remember(stream == nullptr || state().streams.count(stream) == 1 ? hipSuccess : hipErrorInvalidResourceHandle);
 }
-extern "C" hipError_t hipStreamWaitEvent(hipStream_t, hipEvent_t event, unsigned int) {
-  return remember(event == nullptr ? hipErrorInvalidResourceHandle : hipSuccess);
+extern "C" hipError_t hipStreamWaitEvent(hipStream_t stream, hipEvent_t event, unsigned int) {
+  std::lock_guard<std::mutex> guard(state().lock);
+  const bool valid_stream = stream == nullptr || state().streams.count(stream) == 1;
+  return remember(valid_stream && event != nullptr && state().events.count(event) == 1 ? hipSuccess
+                                                                                       : hipErrorInvalidResourceHandle);
 }
 extern "C" hipError_t hipStreamGetDevice(hipStream_t stream, hipDevice_t *device) {
   if (device == nullptr) return remember(hipErrorInvalidValue);
   if (stream == hipStreamLegacy || stream == hipStreamPerThread) return remember(hipErrorInvalidResourceHandle);
+  if (stream != nullptr) {
+    std::lock_guard<std::mutex> guard(state().lock);
+    if (state().streams.count(stream) != 1) return remember(hipErrorInvalidResourceHandle);
+  }
   *device = 0;
   return remember(hipSuccess);
 }
@@ -1087,38 +1233,38 @@ extern "C" hipError_t hipModuleGetFunction(hipFunction_t *function, hipModule_t 
   auto *handle = module_handle(module);
   if (handle->module == nullptr || !handle->module->loaded) return remember(hipErrorInvalidResourceHandle);
   std::shared_ptr<Module> selected = handle->module;
-  auto found = selected->kernels.find(name);
-  if (found == selected->kernels.end()) {
+  auto kernel = resolve_module_kernel(*selected, name);
+  if (!kernel) {
     std::lock_guard<std::mutex> guard(state().lock);
     auto output = state().driver_modules.begin();
     for (auto current = state().driver_modules.begin(); current != state().driver_modules.end(); ++current) {
       auto candidate = current->lock();
       if (!candidate) continue;
       *output++ = *current;
-      const auto global = candidate->kernels.find(name);
-      if (global != candidate->kernels.end() && found == selected->kernels.end()) {
+      const auto global = resolve_module_kernel(*candidate, name);
+      if (global && !kernel) {
         selected = std::move(candidate);
-        found = global;
+        kernel = global;
       }
     }
     state().driver_modules.erase(output, state().driver_modules.end());
   }
   if (trace_modules())
     std::fprintf(stderr, "Gemstone HIP module function module=%p name=%s found=%d\n", static_cast<void *>(handle), name,
-                 found == selected->kernels.end() ? 0 : 1);
-  if (trace_modules() && found == selected->kernels.end()) {
+                 kernel ? 1 : 0);
+  if (trace_modules() && !kernel) {
     size_t shown = 0;
     const std::string requested(name);
     const size_t separator = requested.find("_FSSC");
     const std::string prefix = requested.substr(0, separator);
-    for (const auto &[candidate, _] : selected->kernels) {
-      if (candidate.rfind(prefix, 0) != 0) continue;
-      std::fprintf(stderr, "Gemstone HIP nearby module function=%s\n", candidate.c_str());
+    for (const auto &candidate : selected->metadata) {
+      if (candidate.name.rfind(prefix, 0) != 0) continue;
+      std::fprintf(stderr, "Gemstone HIP nearby module function=%s\n", candidate.name.c_str());
       if (++shown == 8) break;
     }
   }
-  if (found == selected->kernels.end()) return remember(hipErrorInvalidDeviceFunction);
-  auto *result = new (std::nothrow) FunctionHandle{std::move(selected), found->second};
+  if (!kernel) return remember(hipErrorInvalidDeviceFunction);
+  auto *result = new (std::nothrow) FunctionHandle{std::move(selected), std::move(kernel)};
   if (result == nullptr) return remember(hipErrorOutOfMemory);
   *function = reinterpret_cast<hipFunction_t>(result);
   return remember(hipSuccess);
@@ -1128,12 +1274,15 @@ extern "C" hipError_t hipModuleLaunchKernel(hipFunction_t function, unsigned int
                                             unsigned int block_x, unsigned int block_y, unsigned int block_z, unsigned int shared,
                                             hipStream_t stream, void **args, void **extra) {
   if (function == nullptr) return remember(hipErrorInvalidDeviceFunction);
+  auto *function_state = function_handle(function);
+  if (function_state->module == nullptr || !function_state->module->loaded)
+    return remember(hipErrorInvalidResourceHandle);
   gemstone::hip::LaunchBuffer launch_buffer;
   if (!gemstone::hip::parse_launch_buffer(extra, launch_buffer)) return remember(hipErrorInvalidValue);
   if (trace_modules())
     std::fprintf(stderr, "Gemstone HIP module launch f=%p grid=%u,%u,%u block=%u,%u,%u args=%p\n", function, grid_x, grid_y, grid_z,
                  block_x, block_y, block_z, static_cast<void *>(args));
-  return dispatch_kernel(function_handle(function)->kernel, dim3(grid_x, grid_y, grid_z), dim3(block_x, block_y, block_z), args, shared,
+  return dispatch_kernel(function_state->kernel, dim3(grid_x, grid_y, grid_z), dim3(block_x, block_y, block_z), args, shared,
                          stream, launch_buffer);
 }
 
@@ -1141,13 +1290,13 @@ extern "C" hipError_t hipModuleGetFunctionCount(unsigned int *count, hipModule_t
   if (count == nullptr || module == nullptr) return remember(hipErrorInvalidValue);
   auto *handle = module_handle(module);
   if (handle->module == nullptr) return remember(hipErrorInvalidResourceHandle);
-  *count = static_cast<unsigned int>(handle->module->kernels.size());
+  *count = static_cast<unsigned int>(handle->module->metadata.size());
   return remember(hipSuccess);
 }
 
 extern "C" hipError_t hipModuleOccupancyMaxActiveBlocksPerMultiprocessor(int *blocks, hipFunction_t function, int, size_t) {
   if (blocks == nullptr || function == nullptr) return remember(hipErrorInvalidValue);
-  if (!function_handle(function)->kernel) return remember(hipErrorInvalidDeviceFunction);
+  if (!function_handle(function)->kernel || !function_handle(function)->module->loaded) return remember(hipErrorInvalidDeviceFunction);
   *blocks = 1;
   return remember(hipSuccess);
 }
@@ -1155,52 +1304,72 @@ extern "C" hipError_t hipExtModuleLaunchKernel(hipFunction_t function, uint32_t 
                                                uint32_t local_x, uint32_t local_y, uint32_t local_z, size_t shared, hipStream_t stream,
                                                void **args, void **extra, hipEvent_t, hipEvent_t, uint32_t) {
   if (function == nullptr) return remember(hipErrorInvalidDeviceFunction);
-  if (local_x == 0 || local_y == 0 || local_z == 0) return remember(hipErrorInvalidConfiguration);
+  auto *function_state = function_handle(function);
+  if (function_state->module == nullptr || !function_state->module->loaded)
+    return remember(hipErrorInvalidResourceHandle);
+  if (global_x == 0 || global_y == 0 || global_z == 0 || !valid_block(dim3(local_x, local_y, local_z)))
+    return remember(hipErrorInvalidConfiguration);
   gemstone::hip::LaunchBuffer launch_buffer;
   if (!gemstone::hip::parse_launch_buffer(extra, launch_buffer)) return remember(hipErrorInvalidValue);
   if (trace_modules())
     std::fprintf(stderr, "Gemstone HIP ext module launch f=%p global=%u,%u,%u local=%u,%u,%u args=%p\n", function, global_x, global_y,
                  global_z, local_x, local_y, local_z, static_cast<void *>(args));
-  return dispatch_kernel(function_handle(function)->kernel,
-                         dim3(workgroup_count(global_x, local_x), workgroup_count(global_y, local_y), workgroup_count(global_z, local_z)),
-                         dim3(local_x, local_y, local_z), args, shared, stream, launch_buffer);
+  const dim3 global(global_x, global_y, global_z);
+  // Like the vendor extended launch path, fit a nominal workgroup inside a smaller whole grid.
+  const dim3 local(std::min(local_x, global_x), std::min(local_y, global_y), std::min(local_z, global_z));
+  return dispatch_kernel(function_state->kernel,
+                         dim3(workgroup_count(global_x, local.x), workgroup_count(global_y, local.y), workgroup_count(global_z, local.z)),
+                         local, args, shared, stream, launch_buffer, &global);
 }
 
 extern "C" hipError_t hipEventCreateWithFlags(hipEvent_t *event, unsigned int) {
   if (event == nullptr) return remember(hipErrorInvalidValue);
   *event = reinterpret_cast<hipEvent_t>(new (std::nothrow) unsigned char[1]);
-  return remember(*event == nullptr ? hipErrorOutOfMemory : hipSuccess);
+  if (*event == nullptr) return remember(hipErrorOutOfMemory);
+  {
+    std::lock_guard<std::mutex> guard(state().lock);
+    state().events.insert(*event);
+  }
+  return remember(hipSuccess);
 }
 extern "C" hipError_t hipEventCreate(hipEvent_t *event) { return hipEventCreateWithFlags(event, 0); }
 extern "C" hipError_t hipEventDestroy(hipEvent_t event) {
-  if (event != nullptr) delete[] reinterpret_cast<unsigned char *>(event);
+  if (event != nullptr) {
+    std::lock_guard<std::mutex> guard(state().lock);
+    if (state().events.erase(event) != 1) return remember(hipErrorInvalidResourceHandle);
+    delete[] reinterpret_cast<unsigned char *>(event);
+  }
   return remember(hipSuccess);
 }
-extern "C" hipError_t hipEventRecordWithFlags(hipEvent_t event, hipStream_t, unsigned int) {
-  return remember(event == nullptr ? hipErrorInvalidResourceHandle : hipSuccess);
+extern "C" hipError_t hipEventRecordWithFlags(hipEvent_t event, hipStream_t stream, unsigned int) {
+  std::lock_guard<std::mutex> guard(state().lock);
+  const bool valid_stream = stream == nullptr || state().streams.count(stream) == 1;
+  return remember(valid_stream && event != nullptr && state().events.count(event) == 1 ? hipSuccess
+                                                                                       : hipErrorInvalidResourceHandle);
 }
 extern "C" hipError_t hipEventRecord(hipEvent_t event, hipStream_t stream) { return hipEventRecordWithFlags(event, stream, 0); }
 extern "C" hipError_t hipEventSynchronize(hipEvent_t event) {
-  return remember(event == nullptr ? hipErrorInvalidResourceHandle : hipSuccess);
+  std::lock_guard<std::mutex> guard(state().lock);
+  return remember(event != nullptr && state().events.count(event) == 1 ? hipSuccess : hipErrorInvalidResourceHandle);
 }
-extern "C" hipError_t hipEventQuery(hipEvent_t event) { return remember(event == nullptr ? hipErrorInvalidResourceHandle : hipSuccess); }
+extern "C" hipError_t hipEventQuery(hipEvent_t event) {
+  std::lock_guard<std::mutex> guard(state().lock);
+  return remember(event != nullptr && state().events.count(event) == 1 ? hipSuccess : hipErrorInvalidResourceHandle);
+}
 extern "C" hipError_t hipEventElapsedTime(float *milliseconds, hipEvent_t start, hipEvent_t stop) {
   if (milliseconds == nullptr) return remember(hipErrorInvalidValue);
-  if (start == nullptr || stop == nullptr) return remember(hipErrorInvalidResourceHandle);
+  {
+    std::lock_guard<std::mutex> guard(state().lock);
+    if (start == nullptr || stop == nullptr || state().events.count(start) != 1 || state().events.count(stop) != 1)
+      return remember(hipErrorInvalidResourceHandle);
+  }
   *milliseconds = 0.0f;
   return remember(hipSuccess);
 }
 
 extern "C" void **__hipRegisterFatBinary(const void *fatbin) {
   auto module = std::make_shared<Module>();
-  const void *image = nullptr;
-  size_t image_size = 0;
-  const bool selected = select_bundle(fatbin, &image, &image_size, &module->decompressed_image);
-  if (!selected) module->error = std::string("HIP fatbinary has no ") + gemstone::hsa::target_arch() + " bundle";
-  else {
-    module->image = image;
-    module->image_size = image_size;
-  }
+  module->fatbin = fatbin;
   void **token = &module->token;
   {
     auto &runtime = state();
@@ -1208,8 +1377,7 @@ extern "C" void **__hipRegisterFatBinary(const void *fatbin) {
     runtime.modules.emplace(token, module);
   }
   if (trace_modules())
-    std::fprintf(stderr, "Gemstone HIP fatbinary=%p selected=%d loaded=%d kernels=%zu image_size=%zu error=%s\n", fatbin, selected ? 1 : 0,
-                 module->loaded ? 1 : 0, module->kernels.size(), module->image_size, module->error.c_str());
+    std::fprintf(stderr, "Gemstone HIP fatbinary=%p registered lazily\n", fatbin);
   return token;
 }
 

@@ -116,15 +116,126 @@ private final class AMDGPUDeferredProgramResolver(
         .flatMap(alias => program.index.kernel(alias).leftMap(error => ExecutionFailure.InvalidRequest(error.message)))
     }
 
-  def writeGlobal(name: String, offset: Long, bytes: Col[Byte]): Either[ExecutionFailure, Unit] =
-    initialized.flatMap(_.index.writeGlobal(name, offset, bytes).leftMap(error =>
-      ExecutionFailure.InvalidRequest(error.message)
-    ))
+  private final case class Bound(value: DispatchInterpreter.GlobalBinding, memory: ExecutionMemory)
+  private var bound = Map.empty[String, Bound]
+
+  def bindings: Col[DispatchInterpreter.GlobalBinding] = synchronized {
+    Col.from(bound.valuesIterator.map(_.value)).distinct
+  }
+
+  def bindGlobal(
+      name: String,
+      allocation: AllocationId,
+      offset: Long,
+      allocationSize: Long,
+      memory: ExecutionMemory
+  ): Either[ExecutionFailure, Unit] = synchronized {
+    initialized.flatMap { program =>
+      program.index.globalData(name).leftMap(error => ExecutionFailure.NotFound(error.message)).flatMap {
+        case (address, initial) =>
+          if (
+            offset < 0 || offset > allocationSize || initial.size.toLong > allocationSize - offset ||
+            address < offset || address > Long.MaxValue - initial.size.toLong
+          )
+            Left(ExecutionFailure.InvalidRequest("global binding exceeds allocation or virtual address range"))
+          else {
+            val value = DispatchInterpreter.GlobalBinding(address, initial.size, allocation, offset, allocationSize)
+            val old   = bound.get(name)
+            if (old.exists(entry => entry.value != value || !(entry.memory eq memory)))
+              Left(ExecutionFailure.InvalidRequest(s"global $name is already bound to different storage"))
+            else if (old.nonEmpty) Right(())
+            else if (
+              bound.valuesIterator.exists { entry =>
+                val other       = entry.value
+                val overlaps    = address < other.address + other.size && other.address < address + initial.size
+                val sameMapping = allocation == other.allocation && address - offset == other.address - other.offset &&
+                  allocationSize == other.allocationSize && (entry.memory eq memory)
+                (overlaps && !sameMapping) || (allocation == other.allocation && !sameMapping)
+              }
+            ) Left(ExecutionFailure.InvalidRequest("global aliases have conflicting allocation mappings"))
+            else {
+              // Adding an overlapping symbol alias must not overwrite already-live bound bytes with old initializers.
+              val covered = bound.valuesIterator.map(_.value).filter(other =>
+                address < other.address + other.size && other.address < address + initial.size
+              ).map(other =>
+                (math.max(address, other.address) - address).toInt ->
+                  (math.min(address + initial.size, other.address + other.size) - address).toInt
+              ).toCol.sortBy(_._1)
+              val gaps       = Col.newBuilder[(Int, Int)]
+              var coveredEnd = 0
+              covered.foreach { case (start, end) =>
+                if (start > coveredEnd) gaps += coveredEnd -> start
+                coveredEnd = math.max(coveredEnd, end)
+              }
+              if (coveredEnd < initial.size) gaps += coveredEnd -> initial.size
+              val uncovered         = gaps.result()
+              val initializedMemory = if (uncovered.isEmpty) Right(())
+              else memory.read(allocation, offset, initial.size).flatMap { current =>
+                val bytes = Col.toArray(current)
+                uncovered.foreach { case (start, end) =>
+                  val _ = initial.slice(start, end).copyToArray(bytes, start, end - start)
+                }
+                memory.write(allocation, offset, Col.unsafeFromArray(bytes))
+              }
+              initializedMemory.map { _ => bound = bound.updated(name, Bound(value, memory)) }
+            }
+          }
+      }
+    }
+  }
+
+  def writeGlobal(name: String, offset: Long, bytes: Col[Byte]): Either[ExecutionFailure, Unit] = synchronized {
+    initialized.flatMap { program =>
+      program.index.global(name).toRight(ExecutionFailure.NotFound(s"AMDGPU global $name is not present")).flatMap {
+        case (address, size) =>
+          if (offset < 0 || offset > size || bytes.size.toLong > size.toLong - offset)
+            Left(ExecutionFailure.InvalidRequest("global write exceeds symbol bounds"))
+          else {
+            val start   = address + offset
+            val covered = bound.valuesIterator.find(entry =>
+              start >= entry.value.address &&
+                start - entry.value.address <= entry.value.size.toLong - bytes.size
+            )
+            covered match {
+              case Some(entry) =>
+                entry.memory.write(entry.value.allocation, entry.value.offset + start - entry.value.address, bytes)
+              case None
+                  if bound.valuesIterator.forall(entry =>
+                    start >= entry.value.address + entry.value.size || start + bytes.size <= entry.value.address
+                  ) =>
+                program.index.writeGlobal(name, offset, bytes).leftMap(error =>
+                  ExecutionFailure.InvalidRequest(error.message)
+                )
+              case None =>
+                bytes.zipWithIndex.foldLeft[Either[ExecutionFailure, Unit]](Right(())) { case (result, (byte, index)) =>
+                  result.flatMap { _ =>
+                    bound.valuesIterator.find(entry =>
+                      start + index >= entry.value.address &&
+                        start + index < entry.value.address + entry.value.size
+                    ) match {
+                      case Some(entry) => entry.memory.write(
+                          entry.value.allocation,
+                          entry.value.offset + start + index - entry.value.address,
+                          Col(byte)
+                        )
+                      case None => program.index.writeGlobal(name, offset + index, Col(byte))
+                          .leftMap(error => ExecutionFailure.InvalidRequest(error.message))
+                    }
+                  }
+                }
+            }
+          }
+      }
+    }
+  }
+
 }
 
 private final class AMDGPULoadedProgram(
     resolveKernel: String => Either[ExecutionFailure, CodeObjectKernel],
-    writeGlobalFn: (String, Long, Col[Byte]) => Either[ExecutionFailure, Unit]
+    writeGlobalFn: (String, Long, Col[Byte]) => Either[ExecutionFailure, Unit],
+    bindGlobalFn: (String, AllocationId, Long, Long, ExecutionMemory) => Either[ExecutionFailure, Unit],
+    bindings: () => Col[DispatchInterpreter.GlobalBinding]
 ) extends LoadedProgram {
   private val prepared = java.util.concurrent.ConcurrentHashMap[
     String,
@@ -138,7 +249,15 @@ private final class AMDGPULoadedProgram(
   ): Either[ExecutionFailure, Unit] =
     resolveKernel(dispatch.kernelName).flatMap { kernel =>
       prepared.computeIfAbsent(kernel.name, _ => DispatchInterpreter.prepare(kernel))
-    }.flatMap(DispatchInterpreter.execute(_, dispatch, memory, control))
+    }.flatMap(DispatchInterpreter.execute(_, dispatch, memory, control, bindings()))
+
+  override def bindGlobal(
+      name: String,
+      allocation: AllocationId,
+      offset: Long,
+      allocationSize: Long,
+      memory: ExecutionMemory
+  ): Either[ExecutionFailure, Unit] = bindGlobalFn(name, allocation, offset, allocationSize, memory)
 
   override def writeGlobal(name: String, offset: Long, bytes: Col[Byte]): Either[ExecutionFailure, Unit] =
     writeGlobalFn(name, offset, bytes)
@@ -183,7 +302,7 @@ object AMDGPUCodeObjectProgramLoader extends ProgramLoader {
             .map(selected => AMDGPUIndexedProgram(indexed, selected))
         }
       }
-      AMDGPULoadedProgram(resolver.resolveKernel, resolver.writeGlobal)
+      AMDGPULoadedProgram(resolver.resolveKernel, resolver.writeGlobal, resolver.bindGlobal, () => resolver.bindings)
     }
 }
 

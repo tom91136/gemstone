@@ -318,7 +318,15 @@ enum DecodedInstruction {
   case GlobalLoadD16(dest: Int, address: Int, scalarAddress: Option[Int], offset: Int, high: Boolean)
   case GlobalStore(address: Int, scalarAddress: Option[Int], src: Int, bytes: Int, offset: Int)
   case GlobalStoreD16High(address: Int, scalarAddress: Option[Int], src: Int, bytes: Int, offset: Int)
-  case GlobalAtomicAdd(dest: Int, address: Int, scalarAddress: Option[Int], src: Int, bytes: Int, offset: Int)
+  case GlobalAtomicAdd(
+      dest: Int,
+      address: Int,
+      scalarAddress: Option[Int],
+      src: Int,
+      bytes: Int,
+      offset: Int,
+      returnValue: Boolean
+  )
   case GlobalAtomicInc(
       dest: Int,
       address: Int,
@@ -335,7 +343,8 @@ enum DecodedInstruction {
       compareSrc: Int,
       swapSrc: Int,
       bytes: Int,
-      offset: Int
+      offset: Int,
+      returnValue: Boolean
   )
   case FlatLoad(dest: Int, address: Int, bytes: Int, offset: Int)
   case FlatLoadSigned(dest: Int, address: Int, bytes: Int, offset: Int)
@@ -352,7 +361,15 @@ enum DecodedInstruction {
       offset: Int,
       high: Boolean
   )
-  case BufferStore(address: Option[Int], resource: Int, scalarOffset: Option[Int], src: Int, bytes: Int, offset: Int)
+  case BufferStore(
+      address: Option[Int],
+      resource: Int,
+      scalarOffset: Option[Int],
+      src: Int,
+      bytes: Int,
+      offset: Int,
+      high: Boolean = false
+  )
   case DSRead(dest: Int, address: Int, bytes: Int, offsetA: Int, offsetB: Option[Int])
   case DSSignedRead(dest: Int, address: Int, bytes: Int, offsetA: Int, offsetB: Option[Int])
   case DSReadD16(dest: Int, address: Int, bytes: Int, offset: Int, high: Boolean)

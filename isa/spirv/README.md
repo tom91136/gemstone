@@ -1,25 +1,38 @@
 # SPIR-V 1.6
 
-This module models the universal SPIR-V 1.6 binary format in package
-`net.kurobako.gemstone.isa.spirv.v1_6`. Its checked-in `InstructionDef` and `Instruction` enums and the companion-owned
-`definitions`, `version`, and `grammarRevision` are generated from the pinned Khronos JSON grammar. Each singleton definition is the sole owner of its
-opcode name, numeric opcode, decoder, and metadata. Each parameterized instruction points back to that definition and
-exposes its useful fields, common operands, opcode, decoder, and metadata directly.
+The public package is `net.kurobako.gemstone.isa.spirv.v1_6`. Generated instruction definitions,
+operand metadata and grammar revision come from the [pinned Khronos grammar](../../codegen/ISA_REFERENCES.md).
 
-The binary and typed layers are deliberately separate. `Binary` losslessly decodes and encodes `RawModule` values,
-including unknown opcode numbers. Descriptor-driven decoding admits a raw instruction into the typed `Instruction`
-enum only when exactly one definition accepts its opcode and grammar-shaped operands. Missing, malformed, or ambiguous
-forms are decode errors and cannot inhabit the typed AST. `Validator` then enforces the initial OpenCL Compute
-profile: Kernel capability and entry point, physical addressing, an OpenCL memory model, and a supported module version.
+`Binary` preserves raw modules, including unknown opcode numbers. Typed decoding accepts only
+unambiguous grammar-shaped instructions. `Validator` applies the supported OpenCL compute/library
+profile; `Interpreter.prepare` and execution enforce the actual executable subset. Generated
+catalog size is not an execution-coverage claim.
 
-The handwritten executor lowers into an ISA-specific immutable program and consumes the shared execution substrate.
-It initially implements 32-bit constants, copies, integer/bitwise/comparison operations, selection, structured label
-jumps, variables, load/store, and return. Effects are staged and execution is bounded and cancellable. Floating-point,
-vectors, access chains, atomics, barriers, calls, multiple invocations, and the full OpenCL memory model remain explicit
-unsupported traps.
+The interpreter owns type/layout metadata, invocation values, checked pointers, function control
+flow and collective suspension/resumption. Supported operations include selected integer,
+floating-point, vector, memory, call, atomic and collective forms. Unsupported operations and
+layouts fail explicitly; this is not a complete OpenCL memory-model implementation.
 
-Regenerate checked-in sources explicitly:
+## Provider contracts
+
+SYCL uses exactly one OpenCL or Level Zero backend. Module creation retains exact SPIR-V bytes;
+commands preserve queue/event dependencies and publish dirty writes before reporting completion.
+Native addresses require validated allocation provenance and supported relocation/mapping rules;
+the executor never dereferences an application's foreign process address.
+
+Preserve `ByVal` parameter layout even when its first word contains a relocated pointer in opaque
+byte storage. An embedded relocation is not the address of the aggregate itself. Pointer access,
+array strides, packed structures and collective rules remain SPIR-V semantics.
+
+Level Zero allocations must satisfy at least their reported page alignment, including requests
+with smaller or zero alignment. Requested sizes and bounds stay exact; pool clients can rely on
+that alignment when placing suballocations. Host-visible dirty synchronization is explicit and
+does not imply fault-driven UVM.
 
 ```console
-sbt 'spirv / generateSPIRVSources; spirv / generateSPIRVReferenceTests'
+sbt --server --batch 'spirv/generateSPIRVSources; spirv/generateSPIRVReferenceTests'
 ```
+
+See [ISA execution](../../docs/ISA_EXECUTION.md), [runtime boundaries](../../docs/RUNTIME.md)
+and [conformance](../../conformance/README.md). Missing pinned references may require cache
+preparation; checked-in generated sources alone do not promise an entirely offline cold build.

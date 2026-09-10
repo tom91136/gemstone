@@ -114,6 +114,22 @@ class CodeObjectSuite extends munit.FunSuite {
     )
   }
 
+  test("gfx1030 explicit LGKM wait executes after synchronous memory operations") {
+    // LLVM encoding of s_waitcnt_lgkmcnt null, 0, used by Tensile's gfx1030 GEMM.
+    val wait = Col[Byte](0x00, 0x00, 0x7d, 0xbd.toByte)
+    assertEquals(DispatchInterpreter.decodeInstruction(wait, Target.unsafe("gfx1030")), Right(DecodedInstruction.Wait))
+    val code     = wait ++ Col[Byte](0x00, 0x00, 0x81.toByte, 0xbf.toByte)
+    val kernel   = CodeObjectKernel("wait", Target.unsafe("gfx1030"), 0, 0, 0, 0, 0, code)
+    val dispatch = KernelDispatch.create(
+      ProgramId.fromLong(1L).toOption.get,
+      "wait",
+      Dimensions.One,
+      Dimensions.One,
+      Col.empty
+    ).toOption.get
+    assertEquals(DispatchInterpreter.execute(kernel, dispatch, TestMemory()), Right(()))
+  }
+
   test("gfx1036 scalar OR-NOT b32 decodes as a scalar binary operation") {
     assertEquals(
       DispatchInterpreter.decodeInstruction(
@@ -2041,6 +2057,140 @@ class CodeObjectSuite extends munit.FunSuite {
     ).toOption.get
     val control = ExecutionControl.create(ExecutionLimits(maxInstructions = 4096L, quantum = 64))
     assertEquals(DispatchInterpreter.execute(kernel, dispatch, TestMemory(), control), Right(()))
+  }
+
+  test("self-contained linked entries do not decode unrelated unsupported kernels") {
+    val end         = Col[Byte](0x00, 0x00, 0x81.toByte, 0xbf.toByte)
+    val unsupported = Col.fill(4)(0xff.toByte)
+    val kernel      = CodeObjectKernel(
+      "selected",
+      Target.unsafe("gfx1030"),
+      0,
+      0,
+      0,
+      0,
+      0,
+      end,
+      codeAddress = 0x1004L,
+      textAddress = 0x1000L,
+      text = unsupported ++ end,
+      functionSizes = Map(0x1000L -> 4, 0x1004L -> 4)
+    )
+    val dispatch = KernelDispatch.create(
+      ProgramId.fromLong(1L).toOption.get,
+      "selected",
+      Dimensions.One,
+      Dimensions.One,
+      Col.empty
+    ).toOption.get
+    assertEquals(DispatchInterpreter.execute(kernel, dispatch, TestMemory()), Right(()))
+    assert(DispatchInterpreter.prepare(kernel.copy(code = unsupported, codeAddress = 0x1000L)).isLeft)
+    val truncated = Col[Byte](1, 2)
+    assert(DispatchInterpreter.prepare(kernel.copy(
+      code = truncated,
+      text = unsupported ++ truncated,
+      functionSizes = Map(0x1000L -> 4, 0x1004L -> 2)
+    )).left.exists(_.message.contains("byte 4")))
+    // A direct branch leaving the entry must use linked decoding and preserve the target failure.
+    val branch = Col[Byte](0x00, 0x00, 0x82.toByte, 0xbf.toByte)
+    assert(DispatchInterpreter.prepare(kernel.copy(
+      code = branch,
+      codeAddress = 0x1000L,
+      text = branch ++ unsupported
+    )).isLeft)
+  }
+
+  test("proven local PC-relative branches keep unrelated functions isolated") {
+    val words = Col[Long](0xbea01f00L, 0x812284ffL, 0x00000010L, 0x80202220L,
+      0x82218021L, 0xbe802020L, 0xbf810000L)
+    val code        = words.flatMap(word => LittleEndian.toCol(word, 4))
+    val unsupported = Col.fill(4)(0xff.toByte)
+    val kernel      = CodeObjectKernel(
+      "local_jump",
+      Target.unsafe("gfx1030"),
+      0,
+      0,
+      0,
+      0,
+      0,
+      code,
+      codeAddress = 0x1004L,
+      textAddress = 0x1000L,
+      text = unsupported ++ code,
+      functionSizes = Map(0x1000L -> 4, 0x1004L -> code.size)
+    )
+    val dispatch = KernelDispatch.create(
+      ProgramId.fromLong(1L).toOption.get,
+      "local_jump",
+      Dimensions.One,
+      Dimensions.One,
+      Col.empty
+    ).toOption.get
+    assertEquals(DispatchInterpreter.execute(kernel, dispatch, TestMemory()), Right(()))
+    val crossing = kernel.copy(
+      codeAddress = 0xfffffff4L,
+      textAddress = 0xfffffff0L,
+      functionSizes = Map(0xfffffff0L -> 4, 0xfffffff4L -> code.size)
+    )
+    assertEquals(DispatchInterpreter.execute(crossing, dispatch, TestMemory()), Right(()))
+    val aliased = words.updated(1, 0x812084ffL).flatMap(word => LittleEndian.toCol(word, 4))
+    assert(DispatchInterpreter.prepare(kernel.copy(code = aliased, text = unsupported ++ aliased)).isLeft)
+
+    // Entry in the middle invalidates the proof even though the instruction bytes still match.
+    val intoMiddle = LittleEndian.toCol(0xbf820005L, 4) ++ code
+    assert(DispatchInterpreter.prepare(kernel.copy(
+      code = intoMiddle,
+      text = unsupported ++ intoMiddle,
+      functionSizes = Map(0x1000L -> 4, 0x1004L -> intoMiddle.size)
+    )).isLeft)
+    // An unproven indirect target must still require the complete linked program.
+    val unknown = Col[Long](0xbe802024L, 0xbf810000L).flatMap(word => LittleEndian.toCol(word, 4))
+    assert(DispatchInterpreter.prepare(kernel.copy(
+      code = unknown,
+      text = unsupported ++ unknown,
+      functionSizes = Map(0x1000L -> 4, 0x1004L -> unknown.size)
+    )).isLeft)
+  }
+
+  test("gfx1030 buffer short stores keep their two-byte width") {
+    val code = Col[Byte](0x00, 0x10, 0x68, 0xe0.toByte, 0x01, 0x00, 0x01, 0x80.toByte)
+    assertEquals(
+      DispatchInterpreter.decodeInstruction(code, Target.unsafe("gfx1030")),
+      Right(DecodedInstruction.BufferStore(Some(1), 4, None, 0, 2, 0))
+    )
+    // Point the buffer descriptor at allocation 1 and store v0's low half at byte offset 1.
+    val words = Col[Long](0xbe840380L, 0xbe8503ffL, 0x00004000L, 0xbe860388L, 0xbe870380L,
+      0x7e0002ffL, 0x12345678L, 0x7e020281L, 0xe0681000L, 0x80010001L, 0xbf810000L)
+    val kernel = CodeObjectKernel(
+      "store_short",
+      Target.unsafe("gfx1030"),
+      0,
+      0,
+      0,
+      0,
+      0,
+      words.flatMap(word => LittleEndian.toCol(word, 4))
+    )
+    val memory     = TestMemory()
+    val allocation = AllocationId.fromLong(1L).toOption.get
+    memory.allocate(allocation, 8)
+    memory.putInt(allocation, 0, 0xa5a5a5a5)
+    memory.putInt(allocation, 4, 0xa5a5a5a5)
+    val dispatch = KernelDispatch.create(
+      ProgramId.fromLong(1L).toOption.get,
+      "store_short",
+      Dimensions.One,
+      Dimensions.One,
+      Col.empty
+    ).toOption.get
+    assertEquals(DispatchInterpreter.execute(kernel, dispatch, memory), Right(()))
+    assertEquals(memory.getInt(allocation, 0), 0xa55678a5)
+    assertEquals(memory.getInt(allocation, 4), 0xa5a5a5a5)
+    memory.putInt(allocation, 0, 0xa5a5a5a5)
+    val high = kernel.copy(code = words.updated(8, 0xe06c1000L).flatMap(word => LittleEndian.toCol(word, 4)))
+    assertEquals(DispatchInterpreter.execute(high, dispatch, memory), Right(()))
+    assertEquals(memory.getInt(allocation, 0), 0xa51234a5)
+    assertEquals(memory.getInt(allocation, 4), 0xa5a5a5a5)
   }
 
   test("gfx900 transfers control through a linked device-function call and return") {

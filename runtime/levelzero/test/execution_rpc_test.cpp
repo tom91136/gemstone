@@ -1,4 +1,6 @@
 #include <ze_api.h>
+#include "../../../native/execution/test/rpc_fixture.hpp"
+#include <sys/wait.h>
 
 #include <arpa/inet.h>
 #include <netinet/in.h>
@@ -289,9 +291,119 @@ ze_device_handle_t gemstone_device(ze_driver_handle_t *selected_driver) {
   return nullptr;
 }
 
+void cross_workgroup_api() {
+  gemstone_test::RpcFixture server;
+  const auto port = std::to_string(server.port());
+  assert(setenv("GEMSTONE_RPC_PORT", port.c_str(), 1) == 0);
+  assert(setenv("GEMSTONE_RPC_TOKEN", gemstone_test::RpcFixture::token, 1) == 0);
+  assert(zeInit(ZE_INIT_FLAG_GPU_ONLY) == ZE_RESULT_SUCCESS);
+  ze_driver_handle_t driver = nullptr;
+  auto device = gemstone_device(&driver);
+  assert(device != nullptr);
+  ze_context_desc_t context_desc{};
+  context_desc.stype = ZE_STRUCTURE_TYPE_CONTEXT_DESC;
+  ze_context_handle_t context = nullptr;
+  assert(zeContextCreate(driver, &context_desc, &context) == ZE_RESULT_SUCCESS);
+  ze_device_mem_alloc_desc_t device_desc{};
+  device_desc.stype = ZE_STRUCTURE_TYPE_DEVICE_MEM_ALLOC_DESC;
+  ze_host_mem_alloc_desc_t host_desc{};
+  host_desc.stype = ZE_STRUCTURE_TYPE_HOST_MEM_ALLOC_DESC;
+  uint32_t *memory = nullptr;
+  constexpr size_t capacity = 9 * 33 + 2;
+  assert(zeMemAllocShared(context, &device_desc, &host_desc, capacity * 4, 8, device, reinterpret_cast<void **>(&memory))
+         == ZE_RESULT_SUCCESS);
+  ze_module_desc_t module_desc{};
+  module_desc.stype = ZE_STRUCTURE_TYPE_MODULE_DESC;
+  module_desc.format = ZE_MODULE_FORMAT_IL_SPIRV;
+  module_desc.inputSize = sizeof(server.spirv);
+  module_desc.pInputModule = reinterpret_cast<const uint8_t *>(server.spirv);
+  ze_module_handle_t module = nullptr;
+  assert(zeModuleCreate(context, device, &module_desc, &module, nullptr) == ZE_RESULT_SUCCESS);
+  ze_kernel_desc_t kernel_desc{};
+  kernel_desc.stype = ZE_STRUCTURE_TYPE_KERNEL_DESC;
+  kernel_desc.pKernelName = "groups";
+  ze_kernel_handle_t kernel = nullptr;
+  assert(zeKernelCreate(module, &kernel_desc, &kernel) == ZE_RESULT_SUCCESS);
+  auto *output = memory + 1;
+  assert(zeKernelSetArgumentValue(kernel, 0, sizeof(output), &output) == ZE_RESULT_SUCCESS);
+  ze_event_pool_desc_t pool_desc{};
+  pool_desc.stype = ZE_STRUCTURE_TYPE_EVENT_POOL_DESC;
+  pool_desc.flags = ZE_EVENT_POOL_FLAG_HOST_VISIBLE;
+  pool_desc.count = 1;
+  ze_event_pool_handle_t pool = nullptr;
+  assert(zeEventPoolCreate(context, &pool_desc, 1, &device, &pool) == ZE_RESULT_SUCCESS);
+  ze_event_desc_t event_desc{};
+  event_desc.stype = ZE_STRUCTURE_TYPE_EVENT_DESC;
+  event_desc.signal = ZE_EVENT_SCOPE_FLAG_HOST;
+  event_desc.wait = ZE_EVENT_SCOPE_FLAG_HOST;
+  ze_event_handle_t event = nullptr;
+  assert(zeEventCreate(pool, &event_desc, &event) == ZE_RESULT_SUCCESS);
+  for (bool immediate : {false, true}) {
+    ze_command_queue_desc_t queue_desc{};
+    queue_desc.stype = ZE_STRUCTURE_TYPE_COMMAND_QUEUE_DESC;
+    queue_desc.mode = ZE_COMMAND_QUEUE_MODE_SYNCHRONOUS;
+    ze_command_queue_handle_t queue = nullptr;
+    ze_command_list_handle_t list = nullptr;
+    if (immediate) assert(zeCommandListCreateImmediate(context, device, &queue_desc, &list) == ZE_RESULT_SUCCESS);
+    else {
+      assert(zeCommandQueueCreate(context, device, &queue_desc, &queue) == ZE_RESULT_SUCCESS);
+      ze_command_list_desc_t list_desc{};
+      list_desc.stype = ZE_STRUCTURE_TYPE_COMMAND_LIST_DESC;
+      assert(zeCommandListCreate(context, device, &list_desc, &list) == ZE_RESULT_SUCCESS);
+    }
+    for (uint32_t groups : {1U, 2U, 3U, 5U, 9U})
+      for (uint32_t local : {31U, 32U, 33U})
+        for (uint32_t seed : {17U, 91U}) {
+          const auto count = groups * local;
+          std::fill(memory, memory + capacity, 0U);
+          server.expect({local, groups, count, 0, seed});
+          assert(zeEventHostReset(event) == ZE_RESULT_SUCCESS);
+          assert(zeEventQueryStatus(event) == ZE_RESULT_NOT_READY);
+          assert(zeKernelSetGroupSize(kernel, local, 1, 1) == ZE_RESULT_SUCCESS);
+          assert(zeKernelSetArgumentValue(kernel, 1, sizeof(seed), &seed) == ZE_RESULT_SUCCESS);
+          const ze_group_count_t geometry{groups, 1, 1};
+          assert(zeCommandListAppendLaunchKernel(list, kernel, &geometry, event, 0, nullptr) == ZE_RESULT_SUCCESS);
+          if (!immediate) {
+            assert(zeEventQueryStatus(event) == ZE_RESULT_NOT_READY);
+            assert(std::all_of(memory, memory + capacity, [](uint32_t value) { return value == 0; }));
+            assert(zeCommandListClose(list) == ZE_RESULT_SUCCESS);
+            assert(zeCommandQueueExecuteCommandLists(queue, 1, &list, nullptr) == ZE_RESULT_SUCCESS);
+          }
+          assert(zeEventHostSynchronize(event, 5000000000ULL) == ZE_RESULT_SUCCESS);
+          assert(zeEventQueryStatus(event) == ZE_RESULT_SUCCESS);
+          for (uint32_t index = 0; index < count; ++index)
+            assert(output[index] == seed + index);
+          assert(memory[0] == 0);
+          assert(std::all_of(memory + count + 1, memory + capacity, [](uint32_t value) { return value == 0; }));
+          if (!immediate) assert(zeCommandListReset(list) == ZE_RESULT_SUCCESS);
+        }
+    assert(zeCommandListDestroy(list) == ZE_RESULT_SUCCESS);
+    if (queue != nullptr) assert(zeCommandQueueDestroy(queue) == ZE_RESULT_SUCCESS);
+  }
+  assert(zeEventDestroy(event) == ZE_RESULT_SUCCESS);
+  assert(zeEventPoolDestroy(pool) == ZE_RESULT_SUCCESS);
+  assert(zeKernelDestroy(kernel) == ZE_RESULT_SUCCESS);
+  assert(zeModuleDestroy(module) == ZE_RESULT_SUCCESS);
+  assert(zeMemFree(context, memory) == ZE_RESULT_SUCCESS);
+  assert(zeContextDestroy(context) == ZE_RESULT_SUCCESS);
+  assert(server.launches() == 60);
+  server.check();
+}
+
 } // namespace
 
 int main() {
+  // Isolate the existing single-session mock from this independent API matrix.
+  const auto child = fork();
+  assert(child >= 0);
+  if (child == 0) {
+    cross_workgroup_api();
+    _exit(0);
+  }
+  int status = 0;
+  assert(waitpid(child, &status, 0) == child);
+  assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+
   MockServer server;
   const auto port = std::to_string(server.port);
   assert(setenv("GEMSTONE_RPC_PORT", port.c_str(), 1) == 0);

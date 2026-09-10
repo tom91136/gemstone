@@ -1,7 +1,8 @@
 package net.kurobako.gemstone.codegen
 
-/** Callback typedef structures extracted from the pinned official headers. `ValidateAPIs` checks these definitions
-  * against Clang on every conformance run; `GenerateAPISurfaces` uses the same data to bootstrap typed Scala aliases.
+/** Callback typedef structures extracted from the pinned official headers. `GenerateOfficialAPIManifest` checks these
+  * definitions against Clang on every conformance run; `GenerateAPISurfaces` uses the same data to bootstrap typed
+  * Scala aliases.
   */
 object CallbackTypedefCatalog {
   final case class Definition(surface: String, api: String, name: String, signature: String)

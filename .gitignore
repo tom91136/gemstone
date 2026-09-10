@@ -35,3 +35,7 @@
 .env
 .env.*
 !.env.example
+
+# Python helper bytecode
+__pycache__/
+*.py[cod]

@@ -10,74 +10,34 @@ option(UNIFIED_SUITE_BUILD_HOST "Build the dependency-free host reference execut
 option(UNIFIED_SUITE_BUILD_CUDA "Build the CUDA Thrust + cuBLAS executable" OFF)
 option(UNIFIED_SUITE_BUILD_HIP "Build the HIP rocThrust + rocBLAS executable" OFF)
 option(UNIFIED_SUITE_BUILD_SYCL "Build the oneDPL + oneMKL executable" OFF)
+option(UNIFIED_SUITE_BUILD_OPENCL "Build direct OpenCL runtime probes" OFF)
+option(UNIFIED_SUITE_BUILD_HSA "Build direct HSA runtime probes" OFF)
+set(UNIFIED_SUITE_HSA_ARCHITECTURE "gfx900" CACHE STRING "Target for the embedded HSA code object")
+
 option(UNIFIED_SUITE_SYCL_ENABLE_FP64_EMULATION
        "Enable Intel Arc FP64 emulation variables for SYCL CTest cases" ON)
 option(UNIFIED_SUITE_INSTALL_RUNNERS
        "Install the conformance executables in addition to the header-only package" ON)
-set(UNIFIED_SUITE_CTEST_SHARDS 8 CACHE STRING "Number of CTest shards per integration executable")
-set(UNIFIED_SUITE_CTEST_TIMEOUT 120 CACHE STRING "Timeout in seconds for each CTest shard")
+set(UNIFIED_SUITE_CTEST_TIMEOUT 120 CACHE STRING "Timeout in seconds for each CTest case")
 set(UNIFIED_SUITE_CTEST_PROFILE "compact" CACHE STRING
     "CTest workload profile (compact for fast checks, full for the complete parameter matrix)")
 set_property(CACHE UNIFIED_SUITE_CTEST_PROFILE PROPERTY STRINGS compact full)
 
-if(UNIFIED_SUITE_CTEST_PROFILE STREQUAL "full")
-  # The full profile is deliberately explicit and reproducible.  It keeps the
-  # compact profile suitable for local iteration while allowing CI and release
-  # qualification to exercise every compiled scalar family and the boundary
-  # sizes used by the unified catalog.
-  set(_UNIFIED_DEFAULT_ALGORITHM_SIZES "0,1,7,15,31,32,33,63,64,65,127,128,129,257,1023,4096")
-  # oneDPL's SPIR-V CPU-emulator path remains practical through n1024 for
-  # linear algorithms. n4096 is retained as an explicit diagnostic because
-  # cumulative large dispatches can exhaust the emulated Level Zero device.
-  set(_UNIFIED_DEFAULT_SYCL_ALGORITHM_SIZES "0,1,7,15,31,32,33,63,64,65,127,128,129,257,1023,1024")
-  set(_UNIFIED_DEFAULT_BLAS_SIZES "1,2,7,31,32,64,257,1024")
-  set(_UNIFIED_DEFAULT_EDGE_CASE_SIZES "0,1,2,7,15,31,32,33,63,64,257,1023,1024")
-  set(_UNIFIED_DEFAULT_EDGE_BLAS_SIZES "${_UNIFIED_DEFAULT_EDGE_CASE_SIZES}")
-  set(_UNIFIED_DEFAULT_SYCL_EDGE_BLAS_SIZES "0,1,2,7,15,31,32,33,63,64,257")
-  set(_UNIFIED_DEFAULT_STRESS_SIZES "257,4096,16384")
-  set(_UNIFIED_DEFAULT_STRESS_ITERATIONS "8")
-  set(_UNIFIED_DEFAULT_MATRIX_SHAPES "1x1x1,2x2x3,3x5x7,7x5x9,17x13x19")
-  set(_UNIFIED_DEFAULT_ALGORITHM_TYPES "i8,i32,i64,f32,f64,f16")
-  set(_UNIFIED_DEFAULT_BLAS_TYPES "i8,f32,f64,f16")
-  set(_UNIFIED_DEFAULT_EDGE_ALGORITHM_TYPES "i8,i32,i64,f32,f64,f16")
-  set(_UNIFIED_DEFAULT_EDGE_BLAS_TYPES "i8,f32,f64,f16")
-  set(_UNIFIED_DEFAULT_STRESS_TYPES "i8,i32,i64,f32,f64")
-elseif(NOT UNIFIED_SUITE_CTEST_PROFILE STREQUAL "compact")
-  message(FATAL_ERROR
-          "UNIFIED_SUITE_CTEST_PROFILE must be either compact or full, got '${UNIFIED_SUITE_CTEST_PROFILE}'")
-else()
-  set(_UNIFIED_DEFAULT_ALGORITHM_SIZES "0,1,31,32,33,63,64,65,257")
-  set(_UNIFIED_DEFAULT_SYCL_ALGORITHM_SIZES "${_UNIFIED_DEFAULT_ALGORITHM_SIZES}")
-  set(_UNIFIED_DEFAULT_BLAS_SIZES "1,31,64,257")
-  set(_UNIFIED_DEFAULT_EDGE_CASE_SIZES "0,1,7,31,32,33,257")
-  set(_UNIFIED_DEFAULT_EDGE_BLAS_SIZES "${_UNIFIED_DEFAULT_EDGE_CASE_SIZES}")
-  set(_UNIFIED_DEFAULT_SYCL_EDGE_BLAS_SIZES "${_UNIFIED_DEFAULT_EDGE_CASE_SIZES}")
-  set(_UNIFIED_DEFAULT_STRESS_SIZES "257,4096")
-  set(_UNIFIED_DEFAULT_STRESS_ITERATIONS "8")
-  set(_UNIFIED_DEFAULT_MATRIX_SHAPES "1x1x1,2x2x3,7x5x9")
-  set(_UNIFIED_DEFAULT_ALGORITHM_TYPES "i32,f32")
-  set(_UNIFIED_DEFAULT_BLAS_TYPES "f32")
-  set(_UNIFIED_DEFAULT_EDGE_ALGORITHM_TYPES "i32,f32")
-  set(_UNIFIED_DEFAULT_EDGE_BLAS_TYPES "f32")
-  set(_UNIFIED_DEFAULT_STRESS_TYPES "i32,f32")
+if(NOT UNIFIED_SUITE_CTEST_PROFILE MATCHES "^(compact|full)$")
+  message(FATAL_ERROR "UNIFIED_SUITE_CTEST_PROFILE must be compact or full")
 endif()
 
-set(UNIFIED_SUITE_ALGORITHM_SIZES "${_UNIFIED_DEFAULT_ALGORITHM_SIZES}" CACHE STRING "Algorithm sizes used by CTest")
-set(UNIFIED_SUITE_SYCL_ALGORITHM_SIZES "${_UNIFIED_DEFAULT_SYCL_ALGORITHM_SIZES}" CACHE STRING
-    "SYCL algorithm sizes used by CTest")
-set(UNIFIED_SUITE_BLAS_SIZES "${_UNIFIED_DEFAULT_BLAS_SIZES}" CACHE STRING "Level-1 BLAS sizes used by CTest")
-set(UNIFIED_SUITE_EDGE_CASE_SIZES "${_UNIFIED_DEFAULT_EDGE_CASE_SIZES}" CACHE STRING "Semantic edge-case sizes used by CTest")
-set(UNIFIED_SUITE_EDGE_BLAS_SIZES "${_UNIFIED_DEFAULT_EDGE_BLAS_SIZES}" CACHE STRING "Edge BLAS sizes used by CTest")
-set(UNIFIED_SUITE_SYCL_EDGE_BLAS_SIZES "${_UNIFIED_DEFAULT_SYCL_EDGE_BLAS_SIZES}" CACHE STRING
-    "SYCL edge BLAS sizes used by CTest")
-set(UNIFIED_SUITE_STRESS_SIZES "${_UNIFIED_DEFAULT_STRESS_SIZES}" CACHE STRING "Bounded stress sizes used by CTest")
-set(UNIFIED_SUITE_STRESS_ITERATIONS "${_UNIFIED_DEFAULT_STRESS_ITERATIONS}" CACHE STRING "Bounded stress repetitions used by CTest")
-set(UNIFIED_SUITE_MATRIX_SHAPES "${_UNIFIED_DEFAULT_MATRIX_SHAPES}" CACHE STRING "GEMV/GEMM shapes used by CTest")
-set(UNIFIED_SUITE_ALGORITHM_TYPES "${_UNIFIED_DEFAULT_ALGORITHM_TYPES}" CACHE STRING "Algorithm scalar types used by CTest")
-set(UNIFIED_SUITE_BLAS_TYPES "${_UNIFIED_DEFAULT_BLAS_TYPES}" CACHE STRING "BLAS scalar types used by CTest")
-set(UNIFIED_SUITE_EDGE_ALGORITHM_TYPES "${_UNIFIED_DEFAULT_EDGE_ALGORITHM_TYPES}" CACHE STRING "Edge algorithm scalar types used by CTest")
-set(UNIFIED_SUITE_EDGE_BLAS_TYPES "${_UNIFIED_DEFAULT_EDGE_BLAS_TYPES}" CACHE STRING "Edge BLAS scalar types used by CTest")
-set(UNIFIED_SUITE_STRESS_TYPES "${_UNIFIED_DEFAULT_STRESS_TYPES}" CACHE STRING "Bounded stress scalar types used by CTest")
+foreach(retired IN ITEMS SYCL_ALGORITHM_SIZES SYCL_EDGE_BLAS_SIZES CTEST_SHARDS)
+  if(DEFINED UNIFIED_SUITE_${retired})
+    message(FATAL_ERROR "UNIFIED_SUITE_${retired} is retired; remove it from the cache and use the common matrix settings")
+  endif()
+endforeach()
+
+# Empty cache values inherit the runner's profile. CMake owns discovery, not a second copy of profile data.
+foreach(parameter IN ITEMS ALGORITHM_SIZES BLAS_SIZES EDGE_CASE_SIZES EDGE_BLAS_SIZES STRESS_SIZES
+    STRESS_ITERATIONS MATRIX_SHAPES ALGORITHM_TYPES BLAS_TYPES EDGE_ALGORITHM_TYPES EDGE_BLAS_TYPES STRESS_TYPES)
+  set(UNIFIED_SUITE_${parameter} "" CACHE STRING "Optional ${parameter} override for every backend")
+endforeach()
 
 # Installed runners are deliberately relocatable.  The container build copies
 # vendor user-space libraries into <prefix>/lib; the host loader then resolves
@@ -99,100 +59,90 @@ target_include_directories(
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 
-function(unified_suite_register_typed_shards target backend suite case_prefix scalar_types type_option category edge_case_sizes)
+function(unified_suite_register_catalog target backend suite category case_filter edge_case_sizes)
   if(NOT BUILD_TESTING)
     return()
   endif()
-  if(UNIFIED_SUITE_CTEST_SHARDS LESS 1)
-    message(FATAL_ERROR "UNIFIED_SUITE_CTEST_SHARDS must be positive")
-  endif()
-  # Cache variables use comma-separated command-line spelling.  Keep one
-  # scalar family per CTest process so the largest HIP profile cannot put all
-  # type-specific kernels behind one 120-second timeout.  The runner still
-  # owns stable hash partitioning within each typed catalog.
-  set(_unified_suite_algorithm_sizes "${UNIFIED_SUITE_ALGORITHM_SIZES}")
-  if(backend STREQUAL "sycl")
-    set(_unified_suite_algorithm_sizes "${UNIFIED_SUITE_SYCL_ALGORITHM_SIZES}")
-  endif()
-  string(REPLACE "," ";" _unified_suite_scalar_types "${scalar_types}")
-  math(EXPR last_shard "${UNIFIED_SUITE_CTEST_SHARDS} - 1")
-  foreach(scalar_type IN LISTS _unified_suite_scalar_types)
-    foreach(shard RANGE 0 ${last_shard})
-      set(test_name "${backend}/${suite}/${category}/${scalar_type}/shard-${shard}-of-${UNIFIED_SUITE_CTEST_SHARDS}")
-      add_test(
-        NAME "${test_name}"
-        COMMAND $<TARGET_FILE:${target}>
-          --suite=${suite}
-          --algorithm-sizes=${_unified_suite_algorithm_sizes}
-          --blas-sizes=${UNIFIED_SUITE_BLAS_SIZES}
-          --edge-case-sizes=${edge_case_sizes}
-          --stress-sizes=${UNIFIED_SUITE_STRESS_SIZES}
-          --stress-iterations=${UNIFIED_SUITE_STRESS_ITERATIONS}
-          --matrix-shapes=${UNIFIED_SUITE_MATRIX_SHAPES}
-          --algorithm-types=${UNIFIED_SUITE_ALGORITHM_TYPES}
-          --blas-types=${UNIFIED_SUITE_BLAS_TYPES}
-          --edge-algorithm-types=${UNIFIED_SUITE_EDGE_ALGORITHM_TYPES}
-          --edge-blas-types=${UNIFIED_SUITE_EDGE_BLAS_TYPES}
-          --stress-types=${UNIFIED_SUITE_STRESS_TYPES}
-          --${type_option}=${scalar_type}
-          --filter=^${case_prefix}/.*${scalar_type}/
-          --shard-index=${shard}
-          --shard-count=${UNIFIED_SUITE_CTEST_SHARDS}
-          --quiet-pass
-          --allow-empty-shard
-          --allow-all-skipped
-      )
-      set_tests_properties(
-        "${test_name}"
-        PROPERTIES
-          LABELS "unified-suite;${backend};${suite};${category};${scalar_type}"
-          TIMEOUT "${UNIFIED_SUITE_CTEST_TIMEOUT}"
-      )
-      if(backend STREQUAL "sycl" AND UNIFIED_SUITE_SYCL_ENABLE_FP64_EMULATION)
-        set_property(
-          TEST "${test_name}"
-          APPEND PROPERTY ENVIRONMENT
-            "OverrideDefaultFP64Settings=1"
-            "IGC_EnableDPEmulation=1"
-        )
-      endif()
-    endforeach()
+  set(arguments "--profile=${UNIFIED_SUITE_CTEST_PROFILE}" "--suite=${suite}" "--filter=${case_filter}" "--quiet-pass")
+  foreach(parameter IN ITEMS ALGORITHM_SIZES BLAS_SIZES STRESS_SIZES STRESS_ITERATIONS MATRIX_SHAPES
+      ALGORITHM_TYPES BLAS_TYPES EDGE_ALGORITHM_TYPES EDGE_BLAS_TYPES STRESS_TYPES)
+    if(NOT "${UNIFIED_SUITE_${parameter}}" STREQUAL "")
+      string(TOLOWER "${parameter}" option)
+      string(REPLACE "_" "-" option "${option}")
+      list(APPEND arguments "--${option}=${UNIFIED_SUITE_${parameter}}")
+    endif()
   endforeach()
+  if(NOT "${edge_case_sizes}" STREQUAL "")
+    list(APPEND arguments "--edge-case-sizes=${edge_case_sizes}")
+  endif()
+  set(DISCOVER_ARGUMENTS "")
+  foreach(argument IN LISTS arguments)
+    string(APPEND DISCOVER_ARGUMENTS " [==[${argument}]==]")
+  endforeach()
+  set(DISCOVER_FIXED_PROBE FALSE)
+  if(category STREQUAL "runtime")
+    set(DISCOVER_FIXED_PROBE TRUE)
+  endif()
+  set(DISCOVER_TARGET "${target}")
+  set(DISCOVER_BACKEND "${backend}")
+  set(DISCOVER_SUITE "${suite}")
+  set(DISCOVER_ID "${backend}/${suite}/${category}")
+  set(fragment "${CMAKE_CURRENT_BINARY_DIR}/${target}-${suite}-${category}")
+  configure_file(tools/discover-tests.cmake.in "${fragment}.configured.cmake" @ONLY)
+  file(GENERATE OUTPUT "${fragment}.cmake" INPUT "${fragment}.configured.cmake")
+  set_property(DIRECTORY APPEND PROPERTY TEST_INCLUDE_FILES "${fragment}.cmake")
 endfunction()
 
-function(unified_suite_register_shards target backend)
-  # Each process receives one suite/category and one scalar type.  The
-  # existing shard count remains the number of stable hash partitions within
-  # that slice, preserving deterministic coverage while bounding per-process
-  # work for the expanded HIP catalog.
-  set(_unified_edge_blas_sizes "${UNIFIED_SUITE_EDGE_BLAS_SIZES}")
-  if(backend STREQUAL "sycl")
-    set(_unified_edge_blas_sizes "${UNIFIED_SUITE_SYCL_EDGE_BLAS_SIZES}")
-  endif()
-  unified_suite_register_typed_shards(
-    ${target} ${backend} algorithms algorithms "${UNIFIED_SUITE_ALGORITHM_TYPES}" algorithm-types algorithm
-    "${UNIFIED_SUITE_EDGE_CASE_SIZES}"
-  )
-  unified_suite_register_typed_shards(
-    ${target} ${backend} blas blas "${UNIFIED_SUITE_BLAS_TYPES}" blas-types blas "${UNIFIED_SUITE_EDGE_CASE_SIZES}"
-  )
-  unified_suite_register_typed_shards(
-    ${target} ${backend} edge-cases edge-cases/algorithms "${UNIFIED_SUITE_EDGE_ALGORITHM_TYPES}"
-    edge-algorithm-types algorithms "${UNIFIED_SUITE_EDGE_CASE_SIZES}"
-  )
-  unified_suite_register_typed_shards(
-    ${target} ${backend} edge-cases edge-cases/blas "${UNIFIED_SUITE_EDGE_BLAS_TYPES}" edge-blas-types blas
-    "${_unified_edge_blas_sizes}"
-  )
-  unified_suite_register_typed_shards(
-    ${target} ${backend} async async "${UNIFIED_SUITE_EDGE_ALGORITHM_TYPES}" edge-algorithm-types async
-    "${UNIFIED_SUITE_EDGE_CASE_SIZES}"
-  )
-  unified_suite_register_typed_shards(
-    ${target} ${backend} stress stress "${UNIFIED_SUITE_STRESS_TYPES}" stress-types stress
-    "${UNIFIED_SUITE_EDGE_CASE_SIZES}"
-  )
+function(unified_suite_register_runtime target backend)
+  unified_suite_register_catalog(${target} ${backend} edge-cases runtime "^edge-cases/runtime/" "${UNIFIED_SUITE_EDGE_CASE_SIZES}")
 endfunction()
+
+function(unified_suite_register_cases target backend)
+  if(NOT backend STREQUAL "host")
+    unified_suite_register_runtime(${target} ${backend})
+  endif()
+  set(edge_blas_sizes "${UNIFIED_SUITE_EDGE_CASE_SIZES}")
+  if(NOT "${UNIFIED_SUITE_EDGE_BLAS_SIZES}" STREQUAL "")
+    set(edge_blas_sizes "${UNIFIED_SUITE_EDGE_BLAS_SIZES}")
+  endif()
+  unified_suite_register_catalog(${target} ${backend} algorithms algorithms "^algorithms/" "${UNIFIED_SUITE_EDGE_CASE_SIZES}")
+  unified_suite_register_catalog(${target} ${backend} blas blas "^blas/" "${UNIFIED_SUITE_EDGE_CASE_SIZES}")
+  unified_suite_register_catalog(${target} ${backend} edge-cases algorithms "^edge-cases/algorithms/" "${UNIFIED_SUITE_EDGE_CASE_SIZES}")
+  unified_suite_register_catalog(${target} ${backend} edge-cases blas "^edge-cases/blas/" "${edge_blas_sizes}")
+  unified_suite_register_catalog(${target} ${backend} async async "^async/" "${UNIFIED_SUITE_EDGE_CASE_SIZES}")
+  unified_suite_register_catalog(${target} ${backend} stress stress "^stress/" "${UNIFIED_SUITE_EDGE_CASE_SIZES}")
+endfunction()
+
+if(UNIFIED_SUITE_BUILD_OPENCL)
+  find_package(OpenCL REQUIRED)
+  add_executable(unified_suite_opencl programs/runtime_main.cpp programs/opencl/edge_cases.cpp)
+  target_link_libraries(unified_suite_opencl PRIVATE unified_suite::unified_suite OpenCL::OpenCL)
+  list(APPEND _unified_suite_install_runners unified_suite_opencl)
+  unified_suite_register_runtime(unified_suite_opencl opencl)
+endif()
+
+if(UNIFIED_SUITE_BUILD_HSA)
+  find_path(HSA_INCLUDE_DIR hsa/hsa.h PATHS /opt/rocm/include REQUIRED)
+  find_library(HSA_LIBRARY hsa-runtime64 PATHS /opt/rocm/lib REQUIRED)
+  find_program(AMDGPU_CLANG clang PATHS /opt/rocm/llvm/bin NO_DEFAULT_PATH REQUIRED)
+  find_package(Python3 COMPONENTS Interpreter REQUIRED)
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/dispatch.hsaco
+    COMMAND ${AMDGPU_CLANG} -x cl -target amdgcn-amd-amdhsa
+      -mcpu=${UNIFIED_SUITE_HSA_ARCHITECTURE} -cl-std=CL2.0 -mcode-object-version=4
+      -Xclang -finclude-default-header ${CMAKE_CURRENT_SOURCE_DIR}/programs/hsa/vector_copy.cl
+      -o ${CMAKE_CURRENT_BINARY_DIR}/dispatch.hsaco
+    DEPENDS programs/hsa/vector_copy.cl VERBATIM)
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/dispatch_image.hpp
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/embed-binary.py
+      ${CMAKE_CURRENT_BINARY_DIR}/dispatch.hsaco ${CMAKE_CURRENT_BINARY_DIR}/dispatch_image.hpp
+    DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/dispatch.hsaco tools/embed-binary.py VERBATIM)
+  add_executable(unified_suite_hsa programs/runtime_main.cpp programs/hsa/edge_cases.cpp
+    ${CMAKE_CURRENT_BINARY_DIR}/dispatch_image.hpp)
+  target_include_directories(unified_suite_hsa PRIVATE ${HSA_INCLUDE_DIR} ${CMAKE_CURRENT_BINARY_DIR})
+  target_link_libraries(unified_suite_hsa PRIVATE unified_suite::unified_suite ${HSA_LIBRARY})
+  list(APPEND _unified_suite_install_runners unified_suite_hsa)
+  unified_suite_register_runtime(unified_suite_hsa hsa)
+endif()
 
 if(UNIFIED_SUITE_BUILD_HOST)
   add_executable(
@@ -211,7 +161,7 @@ if(UNIFIED_SUITE_BUILD_HOST)
   )
   target_link_libraries(unified_suite_host PRIVATE unified_suite::unified_suite)
   list(APPEND _unified_suite_install_runners unified_suite_host)
-  unified_suite_register_shards(unified_suite_host host)
+  unified_suite_register_cases(unified_suite_host host)
   if(BUILD_TESTING)
     add_executable(unified_suite_catalog_test tests/catalog.cpp)
     target_link_libraries(unified_suite_catalog_test PRIVATE unified_suite::unified_suite)
@@ -261,7 +211,7 @@ if(UNIFIED_SUITE_BUILD_CUDA)
       CUDA_RUNTIME_LIBRARY Static
   )
   list(APPEND _unified_suite_install_runners unified_suite_cuda)
-  unified_suite_register_shards(unified_suite_cuda cuda)
+  unified_suite_register_cases(unified_suite_cuda cuda)
 endif()
 
 if(UNIFIED_SUITE_BUILD_HIP)
@@ -277,36 +227,49 @@ if(UNIFIED_SUITE_BUILD_HIP)
     HINTS ${_unified_suite_rocm_hints}
     PATH_SUFFIXES lib/cmake/rocblas
   )
-  set(
-    _unified_suite_hip_sources
-    programs/hip/algorithms_i8.hip
-    programs/hip/algorithms_i32.hip
-    programs/hip/algorithms_i64.hip
-    programs/hip/algorithms_f32.hip
-    programs/hip/algorithms_f64.hip
-    programs/hip/blas.hip
-    programs/hip/edge_cases.hip
-    programs/hip/async.hip
-    programs/hip/stress.hip
-  )
-  add_executable(
-    unified_suite_hip programs/main.cpp programs/algorithm_catalog.cpp ${_unified_suite_hip_sources}
-  )
-  set_source_files_properties(${_unified_suite_hip_sources} PROPERTIES LANGUAGE HIP)
-  target_link_libraries(unified_suite_hip PRIVATE unified_suite::unified_suite)
-  if(TARGET roc::rocblas)
-    target_link_libraries(unified_suite_hip PRIVATE roc::rocblas)
-  elseif(TARGET rocblas)
-    target_link_libraries(unified_suite_hip PRIVATE rocblas)
-  else()
-    message(FATAL_ERROR "rocBLAS package did not define roc::rocblas or rocblas")
+  function(unified_suite_add_hip_partition target partition)
+    add_executable(${target} programs/partition_main.cpp ${ARGN})
+    set_source_files_properties(programs/partition_main.cpp ${ARGN} PROPERTIES LANGUAGE HIP)
+    target_compile_definitions(${target} PRIVATE UNIFIED_SUITE_PARTITION=${partition})
+    target_link_libraries(${target} PRIVATE unified_suite::unified_suite)
+    if(TARGET roc::rocblas)
+      target_link_libraries(${target} PRIVATE roc::rocblas)
+    elseif(TARGET rocblas)
+      target_link_libraries(${target} PRIVATE rocblas)
+    else()
+      message(FATAL_ERROR "rocBLAS package did not define roc::rocblas or rocblas")
+    endif()
+    set_target_properties(${target} PROPERTIES HIP_STANDARD 20 HIP_STANDARD_REQUIRED YES HIP_EXTENSIONS NO)
+    set(_unified_suite_install_runners ${_unified_suite_install_runners} ${target} PARENT_SCOPE)
+  endfunction()
+
+  unified_suite_add_hip_partition(unified_suite_hip_algorithms_i8 1 programs/hip/algorithms_i8.hip)
+  unified_suite_add_hip_partition(unified_suite_hip_algorithms_i32 2 programs/hip/algorithms_i32.hip)
+  unified_suite_add_hip_partition(unified_suite_hip_algorithms_i64 3 programs/hip/algorithms_i64.hip)
+  unified_suite_add_hip_partition(unified_suite_hip_algorithms_f16 4)
+  unified_suite_add_hip_partition(unified_suite_hip_algorithms_f32 5 programs/hip/algorithms_f32.hip)
+  unified_suite_add_hip_partition(unified_suite_hip_algorithms_f64 6 programs/hip/algorithms_f64.hip)
+  unified_suite_add_hip_partition(unified_suite_hip_blas 7 programs/hip/blas.hip)
+  unified_suite_add_hip_partition(unified_suite_hip 8 programs/hip/edge_cases.hip)
+  unified_suite_add_hip_partition(unified_suite_hip_stress 9 programs/hip/stress.hip)
+  unified_suite_add_hip_partition(unified_suite_hip_async 10 programs/hip/async.hip)
+
+  foreach(type IN ITEMS i8 i32 i64 f16 f32 f64)
+    unified_suite_register_catalog(unified_suite_hip_algorithms_${type} hip algorithms algorithms
+      "^algorithms/[^/]*/${type}/" "${UNIFIED_SUITE_EDGE_CASE_SIZES}")
+  endforeach()
+  unified_suite_register_catalog(unified_suite_hip_algorithms_i32 hip algorithms semantic
+    "^algorithms/roc-thrust-semantic/" "${UNIFIED_SUITE_EDGE_CASE_SIZES}")
+  unified_suite_register_catalog(unified_suite_hip_blas hip blas blas "^blas/" "${UNIFIED_SUITE_EDGE_CASE_SIZES}")
+  unified_suite_register_runtime(unified_suite_hip hip)
+  unified_suite_register_catalog(unified_suite_hip hip edge-cases algorithms "^edge-cases/algorithms/" "${UNIFIED_SUITE_EDGE_CASE_SIZES}")
+  set(_unified_suite_hip_edge_blas_sizes "${UNIFIED_SUITE_EDGE_BLAS_SIZES}")
+  if("${_unified_suite_hip_edge_blas_sizes}" STREQUAL "")
+    set(_unified_suite_hip_edge_blas_sizes "${UNIFIED_SUITE_EDGE_CASE_SIZES}")
   endif()
-  set_target_properties(
-    unified_suite_hip
-    PROPERTIES HIP_STANDARD 20 HIP_STANDARD_REQUIRED YES HIP_EXTENSIONS NO
-  )
-  list(APPEND _unified_suite_install_runners unified_suite_hip)
-  unified_suite_register_shards(unified_suite_hip hip)
+  unified_suite_register_catalog(unified_suite_hip hip edge-cases blas "^edge-cases/blas/" "${_unified_suite_hip_edge_blas_sizes}")
+  unified_suite_register_catalog(unified_suite_hip_async hip async async "^async/" "${UNIFIED_SUITE_EDGE_CASE_SIZES}")
+  unified_suite_register_catalog(unified_suite_hip_stress hip stress stress "^stress/" "${UNIFIED_SUITE_EDGE_CASE_SIZES}")
 endif()
 
 if(UNIFIED_SUITE_BUILD_SYCL)
@@ -343,7 +306,7 @@ if(UNIFIED_SUITE_BUILD_SYCL)
   target_compile_options(unified_suite_sycl PRIVATE -fsycl -fsycl-device-code-split=per_kernel)
   target_link_options(unified_suite_sycl PRIVATE -fsycl -fsycl-device-code-split=per_kernel)
   list(APPEND _unified_suite_install_runners unified_suite_sycl)
-  unified_suite_register_shards(unified_suite_sycl sycl)
+  unified_suite_register_cases(unified_suite_sycl sycl)
 endif()
 
 install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
@@ -373,3 +336,7 @@ install(
     "${CMAKE_CURRENT_BINARY_DIR}/unified_suiteConfigVersion.cmake"
   DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/unified_suite
 )
+
+install(FILES programs/cuda/LICENSE.gpuocelot DESTINATION share/licenses/unified_suite)
+
+install(FILES programs/hsa/LICENSE-ROCR-NCSA DESTINATION share/licenses/unified_suite)

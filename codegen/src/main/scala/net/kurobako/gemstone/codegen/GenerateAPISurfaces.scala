@@ -49,7 +49,7 @@ object GenerateAPISurfaces {
           "usage: GenerateAPISurfaces [--check] <manifest> <api-source-root> <cuda> <hip> <hsa> <level-zero> <opencl>"
         )
     }
-    val manifest            = read[ValidateAPIs.Manifest](Files.readString(manifestPath, StandardCharsets.UTF_8))
+    val manifest = read[GenerateOfficialAPIManifest.Manifest](Files.readString(manifestPath, StandardCharsets.UTF_8))
     val cudaCustomFunctions = ABIDerivation.methods[CUDACustomSurface].iterator.map(_.name).toSet
     val targets             = Vector(
       Target(
@@ -59,7 +59,7 @@ object GenerateAPISurfaces {
         sourceRoot.resolve("net/kurobako/gemstone/cuda/CUDASurface.scala"),
         Vector("HeaderVersion" -> versions(0)),
         cudaCustomFunctions,
-        Set("CUctxCreateParams", "CUhostFn", "CUstreamCallback")
+        Set("CUctxCreateParams", "CUhostFn", "CUstreamCallback", "CUuuid", "cuuint64_t")
       ),
       Target(
         Vector("hip"),
@@ -114,7 +114,11 @@ object GenerateAPISurfaces {
 
   private def missing(name: String): Nothing = throw IllegalArgumentException(s"manifest surface is absent: $name")
 
-  private def render(target: Target, functions: Vector[ValidateAPIs.Function], surfaceSize: Int): String = {
+  private def render(
+      target: Target,
+      functions: Vector[GenerateOfficialAPIManifest.Function],
+      surfaceSize: Int
+  ): String = {
     val api      = target.traitName.stripSuffix("Surface")
     val rendered = functions.traverse { function =>
       val (_, namedParameters) = function.parameters.zipWithIndex.foldLeft(

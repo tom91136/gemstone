@@ -47,4 +47,29 @@ if(BUILD_TESTING)
   target_compile_options(gemstone_opencl_smoke PRIVATE -UNDEBUG -Wall -Wextra -Wpedantic -Werror)
   target_link_libraries(gemstone_opencl_smoke PRIVATE gemstone_opencl)
   add_test(NAME gemstone-opencl-smoke COMMAND gemstone_opencl_smoke)
+  set_tests_properties(gemstone-opencl-smoke PROPERTIES TIMEOUT 30)
+endif()
+
+if(BUILD_TESTING)
+  add_executable(gemstone_opencl_bounded_scheduler test/bounded_scheduler.cpp)
+  target_include_directories(gemstone_opencl_bounded_scheduler PRIVATE "${OPENCL_INCLUDE_DIR}")
+  target_compile_definitions(gemstone_opencl_bounded_scheduler PRIVATE CL_TARGET_OPENCL_VERSION=300)
+  target_compile_options(gemstone_opencl_bounded_scheduler PRIVATE -UNDEBUG -Wall -Wextra -Wpedantic -Werror)
+  target_link_libraries(gemstone_opencl_bounded_scheduler PRIVATE gemstone_opencl)
+  add_test(NAME gemstone-opencl-bounded-scheduler COMMAND gemstone_opencl_bounded_scheduler)
+  set_tests_properties(gemstone-opencl-bounded-scheduler PROPERTIES TIMEOUT 10)
+
+  add_executable(gemstone_opencl_deferred test/deferred.cpp)
+  target_include_directories(gemstone_opencl_deferred PRIVATE "${OPENCL_INCLUDE_DIR}")
+  target_compile_definitions(gemstone_opencl_deferred PRIVATE CL_TARGET_OPENCL_VERSION=300)
+  target_compile_options(gemstone_opencl_deferred PRIVATE -UNDEBUG -Wall -Wextra -Wpedantic -Werror)
+  target_link_libraries(gemstone_opencl_deferred PRIVATE gemstone_opencl)
+  foreach(boundary completion snapshot consecutive dependency-error out-of-order transfer remote-error error-no-event teardown validation
+      command-copy command-fill command-read-rect command-write-rect command-copy-rect command-map command-unmap
+      command-svm-copy command-svm-fill command-svm-map command-svm-unmap command-marker command-barrier
+      command-migrate command-empty-kernel command-marker-ooo command-barrier-ooo
+      command-map-error command-unmap-error command-svm-map-error command-svm-unmap-error command-intel-copy command-intel-fill command-intel-advise command-copy-release command-blocking-rect-ooo command-blocking-svm-ooo command-map-twice)
+    add_test(NAME gemstone-opencl-${boundary} COMMAND gemstone_opencl_deferred ${boundary})
+    set_tests_properties(gemstone-opencl-${boundary} PROPERTIES TIMEOUT 8)
+  endforeach()
 endif()
