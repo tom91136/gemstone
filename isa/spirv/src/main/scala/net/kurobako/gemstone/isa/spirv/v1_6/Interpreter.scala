@@ -1,18 +1,31 @@
 package net.kurobako.gemstone.isa.spirv.v1_6
 
-import net.kurobako.gemstone.Col
+import net.kurobako.gemstone.{NoNul, PlatformTime, Vec}
 
 import net.kurobako.gemstone.binary.Bits.bitCount
 import net.kurobako.gemstone.binary.Bits.mask
 import net.kurobako.gemstone.binary.Bits.signExtend
+import net.kurobako.gemstone.binary.Binary16
+import net.kurobako.gemstone.binary.Binary32
+import net.kurobako.gemstone.binary.BitWidth
 import net.kurobako.gemstone.binary.ByteRange
+import net.kurobako.gemstone.binary.FloatingPointWidth
 import net.kurobako.gemstone.binary.IEEE754
 import net.kurobako.gemstone.binary.LittleEndian
+import net.kurobako.gemstone.binary.ScalarByteWidth
+import net.kurobako.gemstone.concurrent.withLock
 import net.kurobako.gemstone.execution.*
-import net.kurobako.gemstone.isa.ValidationResult
+import net.kurobako.gemstone.isa.ValidationOutcome
+import net.kurobako.gemstone.memory.MemoryValueByteWidth
+import cats.syntax.all.*
+import io.github.iltotore.iron.*
+import io.github.iltotore.iron.constraint.all.*
 import scala.collection.concurrent.TrieMap
-import scala.collection.mutable // scalafix:ok GemstoneRuntimeCollections.mutable-collection; invocation machine state
+import scala.collection.mutable
+import scala.annotation.tailrec
 import scala.util.control.NonFatal
+import java.nio.charset.StandardCharsets
+import java.util.concurrent.locks.ReentrantLock
 
 /** Typed SPIR-V kernel execution over process-neutral allocation identities.
   *
@@ -20,14 +33,16 @@ import scala.util.control.NonFatal
   * addresses: external memory is always accessed through [[ExecutionMemory]], while Function and local storage use
   * invocation/work-group-owned byte buffers.
   */
-@SuppressWarnings(
-  Array(
-    "scalafix:DisableSyntax.var",
-    "scalafix:DisableSyntax.return",
-    "scalafix:GemstoneRuntimeCollections.mutable-collection"
-  )
-)
 object Interpreter {
+  import Memory.*
+  import Operations.*
+
+  private type SPIRVFunctionName = SPIRVFunctionName.T
+  private object SPIRVFunctionName extends RefinedType[String, NoNul]
+
+  private type SPIRVInstructionSetName = SPIRVInstructionSetName.T
+  private object SPIRVInstructionSetName extends RefinedType[String, MinLength[1] & NoNul]
+
   private val VirtualAddressSpan         = 0x0000010000000000L
   private val OpenCLUnaryFloatingOpcodes = Set(
     0, 1, 2, 3, 4, 5, 6, 8, 9, 11, 12, 14, 15, 16, 19, 20, 21, 22, 23, 25, 37, 38, 39, 40, 41,
@@ -37,87 +52,106 @@ object Interpreter {
 
   final class PreparedProgram private[Interpreter] (private[Interpreter] val value: DispatchProgram)
 
-  final case class PerformanceSnapshot(
-      dispatches: Long,
-      collectiveDispatches: Long,
-      invocations: Long,
-      instructions: Long,
-      invocationValueInstances: Long,
-      denseValueSlots: Long,
-      estimatedDenseValueBytes: Long,
-      elapsedNanos: Long
-  )
+  def kernelNames(program: PreparedProgram): Vec[KernelName] =
+    Vec.from(program.value.entryPoints.keys.toSeq.sortBy(_.value))
 
-  /** Opt-in counters for separating interpreter work from launcher and build-tool overhead. A collector may be reused
-    * across dispatches; snapshots are cumulative.
-    */
-  final class PerformanceMetrics() {
-    private var dispatchCount                = 0L
-    private var collectiveDispatchCount      = 0L
-    private var invocationCount              = 0L
-    private var instructionCount             = 0L
-    private var invocationValueInstanceCount = 0L
-    private var denseValueSlotCount          = 0L
-    private var estimatedDenseValueByteCount = 0L
-    private var dispatchElapsedNanos         = 0L
-
-    private[Interpreter] def recordDispatch(collective: Boolean): Unit = {
-      dispatchCount += 1L
-      if (collective) collectiveDispatchCount += 1L
+  def kernelMetadata(program: PreparedProgram, name: KernelName): Either[ExecutionFailure, KernelMetadata] = {
+    val compiled = program.value
+    compiled.entryPoints.get(name).toRight(
+      ExecutionFailure.NotFound(s"SPIR-V entry point $name does not exist")
+    ).flatMap { functionId =>
+      compiled.functions.get(functionId).toRight(
+        ExecutionFailure.InvalidRequest(s"SPIR-V entry point $name has no function body")
+      ).flatMap { function =>
+        function.parameters.foldLeft[Either[ExecutionFailure, (Vec[KernelParameterMetadata], Int)]](
+          Right((Vec.empty[KernelParameterMetadata], 0))
+        ) { case (result, (parameterId, parameterType)) =>
+          result.flatMap { case (parameters, currentOffset) =>
+            parameterMetadata(compiled, parameterId, parameterType).flatMap { parameter =>
+              val offset = alignUp(currentOffset, math.min(8, typeAlignment(compiled, parameterType)))
+              offset.refineEither[Positive0]
+                .leftMap(_ =>
+                  ExecutionFailure.InvalidRequest(s"negative SPIR-V parameter offset $offset")
+                )
+                .map(refinedOffset =>
+                  parameters.appended(parameter.copy(offset = refinedOffset)) -> Math.addExact(offset, parameter.width)
+                )
+            }
+          }
+        }.flatMap { case (parameters, size) =>
+          for {
+            refinedSize <- size.refineEither[Positive0]
+              .leftMap(_ =>
+                ExecutionFailure.InvalidRequest(s"negative SPIR-V argument block size $size")
+              )
+            parameterCount <- parameters.size.refineEither[Positive0]
+              .leftMap(_ => ExecutionFailure.InvalidRequest("negative SPIR-V parameter count"))
+            metadata <- KernelMetadata.validated(refinedSize, parameterCount, parameters)
+              .leftMap(detail => ExecutionFailure.InvalidRequest(detail))
+          } yield metadata
+        }
+      }
     }
-
-    private[Interpreter] def recordInvocation(): Unit = invocationCount += 1L
-
-    private[Interpreter] def recordInstruction(): Unit = instructionCount += 1L
-
-    private[Interpreter] def recordInvocationValues(denseSlots: Int, bytesPerSlot: Int): Unit = {
-      invocationValueInstanceCount += 1L
-      denseValueSlotCount += denseSlots.toLong
-      estimatedDenseValueByteCount += denseSlots.toLong * bytesPerSlot
-    }
-
-    private[Interpreter] def recordElapsed(nanos: Long): Unit = dispatchElapsedNanos += nanos
-
-    private[Interpreter] def merge(other: PerformanceMetrics): Unit = synchronized {
-      invocationCount += other.invocationCount
-      instructionCount += other.instructionCount
-      invocationValueInstanceCount += other.invocationValueInstanceCount
-      denseValueSlotCount += other.denseValueSlotCount
-      estimatedDenseValueByteCount += other.estimatedDenseValueByteCount
-      dispatchElapsedNanos += other.dispatchElapsedNanos
-    }
-
-    def snapshot: PerformanceSnapshot = PerformanceSnapshot(
-      dispatchCount,
-      collectiveDispatchCount,
-      invocationCount,
-      instructionCount,
-      invocationValueInstanceCount,
-      denseValueSlotCount,
-      estimatedDenseValueByteCount,
-      dispatchElapsedNanos
-    )
   }
+
+  private def parameterMetadata(
+      program: DispatchProgram,
+      parameterId: Int,
+      parameterType: Int
+  ): Either[ExecutionFailure, KernelParameterMetadata] =
+    program.types.get(parameterType) match {
+      case Some(RuntimeType.Pointer(_, pointee)) if program.byValueParameters.contains(parameterId) =>
+        pointerLeafOffsets(program, pointee, 0L).flatMap(pointers =>
+          parameterMetadata(typeSize(program, pointee), KernelParameterKind.Scalar, pointers.nonEmpty)
+        )
+      case Some(RuntimeType.Pointer(storageClass, _)) if storageClass == 4 =>
+        Right(KernelParameterMetadata(8, 0, KernelParameterKind.Local, containsPointers = false))
+      case Some(RuntimeType.Pointer(_, _)) =>
+        Right(KernelParameterMetadata(8, 0, KernelParameterKind.Allocation, containsPointers = false))
+      case Some(_) => pointerLeafOffsets(program, parameterType, 0L).flatMap(pointers =>
+          parameterMetadata(typeSize(program, parameterType), KernelParameterKind.Scalar, pointers.nonEmpty)
+        )
+      case None => Left(
+          ExecutionFailure.InvalidRequest(s"SPIR-V parameter type %$parameterType is undefined")
+        )
+    }
+
+  private def parameterMetadata(
+      width: Int,
+      kind: KernelParameterKind,
+      containsPointers: Boolean
+  ): Either[ExecutionFailure, KernelParameterMetadata] =
+    width.refineEither[Positive]
+      .leftMap(_ =>
+        ExecutionFailure.InvalidRequest(s"SPIR-V parameter width must be positive: $width")
+      )
+      .map(refinedWidth => KernelParameterMetadata(refinedWidth, 0, kind, containsPointers))
 
   private enum RuntimeType {
     case Void
     case Bool
-    case Integer(width: Int, signed: Boolean)
-    case Floating(width: Int)
+    case Integer(width: BitWidth, signed: Boolean)
+    case Floating(width: FloatingPointWidth)
     case VectorType(component: Int, count: Int)
     case Array(element: Int, count: Long)
-    case Structure(members: Col[Int])
+    case Structure(members: Vec[Int])
     case Pointer(storageClass: Int, pointee: Int)
-    case Function(result: Int, parameters: Col[Int])
+    case Function(result: Int, parameters: Vec[Int])
     case Event
   }
 
   private enum Region {
     case External(id: AllocationId)
-    case Internal(bytes: Array[Byte])
+    case Internal(memory: InternalMemory)
+    case Opaque(bits: Long)
     case Null
   }
 
+  private final class InternalMemory(val bytes: Array[Byte]) {
+    val lock: ReentrantLock = ReentrantLock()
+  }
+
+  // Aggregate pointer slots are invocation-owned and updated while composite values are materialized.
   private final case class Pointer(
       region: Region,
       offset: Long,
@@ -157,12 +191,15 @@ object Interpreter {
   /** Per-invocation writes over immutable module/dispatch values. A large oneDPL launch can contain hundreds of
     * thousands of invocations, so eagerly copying every SPIR-V constant into every lane dominates execution.
     */
+  // This final holder is the mutable register file for one invocation.
+  // Dense nullable slots avoid allocating an Option for every interpreted SSA read and write.
+  @SuppressWarnings(Array("scalafix:DisableSyntax.null", "scalafix:DisableSyntax.var"))
   private final class InvocationValues(
       constants: Map[Int, RuntimeValue],
       globals: Map[Int, RuntimeValue],
       idBound: Long,
       baseScalars: BaseScalarValues,
-      metrics: PerformanceMetrics | Null
+      metrics: Option[Performance.Metrics]
   ) {
     private val denseLimit = 1000000L
     private val dense      =
@@ -170,10 +207,11 @@ object Interpreter {
       else Array.empty[RuntimeValue | Null]
     private val denseScalarTypes = Array.fill(dense.length)(-1)
     private val denseScalarBits  = Array.ofDim[Long](dense.length)
-    private val touched          = mutable.ArrayBuffer.empty[Int]
+    private val touched          = Array.ofDim[Int](dense.length)
+    private var touchedSize      = 0
     private val overflow         = mutable.LongMap.empty[RuntimeValue]
 
-    if (metrics != null) metrics.recordInvocationValues(dense.length, 16)
+    metrics.foreach(_.recordInvocationValues(dense.length, 16))
 
     def get(key: Long): Option[RuntimeValue] = {
       val local =
@@ -193,7 +231,10 @@ object Interpreter {
     def update(key: Long, value: RuntimeValue): Unit =
       if (key >= 0L && key < dense.length.toLong) {
         val index = key.toInt
-        if (dense(index) == null && denseScalarTypes(index) < 0) touched += index
+        if (dense(index) == null && denseScalarTypes(index) < 0) {
+          touched(touchedSize) = index
+          touchedSize += 1
+        }
         value match {
           case RuntimeValue.Bits(typeId, Array(bits)) =>
             dense(index) = null
@@ -247,7 +288,10 @@ object Interpreter {
 
     def updateScalar(key: Int, typeId: Int, bits: Long): Unit =
       if (key >= 0 && key < dense.length) {
-        if (dense(key) == null && denseScalarTypes(key) < 0) touched += key
+        if (dense(key) == null && denseScalarTypes(key) < 0) {
+          touched(touchedSize) = key
+          touchedSize += 1
+        }
         dense(key) = null
         denseScalarTypes(key) = typeId
         denseScalarBits(key) = bits
@@ -255,53 +299,19 @@ object Interpreter {
 
     def clear(): Unit = {
       var index = 0
-      while (index < touched.length) {
+      while (index < touchedSize) {
         dense(touched(index)) = null
         denseScalarTypes(touched(index)) = -1
         index += 1
       }
-      touched.clear()
+      touchedSize = 0
       overflow.clear()
     }
   }
 
-  private enum FloatingOperation(val opcode: String) {
-    case Add      extends FloatingOperation("OpFAdd")
-    case Subtract extends FloatingOperation("OpFSub")
-    case Multiply extends FloatingOperation("OpFMul")
-    case Divide   extends FloatingOperation("OpFDiv")
-    case Minimum  extends FloatingOperation("OpenCL.std fmin")
-    case Maximum  extends FloatingOperation("OpenCL.std fmax")
-  }
-
-  private enum FloatingComparison(val opcode: String) {
-    case OrderedEqual              extends FloatingComparison("OpFOrdEqual")
-    case OrderedNotEqual           extends FloatingComparison("OpFOrdNotEqual")
-    case Ordered                   extends FloatingComparison("OpOrdered")
-    case UnorderedEqual            extends FloatingComparison("OpFUnordEqual")
-    case UnorderedNotEqual         extends FloatingComparison("OpFUnordNotEqual")
-    case UnorderedLessThan         extends FloatingComparison("OpFUnordLessThan")
-    case UnorderedGreaterThan      extends FloatingComparison("OpFUnordGreaterThan")
-    case UnorderedLessThanEqual    extends FloatingComparison("OpFUnordLessThanEqual")
-    case UnorderedGreaterThanEqual extends FloatingComparison("OpFUnordGreaterThanEqual")
-    case Unordered                 extends FloatingComparison("OpUnordered")
-    case OrderedLessThan           extends FloatingComparison("OpFOrdLessThan")
-    case OrderedLessThanEqual      extends FloatingComparison("OpFOrdLessThanEqual")
-    case OrderedGreaterThan        extends FloatingComparison("OpFOrdGreaterThan")
-    case OrderedGreaterThanEqual   extends FloatingComparison("OpFOrdGreaterThanEqual")
-  }
-
-  private enum FloatingClassification(val opcode: String) {
-    case Infinite extends FloatingClassification("OpIsInf")
-    case NaN      extends FloatingClassification("OpIsNan")
-    case Finite   extends FloatingClassification("OpIsFinite")
-    case Normal   extends FloatingClassification("OpIsNormal")
-    case Signed   extends FloatingClassification("OpSignBitSet")
-  }
-
   private final case class FunctionInfo(
       id: Int,
-      parameters: Col[(Int, Int)],
+      parameters: Vec[(Int, Int)],
       start: Int,
       end: Int,
       labels: Map[Int, Int]
@@ -329,94 +339,63 @@ object Interpreter {
       packedStructures: Set[Int],
       byValueParameters: Set[Int],
       saturatedConversions: Set[Int],
-      extendedInstructionSets: Map[Int, String],
-      entryPoints: Map[String, Int],
+      extendedInstructionSets: Map[Int, SPIRVInstructionSetName],
+      entryPoints: Map[KernelName, Int],
       subgroupSizes: Map[Int, Int],
       functions: Map[Int, FunctionInfo],
-      functionNames: Map[Int, String],
-      collectiveFunctions: Set[Int],
-      atomicFunctions: Set[Int]
+      functionNames: Map[Int, SPIRVFunctionName],
+      collectiveFunctions: Set[Int]
   ) {
     val typeSizeCache: TrieMap[Int, Int]                                  = TrieMap.empty
     val typeAlignmentCache: TrieMap[Int, Int]                             = TrieMap.empty
     val scalarLeafCountCache: TrieMap[Int, Either[ExecutionFailure, Int]] = TrieMap.empty
   }
 
-  private final class DirtyPage {
-    val bytes         = Array.ofDim[Byte](4096)
-    private val dirty = Array.ofDim[Long](64)
-
-    def update(offset: Int, value: Byte): Unit = {
-      bytes(offset) = value
-      dirty(offset >>> 6) |= 1L << (offset & 63)
-    }
-
-    def contains(offset: Int): Boolean =
-      (dirty(offset >>> 6) & (1L << (offset & 63))) != 0L
-
-    def nextDirtyByte(from: Int): Int = {
-      var word = from >>> 6
-      if (word >= dirty.length) return bytes.length
-      var remaining = dirty(word) & (-1L << (from & 63))
-      while (remaining == 0L && word + 1 < dirty.length) {
-        word += 1
-        remaining = dirty(word)
-      }
-      (word << 6) + java.lang.Long.numberOfTrailingZeros(remaining)
-    }
-
-    def nextCleanByte(from: Int): Int = {
-      var word = from >>> 6
-      if (word >= dirty.length) return bytes.length
-      var remaining = ~dirty(word) & (-1L << (from & 63))
-      while (remaining == 0L && word + 1 < dirty.length) {
-        word += 1
-        remaining = ~dirty(word)
-      }
-      (word << 6) + java.lang.Long.numberOfTrailingZeros(remaining)
-    }
-  }
-
+  // Mirrored writes, virtual pointers and relocation bookkeeping are confined behind this final memory-state holder.
   private final class MemoryState(
       memory: ExecutionMemory,
-      relocations: Col[PointerRelocation],
-      threadSafe: Boolean
+      relocations: Vec[PointerRelocation]
   ) {
-    private val lock = Object()
-
-    private inline def withLock[A](inline operation: => A): A =
-      if (threadSafe) lock.synchronized(operation) else operation
     private val writes                   = mutable.HashMap.empty[AllocationId, mutable.LongMap[DirtyPage]]
     private val externalVirtualAddresses = mutable.HashMap.empty[AllocationId, Long]
     private val internalVirtualAddresses = java.util.IdentityHashMap[Array[Byte], java.lang.Long]()
     private val virtualPointers          = mutable.LongMap.empty[Pointer]
-    private val pointerRelocations       = mutable.HashMap.from(relocations.iterator.collect {
-      case relocation if relocation.sourceAllocation.isDefined =>
-        (relocation.sourceAllocation.get -> relocation.sourceOffset) -> (relocation.target -> relocation.targetOffset)
-    })
+    private val pointerRelocations: mutable.HashMap[(AllocationId, Long), (AllocationId, Long)] =
+      mutable.HashMap.from(relocations.iterator.collect {
+        case PointerRelocation(RelocationSource.Allocation(source), sourceOffset, target, targetOffset) =>
+          (source -> (sourceOffset: Long)) -> (target -> (targetOffset: Long))
+      })
     private val argumentRelocations = {
       val result = mutable.HashMap.empty[Int, mutable.LongMap[(AllocationId, Long)]]
-      relocations.foreach { relocation =>
-        relocation.sourceArgument.foreach { argument =>
+      relocations.foreach {
+        case PointerRelocation(RelocationSource.Argument(argument), sourceOffset, target, targetOffset) =>
           result
             .getOrElseUpdate(argument, mutable.LongMap.empty)
-            .update(relocation.sourceOffset, relocation.target -> relocation.targetOffset)
-        }
+            .update(sourceOffset, target -> targetOffset)
+        case _ => ()
       }
       result
     }
+    @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
     private var nextVirtualAddress = 0x0000100000000000L
 
-    def pointerInteger(pointer: Pointer): Either[ExecutionFailure, Long] = withLock {
+    /** IdentityHashMap uses null for a missing Java entry; confine it to this interop pattern. */
+    @SuppressWarnings(Array("scalafix:DisableSyntax.null", "scalafix:DisableSyntax.return"))
+    def pointerInteger(pointer: Pointer): Either[ExecutionFailure, Long] = {
       val base = pointer.region match {
-        case Region.External(id)    => externalVirtualAddresses.getOrElseUpdate(id, allocateVirtualAddress(pointer))
-        case Region.Internal(bytes) =>
-          val existing = internalVirtualAddresses.get(bytes)
-          if (existing == null) {
-            val allocated = allocateVirtualAddress(pointer)
-            internalVirtualAddresses.put(bytes, allocated)
-            allocated
-          } else existing.longValue()
+        case Region.External(id)     => externalVirtualAddresses.getOrElseUpdate(id, allocateVirtualAddress(pointer))
+        case Region.Internal(memory) =>
+          internalVirtualAddresses.get(memory.bytes) match {
+            case null =>
+              val allocated = allocateVirtualAddress(pointer)
+              internalVirtualAddresses.put(memory.bytes, allocated)
+              allocated
+            case existing => existing.longValue()
+          }
+        case Region.Opaque(bits) =>
+          return Either
+            .catchOnly[ArithmeticException](Math.addExact(bits, pointer.offset))
+            .leftMap(_ => ExecutionFailure.InvalidRequest("opaque SPIR-V pointer arithmetic overflow"))
         case Region.Null => return Right(0L)
       }
       Either.cond(
@@ -428,68 +407,76 @@ object Interpreter {
       )
     }
 
-    def relocateArgument(index: Int, bytes: Col[Byte]): Either[ExecutionFailure, Array[Byte]] = withLock {
-      val relocated = bytes.toArray
-      argumentRelocations.get(index).iterator.flatMap(_.iterator).foldLeft[Either[
-        ExecutionFailure,
-        Unit
-      ]](Right(())) {
-        case (result, (sourceOffset, (target, targetOffset))) =>
-          result.flatMap { _ =>
-            Either.cond[ExecutionFailure, Unit](
-              sourceOffset <= relocated.length.toLong - 8L,
-              (),
-              ExecutionFailure.InvalidRequest(
-                s"pointer relocation source offset $sourceOffset exceeds argument $index"
-              )
-            ).flatMap { _ =>
-              pointerInteger(Pointer(Region.External(target), targetOffset, 0, 8)).map {
-                address =>
-                  var byte = 0
-                  while (byte < 8) {
-                    relocated(sourceOffset.toInt + byte) = (address >>> (byte * 8)).toByte
-                    byte += 1
-                  }
+    @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+    def relocateArgument(index: Int, bytes: Vec[Byte]): Either[ExecutionFailure, Array[Byte]] = {
+      val relocated   = bytes.toArray
+      val relocations = argumentRelocations.get(index).iterator.flatMap(_.iterator).toArray
+      var current     = 0
+      var failure     = Option.empty[ExecutionFailure]
+      while (current < relocations.length && failure.isEmpty) {
+        val (sourceOffset, (target, targetOffset)) = relocations(current)
+        if (sourceOffset > relocated.length.toLong - 8L)
+          failure = Some(ExecutionFailure.InvalidRequest(
+            s"pointer relocation source offset $sourceOffset exceeds argument $index"
+          ))
+        else
+          pointerInteger(Pointer(Region.External(target), targetOffset, 0, 8)) match {
+            case Left(error)    => failure = Some(error)
+            case Right(address) =>
+              var byte = 0
+              while (byte < 8) {
+                relocated(sourceOffset.toInt + byte) = (address >>> (byte * 8)).toByte
+                byte += 1
               }
-            }
           }
-      }.map(_ => relocated)
-    }
-
-    def argumentRelocation(index: Int, offset: Long): Option[(AllocationId, Long)] = withLock {
-      argumentRelocations.get(index).flatMap(_.get(offset))
-    }
-
-    def allocationRelocation(source: AllocationId, offset: Long): Option[(AllocationId, Long)] = withLock {
-      pointerRelocations.get(source -> offset)
-    }
-
-    def recordPointerRelocation(pointer: Pointer, destination: Pointer): Unit = withLock {
-      (pointer.region, destination.region) match {
-        case (_, Region.External(destinationAllocation)) =>
-          val _ = pointerRelocations.remove(destinationAllocation -> destination.offset)
-          pointer.region match {
-            case Region.External(pointerAllocation) =>
-              pointerRelocations.update(
-                destinationAllocation -> destination.offset,
-                pointerAllocation     -> pointer.offset
-              )
-              memory.recordPointerRelocation(
-                PointerRelocation(
-                  Some(destinationAllocation),
-                  None,
-                  destination.offset,
-                  pointerAllocation,
-                  pointer.offset
-                )
-              )
-            case _ => ()
-          }
-        case _ => ()
+        current += 1
       }
+      failure.toLeft(relocated)
     }
 
-    def relocatedPointer(source: Pointer, pointee: Int, storageClass: Int): Option[Pointer] = withLock {
+    def argumentRelocation(index: Int, offset: Long): Option[(AllocationId, Long)] =
+      argumentRelocations.get(index).flatMap(_.get(offset))
+
+    def allocationRelocation(source: AllocationId, offset: Long): Option[(AllocationId, Long)] =
+      pointerRelocations.get(source -> offset)
+
+    def recordPointerRelocation(pointer: Pointer, destination: Pointer): Either[ExecutionFailure, Unit] =
+      destination.region match {
+        case Region.External(destinationAllocation) =>
+          destination.offset.refineEither[Positive0] match {
+            case Left(_) => Left(ExecutionFailure.InvalidRequest(
+                s"negative SPIR-V pointer relocation destination offset ${destination.offset}"
+              ))
+            case Right(sourceOffset) => pointer.region match {
+                case Region.External(pointerAllocation) =>
+                  pointer.offset.refineEither[Positive0] match {
+                    case Left(_) => Left(ExecutionFailure.InvalidRequest(
+                        s"negative SPIR-V pointer relocation target offset ${pointer.offset}"
+                      ))
+                    case Right(targetOffset) =>
+                      pointerRelocations.update(
+                        destinationAllocation -> destination.offset,
+                        pointerAllocation     -> pointer.offset
+                      )
+                      memory.recordPointerRelocation(
+                        PointerRelocation(
+                          RelocationSource.Allocation(destinationAllocation),
+                          sourceOffset,
+                          pointerAllocation,
+                          targetOffset
+                        )
+                      )
+                      Right(())
+                  }
+                case _ =>
+                  val _ = pointerRelocations.remove(destinationAllocation -> destination.offset)
+                  Right(())
+              }
+          }
+        case _ => Right(())
+      }
+
+    def relocatedPointer(source: Pointer, pointee: Int, storageClass: Int): Option[Pointer] =
       source.region match {
         case Region.External(allocation) =>
           allocationRelocation(allocation, source.offset).map { case (target, targetOffset) =>
@@ -497,34 +484,27 @@ object Interpreter {
           }
         case _ => None
       }
-    }
 
     def elementOffset(program: DispatchProgram, source: Pointer, index: Long): Long =
       Math.addExact(source.offset, Math.multiplyExact(index, typeSize(program, source.pointee).toLong))
 
     def integerPointer(address: Long, pointee: Int, storageClass: Int): Either[ExecutionFailure, Pointer] =
-      withLock {
-        if (address == 0L) Right(Pointer(Region.Null, 0L, pointee, storageClass))
-        else {
-          val base   = address & ~(VirtualAddressSpan - 1L)
-          val offset = address - base
-          virtualPointers.get(base) match {
-            case Some(origin) if offset >= 0L && offset < VirtualAddressSpan =>
-              Either.cond(
-                storageClass == 8 || storageClass == origin.storageClass,
-                origin.copy(offset = offset, pointee = pointee),
-                ExecutionFailure.InvalidRequest(
-                  s"SPIR-V virtual address 0x${java.lang.Long.toHexString(address)} belongs to storage class " +
-                    s"${origin.storageClass}, not $storageClass"
-                )
+      if (address == 0L) Right(Pointer(Region.Null, 0L, pointee, storageClass))
+      else {
+        val base   = address & ~(VirtualAddressSpan - 1L)
+        val offset = address - base
+        virtualPointers.get(base) match {
+          case Some(origin) if offset >= 0L && offset < VirtualAddressSpan =>
+            Either.cond(
+              storageClass == 8 || storageClass == origin.storageClass,
+              origin.copy(offset = offset, pointee = pointee),
+              ExecutionFailure.InvalidRequest(
+                s"SPIR-V virtual address 0x${java.lang.Long.toHexString(address)} belongs to storage class " +
+                  s"${origin.storageClass}, not $storageClass"
               )
-            case _ =>
-              Left(
-                ExecutionFailure.InvalidRequest(
-                  s"SPIR-V integer 0x${java.lang.Long.toHexString(address)} is not a dispatch-local virtual address"
-                )
-              )
-          }
+            )
+          case _ =>
+            Right(Pointer(Region.Opaque(address), 0L, pointee, storageClass))
         }
       }
 
@@ -535,14 +515,19 @@ object Interpreter {
       address
     }
 
-    def read(pointer: Pointer, size: Int): Either[ExecutionFailure, Array[Byte]] = withLock {
+    @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+    def read(pointer: Pointer, size: Int :| Positive0): Either[ExecutionFailure, Array[Byte]] =
       pointer.region match {
-        case Region.Internal(bytes) =>
-          checkedRange(bytes.length, pointer.offset, size).map(start =>
-            java.util.Arrays.copyOfRange(bytes, start, start + size)
+        case Region.Internal(internal) =>
+          checkedRange(internal.bytes.length, pointer.offset, size).map(start =>
+            java.util.Arrays.copyOfRange(internal.bytes, start, start + size)
           )
         case Region.External(id) =>
-          memory.read(id, pointer.offset, size) match {
+          pointer.offset.refineEither[Positive0]
+            .leftMap(_ =>
+              ExecutionFailure.InvalidRequest(s"invalid external read offset ${pointer.offset}")
+            )
+            .flatMap(offset => memory.read(id, offset, size)) match {
             case Left(error)   => Left(error)
             case Right(source) =>
               val result = source.toArray
@@ -561,16 +546,20 @@ object Interpreter {
           }
         case Region.Null =>
           Left(ExecutionFailure.InvalidRequest("cannot read through a null SPIR-V pointer"))
+        case Region.Opaque(bits) =>
+          Left(ExecutionFailure.InvalidRequest(
+            s"cannot read through opaque SPIR-V pointer 0x${java.lang.Long.toHexString(bits)}"
+          ))
       }
-    }
 
-    def readScalar(pointer: Pointer, size: Int): Either[ExecutionFailure, Long] = withLock {
+    def readScalar(pointer: Pointer, size: MemoryValueByteWidth): Either[ExecutionFailure, Long] = {
       val relocation =
-        if (size != 8) None
+        if (size.value != 8) None
         else
           pointer.region match {
             case Region.External(source) => pointerRelocations.get(source -> pointer.offset)
             case Region.Internal(_)      => None
+            case Region.Opaque(_)        => None
             case Region.Null             => None
           }
       relocation match {
@@ -580,17 +569,28 @@ object Interpreter {
       }
     }
 
-    private def readExternalScalar(pointer: Pointer, size: Int): Either[ExecutionFailure, Long] = pointer.region match {
-      case Region.Internal(bytes) =>
-        checkedRange(bytes.length, pointer.offset, size).map(start => LittleEndian.decode(bytes, start, size))
+    @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+    private def readExternalScalar(
+        pointer: Pointer,
+        size: MemoryValueByteWidth
+    ): Either[ExecutionFailure, Long] = pointer.region match {
+      case Region.Internal(internal) =>
+        checkedRange(internal.bytes.length, pointer.offset, size.value)
+          .map(start => LittleEndian.decode(internal.bytes, start, size.scalarByteWidth))
       case Region.External(id) =>
-        memory.readValue(id, pointer.offset, size) match {
+        pointer.offset.refineEither[Positive0]
+          .leftMap(_ =>
+            ExecutionFailure.InvalidRequest(
+              s"invalid external scalar read offset ${pointer.offset}"
+            )
+          )
+          .flatMap(offset => memory.readValue(id, offset, size)) match {
           case Left(error)   => Left(error)
           case Right(source) =>
             var value = source
             writes.get(id).foreach { pages =>
               var index = 0
-              while (index < size) {
+              while (index < size.value) {
                 val absolute   = pointer.offset + index.toLong
                 val pageOffset = (absolute & 4095L).toInt
                 pages.get(absolute >>> 12) match {
@@ -606,17 +606,27 @@ object Interpreter {
         }
       case Region.Null =>
         Left(ExecutionFailure.InvalidRequest("cannot read scalar through a null SPIR-V pointer"))
+      case Region.Opaque(bits) =>
+        Left(ExecutionFailure.InvalidRequest(
+          s"cannot read scalar through opaque SPIR-V pointer 0x${java.lang.Long.toHexString(bits)}"
+        ))
     }
 
-    def write(pointer: Pointer, bytes: Array[Byte]): Either[ExecutionFailure, Unit] = withLock {
+    @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+    def write(pointer: Pointer, bytes: Array[Byte]): Either[ExecutionFailure, Unit] =
       pointer.region match {
-        case Region.Internal(target) =>
-          checkedRange(target.length, pointer.offset, bytes.length).map { start =>
-            System.arraycopy(bytes, 0, target, start, bytes.length)
+        case Region.Internal(internal) =>
+          checkedRange(internal.bytes.length, pointer.offset, bytes.length) match {
+            case Left(error)  => Left(error)
+            case Right(start) =>
+              Array.copy(bytes, 0, internal.bytes, start, bytes.length)
+              Right(())
           }
         case Region.External(id) =>
           if (pointer.offset < 0L || pointer.offset > Long.MaxValue - bytes.length.toLong)
-            Left(ExecutionFailure.InvalidRequest(s"invalid external write offset ${pointer.offset}"))
+            Left(
+              ExecutionFailure.InvalidRequest(s"invalid external write offset ${pointer.offset}")
+            )
           else {
             val pending = writes.getOrElseUpdate(id, mutable.LongMap.empty)
             var index   = 0
@@ -635,19 +645,27 @@ object Interpreter {
                 s"storage=${pointer.storageClass})"
             )
           )
+        case Region.Opaque(bits) =>
+          Left(ExecutionFailure.InvalidRequest(
+            s"cannot write through opaque SPIR-V pointer 0x${java.lang.Long.toHexString(bits)}"
+          ))
       }
-    }
 
-    def writeScalar(pointer: Pointer, value: Long, size: Int): Either[ExecutionFailure, Unit] = withLock {
+    def writeScalar(pointer: Pointer, value: Long, size: MemoryValueByteWidth): Either[ExecutionFailure, Unit] =
       pointer.region match {
-        case Region.Internal(target) =>
-          checkedRange(target.length, pointer.offset, size).map(start => LittleEndian.write(value, target, start, size))
+        case Region.Internal(internal) =>
+          checkedRange(internal.bytes.length, pointer.offset, size.value)
+            .map(start =>
+              LittleEndian.write(value, internal.bytes, start, size.scalarByteWidth)
+            )
         case Region.External(id) =>
-          if (pointer.offset < 0L || size < 0 || pointer.offset > Long.MaxValue - size.toLong)
-            Left(ExecutionFailure.InvalidRequest(s"invalid external write offset ${pointer.offset}"))
+          if (pointer.offset < 0L || pointer.offset > Long.MaxValue - size.value.toLong)
+            Left(
+              ExecutionFailure.InvalidRequest(s"invalid external write offset ${pointer.offset}")
+            )
           else {
             val pending = writes.getOrElseUpdate(id, mutable.LongMap.empty)
-            LittleEndian.write(value, size) { (index, byte) =>
+            LittleEndian.write(value, size.scalarByteWidth) { (index, byte) =>
               val absolute   = pointer.offset + index.toLong
               val pageOffset = (absolute & 4095L).toInt
               pending
@@ -663,24 +681,27 @@ object Interpreter {
                 s"storage=${pointer.storageClass})"
             )
           )
+        case Region.Opaque(bits) =>
+          Left(ExecutionFailure.InvalidRequest(
+            s"cannot write scalar through opaque SPIR-V pointer 0x${java.lang.Long.toHexString(bits)}"
+          ))
       }
-    }
 
-    def copySlots(destination: Pointer, origin: Pointer, size: Long): Either[ExecutionFailure, Unit] = withLock {
+    def copySlots(destination: Pointer, origin: Pointer, size: Long): Either[ExecutionFailure, Unit] =
       if (size < 0L || origin.offset > Long.MaxValue - size || destination.offset > Long.MaxValue - size)
         Left(ExecutionFailure.InvalidRequest(s"invalid aggregate copy size $size"))
       else {
         destination.slots match {
           case Some(target) =>
             val end = destination.offset + size
-            Col.from(target).foreach { case (destinationOffset, (pointerType, template)) =>
+            Vec.from(target).foreach { case (destinationOffset, (pointerType, template)) =>
               if (destinationOffset >= destination.offset && destinationOffset < end) {
                 val sourceOffset = origin.offset + destinationOffset - destination.offset
                 val typed        = origin.slots.flatMap(_.get(sourceOffset)).map(_._2)
                 val copied       = typed.filter(_.region != Region.Null).orElse {
                   readScalar(
                     Pointer(origin.region, sourceOffset, template.pointee, template.storageClass),
-                    8
+                    MemoryValueByteWidth(8)
                   ).toOption.flatMap(raw => integerPointer(raw, template.pointee, template.storageClass).toOption)
                 }
                 copied.foreach(pointer => target.update(destinationOffset, pointerType -> pointer))
@@ -690,13 +711,62 @@ object Interpreter {
         }
         Right(())
       }
+
+    def atomicReadScalar(pointer: Pointer, size: MemoryValueByteWidth): Either[ExecutionFailure, Long] =
+      pointer.region match {
+        case Region.Internal(internal) => internal.lock.withLock(readExternalScalar(pointer, size))
+        case Region.External(id)       =>
+          pointer.offset.refineEither[Positive0]
+            .leftMap(_ =>
+              ExecutionFailure.InvalidRequest(
+                s"invalid external atomic read offset ${pointer.offset}"
+              )
+            )
+            .flatMap(offset => flush().flatMap(_ => memory.atomicModifyValue(id, offset, size)(value => value)))
+        case Region.Null => Left(ExecutionFailure.InvalidRequest("cannot atomically read a null SPIR-V pointer"))
+        case Region.Opaque(bits) =>
+          Left(ExecutionFailure.InvalidRequest(
+            s"cannot atomically read opaque SPIR-V pointer 0x${java.lang.Long.toHexString(bits)}"
+          ))
+      }
+
+    def atomicWriteScalar(
+        pointer: Pointer,
+        value: Long,
+        size: MemoryValueByteWidth
+    ): Either[ExecutionFailure, Unit] =
+      atomicModifyScalar(pointer, size)(_ => value).map(_ => ())
+
+    def atomicModifyScalar(
+        pointer: Pointer,
+        size: MemoryValueByteWidth
+    )(update: Long => Long): Either[ExecutionFailure, Long] = pointer.region match {
+      case Region.Internal(internal) => internal.lock.withLock {
+          checkedRange(internal.bytes.length, pointer.offset, size.value) match {
+            case Left(error)  => Left(error)
+            case Right(start) =>
+              val scalarSize = size.scalarByteWidth
+              val previous   = LittleEndian.decode(internal.bytes, start, scalarSize)
+              LittleEndian.write(update(previous), internal.bytes, start, scalarSize)
+              Right(previous)
+          }
+        }
+      case Region.External(id) =>
+        pointer.offset.refineEither[Positive0]
+          .leftMap(_ =>
+            ExecutionFailure.InvalidRequest(s"invalid external atomic offset ${pointer.offset}")
+          )
+          .flatMap(offset => flush().flatMap(_ => memory.atomicModifyValue(id, offset, size)(update)))
+      case Region.Null => Left(ExecutionFailure.InvalidRequest("cannot atomically modify a null SPIR-V pointer"))
+      case Region.Opaque(bits) =>
+        Left(ExecutionFailure.InvalidRequest(
+          s"cannot atomically modify opaque SPIR-V pointer 0x${java.lang.Long.toHexString(bits)}"
+        ))
     }
 
-    /** Keep read-modify-write atomics indivisible when workgroups share a pool. */
-    def atomic[A](operation: => A): A = if (threadSafe) lock.synchronized(operation) else operation
-
-    def flush(): Either[ExecutionFailure, Unit] = withLock {
-      val allocations = writes.iterator.toArray.sortBy(_._1.toLong)
+    @SuppressWarnings(Array("scalafix:DisableSyntax.return", "scalafix:DisableSyntax.var"))
+    def flush(): Either[ExecutionFailure, Unit] = {
+      val allocations = writes.iterator.toArray.sortBy(_._1.value)
       var allocation  = 0
       while (allocation < allocations.length) {
         val (id, pending) = allocations(allocation)
@@ -712,8 +782,8 @@ object Interpreter {
               offset = page.nextCleanByte(start)
               memory.write(
                 id,
-                (number << 12) + start.toLong,
-                Col.from(java.util.Arrays.copyOfRange(page.bytes, start, offset))
+                ((number << 12) + start.toLong).refineUnsafe[Positive0],
+                Vec.from(java.util.Arrays.copyOfRange(page.bytes, start, offset))
               ) match {
                 case Left(error) => return Left(error)
                 case Right(())   => ()
@@ -724,13 +794,20 @@ object Interpreter {
         }
         allocation += 1
       }
+      writes.clear()
       Right(())
     }
 
-    private def checkedRange(length: Int, offset: Long, size: Int): Either[ExecutionFailure, Int] =
+    private def checkedRange(
+        length: Int,
+        offset: Long,
+        size: Int
+    ): Either[ExecutionFailure, Int] =
       ByteRange
         .start(length, offset, size)
-        .toRight(ExecutionFailure.InvalidRequest(s"internal byte range $offset + $size exceeds $length"))
+        .toRight(
+          ExecutionFailure.InvalidRequest(s"internal byte range $offset + $size exceeds $length")
+        )
   }
 
   def prepareUnchecked(module: Module): Either[ExecutionFailure, PreparedProgram] =
@@ -747,13 +824,17 @@ object Interpreter {
   /** Validate modules received from an external toolchain before compiling their execution state. Handwritten unit
     * fixtures may use the validation-free overload to exercise individual interpreter rules in isolation.
     */
-  def prepare(module: Module, environment: Environment): Either[ExecutionFailure, PreparedProgram] =
-    Validator.validate(module, environment) match {
-      case ValidationResult.Valid           => prepareUnchecked(module)
-      case ValidationResult.Invalid(issues) =>
-        Left(ExecutionFailure.InvalidRequest(issues.map(_.message).mkString("invalid SPIR-V module: ", "; ", "")))
-      case ValidationResult.Unsupported(issues) =>
-        Left(ExecutionFailure.Unsupported(issues.map(_.message).mkString("unsupported SPIR-V module: ", "; ", "")))
+  def prepare(module: Module, environment: Validation.Environment): Either[ExecutionFailure, PreparedProgram] =
+    Validation.validate(module, environment) match {
+      case ValidationOutcome.Accepted         => prepareUnchecked(module)
+      case ValidationOutcome.Rejected(issues) =>
+        Left(ExecutionFailure.InvalidRequest(
+          issues.map(_.message).mkString("invalid SPIR-V module: ", "; ", "")
+        ))
+      case ValidationOutcome.Incomplete(issues) =>
+        Left(ExecutionFailure.Unsupported(
+          issues.map(_.message).mkString("unsupported SPIR-V module: ", "; ", "")
+        ))
     }
 
   def run(program: PreparedProgram, dispatch: KernelDispatch, memory: ExecutionMemory): Either[ExecutionFailure, Unit] =
@@ -763,7 +844,7 @@ object Interpreter {
       program: PreparedProgram,
       dispatch: KernelDispatch,
       memory: ExecutionMemory,
-      metrics: PerformanceMetrics
+      metrics: Performance.Metrics
   ): Either[ExecutionFailure, Unit] =
     run(program, dispatch, memory, ExecutionControl.default, metrics)
 
@@ -773,25 +854,25 @@ object Interpreter {
       memory: ExecutionMemory,
       control: ExecutionControl
   ): Either[ExecutionFailure, Unit] =
-    runMeasured(program, dispatch, memory, control, null)
+    runMeasured(program, dispatch, memory, control, None)
 
   def run(
       program: PreparedProgram,
       dispatch: KernelDispatch,
       memory: ExecutionMemory,
       control: ExecutionControl,
-      metrics: PerformanceMetrics
+      metrics: Performance.Metrics
   ): Either[ExecutionFailure, Unit] =
-    runMeasured(program, dispatch, memory, control, metrics)
+    runMeasured(program, dispatch, memory, control, Some(metrics))
 
   private def runMeasured(
       program: PreparedProgram,
       dispatch: KernelDispatch,
       memory: ExecutionMemory,
       control: ExecutionControl,
-      metrics: PerformanceMetrics | Null
+      metrics: Option[Performance.Metrics]
   ): Either[ExecutionFailure, Unit] = {
-    val started = if (metrics == null) 0L else System.nanoTime()
+    val started = metrics.fold(0L)(_ => PlatformTime.monotonicNanos)
     try runValidated(program.value, dispatch, memory, control, metrics)
     catch {
       case NonFatal(error) =>
@@ -800,7 +881,8 @@ object Interpreter {
             s"malformed SPIR-V execution state: ${Option(error.getMessage).getOrElse(error.getClass.getSimpleName)}"
           )
         )
-    } finally if (metrics != null) metrics.recordElapsed(System.nanoTime() - started)
+    } finally
+      metrics.foreach(_.recordElapsed(math.max(0L, PlatformTime.monotonicNanos - started)))
   }
 
   def runUnchecked(module: Module, dispatch: KernelDispatch, memory: ExecutionMemory): Either[ExecutionFailure, Unit] =
@@ -811,25 +893,36 @@ object Interpreter {
       dispatch: KernelDispatch,
       memory: ExecutionMemory,
       control: ExecutionControl,
-      metrics: PerformanceMetrics | Null
+      metrics: Option[Performance.Metrics]
   ): Either[ExecutionFailure, Unit] =
     program.entryPoints.get(dispatch.kernelName).toRight(
-      ExecutionFailure.NotFound(s"SPIR-V entry point ${dispatch.kernelName} does not exist")
+      ExecutionFailure.NotFound(
+        s"SPIR-V entry point ${dispatch.kernelName.value} does not exist"
+      )
     ).flatMap { functionId =>
       program.functions.get(functionId).toRight(
-        ExecutionFailure.InvalidRequest(s"SPIR-V entry point ${dispatch.kernelName} has no function body")
+        ExecutionFailure.InvalidRequest(
+          s"SPIR-V entry point ${dispatch.kernelName.value} has no function body"
+        )
       ).flatMap { function =>
         Either.cond(
           function.parameters.size == dispatch.arguments.size,
           (),
           ExecutionFailure.InvalidRequest(
-            s"SPIR-V entry point ${dispatch.kernelName} expects ${function.parameters.size} arguments, " +
+            s"SPIR-V entry point ${dispatch.kernelName.value} expects ${function.parameters.size} arguments, " +
               s"received ${dispatch.arguments.size}"
           )
         ).flatMap(_ => executeDispatch(program, function, dispatch, memory, control, metrics))
       }
     }
 
+  // Module compilation fills indexed tables in one pass and stops at the first malformed instruction.
+  @SuppressWarnings(
+    Array(
+      "scalafix:DisableSyntax.var",
+      "scalafix:DisableSyntax.return"
+    )
+  )
   private def compile(module: Module): Either[ExecutionFailure, DispatchProgram] = {
     val types                   = mutable.HashMap.empty[Int, RuntimeType]
     val constants               = mutable.HashMap.empty[Int, RuntimeValue]
@@ -840,19 +933,25 @@ object Interpreter {
     val packedStructures        = mutable.HashSet.empty[Int]
     val byValueParameters       = mutable.HashSet.empty[Int]
     val saturatedConversions    = mutable.HashSet.empty[Int]
-    val extendedInstructionSets = mutable.HashMap.empty[Int, String]
-    val entryPoints             = mutable.HashMap.empty[String, Int]
+    val extendedInstructionSets = mutable.HashMap.empty[Int, SPIRVInstructionSetName]
+    val entryPoints             = mutable.HashMap.empty[KernelName, Int]
     val subgroupSizes           = mutable.HashMap.empty[Int, Int]
     val functions               = mutable.HashMap.empty[Int, FunctionInfo]
-    val functionNames           = mutable.HashMap.empty[Int, String]
+    val functionNames           = mutable.HashMap.empty[Int, SPIRVFunctionName]
 
     module.instructions.foreach {
-      case Instruction.Name(target, name) => functionNames.update(id(target), literalString(name))
+      case Instruction.Name(target, name) =>
+        functionNames.update(id(target), SPIRVFunctionName.applyUnsafe(literalString(name)))
       case Instruction.Decorate(target, decoration)
           if decoration.words.size >= 2 && unsigned(decoration) == 41L =>
         // Optimized/linker-produced modules may omit OpName for imported
         // builtins but retain their LinkageAttributes decoration.
-        functionNames.update(id(target), literalString(decoration.copy(words = decoration.words.drop(1))))
+        functionNames.update(
+          id(target),
+          SPIRVFunctionName.applyUnsafe(
+            literalString(decoration.copy(words = decoration.words.drop(1).refineUnsafe[MinLength[1]]))
+          )
+        )
       case _ => ()
     }
 
@@ -865,29 +964,35 @@ object Interpreter {
           val bits = unsigned(width).toInt
           if (bits < 8 || bits > 64 || bits % 8 != 0)
             return Left(ExecutionFailure.Unsupported(s"SPIR-V integer width $bits is unsupported"))
-          types.update(id(dest), RuntimeType.Integer(bits, unsigned(signedness) != 0L))
+          // The preceding guard proves the SPIR-V scalar bit-width range at the decode boundary.
+          types.update(id(dest), RuntimeType.Integer(BitWidth.applyUnsafe(bits), unsigned(signedness) != 0L))
         case Instruction.TypeFloat(dest, width, _) =>
           val bits = unsigned(width).toInt
-          if (!Col(16, 32, 64).contains(bits))
-            return Left(ExecutionFailure.Unsupported(s"SPIR-V floating-point width $bits is unsupported"))
-          types.update(id(dest), RuntimeType.Floating(bits))
+          if (!Vec(16, 32, 64).contains(bits))
+            return Left(
+              ExecutionFailure.Unsupported(s"SPIR-V floating-point width $bits is unsupported")
+            )
+          // The preceding closed-domain check proves the supported interchange width.
+          types.update(id(dest), RuntimeType.Floating(FloatingPointWidth.applyUnsafe(bits)))
         case Instruction.TypeVector(dest, component, count) =>
           types.update(id(dest), RuntimeType.VectorType(id(component), unsigned(count).toInt))
         case Instruction.TypeArray(dest, element, length) =>
-          val count = constants.get(id(length)).flatMap(scalarBits) match {
+          val count = constants.get(id(length)).flatMap(scalarBits(_)) match {
             case Some(value) => value
             case None        =>
               return Left(
-                ExecutionFailure.InvalidRequest(s"SPIR-V array length %${id(length)} is not a scalar constant")
+                ExecutionFailure.InvalidRequest(
+                  s"SPIR-V array length %${id(length)} is not a scalar constant"
+                )
               )
           }
           types.update(id(dest), RuntimeType.Array(id(element), count))
         case Instruction.TypeStruct(dest, members) =>
-          types.update(id(dest), RuntimeType.Structure(members.map(id)))
+          types.update(id(dest), RuntimeType.Structure(members.map(id(_))))
         case Instruction.TypePointer(dest, storageClass, dataType) =>
           types.update(id(dest), RuntimeType.Pointer(unsigned(storageClass).toInt, id(dataType)))
         case Instruction.TypeFunction(dest, result, parameters) =>
-          types.update(id(dest), RuntimeType.Function(id(result), parameters.map(id)))
+          types.update(id(dest), RuntimeType.Function(id(result), parameters.map(id(_))))
         case Instruction.TypeEvent(dest)                => types.update(id(dest), RuntimeType.Event)
         case Instruction.ConstantTrue(resultType, dest) =>
           constants.update(id(dest), RuntimeValue.Bits(id(resultType), Array(1L)))
@@ -920,7 +1025,7 @@ object Interpreter {
         case Instruction.Variable(resultType, dest, storageClass, initializer) =>
           globals.update(
             id(dest),
-            GlobalInfo(id(resultType), unsigned(storageClass).toInt, initializer.map(id))
+            GlobalInfo(id(resultType), unsigned(storageClass).toInt, initializer.map(id(_)))
           )
         case Instruction.Decorate(target, decoration) if decoration.words.size >= 2 && unsigned(decoration) == 11L =>
           builtins.update(id(target), decoration.words(1).toUnsigned.toInt)
@@ -940,9 +1045,21 @@ object Interpreter {
             Math.toIntExact(decoration.words(1).toUnsigned)
           )
         case Instruction.ExtInstImport(dest, name) =>
-          extendedInstructionSets.update(id(dest), literalString(name))
+          val decodedName = literalString(name)
+          SPIRVInstructionSetName.either(decodedName) match {
+            case Left(_) =>
+              return Left(ExecutionFailure.InvalidRequest("SPIR-V extended instruction-set name is empty"))
+            case Right(instructionSetName) => extendedInstructionSets.update(id(dest), instructionSetName)
+          }
         case Instruction.EntryPoint(_, entryPoint, name, _) =>
-          entryPoints.update(literalString(name), id(entryPoint))
+          val decodedName = literalString(name)
+          KernelName.either(decodedName) match {
+            case Left(_) =>
+              return Left(
+                ExecutionFailure.InvalidRequest(s"invalid SPIR-V entry-point name '$decodedName'")
+              )
+            case Right(kernelName) => entryPoints.update(kernelName, id(entryPoint))
+          }
         case Instruction.ExecutionMode(entryPoint, mode)
             if unsigned(mode) == 35L && mode.words.size >= 2 =>
           val size = mode.words(1).toUnsigned
@@ -967,10 +1084,12 @@ object Interpreter {
             index += 1
           }
           if (index >= module.instructions.size)
-            return Left(ExecutionFailure.InvalidRequest(s"SPIR-V function %$functionId has no OpFunctionEnd"))
+            return Left(
+              ExecutionFailure.InvalidRequest(s"SPIR-V function %$functionId has no OpFunctionEnd")
+            )
           functions.update(
             functionId,
-            FunctionInfo(functionId, Col.from(parameters.result()), start, index, labels.toMap)
+            FunctionInfo(functionId, Vec.from(parameters.result()), start, index, labels.toMap)
           )
         case _ => ()
       }
@@ -999,23 +1118,13 @@ object Interpreter {
           module,
           definedFunctions,
           instruction => isDirectCollective(instruction, definedNames)
-        ),
-        reachableFunctions(module, definedFunctions, isAtomic)
+        )
       )
     )
   }
 
-  private def isAtomic(instruction: Instruction): Boolean = instruction match {
-    case _: Instruction.AtomicStore | _: Instruction.AtomicLoad | _: Instruction.AtomicExchange |
-        _: Instruction.AtomicCompareExchange | _: Instruction.AtomicCompareExchangeWeak |
-        _: Instruction.AtomicFAddEXT | _: Instruction.AtomicFMinEXT | _: Instruction.AtomicFMaxEXT |
-        _: Instruction.AtomicIAdd | _: Instruction.AtomicUMin | _: Instruction.AtomicIIncrement |
-        _: Instruction.AtomicIDecrement | _: Instruction.AtomicISub | _: Instruction.AtomicSMin |
-        _: Instruction.AtomicSMax | _: Instruction.AtomicUMax | _: Instruction.AtomicAnd |
-        _: Instruction.AtomicOr | _: Instruction.AtomicXor => true
-    case _ => false
-  }
-
+  // Fixed-point reachability uses mutable work sets to avoid rebuilding the graph on each iteration.
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private def reachableFunctions(
       module: Module,
       functions: Map[Int, FunctionInfo],
@@ -1056,16 +1165,21 @@ object Interpreter {
     result.toSet
   }
 
-  private def isDirectCollective(instruction: Instruction, functionNames: Map[Int, String]): Boolean =
+  private def isDirectCollective(
+      instruction: Instruction,
+      functionNames: Map[Int, SPIRVFunctionName]
+  ): Boolean =
     instruction match {
       case _: Instruction.GroupAny | _: Instruction.GroupAll | _: Instruction.GroupUMin | _: Instruction.GroupUMax |
           _: Instruction.GroupSMin | _: Instruction.GroupSMax | _: Instruction.GroupIAdd |
           _: Instruction.GroupIMulKHR | _: Instruction.GroupFAdd | _: Instruction.GroupFMin |
           _: Instruction.GroupFMax | _: Instruction.GroupFMulKHR |
-          _: Instruction.SubgroupShuffleINTEL | _: Instruction.SubgroupShuffleUpINTEL | _: Instruction.SubgroupShuffleDownINTEL | _: Instruction.GroupBroadcast |
+          _: Instruction.SubgroupShuffleINTEL | _: Instruction.SubgroupShuffleUpINTEL |
+          _: Instruction.SubgroupShuffleDownINTEL | _: Instruction.GroupBroadcast |
+          _: Instruction.GroupNonUniformBallot |
           _: Instruction.ControlBarrier => true
       case Instruction.FunctionCall(_, _, called, _) =>
-        functionNames.get(id(called)).exists(isOpenCLCollective)
+        functionNames.get(id(called)).exists(name => isOpenCLCollective(name.value))
       case _ => false
     }
 
@@ -1080,12 +1194,14 @@ object Interpreter {
     case value => openCLBroadcastScope(value).isDefined || value.startsWith("_Z26intel_sub_group_shuffle_up")
   }
 
+  // Composite decoding walks operands directly and exits on the first invalid constituent.
+  @SuppressWarnings(Array("scalafix:DisableSyntax.return", "scalafix:DisableSyntax.var"))
   private def constantComposite(
       types: collection.Map[Int, RuntimeType],
       constants: collection.Map[Int, RuntimeValue],
       resultType: Operand,
       destination: Operand,
-      constituents: Col[Operand]
+      constituents: Vec[Operand]
   ): Either[ExecutionFailure, RuntimeValue] = {
     val lanes = Array.newBuilder[Long]
     var index = 0
@@ -1130,7 +1246,9 @@ object Interpreter {
           case Right(count)                                   => Right(RuntimeValue.Bits(typeId, Array.fill(count)(0L)))
           case Left(ExecutionFailure.InvalidRequest(message)) =>
             Left(
-              ExecutionFailure.InvalidRequest(s"$opcode %${id(destination)} has invalid result type: $message")
+              ExecutionFailure.InvalidRequest(
+                s"$opcode %${id(destination)} has invalid result type: $message"
+              )
             )
           case Left(error) => Left(error)
         }
@@ -1143,6 +1261,11 @@ object Interpreter {
   ): Either[ExecutionFailure, Int] = types.get(typeId) match {
     case Some(RuntimeType.Bool) | Some(RuntimeType.Integer(_, _)) | Some(RuntimeType.Floating(_)) |
         Some(RuntimeType.Event) => Right(1)
+    // Composite values may contain pointers (for example, SYCL's group and
+    // h_item implementation objects). Keep one machine-word leaf for each
+    // pointer so OpUndef and composite layout remain representable; standalone
+    // pointers continue to use RuntimeValue.Address.
+    case Some(RuntimeType.Pointer(_, _))                => Right(1)
     case Some(RuntimeType.VectorType(component, count)) =>
       scalarLeafCount(types, component).flatMap(value => checkedLeafCount(typeId, value.toLong * count.toLong))
     case Some(RuntimeType.Array(element, count)) =>
@@ -1154,7 +1277,9 @@ object Interpreter {
         )
       }
     case value =>
-      Left(ExecutionFailure.InvalidRequest(s"SPIR-V type %$typeId has no scalar data leaves: $value"))
+      Left(
+        ExecutionFailure.InvalidRequest(s"SPIR-V type %$typeId has no scalar data leaves: $value")
+      )
   }
 
   private def scalarLeafCount(program: DispatchProgram, typeId: Int): Either[ExecutionFailure, Int] =
@@ -1164,42 +1289,53 @@ object Interpreter {
     Either.cond(
       count >= 0L && count <= Int.MaxValue.toLong,
       count.toInt,
-      ExecutionFailure.InvalidRequest(s"SPIR-V type %$typeId has an invalid scalar leaf count: $count")
+      ExecutionFailure.InvalidRequest(
+        s"SPIR-V type %$typeId has an invalid scalar leaf count: $count"
+      )
     )
 
+  // Work-item scheduling reuses nullable invocation slots and mutable loop state to keep the dispatch hot path lean.
+  @SuppressWarnings(Array(
+    "scalafix:DisableSyntax.null",
+    "scalafix:DisableSyntax.var",
+    "scalafix:DisableSyntax.return"
+  ))
   private def executeDispatch(
       program: DispatchProgram,
       function: FunctionInfo,
       dispatch: KernelDispatch,
       memory: ExecutionMemory,
       control: ExecutionControl,
-      metrics: PerformanceMetrics | Null
+      metrics: Option[Performance.Metrics]
   ): Either[ExecutionFailure, Unit] = {
     val globalValues = materializeGlobals(program, storageClass => storageClass != 4 && storageClass != 6) match {
       case Left(error)  => return Left(error)
       case Right(value) => value
     }
-    val sx             = dispatch.geometry.groupSize.x
-    val sy             = dispatch.geometry.groupSize.y
-    val sz             = dispatch.geometry.groupSize.z
-    val gx             = dispatch.geometry.groupCount.x
-    val gy             = dispatch.geometry.groupCount.y
-    val gz             = dispatch.geometry.groupCount.z
-    val totalLocal     = Math.multiplyExact(Math.multiplyExact(sx, sy), sz)
+    val groupSize  = dispatch.geometry.groupSize
+    val totalLocal = groupSize.volumeInt match {
+      case Left(message) => return Left(ExecutionFailure.InvalidRequest(message))
+      case Right(value)  => value
+    }
     val subgroup       = program.subgroupSizes.getOrElse(function.id, math.max(1, math.min(32, totalLocal)))
     val hasCollectives = program.collectiveFunctions.contains(function.id)
-    val hasAtomics     = program.atomicFunctions.contains(function.id)
     val baseScalars    = BaseScalarValues(program.constants, globalValues, program.module.header.bound.toUnsigned)
-    if (metrics != null) metrics.recordDispatch(hasCollectives)
-    val groupCount = Math.multiplyExact(Math.multiplyExact(gx.toLong, gy.toLong), gz.toLong)
+    metrics.foreach(_.recordDispatch(hasCollectives))
+    val groupCount = dispatch.geometry.groupCount.volume match {
+      case Left(message) => return Left(ExecutionFailure.InvalidRequest(message))
+      case Right(value)  => value
+    }
     // A large number of one-invocation groups is common in oneDPL. For those
     // launches, queueing work-group tasks costs more than the interpreter work
     // itself. Parallelize either genuinely large workgroups or a sufficiently
     // large number of groups; the pool still enforces the global worker cap.
-    val parallelWork   = !hasAtomics && control.parallelism.shouldParallel(groupCount, totalLocal.toLong)
-    val state          = MemoryState(memory, dispatch.pointerRelocations, threadSafe = false)
-    val flushLock      = Object()
-    val reusableValues =
+    // Positive launch volumes imply the scheduler's non-negative task-count contract.
+    val taskCount: Long :| Positive0 = groupCount.refineUnsafe[Positive0]
+    val workItems: Long :| Positive0 = totalLocal.toLong.refineUnsafe[Positive0]
+    val parallelWork                 = control.parallelism.shouldParallel(taskCount, workItems)
+    val state                        = MemoryState(memory, dispatch.pointerRelocations)
+    val flushLock                    = ReentrantLock()
+    val reusableValues               =
       if (hasCollectives || parallelWork) None
       else
         Some(
@@ -1214,23 +1350,32 @@ object Interpreter {
     val reusableExecution = Array[InvocationExecution | Null](null)
 
     def runGroup(
-        groupIndex: Long,
+        groupIndex: Long :| Positive0,
         reuseInvocationState: Boolean,
-        groupMetrics: PerformanceMetrics | Null,
+        groupMetrics: Option[Performance.Metrics],
         reuseValues: Option[InvocationValues],
         reuseExecution: Option[Array[InvocationExecution | Null]],
         groupState: MemoryState
     ): Either[ExecutionFailure, Unit] = {
-      val group           = dispatch.geometry.groupCoordinates(groupIndex)
-      val groupX          = group.x
-      val groupY          = group.y
-      val groupZ          = group.z
+      val group = dispatch.geometry.groupCoordinates(groupIndex) match {
+        case Left(message) => return Left(ExecutionFailure.InvalidRequest(message))
+        case Right(value)  => value
+      }
+      val activeGroupSize = dispatch.geometry.activeGroupSize(group) match {
+        case Left(message) => return Left(ExecutionFailure.InvalidRequest(message))
+        case Right(value)  => value
+      }
+      val activeLocalCount = activeGroupSize.volumeInt match {
+        case Left(message) => return Left(ExecutionFailure.InvalidRequest(message))
+        case Right(value)  => value
+      }
+
       val workgroupValues = materializeGlobals(program, _ == 4) match {
         case Left(error)  => return Left(error)
         case Right(value) => value
       }
       val shared = dispatch.arguments.zipWithIndex.collect { case (KernelArgument.Local(size), argumentIndex) =>
-        argumentIndex -> Region.Internal(Array.ofDim[Byte](checkedSize(size)))
+        argumentIndex -> Region.Internal(InternalMemory(Array.ofDim[Byte](checkedSize(size))))
       }.toMap
       val reusableValues = if (hasCollectives) None
       else reuseValues.orElse(
@@ -1248,106 +1393,113 @@ object Interpreter {
         case Some(slot) => slot(0)
         case None       => null
       }
-      val executions = mutable.ArrayBuffer.empty[InvocationExecution]
-      var localZ     = 0
-      while (localZ < sz) {
-        var localY = 0
-        while (localY < sy) {
-          var localX = 0
-          while (localX < sx) {
-            val linearLocal     = (localZ * sy + localY) * sx + localX
-            val relativeGlobalX = groupX.toLong * sx + localX
-            val relativeGlobalY = groupY.toLong * sy + localY
-            val relativeGlobalZ = groupZ.toLong * sz + localZ
-            if (
-              relativeGlobalX < dispatch.geometry.globalExtent.x && relativeGlobalY < dispatch.geometry.globalExtent.y &&
-              relativeGlobalZ < dispatch.geometry.globalExtent.z
-            ) {
-              if (groupMetrics != null) groupMetrics.recordInvocation()
-              val globalX       = Math.addExact(dispatch.geometry.globalOffset.x.toLong, relativeGlobalX)
-              val globalY       = Math.addExact(dispatch.geometry.globalOffset.y.toLong, relativeGlobalY)
-              val globalZ       = Math.addExact(dispatch.geometry.globalOffset.z.toLong, relativeGlobalZ)
-              val privateValues = materializeGlobals(program, _ == 6) match {
-                case Left(error)  => return Left(error)
-                case Right(value) => value
-              }
-              val invocation = Invocation(
-                groupX = groupX.toLong,
-                groupY = groupY.toLong,
-                groupZ = groupZ.toLong,
-                localX = localX.toLong,
-                localY = localY.toLong,
-                localZ = localZ.toLong,
-                globalX = globalX,
-                globalY = globalY,
-                globalZ = globalZ,
-                globalSizeX = dispatch.geometry.globalExtent.x.toLong,
-                globalSizeY = dispatch.geometry.globalExtent.y.toLong,
-                globalSizeZ = dispatch.geometry.globalExtent.z.toLong,
-                globalOffsetX = dispatch.geometry.globalOffset.x.toLong,
-                globalOffsetY = dispatch.geometry.globalOffset.y.toLong,
-                globalOffsetZ = dispatch.geometry.globalOffset.z.toLong,
-                workDim = dispatch.geometry.workDim,
-                numWorkgroupsX = dispatch.geometry.groupCount.x.toLong,
-                numWorkgroupsY = dispatch.geometry.groupCount.y.toLong,
-                numWorkgroupsZ = dispatch.geometry.groupCount.z.toLong,
-                workgroupSizeX = sx.toLong,
-                workgroupSizeY = sy.toLong,
-                workgroupSizeZ = sz.toLong,
-                subgroupSize = subgroup,
-                subgroupIndex = linearLocal / subgroup,
-                subgroupLocal = linearLocal % subgroup
-              )
-              prepareInvocation(
-                program,
-                function,
-                dispatch.arguments,
-                shared,
-                invocation,
-                globalValues ++ workgroupValues ++ privateValues,
-                reusableValues,
-                reusableExecution,
-                groupState,
-                baseScalars,
-                groupMetrics
-              ) match {
-                case Left(error)  => return Left(error)
-                case Right(value) =>
-                  if (hasCollectives) executions += value
-                  else {
-                    if (reuseInvocationState) {
-                      reusableExecution = value
-                      reuseExecution.foreach(_(0) = value)
-                    }
-                    resumeInvocation(program, value, groupState, control, groupMetrics) match {
-                      case Left(error)                  => return Left(error)
-                      case Right(()) if value.completed => ()
-                      case Right(())                    =>
-                        return Left(
-                          ExecutionFailure.InvalidRequest(
-                            "SPIR-V program suspended at a collective absent from its static instruction set"
-                          )
-                        )
-                    }
-                  }
-              }
-            }
-            localX += 1
-          }
-          localY += 1
+      val executions  = mutable.ArrayBuffer.empty[InvocationExecution]
+      var linearLocal = 0
+      while (linearLocal < activeLocalCount) {
+        // The loop lower bound proves the linear local index is non-negative.
+        val local = activeGroupSize.coordinates(linearLocal.toLong) match {
+          case Left(message) => return Left(ExecutionFailure.InvalidRequest(message))
+          case Right(value)  => value
         }
-        localZ += 1
+        val global = dispatch.geometry.globalCoordinatesLong(group, local) match {
+          case Left(message) => return Left(ExecutionFailure.InvalidRequest(message))
+          case Right(value)  => value
+        }
+        if (dispatch.geometry.containsGlobal(global)) {
+          groupMetrics.foreach(_.recordInvocation())
+          val privateValues = materializeGlobals(program, _ == 6) match {
+            case Left(error)  => return Left(error)
+            case Right(value) => value
+          }
+          val subgroupIndex = linearLocal / subgroup
+          val invocation    = Invocation(
+            groupX = group.x.toLong,
+            groupY = group.y.toLong,
+            groupZ = group.z.toLong,
+            localX = local.x.toLong,
+            localY = local.y.toLong,
+            localZ = local.z.toLong,
+            globalX = global.x,
+            globalY = global.y,
+            globalZ = global.z,
+            globalSizeX = dispatch.geometry.globalExtent.x.toLong,
+            globalSizeY = dispatch.geometry.globalExtent.y.toLong,
+            globalSizeZ = dispatch.geometry.globalExtent.z.toLong,
+            globalOffsetX = dispatch.geometry.globalOffset.x.toLong,
+            globalOffsetY = dispatch.geometry.globalOffset.y.toLong,
+            globalOffsetZ = dispatch.geometry.globalOffset.z.toLong,
+            workDim = dispatch.geometry.workDim,
+            numWorkgroupsX = dispatch.geometry.groupCount.x.toLong,
+            numWorkgroupsY = dispatch.geometry.groupCount.y.toLong,
+            numWorkgroupsZ = dispatch.geometry.groupCount.z.toLong,
+            workgroupSizeX = activeGroupSize.x.toLong,
+            workgroupSizeY = activeGroupSize.y.toLong,
+            workgroupSizeZ = activeGroupSize.z.toLong,
+            enqueuedWorkgroupSizeX = groupSize.x.toLong,
+            enqueuedWorkgroupSizeY = groupSize.y.toLong,
+            enqueuedWorkgroupSizeZ = groupSize.z.toLong,
+            subgroupSize = math.min(subgroup, activeLocalCount - subgroupIndex * subgroup),
+            maxSubgroupSize = subgroup,
+            numSubgroups = (activeLocalCount.toLong + subgroup.toLong - 1L) / subgroup.toLong,
+            subgroupIndex = subgroupIndex,
+            subgroupLocal = linearLocal % subgroup
+          )
+          prepareInvocation(
+            program,
+            function,
+            dispatch.arguments,
+            shared,
+            invocation,
+            globalValues ++ workgroupValues ++ privateValues,
+            reusableValues,
+            reusableExecution,
+            groupState,
+            baseScalars,
+            groupMetrics
+          ) match {
+            case Left(error)  => return Left(error)
+            case Right(value) =>
+              if (hasCollectives) executions += value
+              else {
+                if (reuseInvocationState) {
+                  reusableExecution = value
+                  reuseExecution.foreach(_(0) = value)
+                }
+                resumeInvocation(program, value, groupState, control, groupMetrics) match {
+                  case Left(error)                  => return Left(error)
+                  case Right(()) if value.completed => ()
+                  case Right(())                    =>
+                    return Left(
+                      ExecutionFailure.InvalidRequest(
+                        "SPIR-V program suspended at a collective absent from its static instruction set"
+                      )
+                    )
+                }
+              }
+          }
+        }
+        linearLocal += 1
       }
       if (hasCollectives)
         runWorkgroup(program, executions, groupState, control, groupMetrics)
       else Right(())
     }
 
-    val runResult = if (!parallelWork) {
-      var groupIndex = 0L
-      var result     = Right(()): Either[ExecutionFailure, Unit]
-      while (groupIndex < groupCount && result.isRight) {
-        result = runGroup(
+    val runResult = control.parallelism.forEach(taskCount, parallel = parallelWork) { groupIndex =>
+      if (parallelWork) {
+        val groupMetrics = metrics.map(_ => Performance.Metrics())
+        val groupState   = MemoryState(memory, dispatch.pointerRelocations)
+        runGroup(groupIndex, reuseInvocationState = false, groupMetrics, None, None, groupState) match {
+          case Left(error) => Left(error)
+          case Right(_)    => flushLock.withLock(groupState.flush()) match {
+              case Left(error) => Left(error)
+              case Right(_)    =>
+                metrics.foreach(total => groupMetrics.foreach(total.merge))
+                Right(())
+            }
+        }
+      } else {
+        runGroup(
           groupIndex,
           reuseInvocationState = true,
           metrics,
@@ -1355,18 +1507,6 @@ object Interpreter {
           Some(reusableExecution),
           state
         )
-        groupIndex += 1L
-      }
-      result
-    } else {
-      control.parallelism.parallelFor(groupCount) { groupIndex =>
-        val groupMetrics = if (metrics == null) null else PerformanceMetrics()
-        val groupState   = MemoryState(memory, dispatch.pointerRelocations, threadSafe = false)
-        runGroup(groupIndex, reuseInvocationState = false, groupMetrics, None, None, groupState).flatMap { _ =>
-          flushLock.synchronized(groupState.flush())
-        }.map { _ =>
-          if (metrics != null && groupMetrics != null) metrics.merge(groupMetrics)
-        }
       }
     }
     runResult match {
@@ -1399,19 +1539,24 @@ object Interpreter {
       workgroupSizeX: Long,
       workgroupSizeY: Long,
       workgroupSizeZ: Long,
+      enqueuedWorkgroupSizeX: Long,
+      enqueuedWorkgroupSizeY: Long,
+      enqueuedWorkgroupSizeZ: Long,
       subgroupSize: Int,
+      maxSubgroupSize: Int,
+      numSubgroups: Long,
       subgroupIndex: Int,
       subgroupLocal: Int
   ) {
-    val group: Array[Long]         = Array(groupX, groupY, groupZ)
-    val local: Array[Long]         = Array(localX, localY, localZ)
-    val global: Array[Long]        = Array(globalX, globalY, globalZ)
-    val globalSize: Array[Long]    = Array(globalSizeX, globalSizeY, globalSizeZ)
-    val globalOffset: Array[Long]  = Array(globalOffsetX, globalOffsetY, globalOffsetZ)
-    val workgroupSize: Array[Long] = Array(workgroupSizeX, workgroupSizeY, workgroupSizeZ)
+    val group: Array[Long]                 = Array(groupX, groupY, groupZ)
+    val local: Array[Long]                 = Array(localX, localY, localZ)
+    val global: Array[Long]                = Array(globalX, globalY, globalZ)
+    val globalSize: Array[Long]            = Array(globalSizeX, globalSizeY, globalSizeZ)
+    val globalOffset: Array[Long]          = Array(globalOffsetX, globalOffsetY, globalOffsetZ)
+    val workgroupSize: Array[Long]         = Array(workgroupSizeX, workgroupSizeY, workgroupSizeZ)
+    val enqueuedWorkgroupSize: Array[Long] =
+      Array(enqueuedWorkgroupSizeX, enqueuedWorkgroupSizeY, enqueuedWorkgroupSizeZ)
     val numWorkgroups: Array[Long] = Array(numWorkgroupsX, numWorkgroupsY, numWorkgroupsZ)
-    def numSubgroups: Long         =
-      (workgroupSizeX * workgroupSizeY * workgroupSizeZ + subgroupSize.toLong - 1L) / subgroupSize.toLong
   }
 
   private enum CollectiveKind {
@@ -1431,6 +1576,7 @@ object Interpreter {
     case ShuffleUp
     case ShuffleDown
     case Broadcast
+    case Ballot
     case Barrier
   }
 
@@ -1461,9 +1607,11 @@ object Interpreter {
       scope: Int,
       payload: CollectivePayload,
       operation: Int = 0,
-      selector: Col[Long] = Col.empty
+      selector: Vec[Long] = Vec.empty
   )
 
+  // PC, call stack and collective suspension are the mutable state of one invocation machine.
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private final class InvocationExecution(
       var invocation: Invocation,
       val values: InvocationValues,
@@ -1489,10 +1637,18 @@ object Interpreter {
     }
   }
 
+  // Invocation setup fills the machine frame sequentially and fails fast on invalid parameters.
+  @SuppressWarnings(
+    Array(
+      "scalafix:DisableSyntax.var",
+      "scalafix:DisableSyntax.return",
+      "scalafix:DisableSyntax.null"
+    )
+  )
   private def prepareInvocation(
       program: DispatchProgram,
       function: FunctionInfo,
-      arguments: Col[KernelArgument],
+      arguments: Vec[KernelArgument],
       shared: Map[Int, Region],
       invocation: Invocation,
       globalValues: Map[Int, RuntimeValue],
@@ -1500,7 +1656,7 @@ object Interpreter {
       reusableExecution: InvocationExecution | Null,
       memory: MemoryState,
       baseScalars: BaseScalarValues,
-      metrics: PerformanceMetrics | Null
+      metrics: Option[Performance.Metrics]
   ): Either[ExecutionFailure, InvocationExecution] = {
     val values = reusableValues match {
       case Some(value) =>
@@ -1531,7 +1687,7 @@ object Interpreter {
             variable,
             RuntimeValue.Address(
               global.pointerType,
-              Pointer(Region.Internal(bytes), 0L, pointee, global.storageClass)
+              Pointer(Region.Internal(InternalMemory(bytes)), 0L, pointee, global.storageClass)
             )
           )
         case None => ()
@@ -1580,29 +1736,31 @@ object Interpreter {
 
   // Keep the loop and semantic families below HotSpot's huge-method threshold.
   // Invocation state is explicit so calls, returns and collective suspension share one path.
+  // The instruction loop exits as soon as the invocation completes, suspends, or faults.
+  @SuppressWarnings(Array("scalafix:DisableSyntax.return"))
   private def resumeInvocation(
       program: DispatchProgram,
       execution: InvocationExecution,
       memory: MemoryState,
       control: ExecutionControl,
-      metrics: PerformanceMetrics | Null
+      metrics: Option[Performance.Metrics]
   ): Either[ExecutionFailure, Unit] = {
     while (execution.pc < execution.currentFunction.end) {
       execution.instructionCount += 1L
-      if (metrics != null) metrics.recordInstruction()
+      metrics.foreach(_.recordInstruction())
       control.checkpoint() match {
         case Left(fault) => return Left(ExecutionFailure.Failed(fault.message))
-        case Right(())   => ()
+        case Right(_)    => ()
       }
-      executeInstruction(program, execution, memory, program.module.instructions(execution.pc)) match {
+      executeInstruction(program, execution, memory, control, program.module.instructions(execution.pc)) match {
         case Left(error) => return Left(error)
-        case Right(())   => ()
+        case Right(_)    => ()
       }
       if (execution.completed || execution.suspended.nonEmpty) return InstructionCompleted
     }
     Left(ExecutionFailure.InvalidRequest(
       s"SPIR-V function %${execution.currentFunction.id} " +
-        s"(${program.functionNames.getOrElse(execution.currentFunction.id, "unnamed")}) " +
+        s"(${program.functionNames.get(execution.currentFunction.id).fold("unnamed")(_.value)}) " +
         "reached OpFunctionEnd without OpReturn"
     ))
   }
@@ -1611,6 +1769,7 @@ object Interpreter {
       program: DispatchProgram,
       execution: InvocationExecution,
       memory: MemoryState,
+      control: ExecutionControl,
       instruction: Instruction
   ): Either[ExecutionFailure, Unit] = instruction match {
     case _: Instruction.FunctionParameter | _: Instruction.Label | _: Instruction.Phi =>
@@ -1620,7 +1779,7 @@ object Interpreter {
     case _: Instruction.Bitcast | _: Instruction.BitCount | _: Instruction.PtrCastToGeneric | _: Instruction.GenericCastToPtr | _: Instruction.GenericCastToPtrExplicit | _: Instruction.PtrAccessChain | _: Instruction.InBoundsPtrAccessChain | _: Instruction.AccessChain | _: Instruction.InBoundsAccessChain | _: Instruction.CompositeExtract | _: Instruction.CompositeConstruct | _: Instruction.CompositeInsert | _: Instruction.VectorExtractDynamic | _: Instruction.VectorInsertDynamic =>
       executeComposite(program, execution, memory, instruction)
     case _: Instruction.VectorShuffle | _: Instruction.ExtInst =>
-      executeExtended(program, execution, memory, instruction)
+      executeExtended(program, execution, memory, control, instruction)
     case _: Instruction.UConvert | _: Instruction.SConvert | _: Instruction.ConvertPtrToU | _: Instruction.ConvertUToPtr | _: Instruction.ConvertSToF | _: Instruction.ConvertUToF | _: Instruction.ConvertFToS | _: Instruction.ConvertFToU | _: Instruction.FConvert | _: Instruction.Undef | _: Instruction.CopyObject | _: Instruction.LifetimeStart | _: Instruction.LifetimeStop =>
       executeConversion(program, execution, memory, instruction)
     case _: Instruction.IAdd | _: Instruction.ISub | _: Instruction.IMul | _: Instruction.UDiv | _: Instruction.UMod | _: Instruction.SDiv | _: Instruction.SRem =>
@@ -1633,15 +1792,23 @@ object Interpreter {
       executeArithmetic(program, execution, instruction)
     case _: Instruction.IsNormal | _: Instruction.SignBitSet | _: Instruction.ULessThan | _: Instruction.UGreaterThan | _: Instruction.ULessThanEqual | _: Instruction.UGreaterThanEqual | _: Instruction.SGreaterThan | _: Instruction.SGreaterThanEqual | _: Instruction.SLessThan | _: Instruction.SLessThanEqual | _: Instruction.Select =>
       executeComparison(program, execution, instruction)
-    case _: Instruction.ControlBarrier | _: Instruction.MemoryBarrier | _: Instruction.GroupAny | _: Instruction.GroupAll | _: Instruction.GroupUMin | _: Instruction.GroupUMax | _: Instruction.GroupSMin | _: Instruction.GroupSMax | _: Instruction.GroupIAdd | _: Instruction.GroupIMulKHR | _: Instruction.GroupFAdd | _: Instruction.GroupFMin | _: Instruction.GroupFMax | _: Instruction.GroupFMulKHR | _: Instruction.SubgroupShuffleINTEL | _: Instruction.SubgroupShuffleUpINTEL | _: Instruction.SubgroupShuffleDownINTEL | _: Instruction.GroupBroadcast =>
+    case _: Instruction.ControlBarrier | _: Instruction.MemoryBarrier | _: Instruction.GroupAny | _: Instruction.GroupAll | _: Instruction.GroupUMin | _: Instruction.GroupUMax | _: Instruction.GroupSMin | _: Instruction.GroupSMax | _: Instruction.GroupIAdd | _: Instruction.GroupIMulKHR | _: Instruction.GroupFAdd | _: Instruction.GroupFMin | _: Instruction.GroupFMax | _: Instruction.GroupFMulKHR | _: Instruction.SubgroupShuffleINTEL | _: Instruction.SubgroupShuffleUpINTEL | _: Instruction.SubgroupShuffleDownINTEL | _: Instruction.GroupBroadcast | _: Instruction.GroupNonUniformBallot =>
       executeCollective(program, execution, instruction)
     case _: Instruction.FunctionCall =>
       executeCall(program, execution, memory, instruction)
     case _: Instruction.Branch | _: Instruction.BranchConditional | _: Instruction.Switch | _: Instruction.ReturnValue | _: Instruction.Return | _: Instruction.AssumeTrueKHR | _: Instruction.LoopMerge | _: Instruction.SelectionMerge =>
       executeBranch(program, execution, instruction)
-    case other => Left(ExecutionFailure.Unsupported(s"${other.opcode} execution is not implemented"))
+    case other =>
+      Left(ExecutionFailure.Unsupported(s"${other.opcode} execution is not implemented"))
   }
 
+  // Phi writes are staged while predecessors are scanned and fail before partial commit.
+  @SuppressWarnings(
+    Array(
+      "scalafix:DisableSyntax.var",
+      "scalafix:DisableSyntax.return"
+    )
+  )
   private def executePhi(
       program: DispatchProgram,
       execution: InvocationExecution,
@@ -1686,11 +1853,14 @@ object Interpreter {
         }
         updates.foreach { case (destination, value) => values.update(destination, value) }
         execution.pc = phiPc
-      case other => return Left(ExecutionFailure.Unsupported(s"${other.opcode} execution is not implemented"))
+      case other =>
+        return Left(ExecutionFailure.Unsupported(s"${other.opcode} execution is not implemented"))
     }
     InstructionCompleted
   }
 
+  // Memory execution fails fast and uses invocation-owned pointer slots for aggregate relocation.
+  @SuppressWarnings(Array("scalafix:DisableSyntax.return"))
   private def executeMemory(
       program: DispatchProgram,
       execution: InvocationExecution,
@@ -1711,7 +1881,7 @@ object Interpreter {
           }
         })
         initializer.flatMap(value => values.get(id(value))).foreach(value =>
-          System.arraycopy(
+          Array.copy(
             encode(program, value),
             0,
             buffer,
@@ -1724,7 +1894,7 @@ object Interpreter {
           RuntimeValue.Address(
             id(resultType),
             Pointer(
-              Region.Internal(buffer),
+              Region.Internal(InternalMemory(buffer)),
               0L,
               pointee,
               unsigned(storageClass).toInt,
@@ -1740,23 +1910,30 @@ object Interpreter {
             program.types.get(id(resultType)) match {
               case Some(RuntimeType.Pointer(_, _)) =>
                 loadPointer(program, memory, source, id(resultType)) match {
-                  case Left(error)  => return Left(error)
+                  case Left(error) =>
+                    return Left(withExecutionContext(error, execution.currentFunction, execution.pc, instruction))
                   case Right(value) =>
                     values.update(id(dest), value)
                     execution.pc += 1
                 }
               case Some(RuntimeType.Bool) | Some(RuntimeType.Integer(_, _)) | Some(RuntimeType.Floating(_)) =>
-                memory.readScalar(source, typeSize(program, id(resultType))) match {
+                scalarMemoryWidth(program, id(resultType)) match {
                   case Left(error) => return Left(error)
-                  case Right(bits) =>
-                    values.updateScalar(id(dest), id(resultType), bits)
-                    execution.pc += 1
+                  case Right(size) => memory.readScalar(source, size) match {
+                      case Left(error)   => return Left(error)
+                      case Right(loaded) =>
+                        values.updateScalar(id(dest), id(resultType), loaded)
+                        execution.pc += 1
+                    }
                 }
-              case _ => memory.read(source, typeSize(program, id(resultType))) match {
-                  case Left(error)  => return Left(error)
-                  case Right(bytes) =>
-                    values.update(id(dest), decode(program, id(resultType), bytes))
-                    execution.pc += 1
+              case _ => nonNegativeTypeSize(program, id(resultType)) match {
+                  case Left(error) => return Left(error)
+                  case Right(size) => memory.read(source, size) match {
+                      case Left(error)  => return Left(error)
+                      case Right(bytes) =>
+                        values.update(id(dest), decode(program, id(resultType), bytes))
+                        execution.pc += 1
+                    }
                 }
             }
         }
@@ -1764,21 +1941,27 @@ object Interpreter {
         address(values, pointer) match {
           case Right(target) if values.scalarType(id(source)) >= 0 =>
             val sourceType = values.scalarType(id(source))
-            memory.writeScalar(target, values.scalarBits(id(source)), typeSize(program, sourceType)) match {
-              case Left(error) =>
-                return Left(withExecutionContext(error, execution.currentFunction, execution.pc, instruction))
-              case Right(()) =>
-                if (typeSize(program, sourceType) == 8)
-                  target.slots.flatMap(_.get(target.offset)).foreach { case (pointerType, template) =>
-                    memory.integerPointer(
-                      values.scalarBits(id(source)),
-                      template.pointee,
-                      template.storageClass
-                    ).toOption.foreach {
-                      pointer => target.slots.foreach(_.update(target.offset, pointerType -> pointer))
-                    }
-                  }
-                execution.pc += 1
+            scalarMemoryWidth(program, sourceType) match {
+              case Left(error) => return Left(error)
+              case Right(size) =>
+                memory.writeScalar(target, values.scalarBits(id(source)), size) match {
+                  case Left(error) =>
+                    return Left(withExecutionContext(error, execution.currentFunction, execution.pc, instruction))
+                  case Right(()) =>
+                    if (size.value == 8)
+                      target.slots.foreach { slots =>
+                        slots.get(target.offset).foreach { case (pointerType, template) =>
+                          memory.integerPointer(
+                            values.scalarBits(id(source)),
+                            template.pointee,
+                            template.storageClass
+                          ).toOption.foreach { pointer =>
+                            slots.update(target.offset, pointerType -> pointer)
+                          }
+                        }
+                      }
+                    execution.pc += 1
+                }
             }
           case Right(target) => values.get(id(source)) match {
               case Some(RuntimeValue.Address(sourceType, value)) =>
@@ -1798,15 +1981,17 @@ object Interpreter {
       case Instruction.CopyMemory(target, source, _, _) =>
         (address(values, target), address(values, source)) match {
           case (Right(destination), Right(origin)) =>
-            val size = typeSize(program, origin.pointee)
-            memory.read(origin, size) match {
-              case Left(error)  => return Left(error)
-              case Right(bytes) =>
-                memory.write(destination, bytes).flatMap(_ =>
-                  memory.copySlots(destination, origin, size.toLong)
-                ) match {
-                  case Left(error) => return Left(error)
-                  case Right(())   => execution.pc += 1
+            nonNegativeTypeSize(program, origin.pointee) match {
+              case Left(error) => return Left(error)
+              case Right(size) => memory.read(origin, size) match {
+                  case Left(error)  => return Left(error)
+                  case Right(bytes) =>
+                    memory.write(destination, bytes).flatMap(_ =>
+                      memory.copySlots(destination, origin, size.toLong)
+                    ) match {
+                      case Left(error) => return Left(error)
+                      case Right(())   => execution.pc += 1
+                    }
                 }
             }
           case (Left(error), _) => return Left(error)
@@ -1814,8 +1999,9 @@ object Interpreter {
         }
       case Instruction.CopyMemorySized(target, source, size, _, _) =>
         (address(values, target), address(values, source), scalar(values, size)) match {
-          case (Right(destination), Right(origin), Right(rawSize)) if rawSize <= Int.MaxValue.toLong =>
-            val byteCount = rawSize.toInt
+          case (Right(destination), Right(origin), Right(rawSize))
+              if rawSize >= 0L && rawSize <= Int.MaxValue.toLong =>
+            val byteCount = rawSize.toInt.refineUnsafe[Positive0]
             memory.read(origin, byteCount) match {
               case Left(error)  => return Left(error)
               case Right(bytes) =>
@@ -1827,7 +2013,9 @@ object Interpreter {
                 }
             }
           case (Right(_), Right(_), Right(rawSize)) =>
-            return Left(ExecutionFailure.InvalidRequest(s"OpCopyMemorySized byte count $rawSize is too large"))
+            return Left(ExecutionFailure.InvalidRequest(
+              s"OpCopyMemorySized byte count $rawSize is outside the supported range"
+            ))
           case (Left(error), _, _) => return Left(error)
           case (_, Left(error), _) => return Left(error)
           case (_, _, Left(error)) => return Left(error)
@@ -1866,7 +2054,9 @@ object Interpreter {
           _     <- Either.cond(
             scope == 2L,
             (),
-            ExecutionFailure.Unsupported(s"OpGroupWaitEvents execution scope $scope is not Workgroup")
+            ExecutionFailure.Unsupported(
+              s"OpGroupWaitEvents execution scope $scope is not Workgroup"
+            )
           )
           _ <- Either.cond(
             count >= 0L,
@@ -1877,11 +2067,14 @@ object Interpreter {
           case Left(error) => return Left(error)
           case Right(())   => execution.pc += 1
         }
-      case other => return Left(ExecutionFailure.Unsupported(s"${other.opcode} execution is not implemented"))
+      case other =>
+        return Left(ExecutionFailure.Unsupported(s"${other.opcode} execution is not implemented"))
     }
     InstructionCompleted
   }
 
+  // Composite operations scan variable operands and retain the first validation failure.
+  @SuppressWarnings(Array("scalafix:DisableSyntax.return", "scalafix:DisableSyntax.var"))
   private def executeComposite(
       program: DispatchProgram,
       execution: InvocationExecution,
@@ -1922,7 +2115,7 @@ object Interpreter {
           case (Some(RuntimeType.Pointer(8, pointee)), Some(RuntimeValue.Address(sourceType, pointer))) =>
             program.types.get(sourceType) match {
               case Some(RuntimeType.Pointer(storageClass, sourcePointee))
-                  if Col(4, 5, 7).contains(storageClass) && sourcePointee == pointee &&
+                  if Vec(4, 5, 7).contains(storageClass) && sourcePointee == pointee &&
                     pointer.pointee == pointee && (pointer.region == Region.Null || pointer.storageClass == storageClass) =>
                 values.update(id(dest), RuntimeValue.Address(id(resultType), pointer))
                 execution.pc += 1
@@ -1943,7 +2136,9 @@ object Interpreter {
             )
           case (None, _) =>
             return Left(
-              ExecutionFailure.InvalidRequest(s"OpPtrCastToGeneric result type %${id(resultType)} is undefined")
+              ExecutionFailure.InvalidRequest(
+                s"OpPtrCastToGeneric result type %${id(resultType)} is undefined"
+              )
             )
           case (_, None) => return Left(undefined(source))
           case _         => return Left(ExecutionFailure.InvalidRequest("OpPtrCastToGeneric source is not a pointer"))
@@ -2022,7 +2217,9 @@ object Interpreter {
           case (Some(RuntimeValue.Bits(_, lanes)), Some(RuntimeValue.Bits(_, Array(component)))) =>
             val selected = component.toInt
             if (selected < 0 || selected >= lanes.length)
-              return Left(ExecutionFailure.InvalidRequest(s"OpVectorExtractDynamic index $selected is out of range"))
+              return Left(ExecutionFailure.InvalidRequest(
+                s"OpVectorExtractDynamic index $selected is out of range"
+              ))
             values.update(id(dest), RuntimeValue.Bits(id(resultType), Array(lanes(selected))))
             execution.pc += 1
           case (None, _) => return Left(undefined(vector))
@@ -2034,7 +2231,9 @@ object Interpreter {
           case (Some(RuntimeValue.Bits(_, lanes)), Some(RuntimeValue.Bits(_, Array(value))), Right(selected)) =>
             val position = selected.toInt
             if (position < 0 || position >= lanes.length)
-              return Left(ExecutionFailure.InvalidRequest(s"OpVectorInsertDynamic index $position is out of range"))
+              return Left(ExecutionFailure.InvalidRequest(
+                s"OpVectorInsertDynamic index $position is out of range"
+              ))
             val result = lanes.clone()
             result(position) = value
             values.update(id(dest), RuntimeValue.Bits(id(resultType), result))
@@ -2044,15 +2243,19 @@ object Interpreter {
           case (_, _, Left(error)) => return Left(error)
           case _ => return Left(ExecutionFailure.InvalidRequest("OpVectorInsertDynamic requires scalar component"))
         }
-      case other => return Left(ExecutionFailure.Unsupported(s"${other.opcode} execution is not implemented"))
+      case other =>
+        return Left(ExecutionFailure.Unsupported(s"${other.opcode} execution is not implemented"))
     }
     InstructionCompleted
   }
 
+  // Extended vector operations use indexed hot loops and fail on the first invalid lane or operand.
+  @SuppressWarnings(Array("scalafix:DisableSyntax.return", "scalafix:DisableSyntax.var"))
   private def executeExtended(
       program: DispatchProgram,
       execution: InvocationExecution,
       memory: MemoryState,
+      control: ExecutionControl,
       instruction: Instruction
   ): Either[ExecutionFailure, Unit] = {
     val values = execution.values
@@ -2090,18 +2293,23 @@ object Interpreter {
             }
           case (None, _) => return Left(undefined(vector1))
           case (_, None) => return Left(undefined(vector2))
-          case _ => return Left(ExecutionFailure.InvalidRequest("OpVectorShuffle operands must be numeric vectors"))
+          case _         => return Left(
+              ExecutionFailure.InvalidRequest("OpVectorShuffle operands must be numeric vectors")
+            )
         }
       case Instruction.ExtInst(resultType, dest, set, inst, sources) =>
-        extendedInstruction(program, values, memory, resultType, dest, set, inst, sources) match {
+        extendedInstruction(program, values, memory, control, resultType, dest, set, inst, sources) match {
           case Left(error) => return Left(error)
           case Right(())   => execution.pc += 1
         }
-      case other => return Left(ExecutionFailure.Unsupported(s"${other.opcode} execution is not implemented"))
+      case other =>
+        return Left(ExecutionFailure.Unsupported(s"${other.opcode} execution is not implemented"))
     }
     InstructionCompleted
   }
 
+  // Conversion dispatch exits immediately when operand or type validation fails.
+  @SuppressWarnings(Array("scalafix:DisableSyntax.return"))
   private def executeConversion(
       program: DispatchProgram,
       execution: InvocationExecution,
@@ -2136,7 +2344,7 @@ object Interpreter {
           case _                =>
             return Left(ExecutionFailure.InvalidRequest("OpConvertPtrToU requires a scalar integer result"))
         }
-        address(values, pointer).flatMap(memory.pointerInteger) match {
+        address(values, pointer).flatMap(memory.pointerInteger(_)) match {
           case Left(error)  => return Left(error)
           case Right(value) =>
             values.update(id(dest), RuntimeValue.Bits(id(resultType), Array(value & mask(resultWidth))))
@@ -2167,7 +2375,9 @@ object Interpreter {
             return Left(ExecutionFailure.InvalidRequest("OpConvertUToPtr requires a pointer result type"))
           case (None, _) =>
             return Left(
-              ExecutionFailure.InvalidRequest(s"OpConvertUToPtr result type %${id(resultType)} is undefined")
+              ExecutionFailure.InvalidRequest(
+                s"OpConvertUToPtr result type %${id(resultType)} is undefined"
+              )
             )
         }
       case Instruction.ConvertSToF(resultType, dest, source) =>
@@ -2219,11 +2429,14 @@ object Interpreter {
           case Left(error) => return Left(error)
           case Right(())   => execution.pc += 1
         }
-      case other => return Left(ExecutionFailure.Unsupported(s"${other.opcode} execution is not implemented"))
+      case other =>
+        return Left(ExecutionFailure.Unsupported(s"${other.opcode} execution is not implemented"))
     }
     InstructionCompleted
   }
 
+  // Integer dispatch exits immediately when operand or type validation fails.
+  @SuppressWarnings(Array("scalafix:DisableSyntax.return"))
   private def executeInteger(
       program: DispatchProgram,
       execution: InvocationExecution,
@@ -2298,11 +2511,14 @@ object Interpreter {
           case Left(error) => return Left(error)
           case Right(())   => execution.pc += 1
         }
-      case other => return Left(ExecutionFailure.Unsupported(s"${other.opcode} execution is not implemented"))
+      case other =>
+        return Left(ExecutionFailure.Unsupported(s"${other.opcode} execution is not implemented"))
     }
     InstructionCompleted
   }
 
+  // Atomic dispatch validates and exits before mutating memory on any failure.
+  @SuppressWarnings(Array("scalafix:DisableSyntax.return"))
   private def executeAtomic(
       program: DispatchProgram,
       execution: InvocationExecution,
@@ -2617,11 +2833,14 @@ object Interpreter {
           case Left(error) => return Left(error)
           case Right(())   => execution.pc += 1
         }
-      case other => return Left(ExecutionFailure.Unsupported(s"${other.opcode} execution is not implemented"))
+      case other =>
+        return Left(ExecutionFailure.Unsupported(s"${other.opcode} execution is not implemented"))
     }
     InstructionCompleted
   }
 
+  // The XOR atomic specialization shares the same fail-before-write contract.
+  @SuppressWarnings(Array("scalafix:DisableSyntax.return"))
   private def executeAtomicXor(
       program: DispatchProgram,
       execution: InvocationExecution,
@@ -2637,17 +2856,20 @@ object Interpreter {
       case Instruction.ShiftLeftLogical(resultType, dest, base, shift) =>
         integerShift(program, values, resultType, dest, base, shift, "OpShiftLeftLogical") {
           (value, amount, width) =>
-            if (java.lang.Long.compareUnsigned(amount, width.toLong) >= 0) 0L
+            if (java.lang.Long.compareUnsigned(amount, width.value.toLong) >= 0) 0L
             else value << amount.toInt
         } match {
           case Left(error) => return Left(error)
           case Right(())   => execution.pc += 1
         }
-      case other => return Left(ExecutionFailure.Unsupported(s"${other.opcode} execution is not implemented"))
+      case other =>
+        return Left(ExecutionFailure.Unsupported(s"${other.opcode} execution is not implemented"))
     }
     InstructionCompleted
   }
 
+  // Arithmetic dispatch exits immediately on undefined or incompatible operands.
+  @SuppressWarnings(Array("scalafix:DisableSyntax.return"))
   private def executeArithmetic(
       program: DispatchProgram,
       execution: InvocationExecution,
@@ -2658,7 +2880,7 @@ object Interpreter {
       case Instruction.ShiftRightLogical(resultType, dest, base, shift) =>
         integerShift(program, values, resultType, dest, base, shift, "OpShiftRightLogical") {
           (value, amount, width) =>
-            if (java.lang.Long.compareUnsigned(amount, width.toLong) >= 0) 0L
+            if (java.lang.Long.compareUnsigned(amount, width.value.toLong) >= 0) 0L
             else (value & mask(width)) >>> amount.toInt
         } match {
           case Left(error) => return Left(error)
@@ -2668,7 +2890,7 @@ object Interpreter {
         integerShift(program, values, resultType, dest, base, shift, "OpShiftRightArithmetic") {
           (value, amount, width) =>
             val signed = signExtend(value, width)
-            if (java.lang.Long.compareUnsigned(amount, width.toLong) >= 0) {
+            if (java.lang.Long.compareUnsigned(amount, width.value.toLong) >= 0) {
               if (signed < 0L) -1L else 0L
             } else signed >> amount.toInt
         } match {
@@ -2865,11 +3087,14 @@ object Interpreter {
           case Left(error) => return Left(error)
           case Right(())   => execution.pc += 1
         }
-      case other => return Left(ExecutionFailure.Unsupported(s"${other.opcode} execution is not implemented"))
+      case other =>
+        return Left(ExecutionFailure.Unsupported(s"${other.opcode} execution is not implemented"))
     }
     InstructionCompleted
   }
 
+  // Comparison dispatch exits immediately on undefined or incompatible operands.
+  @SuppressWarnings(Array("scalafix:DisableSyntax.return"))
   private def executeComparison(
       program: DispatchProgram,
       execution: InvocationExecution,
@@ -2948,7 +3173,9 @@ object Interpreter {
                 values.update(id(dest), RuntimeValue.Bits(id(resultType), result))
                 execution.pc += 1
               case (None, _) =>
-                return Left(ExecutionFailure.InvalidRequest(s"OpSelect condition %${id(condition)} is not boolean"))
+                return Left(ExecutionFailure.InvalidRequest(
+                  s"OpSelect condition %${id(condition)} is not boolean"
+                ))
               case (_, Left(error)) => return Left(error)
               case _                =>
                 return Left(
@@ -2963,17 +3190,24 @@ object Interpreter {
             values.update(id(dest), retag(if (conditionLanes(0) != 0L) yes else no, id(resultType)))
             execution.pc += 1
           case (None, _, _) =>
-            return Left(ExecutionFailure.InvalidRequest(s"OpSelect condition %${id(condition)} is not boolean"))
+            return Left(ExecutionFailure.InvalidRequest(
+              s"OpSelect condition %${id(condition)} is not boolean"
+            ))
           case (_, None, _) => return Left(undefined(whenTrue))
           case (_, _, None) => return Left(undefined(whenFalse))
           case _            =>
-            return Left(ExecutionFailure.InvalidRequest(s"OpSelect condition %${id(condition)} is invalid"))
+            return Left(
+              ExecutionFailure.InvalidRequest(s"OpSelect condition %${id(condition)} is invalid")
+            )
         }
-      case other => return Left(ExecutionFailure.Unsupported(s"${other.opcode} execution is not implemented"))
+      case other =>
+        return Left(ExecutionFailure.Unsupported(s"${other.opcode} execution is not implemented"))
     }
     InstructionCompleted
   }
 
+  // Collective dispatch returns as soon as it emits a rendezvous or encounters an invalid operand.
+  @SuppressWarnings(Array("scalafix:DisableSyntax.return"))
   private def executeCollective(
       program: DispatchProgram,
       execution: InvocationExecution,
@@ -3416,11 +3650,38 @@ object Interpreter {
             )
             return Right(())
         }
-      case other => return Left(ExecutionFailure.Unsupported(s"${other.opcode} execution is not implemented"))
+      case Instruction.GroupNonUniformBallot(resultType, dest, executionScope, pred) =>
+        collectiveBallot(
+          program,
+          values,
+          execution.currentFunction.id,
+          execution.pc,
+          resultType,
+          dest,
+          executionScope,
+          pred
+        ) match {
+          case Left(error)    => return Left(error)
+          case Right(request) =>
+            suspend(
+              execution,
+              execution.currentFunction,
+              execution.pc,
+              execution.currentLabel,
+              execution.predecessor,
+              execution.instructionCount,
+              request
+            )
+            return Right(())
+        }
+      case other =>
+        return Left(ExecutionFailure.Unsupported(s"${other.opcode} execution is not implemented"))
     }
     InstructionCompleted
   }
 
+  // Builtin and function-call argument decoding is indexed and fails fast.
+  @SuppressWarnings(Array("scalafix:DisableSyntax.return", "scalafix:DisableSyntax.var"))
   private def executeCall(
       program: DispatchProgram,
       execution: InvocationExecution,
@@ -3434,7 +3695,9 @@ object Interpreter {
           case Some(value) => value
           case None        =>
             return Left(
-              ExecutionFailure.InvalidRequest(s"OpFunctionCall references undefined function %${id(called)}")
+              ExecutionFailure.InvalidRequest(
+                s"OpFunctionCall references undefined function %${id(called)}"
+              )
             )
         }
         if (arguments.size != callee.parameters.size)
@@ -3443,7 +3706,7 @@ object Interpreter {
               s"OpFunctionCall %${id(called)} expects ${callee.parameters.size} arguments, received ${arguments.size}"
             )
           )
-        program.functionNames.get(id(called)) match {
+        program.functionNames.get(id(called)).map(_.value) match {
           case Some("_Z12get_local_idj") =>
             scalar(values, arguments.head) match {
               case Left(error)                                           => return Left(error)
@@ -3466,25 +3729,29 @@ object Interpreter {
                     )
                 }
               case Right(dimension) =>
-                return Left(ExecutionFailure.InvalidRequest(s"OpenCL get_local_id dimension $dimension is invalid"))
+                return Left(ExecutionFailure.InvalidRequest(
+                  s"OpenCL get_local_id dimension $dimension is invalid"
+                ))
             }
-          case Some("_Z12get_group_idj") | Some("_Z14get_local_sizej") =>
+          case Some("_Z12get_group_idj") | Some("_Z14get_local_sizej") | Some("_Z23get_enqueued_local_sizej") =>
             scalar(values, arguments.head) match {
               case Left(error)                                           => return Left(error)
               case Right(dimension) if dimension >= 0L && dimension < 3L =>
                 integerShape(program, id(resultType)) match {
                   case Some((width, 1)) =>
-                    val source = program.functionNames.get(id(called)) match {
-                      case Some("_Z12get_group_idj")   => execution.invocation.group(dimension.toInt)
-                      case Some("_Z14get_local_sizej") => execution.invocation.workgroupSize(dimension.toInt)
-                      case _                           => 0L
+                    val source = program.functionNames.get(id(called)).map(_.value) match {
+                      case Some("_Z12get_group_idj")            => execution.invocation.group(dimension.toInt)
+                      case Some("_Z14get_local_sizej")          => execution.invocation.workgroupSize(dimension.toInt)
+                      case Some("_Z23get_enqueued_local_sizej") =>
+                        execution.invocation.enqueuedWorkgroupSize(dimension.toInt)
+                      case _ => 0L
                     }
                     values.update(id(dest), RuntimeValue.Bits(id(resultType), Array(source & mask(width))))
                     execution.pc += 1
                   case _ =>
                     return Left(
                       ExecutionFailure.InvalidRequest(
-                        s"OpenCL ${program.functionNames.getOrElse(id(called), "builtin")} result type " +
+                        s"OpenCL ${program.functionNames.get(id(called)).fold("builtin")(_.value)} result type " +
                           s"%${id(resultType)} is not an integer scalar"
                       )
                     )
@@ -3492,7 +3759,7 @@ object Interpreter {
               case Right(dimension) =>
                 return Left(
                   ExecutionFailure.InvalidRequest(
-                    s"OpenCL ${program.functionNames.getOrElse(id(called), "builtin")} dimension $dimension is invalid"
+                    s"OpenCL ${program.functionNames.get(id(called)).fold("builtin")(_.value)} dimension $dimension is invalid"
                   )
                 )
             }
@@ -3518,7 +3785,9 @@ object Interpreter {
                     )
                 }
               case Right(dimension) =>
-                return Left(ExecutionFailure.InvalidRequest(s"OpenCL get_global_id dimension $dimension is invalid"))
+                return Left(ExecutionFailure.InvalidRequest(
+                  s"OpenCL get_global_id dimension $dimension is invalid"
+                ))
             }
           case Some("_Z15get_global_sizej") | Some("_Z17get_global_offsetj") | Some("_Z14get_num_groupsj") =>
             scalar(values, arguments.head) match {
@@ -3526,7 +3795,7 @@ object Interpreter {
               case Right(dimension) if dimension >= 0L && dimension < 3L =>
                 integerShape(program, id(resultType)) match {
                   case Some((width, 1)) =>
-                    val source = program.functionNames.get(id(called)) match {
+                    val source = program.functionNames.get(id(called)).map(_.value) match {
                       case Some("_Z15get_global_sizej")   => execution.invocation.globalSize(dimension.toInt)
                       case Some("_Z17get_global_offsetj") => execution.invocation.globalOffset(dimension.toInt)
                       case Some("_Z14get_num_groupsj")    => execution.invocation.numWorkgroups(dimension.toInt)
@@ -3537,14 +3806,14 @@ object Interpreter {
                   case _ =>
                     return Left(
                       ExecutionFailure.InvalidRequest(
-                        s"OpenCL ${program.functionNames.getOrElse(id(called), "builtin")} result type is not an integer scalar"
+                        s"OpenCL ${program.functionNames.get(id(called)).fold("builtin")(_.value)} result type is not an integer scalar"
                       )
                     )
                 }
               case Right(dimension) =>
                 return Left(
                   ExecutionFailure.InvalidRequest(
-                    s"OpenCL ${program.functionNames.getOrElse(id(called), "builtin")} dimension $dimension is invalid"
+                    s"OpenCL ${program.functionNames.get(id(called)).fold("builtin")(_.value)} dimension $dimension is invalid"
                   )
                 )
             }
@@ -3552,7 +3821,7 @@ object Interpreter {
               Some("_Z16get_sub_group_idv") | Some("_Z18get_num_sub_groupsv") =>
             integerShape(program, id(resultType)) match {
               case Some((width, 1)) =>
-                val source = program.functionNames.get(id(called)) match {
+                val source = program.functionNames.get(id(called)).map(_.value) match {
                   case Some("_Z18get_sub_group_sizev")     => execution.invocation.subgroupSize.toLong
                   case Some("_Z22get_sub_group_local_idv") => execution.invocation.subgroupLocal.toLong
                   case Some("_Z16get_sub_group_idv")       => execution.invocation.subgroupIndex.toLong
@@ -3564,7 +3833,7 @@ object Interpreter {
               case _ =>
                 return Left(
                   ExecutionFailure.InvalidRequest(
-                    s"OpenCL ${program.functionNames.getOrElse(id(called), "builtin")} result type " +
+                    s"OpenCL ${program.functionNames.get(id(called)).fold("builtin")(_.value)} result type " +
                       s"%${id(resultType)} is not an integer scalar"
                   )
                 )
@@ -3595,7 +3864,9 @@ object Interpreter {
             ) match {
               case (Right(value), Some((sourceWidth, 1)), Some((resultWidth, 1))) =>
                 val bits  = value & mask(sourceWidth)
-                val count = if (bits == 0L) sourceWidth.toLong else java.lang.Long.numberOfTrailingZeros(bits).toLong
+                val count =
+                  if (bits == 0L) sourceWidth.value.toLong
+                  else java.lang.Long.numberOfTrailingZeros(bits).toLong
                 values.update(id(dest), RuntimeValue.Bits(id(resultType), Array(count & mask(resultWidth))))
                 execution.pc += 1
               case (Left(error), _, _) => return Left(error)
@@ -3660,7 +3931,7 @@ object Interpreter {
               )
             values.get(id(arguments.head)) match {
               case Some(RuntimeValue.Address(_, pointer)) =>
-                memory.readScalar(pointer, 4) match {
+                memory.readScalar(pointer, MemoryValueByteWidth(4)) match {
                   case Left(error) => return Left(error)
                   case Right(raw)  =>
                     values.update(
@@ -3684,7 +3955,7 @@ object Interpreter {
               )
             values.get(id(arguments.head)) match {
               case Some(RuntimeValue.Address(_, pointer)) =>
-                memory.readScalar(pointer, 2) match {
+                memory.readScalar(pointer, MemoryValueByteWidth(2)) match {
                   case Left(error) => return Left(error)
                   case Right(raw)  =>
                     values.update(
@@ -3721,12 +3992,12 @@ object Interpreter {
               case Some(RuntimeValue.Bits(sourceType, Array(raw))) =>
                 (floatingShape(program, sourceType), integerShape(program, id(resultType))) match {
                   case (Some((width, 1)), Some((resultWidth, 1))) =>
-                    val (exponentMask, fractionMask) = width match {
+                    val (exponentMask, fractionMask) = width.value match {
                       case 16 => (0x7c00L, 0x03ffL)
                       case 32 => (0x7f800000L, 0x007fffffL)
                       case 64 => (0x7ff0000000000000L, 0x000fffffffffffffL)
                     }
-                    val bits  = raw & mask(width)
+                    val bits  = raw & mask(width.bitWidth)
                     val isNan = (bits & exponentMask) == exponentMask && (bits & fractionMask) != 0L
                     values.update(
                       id(dest),
@@ -3739,7 +4010,9 @@ object Interpreter {
                     return Left(ExecutionFailure.InvalidRequest("OpenCL isnan result is not an integer scalar"))
                   case _ =>
                     return Left(
-                      ExecutionFailure.InvalidRequest("OpenCL isnan requires scalar source and result types")
+                      ExecutionFailure.InvalidRequest(
+                        "OpenCL isnan requires scalar source and result types"
+                      )
                     )
                 }
               case Some(_) =>
@@ -3802,7 +4075,7 @@ object Interpreter {
               case Some(value @ RuntimeValue.Bits(sourceType, lanes))
                   if lanes.length == 1 && integerShape(program, sourceType).isDefined &&
                     integerShape(program, sourceType) == integerShape(program, id(resultType)) =>
-                val scope = program.functionNames.get(id(called)) match {
+                val scope = program.functionNames.get(id(called)).map(_.value) match {
                   case Some("_Z28sub_group_scan_exclusive_addi") => 3
                   case _                                         => 2
                 }
@@ -3854,7 +4127,7 @@ object Interpreter {
                     execution.pc,
                     scope,
                     CollectivePayload.Value(id(resultType), id(dest), value),
-                    selector = Col(localId & mask(width))
+                    selector = Vec(localId & mask(width))
                   )
                 )
                 return Right(())
@@ -3895,11 +4168,14 @@ object Interpreter {
             execution.currentLabel = -1
             execution.predecessor = -1
         }
-      case other => return Left(ExecutionFailure.Unsupported(s"${other.opcode} execution is not implemented"))
+      case other =>
+        return Left(ExecutionFailure.Unsupported(s"${other.opcode} execution is not implemented"))
     }
     InstructionCompleted
   }
 
+  // Branch-table decoding advances a cursor and exits on malformed control flow.
+  @SuppressWarnings(Array("scalafix:DisableSyntax.return", "scalafix:DisableSyntax.var"))
   private def executeBranch(
       program: DispatchProgram,
       execution: InvocationExecution,
@@ -3926,12 +4202,12 @@ object Interpreter {
             while (index < targets.size) {
               val pair    = targets(index)
               val literal = pair.words match {
-                case Col(low, _) =>
-                  if (pair.kind != "PairLiteralIntegerIdRef")
+                case Vec(low, _) =>
+                  if (pair.kind.value != "PairLiteralIntegerIdRef")
                     return Left(ExecutionFailure.InvalidRequest("OpSwitch target is not a literal/label pair"))
                   low.toUnsigned
-                case Col(low, high, _) =>
-                  if (pair.kind != "PairLiteralIntegerIdRef")
+                case Vec(low, high, _) =>
+                  if (pair.kind.value != "PairLiteralIntegerIdRef")
                     return Left(ExecutionFailure.InvalidRequest("OpSwitch target is not a literal/label pair"))
                   low.toUnsigned | (high.toUnsigned << 32)
                 case _ =>
@@ -3941,7 +4217,7 @@ object Interpreter {
                 return Left(ExecutionFailure.InvalidRequest("OpSwitch has an incomplete literal/label pair"))
               val label = pair.words.last
               if (literal == value)
-                target = Operand("IdRef", Col(label))
+                target = Operand(SPIRVOperandKind("IdRef"), Vec.nonEmpty(label))
               index += 1
             }
             execution.predecessor = execution.currentLabel
@@ -3981,7 +4257,8 @@ object Interpreter {
         }
       case Instruction.AssumeTrueKHR(_) | Instruction.LoopMerge(_, _, _) | Instruction.SelectionMerge(_, _) =>
         execution.pc += 1
-      case other => return Left(ExecutionFailure.Unsupported(s"${other.opcode} execution is not implemented"))
+      case other =>
+        return Left(ExecutionFailure.Unsupported(s"${other.opcode} execution is not implemented"))
     }
     InstructionCompleted
   }
@@ -4003,12 +4280,19 @@ object Interpreter {
     execution.suspended = Some(request)
   }
 
+  // Workgroup progress mutates invocation machines in place and stops at the first fault or deadlock.
+  @SuppressWarnings(
+    Array(
+      "scalafix:DisableSyntax.var",
+      "scalafix:DisableSyntax.return"
+    )
+  )
   private def runWorkgroup(
       program: DispatchProgram,
       executions: mutable.ArrayBuffer[InvocationExecution],
       memory: MemoryState,
       control: ExecutionControl,
-      metrics: PerformanceMetrics | Null
+      metrics: Option[Performance.Metrics]
   ): Either[ExecutionFailure, Unit] = {
     while (executions.exists(!_.completed)) {
       var index = 0
@@ -4047,6 +4331,13 @@ object Interpreter {
     Right(())
   }
 
+  // Collective resolution scans the mutable invocation set until no suspended operation remains.
+  @SuppressWarnings(
+    Array(
+      "scalafix:DisableSyntax.var",
+      "scalafix:DisableSyntax.return"
+    )
+  )
   private def resolveCollectives(
       program: DispatchProgram,
       executions: mutable.ArrayBuffer[InvocationExecution]
@@ -4056,7 +4347,7 @@ object Interpreter {
     var index     = 0
     while (index < subgroups.length) {
       val subgroup     = subgroups(index)
-      val participants = Col.from(executions.iterator.filter(_.invocation.subgroupIndex == subgroup))
+      val participants = Vec.from(executions.iterator.filter(_.invocation.subgroupIndex == subgroup))
       val requests     = participants.flatMap(_.suspended)
       if (
         requests.nonEmpty && requests.head.scope == 3 &&
@@ -4076,7 +4367,7 @@ object Interpreter {
           if executions.forall(execution =>
             !execution.completed && execution.suspended.exists(sameCollective(_, request))
           ) =>
-        resolveCollective(program, Col.from(executions), request) match {
+        resolveCollective(program, Vec.from(executions), request) match {
           case Left(error) => return Left(error)
           case Right(())   => resolved += 1
         }
@@ -4114,12 +4405,32 @@ object Interpreter {
         case _ => false
       })
 
+  // Per-lane reduction and ballot loops write directly into the collective result buffer.
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private def resolveCollective(
       program: DispatchProgram,
-      participants: Col[InvocationExecution],
+      participants: Vec[InvocationExecution],
       expected: CollectiveRequest
   ): Either[ExecutionFailure, Unit] = {
     val requests = participants.map(_.suspended.get)
+    def scan(
+        inputs: Vec[Array[Long]],
+        initial: Long,
+        resultType: Int
+    )(combine: (Long, Long) => Long): Vec[RuntimeValue] = {
+      val accumulated = Array.fill(inputs.head.length)(initial)
+      val outputs     = Vec.newBuilder[RuntimeValue]
+      inputs.foreach { input =>
+        val before = accumulated.clone()
+        var lane   = 0
+        while (lane < accumulated.length) {
+          accumulated(lane) = combine(accumulated(lane), input(lane))
+          lane += 1
+        }
+        outputs += RuntimeValue.Bits(resultType, if (expected.operation == 1) accumulated.clone() else before)
+      }
+      outputs.result()
+    }
     expected.payload match {
       case CollectivePayload.Barrier(_, _) =>
         participants.foreach { execution =>
@@ -4134,10 +4445,12 @@ object Interpreter {
             (destination, data, invocationId)
         }
         if (shuffleRequests.size != requests.size)
-          Left(ExecutionFailure.InvalidRequest("subgroup shuffle participants have incompatible payloads"))
+          Left(ExecutionFailure.InvalidRequest(
+            "subgroup shuffle participants have incompatible payloads"
+          ))
         else {
           val results =
-            participants.zip(shuffleRequests).foldLeft[Either[ExecutionFailure, Col[RuntimeValue]]](Right(Col.empty)) {
+            participants.zip(shuffleRequests).foldLeft[Either[ExecutionFailure, Vec[RuntimeValue]]](Right(Vec.empty)) {
               case (Right(existing), request) =>
                 val invocationId = request._2._3
                 invocationId match {
@@ -4150,22 +4463,27 @@ object Interpreter {
                           case _ => Left(ExecutionFailure.InvalidRequest("subgroup shuffle source is not suspended"))
                         }
                       case None =>
-                        Left(ExecutionFailure.InvalidRequest(s"subgroup shuffle source lane $sourceLocal is absent"))
+                        Left(ExecutionFailure.InvalidRequest(
+                          s"subgroup shuffle source lane $sourceLocal is absent"
+                        ))
                     }
                   case _ => Left(ExecutionFailure.InvalidRequest("subgroup shuffle invocation id must be scalar"))
                 }
               case (Left(error), _) => Left(error)
             }
-          results.map { values =>
-            participants.zip(values).foreach { case (execution, value) =>
-              execution.suspended.get.payload match {
-                case CollectivePayload.Shuffle(requestType, destination, _, _) =>
-                  execution.values.update(destination, retag(value, requestType))
-                case _ => ()
+          results match {
+            case Left(error)   => Left(error)
+            case Right(values) =>
+              participants.zip(values).foreach { case (execution, value) =>
+                execution.suspended.get.payload match {
+                  case CollectivePayload.Shuffle(requestType, destination, _, _) =>
+                    execution.values.update(destination, retag(value, requestType))
+                  case _ => ()
+                }
+                execution.pc = execution.suspended.get.pc + 1
+                execution.suspended = None
               }
-              execution.pc = execution.suspended.get.pc + 1
-              execution.suspended = None
-            }
+              Right(())
           }
         }
       case CollectivePayload.ShuffleUp(resultType, _, _, _, delta) =>
@@ -4182,10 +4500,12 @@ object Interpreter {
             (destination, previous, current)
         }
         if (shuffleRequests.size != requests.size)
-          Left(ExecutionFailure.InvalidRequest("subgroup shuffle-up participants have incompatible payloads"))
+          Left(ExecutionFailure.InvalidRequest(
+            "subgroup shuffle-up participants have incompatible payloads"
+          ))
         else {
           val results =
-            participants.zip(shuffleRequests).foldLeft[Either[ExecutionFailure, Col[RuntimeValue]]](Right(Col.empty)) {
+            participants.zip(shuffleRequests).foldLeft[Either[ExecutionFailure, Vec[RuntimeValue]]](Right(Vec.empty)) {
               case (Right(existing), (execution, _)) =>
                 val unwrappedSource = execution.invocation.subgroupLocal.toLong - delta
                 val usePrevious     = unwrappedSource < 0L
@@ -4209,22 +4529,27 @@ object Interpreter {
                       case _ => Left(ExecutionFailure.InvalidRequest("subgroup shuffle-up source is not suspended"))
                     }
                   case None =>
-                    Left(ExecutionFailure.InvalidRequest(s"subgroup shuffle-up source lane $sourceLocal is absent"))
+                    Left(ExecutionFailure.InvalidRequest(
+                      s"subgroup shuffle-up source lane $sourceLocal is absent"
+                    ))
                 }
                 value.map(result => existing :+ retag(result, resultType))
               case (Left(error), _) => Left(error)
             }
-          results.map { values =>
-            participants.zip(values).foreach { case (execution, value) =>
-              val request = execution.suspended.get
-              request.payload match {
-                case CollectivePayload.ShuffleUp(requestType, destination, _, _, _) =>
-                  execution.values.update(destination, retag(value, requestType))
-                case _ => ()
+          results match {
+            case Left(error)   => Left(error)
+            case Right(values) =>
+              participants.zip(values).foreach { case (execution, value) =>
+                val request = execution.suspended.get
+                request.payload match {
+                  case CollectivePayload.ShuffleUp(requestType, destination, _, _, _) =>
+                    execution.values.update(destination, retag(value, requestType))
+                  case _ => ()
+                }
+                execution.pc = request.pc + 1
+                execution.suspended = None
               }
-              execution.pc = request.pc + 1
-              execution.suspended = None
-            }
+              Right(())
           }
         }
       case CollectivePayload.ShuffleDown(resultType, _, _, _, delta) =>
@@ -4241,10 +4566,12 @@ object Interpreter {
             (destination, current, next)
         }
         if (shuffleRequests.size != requests.size)
-          Left(ExecutionFailure.InvalidRequest("subgroup shuffle-down participants have incompatible payloads"))
+          Left(ExecutionFailure.InvalidRequest(
+            "subgroup shuffle-down participants have incompatible payloads"
+          ))
         else {
           val results =
-            participants.zip(shuffleRequests).foldLeft[Either[ExecutionFailure, Col[RuntimeValue]]](Right(Col.empty)) {
+            participants.zip(shuffleRequests).foldLeft[Either[ExecutionFailure, Vec[RuntimeValue]]](Right(Vec.empty)) {
               case (Right(existing), (execution, _)) =>
                 val unwrappedSource = execution.invocation.subgroupLocal.toLong + delta
                 val useNext         = unwrappedSource >= execution.invocation.subgroupSize.toLong
@@ -4264,21 +4591,26 @@ object Interpreter {
                       case _ => Left(ExecutionFailure.InvalidRequest("subgroup shuffle-down source is not suspended"))
                     }
                   case None =>
-                    Left(ExecutionFailure.InvalidRequest(s"subgroup shuffle-down source lane $sourceLocal is absent"))
+                    Left(ExecutionFailure.InvalidRequest(
+                      s"subgroup shuffle-down source lane $sourceLocal is absent"
+                    ))
                 }
                 value.map(result => existing :+ retag(result, resultType))
               case (Left(error), _) => Left(error)
             }
-          results.map { values =>
-            participants.zip(values).foreach { case (execution, value) =>
-              execution.suspended.get.payload match {
-                case CollectivePayload.ShuffleDown(requestType, destination, _, _, _) =>
-                  execution.values.update(destination, retag(value, requestType))
-                case _ => ()
+          results match {
+            case Left(error)   => Left(error)
+            case Right(values) =>
+              participants.zip(values).foreach { case (execution, value) =>
+                execution.suspended.get.payload match {
+                  case CollectivePayload.ShuffleDown(requestType, destination, _, _, _) =>
+                    execution.values.update(destination, retag(value, requestType))
+                  case _ => ()
+                }
+                execution.pc = execution.suspended.get.pc + 1
+                execution.suspended = None
               }
-              execution.pc = execution.suspended.get.pc + 1
-              execution.suspended = None
-            }
+              Right(())
           }
         }
       case CollectivePayload.Value(resultType, _, _) =>
@@ -4287,7 +4619,9 @@ object Interpreter {
             value
         }
         if (requestValues.size != requests.size)
-          Left(ExecutionFailure.InvalidRequest("collective participants have incompatible payloads"))
+          Left(
+            ExecutionFailure.InvalidRequest("collective participants have incompatible payloads")
+          )
         else {
           val results = expected.kind match {
             case CollectiveKind.Any =>
@@ -4295,22 +4629,24 @@ object Interpreter {
                 case RuntimeValue.Bits(_, Array(value)) => value != 0L
                 case _                                  => false
               }
-              Right(Col.fill(participants.size)(RuntimeValue.Bits(resultType, Array(if (any) 1L else 0L))))
+              Right(Vec.fill(participants.size)(RuntimeValue.Bits(resultType, Array(if (any) 1L else 0L))))
             case CollectiveKind.All =>
               val all = requestValues.forall {
                 case RuntimeValue.Bits(_, Array(value)) => value != 0L
                 case _                                  => false
               }
-              Right(Col.fill(participants.size)(RuntimeValue.Bits(resultType, Array(if (all) 1L else 0L))))
+              Right(Vec.fill(participants.size)(RuntimeValue.Bits(resultType, Array(if (all) 1L else 0L))))
             case CollectiveKind.UnsignedMin | CollectiveKind.UnsignedMax | CollectiveKind.SignedMin |
                 CollectiveKind.SignedMax =>
               val inputs = requestValues.collect { case RuntimeValue.Bits(_, lanes) => lanes }
               if (inputs.size != requests.size || inputs.isEmpty)
                 Left(
-                  ExecutionFailure.InvalidRequest(s"${expected.kind} participants do not all provide integer values")
+                  ExecutionFailure.InvalidRequest(
+                    s"${expected.kind} participants do not all provide integer values"
+                  )
                 )
               else {
-                val width   = integerShape(program, resultType).map(_._1).getOrElse(64)
+                val width   = integerShape(program, resultType).map(_._1).getOrElse(BitWidth(64))
                 val signed  = expected.kind == CollectiveKind.SignedMin || expected.kind == CollectiveKind.SignedMax
                 val maximum = expected.kind == CollectiveKind.UnsignedMax || expected.kind == CollectiveKind.SignedMax
                 def extremum(left: Long, right: Long): Long = {
@@ -4321,148 +4657,101 @@ object Interpreter {
                 }
                 if (expected.operation == 0) {
                   val lanes = Array.tabulate(inputs.head.length) { lane =>
-                    inputs.iterator.map(_(lane) & mask(width)).reduce(extremum)
+                    inputs.iterator.map(_(lane) & mask(width)).reduce(extremum(_, _))
                   }
-                  Right(Col.fill(participants.size)(RuntimeValue.Bits(resultType, lanes)))
+                  Right(Vec.fill(participants.size)(RuntimeValue.Bits(resultType, lanes)))
                 } else {
                   val identity =
                     if (signed) {
-                      if (maximum) 1L << (width - 1) else (1L << (width - 1)) - 1L
+                      if (maximum) 1L << (width.value - 1) else (1L << (width.value - 1)) - 1L
                     } else if (maximum) 0L
                     else mask(width)
-                  val accumulated = Array.fill(inputs.head.length)(identity & mask(width))
-                  val outputs     = inputs.map { input =>
-                    val before = accumulated.clone()
-                    var lane   = 0
-                    while (lane < accumulated.length) {
-                      accumulated(lane) = extremum(accumulated(lane), input(lane) & mask(width))
-                      lane += 1
-                    }
-                    RuntimeValue.Bits(resultType, if (expected.operation == 1) accumulated.clone() else before)
-                  }
-                  Right(outputs)
+                  Right(scan(inputs, identity & mask(width), resultType)((left, right) =>
+                    extremum(left, right & mask(width))
+                  ))
                 }
               }
             case CollectiveKind.IntegerAdd =>
               val inputs = requestValues.collect { case RuntimeValue.Bits(_, lanes) => lanes }
               if (inputs.size != requests.size || inputs.isEmpty)
-                Left(ExecutionFailure.InvalidRequest("OpGroupIAdd participants do not all provide integer values"))
+                Left(ExecutionFailure.InvalidRequest(
+                  "OpGroupIAdd participants do not all provide integer values"
+                ))
               else {
-                val width = integerShape(program, resultType).map(_._1).getOrElse(64)
+                val width = integerShape(program, resultType).map(_._1).getOrElse(BitWidth(64))
                 if (expected.operation == 0) {
                   val reduced = Array.tabulate(inputs.head.length) { lane =>
                     inputs.iterator.foldLeft(0L)((sum, input) => (sum + input(lane)) & mask(width))
                   }
-                  Right(Col.fill(participants.size)(RuntimeValue.Bits(resultType, reduced)))
+                  Right(Vec.fill(participants.size)(RuntimeValue.Bits(resultType, reduced)))
                 } else {
-                  val accumulated = Array.fill(inputs.head.length)(0L)
-                  val outputs     = inputs.map { input =>
-                    val before = accumulated.clone()
-                    var lane   = 0
-                    while (lane < accumulated.length) {
-                      accumulated(lane) = (accumulated(lane) + input(lane)) & mask(width)
-                      lane += 1
-                    }
-                    RuntimeValue.Bits(
-                      resultType,
-                      if (expected.operation == 1) accumulated.clone() else before
-                    )
-                  }
-                  Right(outputs)
+                  Right(scan(inputs, 0L, resultType)((left, right) => (left + right) & mask(width)))
                 }
               }
             case CollectiveKind.IntegerMultiply =>
               val inputs = requestValues.collect { case RuntimeValue.Bits(_, lanes) => lanes }
               if (inputs.size != requests.size || inputs.isEmpty)
-                Left(ExecutionFailure.InvalidRequest("OpGroupIMulKHR participants do not all provide integer values"))
+                Left(ExecutionFailure.InvalidRequest(
+                  "OpGroupIMulKHR participants do not all provide integer values"
+                ))
               else {
-                val width = integerShape(program, resultType).map(_._1).getOrElse(64)
+                val width = integerShape(program, resultType).map(_._1).getOrElse(BitWidth(64))
                 if (expected.operation == 0) {
                   val reduced = Array.tabulate(inputs.head.length) { lane =>
                     inputs.iterator.foldLeft(1L)((product, input) => (product * input(lane)) & mask(width))
                   }
-                  Right(Col.fill(participants.size)(RuntimeValue.Bits(resultType, reduced)))
+                  Right(Vec.fill(participants.size)(RuntimeValue.Bits(resultType, reduced)))
                 } else {
-                  val accumulated = Array.fill(inputs.head.length)(1L)
-                  val outputs     = inputs.map { input =>
-                    val before = accumulated.clone()
-                    var lane   = 0
-                    while (lane < accumulated.length) {
-                      accumulated(lane) = (accumulated(lane) * input(lane)) & mask(width)
-                      lane += 1
-                    }
-                    RuntimeValue.Bits(
-                      resultType,
-                      if (expected.operation == 1) accumulated.clone() else before
-                    )
-                  }
-                  Right(outputs)
+                  Right(scan(inputs, 1L, resultType)((left, right) => (left * right) & mask(width)))
                 }
               }
             case CollectiveKind.FloatingAdd =>
               val inputs = requestValues.collect { case RuntimeValue.Bits(_, lanes) => lanes }
               if (inputs.size != requests.size || inputs.isEmpty)
-                Left(ExecutionFailure.InvalidRequest("OpGroupFAdd participants do not all provide floating values"))
+                Left(ExecutionFailure.InvalidRequest(
+                  "OpGroupFAdd participants do not all provide floating values"
+                ))
               else {
-                val width = floatingShape(program, resultType).map(_._1).getOrElse(64)
+                val width = floatingShape(program, resultType).map(_._1).getOrElse(FloatingPointWidth(64))
                 if (expected.operation == 0) {
                   val reduced = Array.tabulate(inputs.head.length) { lane =>
                     inputs.iterator.foldLeft(0L)((sum, input) => floatingAddBits(width, sum, input(lane)))
                   }
-                  Right(Col.fill(participants.size)(RuntimeValue.Bits(resultType, reduced)))
+                  Right(Vec.fill(participants.size)(RuntimeValue.Bits(resultType, reduced)))
                 } else {
-                  val accumulated = Array.fill(inputs.head.length)(0L)
-                  val outputs     = inputs.map { input =>
-                    val before = accumulated.clone()
-                    var lane   = 0
-                    while (lane < accumulated.length) {
-                      accumulated(lane) = floatingAddBits(width, accumulated(lane), input(lane))
-                      lane += 1
-                    }
-                    RuntimeValue.Bits(
-                      resultType,
-                      if (expected.operation == 1) accumulated.clone() else before
-                    )
-                  }
-                  Right(outputs)
+                  Right(scan(inputs, 0L, resultType)((left, right) => floatingAddBits(width, left, right)))
                 }
               }
             case CollectiveKind.FloatingMin | CollectiveKind.FloatingMax =>
               val inputs = requestValues.collect { case RuntimeValue.Bits(_, lanes) => lanes }
               if (inputs.size != requests.size || inputs.isEmpty)
-                Left(ExecutionFailure.InvalidRequest(s"${expected.kind} participants do not all provide values"))
+                Left(ExecutionFailure.InvalidRequest(
+                  s"${expected.kind} participants do not all provide values"
+                ))
               else {
-                val width                                   = floatingShape(program, resultType).map(_._1).getOrElse(64)
-                val maximum                                 = expected.kind == CollectiveKind.FloatingMax
+                val width   = floatingShape(program, resultType).map(_._1).getOrElse(FloatingPointWidth(64))
+                val maximum = expected.kind == CollectiveKind.FloatingMax
                 def extremum(left: Long, right: Long): Long =
                   if (maximum) floatingMaximumBits(width, left, right)
                   else floatingMinimumBits(width, left, right)
                 if (expected.operation == 0) {
                   val reduced = Array.tabulate(inputs.head.length) { lane =>
-                    inputs.iterator.map(_(lane)).reduce(extremum)
+                    inputs.iterator.map(_(lane)).reduce(extremum(_, _))
                   }
-                  Right(Col.fill(participants.size)(RuntimeValue.Bits(resultType, reduced)))
+                  Right(Vec.fill(participants.size)(RuntimeValue.Bits(resultType, reduced)))
                 } else {
-                  val identity    = floatingInfinityBits(width, negative = maximum)
-                  val accumulated = Array.fill(inputs.head.length)(identity)
-                  val outputs     = inputs.map { input =>
-                    val before = accumulated.clone()
-                    var lane   = 0
-                    while (lane < accumulated.length) {
-                      accumulated(lane) = extremum(accumulated(lane), input(lane))
-                      lane += 1
-                    }
-                    RuntimeValue.Bits(resultType, if (expected.operation == 1) accumulated.clone() else before)
-                  }
-                  Right(outputs)
+                  val identity = floatingInfinityBits(width, negative = maximum)
+                  Right(scan(inputs, identity, resultType)(extremum(_, _)))
                 }
               }
             case CollectiveKind.FloatingMultiply =>
               val inputs = requestValues.collect { case RuntimeValue.Bits(_, lanes) => lanes }
               if (inputs.size != requests.size || inputs.isEmpty)
-                Left(ExecutionFailure.InvalidRequest("OpGroupFMulKHR participants do not all provide floating values"))
+                Left(ExecutionFailure.InvalidRequest(
+                  "OpGroupFMulKHR participants do not all provide floating values"
+                ))
               else {
-                val width    = floatingShape(program, resultType).map(_._1).getOrElse(64)
+                val width    = floatingShape(program, resultType).map(_._1).getOrElse(FloatingPointWidth(64))
                 val identity = floatingOneBits(width)
                 if (expected.operation == 0) {
                   val reduced = Array.tabulate(inputs.head.length) { lane =>
@@ -4470,22 +4759,9 @@ object Interpreter {
                       floatingMultiplyBits(width, product, input(lane))
                     }
                   }
-                  Right(Col.fill(participants.size)(RuntimeValue.Bits(resultType, reduced)))
+                  Right(Vec.fill(participants.size)(RuntimeValue.Bits(resultType, reduced)))
                 } else {
-                  val accumulated = Array.fill(inputs.head.length)(identity)
-                  val outputs     = inputs.map { input =>
-                    val before = accumulated.clone()
-                    var lane   = 0
-                    while (lane < accumulated.length) {
-                      accumulated(lane) = floatingMultiplyBits(width, accumulated(lane), input(lane))
-                      lane += 1
-                    }
-                    RuntimeValue.Bits(
-                      resultType,
-                      if (expected.operation == 1) accumulated.clone() else before
-                    )
-                  }
-                  Right(outputs)
+                  Right(scan(inputs, identity, resultType)((left, right) => floatingMultiplyBits(width, left, right)))
                 }
               }
             case CollectiveKind.ShuffleUp =>
@@ -4496,11 +4772,11 @@ object Interpreter {
               Left(ExecutionFailure.InvalidRequest("subgroup shuffle payload was resolved as a value collective"))
             case CollectiveKind.Broadcast =>
               val selected = (expected.scope, expected.selector) match {
-                case (3, Col(x)) =>
+                case (3, Vec(x)) =>
                   participants.indexWhere(_.invocation.subgroupLocal.toLong == x)
-                case (_, Col(x)) =>
+                case (_, Vec(x)) =>
                   participants.indexWhere(_.invocation.localX == x)
-                case (_, Col(x, y, z)) =>
+                case (_, Vec(x, y, z)) =>
                   participants.indexWhere(execution =>
                     execution.invocation.localX == x && execution.invocation.localY == y &&
                       execution.invocation.localZ == z
@@ -4513,28 +4789,80 @@ object Interpreter {
                     s"OpGroupBroadcast local id ${expected.selector.mkString("(", ",", ")")} is outside the workgroup"
                   )
                 )
-              else Right(Col.fill(participants.size)(requestValues(selected)))
+              else Right(Vec.fill(participants.size)(requestValues(selected)))
+            case CollectiveKind.Ballot =>
+              val ballot = Array.fill(4)(0L)
+              val valid  = participants.zip(requestValues).forall {
+                case (execution, RuntimeValue.Bits(_, Array(predicate))) =>
+                  val local = execution.invocation.subgroupLocal
+                  if (predicate != 0L) ballot(local / 32) |= 1L << (local % 32)
+                  true
+                case _ => false
+              }
+              if (!valid)
+                Left(ExecutionFailure.InvalidRequest(
+                  "OpGroupNonUniformBallot participants do not all provide scalar boolean predicates"
+                ))
+              else Right(Vec.fill(participants.size)(RuntimeValue.Bits(resultType, ballot)))
             case CollectiveKind.Barrier =>
               Left(ExecutionFailure.InvalidRequest("barrier rendezvous unexpectedly carried a value"))
           }
-          results.map { values =>
-            participants.zip(values).foreach { case (execution, value) =>
-              val request = execution.suspended.get
-              request.payload match {
-                case CollectivePayload.Value(requestType, destination, _) =>
-                  execution.values.update(destination, retag(value, requestType))
-                case CollectivePayload.Barrier(_, _)              => ()
-                case CollectivePayload.Shuffle(_, _, _, _)        => ()
-                case CollectivePayload.ShuffleUp(_, _, _, _, _)   => ()
-                case CollectivePayload.ShuffleDown(_, _, _, _, _) => ()
+          results match {
+            case Left(error)   => Left(error)
+            case Right(values) =>
+              participants.zip(values).foreach { case (execution, value) =>
+                val request = execution.suspended.get
+                request.payload match {
+                  case CollectivePayload.Value(requestType, destination, _) =>
+                    execution.values.update(destination, retag(value, requestType))
+                  case CollectivePayload.Barrier(_, _)              => ()
+                  case CollectivePayload.Shuffle(_, _, _, _)        => ()
+                  case CollectivePayload.ShuffleUp(_, _, _, _, _)   => ()
+                  case CollectivePayload.ShuffleDown(_, _, _, _, _) => ()
+                }
+                execution.pc = request.pc + 1
+                execution.suspended = None
               }
-              execution.pc = request.pc + 1
-              execution.suspended = None
-            }
+              Right(())
           }
         }
     }
   }
+
+  private def collectiveBallot(
+      program: DispatchProgram,
+      values: InvocationValues,
+      function: Int,
+      pc: Int,
+      resultType: Operand,
+      destination: Operand,
+      executionScope: Operand,
+      pred: Operand
+  ): Either[ExecutionFailure, CollectiveRequest] =
+    (scalar(values, executionScope), values.get(id(pred))) match {
+      case (Right(3L), Some(value @ RuntimeValue.Bits(predType, Array(_))))
+          if integerShape(program, id(resultType)).contains(BitWidth(32) -> 4) &&
+            booleanLanes(program, predType).contains(1) =>
+        Right(
+          CollectiveRequest(
+            CollectiveKind.Ballot,
+            function,
+            pc,
+            3,
+            CollectivePayload.Value(id(resultType), id(destination), value)
+          )
+        )
+      case (Right(scope), _) if scope != 3L =>
+        Left(ExecutionFailure.Unsupported(
+          s"OpGroupNonUniformBallot execution scope $scope is not Subgroup"
+        ))
+      case (Right(_), Some(_)) =>
+        Left(ExecutionFailure.InvalidRequest(
+          "OpGroupNonUniformBallot requires a four-lane 32-bit integer result and scalar boolean predicate"
+        ))
+      case (Left(error), _) => Left(error)
+      case (_, None)        => Left(undefined(pred))
+    }
 
   private def controlBarrier(
       values: InvocationValues,
@@ -4547,7 +4875,7 @@ object Interpreter {
     (scalar(values, executionScope), scalar(values, memoryScope), scalar(values, semantics)) match {
       case (Right(executionScope @ (2L | 3L)), Right(memoryScope @ (2L | 3L)), Right(memorySemantics))
           if (memorySemantics & ~0xffdeL) == 0L &&
-            Col(0L, 2L, 4L, 8L, 16L).contains(memorySemantics & 0x1eL) =>
+            Vec(0L, 2L, 4L, 8L, 16L).contains(memorySemantics & 0x1eL) =>
         Right(
           CollectiveRequest(
             CollectiveKind.Barrier,
@@ -4558,9 +4886,13 @@ object Interpreter {
           )
         )
       case (Right(scope), _, _) if scope != 2L && scope != 3L =>
-        Left(ExecutionFailure.Unsupported(s"OpControlBarrier execution scope $scope is not Subgroup or Workgroup"))
+        Left(ExecutionFailure.Unsupported(
+          s"OpControlBarrier execution scope $scope is not Subgroup or Workgroup"
+        ))
       case (Right(_), Right(scope), _) if scope != 2L && scope != 3L =>
-        Left(ExecutionFailure.Unsupported(s"OpControlBarrier memory scope $scope is not Subgroup or Workgroup"))
+        Left(ExecutionFailure.Unsupported(
+          s"OpControlBarrier memory scope $scope is not Subgroup or Workgroup"
+        ))
       case (Right(_), Right(_), Right(memorySemantics)) =>
         Left(
           ExecutionFailure.InvalidRequest(
@@ -4572,6 +4904,8 @@ object Interpreter {
       case (_, Left(error), _) => Left(error)
     }
 
+  // Group copies advance byte ranges directly rather than constructing intermediate slices.
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private def groupAsyncCopy(
       program: DispatchProgram,
       values: InvocationValues,
@@ -4586,20 +4920,30 @@ object Interpreter {
       stride: Operand
   ): Either[ExecutionFailure, Unit] =
     for {
-      scope        <- scalar(values, executionScope)
-      destination  <- address(values, destinationId)
-      source       <- address(values, sourceId)
-      count        <- scalar(values, numElements)
-      sourceStride <- scalar(values, stride)
-      _            <- Either.cond(
+      scope       <- scalar(values, executionScope)
+      destination <- address(values, destinationId)
+      source      <- address(values, sourceId)
+      count       <- scalar(values, numElements)
+      strideValue <- scalar(values, stride)
+      _           <- Either.cond(
         scope == 2L,
         (),
         ExecutionFailure.Unsupported(s"OpGroupAsyncCopy execution scope $scope is not Workgroup")
       )
       _ <- Either.cond(
-        count >= 0L && sourceStride > 0L,
+        count >= 0L && strideValue > 0L,
         (),
-        ExecutionFailure.InvalidRequest(s"OpGroupAsyncCopy has invalid count/stride $count/$sourceStride")
+        ExecutionFailure.InvalidRequest(
+          s"OpGroupAsyncCopy has invalid count/stride $count/$strideValue"
+        )
+      )
+      _ <- Either.cond(
+        (destination.storageClass == 4 && source.storageClass == 5) ||
+          (destination.storageClass == 5 && source.storageClass == 4),
+        (),
+        ExecutionFailure.InvalidRequest(
+          s"OpGroupAsyncCopy requires Workgroup/CrossWorkgroup pointers, got ${destination.storageClass}/${source.storageClass}"
+        )
       )
       _ <- {
         val elementSize = typeSize(program, destination.pointee)
@@ -4610,36 +4954,55 @@ object Interpreter {
           Right(())
         } else {
           try {
-            val totalBytes = Math.toIntExact(Math.multiplyExact(count, elementSize.toLong))
-            val sourceSpan =
-              if (count == 0L) 0
-              else Math.toIntExact(
-                Math.addExact(
-                  Math.multiplyExact(count - 1L, Math.multiplyExact(sourceStride, elementSize.toLong)),
-                  elementSize.toLong
-                )
-              )
-            memory.read(source, sourceSpan).flatMap { sourceBytes =>
-              val packed =
-                if (sourceStride == 1L) sourceBytes
-                else {
-                  val result = Array.ofDim[Byte](totalBytes)
-                  var index  = 0L
-                  while (index < count) {
-                    val sourceOffset =
-                      Math.toIntExact(Math.multiplyExact(index, Math.multiplyExact(sourceStride, elementSize.toLong)))
-                    System.arraycopy(
-                      sourceBytes,
-                      sourceOffset,
-                      result,
-                      Math.toIntExact(index * elementSize.toLong),
-                      elementSize
-                    )
-                    index += 1L
+            val strideBytes = Math.multiplyExact(strideValue, elementSize.toLong)
+            val packedBytes = Math.toIntExact(Math.multiplyExact(count, elementSize.toLong))
+            val sourceBytes =
+              if (destination.storageClass == 4) {
+                val sourceSpan =
+                  if (count == 0L) 0
+                  else Math.toIntExact(Math.addExact(Math.multiplyExact(count - 1L, strideBytes), elementSize.toLong))
+                memory.read(source, sourceSpan.refineUnsafe[Positive0]).map { strided =>
+                  if (strideValue == 1L) strided
+                  else {
+                    val packed = Array.ofDim[Byte](packedBytes)
+                    var index  = 0L
+                    while (index < count) {
+                      Array.copy(
+                        strided,
+                        Math.toIntExact(Math.multiplyExact(index, strideBytes)),
+                        packed,
+                        Math.toIntExact(Math.multiplyExact(index, elementSize.toLong)),
+                        elementSize
+                      )
+                      index += 1L
+                    }
+                    packed
                   }
-                  result
                 }
-              memory.write(destination, packed)
+              } else memory.read(source, packedBytes.refineUnsafe[Positive0])
+            sourceBytes.flatMap { packed =>
+              if (destination.storageClass == 5 && strideValue != 1L) {
+                @tailrec
+                def writeElement(index: Long): Either[ExecutionFailure, Unit] =
+                  if (index == count) Right(())
+                  else {
+                    val target = destination.copy(offset =
+                      Math.addExact(destination.offset, Math.multiplyExact(index, strideBytes))
+                    )
+                    memory
+                      .write(
+                        target,
+                        packed.slice(
+                          Math.toIntExact(Math.multiplyExact(index, elementSize.toLong)),
+                          Math.toIntExact(Math.multiplyExact(index + 1L, elementSize.toLong))
+                        )
+                      ) match {
+                      case failure @ Left(_) => failure
+                      case Right(())         => writeElement(index + 1L)
+                    }
+                  }
+                writeElement(0L)
+              } else memory.write(destination, packed)
             }.map { _ =>
               values.update(id(resultDestination), RuntimeValue.Bits(id(resultType), Array(0L)))
             }
@@ -4698,9 +5061,13 @@ object Interpreter {
           )
         )
       case (Right(scope), _) if scope != 2L && scope != 3L =>
-        Left(ExecutionFailure.Unsupported(s"$opcode execution scope $scope is not Subgroup or Workgroup"))
+        Left(ExecutionFailure.Unsupported(
+          s"$opcode execution scope $scope is not Subgroup or Workgroup"
+        ))
       case (Right(_), Some(_)) =>
-        Left(ExecutionFailure.InvalidRequest(s"$opcode requires scalar boolean predicate and result types"))
+        Left(ExecutionFailure.InvalidRequest(
+          s"$opcode requires scalar boolean predicate and result types"
+        ))
       case (Left(error), _) => Left(error)
       case (_, None)        => Left(undefined(pred))
     }
@@ -4720,7 +5087,7 @@ object Interpreter {
   ): Either[ExecutionFailure, CollectiveRequest] =
     (scalar(values, executionScope), values.get(id(source))) match {
       case (Right(scope @ (2L | 3L)), Some(value @ RuntimeValue.Bits(sourceType, lanes)))
-          if Col(0L, 1L, 2L).contains(unsigned(operation)) &&
+          if Vec(0L, 1L, 2L).contains(unsigned(operation)) &&
             integerShape(program, id(resultType)) == integerShape(program, sourceType) &&
             integerShape(program, sourceType).exists(_._2 == lanes.length) =>
         Right(
@@ -4733,16 +5100,20 @@ object Interpreter {
             unsigned(operation).toInt
           )
         )
-      case (Right(_), _) if !Col(0L, 1L, 2L).contains(unsigned(operation)) =>
+      case (Right(_), _) if !Vec(0L, 1L, 2L).contains(unsigned(operation)) =>
         Left(
           ExecutionFailure.Unsupported(
             s"$opcode group operation ${unsigned(operation)} is not Reduce, InclusiveScan, or ExclusiveScan"
           )
         )
       case (Right(scope), _) if scope != 2L && scope != 3L =>
-        Left(ExecutionFailure.Unsupported(s"$opcode execution scope $scope is not Subgroup or Workgroup"))
+        Left(ExecutionFailure.Unsupported(
+          s"$opcode execution scope $scope is not Subgroup or Workgroup"
+        ))
       case (Right(_), Some(_)) =>
-        Left(ExecutionFailure.InvalidRequest(s"$opcode requires matching integer scalar or vector types"))
+        Left(ExecutionFailure.InvalidRequest(
+          s"$opcode requires matching integer scalar or vector types"
+        ))
       case (Left(error), _) => Left(error)
       case (_, None)        => Left(undefined(source))
     }
@@ -4760,7 +5131,7 @@ object Interpreter {
   ): Either[ExecutionFailure, CollectiveRequest] =
     (scalar(values, executionScope), values.get(id(source))) match {
       case (Right(scope @ (2L | 3L)), Some(value @ RuntimeValue.Bits(sourceType, lanes)))
-          if Col(0L, 1L, 2L).contains(unsigned(operation)) &&
+          if Vec(0L, 1L, 2L).contains(unsigned(operation)) &&
             integerShape(program, id(resultType)) == integerShape(program, sourceType) &&
             integerShape(program, sourceType).exists(_._2 == lanes.length) =>
         Right(
@@ -4773,16 +5144,20 @@ object Interpreter {
             unsigned(operation).toInt
           )
         )
-      case (Right(_), _) if !Col(0L, 1L, 2L).contains(unsigned(operation)) =>
+      case (Right(_), _) if !Vec(0L, 1L, 2L).contains(unsigned(operation)) =>
         Left(
           ExecutionFailure.Unsupported(
             s"OpGroupIAdd group operation ${unsigned(operation)} is not Reduce, InclusiveScan, or ExclusiveScan"
           )
         )
       case (Right(scope), _) if scope != 2L && scope != 3L =>
-        Left(ExecutionFailure.Unsupported(s"OpGroupIAdd execution scope $scope is not Subgroup or Workgroup"))
+        Left(ExecutionFailure.Unsupported(
+          s"OpGroupIAdd execution scope $scope is not Subgroup or Workgroup"
+        ))
       case (Right(_), Some(_)) =>
-        Left(ExecutionFailure.InvalidRequest("OpGroupIAdd requires matching integer scalar or vector types"))
+        Left(ExecutionFailure.InvalidRequest(
+          "OpGroupIAdd requires matching integer scalar or vector types"
+        ))
       case (Left(error), _) => Left(error)
       case (_, None)        => Left(undefined(source))
     }
@@ -4800,7 +5175,7 @@ object Interpreter {
   ): Either[ExecutionFailure, CollectiveRequest] =
     (scalar(values, executionScope), values.get(id(source))) match {
       case (Right(scope @ (2L | 3L)), Some(value @ RuntimeValue.Bits(sourceType, lanes)))
-          if Col(0L, 1L, 2L).contains(unsigned(operation)) &&
+          if Vec(0L, 1L, 2L).contains(unsigned(operation)) &&
             integerShape(program, id(resultType)) == integerShape(program, sourceType) &&
             integerShape(program, sourceType).exists(_._2 == lanes.length) =>
         Right(
@@ -4813,16 +5188,20 @@ object Interpreter {
             unsigned(operation).toInt
           )
         )
-      case (Right(_), _) if !Col(0L, 1L, 2L).contains(unsigned(operation)) =>
+      case (Right(_), _) if !Vec(0L, 1L, 2L).contains(unsigned(operation)) =>
         Left(
           ExecutionFailure.Unsupported(
             s"OpGroupIMulKHR group operation ${unsigned(operation)} is not Reduce, InclusiveScan, or ExclusiveScan"
           )
         )
       case (Right(scope), _) if scope != 2L && scope != 3L =>
-        Left(ExecutionFailure.Unsupported(s"OpGroupIMulKHR execution scope $scope is not Subgroup or Workgroup"))
+        Left(ExecutionFailure.Unsupported(
+          s"OpGroupIMulKHR execution scope $scope is not Subgroup or Workgroup"
+        ))
       case (Right(_), Some(_)) =>
-        Left(ExecutionFailure.InvalidRequest("OpGroupIMulKHR requires matching integer scalar or vector types"))
+        Left(ExecutionFailure.InvalidRequest(
+          "OpGroupIMulKHR requires matching integer scalar or vector types"
+        ))
       case (Left(error), _) => Left(error)
       case (_, None)        => Left(undefined(source))
     }
@@ -4840,7 +5219,7 @@ object Interpreter {
   ): Either[ExecutionFailure, CollectiveRequest] =
     (scalar(values, executionScope), values.get(id(source))) match {
       case (Right(scope @ (2L | 3L)), Some(value @ RuntimeValue.Bits(sourceType, lanes)))
-          if Col(0L, 1L, 2L).contains(unsigned(operation)) &&
+          if Vec(0L, 1L, 2L).contains(unsigned(operation)) &&
             floatingShape(program, id(resultType)) == floatingShape(program, sourceType) &&
             floatingShape(program, sourceType).exists(_._2 == lanes.length) =>
         Right(
@@ -4853,16 +5232,20 @@ object Interpreter {
             unsigned(operation).toInt
           )
         )
-      case (Right(_), _) if !Col(0L, 1L, 2L).contains(unsigned(operation)) =>
+      case (Right(_), _) if !Vec(0L, 1L, 2L).contains(unsigned(operation)) =>
         Left(
           ExecutionFailure.Unsupported(
             s"OpGroupFAdd group operation ${unsigned(operation)} is not Reduce, InclusiveScan, or ExclusiveScan"
           )
         )
       case (Right(scope), _) if scope != 2L && scope != 3L =>
-        Left(ExecutionFailure.Unsupported(s"OpGroupFAdd execution scope $scope is not Subgroup or Workgroup"))
+        Left(ExecutionFailure.Unsupported(
+          s"OpGroupFAdd execution scope $scope is not Subgroup or Workgroup"
+        ))
       case (Right(_), Some(_)) =>
-        Left(ExecutionFailure.InvalidRequest("OpGroupFAdd requires matching floating scalar or vector types"))
+        Left(ExecutionFailure.InvalidRequest(
+          "OpGroupFAdd requires matching floating scalar or vector types"
+        ))
       case (Left(error), _) => Left(error)
       case (_, None)        => Left(undefined(source))
     }
@@ -4880,7 +5263,7 @@ object Interpreter {
   ): Either[ExecutionFailure, CollectiveRequest] =
     (scalar(values, executionScope), values.get(id(source))) match {
       case (Right(scope @ (2L | 3L)), Some(value @ RuntimeValue.Bits(sourceType, lanes)))
-          if Col(0L, 1L, 2L).contains(unsigned(operation)) &&
+          if Vec(0L, 1L, 2L).contains(unsigned(operation)) &&
             floatingShape(program, id(resultType)) == floatingShape(program, sourceType) &&
             floatingShape(program, sourceType).exists(_._2 == lanes.length) =>
         Right(
@@ -4893,16 +5276,20 @@ object Interpreter {
             unsigned(operation).toInt
           )
         )
-      case (Right(_), _) if !Col(0L, 1L, 2L).contains(unsigned(operation)) =>
+      case (Right(_), _) if !Vec(0L, 1L, 2L).contains(unsigned(operation)) =>
         Left(
           ExecutionFailure.Unsupported(
             s"OpGroupFMulKHR group operation ${unsigned(operation)} is not Reduce, InclusiveScan, or ExclusiveScan"
           )
         )
       case (Right(scope), _) if scope != 2L && scope != 3L =>
-        Left(ExecutionFailure.Unsupported(s"OpGroupFMulKHR execution scope $scope is not Subgroup or Workgroup"))
+        Left(ExecutionFailure.Unsupported(
+          s"OpGroupFMulKHR execution scope $scope is not Subgroup or Workgroup"
+        ))
       case (Right(_), Some(_)) =>
-        Left(ExecutionFailure.InvalidRequest("OpGroupFMulKHR requires matching floating scalar or vector types"))
+        Left(ExecutionFailure.InvalidRequest(
+          "OpGroupFMulKHR requires matching floating scalar or vector types"
+        ))
       case (Left(error), _) => Left(error)
       case (_, None)        => Left(undefined(source))
     }
@@ -4922,7 +5309,7 @@ object Interpreter {
   ): Either[ExecutionFailure, CollectiveRequest] =
     (scalar(values, executionScope), values.get(id(source))) match {
       case (Right(scope @ (2L | 3L)), Some(value @ RuntimeValue.Bits(sourceType, lanes)))
-          if Col(0L, 1L, 2L).contains(unsigned(operation)) &&
+          if Vec(0L, 1L, 2L).contains(unsigned(operation)) &&
             floatingShape(program, id(resultType)) == floatingShape(program, sourceType) &&
             floatingShape(program, sourceType).exists(_._2 == lanes.length) =>
         Right(
@@ -4935,16 +5322,20 @@ object Interpreter {
             unsigned(operation).toInt
           )
         )
-      case (Right(_), _) if !Col(0L, 1L, 2L).contains(unsigned(operation)) =>
+      case (Right(_), _) if !Vec(0L, 1L, 2L).contains(unsigned(operation)) =>
         Left(
           ExecutionFailure.Unsupported(
             s"$opcode group operation ${unsigned(operation)} is not Reduce, InclusiveScan, or ExclusiveScan"
           )
         )
       case (Right(scope), _) if scope != 2L && scope != 3L =>
-        Left(ExecutionFailure.Unsupported(s"$opcode execution scope $scope is not Subgroup or Workgroup"))
+        Left(ExecutionFailure.Unsupported(
+          s"$opcode execution scope $scope is not Subgroup or Workgroup"
+        ))
       case (Right(_), Some(_)) =>
-        Left(ExecutionFailure.InvalidRequest(s"$opcode requires matching floating scalar or vector types"))
+        Left(ExecutionFailure.InvalidRequest(
+          s"$opcode requires matching floating scalar or vector types"
+        ))
       case (Left(error), _) => Left(error)
       case (_, None)        => Left(undefined(source))
     }
@@ -4985,7 +5376,9 @@ object Interpreter {
       case (Some(_), Some(_), Right(deltaValue)) if deltaValue < 0L =>
         Left(ExecutionFailure.InvalidRequest("OpSubgroupShuffleUpINTEL delta must be non-negative"))
       case (Some(_), Some(_), Right(_)) =>
-        Left(ExecutionFailure.InvalidRequest("OpSubgroupShuffleUpINTEL requires matching result and operand types"))
+        Left(ExecutionFailure.InvalidRequest(
+          "OpSubgroupShuffleUpINTEL requires matching result and operand types"
+        ))
       case (_, _, Left(error)) => Left(error)
       case (None, _, _)        => Left(undefined(previous))
       case (_, None, _)        => Left(undefined(current))
@@ -5018,7 +5411,9 @@ object Interpreter {
       case (Some(_), Some(RuntimeValue.Bits(_, lanes))) if lanes.length != 1 =>
         Left(ExecutionFailure.InvalidRequest("OpSubgroupShuffleINTEL invocation id must be scalar"))
       case (Some(_), Some(_)) =>
-        Left(ExecutionFailure.InvalidRequest("OpSubgroupShuffleINTEL requires matching data and result types"))
+        Left(ExecutionFailure.InvalidRequest(
+          "OpSubgroupShuffleINTEL requires matching data and result types"
+        ))
       case (None, _) => Left(undefined(data))
       case (_, None) => Left(undefined(invocationId))
     }
@@ -5059,7 +5454,9 @@ object Interpreter {
       case (Some(_), Some(_), Right(deltaValue)) if deltaValue < 0L =>
         Left(ExecutionFailure.InvalidRequest("OpSubgroupShuffleDownINTEL delta must be non-negative"))
       case (Some(_), Some(_), Right(_)) =>
-        Left(ExecutionFailure.InvalidRequest("OpSubgroupShuffleDownINTEL requires matching result and operand types"))
+        Left(ExecutionFailure.InvalidRequest(
+          "OpSubgroupShuffleDownINTEL requires matching result and operand types"
+        ))
       case (_, _, Left(error)) => Left(error)
       case (None, _, _)        => Left(undefined(current))
       case (_, None, _)        => Left(undefined(next))
@@ -5083,9 +5480,9 @@ object Interpreter {
             Some(RuntimeValue.Bits(localIdType, lanes))
           )
           if sourceType == id(resultType) && integerShape(program, localIdType).exists { case (_, count) =>
-            count == lanes.length && Col(1, 3).contains(count)
+            count == lanes.length && Vec(1, 3).contains(count)
           } =>
-        val width = integerShape(program, localIdType).map(_._1).getOrElse(64)
+        val width = integerShape(program, localIdType).map(_._1).getOrElse(BitWidth(64))
         Right(
           CollectiveRequest(
             CollectiveKind.Broadcast,
@@ -5093,11 +5490,13 @@ object Interpreter {
             pc,
             scope.toInt,
             CollectivePayload.Value(id(resultType), id(destination), value),
-            selector = Col.from(lanes.map(_ & mask(width)))
+            selector = Vec.from(lanes.map(_ & mask(width)))
           )
         )
       case (Right(scope), _, _) if scope != 2L && scope != 3L =>
-        Left(ExecutionFailure.Unsupported(s"OpGroupBroadcast execution scope $scope is not Subgroup or Workgroup"))
+        Left(ExecutionFailure.Unsupported(
+          s"OpGroupBroadcast execution scope $scope is not Subgroup or Workgroup"
+        ))
       case (Right(_), None, _) => Left(undefined(source))
       case (Right(_), _, None) => Left(undefined(localId))
       case (Right(_), _, _)    =>
@@ -5109,6 +5508,7 @@ object Interpreter {
       case (Left(error), _, _) => Left(error)
     }
 
+  // Aggregate argument pointer slots are invocation-owned relocation state.
   private def bindArgument(
       program: DispatchProgram,
       parameterType: Int,
@@ -5162,33 +5562,41 @@ object Interpreter {
               case None => Left(ExecutionFailure.InvalidRequest("missing SVM pointer relocation"))
             }
           case KernelArgument.Scalar(bytes) =>
-            memory.relocateArgument(argumentIndex, bytes).map { relocated =>
-              val size   = math.max(typeSize(program, pointee), relocated.length)
-              val buffer = Array.ofDim[Byte](size)
-              System.arraycopy(relocated, 0, buffer, 0, relocated.length)
-              val slots = mutable.LongMap.empty[(Int, Pointer)]
-              pointerLeafOffsets(program, pointee, 0L) match {
-                case Right(leaves) => leaves.foreach { case (offset, pointerType) =>
-                    program.types.get(pointerType) match {
-                      case Some(RuntimeType.Pointer(pointerStorage, pointerPointee)) =>
-                        val pointer = memory.argumentRelocation(argumentIndex, offset) match {
-                          case Some((target, targetOffset)) =>
-                            Pointer(Region.External(target), targetOffset, pointerPointee, pointerStorage)
-                          case None => Pointer(Region.Null, 0L, pointerPointee, pointerStorage)
-                        }
-                        slots.update(offset, pointerType -> pointer)
-                      case _ => ()
+            memory.relocateArgument(argumentIndex, bytes) match {
+              case Left(error)      => Left(error)
+              case Right(relocated) =>
+                val size   = math.max(typeSize(program, pointee), relocated.length)
+                val buffer = Array.ofDim[Byte](size)
+                Array.copy(relocated, 0, buffer, 0, relocated.length)
+                val slots = mutable.LongMap.empty[(Int, Pointer)]
+                pointerLeafOffsets(program, pointee, 0L) match {
+                  case Right(leaves) => leaves.foreach { case (offset, pointerType) =>
+                      program.types.get(pointerType) match {
+                        case Some(RuntimeType.Pointer(pointerStorage, pointerPointee)) =>
+                          val pointer = memory.argumentRelocation(argumentIndex, offset) match {
+                            case Some((target, targetOffset)) =>
+                              Pointer(Region.External(target), targetOffset, pointerPointee, pointerStorage)
+                            case None => Pointer(Region.Null, 0L, pointerPointee, pointerStorage)
+                          }
+                          slots.update(offset, pointerType -> pointer)
+                        case _ => ()
+                      }
                     }
-                  }
-                case Left(_) => ()
-              }
-              RuntimeValue.Address(
-                parameterType,
-                Pointer(Region.Internal(buffer), 0L, pointee, storageClass, Option.when(slots.nonEmpty)(slots))
-              )
+                  case Left(_) => ()
+                }
+                Right(RuntimeValue.Address(
+                  parameterType,
+                  Pointer(
+                    Region.Internal(InternalMemory(buffer)),
+                    0L,
+                    pointee,
+                    storageClass,
+                    Option.when(slots.nonEmpty)(slots)
+                  )
+                ))
             }
           case KernelArgument.Local(size) =>
-            val region = shared.getOrElse(Region.Internal(Array.ofDim[Byte](checkedSize(size))))
+            val region = shared.getOrElse(Region.Internal(InternalMemory(Array.ofDim[Byte](checkedSize(size)))))
             Right(RuntimeValue.Address(parameterType, Pointer(region, 0L, pointee, storageClass)))
         }
       case Some(_) => argument match {
@@ -5200,16 +5608,21 @@ object Interpreter {
                 // 64-bit physical address and convert it back with OpConvertUToPtr.
                 // Register the per-workgroup region in the same virtual address map
                 // used by ordinary pointer conversions.
-                val region = shared.getOrElse(Region.Internal(Array.ofDim[Byte](checkedSize(size))))
+                val region = shared.getOrElse(Region.Internal(InternalMemory(Array.ofDim[Byte](checkedSize(size)))))
                 memory.pointerInteger(Pointer(region, 0L, 0, 4)).map(address =>
                   RuntimeValue.Bits(parameterType, Array(address))
                 )
-              case other => Left(ExecutionFailure.InvalidRequest(s"scalar SPIR-V parameter cannot bind $other"))
+              case other => Left(
+                  ExecutionFailure.InvalidRequest(s"scalar SPIR-V parameter cannot bind $other")
+                )
             }
         }
-      case None => Left(ExecutionFailure.InvalidRequest(s"SPIR-V parameter type %$parameterType is undefined"))
+      case None => Left(
+          ExecutionFailure.InvalidRequest(s"SPIR-V parameter type %$parameterType is undefined")
+        )
     }
 
+  // External aggregate pointer slots are invocation-owned relocation state.
   private def bindExternalAggregatePointerArgument(
       program: DispatchProgram,
       parameterType: Int,
@@ -5252,17 +5665,17 @@ object Interpreter {
   private[v1_6] def pointerLeafOffsetsForTest(
       module: Module,
       typeId: Int
-  ): Either[ExecutionFailure, Col[(Long, Int)]] =
+  ): Either[ExecutionFailure, Vec[(Long, Int)]] =
     prepareUnchecked(module).flatMap(program => pointerLeafOffsets(program.value, typeId, 0L))
 
   private def pointerLeafOffsets(
       program: DispatchProgram,
       typeId: Int,
       baseOffset: Long
-  ): Either[ExecutionFailure, Col[(Long, Int)]] = program.types.get(typeId) match {
-    case Some(RuntimeType.Pointer(_, _))      => Right(Col(baseOffset -> typeId))
+  ): Either[ExecutionFailure, Vec[(Long, Int)]] = program.types.get(typeId) match {
+    case Some(RuntimeType.Pointer(_, _))      => Right(Vec(baseOffset -> typeId))
     case Some(RuntimeType.Structure(members)) =>
-      members.zipWithIndex.foldLeft[Either[ExecutionFailure, Col[(Long, Int)]]](Right(Col.empty)) {
+      members.zipWithIndex.foldLeft[Either[ExecutionFailure, Vec[(Long, Int)]]](Right(Vec.empty)) {
         case (result, (member, index)) =>
           result.flatMap(existing =>
             pointerLeafOffsets(program, member, baseOffset + structMemberOffset(program, typeId, members, index)).map(
@@ -5272,17 +5685,20 @@ object Interpreter {
       }
     case Some(RuntimeType.Array(element, count)) =>
       if (count < 0L || count > Int.MaxValue.toLong)
-        Left(ExecutionFailure.InvalidRequest(s"SPIR-V aggregate pointer array type %$typeId has invalid size $count"))
+        Left(ExecutionFailure.InvalidRequest(
+          s"SPIR-V aggregate pointer array type %$typeId has invalid size $count"
+        ))
       else
-        (0 until count.toInt).foldLeft[Either[ExecutionFailure, Col[(Long, Int)]]](Right(Col.empty)) {
+        (0 until count.toInt).foldLeft[Either[ExecutionFailure, Vec[(Long, Int)]]](Right(Vec.empty)) {
           case (result, index) =>
             result.flatMap { existing =>
               val stride = program.arrayStrides.getOrElse(typeId, typeSize(program, element))
               pointerLeafOffsets(program, element, baseOffset + index.toLong * stride).map(existing ++ _)
             }
         }
-    case Some(_) => Right(Col.empty)
-    case None    => Left(ExecutionFailure.InvalidRequest(s"SPIR-V aggregate member type %$typeId is undefined"))
+    case Some(_) => Right(Vec.empty)
+    case None    =>
+      Left(ExecutionFailure.InvalidRequest(s"SPIR-V aggregate member type %$typeId is undefined"))
   }
 
   private def loadPointer(
@@ -5292,8 +5708,14 @@ object Interpreter {
       resultType: Int
   ): Either[ExecutionFailure, RuntimeValue] = program.types.get(resultType) match {
     case Some(RuntimeType.Pointer(resultStorage, resultPointee)) =>
+      val rawPointer = memory.readScalar(source, MemoryValueByteWidth(8))
       source.slots.flatMap(_.get(source.offset)).orElse(
         memory.relocatedPointer(source, resultPointee, resultStorage).map(resultType -> _)
+      ).orElse(
+        rawPointer
+          .toOption
+          .flatMap(raw => memory.integerPointer(raw, resultPointee, resultStorage).toOption)
+          .map(resultType -> _)
       ) match {
         case Some((slotType, pointer)) => program.types.get(slotType) match {
             case Some(RuntimeType.Pointer(slotStorage, _))
@@ -5314,19 +5736,23 @@ object Interpreter {
                   s"SPIR-V pointer slot at byte ${source.offset} has type %$slotType ($value), " +
                     s"expected %$resultType (${program.types.get(resultType)}), " +
                     s"base pointee %${source.pointee}, storage ${source.storageClass}, " +
-                    s"slots ${source.slots.map(slots => Col.from(slots.keys).sorted.mkString("[", ",", "]")).getOrElse("none")}"
+                    s"slots ${source.slots.map(slots => Vec.from(slots.keys).sorted.mkString("[", ",", "]")).getOrElse("none")}"
                 )
               )
           }
         case None =>
           Left(
             ExecutionFailure.InvalidRequest(
-              s"SPIR-V pointer load at byte ${source.offset} does not reference a typed pointer slot"
+              s"SPIR-V pointer load at byte ${source.offset} does not reference a typed pointer slot " +
+                s"(source pointee %${source.pointee}, source storage ${source.storageClass}, " +
+                s"result type %$resultType, raw ${rawPointer.fold(_.message, value => s"0x${java.lang.Long.toHexString(value)}")})"
             )
           )
       }
     case value =>
-      Left(ExecutionFailure.InvalidRequest(s"SPIR-V pointer load result type %$resultType is invalid: $value"))
+      Left(ExecutionFailure.InvalidRequest(
+        s"SPIR-V pointer load result type %$resultType is invalid: $value"
+      ))
   }
 
   private def storePointer(
@@ -5336,11 +5762,10 @@ object Interpreter {
       sourceType: Int,
       source: Pointer
   ): Either[ExecutionFailure, Unit] =
-    (program.types.get(target.pointee), program.types.get(sourceType), target.slots) match {
+    (program.types.get(target.pointee), program.types.get(sourceType)) match {
       case (
             Some(RuntimeType.Pointer(targetStorage, targetPointee)),
-            Some(RuntimeType.Pointer(sourceStorage, sourcePointee)),
-            Some(slots)
+            Some(RuntimeType.Pointer(sourceStorage, sourcePointee))
           )
           if target.pointee == sourceType && targetStorage == sourceStorage && targetPointee == sourcePointee &&
             source.pointee == sourcePointee &&
@@ -5349,21 +5774,19 @@ object Interpreter {
           case (Region.External(_), Region.Internal(_)) =>
             Left(ExecutionFailure.Unsupported("SPIR-V cannot persist a pointer to dispatch-local storage"))
           case _ =>
-            for {
+            val stored = for {
               address <- memory.pointerInteger(source)
-              _       <- memory.writeScalar(target, address, 8)
-            } yield {
-              slots.update(target.offset, sourceType -> source)
-              memory.recordPointerRelocation(source, target)
+              _       <- memory.writeScalar(target, address, MemoryValueByteWidth(8))
+              _       <- memory.recordPointerRelocation(source, target)
+            } yield ()
+            stored match {
+              case Left(error) => Left(error)
+              case Right(())   =>
+                target.slots.foreach(_.update(target.offset, sourceType -> source))
+                Right(())
             }
         }
-      case (Some(RuntimeType.Pointer(_, _)), Some(RuntimeType.Pointer(_, _)), None) =>
-        Left(
-          ExecutionFailure.InvalidRequest(
-            s"SPIR-V pointer store at byte ${target.offset} does not reference a typed pointer slot"
-          )
-        )
-      case (targetType, sourceValue, _) =>
+      case (targetType, sourceValue) =>
         Left(
           ExecutionFailure.InvalidRequest(
             s"SPIR-V pointer store type mismatch: target pointee %${target.pointee} is $targetType, " +
@@ -5372,6 +5795,8 @@ object Interpreter {
         )
     }
 
+  // Global initialization exits before publishing a partially materialized image.
+  @SuppressWarnings(Array("scalafix:DisableSyntax.return"))
   private def materializeGlobals(
       program: DispatchProgram,
       includeStorageClass: Int => Boolean
@@ -5405,13 +5830,15 @@ object Interpreter {
         }
         values += variable -> RuntimeValue.Address(
           global.pointerType,
-          Pointer(Region.Internal(bytes), 0L, pointee, global.storageClass)
+          Pointer(Region.Internal(InternalMemory(bytes)), 0L, pointee, global.storageClass)
         )
       }
     }
     Right(values.result())
   }
 
+  // Access-chain layout walks nested types with a cursor and fails at the first invalid index.
+  @SuppressWarnings(Array("scalafix:DisableSyntax.return", "scalafix:DisableSyntax.var"))
   private def accessChain(
       program: DispatchProgram,
       values: InvocationValues,
@@ -5420,7 +5847,7 @@ object Interpreter {
       destination: Operand,
       base: Operand,
       element: Option[Operand],
-      indexes: Col[Operand]
+      indexes: Vec[Operand]
   ): Either[ExecutionFailure, Unit] = {
     val source = address(values, base) match {
       case Left(error)  => return Left(error)
@@ -5446,7 +5873,9 @@ object Interpreter {
       program.types.get(typeId) match {
         case Some(RuntimeType.Structure(members)) =>
           if (index < 0L || index >= members.size.toLong)
-            return Left(ExecutionFailure.InvalidRequest(s"structure member index $index is out of range"))
+            return Left(
+              ExecutionFailure.InvalidRequest(s"structure member index $index is out of range")
+            )
           offset += structMemberOffset(program, typeId, members, index.toInt)
           typeId = members(index.toInt)
         case Some(RuntimeType.Array(member, _)) =>
@@ -5455,8 +5884,10 @@ object Interpreter {
         case Some(RuntimeType.VectorType(component, _)) =>
           offset += index * typeSize(program, component)
           typeId = component
-        case Some(value) => return Left(ExecutionFailure.InvalidRequest(s"cannot index through SPIR-V type $value"))
-        case None        => return Left(ExecutionFailure.InvalidRequest(s"SPIR-V type %$typeId is undefined"))
+        case Some(value) =>
+          return Left(ExecutionFailure.InvalidRequest(s"cannot index through SPIR-V type $value"))
+        case None =>
+          return Left(ExecutionFailure.InvalidRequest(s"SPIR-V type %$typeId is undefined"))
       }
       position += 1
     }
@@ -5481,7 +5912,7 @@ object Interpreter {
       case (
             Some(RuntimeType.Pointer(targetStorage, targetPointee)),
             Some(RuntimeValue.Address(sourceType, pointer))
-          ) if Col(4, 5, 7).contains(targetStorage) =>
+          ) if Vec(4, 5, 7).contains(targetStorage) =>
         program.types.get(sourceType) match {
           case Some(RuntimeType.Pointer(8, sourcePointee))
               if sourcePointee == targetPointee && pointer.pointee == targetPointee =>
@@ -5508,7 +5939,9 @@ object Interpreter {
           )
         )
       case (None, _) =>
-        Left(ExecutionFailure.InvalidRequest(s"OpGenericCastToPtr result type %$outputType is undefined"))
+        Left(ExecutionFailure.InvalidRequest(
+          s"OpGenericCastToPtr result type %$outputType is undefined"
+        ))
       case (_, None) => Left(undefined(source))
       case _         => Left(ExecutionFailure.InvalidRequest("OpGenericCastToPtr source is not a pointer"))
     }
@@ -5528,7 +5961,7 @@ object Interpreter {
       case (
             Some(RuntimeType.Pointer(resultStorage, targetPointee)),
             Some(RuntimeValue.Address(sourceType, pointer))
-          ) if resultStorage == targetStorage && Col(4, 5, 7).contains(targetStorage) =>
+          ) if resultStorage == targetStorage && Vec(4, 5, 7).contains(targetStorage) =>
         program.types.get(sourceType) match {
           case Some(RuntimeType.Pointer(8, sourcePointee))
               if sourcePointee == targetPointee && pointer.pointee == targetPointee =>
@@ -5547,24 +5980,28 @@ object Interpreter {
           case _ => Left(ExecutionFailure.InvalidRequest("OpGenericCastToPtrExplicit source is not a pointer"))
         }
       case (Some(RuntimeType.Pointer(resultStorage, _)), _)
-          if resultStorage != targetStorage || !Col(4, 5, 7).contains(targetStorage) =>
+          if resultStorage != targetStorage || !Vec(4, 5, 7).contains(targetStorage) =>
         Left(
           ExecutionFailure.InvalidRequest(
-            s"OpGenericCastToPtrExplicit requires Workgroup, CrossWorkgroup, or Function storage matching result type; " +
+            "OpGenericCastToPtrExplicit requires Workgroup, CrossWorkgroup, or Function storage matching result type; " +
               s"got storage $targetStorage and result storage $resultStorage"
           )
         )
       case (Some(RuntimeType.Pointer(_, _)), None) => Left(undefined(source))
       case (None, _)                               =>
-        Left(ExecutionFailure.InvalidRequest(s"OpGenericCastToPtrExplicit result type %$outputType is undefined"))
+        Left(ExecutionFailure.InvalidRequest(
+          s"OpGenericCastToPtrExplicit result type %$outputType is undefined"
+        ))
       case _ => Left(ExecutionFailure.InvalidRequest("OpGenericCastToPtrExplicit source is not a pointer"))
     }
   }
 
+  // Composite layout walks nested members with a cursor and fails on invalid type structure.
+  @SuppressWarnings(Array("scalafix:DisableSyntax.return", "scalafix:DisableSyntax.var"))
   private def compositeLeafRange(
       program: DispatchProgram,
       typeId: Int,
-      indexes: Col[Operand]
+      indexes: Vec[Operand]
   ): Either[ExecutionFailure, (Int, Int)] = {
     var current = typeId
     var offset  = 0
@@ -5600,7 +6037,8 @@ object Interpreter {
               s"OpComposite index $selected is invalid for type %$current ($value)"
             )
           )
-        case None => return Left(ExecutionFailure.InvalidRequest(s"OpComposite type %$current is undefined"))
+        case None =>
+          return Left(ExecutionFailure.InvalidRequest(s"OpComposite type %$current is undefined"))
       }
       index += 1
     }
@@ -5613,7 +6051,7 @@ object Interpreter {
       resultType: Operand,
       destination: Operand,
       composite: Operand,
-      indexes: Col[Operand]
+      indexes: Vec[Operand]
   ): Either[ExecutionFailure, Unit] = values.get(id(composite)) match {
     case Some(RuntimeValue.Bits(compositeType, lanes)) =>
       compositeLeafRange(program, compositeType, indexes) match {
@@ -5639,14 +6077,14 @@ object Interpreter {
       destination: Operand,
       source: Operand,
       composite: Operand,
-      indexes: Col[Operand]
+      indexes: Vec[Operand]
   ): Either[ExecutionFailure, Unit] =
     (values.get(id(source)), values.get(id(composite))) match {
       case (Some(RuntimeValue.Bits(_, sourceLanes)), Some(RuntimeValue.Bits(compositeType, compositeLanes))) =>
         compositeLeafRange(program, compositeType, indexes) match {
           case Right((offset, count)) if sourceLanes.length == count && offset + count <= compositeLanes.length =>
             val result = compositeLanes.clone()
-            System.arraycopy(sourceLanes, 0, result, offset, count)
+            Array.copy(sourceLanes, 0, result, offset, count)
             values.update(id(destination), RuntimeValue.Bits(id(resultType), result))
             Right(())
           case Right((offset, count)) =>
@@ -5662,9 +6100,9 @@ object Interpreter {
       case _         => Left(ExecutionFailure.Unsupported("composite insertion requires scalar data"))
     }
 
-  private def nextBinary16(bits: Long, upward: Boolean): Long = {
-    val value = bits.toInt & 0xffff
-    if ((value & 0x7fff) > 0x7c00) value.toLong
+  private def nextBinary16(bits: Binary16, upward: Boolean): Binary16 = {
+    val value  = bits.value.toInt
+    val result = if ((value & 0x7fff) > 0x7c00) value.toLong
     else if (upward) {
       if (value == 0x7c00) value.toLong
       else if ((value & 0x8000) != 0) (value - 1).toLong & 0xffffL
@@ -5675,10 +6113,11 @@ object Interpreter {
       else if (value == 0) 0x8001L
       else (value - 1).toLong
     }
+    Binary16.low(result)
   }
 
-  private def doubleToBinary16(value: Double, mode: Int): Long = {
-    val approximate = IEEE754.floatToBinary16(value.toFloat)
+  private def doubleToBinary16(value: Double, mode: Int): Binary16 = {
+    val approximate = IEEE754.doubleToBinary16(value)
     if (value.isNaN || value.isInfinite) approximate
     else {
       val approximateValue = IEEE754.binary16ToFloat(approximate).toDouble
@@ -5696,35 +6135,41 @@ object Interpreter {
             val upperDistance = IEEE754.binary16ToFloat(upper).toDouble - value
             if (lowerDistance < upperDistance) lower
             else if (upperDistance < lowerDistance) upper
-            else if ((lower & 1L) == 0L) lower else upper
+            else if ((lower.value & 1L) == 0L) lower else upper
         }
       }
     }
   }
 
+  // Vector half loads are a lane-wise hot loop with fail-fast memory access.
+  @SuppressWarnings(Array("scalafix:DisableSyntax.return", "scalafix:DisableSyntax.var"))
   private def openCLHalfLoad(
       program: DispatchProgram,
       values: InvocationValues,
       memory: MemoryState,
       resultType: Operand,
       destination: Operand,
-      sources: Col[Operand],
+      sources: Vec[Operand],
       aligned: Boolean
   ): Either[ExecutionFailure, Unit] = {
     val vector = sources.size == 3
     if ((!vector && sources.size != 2) || (vector && sources.size != 3))
       return Left(ExecutionFailure.InvalidRequest("OpenCL.std half load has an invalid operand count"))
     (floatingShape(program, id(resultType)), scalar(values, sources(0)), address(values, sources(1))) match {
-      case (Some((32, count)), Right(offset), Right(pointer))
-          if !vector || unsigned(sources(2)) == count.toLong =>
+      case (Some((width, count)), Right(offset), Right(pointer))
+          if width.value == 32 && (!vector || unsigned(sources(2)) == count.toLong) =>
         val stride = if (aligned && count == 3) 4 else count
         val base   = Math.addExact(pointer.offset, Math.multiplyExact(offset, stride.toLong * 2L))
         val result = Array.ofDim[Long](count)
         var lane   = 0
         while (lane < count) {
-          memory.readScalar(pointer.copy(offset = Math.addExact(base, lane.toLong * 2L)), 2) match {
+          memory.readScalar(
+            pointer.copy(offset = Math.addExact(base, lane.toLong * 2L)),
+            MemoryValueByteWidth(2)
+          ) match {
             case Left(error) => return Left(error)
-            case Right(half) => result(lane) = IEEE754.floatToBinary32(IEEE754.binary16ToFloat(half))
+            case Right(half) =>
+              result(lane) = IEEE754.floatToBinary32(IEEE754.binary16ToFloat(Binary16.low(half))).value
           }
           lane += 1
         }
@@ -5736,21 +6181,25 @@ object Interpreter {
     }
   }
 
+  // Vector half stores are a lane-wise hot loop with fail-fast memory access.
+  @SuppressWarnings(Array("scalafix:DisableSyntax.return", "scalafix:DisableSyntax.var"))
   private def openCLHalfStore(
       program: DispatchProgram,
       values: InvocationValues,
       memory: MemoryState,
-      sources: Col[Operand],
+      sources: Vec[Operand],
       aligned: Boolean,
       rounded: Boolean
   ): Either[ExecutionFailure, Unit] = {
     val expected = if (rounded) 4 else 3
     if (sources.size != expected)
-      return Left(ExecutionFailure.InvalidRequest(s"OpenCL.std half store expects $expected operands"))
+      return Left(
+        ExecutionFailure.InvalidRequest(s"OpenCL.std half store expects $expected operands")
+      )
     (values.get(id(sources(0))), scalar(values, sources(1)), address(values, sources(2))) match {
       case (Some(RuntimeValue.Bits(sourceType, lanes)), Right(offset), Right(pointer)) =>
         floatingShape(program, sourceType) match {
-          case Some((width, count)) if width == 32 || width == 64 =>
+          case Some((width, count)) if width.value == 32 || width.value == 64 =>
             val stride = if (aligned && count == 3) 4 else count
             val base   = Math.addExact(pointer.offset, Math.multiplyExact(offset, stride.toLong * 2L))
             val mode   = if (rounded) unsigned(sources(3)).toInt else 0
@@ -5759,8 +6208,8 @@ object Interpreter {
               val source = floatingToDouble(width, lanes(lane))
               memory.writeScalar(
                 pointer.copy(offset = Math.addExact(base, lane.toLong * 2L)),
-                doubleToBinary16(source, mode),
-                2
+                doubleToBinary16(source, mode).value,
+                MemoryValueByteWidth(2)
               ) match {
                 case Left(error) => return Left(error)
                 case Right(())   => ()
@@ -5773,37 +6222,45 @@ object Interpreter {
       case (None, _, _)              => Left(undefined(sources(0)))
       case (Some(_), Left(error), _) => Left(error)
       case (Some(_), _, Left(error)) => Left(error)
-      case _ => Left(ExecutionFailure.InvalidRequest("OpenCL.std half store operands are not value types"))
+      case _                         =>
+        Left(ExecutionFailure.InvalidRequest("OpenCL.std half store operands are not value types"))
     }
   }
 
+  // Vector loads walk components directly and stop on the first memory fault.
+  @SuppressWarnings(Array("scalafix:DisableSyntax.return", "scalafix:DisableSyntax.var"))
   private def openCLVectorLoad(
       program: DispatchProgram,
       values: InvocationValues,
       memory: MemoryState,
       resultType: Operand,
       destination: Operand,
-      sources: Col[Operand]
+      sources: Vec[Operand]
   ): Either[ExecutionFailure, Unit] =
     if (sources.size != 3)
-      Left(ExecutionFailure.InvalidRequest(s"OpenCL.std vloadn expects 3 operands, received ${sources.size}"))
+      Left(ExecutionFailure.InvalidRequest(
+        s"OpenCL.std vloadn expects 3 operands, received ${sources.size}"
+      ))
     else
       (program.types.get(id(resultType)), scalar(values, sources(0)), address(values, sources(1))) match {
         case (_, Left(error), _) => Left(error)
         case (_, _, Left(error)) => Left(error)
         case (Some(RuntimeType.VectorType(component, count)), Right(offset), Right(pointer))
             if unsigned(sources(2)) == count.toLong =>
-          val elementSize = typeSize(program, component)
-          val base        = Math.addExact(
+          val elementSize = scalarMemoryWidth(program, component) match {
+            case Left(error) => return Left(error)
+            case Right(size) => size
+          }
+          val base = Math.addExact(
             pointer.offset,
-            Math.multiplyExact(Math.multiplyExact(offset, count.toLong), elementSize.toLong)
+            Math.multiplyExact(Math.multiplyExact(offset, count.toLong), elementSize.value.toLong)
           )
           val lanes = Array.ofDim[Long](count)
           var index = 0
           while (index < count) {
             memory.readScalar(
               pointer.copy(
-                offset = Math.addExact(base, Math.multiplyExact(index.toLong, elementSize.toLong)),
+                offset = Math.addExact(base, Math.multiplyExact(index.toLong, elementSize.value.toLong)),
                 pointee = component
               ),
               elementSize
@@ -5824,33 +6281,42 @@ object Interpreter {
         case (Some(_), _, _) =>
           Left(ExecutionFailure.InvalidRequest("OpenCL.std vloadn result type is not a vector"))
         case (None, _, _) =>
-          Left(ExecutionFailure.InvalidRequest(s"OpenCL.std vloadn result type %${id(resultType)} is undefined"))
+          Left(ExecutionFailure.InvalidRequest(
+            s"OpenCL.std vloadn result type %${id(resultType)} is undefined"
+          ))
       }
 
+  // Vector stores walk components directly and stop on the first memory fault.
+  @SuppressWarnings(Array("scalafix:DisableSyntax.return", "scalafix:DisableSyntax.var"))
   private def openCLVectorStore(
       program: DispatchProgram,
       values: InvocationValues,
       memory: MemoryState,
       source: Operand,
-      sources: Col[Operand]
+      sources: Vec[Operand]
   ): Either[ExecutionFailure, Unit] =
     if (sources.size != 2)
-      Left(ExecutionFailure.InvalidRequest(s"OpenCL.std vstoren expects 2 operands, received ${sources.size}"))
+      Left(ExecutionFailure.InvalidRequest(
+        s"OpenCL.std vstoren expects 2 operands, received ${sources.size}"
+      ))
     else
       (values.get(id(source)), scalar(values, sources(0)), address(values, sources(1))) match {
         case (Some(RuntimeValue.Bits(sourceType, lanes)), Right(offset), Right(pointer)) =>
           program.types.get(sourceType) match {
             case Some(RuntimeType.VectorType(component, count)) if lanes.length == count =>
-              val elementSize = typeSize(program, component)
-              val base        = Math.addExact(
+              val elementSize = scalarMemoryWidth(program, component) match {
+                case Left(error) => return Left(error)
+                case Right(size) => size
+              }
+              val base = Math.addExact(
                 pointer.offset,
-                Math.multiplyExact(Math.multiplyExact(offset, count.toLong), elementSize.toLong)
+                Math.multiplyExact(Math.multiplyExact(offset, count.toLong), elementSize.value.toLong)
               )
               var index = 0
               while (index < count) {
                 memory.writeScalar(
                   pointer.copy(
-                    offset = Math.addExact(base, Math.multiplyExact(index.toLong, elementSize.toLong)),
+                    offset = Math.addExact(base, Math.multiplyExact(index.toLong, elementSize.value.toLong)),
                     pointee = component
                   ),
                   lanes(index),
@@ -5863,7 +6329,9 @@ object Interpreter {
               }
               Right(())
             case Some(RuntimeType.VectorType(_, count)) =>
-              Left(ExecutionFailure.InvalidRequest(s"OpenCL.std vstoren has ${lanes.length} lanes, expected $count"))
+              Left(ExecutionFailure.InvalidRequest(
+                s"OpenCL.std vstoren has ${lanes.length} lanes, expected $count"
+              ))
             case _ => Left(ExecutionFailure.InvalidRequest("OpenCL.std vstoren source is not a vector"))
           }
         case (None, _, _)              => Left(undefined(source))
@@ -5890,23 +6358,23 @@ object Interpreter {
           case (Some((width, count)), Some((rightWidth, rightCount)), Some((resultWidth, resultCount)))
               if width == rightWidth && width == resultWidth && count == rightCount && count == resultCount =>
             val result = Array.tabulate(count) { index =>
-              width match {
+              width.value match {
                 case 16 =>
                   IEEE754.floatToBinary16(
                     Math.nextAfter(
-                      IEEE754.binary16ToFloat(leftLanes(index)),
-                      IEEE754.binary16ToFloat(rightLanes(index))
+                      IEEE754.binary16ToFloat(Binary16.low(leftLanes(index) & 0xffffL)),
+                      IEEE754.binary16ToFloat(Binary16.low(rightLanes(index) & 0xffffL))
                     )
-                  )
+                  ).value
                 case 32 =>
-                  java.lang.Float.floatToRawIntBits(
+                  IEEE754.floatToBinary32(
                     Math.nextAfter(
-                      IEEE754.binary32ToFloat(leftLanes(index)),
-                      IEEE754.binary32ToFloat(rightLanes(index))
+                      IEEE754.binary32ToFloat(Binary32.low(leftLanes(index) & 0xffffffffL)),
+                      IEEE754.binary32ToFloat(Binary32.low(rightLanes(index) & 0xffffffffL))
                     )
-                  ).toLong & 0xffffffffL
+                  ).value
                 case 64 =>
-                  java.lang.Double.doubleToRawLongBits(
+                  IEEE754.doubleToBinary64(
                     Math.nextAfter(
                       IEEE754.binary64ToDouble(leftLanes(index)),
                       IEEE754.binary64ToDouble(rightLanes(index))
@@ -5961,7 +6429,8 @@ object Interpreter {
         }
       case (None, _) => Left(undefined(left))
       case (_, None) => Left(undefined(right))
-      case _         => Left(ExecutionFailure.InvalidRequest("OpenCL.std hadd operands are not integer values"))
+      case _         =>
+        Left(ExecutionFailure.InvalidRequest("OpenCL.std hadd operands are not integer values"))
     }
 
   private def openCLSignedAbs(
@@ -5982,7 +6451,9 @@ object Interpreter {
           values.update(id(destination), RuntimeValue.Bits(id(resultType), result))
           Right(())
         case _ =>
-          Left(ExecutionFailure.InvalidRequest("OpenCL.std s_abs requires matching integer scalar/vector types"))
+          Left(ExecutionFailure.InvalidRequest(
+            "OpenCL.std s_abs requires matching integer scalar/vector types"
+          ))
       }
     case Some(_) => Left(ExecutionFailure.InvalidRequest("OpenCL.std s_abs operand is a pointer"))
     case None    => Left(undefined(source))
@@ -6002,14 +6473,16 @@ object Interpreter {
           val result = lanes.map { raw =>
             val value = raw & mask(sourceWidth)
             if (value == 0L)
-              sourceWidth.toLong
+              sourceWidth.value.toLong
             else
-              (java.lang.Long.numberOfLeadingZeros(value) - (64 - sourceWidth)).toLong
+              (java.lang.Long.numberOfLeadingZeros(value) - (64 - sourceWidth.value)).toLong
           }
           values.update(id(destination), RuntimeValue.Bits(id(resultType), result.map(_ & mask(resultWidth))))
           Right(())
         case _ =>
-          Left(ExecutionFailure.InvalidRequest("OpenCL.std clz requires matching integer scalar/vector types"))
+          Left(ExecutionFailure.InvalidRequest(
+            "OpenCL.std clz requires matching integer scalar/vector types"
+          ))
       }
     case Some(_) => Left(ExecutionFailure.InvalidRequest("OpenCL.std clz operand is a pointer"))
     case None    => Left(undefined(source))
@@ -6028,34 +6501,201 @@ object Interpreter {
             if sourceWidth == resultWidth && sourceLanes == resultLanes && lanes.length == sourceLanes =>
           val result = lanes.map { raw =>
             val value = raw & mask(sourceWidth)
-            if (value == 0L) sourceWidth.toLong else java.lang.Long.numberOfTrailingZeros(value).toLong
+            if (value == 0L) sourceWidth.value.toLong else java.lang.Long.numberOfTrailingZeros(value).toLong
           }
           values.update(id(destination), RuntimeValue.Bits(id(resultType), result.map(_ & mask(resultWidth))))
           Right(())
         case _ =>
-          Left(ExecutionFailure.InvalidRequest("OpenCL.std ctz requires matching integer scalar/vector types"))
+          Left(ExecutionFailure.InvalidRequest(
+            "OpenCL.std ctz requires matching integer scalar/vector types"
+          ))
       }
     case Some(_) => Left(ExecutionFailure.InvalidRequest("OpenCL.std ctz operand is a pointer"))
     case None    => Left(undefined(source))
+  }
+
+  private def openCLPopulationCount(
+      program: DispatchProgram,
+      values: InvocationValues,
+      resultType: Operand,
+      destination: Operand,
+      source: Operand
+  ): Either[ExecutionFailure, Unit] = values.get(id(source)) match {
+    case Some(RuntimeValue.Bits(sourceType, lanes)) =>
+      (integerShape(program, sourceType), integerShape(program, id(resultType))) match {
+        case (Some((sourceWidth, sourceLanes)), Some((resultWidth, resultLanes)))
+            if sourceWidth == resultWidth && sourceLanes == resultLanes && lanes.length == sourceLanes =>
+          val result = lanes.map(raw => bitCount(raw, sourceWidth).toLong & mask(resultWidth))
+          values.update(id(destination), RuntimeValue.Bits(id(resultType), result))
+          Right(())
+        case _ =>
+          Left(ExecutionFailure.InvalidRequest(
+            "OpenCL.std popcount requires matching integer scalar/vector types"
+          ))
+      }
+    case Some(_) => Left(ExecutionFailure.InvalidRequest("OpenCL.std popcount operand is a pointer"))
+    case None    => Left(undefined(source))
+  }
+
+  @SuppressWarnings(Array("scalafix:DisableSyntax.return", "scalafix:DisableSyntax.var"))
+  private def openCLPrintf(
+      program: DispatchProgram,
+      values: InvocationValues,
+      memory: MemoryState,
+      output: ExecutionOutput,
+      resultType: Operand,
+      destination: Operand,
+      sources: Vec[Operand]
+  ): Either[ExecutionFailure, Unit] = {
+    if (sources.isEmpty)
+      return Left(ExecutionFailure.InvalidRequest("OpenCL.std printf requires a format string"))
+    val format = values.get(id(sources.head)) match {
+      case Some(RuntimeValue.Address(_, pointer)) => readCString(memory, pointer) match {
+          case Left(error) => return Left(error)
+          case Right(text) => text
+        }
+      case Some(_) => return Left(ExecutionFailure.InvalidRequest("OpenCL.std printf format is not a pointer"))
+      case None    => return Left(undefined(sources.head))
+    }
+    val conversions = printfConversions(format) match {
+      case Left(error)  => return Left(error)
+      case Right(value) => value
+    }
+    if (conversions.size > sources.size - 1)
+      return Left(
+        ExecutionFailure.InvalidRequest(
+          s"OpenCL.std printf format expects at least ${conversions.size} arguments, received ${sources.size - 1}"
+        )
+      )
+    val arguments = mutable.ArrayBuffer.empty[PrintArgument]
+    var index     = 0
+    while (index < conversions.size) {
+      val source = sources(index + 1)
+      values.get(id(source)) match {
+        case Some(RuntimeValue.Bits(typeId, lanes)) =>
+          signedIntegerShape(program, typeId) match {
+            case Some((width, _, signed)) =>
+              arguments += PrintArgument.Integer(Vec.from(lanes), width.value, signed)
+            case None => floatingShape(program, typeId) match {
+                case Some((width, _)) =>
+                  arguments += PrintArgument.Floating(Vec.from(lanes), width.value)
+                case None =>
+                  return Left(
+                    ExecutionFailure.InvalidRequest(
+                      s"OpenCL.std printf argument ${index + 1} is not an integer or floating-point value"
+                    )
+                  )
+              }
+          }
+        case Some(RuntimeValue.Address(_, pointer)) if conversions(index) == 's' =>
+          readCString(memory, pointer) match {
+            case Left(error) => return Left(error)
+            case Right(text) => arguments += PrintArgument.Text(text)
+          }
+        case Some(RuntimeValue.Address(_, pointer)) =>
+          memory.pointerInteger(pointer) match {
+            case Left(error)  => return Left(error)
+            case Right(value) => arguments += PrintArgument.Pointer(value)
+          }
+        case None => return Left(undefined(source))
+      }
+      index += 1
+    }
+    output.print(PrintEvent(format, Vec.from(arguments))).flatMap { _ =>
+      integerShape(program, id(resultType)) match {
+        case Some((width, 1)) =>
+          values.update(id(destination), RuntimeValue.Bits(id(resultType), Array(0L & mask(width))))
+          Right(())
+        case _ => Left(ExecutionFailure.InvalidRequest("OpenCL.std printf result is not an integer scalar"))
+      }
+    }
+  }
+
+  private def signedIntegerShape(program: DispatchProgram, typeId: Int): Option[(BitWidth, Int, Boolean)] =
+    program.types.get(typeId) match {
+      case Some(RuntimeType.Integer(width, signed))       => Some((width, 1, signed))
+      case Some(RuntimeType.VectorType(component, count)) => program.types.get(component) match {
+          case Some(RuntimeType.Integer(width, signed)) => Some((width, count, signed))
+          case _                                        => None
+        }
+      case _ => None
+    }
+
+  @SuppressWarnings(Array("scalafix:DisableSyntax.return", "scalafix:DisableSyntax.var"))
+  private def readCString(memory: MemoryState, pointer: Pointer): Either[ExecutionFailure, String] = {
+    val bytes = mutable.ArrayBuffer.empty[Byte]
+    var index = 0L
+    while (index < 1024L * 1024L) {
+      val current =
+        try pointer.copy(offset = Math.addExact(pointer.offset, index))
+        catch {
+          case _: ArithmeticException =>
+            return Left(ExecutionFailure.InvalidRequest("OpenCL.std printf string pointer overflows"))
+        }
+      memory.read(current, 1) match {
+        case Left(error)                   => return Left(error)
+        case Right(value) if value(0) == 0 =>
+          return Right(String(bytes.toArray, StandardCharsets.UTF_8))
+        case Right(value) => bytes += value(0)
+      }
+      index += 1L
+    }
+    Left(ExecutionFailure.InvalidRequest("OpenCL.std printf string exceeds 1 MiB"))
+  }
+
+  @SuppressWarnings(Array("scalafix:DisableSyntax.return", "scalafix:DisableSyntax.var"))
+  private def printfConversions(format: String): Either[ExecutionFailure, Vec[Char]] = {
+    val result = mutable.ArrayBuffer.empty[Char]
+    var index  = 0
+    while (index < format.length)
+      if (format(index) != '%') index += 1
+      else if (index + 1 < format.length && format(index + 1) == '%') index += 2
+      else {
+        index += 1
+        while (index < format.length && "-+ #0".contains(format(index))) index += 1
+        if (index < format.length && format(index) == '*')
+          return Left(ExecutionFailure.Unsupported("OpenCL.std printf dynamic field widths are not implemented"))
+        while (index < format.length && format(index).isDigit) index += 1
+        if (index < format.length && format(index) == '.') {
+          index += 1
+          if (index < format.length && format(index) == '*')
+            return Left(ExecutionFailure.Unsupported("OpenCL.std printf dynamic precision is not implemented"))
+          while (index < format.length && format(index).isDigit) index += 1
+        }
+        if (index < format.length && format(index) == 'v') {
+          index += 1
+          while (index < format.length && format(index).isDigit) index += 1
+        }
+        while (index < format.length && (format(index) == 'h' || format(index) == 'l')) index += 1
+        if (index >= format.length)
+          return Left(ExecutionFailure.InvalidRequest("OpenCL.std printf format ends within a conversion"))
+        result += format(index).toLower
+        index += 1
+      }
+    Right(Vec.from(result))
   }
 
   private def extendedInstruction(
       program: DispatchProgram,
       values: InvocationValues,
       memory: MemoryState,
+      control: ExecutionControl,
       resultType: Operand,
       destination: Operand,
       set: Operand,
       instruction: Operand,
-      sources: Col[Operand]
+      sources: Vec[Operand]
   ): Either[ExecutionFailure, Unit] = {
     val setId  = id(set)
     val opcode = unsigned(instruction).toInt
-    program.extendedInstructionSets.get(setId) match {
-      case None => Left(ExecutionFailure.InvalidRequest(s"OpExtInst references undefined import %$setId"))
+    program.extendedInstructionSets.get(setId).map(_.value) match {
+      case None =>
+        Left(ExecutionFailure.InvalidRequest(s"OpExtInst references undefined import %$setId"))
       case Some("OpenCL.std") if opcode == 13 =>
         if (sources.size != 2)
-          Left(ExecutionFailure.InvalidRequest(s"OpenCL.std copysign expects 2 operands, received ${sources.size}"))
+          Left(ExecutionFailure.InvalidRequest(
+            s"OpenCL.std copysign expects 2 operands, received ${sources.size}"
+          ))
         else
           (values.get(id(sources(0))), values.get(id(sources(1)))) match {
             case (Some(RuntimeValue.Bits(leftType, left)), Some(RuntimeValue.Bits(rightType, right))) =>
@@ -6066,7 +6706,7 @@ object Interpreter {
               ) match {
                 case (Some(leftShape @ (width, lanes)), Some(rightShape), Some(resultShape))
                     if leftShape == rightShape && leftShape == resultShape =>
-                  val signMask = width match {
+                  val signMask = width.value match {
                     case 16 => 0x8000L
                     case 32 => 0x80000000L
                     case 64 => 0x8000000000000000L
@@ -6092,15 +6732,21 @@ object Interpreter {
           }
       case Some("OpenCL.std") if opcode == 42 =>
         if (sources.size != 3)
-          Left(ExecutionFailure.InvalidRequest(s"OpenCL.std mad expects 3 operands, received ${sources.size}"))
+          Left(ExecutionFailure.InvalidRequest(
+            s"OpenCL.std mad expects 3 operands, received ${sources.size}"
+          ))
         else openCLMad(program, values, resultType, destination, sources(0), sources(1), sources(2))
       case Some("OpenCL.std") if opcode == 43 =>
         if (sources.size != 2)
-          Left(ExecutionFailure.InvalidRequest(s"OpenCL.std maxmag expects 2 operands, received ${sources.size}"))
+          Left(ExecutionFailure.InvalidRequest(
+            s"OpenCL.std maxmag expects 2 operands, received ${sources.size}"
+          ))
         else openCLMaxMag(program, values, resultType, destination, sources(0), sources(1))
       case Some("OpenCL.std") if opcode == 48 =>
         if (sources.size != 2)
-          Left(ExecutionFailure.InvalidRequest(s"OpenCL.std pow expects 2 operands, received ${sources.size}"))
+          Left(ExecutionFailure.InvalidRequest(
+            s"OpenCL.std pow expects 2 operands, received ${sources.size}"
+          ))
         else openCLPow(program, values, resultType, destination, sources(0), sources(1))
       case Some("OpenCL.std") if opcode >= 156 && opcode <= 159 =>
         val name = opcode match {
@@ -6109,9 +6755,11 @@ object Interpreter {
           case 158 => "s_min"
           case _   => "u_min"
         }
-        val width = integerShape(program, id(resultType)).map(_._1).getOrElse(64)
+        val width = integerShape(program, id(resultType)).map(_._1).getOrElse(BitWidth(64))
         if (sources.size != 2)
-          Left(ExecutionFailure.InvalidRequest(s"OpenCL.std $name expects 2 operands, received ${sources.size}"))
+          Left(ExecutionFailure.InvalidRequest(
+            s"OpenCL.std $name expects 2 operands, received ${sources.size}"
+          ))
         else
           integerBitwise(program, values, resultType, destination, sources(0), sources(1), s"OpenCL.std $name") {
             (left, right) =>
@@ -6124,12 +6772,18 @@ object Interpreter {
           }
       case Some("OpenCL.std") if opcode == 58 =>
         if (sources.size != 2)
-          Left(ExecutionFailure.InvalidRequest(s"OpenCL.std sincos expects 2 operands, received ${sources.size}"))
+          Left(ExecutionFailure.InvalidRequest(
+            s"OpenCL.std sincos expects 2 operands, received ${sources.size}"
+          ))
         else openCLSinCos(program, values, memory, resultType, destination, sources(0), sources(1))
+      case Some("OpenCL.std") if opcode == 184 =>
+        openCLPrintf(program, values, memory, control.output, resultType, destination, sources)
       case Some("OpenCL.std") if opcode == 27 || opcode == 28 =>
         val name = if (opcode == 27) "fmax" else "fmin"
         if (sources.size != 2)
-          Left(ExecutionFailure.InvalidRequest(s"OpenCL.std $name expects 2 operands, received ${sources.size}"))
+          Left(ExecutionFailure.InvalidRequest(
+            s"OpenCL.std $name expects 2 operands, received ${sources.size}"
+          ))
         else
           floatingBinary(
             program,
@@ -6142,7 +6796,9 @@ object Interpreter {
           )
       case Some("OpenCL.std") if opcode == 34 =>
         if (sources.size != 2)
-          Left(ExecutionFailure.InvalidRequest(s"OpenCL.std ldexp expects 2 operands, received ${sources.size}"))
+          Left(ExecutionFailure.InvalidRequest(
+            s"OpenCL.std ldexp expects 2 operands, received ${sources.size}"
+          ))
         else openCLLdexp(program, values, resultType, destination, sources(0), sources(1))
       case Some("OpenCL.std")
           if OpenCLUnaryFloatingOpcodes.contains(opcode) =>
@@ -6197,7 +6853,9 @@ object Interpreter {
           case 94 => "native_tan"
         }
         if (sources.size != 1)
-          Left(ExecutionFailure.InvalidRequest(s"OpenCL.std $name expects 1 operand, received ${sources.size}"))
+          Left(ExecutionFailure.InvalidRequest(
+            s"OpenCL.std $name expects 1 operand, received ${sources.size}"
+          ))
         else
           values.get(id(sources.head)) match {
             case Some(RuntimeValue.Bits(sourceType, lanes)) =>
@@ -6259,13 +6917,18 @@ object Interpreter {
                       case 93 => Math.sqrt(value)
                       case 94 => Math.tan(value)
                     }
-                    resultWidth match {
+                    resultWidth.value match {
                       case 16 if opcode == 23 => raw & 0x7fffL
                       case 32 if opcode == 23 => raw & 0x7fffffffL
                       case 64 if opcode == 23 => raw & 0x7fffffffffffffffL
-                      case 16 => IEEE754.floatToBinary16(evaluate(IEEE754.binary16ToFloat(raw).toDouble).toFloat)
+                      case 16                 =>
+                        IEEE754.floatToBinary16(
+                          evaluate(IEEE754.binary16ToFloat(Binary16.low(raw & 0xffffL)).toDouble).toFloat
+                        ).value
                       case 32 =>
-                        IEEE754.floatToBinary32(evaluate(IEEE754.binary32ToFloat(raw).toDouble).toFloat)
+                        IEEE754.floatToBinary32(
+                          evaluate(IEEE754.binary32ToFloat(Binary32.low(raw & 0xffffffffL)).toDouble).toFloat
+                        ).value
                       case 64 => IEEE754.doubleToBinary64(evaluate(IEEE754.binary64ToDouble(raw)))
                     }
                   }
@@ -6278,8 +6941,10 @@ object Interpreter {
                     )
                   )
               }
-            case Some(_) => Left(ExecutionFailure.InvalidRequest(s"OpenCL.std $name operand is not floating-point"))
-            case None    => Left(undefined(sources.head))
+            case Some(_) => Left(
+                ExecutionFailure.InvalidRequest(s"OpenCL.std $name operand is not floating-point")
+              )
+            case None => Left(undefined(sources.head))
           }
       case Some("OpenCL.std") if OpenCLBinaryFloatingOpcodes.contains(opcode) =>
         val name = opcode match {
@@ -6291,7 +6956,9 @@ object Interpreter {
           case _  => "powr"
         }
         if (sources.size != 2)
-          Left(ExecutionFailure.InvalidRequest(s"OpenCL.std $name expects 2 operands, received ${sources.size}"))
+          Left(ExecutionFailure.InvalidRequest(
+            s"OpenCL.std $name expects 2 operands, received ${sources.size}"
+          ))
         else if (opcode == 7 || opcode == 32)
           openCLAtan2OrHypot(program, values, resultType, destination, sources(0), sources(1), opcode == 32)
         else
@@ -6305,33 +6972,53 @@ object Interpreter {
           }
       case Some("OpenCL.std") if opcode == 46 =>
         if (sources.size != 1)
-          Left(ExecutionFailure.InvalidRequest(s"OpenCL.std nan expects 1 operand, received ${sources.size}"))
+          Left(ExecutionFailure.InvalidRequest(
+            s"OpenCL.std nan expects 1 operand, received ${sources.size}"
+          ))
         else openCLNan(program, values, resultType, destination, sources.head)
       case Some("OpenCL.std") if opcode == 49 || opcode == 54 =>
         val name = if (opcode == 49) "pown" else "rootn"
         if (sources.size != 2)
-          Left(ExecutionFailure.InvalidRequest(s"OpenCL.std $name expects 2 operands, received ${sources.size}"))
+          Left(ExecutionFailure.InvalidRequest(
+            s"OpenCL.std $name expects 2 operands, received ${sources.size}"
+          ))
         else openCLIntegerPower(program, values, resultType, destination, sources(0), sources(1), opcode == 54)
       case Some("OpenCL.std") if opcode == 47 =>
         if (sources.size != 2)
-          Left(ExecutionFailure.InvalidRequest(s"OpenCL.std nextafter expects 2 operands, received ${sources.size}"))
+          Left(ExecutionFailure.InvalidRequest(
+            s"OpenCL.std nextafter expects 2 operands, received ${sources.size}"
+          ))
         else openCLNextAfter(program, values, resultType, destination, sources(0), sources(1))
       case Some("OpenCL.std") if opcode == 145 =>
         if (sources.size != 2)
-          Left(ExecutionFailure.InvalidRequest(s"OpenCL.std hadd expects 2 operands, received ${sources.size}"))
+          Left(ExecutionFailure.InvalidRequest(
+            s"OpenCL.std hadd expects 2 operands, received ${sources.size}"
+          ))
         else openCLSignedHalfAdd(program, values, resultType, destination, sources(0), sources(1))
       case Some("OpenCL.std") if opcode == 141 =>
         if (sources.size != 1)
-          Left(ExecutionFailure.InvalidRequest(s"OpenCL.std s_abs expects 1 operand, received ${sources.size}"))
+          Left(ExecutionFailure.InvalidRequest(
+            s"OpenCL.std s_abs expects 1 operand, received ${sources.size}"
+          ))
         else openCLSignedAbs(program, values, resultType, destination, sources.head)
       case Some("OpenCL.std") if opcode == 151 =>
         if (sources.size != 1)
-          Left(ExecutionFailure.InvalidRequest(s"OpenCL.std clz expects 1 operand, received ${sources.size}"))
+          Left(ExecutionFailure.InvalidRequest(
+            s"OpenCL.std clz expects 1 operand, received ${sources.size}"
+          ))
         else openCLCountLeadingZeros(program, values, resultType, destination, sources.head)
       case Some("OpenCL.std") if opcode == 152 =>
         if (sources.size != 1)
-          Left(ExecutionFailure.InvalidRequest(s"OpenCL.std ctz expects 1 operand, received ${sources.size}"))
+          Left(ExecutionFailure.InvalidRequest(
+            s"OpenCL.std ctz expects 1 operand, received ${sources.size}"
+          ))
         else openCLCountTrailingZeros(program, values, resultType, destination, sources.head)
+      case Some("OpenCL.std") if opcode == 166 =>
+        if (sources.size != 1)
+          Left(ExecutionFailure.InvalidRequest(
+            s"OpenCL.std popcount expects 1 operand, received ${sources.size}"
+          ))
+        else openCLPopulationCount(program, values, resultType, destination, sources.head)
       case Some("OpenCL.std") if opcode >= 95 && opcode <= 103 =>
         openCLCommon(program, values, resultType, destination, opcode, sources)
       case Some("OpenCL.std") if opcode >= 104 && opcode <= 110 =>
@@ -6351,9 +7038,11 @@ object Interpreter {
         openCLVectorLoad(program, values, memory, resultType, destination, sources)
       case Some("OpenCL.std") if opcode == 172 =>
         if (sources.size != 3)
-          Left(ExecutionFailure.InvalidRequest(s"OpenCL.std vstoren expects 3 operands, received ${sources.size}"))
+          Left(ExecutionFailure.InvalidRequest(
+            s"OpenCL.std vstoren expects 3 operands, received ${sources.size}"
+          ))
         else
-          openCLVectorStore(program, values, memory, sources.head, Col(sources(1), sources(2)))
+          openCLVectorStore(program, values, memory, sources.head, Vec(sources(1), sources(2)))
       case Some("OpenCL.std") if opcode == 182 || opcode == 183 =>
         openCLShuffle(program, values, resultType, destination, sources, opcode == 183)
       case Some("OpenCL.std") if opcode == 186 =>
@@ -6365,19 +7054,21 @@ object Interpreter {
           Left(ExecutionFailure.InvalidRequest("OpenCL.std prefetch is missing its pointer operand"))
         else address(values, sources.head).map(_ => ())
       case Some(name) =>
-        Left(ExecutionFailure.Unsupported(s"OpExtInst $name opcode $opcode execution is not implemented"))
+        Left(ExecutionFailure.Unsupported(
+          s"OpExtInst $name opcode $opcode execution is not implemented"
+        ))
     }
   }
 
-  private def floatingToDouble(width: Int, bits: Long): Double = width match {
-    case 16 => IEEE754.binary16ToFloat(bits).toDouble
-    case 32 => IEEE754.binary32ToFloat(bits).toDouble
+  private def floatingToDouble(width: FloatingPointWidth, bits: Long): Double = width.value match {
+    case 16 => IEEE754.binary16ToFloat(Binary16.low(bits & 0xffffL)).toDouble
+    case 32 => IEEE754.binary32ToFloat(Binary32.low(bits & 0xffffffffL)).toDouble
     case 64 => IEEE754.binary64ToDouble(bits)
   }
 
-  private def doubleToFloating(width: Int, value: Double): Long = width match {
-    case 16 => IEEE754.floatToBinary16(value.toFloat)
-    case 32 => IEEE754.floatToBinary32(value.toFloat)
+  private def doubleToFloating(width: FloatingPointWidth, value: Double): Long = width.value match {
+    case 16 => IEEE754.doubleToBinary16(value).value
+    case 32 => IEEE754.floatToBinary32(value.toFloat).value
     case 64 => IEEE754.doubleToBinary64(value)
   }
 
@@ -6415,16 +7106,19 @@ object Interpreter {
       if (exponent < 0.0) Double.PositiveInfinity else 0.0
     } else Math.pow(base, exponent)
 
+  // Elementwise floating builtins reuse indexed component buffers and fail fast on type mismatches.
+  @SuppressWarnings(Array("scalafix:DisableSyntax.return", "scalafix:DisableSyntax.var"))
   private def openCLFloatingElementwise(
       program: DispatchProgram,
       values: InvocationValues,
       resultType: Operand,
       destination: Operand,
-      sources: Col[Operand],
+      sources: Vec[Operand],
       name: String
   )(operation: Array[Double] => Double): Either[ExecutionFailure, Unit] =
     floatingShape(program, id(resultType)) match {
-      case None => Left(ExecutionFailure.InvalidRequest(s"OpenCL.std $name result is not floating-point"))
+      case None =>
+        Left(ExecutionFailure.InvalidRequest(s"OpenCL.std $name result is not floating-point"))
       case Some((width, count)) =>
         val sourceLanes  = Array.ofDim[Array[Long]](sources.size)
         val sourceCounts = Array.ofDim[Int](sources.size)
@@ -6444,7 +7138,9 @@ object Interpreter {
                   )
               }
             case Some(_) =>
-              return Left(ExecutionFailure.InvalidRequest(s"OpenCL.std $name operand ${sourceIndex + 1} is a pointer"))
+              return Left(ExecutionFailure.InvalidRequest(
+                s"OpenCL.std $name operand ${sourceIndex + 1} is a pointer"
+              ))
             case None => return Left(undefined(sources(sourceIndex)))
           }
           sourceIndex += 1
@@ -6468,7 +7164,7 @@ object Interpreter {
       resultType: Operand,
       destination: Operand,
       opcode: Int,
-      sources: Col[Operand]
+      sources: Vec[Operand]
   ): Either[ExecutionFailure, Unit] = {
     val (name, arity) = opcode match {
       case 95  => "clamp"      -> 3
@@ -6482,7 +7178,9 @@ object Interpreter {
       case _   => "sign"       -> 1
     }
     if (sources.size != arity)
-      Left(ExecutionFailure.InvalidRequest(s"OpenCL.std $name expects $arity operands, received ${sources.size}"))
+      Left(ExecutionFailure.InvalidRequest(
+        s"OpenCL.std $name expects $arity operands, received ${sources.size}"
+      ))
     else
       openCLFloatingElementwise(program, values, resultType, destination, sources, name) { operands =>
         opcode match {
@@ -6505,13 +7203,15 @@ object Interpreter {
       }
   }
 
+  // Geometric builtins accumulate lane values directly and fail fast on incompatible shapes.
+  @SuppressWarnings(Array("scalafix:DisableSyntax.return", "scalafix:DisableSyntax.var"))
   private def openCLGeometric(
       program: DispatchProgram,
       values: InvocationValues,
       resultType: Operand,
       destination: Operand,
       opcode: Int,
-      sources: Col[Operand]
+      sources: Vec[Operand]
   ): Either[ExecutionFailure, Unit] = {
     val name = opcode match {
       case 104 => "cross"
@@ -6525,102 +7225,148 @@ object Interpreter {
     val arity = if (opcode == 104 || opcode == 105 || opcode == 108) 2 else 1
     if (sources.size != arity)
       return Left(
-        ExecutionFailure.InvalidRequest(s"OpenCL.std $name expects $arity operands, received ${sources.size}")
+        ExecutionFailure.InvalidRequest(
+          s"OpenCL.std $name expects $arity operands, received ${sources.size}"
+        )
       )
     val operands = Array.ofDim[Array[Long]](arity)
-    var width    = 0
+    var width    = Option.empty[FloatingPointWidth]
     var count    = 0
     var index    = 0
     while (index < arity) {
       values.get(id(sources(index))) match {
         case Some(RuntimeValue.Bits(sourceType, lanes)) => floatingShape(program, sourceType) match {
-            case Some((sourceWidth, sourceCount)) if index == 0 || (sourceWidth == width && sourceCount == count) =>
-              width = sourceWidth
+            case Some((sourceWidth, sourceCount))
+                if width.forall(_ == sourceWidth) && (index == 0 || sourceCount == count) =>
+              width = Some(sourceWidth)
               count = sourceCount
               operands(index) = lanes
-            case _ => return Left(ExecutionFailure.InvalidRequest(s"OpenCL.std $name operands have incompatible types"))
+            case _ => return Left(ExecutionFailure.InvalidRequest(
+                s"OpenCL.std $name operands have incompatible types"
+              ))
           }
-        case Some(_) => return Left(ExecutionFailure.InvalidRequest(s"OpenCL.std $name operand is a pointer"))
-        case None    => return Left(undefined(sources(index)))
+        case Some(_) =>
+          return Left(ExecutionFailure.InvalidRequest(s"OpenCL.std $name operand is a pointer"))
+        case None => return Left(undefined(sources(index)))
       }
       index += 1
     }
-    def component(source: Int, lane: Int): Double = floatingToDouble(width, operands(source)(lane))
+    val commonWidth = width match {
+      case Some(value) => value
+      case None        =>
+        return Left(
+          ExecutionFailure.InvalidRequest(s"OpenCL.std $name has no floating-point operands")
+        )
+    }
+    def component(source: Int, lane: Int): Double = floatingToDouble(commonWidth, operands(source)(lane))
     def magnitude(source: Int): Double            = {
-      var sum  = 0.0
-      var lane = 0
+      var length = 0.0
+      var lane   = 0
       while (lane < count) {
-        val value = component(source, lane)
-        sum += value * value
+        length = Math.hypot(length, component(source, lane))
         lane += 1
       }
-      Math.sqrt(sum)
+      length
     }
     opcode match {
       case 104 =>
         if (count != 3 && count != 4)
-          Left(ExecutionFailure.InvalidRequest("OpenCL.std cross requires 3- or 4-component vectors"))
-        else if (!floatingShape(program, id(resultType)).contains((width, count)))
-          Left(ExecutionFailure.InvalidRequest("OpenCL.std cross result type does not match its operands"))
+          Left(
+            ExecutionFailure.InvalidRequest("OpenCL.std cross requires 3- or 4-component vectors")
+          )
+        else if (!floatingShape(program, id(resultType)).contains((commonWidth, count)))
+          Left(ExecutionFailure.InvalidRequest(
+            "OpenCL.std cross result type does not match its operands"
+          ))
         else {
           val result = Array(
-            doubleToFloating(width, component(0, 1) * component(1, 2) - component(0, 2) * component(1, 1)),
-            doubleToFloating(width, component(0, 2) * component(1, 0) - component(0, 0) * component(1, 2)),
-            doubleToFloating(width, component(0, 0) * component(1, 1) - component(0, 1) * component(1, 0))
-          ) ++ Option.when(count == 4)(doubleToFloating(width, 0.0))
+            doubleToFloating(commonWidth, component(0, 1) * component(1, 2) - component(0, 2) * component(1, 1)),
+            doubleToFloating(commonWidth, component(0, 2) * component(1, 0) - component(0, 0) * component(1, 2)),
+            doubleToFloating(commonWidth, component(0, 0) * component(1, 1) - component(0, 1) * component(1, 0))
+          ) ++ Option.when(count == 4)(doubleToFloating(commonWidth, 0.0))
           values.update(id(destination), RuntimeValue.Bits(id(resultType), result))
           Right(())
         }
       case 105 | 108 =>
-        if (!floatingShape(program, id(resultType)).contains((width, 1)))
-          Left(ExecutionFailure.InvalidRequest(s"OpenCL.std $name result is not a matching floating scalar"))
+        if (!floatingShape(program, id(resultType)).contains((commonWidth, 1)))
+          Left(ExecutionFailure.InvalidRequest(
+            s"OpenCL.std $name result is not a matching floating scalar"
+          ))
         else {
-          var sum  = 0.0
-          var lane = 0
+          var distance = 0.0
+          var lane     = 0
           while (lane < count) {
-            val difference = component(0, lane) - component(1, lane)
-            sum += difference * difference
+            distance = Math.hypot(distance, component(0, lane) - component(1, lane))
             lane += 1
           }
           values.update(
             id(destination),
-            RuntimeValue.Bits(id(resultType), Array(doubleToFloating(width, Math.sqrt(sum))))
+            RuntimeValue.Bits(id(resultType), Array(doubleToFloating(commonWidth, distance)))
           )
           Right(())
         }
       case 106 | 109 =>
-        if (!floatingShape(program, id(resultType)).contains((width, 1)))
-          Left(ExecutionFailure.InvalidRequest(s"OpenCL.std $name result is not a matching floating scalar"))
+        if (!floatingShape(program, id(resultType)).contains((commonWidth, 1)))
+          Left(ExecutionFailure.InvalidRequest(
+            s"OpenCL.std $name result is not a matching floating scalar"
+          ))
         else {
           values.update(
             id(destination),
-            RuntimeValue.Bits(id(resultType), Array(doubleToFloating(width, magnitude(0))))
+            RuntimeValue.Bits(id(resultType), Array(doubleToFloating(commonWidth, magnitude(0))))
           )
           Right(())
         }
       case _ =>
-        if (!floatingShape(program, id(resultType)).contains((width, count)))
-          Left(ExecutionFailure.InvalidRequest(s"OpenCL.std $name result type does not match its operand"))
+        if (!floatingShape(program, id(resultType)).contains((commonWidth, count)))
+          Left(ExecutionFailure.InvalidRequest(
+            s"OpenCL.std $name result type does not match its operand"
+          ))
         else {
-          val length = magnitude(0)
-          val result = Array.tabulate(count)(lane => doubleToFloating(width, component(0, lane) / length))
+          var scale = 0.0
+          var lane  = 0
+          while (lane < count) {
+            scale = math.max(scale, math.abs(component(0, lane)))
+            lane += 1
+          }
+          val scaledLength =
+            if (scale == 0.0 || !scale.isFinite) magnitude(0)
+            else {
+              var length = 0.0
+              lane = 0
+              while (lane < count) {
+                length = Math.hypot(length, component(0, lane) / scale)
+                lane += 1
+              }
+              length
+            }
+          val result = Array.tabulate(count) { lane =>
+            val normalized =
+              if (scale == 0.0 || !scale.isFinite) component(0, lane) / scaledLength
+              else (component(0, lane) / scale) / scaledLength
+            doubleToFloating(commonWidth, normalized)
+          }
           values.update(id(destination), RuntimeValue.Bits(id(resultType), result))
           Right(())
         }
     }
   }
 
+  // Shuffle validation exits before writing a partially defined vector.
+  @SuppressWarnings(Array("scalafix:DisableSyntax.return"))
   private def openCLShuffle(
       program: DispatchProgram,
       values: InvocationValues,
       resultType: Operand,
       destination: Operand,
-      sources: Col[Operand],
+      sources: Vec[Operand],
       twoInputs: Boolean
   ): Either[ExecutionFailure, Unit] = {
     val expected = if (twoInputs) 3 else 2
     if (sources.size != expected)
-      return Left(ExecutionFailure.InvalidRequest(s"OpenCL.std shuffle expects $expected operands"))
+      return Left(
+        ExecutionFailure.InvalidRequest(s"OpenCL.std shuffle expects $expected operands")
+      )
     val first     = values.get(id(sources(0)))
     val second    = Option.when(twoInputs)(values.get(id(sources(1)))).flatten
     val maskIndex = if (twoInputs) 2 else 1
@@ -6652,19 +7398,24 @@ object Interpreter {
         }
       case (None, _, _) => Left(undefined(sources(0)))
       case (_, _, None) => Left(undefined(sources(maskIndex)))
-      case _            => Left(ExecutionFailure.InvalidRequest("OpenCL.std shuffle operands are not value types"))
+      case _            =>
+        Left(ExecutionFailure.InvalidRequest("OpenCL.std shuffle operands are not value types"))
     }
   }
 
+  // Bitselect validation exits before writing a partially defined vector.
+  @SuppressWarnings(Array("scalafix:DisableSyntax.return"))
   private def openCLBitselect(
       program: DispatchProgram,
       values: InvocationValues,
       resultType: Operand,
       destination: Operand,
-      sources: Col[Operand]
+      sources: Vec[Operand]
   ): Either[ExecutionFailure, Unit] = {
     if (sources.size != 3)
-      return Left(ExecutionFailure.InvalidRequest(s"OpenCL.std bitselect expects 3 operands, received ${sources.size}"))
+      return Left(ExecutionFailure.InvalidRequest(
+        s"OpenCL.std bitselect expects 3 operands, received ${sources.size}"
+      ))
     (values.get(id(sources(0))), values.get(id(sources(1))), values.get(id(sources(2)))) match {
       case (
             Some(RuntimeValue.Bits(aType, a)),
@@ -6676,7 +7427,9 @@ object Interpreter {
           numericShape(program, aType) != resultShape || numericShape(program, bType) != resultShape ||
           numericShape(program, cType) != resultShape
         )
-          Left(ExecutionFailure.InvalidRequest("OpenCL.std bitselect operands must have matching numeric shapes"))
+          Left(ExecutionFailure.InvalidRequest(
+            "OpenCL.std bitselect operands must have matching numeric shapes"
+          ))
         else {
           values.update(
             id(destination),
@@ -6687,19 +7440,25 @@ object Interpreter {
           )
           Right(())
         }
-      case _ => Left(ExecutionFailure.InvalidRequest("OpenCL.std bitselect operands are undefined or pointer values"))
+      case _ => Left(ExecutionFailure.InvalidRequest(
+          "OpenCL.std bitselect operands are undefined or pointer values"
+        ))
     }
   }
 
+  // Select validation exits before writing a partially defined vector.
+  @SuppressWarnings(Array("scalafix:DisableSyntax.return"))
   private def openCLSelect(
       program: DispatchProgram,
       values: InvocationValues,
       resultType: Operand,
       destination: Operand,
-      sources: Col[Operand]
+      sources: Vec[Operand]
   ): Either[ExecutionFailure, Unit] = {
     if (sources.size != 3)
-      return Left(ExecutionFailure.InvalidRequest(s"OpenCL.std select expects 3 operands, received ${sources.size}"))
+      return Left(ExecutionFailure.InvalidRequest(
+        s"OpenCL.std select expects 3 operands, received ${sources.size}"
+      ))
     (values.get(id(sources(0))), values.get(id(sources(1))), values.get(id(sources(2)))) match {
       case (
             Some(RuntimeValue.Bits(aType, a)),
@@ -6714,7 +7473,7 @@ object Interpreter {
         ) match {
           case (Some(resultShape @ (_, count)), Some(aShape), Some(bShape), Some((conditionWidth, conditionCount)))
               if resultShape == aShape && resultShape == bShape && (conditionCount == count || conditionCount == 1) =>
-            val sign   = 1L << (conditionWidth - 1)
+            val sign   = 1L << (conditionWidth.value - 1)
             val result = Array.tabulate(count) { lane =>
               val condition = c(lane % conditionCount)
               val selected  =
@@ -6726,7 +7485,9 @@ object Interpreter {
             Right(())
           case _ => Left(ExecutionFailure.InvalidRequest("OpenCL.std select operand types are incompatible"))
         }
-      case _ => Left(ExecutionFailure.InvalidRequest("OpenCL.std select operands are undefined or pointer values"))
+      case _ => Left(ExecutionFailure.InvalidRequest(
+          "OpenCL.std select operands are undefined or pointer values"
+        ))
     }
   }
 
@@ -6742,7 +7503,7 @@ object Interpreter {
         case (Some((width, count)), Some((_, sourceCount))) if sourceCount == count || sourceCount == 1 =>
           val result = Array.tabulate(count) { lane =>
             val payload = sourceLanes(lane % sourceCount)
-            width match {
+            width.value match {
               case 16 => 0x7e00L | (payload & 0x1ffL)
               case 32 => 0x7fc00000L | (payload & 0x3fffffL)
               case 64 => 0x7ff8000000000000L | (payload & 0x7ffffffffffffL)
@@ -6776,7 +7537,7 @@ object Interpreter {
           val result = Array.tabulate(count) { lane =>
             val value    = floatingToDouble(width, sourceLanes(lane))
             val power    = signExtend(exponentLanes(lane % exponentCount), exponentWidth).toInt
-            val negative = width match {
+            val negative = width.value match {
               case 16 => (sourceLanes(lane) & 0x8000L) != 0L
               case 32 => (sourceLanes(lane) & 0x80000000L) != 0L
               case 64 => sourceLanes(lane) < 0L
@@ -6802,7 +7563,9 @@ object Interpreter {
       }
     case (None, _) => Left(undefined(source))
     case (_, None) => Left(undefined(exponent))
-    case _         => Left(ExecutionFailure.InvalidRequest("OpenCL.std integer-power operands are not value types"))
+    case _         => Left(
+        ExecutionFailure.InvalidRequest("OpenCL.std integer-power operands are not value types")
+      )
   }
 
   private def openCLMad(
@@ -6845,7 +7608,9 @@ object Interpreter {
             values.update(id(destination), RuntimeValue.Bits(id(resultType), result))
             Right(())
           case _ =>
-            Left(ExecutionFailure.InvalidRequest("OpenCL.std mad requires matching floating-point types"))
+            Left(ExecutionFailure.InvalidRequest(
+              "OpenCL.std mad requires matching floating-point types"
+            ))
         }
       case (None, _, _) => Left(undefined(left))
       case (_, None, _) => Left(undefined(right))
@@ -6853,6 +7618,8 @@ object Interpreter {
       case _            => Left(ExecutionFailure.InvalidRequest("OpenCL.std mad operands are not floating-point"))
     }
 
+  // Sin/cos writes paired results through one indexed component loop.
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private def openCLSinCos(
       program: DispatchProgram,
       values: InvocationValues,
@@ -6871,20 +7638,9 @@ object Interpreter {
             val cosineLanes = Array.ofDim[Long](count)
             var index       = 0
             while (index < count) {
-              width match {
-                case 16 =>
-                  val value = IEEE754.binary16ToFloat(sourceLanes(index)).toDouble
-                  sineLanes(index) = IEEE754.floatToBinary16(Math.sin(value).toFloat)
-                  cosineLanes(index) = IEEE754.floatToBinary16(Math.cos(value).toFloat)
-                case 32 =>
-                  val value = IEEE754.binary32ToFloat(sourceLanes(index)).toDouble
-                  sineLanes(index) = IEEE754.floatToBinary32(Math.sin(value).toFloat)
-                  cosineLanes(index) = IEEE754.floatToBinary32(Math.cos(value).toFloat)
-                case 64 =>
-                  val value = IEEE754.binary64ToDouble(sourceLanes(index))
-                  sineLanes(index) = IEEE754.doubleToBinary64(Math.sin(value))
-                  cosineLanes(index) = IEEE754.doubleToBinary64(Math.cos(value))
-              }
+              val value = floatingToDouble(width, sourceLanes(index))
+              sineLanes(index) = doubleToFloating(width, Math.sin(value))
+              cosineLanes(index) = doubleToFloating(width, Math.cos(value))
               index += 1
             }
             val cosineBytes = Array.ofDim[Byte](typeSize(program, id(resultType)))
@@ -6897,7 +7653,9 @@ object Interpreter {
             }
           case _ =>
             Left(
-              ExecutionFailure.InvalidRequest("OpenCL.std sincos requires matching floating-point scalar/vector types")
+              ExecutionFailure.InvalidRequest(
+                "OpenCL.std sincos requires matching floating-point scalar/vector types"
+              )
             )
         }
       case (None, _)        => Left(undefined(source))
@@ -6923,37 +7681,20 @@ object Interpreter {
             if width == rightWidth && width == resultWidth && lanes == rightLanesCount && lanes == resultLanes &&
               leftLanes.length == lanes && rightLanes.length == lanes =>
           val result = Array.tabulate(lanes) { index =>
-            width match {
-              case 16 =>
-                val leftValue  = IEEE754.binary16ToFloat(leftLanes(index)).toDouble
-                val rightValue = IEEE754.binary16ToFloat(rightLanes(index)).toDouble
-                val selected   =
-                  if (Math.abs(leftValue) > Math.abs(rightValue)) leftValue
-                  else if (Math.abs(rightValue) > Math.abs(leftValue)) rightValue
-                  else Math.max(leftValue, rightValue)
-                IEEE754.floatToBinary16(selected.toFloat)
-              case 32 =>
-                val leftValue  = IEEE754.binary32ToFloat(leftLanes(index))
-                val rightValue = IEEE754.binary32ToFloat(rightLanes(index))
-                val selected   =
-                  if (Math.abs(leftValue) > Math.abs(rightValue)) leftValue
-                  else if (Math.abs(rightValue) > Math.abs(leftValue)) rightValue
-                  else Math.max(leftValue, rightValue)
-                IEEE754.floatToBinary32(selected)
-              case 64 =>
-                val leftValue  = IEEE754.binary64ToDouble(leftLanes(index))
-                val rightValue = IEEE754.binary64ToDouble(rightLanes(index))
-                val selected   =
-                  if (Math.abs(leftValue) > Math.abs(rightValue)) leftValue
-                  else if (Math.abs(rightValue) > Math.abs(leftValue)) rightValue
-                  else Math.max(leftValue, rightValue)
-                IEEE754.doubleToBinary64(selected)
-            }
+            val leftValue  = floatingToDouble(width, leftLanes(index))
+            val rightValue = floatingToDouble(width, rightLanes(index))
+            val selected   =
+              if (Math.abs(leftValue) > Math.abs(rightValue)) leftValue
+              else if (Math.abs(rightValue) > Math.abs(leftValue)) rightValue
+              else Math.max(leftValue, rightValue)
+            doubleToFloating(width, selected)
           }
           values.update(id(destination), RuntimeValue.Bits(id(resultType), result))
           Right(())
         case _ =>
-          Left(ExecutionFailure.InvalidRequest("OpenCL.std maxmag requires matching floating-point types"))
+          Left(ExecutionFailure.InvalidRequest(
+            "OpenCL.std maxmag requires matching floating-point types"
+          ))
       }
     case (None, _) => Left(undefined(left))
     case (_, None) => Left(undefined(right))
@@ -6978,34 +7719,17 @@ object Interpreter {
             if width == rightWidth && width == resultWidth && lanes == rightLanesCount && lanes == resultLanes &&
               leftLanes.length == lanes && rightLanes.length == lanes =>
           val result = Array.tabulate(lanes) { index =>
-            width match {
-              case 16 =>
-                IEEE754.floatToBinary16(
-                  Math.pow(
-                    IEEE754.binary16ToFloat(leftLanes(index)).toDouble,
-                    IEEE754.binary16ToFloat(rightLanes(index)).toDouble
-                  ).toFloat
-                )
-              case 32 =>
-                IEEE754.floatToBinary32(
-                  Math.pow(
-                    IEEE754.binary32ToFloat(leftLanes(index)).toDouble,
-                    IEEE754.binary32ToFloat(rightLanes(index)).toDouble
-                  ).toFloat
-                )
-              case 64 =>
-                IEEE754.doubleToBinary64(
-                  Math.pow(
-                    IEEE754.binary64ToDouble(leftLanes(index)),
-                    IEEE754.binary64ToDouble(rightLanes(index))
-                  )
-                )
-            }
+            doubleToFloating(
+              width,
+              Math.pow(floatingToDouble(width, leftLanes(index)), floatingToDouble(width, rightLanes(index)))
+            )
           }
           values.update(id(destination), RuntimeValue.Bits(id(resultType), result))
           Right(())
         case _ =>
-          Left(ExecutionFailure.InvalidRequest("OpenCL.std pow requires matching floating-point types"))
+          Left(ExecutionFailure.InvalidRequest(
+            "OpenCL.std pow requires matching floating-point types"
+          ))
       }
     case (None, _) => Left(undefined(left))
     case (_, None) => Left(undefined(right))
@@ -7035,25 +7759,10 @@ object Interpreter {
             if width == rightWidth && width == resultWidth && count == rightCount && count == resultCount &&
               leftLanes.length == count && rightLanes.length == count =>
           val result = Array.tabulate(count) { index =>
-            val value = width match {
-              case 16 =>
-                val leftValue  = IEEE754.binary16ToFloat(leftLanes(index)).toDouble
-                val rightValue = IEEE754.binary16ToFloat(rightLanes(index)).toDouble
-                if (hypot) Math.hypot(leftValue, rightValue) else Math.atan2(leftValue, rightValue)
-              case 32 =>
-                val leftValue  = IEEE754.binary32ToFloat(leftLanes(index)).toDouble
-                val rightValue = IEEE754.binary32ToFloat(rightLanes(index)).toDouble
-                if (hypot) Math.hypot(leftValue, rightValue) else Math.atan2(leftValue, rightValue)
-              case 64 =>
-                val leftValue  = IEEE754.binary64ToDouble(leftLanes(index))
-                val rightValue = IEEE754.binary64ToDouble(rightLanes(index))
-                if (hypot) Math.hypot(leftValue, rightValue) else Math.atan2(leftValue, rightValue)
-            }
-            width match {
-              case 16 => IEEE754.floatToBinary16(value.toFloat)
-              case 32 => IEEE754.floatToBinary32(value.toFloat)
-              case 64 => IEEE754.doubleToBinary64(value)
-            }
+            val leftValue  = floatingToDouble(width, leftLanes(index))
+            val rightValue = floatingToDouble(width, rightLanes(index))
+            val value      = if (hypot) Math.hypot(leftValue, rightValue) else Math.atan2(leftValue, rightValue)
+            doubleToFloating(width, value)
           }
           values.update(id(destination), RuntimeValue.Bits(id(resultType), result))
           Right(())
@@ -7088,29 +7797,23 @@ object Interpreter {
               Some((resultWidth, resultCount)),
               Some((exponentWidth, exponentCount))
             )
-            if width == resultWidth && count == resultCount && exponentWidth == 32 && exponentCount == count &&
+            if width == resultWidth && count == resultCount && exponentWidth.value == 32 && exponentCount == count &&
               sourceLanes.length == count && exponentLanes.length == count =>
           val result = Array.tabulate(count) { index =>
             val scale = signExtend(exponentLanes(index), exponentWidth).toInt
-            width match {
-              case 16 =>
-                IEEE754.floatToBinary16(
-                  Math.scalb(IEEE754.binary16ToFloat(sourceLanes(index)), scale).toFloat
-                )
-              case 32 =>
-                IEEE754.floatToBinary32(Math.scalb(IEEE754.binary32ToFloat(sourceLanes(index)), scale))
-              case 64 =>
-                IEEE754.doubleToBinary64(Math.scalb(IEEE754.binary64ToDouble(sourceLanes(index)), scale))
-            }
+            doubleToFloating(width, Math.scalb(floatingToDouble(width, sourceLanes(index)), scale))
           }
           values.update(id(destination), RuntimeValue.Bits(id(resultType), result))
           Right(())
         case _ =>
-          Left(ExecutionFailure.InvalidRequest("OpenCL.std ldexp requires matching floating values and i32 exponents"))
+          Left(ExecutionFailure.InvalidRequest(
+            "OpenCL.std ldexp requires matching floating values and i32 exponents"
+          ))
       }
     case (None, _) => Left(undefined(source))
     case (_, None) => Left(undefined(exponent))
-    case _         => Left(ExecutionFailure.InvalidRequest("OpenCL.std ldexp operands are not value types"))
+    case _         =>
+      Left(ExecutionFailure.InvalidRequest("OpenCL.std ldexp operands are not value types"))
   }
 
   private def binary(
@@ -7133,7 +7836,7 @@ object Interpreter {
         id(resultType),
         result
       )
-      Right(())
+      InstructionCompleted
     } else
       (bits(values, left), bits(values, right)) match {
         case (Right(a), Right(b)) =>
@@ -7141,7 +7844,7 @@ object Interpreter {
           val size  = math.max(a.length, b.length)
           val lanes = Array.tabulate(size)(index => operation(a(index % a.length), b(index % b.length)) & mask(width))
           values.update(id(destination), RuntimeValue.Bits(id(resultType), lanes))
-          Right(())
+          InstructionCompleted
         case (Left(error), _) => Left(error)
         case (_, Left(error)) => Left(error)
       }
@@ -7155,7 +7858,7 @@ object Interpreter {
       base: Operand,
       shift: Operand,
       opcode: String
-  )(operation: (Long, Long, Int) => Long): Either[ExecutionFailure, Unit] =
+  )(operation: (Long, Long, BitWidth) => Long): Either[ExecutionFailure, Unit] =
     (values.get(id(base)), values.get(id(shift))) match {
       case (
             Some(RuntimeValue.Bits(baseType, baseLanes)),
@@ -7315,7 +8018,7 @@ object Interpreter {
         ))
       case 30 => Right(Array(invocation.workDim.toLong))
       case 31 => Right(invocation.globalSize)
-      case 32 => Right(invocation.workgroupSize)
+      case 32 => Right(invocation.enqueuedWorkgroupSize)
       case 33 => Right(invocation.globalOffset)
       case 34 => Right(
           Array(
@@ -7331,7 +8034,7 @@ object Interpreter {
           )
         )
       case 36    => Right(Array(invocation.subgroupSize.toLong))
-      case 37    => Right(Array(invocation.subgroupSize.toLong))
+      case 37    => Right(Array(invocation.maxSubgroupSize.toLong))
       case 38    => Right(Array(invocation.numSubgroups))
       case 39    => Right(Array(invocation.numSubgroups))
       case 40    => Right(Array(invocation.subgroupIndex.toLong))
@@ -7361,7 +8064,7 @@ object Interpreter {
   private def decode(program: DispatchProgram, typeId: Int, bytes: Array[Byte]): RuntimeValue = {
     val count = scalarLeafCount(program, typeId).fold(
       error => throw IllegalArgumentException(error.message),
-      identity
+      value => value
     )
     val lanes = Array.ofDim[Long](count)
     val used  = decodeBits(program, typeId, bytes, 0, lanes, 0)
@@ -7372,6 +8075,8 @@ object Interpreter {
     RuntimeValue.Bits(typeId, lanes)
   }
 
+  // Dense scalar/vector decoding writes output lanes in place.
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private def decodeBits(
       program: DispatchProgram,
       typeId: Int,
@@ -7385,10 +8090,17 @@ object Interpreter {
       if (laneStart >= lanes.length)
         throw IllegalArgumentException(s"SPIR-V value of type %$typeId has too many scalar leaves")
       val width     = scalarWidth(program, typeId)
-      val byteCount = width / 8
+      val byteCount = ScalarByteWidth.applyUnsafe(width.value / 8)
       val offset    = Math.min(byteStart, input.length)
-      val available = Math.min(byteCount, input.length - offset)
+      val available = ScalarByteWidth.applyUnsafe(Math.min(byteCount.value, input.length - offset))
       lanes(laneStart) = LittleEndian.decode(input, offset, available) & mask(width)
+      laneStart + 1
+    case Some(RuntimeType.Pointer(_, _)) =>
+      if (laneStart >= lanes.length)
+        throw IllegalArgumentException(s"SPIR-V value of type %$typeId has too many pointer leaves")
+      val offset    = Math.min(byteStart, input.length)
+      val available = ScalarByteWidth.applyUnsafe(Math.min(8, input.length - offset))
+      lanes(laneStart) = LittleEndian.decode(input, offset, available)
       laneStart + 1
     case Some(RuntimeType.VectorType(component, count)) =>
       var lane  = laneStart
@@ -7438,6 +8150,8 @@ object Interpreter {
       throw IllegalArgumentException(s"cannot encode runtime pointer $pointer as process-neutral bytes")
   }
 
+  // Dense scalar/vector encoding writes output lanes in place.
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private def encodeBits(
       program: DispatchProgram,
       typeId: Int,
@@ -7451,7 +8165,17 @@ object Interpreter {
       if (laneStart >= lanes.length)
         throw IllegalArgumentException(s"SPIR-V value of type %$typeId has too few scalar leaves")
       val width = scalarWidth(program, typeId)
-      LittleEndian.write(lanes(laneStart), output, byteStart, width / 8)
+      LittleEndian.write(
+        lanes(laneStart),
+        output,
+        byteStart,
+        ScalarByteWidth.applyUnsafe(width.value / 8)
+      )
+      laneStart + 1
+    case Some(RuntimeType.Pointer(_, _)) =>
+      if (laneStart >= lanes.length)
+        throw IllegalArgumentException(s"SPIR-V value of type %$typeId has too few pointer leaves")
+      LittleEndian.write(lanes(laneStart), output, byteStart, ScalarByteWidth(8))
       laneStart + 1
     case Some(RuntimeType.VectorType(component, count)) =>
       var lane  = laneStart
@@ -7498,10 +8222,35 @@ object Interpreter {
   private def typeSize(program: DispatchProgram, typeId: Int): Int =
     program.typeSizeCache.getOrElseUpdate(typeId, typeSizeUncached(program, typeId))
 
+  private def nonNegativeTypeSize(
+      program: DispatchProgram,
+      typeId: Int
+  ): Either[ExecutionFailure, Int :| Positive0] = {
+    val size = typeSize(program, typeId)
+    size.refineEither[Positive0]
+      .leftMap(_ =>
+        ExecutionFailure.InvalidRequest(s"SPIR-V type %$typeId has a negative byte size: $size")
+      )
+  }
+
+  private def scalarMemoryWidth(
+      program: DispatchProgram,
+      typeId: Int
+  ): Either[ExecutionFailure, MemoryValueByteWidth] = {
+    val size = typeSize(program, typeId)
+    size.refineEither[Interval.Closed[1, 8]]
+      .leftMap(_ =>
+        ExecutionFailure.InvalidRequest(
+          s"SPIR-V scalar type %$typeId has invalid byte width $size"
+        )
+      )
+      .map(size => MemoryValueByteWidth(size))
+  }
+
   private def typeSizeUncached(program: DispatchProgram, typeId: Int): Int = program.types.get(typeId) match {
     case Some(RuntimeType.Bool)                     => 1
-    case Some(RuntimeType.Integer(width, _))        => width / 8
-    case Some(RuntimeType.Floating(width))          => width / 8
+    case Some(RuntimeType.Integer(width, _))        => width.value / 8
+    case Some(RuntimeType.Floating(width))          => width.value / 8
     case Some(RuntimeType.Event)                    => 8
     case Some(RuntimeType.VectorType(component, n)) =>
       Math.multiplyExact(typeSize(program, component), if (n == 3) 4 else n)
@@ -7514,7 +8263,9 @@ object Interpreter {
     case None                                 => throw IllegalArgumentException(s"SPIR-V type %$typeId is undefined")
   }
 
-  private def structSize(program: DispatchProgram, structureType: Int, members: Col[Int]): Int = {
+  // Struct layout carries offset/alignment state and uses the packed-layout fast exit.
+  @SuppressWarnings(Array("scalafix:DisableSyntax.return", "scalafix:DisableSyntax.var"))
+  private def structSize(program: DispatchProgram, structureType: Int, members: Vec[Int]): Int = {
     if (program.packedStructures.contains(structureType))
       return members.foldLeft(0)((size, member) => Math.addExact(size, typeSize(program, member)))
     var offset = 0
@@ -7530,10 +8281,12 @@ object Interpreter {
     alignUp(offset, align)
   }
 
+  // Struct member layout carries offset/alignment state through one ordered scan.
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private def structMemberOffset(
       program: DispatchProgram,
       structureType: Int,
-      members: Col[Int],
+      members: Vec[Int],
       selected: Int
   ): Int =
     if (program.packedStructures.contains(structureType))
@@ -7562,11 +8315,11 @@ object Interpreter {
     case _                               => math.max(1, typeSize(program, typeId))
   }
 
-  private def scalarWidth(program: DispatchProgram, typeId: Int): Int = program.types.get(typeId) match {
-    case Some(RuntimeType.Bool)                     => 8
+  private def scalarWidth(program: DispatchProgram, typeId: Int): BitWidth = program.types.get(typeId) match {
+    case Some(RuntimeType.Bool)                     => BitWidth(8)
     case Some(RuntimeType.Integer(width, _))        => width
-    case Some(RuntimeType.Floating(width))          => width
-    case Some(RuntimeType.Event)                    => 64
+    case Some(RuntimeType.Floating(width))          => width.bitWidth
+    case Some(RuntimeType.Event)                    => BitWidth(64)
     case Some(RuntimeType.VectorType(component, _)) => scalarWidth(program, component)
     case value => throw IllegalArgumentException(s"SPIR-V type %$typeId is not scalar or vector: $value")
   }
@@ -7579,8 +8332,9 @@ object Interpreter {
   private def address(values: InvocationValues, operand: Operand): Either[ExecutionFailure, Pointer] =
     values.get(id(operand)) match {
       case Some(RuntimeValue.Address(_, value)) => Right(value)
-      case Some(_) => Left(ExecutionFailure.InvalidRequest(s"SPIR-V value %${id(operand)} is not a pointer"))
-      case None    => Left(undefined(operand))
+      case Some(_)                              =>
+        Left(ExecutionFailure.InvalidRequest(s"SPIR-V value %${id(operand)} is not a pointer"))
+      case None => Left(undefined(operand))
     }
 
   /** Lifetime instructions are semantic markers, but accepting a malformed marker would hide a corrupt module. Resolve
@@ -7594,41 +8348,54 @@ object Interpreter {
       sizeOperand: Operand
   ): Either[ExecutionFailure, Unit] =
     (pointerOperand.words, sizeOperand.words) match {
-      case (Col(pointerId), Col(sizeWord)) => values.get(pointerId.bits) match {
+      case (Vec(pointerId), Vec(sizeWord)) => values.get(pointerId.bits) match {
           case Some(RuntimeValue.Address(pointerType, pointer)) => program.types.get(pointerType) match {
               case Some(RuntimeType.Pointer(_, pointee)) if pointee == pointer.pointee =>
                 val size = sizeWord.toUnsigned
                 pointer.region match {
-                  case Region.Internal(bytes) if size != 0L =>
+                  case Region.Internal(internal) if size != 0L =>
                     val end = pointer.offset + size
                     Either.cond(
-                      pointer.offset >= 0L && end >= pointer.offset && end <= bytes.length.toLong,
+                      pointer.offset >= 0L && end >= pointer.offset && end <= internal.bytes.length.toLong,
                       (),
                       ExecutionFailure.InvalidRequest(
-                        s"$opcode byte range ${pointer.offset} + $size exceeds internal object of ${bytes.length} bytes"
+                        s"$opcode byte range ${pointer.offset} + $size exceeds internal object of ${internal.bytes.length} bytes"
                       )
                     )
                   case _ => Right(())
                 }
               case Some(_) =>
-                Left(ExecutionFailure.InvalidRequest(s"$opcode target %${pointerId.bits} does not have pointer type"))
+                Left(ExecutionFailure.InvalidRequest(
+                  s"$opcode target %${pointerId.bits} does not have pointer type"
+                ))
               case None =>
-                Left(ExecutionFailure.InvalidRequest(s"$opcode target %${pointerId.bits} has undefined pointer type"))
+                Left(ExecutionFailure.InvalidRequest(
+                  s"$opcode target %${pointerId.bits} has undefined pointer type"
+                ))
             }
-          case Some(_) => Left(ExecutionFailure.InvalidRequest(s"$opcode target %${pointerId.bits} is not a pointer"))
-          case None    => Left(ExecutionFailure.InvalidRequest(s"$opcode target %${pointerId.bits} is undefined"))
+          case Some(_) => Left(ExecutionFailure.InvalidRequest(
+              s"$opcode target %${pointerId.bits} is not a pointer"
+            ))
+          case None => Left(
+              ExecutionFailure.InvalidRequest(s"$opcode target %${pointerId.bits} is undefined")
+            )
         }
       case (pointerWords, _) if pointerWords.size != 1 =>
-        Left(ExecutionFailure.InvalidRequest(s"$opcode pointer must contain one word, found ${pointerWords.size}"))
+        Left(ExecutionFailure.InvalidRequest(
+          s"$opcode pointer must contain one word, found ${pointerWords.size}"
+        ))
       case (_, sizeWords) =>
-        Left(ExecutionFailure.InvalidRequest(s"$opcode size must contain one word, found ${sizeWords.size}"))
+        Left(ExecutionFailure.InvalidRequest(
+          s"$opcode size must contain one word, found ${sizeWords.size}"
+        ))
     }
 
   private def bits(values: InvocationValues, operand: Operand): Either[ExecutionFailure, Array[Long]] =
     values.get(id(operand)) match {
       case Some(RuntimeValue.Bits(_, value)) => Right(value)
-      case Some(_) => Left(ExecutionFailure.InvalidRequest(s"SPIR-V value %${id(operand)} is not numeric"))
-      case None    => Left(undefined(operand))
+      case Some(_)                           =>
+        Left(ExecutionFailure.InvalidRequest(s"SPIR-V value %${id(operand)} is not numeric"))
+      case None => Left(undefined(operand))
     }
 
   private def scalar(values: InvocationValues, operand: Operand): Either[ExecutionFailure, Long] =
@@ -7636,7 +8403,9 @@ object Interpreter {
     else
       bits(values, operand).flatMap {
         case Array(value) => Right(value)
-        case value => Left(ExecutionFailure.InvalidRequest(s"SPIR-V value %${id(operand)} has ${value.length} lanes"))
+        case value        => Left(ExecutionFailure.InvalidRequest(
+            s"SPIR-V value %${id(operand)} has ${value.length} lanes"
+          ))
       }
 
   private def scalarBits(value: RuntimeValue): Option[Long] = value match {
@@ -7649,6 +8418,8 @@ object Interpreter {
     case RuntimeValue.Address(_, pointer) => RuntimeValue.Address(typeId, pointer)
   }
 
+  // Bitcast packs and unpacks lane bits without allocating intermediate collections.
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private def bitcast(
       program: DispatchProgram,
       sourceType: Int,
@@ -7659,16 +8430,17 @@ object Interpreter {
     val resultShape = numericShape(program, resultType)
     (sourceShape, resultShape) match {
       case (Some((sourceWidth, sourceCount)), Some((resultWidth, resultCount)))
-          if sourceLanes.length == sourceCount && sourceWidth * sourceCount == resultWidth * resultCount =>
+          if sourceLanes.length == sourceCount &&
+            sourceWidth.value * sourceCount == resultWidth.value * resultCount =>
         val result     = Array.ofDim[Long](resultCount)
         var resultLane = 0
         while (resultLane < resultCount) {
           var bits = 0L
           var bit  = 0
-          while (bit < resultWidth) {
-            val sourceBit    = resultLane * resultWidth + bit
-            val sourceLane   = sourceBit / sourceWidth
-            val sourceOffset = sourceBit % sourceWidth
+          while (bit < resultWidth.value) {
+            val sourceBit    = resultLane * resultWidth.value + bit
+            val sourceLane   = sourceBit / sourceWidth.value
+            val sourceOffset = sourceBit % sourceWidth.value
             if (((sourceLanes(sourceLane) >>> sourceOffset) & 1L) != 0L) bits |= 1L << bit
             bit += 1
           }
@@ -7684,24 +8456,32 @@ object Interpreter {
           )
         )
       case (None, _) =>
-        Left(ExecutionFailure.InvalidRequest(s"OpBitcast source type %$sourceType is not scalar/vector numeric data"))
+        Left(ExecutionFailure.InvalidRequest(
+          s"OpBitcast source type %$sourceType is not scalar/vector numeric data"
+        ))
       case (_, None) =>
-        Left(ExecutionFailure.InvalidRequest(s"OpBitcast result type %$resultType is not scalar/vector numeric data"))
+        Left(ExecutionFailure.InvalidRequest(
+          s"OpBitcast result type %$resultType is not scalar/vector numeric data"
+        ))
     }
   }
 
-  private def numericShape(program: DispatchProgram, typeId: Int): Option[(Int, Int)] =
-    integerShape(program, typeId).orElse(floatingShape(program, typeId)).orElse {
-      program.types.get(typeId) match {
-        case Some(RuntimeType.Bool) => Some((8, 1))
-        case Some(RuntimeType.VectorType(component, count))
-            if program.types.get(component).contains(RuntimeType.Bool) => Some((8, count))
-        case _ => None
+  private def numericShape(program: DispatchProgram, typeId: Int): Option[(BitWidth, Int)] =
+    integerShape(program, typeId)
+      .orElse(floatingShape(program, typeId).map((width, count) => width.bitWidth -> count))
+      .orElse {
+        program.types.get(typeId) match {
+          case Some(RuntimeType.Bool) => Some((BitWidth(8), 1))
+          case Some(RuntimeType.VectorType(component, count))
+              if program.types.get(component).contains(RuntimeType.Bool) => Some((BitWidth(8), count))
+          case _ => None
+        }
       }
-    }
 
+  // Phi lookup scans predecessor pairs and exits at the matching edge or malformed operand.
+  @SuppressWarnings(Array("scalafix:DisableSyntax.return", "scalafix:DisableSyntax.var"))
   private def phiIncoming(
-      incoming: Col[Operand],
+      incoming: Vec[Operand],
       predecessor: Int
   ): Either[ExecutionFailure, Option[Int]] = {
     var selected = -1
@@ -7709,7 +8489,7 @@ object Interpreter {
     while (index < incoming.size) {
       val pair = incoming(index)
       pair.words match {
-        case Col(value, parent) => if (parent.bits == predecessor) selected = value.bits
+        case Vec(value, parent) => if (parent.bits == predecessor) selected = value.bits
         case words              =>
           return Left(
             ExecutionFailure.InvalidRequest(
@@ -7734,17 +8514,15 @@ object Interpreter {
         case (Some((sourceWidth, sourceLanes)), Some((resultWidth, resultLanes))) if sourceLanes == resultLanes =>
           val converted = lanes.map { raw =>
             val signed = signExtend(raw, sourceWidth)
-            resultWidth match {
-              case 16 => IEEE754.floatToBinary16(signed.toFloat)
-              case 32 => IEEE754.floatToBinary32(signed.toFloat)
-              case 64 => IEEE754.doubleToBinary64(signed.toDouble)
-            }
+            doubleToFloating(resultWidth, signed.toDouble)
           }
           values.update(id(destination), RuntimeValue.Bits(id(resultType), converted))
           Right(())
         case (None, _) =>
           Left(
-            ExecutionFailure.InvalidRequest(s"OpConvertSToF source %${id(source)} is not an integer scalar or vector")
+            ExecutionFailure.InvalidRequest(
+              s"OpConvertSToF source %${id(source)} is not an integer scalar or vector"
+            )
           )
         case (_, None) =>
           Left(
@@ -7759,8 +8537,9 @@ object Interpreter {
             )
           )
       }
-    case Some(_) => Left(ExecutionFailure.InvalidRequest(s"OpConvertSToF source %${id(source)} is a pointer"))
-    case None    => Left(undefined(source))
+    case Some(_) =>
+      Left(ExecutionFailure.InvalidRequest(s"OpConvertSToF source %${id(source)} is a pointer"))
+    case None => Left(undefined(source))
   }
 
   private def convertUnsignedToFloat(
@@ -7774,21 +8553,19 @@ object Interpreter {
       (integerShape(program, sourceType), floatingShape(program, id(resultType))) match {
         case (Some((sourceWidth, sourceLanes)), Some((resultWidth, resultLanes))) if sourceLanes == resultLanes =>
           val converted = lanes.map { raw =>
-            val unsigned = sourceWidth match {
+            val unsigned = sourceWidth.value match {
               case 64 if raw < 0L => (raw >>> 1).toDouble * 2.0 + (raw & 1L).toDouble
-              case width          => (raw & mask(width)).toDouble
+              case _              => (raw & mask(sourceWidth)).toDouble
             }
-            resultWidth match {
-              case 16 => IEEE754.floatToBinary16(unsigned.toFloat)
-              case 32 => IEEE754.floatToBinary32(unsigned.toFloat)
-              case 64 => IEEE754.doubleToBinary64(unsigned)
-            }
+            doubleToFloating(resultWidth, unsigned)
           }
           values.update(id(destination), RuntimeValue.Bits(id(resultType), converted))
           Right(())
         case (None, _) =>
           Left(
-            ExecutionFailure.InvalidRequest(s"OpConvertUToF source %${id(source)} is not an integer scalar or vector")
+            ExecutionFailure.InvalidRequest(
+              s"OpConvertUToF source %${id(source)} is not an integer scalar or vector"
+            )
           )
         case (_, None) =>
           Left(
@@ -7803,8 +8580,9 @@ object Interpreter {
             )
           )
       }
-    case Some(_) => Left(ExecutionFailure.InvalidRequest(s"OpConvertUToF source %${id(source)} is a pointer"))
-    case None    => Left(undefined(source))
+    case Some(_) =>
+      Left(ExecutionFailure.InvalidRequest(s"OpConvertUToF source %${id(source)} is a pointer"))
+    case None => Left(undefined(source))
   }
 
   private def signedConvert(
@@ -7823,7 +8601,9 @@ object Interpreter {
           )
           Right(())
         case (None, _) =>
-          Left(ExecutionFailure.InvalidRequest(s"OpSConvert source %${id(source)} is not an integer scalar or vector"))
+          Left(ExecutionFailure.InvalidRequest(
+            s"OpSConvert source %${id(source)} is not an integer scalar or vector"
+          ))
         case (_, None) =>
           Left(
             ExecutionFailure.InvalidRequest(
@@ -7837,8 +8617,9 @@ object Interpreter {
             )
           )
       }
-    case Some(_) => Left(ExecutionFailure.InvalidRequest(s"OpSConvert source %${id(source)} is a pointer"))
-    case None    => Left(undefined(source))
+    case Some(_) =>
+      Left(ExecutionFailure.InvalidRequest(s"OpSConvert source %${id(source)} is a pointer"))
+    case None => Left(undefined(source))
   }
 
   private def floatingClassify(
@@ -7853,7 +8634,7 @@ object Interpreter {
       (floatingShape(program, sourceType), booleanLanes(program, id(resultType))) match {
         case (Some((width, sourceLanes)), Some(resultLanes)) if sourceLanes == resultLanes =>
           val result = lanes.map { raw =>
-            val (signMask, exponentMask, fractionMask) = width match {
+            val (signMask, exponentMask, fractionMask) = width.value match {
               case 16 => (0x8000L, 0x7c00L, 0x03ffL)
               case 32 => (0x80000000L, 0x7f800000L, 0x007fffffL)
               case 64 => (0x8000000000000000L, 0x7ff0000000000000L, 0x000fffffffffffffL)
@@ -7891,8 +8672,9 @@ object Interpreter {
             )
           )
       }
-    case Some(_) => Left(ExecutionFailure.InvalidRequest(s"${classification.opcode} source is a pointer"))
-    case None    => Left(undefined(source))
+    case Some(_) =>
+      Left(ExecutionFailure.InvalidRequest(s"${classification.opcode} source is a pointer"))
+    case None => Left(undefined(source))
   }
 
   private def floatingNegate(
@@ -7905,7 +8687,7 @@ object Interpreter {
     case Some(RuntimeValue.Bits(sourceType, lanes)) =>
       (floatingShape(program, sourceType), floatingShape(program, id(resultType))) match {
         case (Some(sourceShape @ (width, _)), Some(resultShape)) if sourceShape == resultShape =>
-          val signMask = width match {
+          val signMask = width.value match {
             case 16 => 0x8000L
             case 32 => 0x80000000L
             case 64 => 0x8000000000000000L
@@ -7941,10 +8723,10 @@ object Interpreter {
         case (Some((width, count)), Some((leftWidth, leftCount)), Some((rightWidth, rightCount)))
             if width == leftWidth && width == rightWidth && count == leftCount && count == rightCount =>
           val result = Array.tabulate(count) { index =>
-            width match {
+            width.value match {
               case 16 =>
-                val a = IEEE754.binary16ToFloat(leftLanes(index))
-                val b = IEEE754.binary16ToFloat(rightLanes(index))
+                val a = IEEE754.binary16ToFloat(Binary16.low(leftLanes(index) & 0xffffL))
+                val b = IEEE754.binary16ToFloat(Binary16.low(rightLanes(index) & 0xffffL))
                 IEEE754.floatToBinary16(
                   operation match {
                     case FloatingOperation.Add      => a + b
@@ -7954,10 +8736,10 @@ object Interpreter {
                     case FloatingOperation.Minimum  => floatingMinimum(a, b)
                     case FloatingOperation.Maximum  => floatingMaximum(a, b)
                   }
-                )
+                ).value
               case 32 =>
-                val a = IEEE754.binary32ToFloat(leftLanes(index))
-                val b = IEEE754.binary32ToFloat(rightLanes(index))
+                val a = IEEE754.binary32ToFloat(Binary32.low(leftLanes(index) & 0xffffffffL))
+                val b = IEEE754.binary32ToFloat(Binary32.low(rightLanes(index) & 0xffffffffL))
                 IEEE754.floatToBinary32(
                   operation match {
                     case FloatingOperation.Add      => a + b
@@ -7967,7 +8749,7 @@ object Interpreter {
                     case FloatingOperation.Minimum  => floatingMinimum(a, b)
                     case FloatingOperation.Maximum  => floatingMaximum(a, b)
                   }
-                )
+                ).value
               case 64 =>
                 val a = IEEE754.binary64ToDouble(leftLanes(index))
                 val b = IEEE754.binary64ToDouble(rightLanes(index))
@@ -7992,10 +8774,14 @@ object Interpreter {
             )
           )
         case (_, None, _) =>
-          Left(ExecutionFailure.InvalidRequest(s"${operation.opcode} left operand %${id(left)} is not floating-point"))
+          Left(ExecutionFailure.InvalidRequest(
+            s"${operation.opcode} left operand %${id(left)} is not floating-point"
+          ))
         case (_, _, None) =>
           Left(
-            ExecutionFailure.InvalidRequest(s"${operation.opcode} right operand %${id(right)} is not floating-point")
+            ExecutionFailure.InvalidRequest(
+              s"${operation.opcode} right operand %${id(right)} is not floating-point"
+            )
           )
         case (Some(result), Some(leftShape), Some(rightShape)) =>
           Left(
@@ -8005,9 +8791,13 @@ object Interpreter {
           )
       }
     case (Some(RuntimeValue.Address(_, _)), _) =>
-      Left(ExecutionFailure.InvalidRequest(s"${operation.opcode} left operand %${id(left)} is a pointer"))
+      Left(ExecutionFailure.InvalidRequest(
+        s"${operation.opcode} left operand %${id(left)} is a pointer"
+      ))
     case (_, Some(RuntimeValue.Address(_, _))) =>
-      Left(ExecutionFailure.InvalidRequest(s"${operation.opcode} right operand %${id(right)} is a pointer"))
+      Left(ExecutionFailure.InvalidRequest(
+        s"${operation.opcode} right operand %${id(right)} is a pointer"
+      ))
     case (None, _) => Left(undefined(left))
     case (_, None) => Left(undefined(right))
   }
@@ -8024,16 +8814,7 @@ object Interpreter {
         case (Some((sourceWidth, sourceLanes)), Some((resultWidth, resultLanes)))
             if sourceLanes == resultLanes && lanes.length == sourceLanes =>
           val converted = lanes.map { raw =>
-            val value = sourceWidth match {
-              case 16 => IEEE754.binary16ToFloat(raw).toDouble
-              case 32 => IEEE754.binary32ToFloat(raw).toDouble
-              case 64 => IEEE754.binary64ToDouble(raw)
-            }
-            resultWidth match {
-              case 16 => IEEE754.doubleToBinary16(value)
-              case 32 => IEEE754.floatToBinary32(value.toFloat).toLong & 0xffffffffL
-              case 64 => IEEE754.doubleToBinary64(value)
-            }
+            doubleToFloating(resultWidth, floatingToDouble(sourceWidth, raw))
           }
           values.update(id(destination), RuntimeValue.Bits(id(resultType), converted))
           Right(())
@@ -8054,8 +8835,9 @@ object Interpreter {
             )
           )
       }
-    case Some(_) => Left(ExecutionFailure.InvalidRequest(s"OpFConvert source %${id(source)} is a pointer"))
-    case None    => Left(undefined(source))
+    case Some(_) =>
+      Left(ExecutionFailure.InvalidRequest(s"OpFConvert source %${id(source)} is a pointer"))
+    case None => Left(undefined(source))
   }
 
   private def convertFloatToSigned(
@@ -8069,15 +8851,11 @@ object Interpreter {
       (floatingShape(program, sourceType), integerShape(program, id(resultType))) match {
         case (Some((sourceWidth, sourceLanes)), Some((resultWidth, resultLanes))) if sourceLanes == resultLanes =>
           val converted = lanes.map { raw =>
-            val floating = sourceWidth match {
-              case 16 => IEEE754.binary16ToFloat(raw).toDouble
-              case 32 => IEEE754.binary32ToFloat(raw).toDouble
-              case 64 => IEEE754.binary64ToDouble(raw)
-            }
-            val signed =
+            val floating = floatingToDouble(sourceWidth, raw)
+            val signed   =
               if (program.saturatedConversions.contains(id(destination))) {
-                val minimum = if (resultWidth == 64) Long.MinValue else -(1L << (resultWidth - 1))
-                val maximum = if (resultWidth == 64) Long.MaxValue else (1L << (resultWidth - 1)) - 1L
+                val minimum = if (resultWidth.value == 64) Long.MinValue else -(1L << (resultWidth.value - 1))
+                val maximum = if (resultWidth.value == 64) Long.MaxValue else (1L << (resultWidth.value - 1)) - 1L
                 if (floating.isNaN) minimum
                 else if (floating <= minimum.toDouble) minimum
                 else if (floating >= maximum.toDouble) maximum
@@ -8106,10 +8884,13 @@ object Interpreter {
             )
           )
       }
-    case Some(_) => Left(ExecutionFailure.InvalidRequest(s"OpConvertFToS source %${id(source)} is a pointer"))
-    case None    => Left(undefined(source))
+    case Some(_) =>
+      Left(ExecutionFailure.InvalidRequest(s"OpConvertFToS source %${id(source)} is a pointer"))
+    case None => Left(undefined(source))
   }
 
+  // Unsigned conversion scans vector lanes and stops before publishing an invalid divisor/range result.
+  @SuppressWarnings(Array("scalafix:DisableSyntax.return", "scalafix:DisableSyntax.var"))
   private def convertFloatToUnsigned(
       program: DispatchProgram,
       values: InvocationValues,
@@ -8155,23 +8936,28 @@ object Interpreter {
             )
           )
       }
-    case Some(_) => Left(ExecutionFailure.InvalidRequest(s"OpConvertFToU source %${id(source)} is a pointer"))
-    case None    => Left(undefined(source))
+    case Some(_) =>
+      Left(ExecutionFailure.InvalidRequest(s"OpConvertFToU source %${id(source)} is a pointer"))
+    case None => Left(undefined(source))
   }
 
   /** Converts an IEEE-754 bit pattern by truncating toward zero without first narrowing through a signed Long. */
-  private def floatingToUnsigned(raw: Long, sourceWidth: Int, resultWidth: Int): Either[String, Long] = {
-    val (exponentBits, fractionBits, bias) = sourceWidth match {
+  private def floatingToUnsigned(
+      raw: Long,
+      sourceWidth: FloatingPointWidth,
+      resultWidth: BitWidth
+  ): Either[String, Long] = {
+    val (exponentBits, fractionBits, bias) = sourceWidth.value match {
       case 16 => (5, 10, 15)
       case 32 => (8, 23, 127)
       case 64 => (11, 52, 1023)
     }
-    val bits            = raw & mask(sourceWidth)
+    val bits            = raw & mask(sourceWidth.bitWidth)
     val fractionMask    = (1L << fractionBits) - 1L
     val exponentMask    = (1L << exponentBits) - 1L
     val fraction        = bits & fractionMask
     val encodedExponent = (bits >>> fractionBits) & exponentMask
-    val negative        = ((bits >>> (sourceWidth - 1)) & 1L) != 0L
+    val negative        = ((bits >>> (sourceWidth.value - 1)) & 1L) != 0L
     val magnitudeIsZero = encodedExponent == 0L && fraction == 0L
 
     if (encodedExponent == exponentMask) Left("NaN and infinity are not integers")
@@ -8183,7 +8969,7 @@ object Interpreter {
       val integer     =
         if (exponent >= fractionBits) significand << (exponent - fractionBits)
         else significand >> (fractionBits - exponent)
-      if (integer.bitLength > resultWidth) Left("value exceeds the result width")
+      if (integer.bitLength > resultWidth.value) Left("value exceeds the result width")
       else Right(integer.longValue & mask(resultWidth))
     }
   }
@@ -8283,7 +9069,9 @@ object Interpreter {
     val rightId  = id(right)
     integerShape(program, resultId) match {
       case None =>
-        Left(ExecutionFailure.InvalidRequest(s"$opcode result type %$resultId is not an integer scalar or vector"))
+        Left(ExecutionFailure.InvalidRequest(
+          s"$opcode result type %$resultId is not an integer scalar or vector"
+        ))
       case Some((width, count)) =>
         val leftType  = values.scalarType(leftId)
         val rightType = values.scalarType(rightId)
@@ -8333,7 +9121,9 @@ object Interpreter {
     val sourceId = id(source)
     integerShape(program, resultId) match {
       case None =>
-        Left(ExecutionFailure.InvalidRequest(s"OpNot result type %$resultId is not an integer scalar or vector"))
+        Left(ExecutionFailure.InvalidRequest(
+          s"OpNot result type %$resultId is not an integer scalar or vector"
+        ))
       case Some((width, count)) if count == 1 && values.scalarType(sourceId) == resultId =>
         values.updateScalar(id(destination), resultId, ~values.scalarBits(sourceId) & mask(width))
         Right(())
@@ -8364,7 +9154,9 @@ object Interpreter {
     val baseId   = id(base)
     integerShape(program, resultId) match {
       case None =>
-        Left(ExecutionFailure.InvalidRequest(s"OpBitCount result type %$resultId is not an integer scalar or vector"))
+        Left(ExecutionFailure.InvalidRequest(
+          s"OpBitCount result type %$resultId is not an integer scalar or vector"
+        ))
       case Some((width, count)) =>
         val operation: Long => Long = value =>
           bitCount(value, width).toLong
@@ -8449,6 +9241,8 @@ object Interpreter {
       }
   }
 
+  // Dot products accumulate directly across vector lanes.
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private def floatingDot(
       program: DispatchProgram,
       values: InvocationValues,
@@ -8482,7 +9276,8 @@ object Interpreter {
       }
     case (None, _) => Left(undefined(left))
     case (_, None) => Left(undefined(right))
-    case _         => Left(ExecutionFailure.InvalidRequest("OpDot operands are not floating-point vectors"))
+    case _         =>
+      Left(ExecutionFailure.InvalidRequest("OpDot operands are not floating-point vectors"))
   }
 
   private def logicalReduction(
@@ -8499,10 +9294,14 @@ object Interpreter {
           val result = if (all) lanes.forall(_ != 0L) else lanes.exists(_ != 0L)
           values.updateScalar(id(destination), id(resultType), if (result) 1L else 0L)
           Right(())
-        case _ => Left(ExecutionFailure.InvalidRequest(s"Op${if (all) "All" else "Any"} requires a boolean vector"))
+        case _ => Left(ExecutionFailure.InvalidRequest(
+            s"Op${if (all) "All" else "Any"} requires a boolean vector"
+          ))
       }
-    case Some(_) => Left(ExecutionFailure.InvalidRequest(s"Op${if (all) "All" else "Any"} source is a pointer"))
-    case None    => Left(undefined(source))
+    case Some(_) => Left(ExecutionFailure.InvalidRequest(
+        s"Op${if (all) "All" else "Any"} source is a pointer"
+      ))
+    case None => Left(undefined(source))
   }
 
   private def logicalNot(
@@ -8531,7 +9330,9 @@ object Interpreter {
           )
           Right(())
         case Some(_) =>
-          Left(ExecutionFailure.InvalidRequest("OpLogicalNot requires matching boolean operand and result types"))
+          Left(ExecutionFailure.InvalidRequest(
+            "OpLogicalNot requires matching boolean operand and result types"
+          ))
         case None => Left(undefined(source))
       }
   }
@@ -8546,6 +9347,8 @@ object Interpreter {
     case Remainder extends UnsignedIntegerOperation("OpUMod")
   }
 
+  // Vector arithmetic uses indexed lanes and exits before division by zero.
+  @SuppressWarnings(Array("scalafix:DisableSyntax.return", "scalafix:DisableSyntax.var"))
   private def unsignedIntegerArithmetic(
       program: DispatchProgram,
       values: InvocationValues,
@@ -8577,7 +9380,9 @@ object Interpreter {
               val dividend = leftLanes(index) & mask(width)
               val divisor  = rightLanes(index) & mask(width)
               if (divisor == 0L)
-                return Left(ExecutionFailure.InvalidRequest(s"${operation.opcode} divisor lane $index is zero"))
+                return Left(ExecutionFailure.InvalidRequest(
+                  s"${operation.opcode} divisor lane $index is zero"
+                ))
               result(index) =
                 (operation match {
                   case UnsignedIntegerOperation.Divide    => java.lang.Long.divideUnsigned(dividend, divisor)
@@ -8613,9 +9418,13 @@ object Interpreter {
             )
         }
       case (Some(RuntimeValue.Address(_, _)), _) =>
-        Left(ExecutionFailure.InvalidRequest(s"${operation.opcode} left operand %${id(left)} is a pointer"))
+        Left(ExecutionFailure.InvalidRequest(
+          s"${operation.opcode} left operand %${id(left)} is a pointer"
+        ))
       case (_, Some(RuntimeValue.Address(_, _))) =>
-        Left(ExecutionFailure.InvalidRequest(s"${operation.opcode} right operand %${id(right)} is a pointer"))
+        Left(ExecutionFailure.InvalidRequest(
+          s"${operation.opcode} right operand %${id(right)} is a pointer"
+        ))
       case (None, _) => Left(undefined(left))
       case (_, None) => Left(undefined(right))
     }
@@ -8635,6 +9444,8 @@ object Interpreter {
     case Xor             extends AtomicIntegerOperation("OpAtomicXor")
   }
 
+  // Atomic validation exits before any invalid memory update.
+  @SuppressWarnings(Array("scalafix:DisableSyntax.return"))
   private def atomicStore(
       program: DispatchProgram,
       values: InvocationValues,
@@ -8648,8 +9459,8 @@ object Interpreter {
     val valueId   = id(value)
     val valueType = values.scalarType(valueId)
     val shape     = Option.when(valueType >= 0)(valueType).flatMap(atomicScalarShape(program, _)) match {
-      case Some(result @ (width, 1)) if width == 32 || width == 64 => result
-      case _                                                       =>
+      case Some(result @ (width, 1)) if width.value == 32 || width.value == 64 => result
+      case _                                                                   =>
         return Left(
           ExecutionFailure.InvalidRequest(s"$opcode requires a 32- or 64-bit scalar value")
         )
@@ -8664,7 +9475,7 @@ object Interpreter {
           s"$opcode pointer pointee %${target.pointee} does not match value type %$valueType"
         )
       )
-    if (!Col(4, 5, 8, 10, 11, 12, 5349).contains(target.storageClass))
+    if (!Vec(4, 5, 8, 10, 11, 12, 5349).contains(target.storageClass))
       return Left(
         ExecutionFailure.InvalidRequest(
           s"$opcode pointer storage class ${target.storageClass} does not support atomic access"
@@ -8672,10 +9483,16 @@ object Interpreter {
       )
     validateAtomicControls(values, scope, semantics, opcode).flatMap { _ =>
       val width = shape._1
-      memory.writeScalar(target, values.scalarBits(valueId) & mask(width), width / 8)
+      memory.atomicWriteScalar(
+        target,
+        values.scalarBits(valueId) & mask(width),
+        MemoryValueByteWidth.applyUnsafe(width.value / 8)
+      )
     }
   }
 
+  // Atomic validation exits before any invalid memory access.
+  @SuppressWarnings(Array("scalafix:DisableSyntax.return"))
   private def atomicLoad(
       program: DispatchProgram,
       values: InvocationValues,
@@ -8689,9 +9506,11 @@ object Interpreter {
     val opcode       = "OpAtomicLoad"
     val resultTypeId = id(resultType)
     val shape        = atomicScalarShape(program, resultTypeId) match {
-      case Some(result @ (width, 1)) if width == 32 || width == 64 => result
-      case _                                                       =>
-        return Left(ExecutionFailure.InvalidRequest(s"$opcode requires a 32- or 64-bit scalar result"))
+      case Some(result @ (width, 1)) if width.value == 32 || width.value == 64 => result
+      case _                                                                   =>
+        return Left(
+          ExecutionFailure.InvalidRequest(s"$opcode requires a 32- or 64-bit scalar result")
+        )
     }
     val target = address(values, pointer) match {
       case Left(error)  => return Left(error)
@@ -8703,19 +9522,21 @@ object Interpreter {
           s"$opcode pointer pointee %${target.pointee} does not match result type %$resultTypeId"
         )
       )
-    if (!Col(4, 5, 8, 10, 11, 12, 5349).contains(target.storageClass))
+    if (!Vec(4, 5, 8, 10, 11, 12, 5349).contains(target.storageClass))
       return Left(
         ExecutionFailure.InvalidRequest(
           s"$opcode pointer storage class ${target.storageClass} does not support atomic access"
         )
       )
     validateAtomicControls(values, scope, semantics, opcode).flatMap { _ =>
-      memory.readScalar(target, shape._1 / 8).map(value =>
+      memory.atomicReadScalar(target, MemoryValueByteWidth.applyUnsafe(shape._1.value / 8)).map(value =>
         values.updateScalar(id(destination), resultTypeId, value & mask(shape._1))
       )
     }
   }
 
+  // Atomic validation exits before any invalid memory update.
+  @SuppressWarnings(Array("scalafix:DisableSyntax.return"))
   private def atomicExchange(
       program: DispatchProgram,
       values: InvocationValues,
@@ -8731,31 +9552,39 @@ object Interpreter {
     val resultTypeId = id(resultType)
     val valueId      = id(value)
     val shape        = atomicScalarShape(program, resultTypeId) match {
-      case Some(result @ (width, 1)) if width == 32 || width == 64 => result
-      case _                                                       =>
-        return Left(ExecutionFailure.InvalidRequest(s"$opcode requires a 32- or 64-bit scalar result"))
+      case Some(result @ (width, 1)) if width.value == 32 || width.value == 64 => result
+      case _                                                                   =>
+        return Left(
+          ExecutionFailure.InvalidRequest(s"$opcode requires a 32- or 64-bit scalar result")
+        )
     }
     if (values.scalarType(valueId) != resultTypeId)
-      return Left(ExecutionFailure.InvalidRequest(s"$opcode requires matching result and value types"))
+      return Left(
+        ExecutionFailure.InvalidRequest(s"$opcode requires matching result and value types")
+      )
     val target = address(values, pointer) match {
       case Left(error)  => return Left(error)
       case Right(value) => value
     }
     if (target.pointee != resultTypeId)
-      return Left(ExecutionFailure.InvalidRequest(s"$opcode pointer pointee does not match result type"))
-    if (!Col(4, 5, 8, 10, 11, 12, 5349).contains(target.storageClass))
-      return Left(ExecutionFailure.InvalidRequest(s"$opcode pointer storage class does not support atomic access"))
+      return Left(
+        ExecutionFailure.InvalidRequest(s"$opcode pointer pointee does not match result type")
+      )
+    if (!Vec(4, 5, 8, 10, 11, 12, 5349).contains(target.storageClass))
+      return Left(ExecutionFailure.InvalidRequest(
+        s"$opcode pointer storage class does not support atomic access"
+      ))
     validateAtomicControls(values, scope, semantics, opcode).flatMap { _ =>
-      memory.atomic {
-        memory.readScalar(target, shape._1 / 8).flatMap { previous =>
-          memory.writeScalar(target, values.scalarBits(valueId) & mask(shape._1), shape._1 / 8).map { _ =>
-            values.updateScalar(id(destination), resultTypeId, previous & mask(shape._1))
-          }
-        }
+      memory.atomicModifyScalar(target, MemoryValueByteWidth.applyUnsafe(shape._1.value / 8))(_ =>
+        values.scalarBits(valueId) & mask(shape._1)
+      ).map {
+        previous => values.updateScalar(id(destination), resultTypeId, previous & mask(shape._1))
       }
     }
   }
 
+  // Atomic validation exits before any invalid memory update.
+  @SuppressWarnings(Array("scalafix:DisableSyntax.return"))
   private def atomicCompareExchange(
       program: DispatchProgram,
       values: InvocationValues,
@@ -8774,30 +9603,35 @@ object Interpreter {
     val valueId      = id(value)
     val comparatorId = id(comparator)
     val shape        = atomicScalarShape(program, resultTypeId) match {
-      case Some(result @ (width, 1)) if width == 32 || width == 64 => result
-      case _                                                       =>
-        return Left(ExecutionFailure.InvalidRequest(s"$opcode requires a 32- or 64-bit scalar result"))
+      case Some(result @ (width, 1)) if width.value == 32 || width.value == 64 => result
+      case _                                                                   =>
+        return Left(
+          ExecutionFailure.InvalidRequest(s"$opcode requires a 32- or 64-bit scalar result")
+        )
     }
     if (values.scalarType(valueId) != resultTypeId || values.scalarType(comparatorId) != resultTypeId)
-      return Left(ExecutionFailure.InvalidRequest(s"$opcode requires matching result, value, and comparator types"))
+      return Left(ExecutionFailure.InvalidRequest(
+        s"$opcode requires matching result, value, and comparator types"
+      ))
     val target = address(values, pointer) match {
       case Left(error)  => return Left(error)
       case Right(value) => value
     }
     if (target.pointee != resultTypeId)
-      return Left(ExecutionFailure.InvalidRequest(s"$opcode pointer pointee does not match result type"))
-    if (!Col(4, 5, 8, 10, 11, 12, 5349).contains(target.storageClass))
-      return Left(ExecutionFailure.InvalidRequest(s"$opcode pointer storage class does not support atomic access"))
+      return Left(
+        ExecutionFailure.InvalidRequest(s"$opcode pointer pointee does not match result type")
+      )
+    if (!Vec(4, 5, 8, 10, 11, 12, 5349).contains(target.storageClass))
+      return Left(ExecutionFailure.InvalidRequest(
+        s"$opcode pointer storage class does not support atomic access"
+      ))
     for {
       _      <- validateAtomicControls(values, scope, equal, opcode)
       _      <- validateAtomicControls(values, scope, unequal, opcode)
-      result <- memory.atomic {
-        for {
-          previous <- memory.readScalar(target, shape._1 / 8)
-          _        <- if ((previous & mask(shape._1)) == (values.scalarBits(comparatorId) & mask(shape._1)))
-            memory.writeScalar(target, values.scalarBits(valueId) & mask(shape._1), shape._1 / 8)
-          else Right(())
-        } yield previous
+      result <- memory.atomicModifyScalar(target, MemoryValueByteWidth.applyUnsafe(shape._1.value / 8)) { previous =>
+        if ((previous & mask(shape._1)) == (values.scalarBits(comparatorId) & mask(shape._1)))
+          values.scalarBits(valueId) & mask(shape._1)
+        else previous
       }
     } yield values.updateScalar(id(destination), resultTypeId, result & mask(shape._1))
   }
@@ -8826,9 +9660,12 @@ object Interpreter {
       )
     } yield ()
 
-  private def atomicScalarShape(program: DispatchProgram, typeId: Int): Option[(Int, Int)] =
-    integerShape(program, typeId).orElse(floatingShape(program, typeId))
+  private def atomicScalarShape(program: DispatchProgram, typeId: Int): Option[(BitWidth, Int)] =
+    integerShape(program, typeId)
+      .orElse(floatingShape(program, typeId).map((width, count) => width.bitWidth -> count))
 
+  // Atomic validation exits before any invalid integer memory update.
+  @SuppressWarnings(Array("scalafix:DisableSyntax.return"))
   private def atomicInteger(
       program: DispatchProgram,
       values: InvocationValues,
@@ -8842,10 +9679,10 @@ object Interpreter {
       operation: AtomicIntegerOperation
   ): Either[ExecutionFailure, Unit] = {
     val resultTypeId = id(resultType)
-    val valueId      = value.map(id)
+    val valueId      = value.map(id(_))
     val shape        = integerShape(program, resultTypeId) match {
-      case Some(result @ (width, 1)) if width == 32 || width == 64 => result
-      case _                                                       =>
+      case Some(result @ (width, 1)) if width.value == 32 || width.value == 64 => result
+      case _                                                                   =>
         return Left(
           ExecutionFailure.InvalidRequest(
             s"${operation.opcode} requires a 32- or 64-bit scalar integer result"
@@ -8876,38 +9713,36 @@ object Interpreter {
       case Right(())   => ()
     }
     val width    = shape._1
-    val byteSize = width / 8
-    memory.atomic {
-      memory.readScalar(target, byteSize).flatMap { previous =>
-        val operand = valueId.fold(1L)(values.scalarBits) & mask(width)
-        val updated = operation match {
-          case AtomicIntegerOperation.Increment     => (previous + 1L) & mask(width)
-          case AtomicIntegerOperation.Decrement     => (previous - 1L) & mask(width)
-          case AtomicIntegerOperation.Add           => (previous + operand) & mask(width)
-          case AtomicIntegerOperation.Subtract      => (previous - operand) & mask(width)
-          case AtomicIntegerOperation.SignedMinimum =>
-            if (signExtend(previous, width) > signExtend(operand, width)) operand else previous
-          case AtomicIntegerOperation.UnsignedMinimum =>
-            if (width == 64 && java.lang.Long.compareUnsigned(previous, operand) > 0) operand
-            else if (width < 64 && previous > operand) operand
-            else previous
-          case AtomicIntegerOperation.SignedMaximum =>
-            if (signExtend(previous, width) < signExtend(operand, width)) operand else previous
-          case AtomicIntegerOperation.UnsignedMaximum =>
-            if (width == 64 && java.lang.Long.compareUnsigned(previous, operand) < 0) operand
-            else if (width < 64 && previous < operand) operand
-            else previous
-          case AtomicIntegerOperation.And => previous & operand
-          case AtomicIntegerOperation.Or  => previous | operand
-          case AtomicIntegerOperation.Xor => previous ^ operand
-        }
-        memory.writeScalar(target, updated, byteSize).map { _ =>
-          values.updateScalar(id(destination), resultTypeId, previous & mask(width))
-        }
+    val byteSize = MemoryValueByteWidth.applyUnsafe(width.value / 8)
+    val operand  = valueId.fold(1L)(values.scalarBits(_)) & mask(width)
+    memory.atomicModifyScalar(target, byteSize) { previous =>
+      val updated = operation match {
+        case AtomicIntegerOperation.Increment     => (previous + 1L) & mask(width)
+        case AtomicIntegerOperation.Decrement     => (previous - 1L) & mask(width)
+        case AtomicIntegerOperation.Add           => (previous + operand) & mask(width)
+        case AtomicIntegerOperation.Subtract      => (previous - operand) & mask(width)
+        case AtomicIntegerOperation.SignedMinimum =>
+          if (signExtend(previous, width) > signExtend(operand, width)) operand else previous
+        case AtomicIntegerOperation.UnsignedMinimum =>
+          if (width.value == 64 && java.lang.Long.compareUnsigned(previous, operand) > 0) operand
+          else if (width.value < 64 && previous > operand) operand
+          else previous
+        case AtomicIntegerOperation.SignedMaximum =>
+          if (signExtend(previous, width) < signExtend(operand, width)) operand else previous
+        case AtomicIntegerOperation.UnsignedMaximum =>
+          if (width.value == 64 && java.lang.Long.compareUnsigned(previous, operand) < 0) operand
+          else if (width.value < 64 && previous < operand) operand
+          else previous
+        case AtomicIntegerOperation.And => previous & operand
+        case AtomicIntegerOperation.Or  => previous | operand
+        case AtomicIntegerOperation.Xor => previous ^ operand
       }
-    }
+      updated
+    }.map(previous => values.updateScalar(id(destination), resultTypeId, previous & mask(width)))
   }
 
+  // Atomic validation exits before any invalid floating memory update.
+  @SuppressWarnings(Array("scalafix:DisableSyntax.return"))
   private def atomicFloatingAdd(
       program: DispatchProgram,
       values: InvocationValues,
@@ -8923,36 +9758,42 @@ object Interpreter {
     val resultTypeId = id(resultType)
     val valueId      = id(value)
     val shape        = floatingShape(program, resultTypeId) match {
-      case Some(result @ (width, 1)) if width == 16 || width == 32 || width == 64 => result
-      case _                                                                      =>
+      case Some(result @ (_, 1)) => result
+      case _                     =>
         return Left(
-          ExecutionFailure.InvalidRequest(s"$opcode requires a 16-, 32-, or 64-bit scalar floating-point result")
+          ExecutionFailure.InvalidRequest(
+            s"$opcode requires a 16-, 32-, or 64-bit scalar floating-point result"
+          )
         )
     }
     if (values.scalarType(valueId) != resultTypeId)
-      return Left(ExecutionFailure.InvalidRequest(s"$opcode requires matching result and value types"))
+      return Left(
+        ExecutionFailure.InvalidRequest(s"$opcode requires matching result and value types")
+      )
     val target = address(values, pointer) match {
       case Left(error)  => return Left(error)
       case Right(value) => value
     }
     if (target.pointee != resultTypeId)
-      return Left(ExecutionFailure.InvalidRequest(s"$opcode pointer pointee does not match result type"))
-    if (!Col(4, 5, 8, 10, 11, 12, 5349).contains(target.storageClass))
-      return Left(ExecutionFailure.InvalidRequest(s"$opcode pointer storage class does not support atomic access"))
+      return Left(
+        ExecutionFailure.InvalidRequest(s"$opcode pointer pointee does not match result type")
+      )
+    if (!Vec(4, 5, 8, 10, 11, 12, 5349).contains(target.storageClass))
+      return Left(ExecutionFailure.InvalidRequest(
+        s"$opcode pointer storage class does not support atomic access"
+      ))
     validateAtomicControls(values, scope, semantics, opcode).flatMap { _ =>
       val width    = shape._1
-      val byteSize = width / 8
-      memory.atomic {
-        memory.readScalar(target, byteSize).flatMap { previous =>
-          val updated = floatingAddBits(width, previous, values.scalarBits(valueId)) & mask(width)
-          memory.writeScalar(target, updated, byteSize).map { _ =>
-            values.updateScalar(id(destination), resultTypeId, previous & mask(width))
-          }
-        }
-      }
+      val bitWidth = width.bitWidth
+      val byteSize = MemoryValueByteWidth.applyUnsafe(width.value / 8)
+      memory.atomicModifyScalar(target, byteSize) { previous =>
+        floatingAddBits(width, previous, values.scalarBits(valueId)) & mask(bitWidth)
+      }.map(previous => values.updateScalar(id(destination), resultTypeId, previous & mask(bitWidth)))
     }
   }
 
+  // Atomic validation exits before any invalid floating memory update.
+  @SuppressWarnings(Array("scalafix:DisableSyntax.return"))
   private def atomicFloatingMinMax(
       program: DispatchProgram,
       values: InvocationValues,
@@ -8969,39 +9810,46 @@ object Interpreter {
     val resultTypeId = id(resultType)
     val valueId      = id(value)
     val shape        = floatingShape(program, resultTypeId) match {
-      case Some(result @ (width, 1)) if width == 16 || width == 32 || width == 64 => result
-      case _                                                                      =>
+      case Some(result @ (_, 1)) => result
+      case _                     =>
         return Left(
-          ExecutionFailure.InvalidRequest(s"$opcode requires a 16-, 32-, or 64-bit scalar floating-point result")
+          ExecutionFailure.InvalidRequest(
+            s"$opcode requires a 16-, 32-, or 64-bit scalar floating-point result"
+          )
         )
     }
     if (values.scalarType(valueId) != resultTypeId)
-      return Left(ExecutionFailure.InvalidRequest(s"$opcode requires matching result and value types"))
+      return Left(
+        ExecutionFailure.InvalidRequest(s"$opcode requires matching result and value types")
+      )
     val target = address(values, pointer) match {
       case Left(error)  => return Left(error)
       case Right(value) => value
     }
     if (target.pointee != resultTypeId)
-      return Left(ExecutionFailure.InvalidRequest(s"$opcode pointer pointee does not match result type"))
-    if (!Col(4, 5, 8, 10, 11, 12, 5349).contains(target.storageClass))
-      return Left(ExecutionFailure.InvalidRequest(s"$opcode pointer storage class does not support atomic access"))
+      return Left(
+        ExecutionFailure.InvalidRequest(s"$opcode pointer pointee does not match result type")
+      )
+    if (!Vec(4, 5, 8, 10, 11, 12, 5349).contains(target.storageClass))
+      return Left(ExecutionFailure.InvalidRequest(
+        s"$opcode pointer storage class does not support atomic access"
+      ))
     validateAtomicControls(values, scope, semantics, opcode).flatMap { _ =>
       val width    = shape._1
-      val byteSize = width / 8
-      memory.atomic {
-        memory.readScalar(target, byteSize).flatMap { previous =>
-          val operand = values.scalarBits(valueId)
-          val updated =
-            if (maximum) floatingMaximumBits(width, previous, operand)
-            else floatingMinimumBits(width, previous, operand)
-          memory.writeScalar(target, updated & mask(width), byteSize).map { _ =>
-            values.updateScalar(id(destination), resultTypeId, previous & mask(width))
-          }
-        }
-      }
+      val bitWidth = width.bitWidth
+      val byteSize = MemoryValueByteWidth.applyUnsafe(width.value / 8)
+      val operand  = values.scalarBits(valueId)
+      memory.atomicModifyScalar(target, byteSize) { previous =>
+        val updated =
+          if (maximum) floatingMaximumBits(width, previous, operand)
+          else floatingMinimumBits(width, previous, operand)
+        updated & mask(bitWidth)
+      }.map(previous => values.updateScalar(id(destination), resultTypeId, previous & mask(bitWidth)))
     }
   }
 
+  // Vector arithmetic uses indexed lanes and exits before division overflow or zero.
+  @SuppressWarnings(Array("scalafix:DisableSyntax.return", "scalafix:DisableSyntax.var"))
   private def signedIntegerArithmetic(
       program: DispatchProgram,
       values: InvocationValues,
@@ -9028,7 +9876,7 @@ object Interpreter {
             Left(ExecutionFailure.InvalidRequest(s"${operation.opcode} divisor lane 0 is zero"))
           else {
             val dividend = signExtend(values.scalarBits(leftId), width)
-            val minimum  = if (width == 64) Long.MinValue else -(1L << (width - 1))
+            val minimum  = if (width.value == 64) Long.MinValue else -(1L << (width.value - 1))
             if (dividend == minimum && divisor == -1L)
               Left(
                 ExecutionFailure.InvalidRequest(
@@ -9084,10 +9932,12 @@ object Interpreter {
                 if width == leftWidth && width == rightWidth =>
               val divisor = signExtend(rightValue, width)
               if (divisor == 0L)
-                Left(ExecutionFailure.InvalidRequest(s"${operation.opcode} divisor lane 0 is zero"))
+                Left(
+                  ExecutionFailure.InvalidRequest(s"${operation.opcode} divisor lane 0 is zero")
+                )
               else {
                 val dividend = signExtend(leftValue, width)
-                val minimum  = if (width == 64) Long.MinValue else -(1L << (width - 1))
+                val minimum  = if (width.value == 64) Long.MinValue else -(1L << (width.value - 1))
                 if (dividend == minimum && divisor == -1L)
                   Left(
                     ExecutionFailure.InvalidRequest(
@@ -9142,9 +9992,11 @@ object Interpreter {
               while (index < count) {
                 val divisor = signExtend(rightLanes(index), width)
                 if (divisor == 0L)
-                  return Left(ExecutionFailure.InvalidRequest(s"${operation.opcode} divisor lane $index is zero"))
+                  return Left(ExecutionFailure.InvalidRequest(
+                    s"${operation.opcode} divisor lane $index is zero"
+                  ))
                 val dividend = signExtend(leftLanes(index), width)
-                val minimum  = if (width == 64) Long.MinValue else -(1L << (width - 1))
+                val minimum  = if (width.value == 64) Long.MinValue else -(1L << (width.value - 1))
                 if (dividend == minimum && divisor == -1L)
                   return Left(
                     ExecutionFailure.InvalidRequest(
@@ -9186,9 +10038,13 @@ object Interpreter {
               )
           }
         case (Some(RuntimeValue.Address(_, _)), _) =>
-          Left(ExecutionFailure.InvalidRequest(s"${operation.opcode} left operand %${id(left)} is a pointer"))
+          Left(ExecutionFailure.InvalidRequest(
+            s"${operation.opcode} left operand %${id(left)} is a pointer"
+          ))
         case (_, Some(RuntimeValue.Address(_, _))) =>
-          Left(ExecutionFailure.InvalidRequest(s"${operation.opcode} right operand %${id(right)} is a pointer"))
+          Left(ExecutionFailure.InvalidRequest(
+            s"${operation.opcode} right operand %${id(right)} is a pointer"
+          ))
         case (None, _) => Left(undefined(left))
         case (_, None) => Left(undefined(right))
       }
@@ -9214,74 +10070,37 @@ object Interpreter {
               leftLanes.length == resultLanes && rightLanes.length == resultLanes =>
           val width  = leftShape._1
           val result = Array.tabulate(resultLanes) { index =>
-            val comparison = width match {
-              case 16 =>
-                val a = IEEE754.binary16ToFloat(leftLanes(index))
-                val b = IEEE754.binary16ToFloat(rightLanes(index))
-                operation match {
-                  case FloatingComparison.OrderedEqual              => a == b
-                  case FloatingComparison.OrderedNotEqual           => !a.isNaN && !b.isNaN && a != b
-                  case FloatingComparison.Ordered                   => !a.isNaN && !b.isNaN
-                  case FloatingComparison.UnorderedEqual            => a == b || a.isNaN || b.isNaN
-                  case FloatingComparison.UnorderedNotEqual         => a != b
-                  case FloatingComparison.UnorderedLessThan         => a < b || a.isNaN || b.isNaN
-                  case FloatingComparison.UnorderedGreaterThan      => a > b || a.isNaN || b.isNaN
-                  case FloatingComparison.UnorderedLessThanEqual    => a <= b || a.isNaN || b.isNaN
-                  case FloatingComparison.UnorderedGreaterThanEqual => a >= b || a.isNaN || b.isNaN
-                  case FloatingComparison.Unordered                 => a.isNaN || b.isNaN
-                  case FloatingComparison.OrderedLessThan           => a < b
-                  case FloatingComparison.OrderedLessThanEqual      => a <= b
-                  case FloatingComparison.OrderedGreaterThan        => a > b
-                  case FloatingComparison.OrderedGreaterThanEqual   => a >= b
-                }
-              case 32 =>
-                val a = IEEE754.binary32ToFloat(leftLanes(index))
-                val b = IEEE754.binary32ToFloat(rightLanes(index))
-                operation match {
-                  case FloatingComparison.OrderedEqual              => a == b
-                  case FloatingComparison.OrderedNotEqual           => !a.isNaN && !b.isNaN && a != b
-                  case FloatingComparison.Ordered                   => !a.isNaN && !b.isNaN
-                  case FloatingComparison.UnorderedEqual            => a == b || a.isNaN || b.isNaN
-                  case FloatingComparison.UnorderedNotEqual         => a != b
-                  case FloatingComparison.UnorderedLessThan         => a < b || a.isNaN || b.isNaN
-                  case FloatingComparison.UnorderedGreaterThan      => a > b || a.isNaN || b.isNaN
-                  case FloatingComparison.UnorderedLessThanEqual    => a <= b || a.isNaN || b.isNaN
-                  case FloatingComparison.UnorderedGreaterThanEqual => a >= b || a.isNaN || b.isNaN
-                  case FloatingComparison.Unordered                 => a.isNaN || b.isNaN
-                  case FloatingComparison.OrderedLessThan           => a < b
-                  case FloatingComparison.OrderedLessThanEqual      => a <= b
-                  case FloatingComparison.OrderedGreaterThan        => a > b
-                  case FloatingComparison.OrderedGreaterThanEqual   => a >= b
-                }
-              case 64 =>
-                val a = IEEE754.binary64ToDouble(leftLanes(index))
-                val b = IEEE754.binary64ToDouble(rightLanes(index))
-                operation match {
-                  case FloatingComparison.OrderedEqual              => a == b
-                  case FloatingComparison.OrderedNotEqual           => !a.isNaN && !b.isNaN && a != b
-                  case FloatingComparison.Ordered                   => !a.isNaN && !b.isNaN
-                  case FloatingComparison.UnorderedEqual            => a == b || a.isNaN || b.isNaN
-                  case FloatingComparison.UnorderedNotEqual         => a != b
-                  case FloatingComparison.UnorderedLessThan         => a < b || a.isNaN || b.isNaN
-                  case FloatingComparison.UnorderedGreaterThan      => a > b || a.isNaN || b.isNaN
-                  case FloatingComparison.UnorderedLessThanEqual    => a <= b || a.isNaN || b.isNaN
-                  case FloatingComparison.UnorderedGreaterThanEqual => a >= b || a.isNaN || b.isNaN
-                  case FloatingComparison.Unordered                 => a.isNaN || b.isNaN
-                  case FloatingComparison.OrderedLessThan           => a < b
-                  case FloatingComparison.OrderedLessThanEqual      => a <= b
-                  case FloatingComparison.OrderedGreaterThan        => a > b
-                  case FloatingComparison.OrderedGreaterThanEqual   => a >= b
-                }
+            val a          = IEEE754.toDouble(leftLanes(index), width)
+            val b          = IEEE754.toDouble(rightLanes(index), width)
+            val comparison = operation match {
+              case FloatingComparison.OrderedEqual              => a == b
+              case FloatingComparison.OrderedNotEqual           => !a.isNaN && !b.isNaN && a != b
+              case FloatingComparison.Ordered                   => !a.isNaN && !b.isNaN
+              case FloatingComparison.UnorderedEqual            => a == b || a.isNaN || b.isNaN
+              case FloatingComparison.UnorderedNotEqual         => a != b
+              case FloatingComparison.UnorderedLessThan         => a < b || a.isNaN || b.isNaN
+              case FloatingComparison.UnorderedGreaterThan      => a > b || a.isNaN || b.isNaN
+              case FloatingComparison.UnorderedLessThanEqual    => a <= b || a.isNaN || b.isNaN
+              case FloatingComparison.UnorderedGreaterThanEqual => a >= b || a.isNaN || b.isNaN
+              case FloatingComparison.Unordered                 => a.isNaN || b.isNaN
+              case FloatingComparison.OrderedLessThan           => a < b
+              case FloatingComparison.OrderedLessThanEqual      => a <= b
+              case FloatingComparison.OrderedGreaterThan        => a > b
+              case FloatingComparison.OrderedGreaterThanEqual   => a >= b
             }
             if (comparison) 1L else 0L
           }
           values.update(id(destination), RuntimeValue.Bits(id(resultType), result))
           Right(())
         case (None, _, _) =>
-          Left(ExecutionFailure.InvalidRequest(s"${operation.opcode} left operand %${id(left)} is not floating-point"))
+          Left(ExecutionFailure.InvalidRequest(
+            s"${operation.opcode} left operand %${id(left)} is not floating-point"
+          ))
         case (_, None, _) =>
           Left(
-            ExecutionFailure.InvalidRequest(s"${operation.opcode} right operand %${id(right)} is not floating-point")
+            ExecutionFailure.InvalidRequest(
+              s"${operation.opcode} right operand %${id(right)} is not floating-point"
+            )
           )
         case (_, _, None) =>
           Left(
@@ -9299,14 +10118,18 @@ object Interpreter {
           )
       }
     case (Some(RuntimeValue.Address(_, _)), _) =>
-      Left(ExecutionFailure.InvalidRequest(s"${operation.opcode} left operand %${id(left)} is a pointer"))
+      Left(ExecutionFailure.InvalidRequest(
+        s"${operation.opcode} left operand %${id(left)} is a pointer"
+      ))
     case (_, Some(RuntimeValue.Address(_, _))) =>
-      Left(ExecutionFailure.InvalidRequest(s"${operation.opcode} right operand %${id(right)} is a pointer"))
+      Left(ExecutionFailure.InvalidRequest(
+        s"${operation.opcode} right operand %${id(right)} is a pointer"
+      ))
     case (None, _) => Left(undefined(left))
     case (_, None) => Left(undefined(right))
   }
 
-  private def integerShape(program: DispatchProgram, typeId: Int): Option[(Int, Int)] =
+  private def integerShape(program: DispatchProgram, typeId: Int): Option[(BitWidth, Int)] =
     program.types.get(typeId) match {
       case Some(RuntimeType.Integer(width, _))            => Some((width, 1))
       case Some(RuntimeType.VectorType(component, count)) => program.types.get(component) match {
@@ -9316,7 +10139,7 @@ object Interpreter {
       case _ => None
     }
 
-  private def floatingShape(program: DispatchProgram, typeId: Int): Option[(Int, Int)] =
+  private def floatingShape(program: DispatchProgram, typeId: Int): Option[(FloatingPointWidth, Int)] =
     program.types.get(typeId) match {
       case Some(RuntimeType.Floating(width))              => Some((width, 1))
       case Some(RuntimeType.VectorType(component, count)) => program.types.get(component) match {
@@ -9326,46 +10149,94 @@ object Interpreter {
       case _ => None
     }
 
-  private[v1_6] def floatingAddBits(width: Int, left: Long, right: Long): Long = width match {
+  private[v1_6] def floatingAddBits(width: FloatingPointWidth, left: Long, right: Long): Long = width.value match {
     case 16 =>
-      IEEE754.floatToBinary16(IEEE754.binary16ToFloat(left) + IEEE754.binary16ToFloat(right))
+      IEEE754.floatToBinary16(
+        IEEE754.binary16ToFloat(Binary16.low(left & 0xffffL)) +
+          IEEE754.binary16ToFloat(Binary16.low(right & 0xffffL))
+      ).value
     case 32 =>
-      IEEE754.floatToBinary32(IEEE754.binary32ToFloat(left) + IEEE754.binary32ToFloat(right))
+      IEEE754.floatToBinary32(
+        IEEE754.binary32ToFloat(Binary32.low(left & 0xffffffffL)) +
+          IEEE754.binary32ToFloat(Binary32.low(right & 0xffffffffL))
+      ).value
     case 64 =>
       IEEE754.doubleToBinary64(IEEE754.binary64ToDouble(left) + IEEE754.binary64ToDouble(right))
   }
 
-  private def floatingOneBits(width: Int): Long = width match {
-    case 16 => IEEE754.floatToBinary16(1.0f).toLong
-    case 32 => IEEE754.floatToBinary32(1.0f).toLong & 0xffffffffL
+  private def floatingOneBits(width: FloatingPointWidth): Long = width.value match {
+    case 16 => IEEE754.floatToBinary16(1.0f).value
+    case 32 => IEEE754.floatToBinary32(1.0f).value
     case 64 => IEEE754.doubleToBinary64(1.0)
   }
 
-  private def floatingInfinityBits(width: Int, negative: Boolean): Long = width match {
+  private def floatingInfinityBits(width: FloatingPointWidth, negative: Boolean): Long = width.value match {
     case 16 => if (negative) 0xfc00L else 0x7c00L
     case 32 => if (negative) 0xff800000L else 0x7f800000L
     case 64 => if (negative) 0xfff0000000000000L else 0x7ff0000000000000L
   }
 
-  private[v1_6] def floatingMultiplyBits(width: Int, left: Long, right: Long): Long = width match {
+  private[v1_6] def floatingMultiplyBits(
+      width: FloatingPointWidth,
+      left: Long,
+      right: Long
+  ): Long = width.value match {
     case 16 =>
-      IEEE754.floatToBinary16(IEEE754.binary16ToFloat(left) * IEEE754.binary16ToFloat(right))
+      IEEE754.floatToBinary16(
+        IEEE754.binary16ToFloat(Binary16.low(left & 0xffffL)) *
+          IEEE754.binary16ToFloat(Binary16.low(right & 0xffffL))
+      ).value
     case 32 =>
-      IEEE754.floatToBinary32(IEEE754.binary32ToFloat(left) * IEEE754.binary32ToFloat(right))
+      IEEE754.floatToBinary32(
+        IEEE754.binary32ToFloat(Binary32.low(left & 0xffffffffL)) *
+          IEEE754.binary32ToFloat(Binary32.low(right & 0xffffffffL))
+      ).value
     case 64 =>
       IEEE754.doubleToBinary64(IEEE754.binary64ToDouble(left) * IEEE754.binary64ToDouble(right))
   }
 
-  private[v1_6] def floatingMinimumBits(width: Int, left: Long, right: Long): Long = width match {
-    case 16 => IEEE754.floatToBinary16(floatingMinimum(IEEE754.binary16ToFloat(left), IEEE754.binary16ToFloat(right)))
-    case 32 => IEEE754.floatToBinary32(floatingMinimum(IEEE754.binary32ToFloat(left), IEEE754.binary32ToFloat(right)))
+  private[v1_6] def floatingMinimumBits(
+      width: FloatingPointWidth,
+      left: Long,
+      right: Long
+  ): Long = width.value match {
+    case 16 =>
+      IEEE754.floatToBinary16(
+        floatingMinimum(
+          IEEE754.binary16ToFloat(Binary16.low(left & 0xffffL)),
+          IEEE754.binary16ToFloat(Binary16.low(right & 0xffffL))
+        )
+      ).value
+    case 32 =>
+      IEEE754.floatToBinary32(
+        floatingMinimum(
+          IEEE754.binary32ToFloat(Binary32.low(left & 0xffffffffL)),
+          IEEE754.binary32ToFloat(Binary32.low(right & 0xffffffffL))
+        )
+      ).value
     case 64 =>
       IEEE754.doubleToBinary64(floatingMinimum(IEEE754.binary64ToDouble(left), IEEE754.binary64ToDouble(right)))
   }
 
-  private[v1_6] def floatingMaximumBits(width: Int, left: Long, right: Long): Long = width match {
-    case 16 => IEEE754.floatToBinary16(floatingMaximum(IEEE754.binary16ToFloat(left), IEEE754.binary16ToFloat(right)))
-    case 32 => IEEE754.floatToBinary32(floatingMaximum(IEEE754.binary32ToFloat(left), IEEE754.binary32ToFloat(right)))
+  private[v1_6] def floatingMaximumBits(
+      width: FloatingPointWidth,
+      left: Long,
+      right: Long
+  ): Long = width.value match {
+    case 16 =>
+      IEEE754.floatToBinary16(
+        floatingMaximum(
+          IEEE754.binary16ToFloat(Binary16.low(left & 0xffffL)),
+          IEEE754.binary16ToFloat(Binary16.low(right & 0xffffL))
+        )
+      ).value
+    case 32 =>
+      IEEE754.floatToBinary32(
+        floatingMaximum(
+          IEEE754.binary32ToFloat(Binary32.low(left & 0xffffffffL)),
+          IEEE754.binary32ToFloat(Binary32.low(right & 0xffffffffL))
+        )
+      ).value
     case 64 =>
       IEEE754.doubleToBinary64(floatingMaximum(IEEE754.binary64ToDouble(left), IEEE754.binary64ToDouble(right)))
   }
@@ -9376,9 +10247,9 @@ object Interpreter {
     else if (left == right) {
       if (
         left == 0.0f &&
-        ((java.lang.Float.floatToRawIntBits(left) | java.lang.Float.floatToRawIntBits(right)) < 0)
+        ((IEEE754.floatToBinary32(left).value.toInt | IEEE754.floatToBinary32(right).value.toInt) < 0)
       )
-        java.lang.Float.intBitsToFloat(0x80000000)
+        IEEE754.binary32ToFloat(Binary32(0x80000000L))
       else left
     } else if (left < right) left else right
 
@@ -9388,7 +10259,7 @@ object Interpreter {
     else if (left == right) {
       if (
         left == 0.0f &&
-        ((java.lang.Float.floatToRawIntBits(left) & java.lang.Float.floatToRawIntBits(right)) >= 0)
+        ((IEEE754.floatToBinary32(left).value.toInt & IEEE754.floatToBinary32(right).value.toInt) >= 0)
       )
         0.0f
       else left
@@ -9400,9 +10271,9 @@ object Interpreter {
     else if (left == right) {
       if (
         left == 0.0d &&
-        ((java.lang.Double.doubleToRawLongBits(left) | java.lang.Double.doubleToRawLongBits(right)) < 0L)
+        ((IEEE754.doubleToBinary64(left) | IEEE754.doubleToBinary64(right)) < 0L)
       )
-        java.lang.Double.longBitsToDouble(0x8000000000000000L)
+        IEEE754.binary64ToDouble(0x8000000000000000L)
       else left
     } else if (left < right) left else right
 
@@ -9412,7 +10283,7 @@ object Interpreter {
     else if (left == right) {
       if (
         left == 0.0d &&
-        ((java.lang.Double.doubleToRawLongBits(left) & java.lang.Double.doubleToRawLongBits(right)) >= 0L)
+        ((IEEE754.doubleToBinary64(left) & IEEE754.doubleToBinary64(right)) >= 0L)
       )
         0.0d
       else left
@@ -9440,9 +10311,12 @@ object Interpreter {
       throw IllegalArgumentException(s"SPIR-V label %${id(operand)} is absent in function %${function.id}")
     )
 
-  private def id(operand: Operand): Int        = operand.word.bits
+  // Generated Id operands consume exactly one word; the non-empty operand representation makes this access total.
+  private def id(operand: Operand): Int        = operand.words.head.bits
   private def unsigned(operand: Operand): Long = operand.words.head.toUnsigned
 
+  // Literal words are assembled directly from their encoded byte sequence.
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private def literalBits(operand: Operand): Long = {
     var result = 0L
     var index  = 0
@@ -9455,7 +10329,7 @@ object Interpreter {
 
   private def literalString(operand: Operand): String = {
     val bytes = operand.words.flatMap { word =>
-      LittleEndian.toCol(word.bits.toLong, 4)
+      LittleEndian.toVec(word.bits.toLong, ScalarByteWidth(4))
     }.takeWhile(_ != 0)
     String(bytes.toArray, java.nio.charset.StandardCharsets.UTF_8)
   }
@@ -9469,8 +10343,10 @@ object Interpreter {
       pc: Int,
       instruction: Instruction
   ): ExecutionFailure = error match {
-    case ExecutionFailure.InvalidRequest(message) if message.startsWith("cannot write through a null SPIR-V pointer") =>
-      ExecutionFailure.InvalidRequest(s"$message at function %${function.id}, pc $pc (${instruction.opcode})")
+    case ExecutionFailure.InvalidRequest(message) =>
+      ExecutionFailure.InvalidRequest(
+        s"$message at function %${function.id}, pc $pc ($instruction)"
+      )
     case _ => error
   }
 

@@ -652,11 +652,11 @@ lds_param_load v17, attr33.w
 image_atomic_add v5, v1, s[8:15] dmask:0x1 unorm glc
 // ERROR: missing dim operand
 
+image_atomic_fcmpswap v[4:5], v32, s[96:103] dmask:0x3 dim:SQ_RSRC_IMG_1D glc
+// ERROR: instruction not supported on this GPU (gfx1100): image_atomic_fcmpswap
+
 image_gather4_c_b_o v[64:67], [v32, v0, v4, v5, v6, v7], s[4:11], s[100:103] dmask:0x1 dim:SQ_RSRC_IMG_3D
 // ERROR: instruction not supported on this GPU (gfx1100): image_gather4_c_b_o
-
-image_gather4_l_o v[64:67], [v32, v0, v4, v5, v6], s[4:11], s[100:103] dmask:0x1 dim:SQ_RSRC_IMG_3D
-// ERROR: instruction not supported on this GPU (gfx1100): image_gather4_l_o
 
 image_sample_cd_o v[64:66], [v32, v16, v0, v2, v1, v4, v5, v6, v7, v8], s[4:11], s[100:103] dmask:0x7 dim:SQ_RSRC_IMG_3D
 // ERROR: instruction not supported on this GPU (gfx1100): image_sample_cd_o
@@ -2064,8 +2064,8 @@ v_dual_subrev_f32 v255, -1, v4 :: v_dual_add_f32 v6, src_scc, v5
 
 // SOURCE: gfx11_asm_vopd_err.s
 
-v_dual_add_f32      v1, v1, v5                   ::  v_dual_mov_b32       v2, v1
-// ERROR: src0 operands must use different VGPR banks
+v_dual_add_f32      v1, v4, v0                   ::  v_dual_add_f32       v2, v5, v4
+// ERROR: src1 operands must use different VGPR banks
 
 v_dual_fmaak_f32    v122, s74, v161, 2.741       ::  v_dual_and_b32       v247, s75, v98
 // ERROR: invalid operand (violates constant bus restrictions)
@@ -2111,9 +2111,6 @@ buffer_atomic_sub_clamp_u32 v5, off, s[8:11], s3 offset:0 glc
 buffer_wbinvl1_vol
 // ERROR: instruction not supported on this GPU (gfx1100): buffer_wbinvl1_vol
 
-ds_cond_sub_u32 v1, v2
-// ERROR: instruction not supported on this GPU (gfx1100): ds_cond_sub_u32
-
 ds_min_src2_u64 v1
 // ERROR: instruction not supported on this GPU (gfx1100): ds_min_src2_u64
 
@@ -2132,17 +2129,11 @@ flat_atomic_csub_u32 v1, v[0:1], v2 offset:64 th:TH_ATOMIC_RETURN
 flat_atomic_sub_clamp_u32 v1, v[0:1], v2 offset:64 th:TH_ATOMIC_RETURN
 // ERROR: instruction not supported on this GPU (gfx1100): flat_atomic_sub_clamp_u32
 
-global_atomic_ordered_add_b64 v0, v[2:3], s[0:1] offset:64
-// ERROR: instruction not supported on this GPU (gfx1100): global_atomic_ordered_add_b64
-
 global_atomic_sub_clamp_u32 v5, v[1:2], v2, off glc
 // ERROR: instruction not supported on this GPU (gfx1100): global_atomic_sub_clamp_u32
 
 global_load_tr_b64 v[1:2], v[3:4], off
 // ERROR: instruction not supported on this GPU (gfx1100): global_load_tr_b64
-
-s_atomic_and flat_scratch_hi, s[2:3], s0
-// ERROR: instruction not supported on this GPU (gfx1100): s_atomic_and
 
 s_atomic_and_x2 flat_scratch, s[2:3], s0
 // ERROR: instruction not supported on this GPU (gfx1100): s_atomic_and_x2
@@ -2156,14 +2147,11 @@ s_atomic_umax_x2 flat_scratch, s[2:3], s0
 s_atomic_xor flat_scratch_hi, s[2:3], s0
 // ERROR: instruction not supported on this GPU (gfx1100): s_atomic_xor
 
-s_buffer_atomic_inc flat_scratch_hi, s[4:7], s0
-// ERROR: instruction not supported on this GPU (gfx1100): s_buffer_atomic_inc
+s_buffer_atomic_inc_x2 flat_scratch, s[4:7], s0
+// ERROR: instruction not supported on this GPU (gfx1100): s_buffer_atomic_inc_x2
 
 s_buffer_atomic_swap_x2 flat_scratch, s[4:7], s0
 // ERROR: instruction not supported on this GPU (gfx1100): s_buffer_atomic_swap_x2
-
-s_ceil_f16 s5, s1
-// ERROR: instruction not supported on this GPU (gfx1100): s_ceil_f16
 
 s_ceil_f32 s5, s1
 // ERROR: instruction not supported on this GPU (gfx1100): s_ceil_f32
@@ -2189,8 +2177,8 @@ s_floor_f16 s5, s1
 s_memtime exec
 // ERROR: instruction not supported on this GPU (gfx1100): s_memtime
 
-s_min_f16 s5, s1, s2
-// ERROR: instruction not supported on this GPU (gfx1100): s_min_f16
+s_min_f32 s5, s1, s2
+// ERROR: instruction not supported on this GPU (gfx1100): s_min_f32
 
 s_scratch_store_dwordx4 s[4:7], flat_scratch, s0
 // ERROR: instruction not supported on this GPU (gfx1100): s_scratch_store_dwordx4
@@ -2203,6 +2191,9 @@ scratch_load_lds_dword off, off
 
 v_addc_u32 v0, vcc, exec_hi, v0, vcc
 // ERROR: instruction not supported on this GPU (gfx1100): v_addc_u32
+
+v_clrexcp
+// ERROR: instruction not supported on this GPU (gfx1100): v_clrexcp
 
 v_cmps_le_f32 vcc, -1, v2
 // ERROR: instruction not supported on this GPU (gfx1100): v_cmps_le_f32

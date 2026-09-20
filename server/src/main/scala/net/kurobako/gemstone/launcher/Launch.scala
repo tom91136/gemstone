@@ -1,73 +1,82 @@
 package net.kurobako.gemstone.launcher
 
-import net.kurobako.gemstone.Col.*
+import net.kurobako.gemstone.server.transport.{ClientId, RPCPort}
 
-import java.io.File
 import java.nio.file.Path
+import java.util.Locale
 
-enum ComputeAPI(val id: String) {
+private[gemstone] enum ComputeAPI(val id: String) {
   case CUDA      extends ComputeAPI("cuda")
   case HIP       extends ComputeAPI("hip")
   case HSA       extends ComputeAPI("hsa")
   case OpenCL    extends ComputeAPI("opencl")
   case LevelZero extends ComputeAPI("levelzero")
-  case SYCL      extends ComputeAPI("sycl")
 }
 
-object ComputeAPI {
+private[gemstone] object ComputeAPI {
   def parse(value: String): Either[LaunchError, ComputeAPI] =
-    values.find(_.id == value.toLowerCase).toRight(LaunchError(s"unsupported compute API: $value"))
+    values.find(_.id == value.toLowerCase(Locale.ROOT))
+      .toRight(LaunchError(s"unsupported compute API: $value"))
+
+  def parseAll(value: String): Either[LaunchError, Set[ComputeAPI]] = {
+    val names = value.split(",", -1).toVector
+    if (names.exists(_.isEmpty)) Left(LaunchError("--apis must be a comma-separated non-empty API list"))
+    else names.foldLeft[Either[LaunchError, Set[ComputeAPI]]](Right(Set.empty)) { (result, name) =>
+      for {
+        parsed <- result
+        api    <- parse(name)
+      } yield parsed + api
+    }
+  }
+
+  def defaults(platform: RuntimePlatform): Set[ComputeAPI] = platform match {
+    case RuntimePlatform.Linux => Set(HSA, CUDA, OpenCL, LevelZero)
+    case _                     => Set(HIP, CUDA, OpenCL, LevelZero)
+  }
 }
 
-final case class Endpoint(port: Int, token: String) {
-  require(port >= 1 && port <= 65535, s"invalid RPC port: $port")
-  require(
-    token.length == 64 && token.forall(character => character.isDigit || (character >= 'a' && character <= 'f')),
-    "RPC token must contain exactly 64 lowercase hexadecimal characters"
-  )
+private[gemstone] final case class Endpoint(port: RPCPort, client: ClientId)
+
+private[gemstone] final case class RuntimeLayout(
+    directory: Path,
+    platform: RuntimePlatform = RuntimePlatform.current
+) {
+  private[launcher] def absolute: RuntimeLayout = copy(directory = directory.toAbsolutePath.normalize())
+  def library(api: ComputeAPI): Path            = directory.resolve(platform match {
+    case RuntimePlatform.Windows => api match {
+        case ComputeAPI.CUDA      => "cuda.dll"
+        case ComputeAPI.HIP       => "amdhip64.dll"
+        case ComputeAPI.HSA       => "hsa-runtime64.dll"
+        case ComputeAPI.OpenCL    => "OpenCL_gemstone.dll"
+        case ComputeAPI.LevelZero => "ze_gemstone.dll"
+      }
+    case _ => api match {
+        case ComputeAPI.CUDA      => "libcuda.so.1"
+        case ComputeAPI.HIP       => "libamdhip64.so.7"
+        case ComputeAPI.HSA       => "libhsa-runtime64.so.1"
+        case ComputeAPI.OpenCL    => "libOpenCL_gemstone.so.1"
+        case ComputeAPI.LevelZero => "libze_gemstone.so.1"
+      }
+  })
 }
 
-final case class RuntimeLayout(
-    cudaDriver: Option[Path] = None,
-    hipRuntime: Option[Path] = None,
-    hsaRuntime: Option[Path] = None,
-    openCLICD: Option[Path] = None,
-    openCLLoader: Option[Path] = None,
-    levelZeroDriver: Option[Path] = None,
-    hipRoute: HIPRuntimeRoute = HIPRuntimeRoute.GemstoneHIP
-)
-
-final case class Environment(set: Map[String, String], unset: Set[String]) {
+private[gemstone] final case class Environment(set: Map[String, String], unset: Set[String]) {
   def applyTo(target: java.util.Map[String, String]): Unit = {
-    unset.foreach(target.remove)
+    unset.foreach(target.remove(_))
     set.foreach { case (name, value) => target.put(name, value) }
   }
 }
 
-final case class UsageSnapshot(cudaRequests: Long, executionRequests: Long) {
-  def +(other: UsageSnapshot): UsageSnapshot =
-    UsageSnapshot(cudaRequests + other.cudaRequests, executionRequests + other.executionRequests)
-}
-
-enum RequiredEvidence {
-  case CUDA, Execution
-
-  def satisfied(before: UsageSnapshot, after: UsageSnapshot): Boolean = this match {
-    case CUDA      => after.cudaRequests > before.cudaRequests
-    case Execution => after.executionRequests > before.executionRequests
-  }
-}
-
-final case class LaunchPlan(
-    api: ComputeAPI,
-    environment: Environment,
-    requiredEvidence: RequiredEvidence
+private[gemstone] final case class LaunchPlan(
+    apis: Set[ComputeAPI],
+    environment: Environment
 )
 
-final case class LaunchError(message: String)
+private[gemstone] final case class LaunchError(message: String)
 
-object Launch {
+private[gemstone] object Launch {
   private val RemovedOverrides = Set(
+    "CONFORMANCE_DEVICE",
     "GEMSTONE_RECORD",
     "HSA_ENABLE_DTIF",
     "HSA_TOOLS_LIB",
@@ -79,144 +88,48 @@ object Launch {
   )
 
   def plan(
-      api: ComputeAPI,
+      apis: Set[ComputeAPI],
       layout: RuntimeLayout,
       endpoint: Endpoint,
-      inherited: Map[String, String],
-      platform: RuntimePlatform = RuntimePlatform.current
-  ): Either[LaunchError, LaunchPlan] = {
-    val common = Map(
-      "GEMSTONE_RPC_PORT"  -> endpoint.port.toString,
-      "GEMSTONE_RPC_TOKEN" -> endpoint.token
-    )
-    val base = Environment(common, RemovedOverrides)
-    api match {
-      case ComputeAPI.CUDA =>
-        preload("CUDA Driver", api, layout.cudaDriver, base, inherited, RequiredEvidence.CUDA)
-      case ComputeAPI.HIP =>
-        hip(api, layout, base, inherited, platform)
-      case ComputeAPI.HSA =>
-        preload("HSA Runtime", api, layout.hsaRuntime, base, inherited, RequiredEvidence.Execution)
-      case ComputeAPI.OpenCL =>
-        openCL(api, layout, base, inherited)
-      case ComputeAPI.LevelZero =>
-        levelZero(api, layout, base)
-      case ComputeAPI.SYCL =>
-        (layout.levelZeroDriver, layout.openCLICD) match {
-          case (Some(_), None)    => levelZero(api, layout, base).map(withSYCLSelector(_, "level_zero:gpu"))
-          case (None, Some(_))    => openCL(api, layout, base, inherited).map(withSYCLSelector(_, "opencl:gpu"))
-          case (Some(_), Some(_)) => Left(LaunchError("SYCL requires exactly one Gemstone backend provider"))
-          case (None, None)       => Left(LaunchError("SYCL backend provider is absent"))
-        }
-    }
-  }
-
-  private def levelZero(
-      api: ComputeAPI,
-      layout: RuntimeLayout,
-      base: Environment
-  ): Either[LaunchError, LaunchPlan] =
-    provider("Level Zero Driver", layout.levelZeroDriver).map { library =>
-      LaunchPlan(
-        api,
-        base.copy(set =
-          base.set ++ Map(
-            "ZE_ENABLE_ALT_DRIVERS"        -> library.toString,
-            "ZE_ENABLE_LOADER_DEBUG_TRACE" -> "0"
-          )
-        ),
-        RequiredEvidence.Execution
-      )
-    }
-
-  private def openCL(
-      api: ComputeAPI,
-      layout: RuntimeLayout,
-      base: Environment,
       inherited: Map[String, String]
   ): Either[LaunchError, LaunchPlan] =
-    provider("OpenCL ICD", layout.openCLICD).map { directory =>
-      val environment = layout.openCLLoader.fold(base)(withPreloadedLibrary(base, _, inherited))
-      LaunchPlan(
-        api,
-        environment.copy(set = environment.set.updated("OCL_ICD_VENDORS", directory.toString + File.separator)),
-        RequiredEvidence.Execution
+    if (apis.isEmpty) Left(LaunchError("at least one compute API must be enabled"))
+    else {
+      val runtime = layout.absolute
+      val preload = ComputeAPI.values.iterator.filter(apis).collect {
+        case api @ (ComputeAPI.CUDA | ComputeAPI.HIP | ComputeAPI.HSA | ComputeAPI.OpenCL) => runtime.library(api)
+      }.toVector
+      val directories          = preload.flatMap(path => Option(path.getParent)).distinct
+      val inheritedPreload     = inherited.get("LD_PRELOAD").filter(_.nonEmpty).toVector
+      val inheritedLibraryPath = inherited.get("LD_LIBRARY_PATH").filter(_.nonEmpty).toVector
+      val common               = Map(
+        "GEMSTONE_RPC_PORT"   -> s"${endpoint.port.value}",
+        "GEMSTONE_RPC_CLIENT" -> s"${endpoint.client.value}"
       )
+      val dynamic = Map.newBuilder[String, String]
+      val conformanceTarget = for {
+        backend      <- inherited.get("CONFORMANCE_TARGET_BACKEND")
+        architecture <- inherited.get("CONFORMANCE_TARGET_ARCHITECTURE").filter(_.nonEmpty)
+      } yield backend -> architecture
+      conformanceTarget.foreach {
+        case ("cuda", architecture)
+            if apis(ComputeAPI.CUDA) && !inherited.contains("GEMSTONE_CUDA_TARGET") &&
+              !inherited.contains("GEMSTONE_CUDA_TARGET_ARCH") =>
+          dynamic += "GEMSTONE_CUDA_TARGET" -> architecture
+        case ("hip" | "hsa", architecture)
+            if (apis(ComputeAPI.HIP) || apis(ComputeAPI.HSA)) && !inherited.contains("GEMSTONE_AMDGPU_TARGET") =>
+          dynamic += "GEMSTONE_AMDGPU_TARGET" -> architecture
+        case _ =>
+      }
+      if (preload.nonEmpty) dynamic += "LD_PRELOAD" -> (preload.map(path => s"$path") ++ inheritedPreload).mkString(":")
+      if (directories.nonEmpty)
+        dynamic += "LD_LIBRARY_PATH" -> (directories.map(path => s"$path") ++ inheritedLibraryPath).mkString(":")
+      if (apis(ComputeAPI.OpenCL))
+        dynamic += "OCL_ICD_FILENAMES" -> s"${runtime.library(ComputeAPI.OpenCL)}"
+      if (apis(ComputeAPI.LevelZero)) {
+        dynamic += "ZE_ENABLE_ALT_DRIVERS"        -> s"${runtime.library(ComputeAPI.LevelZero)}"
+        dynamic += "ZE_ENABLE_LOADER_DEBUG_TRACE" -> "0"
+      }
+      Right(LaunchPlan(apis, Environment(common ++ dynamic.result(), RemovedOverrides)))
     }
-
-  private def withSYCLSelector(plan: LaunchPlan, selector: String): LaunchPlan =
-    plan.copy(environment =
-      plan.environment.copy(set =
-        plan.environment.set.updated(
-          "ONEAPI_DEVICE_SELECTOR",
-          selector
-        )
-      )
-    )
-
-  private def preload(
-      name: String,
-      api: ComputeAPI,
-      path: Option[Path],
-      base: Environment,
-      inherited: Map[String, String],
-      evidence: RequiredEvidence
-  ): Either[LaunchError, LaunchPlan] =
-    provider(name, path).map { library =>
-      LaunchPlan(
-        api,
-        withPreloadedLibrary(base, library, inherited),
-        evidence
-      )
-    }
-
-  private def hip(
-      api: ComputeAPI,
-      layout: RuntimeLayout,
-      base: Environment,
-      inherited: Map[String, String],
-      platform: RuntimePlatform
-  ): Either[LaunchError, LaunchPlan] =
-    if (!HIPRuntimeRoute.supported(platform).contains(layout.hipRoute))
-      Left(
-        LaunchError(s"HIP route ${layout.hipRoute.id} requires compatible Linux ROCm; it is unavailable on $platform")
-      )
-    else for {
-      library <- provider("HIP Runtime", layout.hipRuntime)
-      hsa     <- if (layout.hipRoute.requiresHSA) provider("HSA Runtime", layout.hsaRuntime).map(Some(_))
-      else Right(None)
-    } yield {
-      val libraries   = hsa.toCol :+ library
-      val directories = libraries.flatMap(path => Option(path.getParent).toCol).map(_.toString).distinct
-      val libraryPath = (directories ++ inherited.get("LD_LIBRARY_PATH").filter(_.nonEmpty).toCol).mkString(":")
-      LaunchPlan(
-        api,
-        base.copy(set =
-          base.set ++ Map(
-            "LD_PRELOAD"      -> libraries.map(_.toString).mkString(":"),
-            "LD_LIBRARY_PATH" -> libraryPath
-          )
-        ),
-        RequiredEvidence.Execution
-      )
-    }
-
-  private def withPreloadedLibrary(
-      base: Environment,
-      library: Path,
-      inherited: Map[String, String]
-  ): Environment = {
-    val directory   = Option(library.getParent).getOrElse(Path.of("."))
-    val libraryPath = inherited.get("LD_LIBRARY_PATH").filter(_.nonEmpty)
-      .fold(directory.toString)(value => s"$directory:$value")
-    base.copy(set =
-      base.set ++ Map(
-        "LD_PRELOAD"      -> library.toString,
-        "LD_LIBRARY_PATH" -> libraryPath
-      )
-    )
-  }
-
-  private def provider(name: String, path: Option[Path]): Either[LaunchError, Path] =
-    path.toRight(LaunchError(s"$name provider is absent"))
 }

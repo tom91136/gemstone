@@ -1,19 +1,28 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
-import net.kurobako.gemstone.Col
+import Program.*
+
+import VirtualMachine.*
+
+import io.github.iltotore.iron.*
+import io.github.iltotore.iron.constraint.all.*
+
+import net.kurobako.gemstone.Vec
 
 import net.kurobako.gemstone.execution.*
 import net.kurobako.gemstone.memory.ArrayCheckedMemory
 import net.kurobako.gemstone.memory.GuestAddress
-import net.kurobako.gemstone.trace.TraceEvent
+import net.kurobako.gemstone.memory.MemoryValueByteWidth
 
 final class InterpreterSuite extends munit.FunSuite {
-  test("atomics in device callees keep the complete grid sequential") {
+  test("atomics in device callees remain correct across parallel blocks") {
     val parallelCalls = java.util.concurrent.atomic.AtomicInteger(0)
     final class RecordingParallelism extends ExecutionParallelism {
-      override val parallelism                                                            = 4
-      override def shouldParallel(tasks: Long, workItems: Long): Boolean                  = tasks > 1L
-      override def parallelFor(tasks: Long)(task: Long => Either[ExecutionFailure, Unit]) = {
+      override val parallelism: Int :| Positive                                                    = 4
+      override def shouldParallel(tasks: Long :| Positive0, workItems: Long :| Positive0): Boolean = tasks > 1L
+      override def parallelFor(
+          tasks: Long :| Positive0
+      )(task: Long :| Positive0 => Either[ExecutionFailure, Unit]) = {
         parallelCalls.incrementAndGet()
         ExecutionParallelism.Sequential.parallelFor(tasks)(task)
       }
@@ -37,24 +46,24 @@ final class InterpreterSuite extends munit.FunSuite {
         }
         ret;
       }"""
-    val kernel  = ISA.compile(source).fold(error => fail(error.toString), identity)
+    val kernel  = ISA.compile(source).fold(error => fail(error.toString), value => value)
     val memory  = ArrayCheckedMemory.allocate(4)
-    val control = ExecutionControl.create(parallelism = RecordingParallelism())
-    val result  = Interpreter.execute(
+    val control = ExecutionControl(parallelism = RecordingParallelism())
+    val result  = VirtualMachine.execute(
       kernel,
       geometry(4, 1),
-      Map("output" -> Argument(memory.allocation.start.value)),
+      Map(ParameterName("output") -> Argument(memory.allocation.start.value)),
       memory,
       control,
       captureTrace = false
     )
     assert(result.isRight, result.toString)
     assertEquals(memory.readInt32(memory.allocation.start), Right(4))
-    assertEquals(parallelCalls.get(), 0)
+    assertEquals(parallelCalls.get(), 1)
   }
 
   private def geometry(blocks: Int, threads: Int): LaunchGeometry =
-    LaunchGeometry.create(Dimensions.create(threads, 1, 1).toOption.get, Dimensions.create(blocks, 1, 1).toOption.get)
+    LaunchGeometry.forLaunch(TestDimensions(threads), TestDimensions(blocks))
       .toOption.get
 
   private val vectorAdd = """
@@ -87,10 +96,14 @@ final class InterpreterSuite extends munit.FunSuite {
 
   test("parse and deterministically execute integer vector addition") {
     val kernel = ISA.compile(vectorAdd).toOption.get
-    assertEquals(kernel.name, "vector_add")
+    assertEquals(kernel.name, KernelName("vector_add"))
     assertEquals(
       kernel.parameters.toSeq,
-      Seq(KernelParameter("input_a", 8), KernelParameter("input_b", 8), KernelParameter("output", 8))
+      Seq(
+        KernelParameter(ParameterName("input_a"), 8),
+        KernelParameter(ParameterName("input_b"), 8),
+        KernelParameter(ParameterName("output"), 8)
+      )
     )
 
     val memory = ArrayCheckedMemory.allocate(192, provenance = "vector-add arena")
@@ -98,21 +111,21 @@ final class InterpreterSuite extends munit.FunSuite {
     val a      = base
     val b      = base.offset(64L)
     val output = base.offset(128L)
-    val values = Col(1, 2, 3, 4)
+    val values = Vec(1, 2, 3, 4)
 
     values.indices.foreach { index =>
       memory.writeInt32(a.offset(index.toLong * 4L), values(index)).toOption.get
       memory.writeInt32(b.offset(index.toLong * 4L), values(index) * 10).toOption.get
     }
 
-    val result = Interpreter
+    val result = VMInterpreter
       .execute(
         kernel,
         geometry(1, values.size),
         Map(
-          "input_a" -> Argument(a.value),
-          "input_b" -> Argument(b.value),
-          "output"  -> Argument(output.value)
+          ParameterName("input_a") -> Argument(a.value),
+          ParameterName("input_b") -> Argument(b.value),
+          ParameterName("output")  -> Argument(output.value)
         ),
         memory
       )
@@ -124,7 +137,7 @@ final class InterpreterSuite extends munit.FunSuite {
       Seq(11, 22, 33, 44)
     )
     assertEquals(
-      result.trace.events.collect { case event: TraceEvent.OutputWrite => event.value }.toSeq,
+      result.trace.events.collect { case event: Trace.Event.OutputWrite => event.value }.toSeq,
       Seq(11, 22, 33, 44)
     )
   }
@@ -143,19 +156,19 @@ final class InterpreterSuite extends munit.FunSuite {
       |  ret;
       |}
       |""".stripMargin
-    val kernel = ISA.compile(source).fold(error => fail(error.message), identity)
-    assertEquals(kernel.sharedSymbols.keySet, Set("first", "second"))
-    assertNotEquals(kernel.sharedSymbols("first"), kernel.sharedSymbols("second"))
+    val kernel = ISA.compile(source).fold(error => fail(error.message), value => value)
+    assertEquals(kernel.sharedSymbols.keySet, Set(SymbolName("first"), SymbolName("second")))
+    assertNotEquals(kernel.sharedSymbols(SymbolName("first")), kernel.sharedSymbols(SymbolName("second")))
     assert(
       kernel.instructions.exists {
-        case ExecutableInstruction.Move(_, Value.Symbol("first"), _) => true
-        case _                                                       => false
+        case ExecutableInstruction.Move(_, Value.Symbol(name), _) if name == SymbolName("first") => true
+        case _                                                                                   => false
       }
     )
     assert(
       kernel.instructions.exists {
-        case ExecutableInstruction.Move(_, Value.Symbol("second"), _) => true
-        case _                                                        => false
+        case ExecutableInstruction.Move(_, Value.Symbol(name), _) if name == SymbolName("second") => true
+        case _                                                                                    => false
       }
     )
   }
@@ -180,12 +193,12 @@ final class InterpreterSuite extends munit.FunSuite {
       |  ret;
       |}
       |""".stripMargin
-    val kernel = ISA.compile(source).fold(error => fail(error.message), identity)
+    val kernel = ISA.compile(source).fold(error => fail(error.message), value => value)
     val memory = ArrayCheckedMemory.allocate(4, provenance = "generic-shared")
-    val result = Interpreter.execute(
+    val result = VirtualMachine.execute(
       kernel,
       geometry(1, 1),
-      Map("output" -> Argument(memory.allocation.start.value)),
+      Map(ParameterName("output") -> Argument(memory.allocation.start.value)),
       memory
     )
     assert(result.isRight, result.left.toOption.map(_.message).getOrElse(""))
@@ -221,29 +234,29 @@ final class InterpreterSuite extends munit.FunSuite {
       |  ret;
       |}
       |""".stripMargin
-    val kernel = ISA.compile(source).fold(error => fail(error.message), identity)
+    val kernel = ISA.compile(source).fold(error => fail(error.message), value => value)
     val memory = ArrayCheckedMemory.allocate(32, provenance = "integer-division")
-    val result = Interpreter.execute(
+    val result = VirtualMachine.execute(
       kernel,
       geometry(1, 1),
       Map(
-        "dividend"          -> Argument(-21L),
-        "unsigned_dividend" -> Argument(-1L),
-        "divisor"           -> Argument(3L),
-        "unsigned_divisor"  -> Argument(2L),
-        "output"            -> Argument(memory.allocation.start.value)
+        ParameterName("dividend")          -> Argument(-21L),
+        ParameterName("unsigned_dividend") -> Argument(-1L),
+        ParameterName("divisor")           -> Argument(3L),
+        ParameterName("unsigned_divisor")  -> Argument(2L),
+        ParameterName("output")            -> Argument(memory.allocation.start.value)
       ),
       memory
     )
     assert(result.isRight, result.left.toOption.map(_.message).getOrElse(""))
-    assertEquals(memory.readLittleEndian(memory.allocation.start, 8).toOption.get, -7L)
+    assertEquals(memory.readLittleEndian(memory.allocation.start, MemoryValueByteWidth(8)).toOption.get, -7L)
     assertEquals(
-      memory.readLittleEndian(memory.allocation.start.offset(8L), 8).toOption.get,
+      memory.readLittleEndian(memory.allocation.start.offset(8L), MemoryValueByteWidth(8)).toOption.get,
       java.lang.Long.divideUnsigned(-1L, 2L)
     )
-    assertEquals(memory.readLittleEndian(memory.allocation.start.offset(16L), 8).toOption.get, 0L)
+    assertEquals(memory.readLittleEndian(memory.allocation.start.offset(16L), MemoryValueByteWidth(8)).toOption.get, 0L)
     assertEquals(
-      memory.readLittleEndian(memory.allocation.start.offset(24L), 8).toOption.get,
+      memory.readLittleEndian(memory.allocation.start.offset(24L), MemoryValueByteWidth(8)).toOption.get,
       java.lang.Long.remainderUnsigned(-1L, 2L)
     )
   }
@@ -273,17 +286,17 @@ final class InterpreterSuite extends munit.FunSuite {
       |  ret;
       |}
       |""".stripMargin
-    val kernel = ISA.compile(source).fold(error => fail(error.message), identity)
+    val kernel = ISA.compile(source).fold(error => fail(error.message), value => value)
     val memory = ArrayCheckedMemory.allocate(16, provenance = "divergent-barrier")
-    val result = Interpreter.execute(
+    val result = VirtualMachine.execute(
       kernel,
       geometry(1, 4),
-      Map("output" -> Argument(memory.allocation.start.value)),
+      Map(ParameterName("output") -> Argument(memory.allocation.start.value)),
       memory
     )
     assert(result.isRight, result.left.toOption.map(_.message).getOrElse(""))
     assertEquals(
-      Col.tabulate(4)(index => memory.readInt32(memory.allocation.start.offset(index.toLong * 4L)).toOption.get).toSeq,
+      Vec.tabulate(4)(index => memory.readInt32(memory.allocation.start.offset(index.toLong * 4L)).toOption.get).toSeq,
       Seq(7, 7, 9, 9)
     )
   }
@@ -319,16 +332,19 @@ final class InterpreterSuite extends munit.FunSuite {
       |  ret;
       |}
       |""".stripMargin
-    val kernel = ISA.compile(source).fold(error => fail(error.message), identity)
+    val kernel = ISA.compile(source).fold(error => fail(error.message), value => value)
     val memory = ArrayCheckedMemory.allocate(8, provenance = "divergent-workgroup-barrier-id")
-    val result = Interpreter.execute(
+    val result = VirtualMachine.execute(
       kernel,
       geometry(1, 256),
-      Map("output" -> Argument(memory.allocation.start.value)),
+      Map(ParameterName("output") -> Argument(memory.allocation.start.value)),
       memory
     )
     assert(result.isRight, result.left.toOption.map(_.message).getOrElse(""))
-    assertEquals(memory.readLittleEndian(memory.allocation.start, 8).toOption.get, 0x3ff0000000000000L)
+    assertEquals(
+      memory.readLittleEndian(memory.allocation.start, MemoryValueByteWidth(8)).toOption.get,
+      0x3ff0000000000000L
+    )
   }
 
   test("divergent warp participants publish shared stores at a warp barrier") {
@@ -360,17 +376,17 @@ final class InterpreterSuite extends munit.FunSuite {
       |  ret;
       |}
       |""".stripMargin
-    val kernel = ISA.compile(source).fold(error => fail(error.message), identity)
+    val kernel = ISA.compile(source).fold(error => fail(error.message), value => value)
     val memory = ArrayCheckedMemory.allocate(16, provenance = "divergent-warp-barrier")
-    val result = Interpreter.execute(
+    val result = VirtualMachine.execute(
       kernel,
       geometry(1, 4),
-      Map("output" -> Argument(memory.allocation.start.value)),
+      Map(ParameterName("output") -> Argument(memory.allocation.start.value)),
       memory
     )
     assert(result.isRight, result.left.toOption.map(_.message).getOrElse(""))
     assertEquals(
-      Col.tabulate(4)(index => memory.readInt32(memory.allocation.start.offset(index.toLong * 4L)).toOption.get).toSeq,
+      Vec.tabulate(4)(index => memory.readInt32(memory.allocation.start.offset(index.toLong * 4L)).toOption.get).toSeq,
       Seq(7, 7, 7, 7)
     )
   }
@@ -395,17 +411,17 @@ final class InterpreterSuite extends munit.FunSuite {
       |  ret;
       |}
       |""".stripMargin
-    val kernel = ISA.compile(source).fold(error => fail(error.message), identity)
-    val memory = ArrayCheckedMemory.allocate(16, provenance = "synchronized-warp-shuffle")
-    val result = Interpreter.execute(
+    val kernel = ISA.compile(source).fold(error => fail(error.message), value => value)
+    val memory = ArrayCheckedMemory.allocate(16, provenance = "sync-warp-shuffle")
+    val result = VirtualMachine.execute(
       kernel,
       geometry(1, 4),
-      Map("output" -> Argument(memory.allocation.start.value)),
+      Map(ParameterName("output") -> Argument(memory.allocation.start.value)),
       memory
     )
     assert(result.isRight, result.left.toOption.map(_.message).getOrElse(""))
     assertEquals(
-      Col.tabulate(4)(index => memory.readInt32(memory.allocation.start.offset(index.toLong * 4L)).toOption.get).toSeq,
+      Vec.tabulate(4)(index => memory.readInt32(memory.allocation.start.offset(index.toLong * 4L)).toOption.get).toSeq,
       Seq(7, 7, 7, 7)
     )
   }
@@ -424,17 +440,17 @@ final class InterpreterSuite extends munit.FunSuite {
       |  ret;
       |}
       |""".stripMargin
-    val kernel = ISA.compile(source).fold(error => fail(error.message), identity)
+    val kernel = ISA.compile(source).fold(error => fail(error.message), value => value)
     val memory = ArrayCheckedMemory.allocate(8, provenance = "64-bit-warp-shuffle")
-    val result = Interpreter.execute(
+    val result = VirtualMachine.execute(
       kernel,
       geometry(1, 4),
-      Map("output" -> Argument(memory.allocation.start.value)),
+      Map(ParameterName("output") -> Argument(memory.allocation.start.value)),
       memory
     )
     assert(result.isRight, result.left.toOption.map(_.message).getOrElse(""))
     assertEquals(
-      memory.readLittleEndian(memory.allocation.start, 8).toOption,
+      memory.readLittleEndian(memory.allocation.start, MemoryValueByteWidth(8)).toOption,
       Some(0x1122334455667788L)
     )
   }
@@ -459,17 +475,17 @@ final class InterpreterSuite extends munit.FunSuite {
       |  ret;
       |}
       |""".stripMargin
-    val kernel = ISA.compile(source).fold(error => fail(error.message), identity)
+    val kernel = ISA.compile(source).fold(error => fail(error.message), value => value)
     val memory = ArrayCheckedMemory.allocate(8, provenance = "inline-warp-shuffle-registers")
-    val result = Interpreter.execute(
+    val result = VirtualMachine.execute(
       kernel,
       geometry(1, 2),
-      Map("output" -> Argument(memory.allocation.start.value)),
+      Map(ParameterName("output") -> Argument(memory.allocation.start.value)),
       memory
     )
     assert(result.isRight, result.left.toOption.map(_.message).getOrElse(""))
     assertEquals(
-      Col.tabulate(2)(index => memory.readInt32(memory.allocation.start.offset(index.toLong * 4L)).toOption.get).toSeq,
+      Vec.tabulate(2)(index => memory.readInt32(memory.allocation.start.offset(index.toLong * 4L)).toOption.get).toSeq,
       Seq(7, 7)
     )
   }
@@ -503,23 +519,23 @@ final class InterpreterSuite extends munit.FunSuite {
       |  ret;
       |}
       |""".stripMargin
-    val kernel     = ISA.compile(source).fold(error => fail(error.message), identity)
-    val groupSize  = Dimensions.create(2, 2, 1).toOption.get
-    val groupCount = Dimensions.create(2, 2, 1).toOption.get
-    val launch     = LaunchGeometry.create(groupSize, groupCount).toOption.get
+    val kernel     = ISA.compile(source).fold(error => fail(error.message), value => value)
+    val groupSize  = Dimensions(2, 2, 1)
+    val groupCount = Dimensions(2, 2, 1)
+    val launch     = LaunchGeometry.forLaunch(groupSize, groupCount).toOption.get
     val memory     = ArrayCheckedMemory.allocate(16 * 4, provenance = "ptx-3d-coordinates")
-    val result     = Interpreter.execute(
+    val result     = VirtualMachine.execute(
       kernel,
       launch,
-      Map("output" -> Argument(memory.allocation.start.value)),
+      Map(ParameterName("output") -> Argument(memory.allocation.start.value)),
       memory,
       captureTrace = false
     )
 
     assert(result.isRight, result.left.toOption.map(_.message).getOrElse(""))
     assertEquals(
-      Col.tabulate(16)(index => memory.readInt32(memory.allocation.start.offset(index.toLong * 4L)).toOption.get).toSeq,
-      Col.from(0.until(16))
+      Vec.tabulate(16)(index => memory.readInt32(memory.allocation.start.offset(index.toLong * 4L)).toOption.get).toSeq,
+      Vec.from(0.until(16))
     )
   }
 
@@ -532,28 +548,28 @@ final class InterpreterSuite extends munit.FunSuite {
       |  bra again;
       |}
       |""".stripMargin
-    val kernel = ISA.compile(source).fold(error => fail(error.message), identity)
-    val result = Interpreter.execute(
+    val kernel = ISA.compile(source).fold(error => fail(error.message), value => value)
+    val result = VirtualMachine.execute(
       kernel,
       geometry(1, 1),
       Map.empty,
       ArrayCheckedMemory.allocate(4),
-      ExecutionControl.create(ExecutionLimits(maxInstructions = 8L, quantum = 2))
+      ExecutionControl(ExecutionLimits(maxInstructions = 8L, quantum = 2))
     )
     assert(result.left.exists(_.message.contains("instruction budget of 8")))
   }
 
   test("execution observes cancellation before fetching an instruction") {
-    val kernel       = ISA.compile(vectorAdd).fold(error => fail(error.message), identity)
+    val kernel       = ISA.compile(vectorAdd).fold(error => fail(error.message), value => value)
     val cancellation = CancellationToken.Source()
     cancellation.cancel()
-    val result = Interpreter.execute(
+    val result = VirtualMachine.execute(
       kernel,
       geometry(1, 1),
       Map.empty,
       ArrayCheckedMemory.allocate(4),
-      control = ExecutionControl.create(cancellation = cancellation)
+      control = ExecutionControl(cancellation = cancellation)
     )
-    assertEquals(result, Left(ExecutionError("execution was cancelled")))
+    assertEquals(result, Left(VirtualMachine.Error("execution was cancelled")))
   }
 }

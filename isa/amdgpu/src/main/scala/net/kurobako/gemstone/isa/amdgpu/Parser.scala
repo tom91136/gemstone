@@ -1,26 +1,35 @@
 package net.kurobako.gemstone.isa.amdgpu
 
-import net.kurobako.gemstone.Col
-import net.kurobako.gemstone.Col.*
+import net.kurobako.gemstone.Vec
+import net.kurobako.gemstone.Vec.*
 
 import cats.data.Chain
 import cats.parse.Parser as P
 import cats.syntax.all.*
+import io.github.iltotore.iron.*
+import io.github.iltotore.iron.constraint.all.*
 
 import scala.annotation.tailrec
 import scala.util.Try
 
 object Parser {
+  private def parseError(line: Int, column: Int, message: String): ParseError =
+    ParseError(
+      line.refineUnsafe[Positive],
+      column.refineUnsafe[Positive],
+      message
+    )
+
   def parse(source: String): Either[ParseError, Program] =
-    source.linesIterator.zipWithIndex.toCol
+    source.linesIterator.zipWithIndex.toVec
       .traverse { case (line, index) => parseLine(line, index + 1) }
       .map(statements => Program(statements.flatten))
 
   def parseInstruction(source: String): Either[ParseError, Instruction] =
     parse(source).flatMap {
-      case Program(Col(Statement.Instruction(instruction))) => Right(instruction)
-      case Program(Col())                                   => Left(ParseError(1, 1, "expected an instruction"))
-      case _ => Left(ParseError(1, 1, "expected exactly one instruction"))
+      case Program(Vec(Statement.Instruction(instruction))) => Right(instruction)
+      case Program(Vec())                                   => Left(parseError(1, 1, "expected an instruction"))
+      case _ => Left(parseError(1, 1, "expected exactly one instruction"))
     }
 
   private def parseLine(source: String, line: Int): Either[ParseError, Option[Statement]] = {
@@ -29,13 +38,13 @@ object Parser {
     else if (text.endsWith(":")) {
       val name = text.dropRight(1).trim
       if (isIdentifier(name)) Right(Some(Statement.Label(name)))
-      else Left(ParseError(line, 1, s"invalid label '$name'"))
+      else Left(parseError(line, 1, s"invalid label '$name'"))
     } else if (text.startsWith(".")) {
       val end  = text.indexWhere(_.isWhitespace)
       val name = if (end < 0) text else text.take(end)
       val args = if (end < 0) "" else text.drop(end).trim
       if (directiveName.parseAll(name).isRight) Right(Some(Statement.Directive(name, args)))
-      else Left(ParseError(line, 1, s"invalid directive '$name'"))
+      else Left(parseError(line, 1, s"invalid directive '$name'"))
     } else {
       text match {
         case s"$left :: $right" =>
@@ -51,7 +60,7 @@ object Parser {
   private def parseInstructionLine(text: String, line: Int): Either[ParseError, Instruction] = {
     val opcodeEnd  = text.indexWhere(_.isWhitespace)
     val opcodeText = if (opcodeEnd < 0) text else text.take(opcodeEnd)
-    if (opcodeName.parseAll(opcodeText).isLeft) Left(ParseError(line, 1, s"invalid AMDGPU opcode '$opcodeText'"))
+    if (opcodeName.parseAll(opcodeText).isLeft) Left(parseError(line, 1, s"invalid AMDGPU opcode '$opcodeText'"))
     else {
       val opcode = normalizeOpcode(opcodeText)
       val tail   = if (opcodeEnd < 0) "" else text.drop(opcodeEnd).trim
@@ -66,12 +75,12 @@ object Parser {
               )
           })
           .flatMap { case (operands, modifiers) =>
-            Instruction.decode(opcode, Col.from(operands.iterator), Col.from(modifiers.iterator)).leftMap {
-              case InstructionDecodeError.UnknownOpcode(value) => ParseError(line, 1, s"unknown AMDGPU opcode '$value'")
+            Instruction.decode(opcode, Vec.from(operands.iterator), Vec.from(modifiers.iterator)).leftMap {
+              case InstructionDecodeError.UnknownOpcode(value) => parseError(line, 1, s"unknown AMDGPU opcode '$value'")
               case InstructionDecodeError.InvalidOperandCount(value, expected, actual) =>
-                ParseError(line, 1, s"$value expects ${expected.mkString(" or ")} operands, found $actual")
+                parseError(line, 1, s"$value expects ${expected.mkString(" or ")} operands, found $actual")
               case InstructionDecodeError.AmbiguousForms(value, definitions) =>
-                ParseError(line, 1, s"$value ambiguously matched ${definitions.mkString(", ")}")
+                parseError(line, 1, s"$value ambiguously matched ${definitions.mkString(", ")}")
             }
           }
       }
@@ -79,27 +88,30 @@ object Parser {
   }
 
   private def parseWords(
-      words: Col[String],
+      words: Vec[String],
       line: Int,
       instruction: String
-  ): Either[ParseError, Col[Either[Operand, Modifier]]] =
+  ): Either[ParseError, Vec[Either[Operand, Modifier]]] =
     words.zipWithIndex.traverse { case (word, wordIndex) =>
       parseModifier(word) match {
         case Some(modifier)        => Right(Right(modifier))
         case None if wordIndex > 0 =>
-          Right(Right(Modifier(if (isIdentifier(word)) word.toLowerCase else word)))
-        case None => parseOperand(word, line, instruction.indexOf(word) + 1).map(Left.apply)
+          val name = if (isIdentifier(word)) word.toLowerCase else word
+          AMDGPUModifierName.either(name)
+            .leftMap(_ => parseError(line, instruction.indexOf(word) + 1, s"invalid modifier '$word'"))
+            .map(value => Right(Modifier(value)))
+        case None => parseOperand(word, line, instruction.indexOf(word) + 1).map(Left(_))
       }
     }
 
   private def parseOperand(text: String, line: Int, column: Int): Either[ParseError, Operand] =
     if (text.startsWith("-") && text.length > 1 && !looksNumeric(text))
-      parseOperand(text.drop(1), line, column + 1).map(Operand.Negated.apply)
+      parseOperand(text.drop(1), line, column + 1).map(Operand.Negated(_))
     else if (text.startsWith("|") && text.endsWith("|") && text.length > 2)
-      parseOperand(text.slice(1, text.length - 1), line, column + 1).map(Operand.Absolute.apply)
+      parseOperand(text.slice(1, text.length - 1), line, column + 1).map(Operand.Absolute(_))
     else parseRegister(text).orElse(parseNumber(text)).orElse(parseAtom(text)) match {
       case Some(value) => Right(value)
-      case None        => Left(ParseError(line, column, s"invalid operand '$text'"))
+      case None        => Left(parseError(line, column, s"invalid operand '$text'"))
     }
 
   private def parseRegister(text: String): Option[Operand] =
@@ -113,7 +125,7 @@ object Parser {
         } yield Operand.Register(file, firstValue, lastValue)
       case value if SpecialRegisters.contains(value) => Some(Operand.SpecialRegister(value))
       case value                                     =>
-        RegisterPrefixes.find(value.startsWith).flatMap { prefix =>
+        RegisterPrefixes.find(value.startsWith(_)).flatMap { prefix =>
           val number = value.drop(prefix.length)
           for {
             file     <- registerFile(prefix)
@@ -144,20 +156,23 @@ object Parser {
 
   private def parseModifier(text: String): Option[Modifier] = {
     val colon = topLevelColon(text)
-    if (colon > 0 && isIdentifier(text.take(colon)))
-      Some(Modifier(text.take(colon).toLowerCase, Some(text.drop(colon + 1))))
-    else if (KnownFlagModifiers.contains(text.toLowerCase)) Some(Modifier(text.toLowerCase))
+    if (colon > 0 && colon < text.length - 1 && isIdentifier(text.take(colon)))
+      AMDGPUModifierValue.either(text.drop(colon + 1)).toOption.map(value =>
+        Modifier(AMDGPUModifierName.applyUnsafe(text.take(colon).toLowerCase), Some(value))
+      )
+    else if (KnownFlagModifiers.contains(text.toLowerCase))
+      Some(Modifier(AMDGPUModifierName.applyUnsafe(text.toLowerCase)))
     else None
   }
 
-  private def splitTopLevel(text: String, separator: Char, line: Int): Either[ParseError, Col[String]] = {
+  private def splitTopLevel(text: String, separator: Char, line: Int): Either[ParseError, Vec[String]] = {
     @tailrec
-    def loop(index: Int, start: Int, round: Int, square: Int, result: Chain[String]): Either[ParseError, Col[String]] =
+    def loop(index: Int, start: Int, round: Int, square: Int, result: Chain[String]): Either[ParseError, Vec[String]] =
       if (index == text.length) {
         val last = text.drop(start).trim
-        if (round != 0 || square != 0) Left(ParseError(line, text.length, "unclosed delimiter"))
-        else if (last.isEmpty) Left(ParseError(line, text.length, "empty operand"))
-        else Right(Col.from(result.append(last).iterator))
+        if (round != 0 || square != 0) Left(parseError(line, text.length, "unclosed delimiter"))
+        else if (last.isEmpty) Left(parseError(line, text.length, "empty operand"))
+        else Right(Vec.from(result.append(last).iterator))
       } else {
         val (nextRound, nextSquare) = text(index) match {
           case '(' => round + 1 -> square
@@ -167,18 +182,18 @@ object Parser {
           case _   => round     -> square
         }
         if (nextRound < 0 || nextSquare < 0)
-          Left(ParseError(line, index + 1, "unmatched closing delimiter"))
+          Left(parseError(line, index + 1, "unmatched closing delimiter"))
         else if (text(index) == separator && nextRound == 0 && nextSquare == 0) {
           val part = text.slice(start, index).trim
-          if (part.isEmpty) Left(ParseError(line, index + 1, "empty operand"))
+          if (part.isEmpty) Left(parseError(line, index + 1, "empty operand"))
           else loop(index + 1, index + 1, nextRound, nextSquare, result.append(part))
         } else loop(index + 1, start, nextRound, nextSquare, result)
       }
 
-    if (text.isEmpty) Right(Col.empty) else loop(0, 0, 0, 0, Chain.empty)
+    if (text.isEmpty) Right(Vec.empty) else loop(0, 0, 0, 0, Chain.empty)
   }
 
-  private def splitWhitespace(text: String): Col[String] = {
+  private def splitWhitespace(text: String): Vec[String] = {
     @tailrec
     def loop(
         index: Int,
@@ -202,13 +217,13 @@ object Parser {
       else loop(index + 1, if (completedAt.nonEmpty) None else nextStart, nextRound, nextSquare, nextResult)
     }
 
-    Col.from(loop(0, None, 0, 0, Chain.empty).iterator)
+    Vec.from(loop(0, None, 0, 0, Chain.empty).iterator)
   }
 
   private def stripComment(source: String): String = {
     val slash = source.indexOf("//")
     val hash  = source.indexOf('#')
-    val end   = Col(slash, hash).filter(_ >= 0).minOption.getOrElse(source.length)
+    val end   = Vec(slash, hash).filter(_ >= 0).minOption.getOrElse(source.length)
     source.take(end)
   }
 
@@ -252,7 +267,7 @@ object Parser {
     case _      => None
   }
 
-  private val RegisterPrefixes = Col("ttmp", "s", "v", "a")
+  private val RegisterPrefixes = Vec("ttmp", "s", "v", "a")
 
   private val identifierStart = P.charWhere(character => character.isLetter || character == '_' || character == '$')
   private val identifierPart  = P.charWhere(character => character.isLetterOrDigit || "_.$".contains(character))

@@ -1,62 +1,75 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
-import net.kurobako.gemstone.Col
+import Program.*
+
+import VirtualMachine.*
+
+import io.github.iltotore.iron.*
+import io.github.iltotore.iron.constraint.all.*
+
+import net.kurobako.gemstone.Vec
 import net.kurobako.gemstone.execution.*
 import net.kurobako.gemstone.memory.*
+
+import scala.collection.mutable
 
 final class WideDescriptorSuite extends munit.FunSuite {
   private val values = (0 until 4096).map { index =>
     val x = (index * 17 + 11) % 23 - 11; x * x
   }
-  private val first     = values.take(896).sum.toDouble
-  private val partial   = values.slice(896, 1792).sum.toDouble
-  private val inclusive = first + partial
-  private val current   = values.slice(1792, 2688).sum.toDouble
-  private val expected  = values.take(2688).sum.toDouble
-  private val geometry  = LaunchGeometry.create(Dimensions.One, Dimensions.create(3, 1, 1).toOption.get).toOption.get
-  private def bits(value: Double): Long      = java.lang.Double.doubleToRawLongBits(value)
+  private val first                     = values.take(896).sum.toDouble
+  private val partial                   = values.slice(896, 1792).sum.toDouble
+  private val inclusive                 = first + partial
+  private val current                   = values.slice(1792, 2688).sum.toDouble
+  private val expected                  = values.take(2688).sum.toDouble
+  private val geometry                  = LaunchGeometry.forLaunch(Dimensions.One, Dimensions(3, 1, 1)).toOption.get
+  private def bits(value: Double): Long = java.lang.Double.doubleToRawLongBits(value)
   private def literal(value: Double): String = "0d" + java.lang.Long.toHexString(bits(value))
 
-  private class DescriptorMemory extends AddressMemory {
+  // Interleaving controls and observations are confined to this final test fixture.
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+  private final class DescriptorMemory extends AddressMemory {
     val backing                                  = ArrayCheckedMemory.allocate(64, GuestAddress(0x10000000000L))
     val base                                     = backing.allocation.start
     var transition                               = false
-    var observed                                 = Vector.empty[(Long, Double)]
+    val observed                                 = mutable.ArrayBuffer.empty[(Long, Double)]
     def set(status: Long, payload: Double): Unit = {
-      backing.writeLittleEndian(base, status, 8).toOption.get
-      backing.writeLittleEndian(base.offset(8), bits(payload), 8).toOption.get
+      backing.writeLittleEndian(base, status, MemoryValueByteWidth(8)).toOption.get
+      backing.writeLittleEndian(base.offset(8), bits(payload), MemoryValueByteWidth(8)).toOption.get
     }
     private def afterRead(address: GuestAddress): Unit = if (transition && address == base) {
       transition = false
       set(101, inclusive)
     }
-    private def observe(): Unit = observed :+= (
-      backing.readLittleEndian(base, 8).toOption.get ->
-        java.lang.Double.longBitsToDouble(backing.readLittleEndian(base.offset(8), 8).toOption.get)
+    private def observe(): Unit = observed += (
+      backing.readLittleEndian(base, MemoryValueByteWidth(8)).toOption.get ->
+        java.lang.Double.longBitsToDouble(
+          backing.readLittleEndian(base.offset(8), MemoryValueByteWidth(8)).toOption.get
+        )
     )
-    override def readInt8(address: GuestAddress)                    = backing.readInt8(address)
-    override def readInt32(address: GuestAddress)                   = backing.readInt32(address)
-    override def writeInt8(address: GuestAddress, value: Byte)      = backing.writeInt8(address, value)
-    override def writeInt32(address: GuestAddress, value: Int)      = backing.writeInt32(address, value)
-    override def readLittleEndian(address: GuestAddress, size: Int) = {
+    override def readInt8(address: GuestAddress)               = backing.readInt8(address)
+    override def readInt32(address: GuestAddress)              = backing.readInt32(address)
+    override def writeInt8(address: GuestAddress, value: Byte) = backing.writeInt8(address, value)
+    override def writeInt32(address: GuestAddress, value: Int) = backing.writeInt32(address, value)
+    override def readLittleEndian(address: GuestAddress, size: MemoryValueByteWidth) = {
       val result = backing.readLittleEndian(address, size)
       afterRead(address)
       result
     }
-    override def writeLittleEndian(address: GuestAddress, value: Long, size: Int) = {
+    override def writeLittleEndian(address: GuestAddress, value: Long, size: MemoryValueByteWidth) = {
       val result = backing.writeLittleEndian(address, value, size)
       observe()
       result
     }
-    override def readBytes(address: GuestAddress, size: Int): Either[MemoryError, Col[Byte]] = {
+    override def readBytes(address: GuestAddress, size: Int :| Positive0): Either[MemoryError, Vec[Byte]] = {
       val result = backing.validateRange(address, size).map(_ =>
-        Col.from((0 until size).map(index => backing.readInt8(address.offset(index)).toOption.get))
+        Vec.from((0 until size).map(index => backing.readInt8(address.offset(index)).toOption.get))
       )
       afterRead(address)
       result
     }
-    override def writeBytes(address: GuestAddress, bytes: Col[Byte]): Either[MemoryError, Unit] = {
-      val result = backing.validateRange(address, bytes.size).map { _ =>
+    override def writeBytes(address: GuestAddress, bytes: Vec[Byte]): Either[MemoryError, Unit] = {
+      val result = backing.validateRange(address, bytes.size.refineUnsafe[Positive0]).map { _ =>
         bytes.zipWithIndex.foreach { case (byte, index) => backing.writeInt8(address.offset(index), byte).toOption.get }
       }
       observe()
@@ -90,11 +103,11 @@ final class WideDescriptorSuite extends munit.FunSuite {
         st.global.f64 [%rd4+32], %fd;
         ret;
       }"""
-    val kernel = ISA.compile(source).fold(error => fail(error.message), identity)
-    val result = Interpreter.execute(
+    val kernel = ISA.compile(source).fold(error => fail(error.message), value => value)
+    val result = VirtualMachine.execute(
       kernel,
       geometry,
-      Map("memory" -> Argument(memory.base.value)),
+      Map(ParameterName("memory") -> Argument(memory.base.value)),
       memory,
       captureTrace = false
     )
@@ -102,7 +115,7 @@ final class WideDescriptorSuite extends munit.FunSuite {
     (0 until 3).foreach { group =>
       val actual = java.lang.Double.longBitsToDouble(memory.backing.readLittleEndian(
         memory.base.offset(32 + group * 8L),
-        8
+        MemoryValueByteWidth(8)
       ).toOption.get)
       assertEquals(actual, expected, s"group $group must not double-count first tile $first")
     }
@@ -122,17 +135,17 @@ final class WideDescriptorSuite extends munit.FunSuite {
         st.relaxed.gpu.v2.u64 [%rd0], {%rd1, %rd2};
         ret;
       }"""
-    val kernel = ISA.compile(source).fold(error => fail(error.message), identity)
-    val result = Interpreter.execute(
+    val kernel = ISA.compile(source).fold(error => fail(error.message), value => value)
+    val result = VirtualMachine.execute(
       kernel,
       geometry,
-      Map("memory" -> Argument(memory.base.value)),
+      Map(ParameterName("memory") -> Argument(memory.base.value)),
       memory,
       captureTrace = true
     )
     assert(result.isRight, result.toString)
     val writes = result.toOption.get.trace.events.collect {
-      case event: net.kurobako.gemstone.trace.TraceEvent.OutputWrite => event
+      case event: Trace.Event.OutputWrite => event
     }
     assertEquals(writes.size, 6, "tracing retains both vector elements for every group")
     assert(memory.observed.nonEmpty)

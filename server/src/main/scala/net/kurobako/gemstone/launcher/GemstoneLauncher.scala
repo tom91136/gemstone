@@ -1,104 +1,99 @@
 package net.kurobako.gemstone.launcher
 
-import net.kurobako.gemstone.Col
+import net.kurobako.gemstone.{NoNul, Vec}
 
-import java.nio.file.Files
-import java.nio.file.Path
-import scala.annotation.tailrec
+import java.nio.file.{Files, Path}
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
+import cats.syntax.all.*
+import com.monovore.decline.{Argument, Opts}
+import io.github.iltotore.iron.*
+import io.github.iltotore.iron.constraint.all.*
 
-object GemstoneLauncher {
-  private final case class Options(api: ComputeAPI, layout: RuntimeLayout, command: Col[String])
+import scala.util.Using
 
-  def main(arguments: Array[String]): Unit = {
-    val exit = parse(arguments).fold(
-      error => {
-        System.err.println(s"gemstone: ${error.message}")
-        2
-      },
-      run
-    )
-    if (exit != 0) System.exit(exit)
-  }
+private[gemstone] object GemstoneLauncher {
+  private[gemstone] type Executable = Executable.T
+  private[gemstone] object Executable extends RefinedType[String, MinLength[1] & NoNul]
 
-  private def run(options: Options): Int = {
-    val missing = providerPaths(options.layout).filterNot(Files.exists(_))
-    if (missing.nonEmpty) {
-      System.err.println(s"gemstone: runtime provider does not exist: ${missing.head}")
-      2
-    } else
-      GemstoneProcess.attestedExit(options.api, options.layout, sys.env) { environment =>
-        val builder = ProcessBuilder(options.command*).inheritIO()
-        environment.applyTo(builder.environment())
-        builder.start().waitFor()
-      }.fold(
-        error => {
-          System.err.println(s"gemstone: ${error.message}")
-          86
-        },
-        identity
-      )
-  }
-
-  private def parse(arguments: Array[String]): Either[LaunchError, Options] = {
-    @tailrec
-    def loop(
-        index: Int,
-        api: Option[ComputeAPI],
-        layout: RuntimeLayout
-    ): Either[LaunchError, Options] =
-      if (index >= arguments.length)
-        Left(LaunchError("usage: gemstone run --api <api> [provider option] -- <command> [arguments...]"))
-      else
-        arguments(index) match {
-          case "run"                                => loop(index + 1, api, layout)
-          case "--" if index + 1 < arguments.length =>
-            api.toRight(LaunchError("--api is required")).map(Options(_, layout, Col.from(arguments.drop(index + 1))))
-          case option if index + 1 >= arguments.length =>
-            Left(LaunchError(s"incomplete launcher option: $option"))
-          case "--api" =>
-            ComputeAPI.parse(arguments(index + 1)) match {
-              case Left(error)  => Left(error)
-              case Right(value) => loop(index + 2, Some(value), layout)
-            }
-          case "--cuda-driver" =>
-            loop(index + 2, api, layout.copy(cudaDriver = Some(Path.of(arguments(index + 1)))))
-          case "--hip-route" =>
-            HIPRuntimeRoute.parse(arguments(index + 1)) match {
-              case Left(error)  => Left(error)
-              case Right(route) => loop(index + 2, api, layout.copy(hipRoute = route))
-            }
-          case "--hip-runtime" =>
-            loop(index + 2, api, layout.copy(hipRuntime = Some(Path.of(arguments(index + 1)))))
-          case "--hsa-runtime" =>
-            loop(index + 2, api, layout.copy(hsaRuntime = Some(Path.of(arguments(index + 1)))))
-          case "--opencl-icd" =>
-            loop(index + 2, api, layout.copy(openCLICD = Some(Path.of(arguments(index + 1)))))
-          case "--opencl-loader" =>
-            loop(index + 2, api, layout.copy(openCLLoader = Some(Path.of(arguments(index + 1)))))
-          case "--levelzero-driver" =>
-            loop(index + 2, api, layout.copy(levelZeroDriver = Some(Path.of(arguments(index + 1)))))
-          case option => Left(LaunchError(s"unknown launcher option: $option"))
-        }
-
-    loop(0, None, fromEnvironment(sys.env))
-  }
-
-  private def fromEnvironment(environment: Map[String, String]): RuntimeLayout = RuntimeLayout(
-    cudaDriver = environment.get("GEMSTONE_CUDA_DRIVER").filter(_.nonEmpty).map(Path.of(_)),
-    hipRuntime = environment.get("GEMSTONE_HIP_RUNTIME").filter(_.nonEmpty).map(Path.of(_)),
-    hsaRuntime = environment.get("GEMSTONE_HSA_RUNTIME").filter(_.nonEmpty).map(Path.of(_)),
-    openCLICD = environment.get("GEMSTONE_OPENCL_ICD").filter(_.nonEmpty).map(Path.of(_)),
-    openCLLoader = environment.get("GEMSTONE_OPENCL_LOADER").filter(_.nonEmpty).map(Path.of(_)),
-    levelZeroDriver = environment.get("GEMSTONE_LEVELZERO_DRIVER").filter(_.nonEmpty).map(Path.of(_))
+  private[gemstone] final case class Options(
+      apis: Set[ComputeAPI],
+      layout: RuntimeLayout,
+      executable: Executable,
+      arguments: Vec[String :| NoNul]
   )
 
-  private def providerPaths(layout: RuntimeLayout): Col[Path] =
-    Col(
-      layout.cudaDriver,
-      layout.hipRuntime,
-      layout.hsaRuntime,
-      layout.openCLICD,
-      layout.openCLLoader,
-      layout.levelZeroDriver
-    ).flatten
+  private[launcher] final class RunningProcess(val process: Process) extends AutoCloseable {
+    private val stopping = AtomicBoolean(false)
+    private val shutdownHook = Thread(() => stop(), "gemstone-launcher-cleanup")
+    Runtime.getRuntime.addShutdownHook(shutdownHook)
+
+    private def stop(): Unit = {
+      if (stopping.compareAndSet(false, true)) {
+        val descendants = process.descendants()
+        try descendants.forEach { descendant =>
+          val _ = descendant.destroyForcibly()
+        }
+        finally descendants.close()
+        val _ = process.destroyForcibly()
+        try {
+          val _ = process.waitFor(2, TimeUnit.SECONDS)
+        } catch case _: InterruptedException => Thread.currentThread().interrupt()
+      }
+    }
+
+    override def close(): Unit = {
+      try Runtime.getRuntime.removeShutdownHook(shutdownHook)
+      catch case _: IllegalStateException => ()
+      stop()
+    }
+  }
+
+  private given Argument[Set[ComputeAPI]] = Argument.from("apis") { value =>
+    ComputeAPI.parseAll(value).leftMap(_.message).toValidatedNel
+  }
+
+  private val invocation = Opts.arguments[String]("command").mapValidated { command =>
+    (for {
+      executable <- Executable.either(command.head)
+        .leftMap(_ => "command executable must be non-empty and contain no NUL characters")
+      arguments <- command.tail.zipWithIndex.traverse { case (argument, index) =>
+        argument.refineEither[NoNul]
+          .leftMap(_ => s"command argument ${index + 1} contains a NUL character")
+      }
+    } yield executable -> Vec.from(arguments)).toValidatedNel
+  }
+
+  private[gemstone] val options = (
+    Opts.option[Set[ComputeAPI]]("apis", help = "Comma-separated APIs to provide").orNone,
+    invocation
+  ).mapN { (apis, command) =>
+    val directory = sys.env.get("GEMSTONE_NATIVE_DIRECTORY").filter(_.nonEmpty).map(Path.of(_))
+      .getOrElse(Path.of("native-build"))
+    Options(
+      apis.getOrElse(ComputeAPI.defaults(RuntimePlatform.current)),
+      RuntimeLayout(directory),
+      command._1,
+      command._2
+    )
+  }
+
+  private[gemstone] def run(options: Options): Int = {
+    val layout  = options.layout.absolute
+    val missing = options.apis.iterator.map(layout.library).filterNot(Files.isRegularFile(_)).toVector
+    if (missing.nonEmpty) {
+      Console.err.println(s"gemstone: runtime provider is not a regular file: ${missing.head}")
+      2
+    } else {
+      val launched = GemstoneProcess.run(options.apis, layout, sys.env) { environment =>
+        val builder = ProcessBuilder((options.executable.value +: options.arguments)*).inheritIO()
+        environment.applyTo(builder.environment())
+        Using.resource(RunningProcess(builder.start()))(_.process.waitFor())
+      }
+      launched match {
+        case Left(error)   => Console.err.println(s"gemstone: ${error.message}"); 86
+        case Right(status) => status
+      }
+    }
+  }
 }

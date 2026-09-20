@@ -1,31 +1,42 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
+import Program.*
+
+import VirtualMachine.*
+
+import io.github.iltotore.iron.*
+import io.github.iltotore.iron.constraint.all.*
+
 import net.kurobako.gemstone.execution.*
 import net.kurobako.gemstone.memory.*
 
+import scala.collection.mutable
+
 final class CoherentVectorSuite extends munit.FunSuite {
-  private val geometry = LaunchGeometry.create(Dimensions.One, Dimensions.One).toOption.get
+  private val geometry = LaunchGeometry.forLaunch(Dimensions.One, Dimensions.One).toOption.get
   private val packed   = (668L << 32) | 101L
 
-  private class InterleavingMemory extends AddressMemory {
+  // Interleaving controls and observations are confined to this final test fixture.
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+  private final class InterleavingMemory extends AddressMemory {
     val backing                                   = ArrayCheckedMemory.allocate(32, GuestAddress(0x10000000000L))
     val base                                      = backing.allocation.start
-    var observed                                  = Vector.empty[Long]
+    val observed                                  = mutable.ArrayBuffer.empty[Long]
     var changeAfterRead                           = false
     override def readInt8(address: GuestAddress)  = backing.readInt8(address)
     override def readInt32(address: GuestAddress) = backing.readInt32(address)
-    override def writeInt8(address: GuestAddress, value: Byte)      = backing.writeInt8(address, value)
-    override def writeInt32(address: GuestAddress, value: Int)      = backing.writeInt32(address, value)
-    override def readLittleEndian(address: GuestAddress, size: Int) = {
+    override def writeInt8(address: GuestAddress, value: Byte) = backing.writeInt8(address, value)
+    override def writeInt32(address: GuestAddress, value: Int) = backing.writeInt32(address, value)
+    override def readLittleEndian(address: GuestAddress, size: MemoryValueByteWidth) = {
       val result = backing.readLittleEndian(address, size)
       if (changeAfterRead && address == base) {
-        backing.writeLittleEndian(base, (1234L << 32) | 100L, 8).toOption.get
+        backing.writeLittleEndian(base, (1234L << 32) | 100L, MemoryValueByteWidth(8)).toOption.get
       }
       result
     }
-    override def writeLittleEndian(address: GuestAddress, value: Long, size: Int) = {
+    override def writeLittleEndian(address: GuestAddress, value: Long, size: MemoryValueByteWidth) = {
       val result = backing.writeLittleEndian(address, value, size)
-      observed :+= backing.readLittleEndian(base, 8).toOption.get
+      observed += backing.readLittleEndian(base, MemoryValueByteWidth(8)).toOption.get
       result
     }
   }
@@ -44,10 +55,10 @@ final class CoherentVectorSuite extends munit.FunSuite {
         st.release.gpu.v2.u32 [%rd], {%r0, %r1};
         ret;
       }""").toOption.get
-    assert(Interpreter.execute(
+    assert(VirtualMachine.execute(
       kernel,
       geometry,
-      Map("output" -> Argument(memory.base.value)),
+      Map(ParameterName("output") -> Argument(memory.base.value)),
       memory,
       captureTrace = false
     ).isRight)
@@ -57,7 +68,7 @@ final class CoherentVectorSuite extends munit.FunSuite {
 
   test("packed acquire load observes one descriptor despite a following publication") {
     val memory = InterleavingMemory()
-    memory.backing.writeLittleEndian(memory.base, packed, 8).toOption.get
+    memory.backing.writeLittleEndian(memory.base, packed, MemoryValueByteWidth(8)).toOption.get
     memory.changeAfterRead = true
     val kernel = ISA.compile(""".version 8.0
       .target sm_80
@@ -71,13 +82,13 @@ final class CoherentVectorSuite extends munit.FunSuite {
         st.global.v2.u32 [%rd], {%r0, %r1};
         ret;
       }""").toOption.get
-    assert(Interpreter.execute(
+    assert(VirtualMachine.execute(
       kernel,
       geometry,
-      Map("input" -> Argument(memory.base.value)),
+      Map(ParameterName("input") -> Argument(memory.base.value)),
       memory,
       captureTrace = false
     ).isRight)
-    assertEquals(memory.backing.readLittleEndian(memory.base.offset(8), 8), Right(packed))
+    assertEquals(memory.backing.readLittleEndian(memory.base.offset(8), MemoryValueByteWidth(8)), Right(packed))
   }
 }

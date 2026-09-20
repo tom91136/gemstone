@@ -86,6 +86,9 @@ v_cmpx_nle_f16 vcc, v2, v4
 v_cmpx_nlg_f16 vcc, v2, v4
 // ERROR: instruction not supported on this GPU (hawaii): v_cmpx_nlg_f16
 
+v_cmpx_nlt_f16 vcc, v2, v4
+// ERROR: instruction not supported on this GPU (hawaii): v_cmpx_nlt_f16
+
 // SOURCE: xnack-mask.s
 
 s_mov_b32 xnack_mask_hi, -1

@@ -1,26 +1,32 @@
 package net.kurobako.gemstone.isa.amdgpu
 
-import net.kurobako.gemstone.Col
-import net.kurobako.gemstone.Col.*
+import CodeObject.*
+import ExecutableInstruction.*
+
+import io.github.iltotore.iron.*
+import io.github.iltotore.iron.constraint.all.*
+
+import net.kurobako.gemstone.Vec
+import net.kurobako.gemstone.Vec.*
 import net.kurobako.gemstone.binary.Bits
+import net.kurobako.gemstone.binary.BitWidth
+import net.kurobako.gemstone.binary.Binary16
+import net.kurobako.gemstone.binary.Binary32
 import net.kurobako.gemstone.binary.ByteRange
 import net.kurobako.gemstone.binary.IEEE754
 import net.kurobako.gemstone.binary.LittleEndian
+import net.kurobako.gemstone.binary.ScalarByteWidth
+import net.kurobako.gemstone.concurrent.withLock
 import net.kurobako.gemstone.execution.*
+import net.kurobako.gemstone.memory.MemoryValueByteWidth
 
 import cats.syntax.either.*
 import cats.syntax.traverse.*
 
 import java.math.BigInteger
+import java.util.concurrent.locks.ReentrantLock
 import scala.collection.immutable.IntMap
-import scala.collection.mutable // scalafix:ok GemstoneRuntimeCollections.mutable-collection; decoder and wave state
 
-@SuppressWarnings(
-  Array(
-    "scalafix:DisableSyntax.var",
-    "scalafix:GemstoneRuntimeCollections.mutable-collection"
-  )
-)
 object DispatchInterpreter {
   private val KernargAddress                                     = 0x100000000000L
   private val DispatchAddress                                    = 0x200000000000L
@@ -28,36 +34,6 @@ object DispatchInterpreter {
   private val AllocationSpan                                     = 0x000100000000L
   private val AdvanceMarker                                      = Int.MinValue
   private val AdvanceStep: Either[ExecutionFailure, Option[Int]] = Right(Some(AdvanceMarker))
-
-  private def containsAtomics(operations: Col[DecodedInstruction], entry: Int): Boolean = {
-    def globalAtomic(instruction: DecodedInstruction): Boolean = instruction match {
-      case _: DecodedInstruction.GlobalAtomicAdd | _: DecodedInstruction.GlobalAtomicInc |
-          _: DecodedInstruction.GlobalAtomicCompareSwap => true
-      case _ => false
-    }
-    val visited = mutable.BitSet.empty
-    val pending = mutable.ArrayDeque(entry)
-    var found   = false
-    while (pending.nonEmpty && !found) {
-      val index = pending.removeLast()
-      if (index >= 0 && index < operations.size && !visited.contains(index)) {
-        visited += index
-        operations(index) match {
-          case instruction if globalAtomic(instruction) => found = true
-          // Indirect calls/jumps may reach any linked function; fail closed.
-          case _: DecodedInstruction.SSetPc | _: DecodedInstruction.SSwapPc =>
-            found = operations.exists(globalAtomic)
-          case DecodedInstruction.End                       => ()
-          case DecodedInstruction.Branch(condition, target) =>
-            pending.append(target)
-            if (condition != ScalarBranchCondition.Always) pending.append(index + 1)
-          case _: DecodedInstruction.BranchRelative => found = true
-          case _                                    => pending.append(index + 1)
-        }
-      }
-    }
-    found
-  }
 
   /** Convert a lane-wise operation's success to the shared advance marker. Keeping this path allocation-free matters
     * for memory and DS instructions, which otherwise create a fresh `Some(index + 1)` for every instruction.
@@ -68,7 +44,6 @@ object DispatchInterpreter {
     case Left(error) => Left(error)
     case Right(_)    => AdvanceStep
   }
-  private val OpcodeNameCache = mutable.HashMap.empty[(String, Int, String), Either[String, String]]
   // Decoder membership tables are immutable and shared. Keeping them out of
   // instruction-level methods avoids rebuilding a HashSet for every decoded
   // instruction in a code object.
@@ -330,16 +305,6 @@ object DispatchInterpreter {
     "expIf",
     "expId"
   )
-  // ProcessEnvironment's containsKey still converts and encodes String keys. Copy the immutable process keys into a
-  // regular HashSet once because some trace guards sit in the instruction loop.
-  private object Environment {
-    private val traceNames = Option(System.getenv("GEMSTONE_AMDGPU_TRACE")).iterator
-      .flatMap(_.split(',')).map(_.trim.toLowerCase).toSet
-    def trace(name: String): Boolean       = traceNames.contains("all") || traceNames.contains(name)
-    private val names                      = java.util.HashSet[String](System.getenv().keySet())
-    def containsKey(name: String): Boolean = names.contains(name)
-  }
-
   private val SDWAVOP2Opcodes = Set(
     "v_add_u32",
     "v_add_nc_u32",
@@ -422,8 +387,6 @@ object DispatchInterpreter {
       case "s_max_i32" => (Bits.low32(math.max(left32.toInt, right32.toInt).toLong), left32.toInt > right32.toInt)
     }
   }
-  private[amdgpu] def workItemIds(linear: Int, width: Int, height: Int): (Int, Int, Int) =
-    (linear % width, (linear / width) % height, linear / (width * height))
   private[amdgpu] def mergeD16(existing: Long, value: Long, high: Boolean): Long =
     if (high) (Bits.low32(existing) & 0x0000ffffL) | (Bits.low16(value) << 16)
     else (Bits.low32(existing) & 0xffff0000L) | Bits.low16(value)
@@ -442,10 +405,10 @@ object DispatchInterpreter {
     if (unsigned == 0) 0xffffffffL else Integer.numberOfLeadingZeros(unsigned).toLong
   }
   private[amdgpu] def floatClassMask(value: Float): Long = {
-    val bits     = java.lang.Float.floatToRawIntBits(value)
+    val bits     = IEEE754.floatToBinary32(value).value
     val exponent = (bits >>> 23) & 0xff
     val fraction = bits & 0x7fffff
-    val negative = bits < 0
+    val negative = (bits & 0x80000000L) != 0L
     val classBit =
       if (exponent == 0xff && fraction != 0) if ((fraction & 0x400000) == 0) 0 else 1
       else if (exponent == 0xff) if (negative) 2 else 9
@@ -474,7 +437,7 @@ object DispatchInterpreter {
       clamp: Boolean
   ): Long = {
     def half(source: Long, high: Boolean): Float =
-      IEEE754.binary16ToFloat(Bits.low16(if (high) source >>> 16 else source))
+      IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(if (high) source >>> 16 else source)))
     def calculate(selection: Int, negate: Int): Long = {
       def operand(source: Long, index: Int): Float = {
         val value = half(source, (selection & (1 << index)) != 0)
@@ -482,7 +445,7 @@ object DispatchInterpreter {
       }
       val result  = Math.fma(operand(srcA, 0), operand(srcB, 1), operand(srcC, 2))
       val clamped = if (clamp) clampF32(result) else result
-      Bits.low16(IEEE754.floatToBinary16(clamped))
+      IEEE754.floatToBinary16(clamped).value
     }
     calculate(lowSelection, negateLow) | (calculate(highSelection, negateHigh) << 16)
   }
@@ -501,12 +464,10 @@ object DispatchInterpreter {
     def operand(source: Long, index: Int): Float = {
       val convertFromHalf = (opSelectionHi & (1 << index)) != 0
       val selectHigh      = (opSelection & (1 << index)) != 0
-      val bits            =
-        if (convertFromHalf) Bits.low16(if (selectHigh) source >>> 16 else source)
-        else Bits.low32(source)
-      val value =
-        if (convertFromHalf) IEEE754.binary16ToFloat(bits)
-        else IEEE754.binary32ToFloat(bits)
+      val value           =
+        if (convertFromHalf)
+          IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(if (selectHigh) source >>> 16 else source)))
+        else IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(source)))
       val absoluteValue = if ((absolute & (1 << index)) != 0) math.abs(value) else value
       if ((negate & (1 << index)) != 0) -absoluteValue else absoluteValue
     }
@@ -516,7 +477,7 @@ object DispatchInterpreter {
         val converted = IEEE754.binary16ToFloat(rounded)
         IEEE754.floatToBinary16(math.max(0.0f, math.min(1.0f, converted)))
       } else rounded
-    mergeD16(existing, value, high)
+    mergeD16(existing, value.value, high)
   }
   private[amdgpu] def fmaMixF32(
       srcA: Long,
@@ -531,27 +492,28 @@ object DispatchInterpreter {
     def operand(source: Long, index: Int): Float = {
       val convertFromHalf = (opSelectionHi & (1 << index)) != 0
       val selectHigh      = (opSelection & (1 << index)) != 0
-      val bits            =
-        if (convertFromHalf) Bits.low16(if (selectHigh) source >>> 16 else source)
-        else Bits.low32(source)
-      val value =
-        if (convertFromHalf) IEEE754.binary16ToFloat(bits)
-        else IEEE754.binary32ToFloat(bits)
+      val value           =
+        if (convertFromHalf)
+          IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(if (selectHigh) source >>> 16 else source)))
+        else IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(source)))
       val absoluteValue = if ((absolute & (1 << index)) != 0) math.abs(value) else value
       if ((negate & (1 << index)) != 0) -absoluteValue else absoluteValue
     }
     val result = Math.fma(operand(srcA, 0), operand(srcB, 1), operand(srcC, 2))
-    IEEE754.floatToBinary32(if (clamp) clampF32(result) else result)
+    IEEE754.floatToBinary32(if (clamp) clampF32(result) else result).value
   }
-  private[amdgpu] def dot2F32F16(left: Long, right: Long, accumulator: Long, accumulate: Boolean): Long = {
-    val leftLow   = IEEE754.binary16ToFloat(Bits.low16(left))
-    val leftHigh  = IEEE754.binary16ToFloat(Bits.low16(left >>> 16))
-    val rightLow  = IEEE754.binary16ToFloat(Bits.low16(right))
-    val rightHigh = IEEE754.binary16ToFloat(Bits.low16(right >>> 16))
+  private[amdgpu] def dot2F32F16(left: Long, right: Long, accumulator: Long, accumulate: Boolean): Binary32 = {
+    val leftLow   = IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(left)))
+    val leftHigh  = IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(left >>> 16)))
+    val rightLow  = IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(right)))
+    val rightHigh = IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(right >>> 16)))
     val products  = Math.fma(leftLow, rightLow, leftHigh * rightHigh)
-    val result    = if (accumulate) products + IEEE754.binary32ToFloat(Bits.low32(accumulator)) else products
+    val result    =
+      if (accumulate) products + IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(accumulator))) else products
     IEEE754.floatToBinary32(result)
   }
+  // Four packed lanes are accumulated without creating an intermediate collection.
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private[amdgpu] def dot4U32U8(left: Long, right: Long, accumulator: Long): Long = {
     var result = Bits.low32(accumulator)
     var index  = 0
@@ -574,7 +536,7 @@ object DispatchInterpreter {
   private[amdgpu] def unsignedFloatToInt32(value: Float): Long =
     Bits.low32((if (value < 0.0f) -value else value).toLong)
   private[amdgpu] def doubleClassMask(value: Double): Long = {
-    val bits     = java.lang.Double.doubleToRawLongBits(value)
+    val bits     = IEEE754.doubleToBinary64(value)
     val exponent = (bits >>> 52) & 0x7ffL
     val fraction = bits & 0x000fffffffffffffL
     val negative = bits < 0L
@@ -600,22 +562,25 @@ object DispatchInterpreter {
     }
     Bits.low32((signed(left) * signed(right)) >> 32)
   }
-  private[amdgpu] def fmaF32(opcode: String, leftBits: Long, rightBits: Long, addendBits: Long): Long = {
-    val left   = IEEE754.binary32ToFloat(Bits.low32(leftBits))
-    val right  = IEEE754.binary32ToFloat(Bits.low32(rightBits))
-    val addend = IEEE754.binary32ToFloat(Bits.low32(addendBits))
+  private[amdgpu] def fmaF32(opcode: String, leftBits: Long, rightBits: Long, addendBits: Long): Binary32 = {
+    val left   = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(leftBits)))
+    val right  = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(rightBits)))
+    val addend = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(addendBits)))
     val result = if (opcode == "v_fma_f32") Math.fma(left, right, addend) else left * right + addend
     IEEE754.floatToBinary32(result)
   }
   private[amdgpu] def bitReverse32(value: Long): Long =
-    Bits.reverseBits(value, 32)
-  private[amdgpu] def minimumF16(left: Long, right: Long): Long =
+    Bits.reverseBits(value, BitWidth(32))
+  private[amdgpu] def minimumF16(left: Long, right: Long): Binary16 =
     IEEE754.floatToBinary16(
-      math.min(IEEE754.binary16ToFloat(Bits.low16(left)), IEEE754.binary16ToFloat(Bits.low16(right)))
+      math.min(
+        IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(left))),
+        IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(right)))
+      )
     )
   private[amdgpu] def compareF16(opcode: String, left: Long, right: Long): Boolean = {
-    val a = IEEE754.binary16ToFloat(Bits.low16(left))
-    val b = IEEE754.binary16ToFloat(Bits.low16(right))
+    val a = IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(left)))
+    val b = IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(right)))
     opcode match {
       case "v_cmp_eq_f16"                   => a == b
       case "v_cmp_neq_f16" | "v_cmp_lg_f16" => a != b
@@ -637,8 +602,8 @@ object DispatchInterpreter {
     bpermuteSourceLane(address, 0L)
   private[amdgpu] def bpermuteSourceLane(address: Long, offset: Long): Int =
     (((address + offset) >>> 2) & 63L).toInt
-  private[amdgpu] def permuteDestinationLane(address: Long, offset: Long, waveSize: Int): Int =
-    (((address + offset) >>> 2) & (waveSize - 1L)).toInt
+  private[amdgpu] def permuteDestinationLane(address: Long, offset: Long, waveSize: WaveSize): Int =
+    (((address + offset) >>> 2) & (waveSize.value - 1L)).toInt
   private[amdgpu] def dppQuadSourceLane(lane: Int, control: Int): Int =
     (lane & ~3) | ((control >>> ((lane & 3) * 2)) & 3)
   private[amdgpu] def dppSourceLane(lane: Int, control: Int): Option[Int] =
@@ -663,6 +628,8 @@ object DispatchInterpreter {
     }
   private[amdgpu] def dppLaneEnabled(lane: Int, rowMask: Int, bankMask: Int): Boolean =
     (rowMask & (1 << (lane / 16))) != 0 && (bankMask & (1 << (lane & 3))) != 0
+  private[amdgpu] def waveConditionMask(mask: Long, lanes: LaneCount): Long =
+    if (lanes.value <= 32) Bits.low32(mask) else mask
   private[amdgpu] def mbCount(mask: Long, executionMask: Long, lane: Int, high: Boolean, base: Long): Long = {
     val laneInHalf = lane & 31
     val belowLane  = if (laneInHalf == 0) 0L else (1L << laneInHalf) - 1L
@@ -678,20 +645,26 @@ object DispatchInterpreter {
 
   final class PreparedKernel private[DispatchInterpreter] (
       val kernel: CodeObjectKernel,
-      private[DispatchInterpreter] val operations: Col[DecodedInstruction],
+      private[DispatchInterpreter] val operations: Vec[DecodedInstruction],
       private[DispatchInterpreter] val executable: Array[ExecutableInstruction],
       private[DispatchInterpreter] val instructionIndices: Map[Int, Int],
-      private[DispatchInterpreter] val instructionOffsets: Col[Int],
+      private[DispatchInterpreter] val instructionOffsets: Vec[Int],
       private[DispatchInterpreter] val entryInstruction: Int
   )
 
   private final case class Decoded(operation: DecodedInstruction, size: Int)
   private final case class DecodedProgram(
-      operations: Col[DecodedInstruction],
+      operations: Vec[DecodedInstruction],
       instructionIndices: Map[Int, Int],
-      instructionOffsets: Col[Int]
+      instructionOffsets: Vec[Int]
   )
-  final case class GlobalBinding(address: Long, size: Int, allocation: AllocationId, offset: Long, allocationSize: Long)
+  final case class GlobalBinding(
+      address: Long,
+      size: Int :| Positive0,
+      allocation: AllocationId,
+      offset: Long :| Positive0,
+      allocationSize: Long :| Positive
+  )
   private final case class AllocationRegion(
       base: Long,
       id: AllocationId,
@@ -700,77 +673,8 @@ object DispatchInterpreter {
       alias: Boolean = false
   )
   private val EmptyAllocationRegions = Array.empty[AllocationRegion]
-  private final class VectorRegisters(lanes: Int) {
-    private val registers = Array.ofDim[Array[Long] | Null](256)
-
-    def apply(index: Int): Array[Long] = registers(index) match {
-      case null =>
-        val allocated = Array.ofDim[Long](lanes)
-        registers(index) = allocated
-        allocated
-      case value => value
-    }
-  }
-  private final class LaneBits(lanes: Int, initial: Long) {
-    private val laneLimit = Bits.mask(lanes)
-    private var value     = initial & laneLimit
-    private var storage   = initial & laneLimit
-    private var bitCount  = java.lang.Long.bitCount(value)
-
-    // Lane-mask view: comparison results and EXEC masking operate on the low
-    // `lanes` bits and leave a wave32 upper half untouched.
-    def bits: Long               = value
-    def bits_=(next: Long): Unit = writeLanes(next)
-
-    // Full architectural register. VCC and EXEC are also ordinary scalar
-    // registers (s106/s107 and s126/s127), and the compiler uses their upper
-    // halves as scratch on wave32 targets, so scalar reads must observe what
-    // scalar writes stored even when the wave is narrower than 64 lanes.
-    def register: Long               = storage
-    def register_=(next: Long): Unit = {
-      storage = next
-      value = next & laneLimit
-      bitCount = java.lang.Long.bitCount(value)
-    }
-
-    private def writeLanes(next: Long): Unit = {
-      value = next & laneLimit
-      storage = (storage & ~laneLimit) | value
-      bitCount = java.lang.Long.bitCount(value)
-    }
-
-    def apply(lane: Int): Boolean                 = (value & (1L << lane)) != 0L
-    def update(lane: Int, enabled: Boolean): Unit = {
-      val mask       = 1L << lane
-      val wasEnabled = (value & mask) != 0L
-      if (enabled != wasEnabled) {
-        if (enabled) {
-          value |= mask
-          storage |= mask
-          bitCount += 1
-        } else {
-          value &= ~mask
-          storage &= ~mask
-          bitCount -= 1
-        }
-      }
-    }
-    def count: Int         = bitCount
-    def isEmpty: Boolean   = bitCount == 0
-    def nonEmpty: Boolean  = bitCount != 0
-    def first: Option[Int] = Option.when(value != 0L)(java.lang.Long.numberOfTrailingZeros(value))
-  }
-  private final class ScratchMemory(lanes: Int, bytesPerLane: Int) {
-    private val values = Array.ofDim[Array[Byte] | Null](lanes)
-
-    def apply(lane: Int): Array[Byte] = values(lane) match {
-      case null =>
-        val allocated = Array.ofDim[Byte](bytesPerLane)
-        values(lane) = allocated
-        allocated
-      case value => value
-    }
-  }
+  // Lane-wise register updates are an allocation-sensitive interpreter loop.
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private def executeVMove(
       dest: Int,
       src: InstructionSource,
@@ -778,14 +682,14 @@ object DispatchInterpreter {
       vector: VectorRegisters,
       carry: LaneBits,
       active: LaneBits,
-      lanes: Int
+      lanes: LaneCount
   ): Unit = {
     val destination = vector(dest)
     src match {
       case InstructionSource.VectorRegister(index) =>
         val source = vector(index)
         var lane   = 0
-        while (lane < lanes) {
+        while (lane < lanes.value) {
           if (active(lane)) destination(lane) = Bits.low32(source(lane))
           lane += 1
         }
@@ -801,19 +705,21 @@ object DispatchInterpreter {
           case InstructionSource.VectorRegister(_) => 0L
         }
         var lane = 0
-        while (lane < lanes) {
+        while (lane < lanes.value) {
           if (active(lane)) destination(lane) = Bits.low32(value)
           lane += 1
         }
     }
   }
+  // Lane-wise packed register updates are an allocation-sensitive interpreter loop.
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private def executePackedVMove(
       instruction: ExecutableInstruction,
       scalar: Array[Long],
       vector: VectorRegisters,
       carry: LaneBits,
       active: LaneBits,
-      lanes: Int
+      lanes: LaneCount
   ): Unit = {
     val destination = vector(ExecutableInstruction.vMoveDestination(instruction))
     val sourceValue = ExecutableInstruction.vMoveSourceValue(instruction)
@@ -821,7 +727,7 @@ object DispatchInterpreter {
       case 1 =>
         val source = vector(sourceValue.toInt)
         var lane   = 0
-        while (lane < lanes) {
+        while (lane < lanes.value) {
           if (active(lane)) destination(lane) = Bits.low32(source(lane))
           lane += 1
         }
@@ -837,12 +743,14 @@ object DispatchInterpreter {
           case 2 => sourceValue
         }
         var lane = 0
-        while (lane < lanes) {
+        while (lane < lanes.value) {
           if (active(lane)) destination(lane) = Bits.low32(value)
           lane += 1
         }
     }
   }
+  // Null is the allocation-free first-failure sentinel in this measured packed-memory loop.
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var", "scalafix:DisableSyntax.null"))
   private def executePackedGlobalLoad(
       instruction: ExecutableInstruction,
       index: Int,
@@ -850,7 +758,7 @@ object DispatchInterpreter {
       scalar: Array[Long],
       vector: VectorRegisters,
       active: LaneBits,
-      lanes: Int,
+      lanes: LaneCount,
       kernarg: Array[Byte],
       dispatchBytes: Array[Byte],
       allocations: Array[AllocationRegion],
@@ -864,68 +772,43 @@ object DispatchInterpreter {
     val offset                           = ExecutableInstruction.memoryOffset(instruction)
     var lane                             = 0
     var failure: ExecutionFailure | Null = null
-    while (lane < lanes && failure == null) {
+    while (lane < lanes.value && failure == null) {
       if (active(lane)) {
-        val base =
-          if (scalarAddress >= 0) pair(scalar, scalarAddress) + Bits.low32(vector(address)(lane))
-          else pair(vector, address, lane)
+        val base = scalarAddress
+          .map(register => pair(scalar, register) + Bits.low32(vector(address)(lane)))
+          .getOrElse(pair(vector, address, lane))
         val guestAddress = base + signed13(offset)
-        if (byteCount <= 8)
-          readValue(
-            guestAddress,
-            byteCount,
-            kernarg,
-            dispatchBytes,
-            kernel.readOnlyAddress,
-            kernel.readOnly,
-            kernel.globalMemory,
-            allocations,
-            memory
-          ) match {
-            case Left(error)  => failure = error
-            case Right(value) =>
-              writeVectorValue(vector, dest, lane, value, byteCount)
-              if (Environment.trace("loads") && lane < 8)
-                System.err.println(
-                  s"Gemstone AMDGPU packed global load index=$index kernel=${kernel.name} lane=$lane base=0x${base.toHexString} addressReg=$address scalarAddress=$scalarAddress address=0x${guestAddress.toHexString} bytes=$byteCount dest=$dest value=0x${value.toHexString}"
-                )
-              if (traceByteSort && lane == 0)
-                System.err.println(
-                  s"Gemstone AMDGPU byte-sort GlobalLoad index=$index dest=$dest address=0x${guestAddress.toHexString} bytes=$byteCount value=0x${vector(dest)(lane).toHexString}"
-                )
-          }
-        else
-          readBytes(
-            guestAddress,
-            byteCount,
-            kernarg,
-            dispatchBytes,
-            kernel.readOnlyAddress,
-            kernel.readOnly,
-            kernel.globalMemory,
-            allocations,
-            memory
-          ) match {
-            case Left(error)  => failure = error
-            case Right(bytes) =>
-              writeVectorBytes(vector, dest, lane, bytes)
-              if (Environment.trace("loads") && lane < 8)
-                System.err.println(
-                  s"Gemstone AMDGPU packed global load index=$index kernel=${kernel.name} lane=$lane base=0x${base.toHexString} addressReg=$address scalarAddress=$scalarAddress address=0x${guestAddress.toHexString} bytes=$byteCount dest=$dest value=${bytes.map(
-                      byte => f"0x${byte & 0xff}%02x"
-                    ).mkString("[", ",", "]")}"
-                )
-              if (traceByteSort && lane == 0)
-                System.err.println(
-                  s"Gemstone AMDGPU byte-sort GlobalLoad index=$index dest=$dest address=0x${guestAddress.toHexString} bytes=$byteCount value=0x${vector(dest)(lane).toHexString}"
-                )
-          }
+        readValue(
+          guestAddress,
+          byteCount,
+          kernarg,
+          dispatchBytes,
+          kernel.readOnlyAddress,
+          kernel.readOnly,
+          kernel.globalMemory,
+          allocations,
+          memory
+        ) match {
+          case Left(error)  => failure = error
+          case Right(value) =>
+            writeVectorValue(vector, dest, lane, value, byteCount.value)
+            if (AMDGPUEnvironment.trace("loads") && lane < 8)
+              scribe.debug(
+                s"Gemstone AMDGPU packed global load index=$index kernel=${kernel.name} lane=$lane base=0x${base.toHexString} addressReg=$address scalarAddress=$scalarAddress address=0x${guestAddress.toHexString} bytes=${byteCount.value} dest=$dest value=0x${value.toHexString}"
+              )
+            if (traceByteSort && lane == 0)
+              scribe.debug(
+                s"Gemstone AMDGPU byte-sort GlobalLoad index=$index dest=$dest address=0x${guestAddress.toHexString} bytes=${byteCount.value} value=0x${vector(dest)(lane).toHexString}"
+              )
+        }
       }
       lane += 1
     }
     failure
   }
 
+  // Null is the allocation-free first-failure sentinel in this measured packed-memory loop.
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var", "scalafix:DisableSyntax.null"))
   private def executePackedGlobalStore(
       instruction: ExecutableInstruction,
       index: Int,
@@ -933,7 +816,7 @@ object DispatchInterpreter {
       scalar: Array[Long],
       vector: VectorRegisters,
       active: LaneBits,
-      lanes: Int,
+      lanes: LaneCount,
       allocations: Array[AllocationRegion],
       memory: ExecutionMemory
   ): ExecutionFailure | Null = {
@@ -942,42 +825,33 @@ object DispatchInterpreter {
     val scalarAddress                    = ExecutableInstruction.memoryScalarAddress(instruction)
     val byteCount                        = ExecutableInstruction.memoryBytes(instruction)
     val offset                           = ExecutableInstruction.memoryOffset(instruction)
-    val traceStores                      = Environment.trace("stores")
+    val traceStores                      = AMDGPUEnvironment.trace("stores")
     var lane                             = 0
     var failure: ExecutionFailure | Null = null
-    while (lane < lanes && failure == null) {
+    while (lane < lanes.value && failure == null) {
       if (active(lane)) {
-        val base =
-          if (scalarAddress >= 0) pair(scalar, scalarAddress) + Bits.low32(vector(address)(lane))
-          else pair(vector, address, lane)
+        val base = scalarAddress
+          .map(register => pair(scalar, register) + Bits.low32(vector(address)(lane)))
+          .getOrElse(pair(vector, address, lane))
         val guestAddress = base + signed13(offset)
         if (
           traceStores && lane < 16 &&
           (kernel.name.contains("wrapped_scan") || kernel.name.contains("set_operations") ||
-            Environment.trace("all-stores"))
+            AMDGPUEnvironment.trace("all-stores"))
         )
-          System.err.println(
-            s"Gemstone AMDGPU global store index=$index lane=$lane kernel=${kernel.name} address=0x${guestAddress.toHexString} bytes=$byteCount src=$src values=${vectorBytes(vector, src, lane, byteCount).map(
+          scribe.debug(
+            s"Gemstone AMDGPU global store index=$index lane=$lane kernel=${kernel.name} address=0x${guestAddress.toHexString} bytes=$byteCount src=$src values=${vectorBytes(vector, src, lane, byteCount.value).map(
                 v => f"0x${v & 0xff}%02x"
               ).mkString("[", ",", "]")}"
           )
-        val stored =
-          if (byteCount <= 8)
-            writeValue(
-              guestAddress,
-              if (byteCount <= 4) vector(src)(lane) else pair(vector, src, lane),
-              byteCount,
-              allocations,
-              memory,
-              kernel.globalMemory
-            )
-          else writeBytes(
-            guestAddress,
-            vectorBytes(vector, src, lane, byteCount),
-            allocations,
-            memory,
-            kernel.globalMemory
-          )
+        val stored = writeValue(
+          guestAddress,
+          if (byteCount.value <= 4) vector(src)(lane) else pair(vector, src, lane),
+          byteCount,
+          allocations,
+          memory,
+          kernel.globalMemory
+        )
         stored match {
           case Left(error) => failure = error
           case Right(())   => ()
@@ -1005,6 +879,8 @@ object DispatchInterpreter {
       case index => scalar(index)
     }
 
+  // Packed arithmetic walks active lanes directly in the interpreter hot path.
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private def executePackedVBinary(
       instruction: ExecutableInstruction,
       index: Int,
@@ -1012,7 +888,7 @@ object DispatchInterpreter {
       vector: VectorRegisters,
       carry: LaneBits,
       active: LaneBits,
-      lanes: Int,
+      lanes: LaneCount,
       traceLog: Boolean,
       traceByteSort: Boolean
   ): Unit = {
@@ -1029,25 +905,27 @@ object DispatchInterpreter {
     // the same 20-way dispatch for every active lane.
     if (opcode == ExecutableInstruction.VBinary.MacF32) {
       var lane = 0
-      while (lane < lanes) {
+      while (lane < lanes.value) {
         if (active(lane)) {
           val left     = Bits.low32(packedSource(srcA, lane, scalar, vector, carry, active))
           val right    = Bits.low32(packedSource(srcB, lane, scalar, vector, carry, active))
           val previous = Bits.low32(destination(lane))
           destination(lane) = IEEE754.floatToBinary32(
-            IEEE754.binary32ToFloat(left) * IEEE754.binary32ToFloat(right) +
-              IEEE754.binary32ToFloat(previous)
-          )
+            IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(left))) * IEEE754.binary32ToFloat(
+              Binary32.fromLow(Bits.low32(right))
+            ) +
+              IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(previous)))
+          ).value
           if (traceLog && lane == 0)
-            System.err.println(
-              s"Gemstone AMDGPU log packed-binary opcode=v_fmac_f32 dest=$dest left=${IEEE754.binary32ToFloat(left)} right=${IEEE754.binary32ToFloat(right)} result=${IEEE754.binary32ToFloat(destination(lane))}"
+            scribe.debug(
+              s"Gemstone AMDGPU log packed-binary opcode=v_fmac_f32 dest=$dest left=${IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(left)))} right=${IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(right)))} result=${IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(destination(lane))))}"
             )
         }
         lane += 1
       }
     } else {
       var lane = 0
-      while (lane < lanes) {
+      while (lane < lanes.value) {
         if (active(lane)) {
           val left     = Bits.low32(packedSource(srcA, lane, scalar, vector, carry, active))
           val right    = Bits.low32(packedSource(srcB, lane, scalar, vector, carry, active))
@@ -1080,64 +958,85 @@ object DispatchInterpreter {
               destination(lane) = if (clamp) math.max(0L, right - left) else unsignedSubtractReverse32(left, right)
             case ExecutableInstruction.VBinary.AddF32 =>
               destination(lane) = IEEE754.floatToBinary32(
-                IEEE754.binary32ToFloat(left) + IEEE754.binary32ToFloat(right)
-              )
+                IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(left))) + IEEE754.binary32ToFloat(
+                  Binary32.fromLow(Bits.low32(right))
+                )
+              ).value
             case ExecutableInstruction.VBinary.MulF32 =>
               destination(lane) = IEEE754.floatToBinary32(
-                IEEE754.binary32ToFloat(left) * IEEE754.binary32ToFloat(right)
-              )
+                IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(left))) * IEEE754.binary32ToFloat(
+                  Binary32.fromLow(Bits.low32(right))
+                )
+              ).value
             case ExecutableInstruction.VBinary.MacF32 =>
               destination(lane) = IEEE754.floatToBinary32(
-                IEEE754.binary32ToFloat(left) * IEEE754.binary32ToFloat(right) +
-                  IEEE754.binary32ToFloat(previous)
-              )
+                IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(left))) * IEEE754.binary32ToFloat(
+                  Binary32.fromLow(Bits.low32(right))
+                ) +
+                  IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(previous)))
+              ).value
             case ExecutableInstruction.VBinary.SubF32 =>
               destination(lane) = IEEE754.floatToBinary32(
-                IEEE754.binary32ToFloat(left) - IEEE754.binary32ToFloat(right)
-              )
+                IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(left))) - IEEE754.binary32ToFloat(
+                  Binary32.fromLow(Bits.low32(right))
+                )
+              ).value
             case ExecutableInstruction.VBinary.MinF32 =>
               destination(lane) = IEEE754.floatToBinary32(
-                math.min(IEEE754.binary32ToFloat(left), IEEE754.binary32ToFloat(right))
-              )
+                math.min(
+                  IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(left))),
+                  IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(right)))
+                )
+              ).value
             case ExecutableInstruction.VBinary.MaxF32 =>
               destination(lane) = IEEE754.floatToBinary32(
-                math.max(IEEE754.binary32ToFloat(left), IEEE754.binary32ToFloat(right))
-              )
+                math.max(
+                  IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(left))),
+                  IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(right)))
+                )
+              ).value
             case ExecutableInstruction.VBinary.AddF16 =>
               destination(lane) = IEEE754.floatToBinary16(
-                IEEE754.binary16ToFloat(Bits.low16(left)) + IEEE754.binary16ToFloat(Bits.low16(right))
-              )
+                IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(left))) + IEEE754.binary16ToFloat(
+                  Binary16.fromLow(Bits.low16(right))
+                )
+              ).value
             case ExecutableInstruction.VBinary.MulF16 =>
               destination(lane) = IEEE754.floatToBinary16(
-                IEEE754.binary16ToFloat(Bits.low16(left)) * IEEE754.binary16ToFloat(Bits.low16(right))
-              )
+                IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(left))) * IEEE754.binary16ToFloat(
+                  Binary16.fromLow(Bits.low16(right))
+                )
+              ).value
             case ExecutableInstruction.VBinary.MacF16 =>
               destination(lane) = IEEE754.floatToBinary16(
                 Math.fma(
-                  IEEE754.binary16ToFloat(Bits.low16(left)),
-                  IEEE754.binary16ToFloat(Bits.low16(right)),
-                  IEEE754.binary16ToFloat(Bits.low16(previous))
+                  IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(left))),
+                  IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(right))),
+                  IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(previous)))
                 )
-              )
-            case ExecutableInstruction.VBinary.MinF16 => destination(lane) = minimumF16(left, right)
+              ).value
+            case ExecutableInstruction.VBinary.MinF16 => destination(lane) = minimumF16(left, right).value
             case ExecutableInstruction.VBinary.MaxF16 =>
               destination(lane) = IEEE754.floatToBinary16(
-                math.max(IEEE754.binary16ToFloat(Bits.low16(left)), IEEE754.binary16ToFloat(Bits.low16(right)))
-              )
+                math.max(
+                  IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(left))),
+                  IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(right)))
+                )
+              ).value
           }
           if (traceLog && lane == 0)
-            System.err.println(
-              s"Gemstone AMDGPU log packed-binary opcode=${ExecutableInstruction.VBinary.opcodeName(opcode)} dest=$dest left=${IEEE754.binary32ToFloat(left)} right=${IEEE754.binary32ToFloat(right)} result=${IEEE754.binary32ToFloat(destination(lane))}"
+            scribe.debug(
+              s"Gemstone AMDGPU log packed-binary opcode=${ExecutableInstruction.VBinary.opcodeName(opcode)} dest=$dest left=${IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(left)))} right=${IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(right)))} result=${IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(destination(lane))))}"
             )
           if (traceByteSort && lane == 0 && index >= 540 && index <= 620)
-            System.err.println(
+            scribe.debug(
               s"Gemstone AMDGPU byte-sort packed VBinary index=$index opcode=${ExecutableInstruction.VBinary.opcodeName(opcode)} dest=$dest left=0x${left.toHexString} right=0x${right.toHexString} result=0x${destination(lane).toHexString}"
             )
           if (
-            Environment.trace("reduce") && lane == 0 &&
+            AMDGPUEnvironment.trace("reduce") && lane == 0 &&
             ExecutableInstruction.VBinary.opcodeName(opcode) == "v_add_u32"
           )
-            System.err.println(
+            scribe.debug(
               s"Gemstone AMDGPU reduce packed add index=$index dest=$dest left=0x${left.toHexString} right=0x${right.toHexString} result=0x${destination(lane).toHexString}"
             )
         }
@@ -1145,31 +1044,16 @@ object DispatchInterpreter {
       }
     }
   }
-  private final case class WaveState(
-      scalar: Array[Long],
-      vector: VectorRegisters,
-      carry: LaneBits,
-      active: LaneBits,
-      scalarCarry: Boolean,
-      scratch: ScratchMemory,
-      nextInstruction: Int
-  )
-
-  private enum WaveBoundary {
-    case Barrier(state: WaveState)
-    case End
-  }
-
-  def validate(code: Col[Byte], target: Target): Either[String, Unit] =
+  def validate(code: Vec[Byte], target: Target): Either[String, Unit] =
     decodeProgram(code, target).map(_ => ())
 
   /** Decode one instruction for decoder-focused tests without exposing the executable model publicly. */
   private[amdgpu] def decodeInstruction(
-      code: Col[Byte],
+      code: Vec[Byte],
       target: Target
   ): Either[String, DecodedInstruction] =
     Either.cond(code.size >= 4, (), "truncated instruction at byte 0")
-      .flatMap(_ => decode(Col.toArray(code), 0, target).map(_.operation))
+      .flatMap(_ => decode(Vec.toArray(code), 0, target).map(_.operation))
 
   private def selfContained(program: DecodedProgram): Boolean = {
     def constant(source: InstructionSource): Option[Long] = source match {
@@ -1184,7 +1068,7 @@ object DispatchInterpreter {
         // Prove its destination; do not rewrite the instructions or assume unknown indirect targets.
         // Restrict the proof to ordinary SGPRs, excluding the VCC/EXEC register aliases.
         case (
-              Col(
+              Vec(
                 DecodedInstruction.SGetPc(base, offset),
                 DecodedInstruction.SBinary("s_add_i32", temporary, left, right),
                 DecodedInstruction.SBinary(
@@ -1227,7 +1111,7 @@ object DispatchInterpreter {
     val programCode    = if (linkedText) kernel.text else kernel.code
     val functionRanges =
       if (linkedText) linkedTextRanges(kernel.textAddress, kernel.text, kernel.functionSizes)
-      else Col.empty[(Int, Int)]
+      else Vec.empty[(Int, Int)]
     val decoded = if (linkedText) {
       val entrySize  = math.min(kernel.code.size, kernel.functionSizes.getOrElse(kernel.codeAddress, kernel.code.size))
       val entryRange = linkedTextRanges(kernel.textAddress, kernel.text, Map(kernel.codeAddress -> entrySize))
@@ -1238,7 +1122,7 @@ object DispatchInterpreter {
       }
     } else decodeProgram(programCode, kernel.target, functionRanges)
     decoded
-      .leftMap(ExecutionFailure.Unsupported.apply)
+      .leftMap(detail => ExecutionFailure.Unsupported(detail))
       .flatMap { program =>
         val entryOffset = if (linkedText) kernel.codeAddress - kernel.textAddress else 0L
         val entryIndex  =
@@ -1268,23 +1152,23 @@ object DispatchInterpreter {
       memory: ExecutionMemory,
       control: ExecutionControl
   ): Either[ExecutionFailure, Unit] =
-    execute(prepared, dispatch, memory, control, Col.empty)
+    execute(prepared, dispatch, memory, control, Vec.empty)
 
   def execute(
       prepared: PreparedKernel,
       dispatch: KernelDispatch,
       memory: ExecutionMemory,
       control: ExecutionControl,
-      globalBindings: Col[GlobalBinding]
+      globalBindings: Vec[GlobalBinding]
   ): Either[ExecutionFailure, Unit] =
     for {
       kernargSize <- effectiveKernargSize(prepared.kernel, dispatch.arguments)
-        .leftMap(ExecutionFailure.InvalidRequest.apply)
+        .leftMap(detail => ExecutionFailure.InvalidRequest(detail))
       addresses = memory.allocationAddresses
       _ <- validateAddressAliases(prepared.kernel, kernargSize, addresses)
-        .leftMap(ExecutionFailure.InvalidRequest.apply)
+        .leftMap(detail => ExecutionFailure.InvalidRequest(detail))
       packed <- packArguments(dispatch.arguments, kernargSize, globalBindings, addresses)
-        .leftMap(ExecutionFailure.InvalidRequest.apply)
+        .leftMap(detail => ExecutionFailure.InvalidRequest(detail))
       (kernarg, allocations) = packed
       _ <- runDispatch(
         prepared.kernel,
@@ -1303,7 +1187,7 @@ object DispatchInterpreter {
 
   private[amdgpu] def effectiveKernargSize(
       kernel: CodeObjectKernel,
-      arguments: Col[KernelArgument]
+      arguments: Vec[KernelArgument]
   ): Either[String, Int] =
     if (kernel.kernargSize != 0 || arguments.isEmpty || kernel.codeAddress == 0L) Right(kernel.kernargSize)
     else
@@ -1327,8 +1211,10 @@ object DispatchInterpreter {
       control: ExecutionControl = ExecutionControl.default
   ): Either[ExecutionFailure, Unit] = prepare(kernel).flatMap(execute(_, dispatch, memory, control))
 
-  private def linkedTextRanges(base: Long, code: Col[Byte], sizes: Map[Long, Int]): Col[(Int, Int)] = {
-    val bytes  = Col.toArray(code)
+  // Validate and coalesce linked text ranges in one ordered scan.
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+  private def linkedTextRanges(base: Long, code: Vec[Byte], sizes: Map[Long, Int]): Vec[(Int, Int)] = {
+    val bytes  = Vec.toArray(code)
     val length = bytes.length
     val ranges = sizes.iterator.flatMap { case (address, size) =>
       val relative = address - base
@@ -1336,10 +1222,10 @@ object DispatchInterpreter {
         val bounded = math.min(size.toLong, length.toLong - relative)
         Option.when(bounded > 0L)((relative.toInt, bounded.toInt))
       } else None
-    }.toCol.sortBy(_._1)
-    if (ranges.isEmpty) Col.empty
+    }.toVec.sortBy(_._1)
+    if (ranges.isEmpty) Vec.empty
     else {
-      val normalized = Col.newBuilder[(Int, Int)]
+      val normalized = Vec.newBuilder[(Int, Int)]
       var index      = 0
       while (index < ranges.size) {
         val (start, size) = ranges(index)
@@ -1359,15 +1245,17 @@ object DispatchInterpreter {
     }
   }
 
+  // Decode variable-width instructions while retaining the first malformed range.
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private def decodeProgram(
-      code: Col[Byte],
+      code: Vec[Byte],
       target: Target,
-      functionRanges: Col[(Int, Int)] = Col.empty,
+      functionRanges: Vec[(Int, Int)] = Vec.empty,
       deferExternalBranches: Boolean = false
   ): Either[String, DecodedProgram] = {
-    val bytes      = Col.toArray(code)
-    val ranges     = if (functionRanges.nonEmpty) functionRanges else Col(0 -> bytes.length)
-    val result     = Col.newBuilder[(Int, DecodedInstruction)]
+    val bytes      = Vec.toArray(code)
+    val ranges     = if (functionRanges.nonEmpty) functionRanges else Vec(0 -> bytes.length)
+    val result     = Vec.newBuilder[(Int, DecodedInstruction)]
     var rangeIndex = 0
     var failure    = Option.empty[String]
     while (rangeIndex < ranges.length && failure.isEmpty) {
@@ -1398,7 +1286,7 @@ object DispatchInterpreter {
           }
       rangeIndex += 1
     }
-    failure.toLeft(Col.from(result.result())).flatMap { decoded =>
+    failure.toLeft(Vec.from(result.result())).flatMap { decoded =>
       // Byte offsets are dense integer keys; IntMap avoids the boxed tuple and
       // generic hash-map builder previously allocated for every decoded code
       // object while retaining the same immutable lookup contract.
@@ -1487,8 +1375,11 @@ object DispatchInterpreter {
     for {
       opcode <- opcodeName("SOP1", ((word >>> 8) & 0xffL).toInt, target)
       literal = Option.when((word & 0xffL) == 255L)(())
-      _         <- requireBytes(bytes, offset, if (literal.nonEmpty) 8 else 4)
-      src       <- scalarSource((word & 0xffL).toInt, literal.map(_ => unsignedInt(bytes, offset + 4)))
+      _   <- requireBytes(bytes, offset, if (literal.nonEmpty) 8 else 4)
+      src <- scalarSource(
+        (word & 0xffL).toInt,
+        literal.map(_ => unsignedInt(bytes, offset + 4))
+      )
       operation <- opcode match {
         case "s_mov_b32"  => Right(DecodedInstruction.SMove(((word >>> 16) & 0x7fL).toInt, src))
         case "s_mov_b64"  => Right(DecodedInstruction.SMove64(((word >>> 16) & 0x7fL).toInt, src))
@@ -1673,7 +1564,10 @@ object DispatchInterpreter {
             if ((sdwa & (1L << 23)) != 0L) InstructionSource.Scalar(encoding)
             else InstructionSource.VectorRegister(encoding)
           )
-        case None => vectorSource(srcAEncoding, Option.when(hasLiteral)(unsignedInt(bytes, offset + 4)))
+        case None => vectorSource(
+            srcAEncoding,
+            Option.when(hasLiteral)(unsignedInt(bytes, offset + 4))
+          )
       }
       // VOP2's SRC1 field is a VGPR index in the ordinary encoding.  It is
       // only allowed to name an SGPR when the SDWA extension explicitly
@@ -1797,7 +1691,10 @@ object DispatchInterpreter {
           Right(if ((sdwa & (1L << 23)) != 0L) InstructionSource.Scalar(encoding)
           else InstructionSource.VectorRegister(encoding))
         case Some(dpp) => Right(InstructionSource.VectorRegister((dpp & 0xffL).toInt))
-        case None      => vectorSource(sourceEncoding, Option.when(hasLiteral)(unsignedInt(bytes, offset + 4)))
+        case None      => vectorSource(
+            sourceEncoding,
+            Option.when(hasLiteral)(unsignedInt(bytes, offset + 4))
+          )
       }
       operation <- opcode match {
         case "v_mov_b32" if hasDPP =>
@@ -1872,7 +1769,10 @@ object DispatchInterpreter {
       srcA <- extension match {
         case Some(sdwa) if (sdwa & (1L << 23)) != 0L => Right(InstructionSource.Scalar((sdwa & 0xffL).toInt))
         case Some(sdwa)                              => Right(InstructionSource.VectorRegister((sdwa & 0xffL).toInt))
-        case None => vectorSource(srcAEncoding, Option.when(hasLiteral)(unsignedInt(bytes, offset + 4)))
+        case None                                    => vectorSource(
+            srcAEncoding,
+            Option.when(hasLiteral)(unsignedInt(bytes, offset + 4))
+          )
       }
       // In VOPC, SRC1 is always a VGPR in the normal encoding.  Unlike
       // SRC0, its 8-bit field does not use the scalar/constant source table.
@@ -1986,6 +1886,9 @@ object DispatchInterpreter {
             srcA,
             srcB,
             srcC,
+            (word & 0x100L) != 0L,
+            (word & 0x200L) != 0L,
+            (word & 0x400L) != 0L,
             (second & (1L << 29)) != 0L,
             (second & (1L << 30)) != 0L,
             (second & (1L << 31)) != 0L
@@ -1993,7 +1896,14 @@ object DispatchInterpreter {
         case "v_div_fmas_f64" | "v_div_fmas_f64_e64" =>
           Right(DecodedInstruction.VDivFmasF64((word & 0xffL).toInt, srcA, srcB, srcC))
         case "v_div_fixup_f64" | "v_div_fixup_f64_e64" =>
-          Right(DecodedInstruction.VDivFixupF64((word & 0xffL).toInt, srcA, srcB, srcC))
+          Right(DecodedInstruction.VDivFixupF64(
+            (word & 0xffL).toInt,
+            srcA,
+            srcB,
+            srcC,
+            ((word >>> 8) & 0x7L).toInt,
+            ((second >>> 29) & 0x7L).toInt
+          ))
         case "v_div_scale_f64" | "v_div_scale_f64_e64" =>
           Right(DecodedInstruction.VDivScaleF64(
             (word & 0xffL).toInt,
@@ -2146,7 +2056,14 @@ object DispatchInterpreter {
           // destination VGPR, which the VBinary execution path preserves.
           Right(DecodedInstruction.VBinary("v_mac_f32", (word & 0xffL).toInt, srcA, srcB, clamp = false))
         case "v_div_fixup_f32" =>
-          Right(DecodedInstruction.VDivFixupF32((word & 0xffL).toInt, srcA, srcB, srcC))
+          Right(DecodedInstruction.VDivFixupF32(
+            (word & 0xffL).toInt,
+            srcA,
+            srcB,
+            srcC,
+            ((word >>> 8) & 0x7L).toInt,
+            ((second >>> 29) & 0x7L).toInt
+          ))
         case "v_bcnt_u32_b32" | "v_bcnt_u32_b32_e64" =>
           Right(DecodedInstruction.VBitCount((word & 0xffL).toInt, srcA, srcB))
         case "v_pk_fma_f16" =>
@@ -2338,15 +2255,17 @@ object DispatchInterpreter {
   ): Either[String, Decoded] =
     for {
       _ <- requireBytes(bytes, offset, 8)
-      // The DS opcode occupies bits 18:25 in the instruction word.  Keep the
-      // generated opcode numbering unchanged; using bit 17 here aliases the
-      // high address-offset bit into the opcode (for example ds_write_b128's
-      // 0xdf becomes the spurious 0xbe).
-      rawOpcode = ((word >>> 18) & 0xffL).toInt
+      // GCN/CDNA place GDS at bit 16 and OP at 17:24. RDNA moved both
+      // fields one bit upward while retaining the two eight-bit offsets.
+      opcodeShift = target.family match {
+        case Family.GFX10 | Family.GFX11 | Family.GFX12 => 18
+        case _                                          => 17
+      }
+      rawOpcode = ((word >>> opcodeShift) & 0xffL).toInt
       opcode <- opcodeName("DS", rawOpcode, target).leftMap(_ =>
         s"unknown DS opcode $rawOpcode for ${target.name} word=0x${word.toHexString}"
       )
-      _ <- Either.cond((word & 0x10000L) == 0L, (), s"$opcode GDS execution is not implemented")
+      _ <- Either.cond((word & (1L << (opcodeShift - 1))) == 0L, (), s"$opcode GDS execution is not implemented")
       second   = unsignedInt(bytes, offset + 4)
       address  = (second & 0xffL).toInt
       dataA    = ((second >>> 8) & 0xffL).toInt
@@ -2364,7 +2283,7 @@ object DispatchInterpreter {
         case "ds_swizzle_b32" => Right(DecodedInstruction.DSSwizzle(dest, address, dsOffset))
         case atomic @ (
               "ds_add_u32" | "ds_sub_u32" | "ds_inc_u32" | "ds_dec_u32" |
-              "ds_min_u32" | "ds_max_u32" |
+              "ds_min_i32" | "ds_max_i32" | "ds_min_u32" | "ds_max_u32" |
               "ds_and_rtn_b32" | "ds_or_rtn_b32" | "ds_xor_rtn_b32" |
               "ds_and_rtn_b64" | "ds_or_rtn_b64" | "ds_xor_rtn_b64" |
               "ds_add_rtn_u32" | "ds_add_rtn_u64" | "ds_sub_rtn_u32" | "ds_sub_rtn_u64" |
@@ -2831,7 +2750,7 @@ object DispatchInterpreter {
         case "buffer_store_short" =>
           Right(DecodedInstruction.BufferStore(address, resource, scalarOffset, src, 2, immediate))
         case "buffer_store_short_d16_hi" =>
-          Right(DecodedInstruction.BufferStore(address, resource, scalarOffset, src, 2, immediate, high = true))
+          Right(DecodedInstruction.BufferStoreD16High(address, resource, scalarOffset, src, 2, immediate))
         case "buffer_store_dword" =>
           Right(DecodedInstruction.BufferStore(address, resource, scalarOffset, src, 4, immediate))
         case "buffer_store_dwordx2" =>
@@ -2843,23 +2762,10 @@ object DispatchInterpreter {
     } yield Decoded(operation, 8)
 
   private def opcodeName(format: String, opcode: Int, target: Target): Either[String, String] =
-    OpcodeNameCache.synchronized {
-      OpcodeNameCache.getOrElseUpdate((format, opcode, target.name), opcodeNameUncached(format, opcode, target))
-    }
+    resolveOpcodeName(format, opcode, target)
 
-  private def opcodeNameUncached(format: String, opcode: Int, target: Target): Either[String, String] = {
-    val names = Instruction.definitions.iterator.filter(definition =>
-      encodingsFor(definition, target).exists { encoding =>
-        val sameFormat = encoding.format == format ||
-          (format == "VOP3" && encoding.format.startsWith("VOP3_")) ||
-          (format == "VOP2" && encoding.format == "VOP2_INST_LITERAL")
-        // The RDNA XML calls the shared global/flat encoding FLAT_GLBL.  The
-        // decoder has already selected the GLOBAL or FLAT half using the
-        // address-mode bits, so expose that normalized spelling here.
-        val sharedGlobalFlat = (format == "GLOBAL" || format == "FLAT") && encoding.format == "FLAT_GLBL"
-        (sameFormat || sharedGlobalFlat) && encoding.opcode == opcode
-      }
-    ).map(_.opcode).toCol.distinct
+  private def resolveOpcodeName(format: String, opcode: Int, target: Target): Either[String, String] = {
+    val names = OpcodeIndex.names(format, opcode, target)
     // RDNA's FLAT_GLBL encoding is shared by the flat and global mnemonics.
     // Once the decoder has selected the address mode, retain only the
     // corresponding mnemonic family; otherwise an otherwise valid opcode is
@@ -2870,8 +2776,8 @@ object DispatchInterpreter {
       case _        => names
     }
     modeNames match {
-      case Col(name)                                                 => Right(name)
-      case Col() if format == "VOP3" && target.family == Family.GFX9 =>
+      case Vec(name)                                                 => Right(name)
+      case Vec() if format == "VOP3" && target.family == Family.GFX9 =>
         Map(
           16  -> "v_cmp_class_f32",
           18  -> "v_cmp_class_f64",
@@ -2976,7 +2882,7 @@ object DispatchInterpreter {
           658 -> "v_trig_preop_f64",
           901 -> "v_pk_lshrrev_b16"
         ).get(opcode).toRight(s"unknown $format opcode $opcode for ${target.name}")
-      case Col() => Left(s"unknown $format opcode $opcode for ${target.name}")
+      case Vec() => Left(s"unknown $format opcode $opcode for ${target.name}")
       case aliases if aliases.toSet == Set("v_mul_lo_i32", "v_mul_lo_u32") =>
         Right("v_mul_lo_u32")
       case _ => Left(s"ambiguous $format opcode $opcode for ${target.name}: ${names.mkString(", ")}")
@@ -3002,7 +2908,7 @@ object DispatchInterpreter {
     else if (encoding >= 240 && encoding <= 248)
       Right(
         InstructionSource.Constant(
-          Col(
+          Vec(
             0x3f000000L,
             0xbf000000L,
             0x3f800000L,
@@ -3033,13 +2939,13 @@ object DispatchInterpreter {
   private def validateAddressAliases(
       kernel: CodeObjectKernel,
       kernargSize: Int,
-      addresses: Col[AllocationAddress]
+      addresses: Vec[AllocationAddress]
   ): Either[String, Unit] = {
     def overlaps(base: Long, size: Long, other: Long, otherSize: Long): Boolean =
       size > 0 && otherSize > 0 &&
         (if (base >= other) base - other < otherSize else other - base < size)
     val invalid = addresses.iterator.filter(_.address.nonEmpty).find { allocation =>
-      val base = allocation.address.get
+      val base = allocation.address.get.value
       allocation.size <= 0 || base <= 0 || base > Long.MaxValue - allocation.size ||
       overlaps(base, allocation.size, KernargAddress, kernargSize.toLong) ||
       overlaps(base, allocation.size, DispatchAddress, 64L) ||
@@ -3050,50 +2956,54 @@ object DispatchInterpreter {
         overlaps(base, allocation.size, address, bytes.length.toLong)
       } ||
       addresses.exists { other =>
-        val slot = other.allocation.toLong - 1L
+        val slot = other.allocation.value - 1L
         (slot <= (Long.MaxValue - AllocationBase) / AllocationSpan &&
           overlaps(base, allocation.size, AllocationBase + slot * AllocationSpan, AllocationSpan)) ||
         (other.allocation != allocation.allocation && other.address.exists(address =>
-          overlaps(base, allocation.size, address, other.size)
+          overlaps(base, allocation.size, address.value, other.size)
         ))
       }
     }
     invalid.toLeft(()).left.map(allocation =>
-      s"allocation ${allocation.allocation.toLong} address alias is invalid or overlaps an AMDGPU address range"
+      s"allocation ${allocation.allocation.value} address alias is invalid or overlaps an AMDGPU address range"
     )
   }
 
+  // Kernarg packing assigns compact allocation regions and fails at the first invalid argument.
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private def packArguments(
-      arguments: Col[KernelArgument],
+      arguments: Vec[KernelArgument],
       kernargSize: Int,
-      globalBindings: Col[GlobalBinding],
-      addresses: Col[AllocationAddress]
+      globalBindings: Vec[GlobalBinding],
+      addresses: Vec[AllocationAddress]
   ): Either[String, (Array[Byte], Array[AllocationRegion])] = {
     val packed        = Array.ofDim[Byte](kernargSize)
     val regionStorage =
       if (arguments.isEmpty) EmptyAllocationRegions else Array.ofDim[AllocationRegion](arguments.length)
-    var regionCount            = 0
-    var packedOffset           = 0
-    var argumentIndex          = 0
-    var failure: String | Null = null
-    while (argumentIndex < arguments.length && failure == null) {
+    var regionCount   = 0
+    var packedOffset  = 0
+    var argumentIndex = 0
+    var failure       = Option.empty[String]
+    while (argumentIndex < arguments.length && failure.isEmpty) {
       arguments(argumentIndex) match {
         case KernelArgument.Scalar(bytes) =>
-          if (packedOffset == kernargSize) failure =
+          if (packedOffset == kernargSize) failure = Some(
             s"kernel descriptor requires $kernargSize kernarg bytes, received trailing argument $argumentIndex"
+          )
           else if (packedOffset > kernargSize - bytes.length)
-            failure = s"kernel descriptor requires $kernargSize kernarg bytes, received more than $kernargSize"
+            failure = Some(s"kernel descriptor requires $kernargSize kernarg bytes, received more than $kernargSize")
           else {
             val _ = bytes.copyToArray(packed, packedOffset, bytes.length)
             packedOffset += bytes.length
           }
         case KernelArgument.Allocation(id, offset) =>
-          if (packedOffset == kernargSize) failure =
+          if (packedOffset == kernargSize) failure = Some(
             s"kernel descriptor requires $kernargSize kernarg bytes, received trailing argument $argumentIndex"
+          )
           else if (offset < 0L || offset >= AllocationSpan)
-            failure = s"allocation offset $offset is outside the interpreter address span"
+            failure = Some(s"allocation offset $offset is outside the interpreter address span")
           else if (packedOffset > kernargSize - 8)
-            failure = s"kernel descriptor requires $kernargSize kernarg bytes, received more than $kernargSize"
+            failure = Some(s"kernel descriptor requires $kernargSize kernarg bytes, received more than $kernargSize")
           else {
             var regionIndex = 0
             while (regionIndex < regionCount && regionStorage(regionIndex).id != id) regionIndex += 1
@@ -3103,64 +3013,93 @@ object DispatchInterpreter {
               // dispatch.  The virtual address therefore must be derived from
               // the stable allocation identity, rather than the position of
               // the allocation in this dispatch's argument list.
-              val slot = id.toLong - 1L
+              val slot = id.value - 1L
               if (slot > (Long.MaxValue - AllocationBase) / AllocationSpan)
-                failure = s"allocation ID ${id.toLong} is outside the interpreter address span"
+                failure = Some(s"allocation ID ${id.value} is outside the interpreter address span")
               else {
                 regionStorage(regionIndex) = globalBindings.find(_.allocation == id) match {
                   case Some(binding) =>
-                    AllocationRegion(binding.address - binding.offset, id, 0L, binding.allocationSize)
+                    AllocationRegion(
+                      binding.address - binding.offset,
+                      id,
+                      0L,
+                      (binding.allocationSize: Long).refineUnsafe[Positive0]
+                    )
                   case None =>
                     addresses.find(_.allocation == id).flatMap(value => value.address.map(value -> _)) match {
-                      case Some((allocation, address)) => AllocationRegion(address, id, 0L, allocation.size)
+                      case Some((allocation, address)) => AllocationRegion(
+                          address.value,
+                          id,
+                          0L,
+                          (allocation.size: Long).refineUnsafe[Positive0]
+                        )
                       case None => AllocationRegion(AllocationBase + slot * AllocationSpan, id, 0L)
                     }
                 }
                 regionCount += 1
               }
             }
-            if (failure == null) {
-              LittleEndian.write(regionStorage(regionIndex).base + offset, packed, packedOffset, 8)
+            if (failure.isEmpty) {
+              LittleEndian.write(
+                regionStorage(regionIndex).base + offset,
+                packed,
+                packedOffset,
+                ScalarByteWidth(8)
+              )
               packedOffset += 8
             }
           }
-        case KernelArgument.Local(_) => failure = "gfx900 local kernargs are not implemented"
+        case KernelArgument.Local(_) => failure = Some("gfx900 local kernargs are not implemented")
       }
       argumentIndex += 1
     }
-    if (failure != null) Left(failure)
-    else if (packedOffset != kernargSize)
-      Left(s"kernel descriptor requires $kernargSize kernarg bytes, received $packedOffset")
-    else {
-      val allocations =
-        if (regionCount == 0) EmptyAllocationRegions
-        else if (regionCount == regionStorage.length) regionStorage
-        else java.util.Arrays.copyOf(regionStorage, regionCount)
-      if (Environment.trace("arguments"))
-        System.err.println(
-          s"Gemstone AMDGPU arguments allocations=${allocations.map(_.id.toLong).toCol} args=${arguments.map {
-              case KernelArgument.Allocation(id, offset) => s"alloc:${id.toLong}+$offset"
-              case KernelArgument.Scalar(bytes)          => s"scalar:${bytes.length}"
-              case KernelArgument.Local(size)            => s"local:$size"
-            }}"
+    failure match {
+      case Some(message)                       => Left(message)
+      case None if packedOffset != kernargSize =>
+        Left(s"kernel descriptor requires $kernargSize kernarg bytes, received $packedOffset")
+      case None =>
+        val allocations =
+          if (regionCount == 0) EmptyAllocationRegions
+          else if (regionCount == regionStorage.length) regionStorage
+          else java.util.Arrays.copyOf(regionStorage, regionCount)
+        if (AMDGPUEnvironment.trace("arguments"))
+          scribe.debug(
+            s"Gemstone AMDGPU arguments allocations=${allocations.map(_.id.value).toVec} args=${arguments.map {
+                case KernelArgument.Allocation(id, offset) => s"alloc:${id.value}+$offset"
+                case KernelArgument.Scalar(bytes)          => s"scalar:${bytes.length}"
+                case KernelArgument.Local(size)            => s"local:$size"
+              }}"
+          )
+        val bound = globalBindings.map(binding =>
+          AllocationRegion(
+            binding.address,
+            binding.allocation,
+            binding.offset,
+            binding.size.toLong.refineUnsafe[Positive0],
+            alias = true
+          )
+        ) ++ addresses.flatMap(allocation =>
+          allocation.address.map(address =>
+            AllocationRegion(
+              address.value,
+              allocation.allocation,
+              0L,
+              (allocation.size: Long).refineUnsafe[Positive0],
+              alias = true
+            )
+          )
         )
-      val bound = globalBindings.map(binding =>
-        AllocationRegion(binding.address, binding.allocation, binding.offset, binding.size.toLong, alias = true)
-      ) ++ addresses.flatMap(allocation =>
-        allocation.address.map(address =>
-          AllocationRegion(address, allocation.allocation, 0L, allocation.size, alias = true)
-        )
-      )
-      Right(packed -> (if (bound.isEmpty) allocations else Col.toArray(bound) ++ allocations))
+        Right(packed -> (if (bound.isEmpty) allocations else Vec.toArray(bound) ++ allocations))
     }
   }
 
+  // Workgroups advance through the shared bounded scheduler without materializing a result collection.
   private def runDispatch(
       kernel: CodeObjectKernel,
-      operations: Col[DecodedInstruction],
+      operations: Vec[DecodedInstruction],
       executable: Array[ExecutableInstruction],
       instructionIndices: Map[Int, Int],
-      instructionOffsets: Col[Int],
+      instructionOffsets: Vec[Int],
       entryInstruction: Int,
       kernarg: Array[Byte],
       allocations: Array[AllocationRegion],
@@ -3169,83 +3108,77 @@ object DispatchInterpreter {
       control: ExecutionControl
   ): Either[ExecutionFailure, Unit] =
     for {
-      localCount <- dispatch.geometry.groupSize.volumeInt.leftMap(ExecutionFailure.InvalidRequest.apply)
-      _          <- {
-        if (Environment.trace("dispatch"))
-          System.err.println(
+      localCount <- dispatch.geometry.groupSize.volumeInt
+        .leftMap(detail => ExecutionFailure.InvalidRequest(detail))
+      groupCount <- dispatch.geometry.groupCount.volume
+        .leftMap(detail => ExecutionFailure.InvalidRequest(detail))
+      _ <- {
+        if (AMDGPUEnvironment.trace("dispatch"))
+          scribe.debug(
             s"Gemstone AMDGPU dispatch requested=${dispatch.kernelName} loaded=${kernel.name} global=${dispatch.geometry.globalExtent} groups=${dispatch.geometry.groupCount} group=${dispatch.geometry.groupSize}"
           )
         val dispatchBytes = Array.ofDim[Byte](64)
-        LittleEndian.write(dispatch.geometry.groupSize.x.toLong, dispatchBytes, 4, 2)
-        LittleEndian.write(dispatch.geometry.groupSize.y.toLong, dispatchBytes, 6, 2)
-        LittleEndian.write(dispatch.geometry.groupSize.z.toLong, dispatchBytes, 8, 2)
-        LittleEndian.write(dispatch.geometry.globalExtent.x.toLong, dispatchBytes, 12, 4)
-        LittleEndian.write(dispatch.geometry.globalExtent.y.toLong, dispatchBytes, 16, 4)
-        LittleEndian.write(dispatch.geometry.globalExtent.z.toLong, dispatchBytes, 20, 4)
-        LittleEndian.write(dispatch.privateSegmentBytes.toLong, dispatchBytes, 24, 4)
-        LittleEndian.write(dispatch.groupSegmentBytes.toLong, dispatchBytes, 28, 4)
-        val groupCount = Math.multiplyExact(
-          Math.multiplyExact(dispatch.geometry.groupCount.x.toLong, dispatch.geometry.groupCount.y.toLong),
-          dispatch.geometry.groupCount.z.toLong
+        LittleEndian.write(dispatch.geometry.groupSize.x.toLong, dispatchBytes, 4, ScalarByteWidth(2))
+        LittleEndian.write(dispatch.geometry.groupSize.y.toLong, dispatchBytes, 6, ScalarByteWidth(2))
+        LittleEndian.write(dispatch.geometry.groupSize.z.toLong, dispatchBytes, 8, ScalarByteWidth(2))
+        LittleEndian.write(dispatch.geometry.globalExtent.x.toLong, dispatchBytes, 12, ScalarByteWidth(4))
+        LittleEndian.write(dispatch.geometry.globalExtent.y.toLong, dispatchBytes, 16, ScalarByteWidth(4))
+        LittleEndian.write(dispatch.geometry.globalExtent.z.toLong, dispatchBytes, 20, ScalarByteWidth(4))
+        LittleEndian.write(dispatch.privateSegmentBytes.toLong, dispatchBytes, 24, ScalarByteWidth(4))
+        LittleEndian.write(dispatch.groupSegmentBytes.toLong, dispatchBytes, 28, ScalarByteWidth(4))
+        def runGroupIndex(index: Long :| Positive0): Either[ExecutionFailure, Unit] =
+          dispatch.geometry.groupCoordinates(index)
+            .leftMap(detail => ExecutionFailure.InvalidRequest(detail))
+            .fold(
+              error => Left(error),
+              group =>
+                runGroup(
+                  kernel,
+                  operations,
+                  executable,
+                  instructionIndices,
+                  instructionOffsets,
+                  entryInstruction,
+                  kernarg,
+                  dispatchBytes,
+                  allocations,
+                  dispatch,
+                  localCount,
+                  group,
+                  memory,
+                  control
+                )
+            )
+        val refinedGroupCount = (groupCount: Long).refineUnsafe[Positive0]
+        val parallelGroups    = control.parallelism.shouldParallel(
+          refinedGroupCount,
+          localCount.toLong.refineUnsafe[Positive0]
         )
-        def runGroupIndex(index: Long): Either[ExecutionFailure, Unit] = {
-          val group = dispatch.geometry.groupCoordinates(index)
-          runGroup(
-            kernel,
-            operations,
-            executable,
-            instructionIndices,
-            instructionOffsets,
-            entryInstruction,
-            kernarg,
-            dispatchBytes,
-            allocations,
-            dispatch,
-            localCount,
-            group.x,
-            group.y,
-            group.z,
-            memory,
-            control
-          )
-        }
-        val parallelGroups = control.parallelism.shouldParallel(groupCount, localCount.toLong) &&
-          !containsAtomics(operations, entryInstruction)
-        val result = if (parallelGroups)
-          control.parallelism.parallelFor(groupCount)(runGroupIndex)
-        else {
-          var groupIndex = 0L
-          var result     = Right(()): Either[ExecutionFailure, Unit]
-          while (groupIndex < groupCount && result.isRight) {
-            result = runGroupIndex(groupIndex)
-            groupIndex += 1L
-          }
-          result
-        }
+        val result  = control.parallelism.forEach(refinedGroupCount, parallel = parallelGroups)(runGroupIndex(_))
         val failure = result.left.toOption
         failure.foreach { error =>
-          if (Environment.trace("dispatch"))
-            System.err.println(s"Gemstone AMDGPU dispatch failure kernel=${kernel.name}: ${error.message}")
+          if (AMDGPUEnvironment.trace("dispatch"))
+            scribe.debug(s"Gemstone AMDGPU dispatch failure kernel=${kernel.name}: ${error.message}")
         }
         failure.toLeft(())
       }
     } yield ()
 
+  // Wave rendezvous is a measured mutable state machine; null marks absent wave state and the first failure.
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var", "scalafix:DisableSyntax.null", "scalafix:GemstoneNoAssume"))
   private def runGroup(
       kernel: CodeObjectKernel,
-      operations: Col[DecodedInstruction],
+      operations: Vec[DecodedInstruction],
       executable: Array[ExecutableInstruction],
       instructionIndices: Map[Int, Int],
-      instructionOffsets: Col[Int],
+      instructionOffsets: Vec[Int],
       entryInstruction: Int,
       kernarg: Array[Byte],
       dispatchBytes: Array[Byte],
       allocations: Array[AllocationRegion],
       dispatch: KernelDispatch,
       localCount: Int,
-      groupX: Int,
-      groupY: Int,
-      groupZ: Int,
+      group: Coordinates,
       memory: ExecutionMemory,
       control: ExecutionControl
   ): Either[ExecutionFailure, Unit] = {
@@ -3254,17 +3187,17 @@ object DispatchInterpreter {
     // wave32.  The wave width is part of the executable target, not a global
     // property of the interpreter, and controls both lane partitioning and
     // EXEC/VCC mask width.
-    val waveSize = if (Environment.containsKey("GEMSTONE_AMDGPU_WAVE64")) 64
+    val waveSize: WaveSize = if (AMDGPUEnvironment.containsKey("GEMSTONE_AMDGPU_WAVE64")) WaveSize(64)
     else kernel.target.family match {
       case Family.GFX6 | Family.GFX7 | Family.GFX8 | Family.GFX9 | Family.CDNA1 | Family.CDNA2 | Family.CDNA3 | Family.CDNA4 |
-          Family.CDNA5 => 64
-      case _ => 32
+          Family.CDNA5 => WaveSize(64)
+      case _ => WaveSize(32)
     }
-    if (Environment.trace("wave"))
-      System.err.println(
+    if (AMDGPUEnvironment.trace("wave"))
+      scribe.debug(
         s"Gemstone AMDGPU wave kernel=${kernel.name} target=${kernel.target} properties=${kernel.kernelCodeProperties} waveSize=$waveSize localCount=$localCount entry=$entryInstruction"
       )
-    val waveCount = (localCount + waveSize - 1) / waveSize
+    val waveCount = (localCount + waveSize.value - 1) / waveSize.value
     val states    = Array.ofDim[WaveState | Null](waveCount)
     // A wave can leave the kernel before another wave reaches a workgroup
     // barrier.  That is legal for barriers in divergent control flow when
@@ -3272,7 +3205,7 @@ object DispatchInterpreter {
     // retain the completion state so an ended wave is not restarted on the
     // next barrier-release round.
     val finished                         = Array.fill(waveCount)(false)
-    val maskGlobalBounds                 = Environment.containsKey("GEMSTONE_AMDGPU_INITIAL_EXEC_GLOBAL")
+    val maskGlobalBounds                 = AMDGPUEnvironment.containsKey("GEMSTONE_AMDGPU_INITIAL_EXEC_GLOBAL")
     var complete                         = false
     var failure: ExecutionFailure | Null = null
     while (!complete && failure == null) {
@@ -3282,58 +3215,61 @@ object DispatchInterpreter {
       while (waveIndex < waveCount && failure == null) {
         if (!finished(waveIndex)) {
           live += 1
-          val start         = waveIndex * waveSize
-          val lanes         = math.min(waveSize, localCount - start)
-          var initialActive = Bits.mask(lanes)
-          if (maskGlobalBounds) {
-            initialActive = 0L
-            var lane = 0
-            while (lane < lanes) {
-              val linear = start + lane
-              val localX = linear                                   % dispatch.geometry.groupSize.x
-              val localY = (linear / dispatch.geometry.groupSize.x) % dispatch.geometry.groupSize.y
-              val localZ =
-                (linear.toLong / (dispatch.geometry.groupSize.x.toLong * dispatch.geometry.groupSize.y.toLong)).toInt
-              if (
-                groupX.toLong * dispatch.geometry.groupSize.x + localX < dispatch.geometry.globalExtent.x &&
-                groupY.toLong * dispatch.geometry.groupSize.y + localY < dispatch.geometry.globalExtent.y &&
-                groupZ.toLong * dispatch.geometry.groupSize.z + localZ < dispatch.geometry.globalExtent.z
-              ) initialActive |= 1L << lane
-              lane += 1
+          val start = waveIndex * waveSize.value
+          // The enclosing wave loop guarantees start < localCount; waveSize is 32 or 64.
+          val lanes         = LaneCount.assume(math.min(waveSize.value, localCount - start))
+          val initialActive =
+            if (!maskGlobalBounds) Right(Bits.mask(lanes.bitWidth))
+            else {
+              var active                                     = 0L
+              var lane                                       = 0
+              var coordinateFailure: ExecutionFailure | Null = null
+              while (lane < lanes.value && coordinateFailure == null) {
+                dispatch.geometry.localCoordinates(start + lane) match {
+                  case Left(detail) => coordinateFailure = ExecutionFailure.InvalidRequest(detail)
+                  case Right(local) =>
+                    dispatch.geometry.globalCoordinatesLong(group, local) match {
+                      case Left(detail)  => coordinateFailure = ExecutionFailure.InvalidRequest(detail)
+                      case Right(global) =>
+                        if (dispatch.geometry.containsGlobal(global)) active |= 1L << lane
+                    }
+                }
+                lane += 1
+              }
+              if (coordinateFailure == null) Right(active) else Left(coordinateFailure)
             }
-          }
-          runWave(
-            kernel,
-            operations,
-            executable,
-            instructionIndices,
-            instructionOffsets,
-            entryInstruction,
-            kernarg,
-            dispatchBytes,
-            allocations,
-            groupX,
-            groupY,
-            groupZ,
-            dispatch.geometry.groupSize.x,
-            dispatch.geometry.groupSize.y,
-            dispatch.geometry.groupSize.z,
-            start,
-            lanes,
-            waveSize,
-            lds,
-            initialActive,
-            states(waveIndex),
-            memory,
-            control
-          ) match {
-            case Left(error)                        => failure = error
-            case Right(WaveBoundary.Barrier(state)) =>
-              states(waveIndex) = state
-              waiting += 1
-            case Right(WaveBoundary.End) =>
-              states(waveIndex) = null
-              finished(waveIndex) = true
+          initialActive match {
+            case Left(error)       => failure = error
+            case Right(activeMask) =>
+              runWave(
+                kernel,
+                operations,
+                executable,
+                instructionIndices,
+                instructionOffsets,
+                entryInstruction,
+                kernarg,
+                dispatchBytes,
+                allocations,
+                dispatch.geometry,
+                group,
+                start,
+                lanes,
+                waveSize,
+                lds,
+                activeMask,
+                states(waveIndex),
+                memory,
+                control
+              ) match {
+                case Left(error)                        => failure = error
+                case Right(WaveBoundary.Barrier(state)) =>
+                  states(waveIndex) = state
+                  waiting += 1
+                case Right(WaveBoundary.End) =>
+                  states(waveIndex) = null
+                  finished(waveIndex) = true
+              }
           }
         }
         waveIndex += 1
@@ -3344,31 +3280,51 @@ object DispatchInterpreter {
     if (failure == null) Right(()) else Left(failure)
   }
 
+  // Register, PC and barrier state are updated directly in the measured wave interpreter loop; null avoids allocating
+  // checkpoint and optional-state wrappers for every instruction.
+  @SuppressWarnings(Array(
+    "scalafix:DisableSyntax.var",
+    "scalafix:DisableSyntax.null",
+    "scalafix:DisableSyntax.return",
+    "scalafix:GemstoneNoAssume"
+  ))
   private def runWave(
       kernel: CodeObjectKernel,
-      operations: Col[DecodedInstruction],
+      operations: Vec[DecodedInstruction],
       executable: Array[ExecutableInstruction],
       instructionIndices: Map[Int, Int],
-      instructionOffsets: Col[Int],
+      instructionOffsets: Vec[Int],
       entryInstruction: Int,
       kernarg: Array[Byte],
       dispatchBytes: Array[Byte],
       allocations: Array[AllocationRegion],
-      groupX: Int,
-      groupY: Int,
-      groupZ: Int,
-      groupWidth: Int,
-      groupHeight: Int,
-      groupDepth: Int,
+      geometry: LaunchGeometry,
+      group: Coordinates,
       localStart: Int,
-      lanes: Int,
-      waveSize: Int,
+      lanes: LaneCount,
+      waveSize: WaveSize,
       lds: Array[Byte],
       initialActive: Long,
       initial: WaveState | Null,
       memory: ExecutionMemory,
       control: ExecutionControl
   ): Either[ExecutionFailure, WaveBoundary] = {
+    val groupX          = group.x
+    val groupY          = group.y
+    val groupZ          = group.z
+    val groupWidth      = geometry.groupSize.x
+    val groupHeight     = geometry.groupSize.y
+    val groupDepth      = geometry.groupSize.z
+    val laneCoordinates = Array.ofDim[Coordinates](lanes.value)
+    var coordinateLane  = 0
+    while (coordinateLane < lanes.value) {
+      // localStart + coordinateLane is a member of this wave and therefore within the validated group volume.
+      geometry.localCoordinates(localStart + coordinateLane) match {
+        case Left(detail) => return Left(ExecutionFailure.InvalidRequest(detail))
+        case Right(local) => laneCoordinates(coordinateLane) = local
+      }
+      coordinateLane += 1
+    }
     val scalar = initial match {
       case null  => Array.fill[Long](128)(0L)
       case state => state.scalar
@@ -3394,30 +3350,31 @@ object DispatchInterpreter {
       case state => state.scalarCarry
     }
     val scratch = initial match {
+      // The 4096-byte floor proves the per-lane allocation is positive.
       case null  => ScratchMemory(lanes, math.max(4096, kernel.privateSegmentSize))
       case state => state.scratch
     }
     val codeBase     = if (kernel.textAddress != 0L && kernel.text.nonEmpty) kernel.textAddress else kernel.codeAddress
-    val traceF64     = Environment.trace("f64") && kernel.name.contains("basic_arithmetic")
-    val traceControl = Environment.trace("control")
+    val traceF64     = AMDGPUEnvironment.trace("f64") && kernel.name.contains("basic_arithmetic")
+    val traceControl = AMDGPUEnvironment.trace("control")
     val traceSetControl =
-      Environment.trace("set-control") && kernel.name.contains("set_operations")
-    val traceSetOps  = Environment.trace("set-ops") && kernel.name.contains("set_operations")
+      AMDGPUEnvironment.trace("set-control") && kernel.name.contains("set_operations")
+    val traceSetOps  = AMDGPUEnvironment.trace("set-ops") && kernel.name.contains("set_operations")
     val traceSetTail =
-      Environment.trace("set-tail") && kernel.name.contains("set_operations")
-    val traceLog      = Environment.trace("log") && kernel.name.contains("log_functor")
-    val traceSqrt     = Environment.trace("sqrt") && kernel.name.contains("sqrt_functor")
-    val traceLds      = Environment.trace("lds")
-    val traceSetLds   = Environment.trace("set-lds") && kernel.name.contains("set_operations")
+      AMDGPUEnvironment.trace("set-tail") && kernel.name.contains("set_operations")
+    val traceLog      = AMDGPUEnvironment.trace("log") && kernel.name.contains("log_functor")
+    val traceSqrt     = AMDGPUEnvironment.trace("sqrt") && kernel.name.contains("sqrt_functor")
+    val traceLds      = AMDGPUEnvironment.trace("lds")
+    val traceSetLds   = AMDGPUEnvironment.trace("set-lds") && kernel.name.contains("set_operations")
     val traceByteSort =
-      Environment.trace("byte-sort") && kernel.name.contains("radix_sort_block_sort")
+      AMDGPUEnvironment.trace("byte-sort") && kernel.name.contains("radix_sort_block_sort")
     val traceByteSortCompare =
-      Environment.trace("byte-compare") && kernel.name.contains("radix_sort_block_sort")
+      AMDGPUEnvironment.trace("byte-compare") && kernel.name.contains("radix_sort_block_sort")
     val traceByteSortRank =
-      Environment.trace("byte-rank") && kernel.name.contains("radix_sort_block_sort")
+      AMDGPUEnvironment.trace("byte-rank") && kernel.name.contains("radix_sort_block_sort")
     val traceMergeRank =
-      Environment.trace("merge-rank") && kernel.name.contains("wrapped_merge_sort") &&
-        localStart == 0 && lanes == waveSize
+      AMDGPUEnvironment.trace("merge-rank") && kernel.name.contains("wrapped_merge_sort") &&
+        localStart == 0 && lanes.value == waveSize.value
     var nextUserSgpr                           = 0
     def enabled(value: Int, bit: Int): Boolean = (value & (1 << bit)) != 0
     def reserve(count: Int): Int               = {
@@ -3438,27 +3395,27 @@ object DispatchInterpreter {
       if (enabled(kernel.computePgmRsrc2, 9)) scalar(reserve(1)) = Bits.unsigned32(groupZ)
       if (enabled(kernel.computePgmRsrc2, 10)) scalar(reserve(1)) = 0L
       val enabledWorkItemIds = (kernel.computePgmRsrc2 >>> 11) & 0x3
-      (0 until lanes).foreach { lane =>
-        val (x, y, z) = workItemIds(localStart + lane, groupWidth, groupHeight)
-        vector(0)(lane) = Bits.unsigned32(x)
-        if (enabledWorkItemIds >= 1) vector(1)(lane) = Bits.unsigned32(y)
-        if (enabledWorkItemIds >= 2) vector(2)(lane) = Bits.unsigned32(z)
+      (0 until lanes.value).foreach { lane =>
+        val local = laneCoordinates(lane)
+        vector(0)(lane) = Bits.unsigned32(local.x)
+        if (enabledWorkItemIds >= 1) vector(1)(lane) = Bits.unsigned32(local.y)
+        if (enabledWorkItemIds >= 2) vector(2)(lane) = Bits.unsigned32(local.z)
       }
       if (traceControl && kernel.name.contains("wrapped_transform_config"))
-        System.err.println(
+        scribe.debug(
           s"Gemstone AMDGPU transform entry kernel=${kernel.name} properties=${kernel.kernelCodeProperties} rsrc2=${kernel.computePgmRsrc2} nextUserSgpr=$nextUserSgpr scalar=${scalar.take(16).mkString("[", ",", "]")} group=($groupX,$groupY,$groupZ) localStart=$localStart lanes=$lanes"
         )
-      if (Environment.trace("wave"))
-        System.err.println(
-          s"Gemstone AMDGPU wave entry kernel=${kernel.name} localStart=$localStart lanes=$lanes groupWidth=$groupWidth vector0=${(0 until math.min(4, lanes)).map(
+      if (AMDGPUEnvironment.trace("wave"))
+        scribe.debug(
+          s"Gemstone AMDGPU wave entry kernel=${kernel.name} localStart=$localStart lanes=$lanes groupWidth=$groupWidth vector0=${(0 until math.min(4, lanes.value)).map(
               lane => vector(0)(lane)
             ).mkString(",")}"
         )
       if (
-        Environment.trace("merge-entry") &&
+        AMDGPUEnvironment.trace("merge-entry") &&
         kernel.name.contains("wrapped_merge_sort") && localStart == 0
       )
-        System.err.println(
+        scribe.debug(
           s"Gemstone AMDGPU merge entry scalar=${scalar.take(32).mkString("[", ",", "]")} group=($groupX,$groupY,$groupZ) lanes=$lanes"
         )
     }
@@ -3483,7 +3440,7 @@ object DispatchInterpreter {
       // the null SGPR (s[125:126]).  Do not read/write that pseudo-register:
       // s126 is the live EXEC mask in the emulator.
       if (destination != 125) {
-        if (waveSize <= 32) {
+        if (waveSize.value <= 32) {
           writeScalar32(destination, Bits.low32(result))
         } else {
           writeScalar64(destination, result)
@@ -3535,7 +3492,7 @@ object DispatchInterpreter {
 
     def foreachLane(operation: Int => Unit): Unit = {
       var lane = 0
-      while (lane < lanes) {
+      while (lane < lanes.value) {
         operation(lane)
         lane += 1
       }
@@ -3543,7 +3500,7 @@ object DispatchInterpreter {
 
     def foreachActive(operation: Int => Unit): Unit = {
       var lane = 0
-      while (lane < lanes) {
+      while (lane < lanes.value) {
         if (active(lane)) operation(lane)
         lane += 1
       }
@@ -3563,11 +3520,11 @@ object DispatchInterpreter {
     // functions (the hardware applies the local aperture); model that
     // aperture explicitly before falling back to per-lane scratch or the
     // dispatch allocation map.
-    def flatLoad(lane: Int, address: Long, size: Int): Either[ExecutionFailure, Col[Byte]] =
+    def flatLoad(lane: Int, address: Long, size: Int): Either[ExecutionFailure, Vec[Byte]] =
       if (address >= 0L && address <= lds.length.toLong - size.toLong)
-        readLDS(lds, address, size).map(Col.unsafeFromArray)
+        readLDS(lds, address, size).map(Vec.unsafeFromArray)
       else if (address >= 0L && address <= scratch(lane).length.toLong - size.toLong)
-        Right(Col.unsafeFromArray(java.util.Arrays.copyOfRange(scratch(lane), address.toInt, address.toInt + size)))
+        Right(Vec.unsafeFromArray(java.util.Arrays.copyOfRange(scratch(lane), address.toInt, address.toInt + size)))
       else
         readBytes(
           address,
@@ -3585,36 +3542,85 @@ object DispatchInterpreter {
       if (address >= 0L && address <= lds.length.toLong - bytes.length)
         writeLDS(lds, address, bytes)
       else if (address >= 0L && address <= scratch(lane).length.toLong - bytes.length) {
-        System.arraycopy(bytes, 0, scratch(lane), address.toInt, bytes.length)
+        Array.copy(bytes, 0, scratch(lane), address.toInt, bytes.length)
         Right(())
       } else writeBytes(address, bytes, allocations, memory, kernel.globalMemory)
 
     def isEmulatedCall(name: String): Boolean =
       name == "__ockl_get_group_id" || name == "__ockl_get_local_size" || name == "__ockl_get_local_id" ||
-        EmulatedCallNameFragments.exists(name.contains)
+        EmulatedCallNameFragments.exists(name.contains(_))
+
+    def executeBufferStore(
+        index: Int,
+        address: Option[Int],
+        resource: Int,
+        scalarOffset: Option[Int],
+        src: Int,
+        byteCount: Int :| Interval.Closed[1, 16],
+        offset: Int,
+        highByteCount: Option[ScalarByteWidth]
+    ): Either[ExecutionFailure, Option[Int]] = {
+      def storedBytes(lane: Int): Array[Byte] = highByteCount match {
+        case Some(width) => LittleEndian.toArray(vector(src)(lane) >>> 16, width)
+        case None        => vectorBytes(vector, src, lane, byteCount)
+      }
+
+      def storeLane(lane: Int): Either[ExecutionFailure, Unit] =
+        if (lane == lanes.value) Right(())
+        else if (!active(lane)) storeLane(lane + 1)
+        else {
+          val start =
+            address.map(register => Bits.low32(vector(register)(lane))).getOrElse(0L) + scalarOffset.fold(0L)(
+              register => Bits.low32(scalar(register))
+            ) + offset.toLong
+          val base  = sourceScalar64(InstructionSource.Scalar(resource)) & 0x0000ffffffffffffL
+          val range = Bits.low32(scalar(resource + 2))
+          if (AMDGPUEnvironment.trace("all-stores") && lane < 4)
+            scribe.debug(
+              s"Gemstone AMDGPU buffer store index=$index kernel=${kernel.name} lane=$lane start=$start base=0x${base.toHexString} src=$src value=0x${vector(src)(lane).toHexString}"
+            )
+          if (base != 0L && (start < 0L || start > range - byteCount.toLong)) storeLane(lane + 1)
+          else if (base != 0L)
+            writeBytes(base + start, storedBytes(lane), allocations, memory, kernel.globalMemory)
+              .flatMap(_ => storeLane(lane + 1))
+          else if (start < 0L || start > scratch(lane).length.toLong - byteCount.toLong)
+            Left(ExecutionFailure.Failed(
+              s"buffer store ${operations(index)} at instruction $index lane $lane offset $start size $byteCount exceeds private scratch ${scratch(lane).length}"
+            ))
+          else {
+            val bytes = storedBytes(lane)
+            Array.copy(bytes, 0, scratch(lane), start.toInt, byteCount)
+            storeLane(lane + 1)
+          }
+        }
+
+      advanceAfter(storeLane(0))
+    }
 
     // Keep the large decoded instruction switch out of the packed dispatcher: the JVM
     // otherwise interprets even packed operations because the method exceeds its JIT size limit.
     def stepDecoded(index: Int): Either[ExecutionFailure, Option[Int]] = operations(index) match {
       case DecodedInstruction.End =>
         if (traceControl)
-          System.err.println(s"Gemstone AMDGPU control end index=$index active=${laneMask(active)}")
+          scribe.debug(s"Gemstone AMDGPU control end index=$index active=${laneMask(active)}")
         Right(None)
       case DecodedInstruction.Wait                      => AdvanceStep
       case DecodedInstruction.SSetGprIdxOn              => AdvanceStep
       case DecodedInstruction.Barrier                   => Right(Some(-1))
       case DecodedInstruction.Branch(condition, target) =>
         val taken = condition match {
-          case ScalarBranchCondition.Always      => true
-          case ScalarBranchCondition.SccZero     => !scalarCarry
-          case ScalarBranchCondition.SccNonZero  => scalarCarry
-          case ScalarBranchCondition.VccZero     => (laneMask(carry) & Bits.mask(lanes)) == 0L
-          case ScalarBranchCondition.VccNonZero  => (laneMask(carry) & Bits.mask(lanes)) != 0L
+          case ScalarBranchCondition.Always     => true
+          case ScalarBranchCondition.SccZero    => !scalarCarry
+          case ScalarBranchCondition.SccNonZero => scalarCarry
+          case ScalarBranchCondition.VccZero    =>
+            (laneMask(carry) & Bits.mask(lanes.bitWidth)) == 0L
+          case ScalarBranchCondition.VccNonZero =>
+            (laneMask(carry) & Bits.mask(lanes.bitWidth)) != 0L
           case ScalarBranchCondition.ExecZero    => active.isEmpty
           case ScalarBranchCondition.ExecNonZero => active.nonEmpty
         }
         if (traceControl)
-          System.err.println(
+          scribe.debug(
             s"Gemstone AMDGPU control branch index=$index target=$target condition=$condition taken=$taken active=${laneMask(active)} scc=$scalarCarry vcc=${laneMask(carry)}"
           )
         Right(Some(if (taken) target else index + 1))
@@ -3632,39 +3638,42 @@ object DispatchInterpreter {
           kernel.globalMemory,
           allocations,
           memory
-        ).map {
-          bytes =>
-            (0 until count).foreach(register => scalar(dest + register) = unsignedInt(bytes, register * 4))
-          if (
-            Environment.trace("merge-input") &&
-            kernel.name.contains("wrapped_merge_sort") && localStart == 0 && index >= 1304 && index <= 1304
-          )
-            System.err.println(
-              s"Gemstone AMDGPU merge input sload index=$index base=$base offset=$offset address=0x${address.toHexString} dest=$dest values=${(0 until count).map(
-                  register => scalar(dest + register)
-                ).mkString("[", ",", "]")}"
+        ) match {
+          case Left(error)  => Left(error)
+          case Right(bytes) =>
+            (0 until count).foreach { register =>
+              scalar(dest + register) = unsignedInt(bytes, register * 4)
+            }
+            if (
+              AMDGPUEnvironment.trace("merge-input") &&
+              kernel.name.contains("wrapped_merge_sort") && localStart == 0 && index >= 1304 && index <= 1304
             )
-          if (traceControl) {
-            val loaded = (0 until count).map(register => scalar(dest + register))
-            System.err.println(
-              s"Gemstone AMDGPU control sload dest=$dest count=$count base=$base offset=$offset values=$loaded"
-            )
-          }
-          Some(index + 1)
+              scribe.debug(
+                s"Gemstone AMDGPU merge input sload index=$index base=$base offset=$offset address=0x${address.toHexString} dest=$dest values=${(0 until count).map(
+                    register => scalar(dest + register)
+                  ).mkString("[", ",", "]")}"
+              )
+            if (traceControl) {
+              val loaded = (0 until count).map(register => scalar(dest + register))
+              scribe.debug(
+                s"Gemstone AMDGPU control sload dest=$dest count=$count base=$base offset=$offset values=$loaded"
+              )
+            }
+            Right(Some(index + 1))
         }
       case DecodedInstruction.SMove(dest, src) =>
         writeScalar32(dest, source(src, 0))
         if (traceControl && (dest == 18 || dest == 19))
-          System.err.println(s"Gemstone AMDGPU control smove dest=$dest src=$src value=${scalar(dest)}")
+          scribe.debug(s"Gemstone AMDGPU control smove dest=$dest src=$src value=${scalar(dest)}")
         if (traceSetControl)
-          System.err.println(
+          scribe.debug(
             s"Gemstone AMDGPU set smove kernel=${kernel.name} localStart=$localStart index=$index dest=$dest src=$src value=0x${scalar(dest).toHexString}"
           )
         AdvanceStep
       case DecodedInstruction.SMoveImmediate(dest, value) =>
         writeScalar32(dest, Bits.unsigned32(value))
         if (traceSetControl)
-          System.err.println(
+          scribe.debug(
             s"Gemstone AMDGPU set smovei kernel=${kernel.name} localStart=$localStart index=$index dest=$dest value=0x${scalar(dest).toHexString}"
           )
         AdvanceStep
@@ -3690,12 +3699,14 @@ object DispatchInterpreter {
         val target = sourceScalar64(src)
         programIndex(target)
           .map(index => Right(Some(index)))
-          .getOrElse(Left(ExecutionFailure.Failed(f"AMDGPU setpc target 0x$target%X is not an instruction")))
+          .getOrElse(Left(ExecutionFailure.Failed(
+            f"AMDGPU setpc target 0x$target%X is not an instruction"
+          )))
       case DecodedInstruction.SSwapPc(dest, src) =>
         val target      = sourceScalar64(src)
         val targetIndex = programIndex(target)
         val targetName  = kernel.functionTargets.get(target)
-        if (!targetName.exists(isEmulatedCall) && targetIndex.nonEmpty) {
+        if (!targetName.exists(isEmulatedCall(_)) && targetIndex.nonEmpty) {
           // Device calls and returns use the same hardware primitive:
           // save the next instruction address in the destination pair,
           // then jump to the source pair. A callee returns by swapping
@@ -3749,18 +3760,18 @@ object DispatchInterpreter {
           kernel.functionTargets.get(target) match {
             case Some(name) if name.contains("logIf") =>
               foreachActive { lane =>
-                val real      = IEEE754.binary32ToFloat(Bits.low32(vector(0)(lane))).toDouble
-                val imaginary = IEEE754.binary32ToFloat(Bits.low32(vector(1)(lane))).toDouble
-                vector(0)(lane) = IEEE754.floatToBinary32(math.log(math.hypot(real, imaginary)).toFloat)
-                vector(1)(lane) = IEEE754.floatToBinary32(math.atan2(imaginary, real).toFloat)
+                val real      = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(vector(0)(lane)))).toDouble
+                val imaginary = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(vector(1)(lane)))).toDouble
+                vector(0)(lane) = IEEE754.floatToBinary32(math.log(math.hypot(real, imaginary)).toFloat).value
+                vector(1)(lane) = IEEE754.floatToBinary32(math.atan2(imaginary, real).toFloat).value
               }
               AdvanceStep
             case Some(name) if name.contains("logId") =>
               foreachActive { lane =>
                 val real          = IEEE754.binary64ToDouble(pair(vector, 0, lane))
                 val imaginary     = IEEE754.binary64ToDouble(pair(vector, 2, lane))
-                val realBits      = java.lang.Double.doubleToRawLongBits(math.log(math.hypot(real, imaginary)))
-                val imaginaryBits = java.lang.Double.doubleToRawLongBits(math.atan2(imaginary, real))
+                val realBits      = IEEE754.doubleToBinary64(math.log(math.hypot(real, imaginary)))
+                val imaginaryBits = IEEE754.doubleToBinary64(math.atan2(imaginary, real))
                 vector(0)(lane) = Bits.low32(realBits)
                 vector(1)(lane) = Bits.high32(realBits)
                 vector(2)(lane) = Bits.low32(imaginaryBits)
@@ -3769,8 +3780,8 @@ object DispatchInterpreter {
               AdvanceStep
             case Some(name) if name.contains("casinhf") =>
               foreachActive { lane =>
-                val real             = IEEE754.binary32ToFloat(Bits.low32(vector(0)(lane))).toDouble
-                val imaginary        = IEEE754.binary32ToFloat(Bits.low32(vector(1)(lane))).toDouble
+                val real             = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(vector(0)(lane)))).toDouble
+                val imaginary        = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(vector(1)(lane)))).toDouble
                 val squareReal       = real * real - imaginary * imaginary + 1.0
                 val squareImaginary  = 2.0 * real * imaginary
                 val magnitude        = math.hypot(squareReal, squareImaginary)
@@ -3779,8 +3790,8 @@ object DispatchInterpreter {
                 val shiftedReal      = real + rootReal
                 val shiftedImaginary = imaginary + rootImaginary
                 vector(0)(lane) =
-                  IEEE754.floatToBinary32(math.log(math.hypot(shiftedReal, shiftedImaginary)).toFloat)
-                vector(1)(lane) = IEEE754.floatToBinary32(math.atan2(shiftedImaginary, shiftedReal).toFloat)
+                  IEEE754.floatToBinary32(math.log(math.hypot(shiftedReal, shiftedImaginary)).toFloat).value
+                vector(1)(lane) = IEEE754.floatToBinary32(math.atan2(shiftedImaginary, shiftedReal).toFloat).value
               }
               AdvanceStep
             case Some(name) if name.contains("casinhE") =>
@@ -3796,8 +3807,8 @@ object DispatchInterpreter {
                 val shiftedImaginary = imaginary + rootImaginary
                 val resultReal       = math.log(math.hypot(shiftedReal, shiftedImaginary))
                 val resultImaginary  = math.atan2(shiftedImaginary, shiftedReal)
-                val realBits         = java.lang.Double.doubleToRawLongBits(resultReal)
-                val imaginaryBits    = java.lang.Double.doubleToRawLongBits(resultImaginary)
+                val realBits         = IEEE754.doubleToBinary64(resultReal)
+                val imaginaryBits    = IEEE754.doubleToBinary64(resultImaginary)
                 vector(0)(lane) = Bits.low32(realBits)
                 vector(1)(lane) = Bits.high32(realBits)
                 vector(2)(lane) = Bits.low32(imaginaryBits)
@@ -3806,11 +3817,11 @@ object DispatchInterpreter {
               AdvanceStep
             case Some(name) if name.contains("cacosf") =>
               foreachActive { lane =>
-                val real      = IEEE754.binary32ToFloat(Bits.low32(vector(0)(lane))).toDouble
-                val imaginary = IEEE754.binary32ToFloat(Bits.low32(vector(1)(lane))).toDouble
+                val real      = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(vector(0)(lane)))).toDouble
+                val imaginary = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(vector(1)(lane)))).toDouble
                 val result    = complexAcos(real, imaginary)
-                vector(0)(lane) = IEEE754.floatToBinary32(result._1.toFloat)
-                vector(1)(lane) = IEEE754.floatToBinary32(result._2.toFloat)
+                vector(0)(lane) = IEEE754.floatToBinary32(result._1.toFloat).value
+                vector(1)(lane) = IEEE754.floatToBinary32(result._2.toFloat).value
               }
               AdvanceStep
             case Some(name) if name.contains("cacosE") =>
@@ -3818,10 +3829,10 @@ object DispatchInterpreter {
                 val real          = IEEE754.binary64ToDouble(pair(vector, 0, lane))
                 val imaginary     = IEEE754.binary64ToDouble(pair(vector, 2, lane))
                 val result        = complexAcos(real, imaginary)
-                val realBits      = java.lang.Double.doubleToRawLongBits(result._1)
-                val imaginaryBits = java.lang.Double.doubleToRawLongBits(result._2)
-                if (Environment.trace("calls") && lane == 0)
-                  System.err.println(
+                val realBits      = IEEE754.doubleToBinary64(result._1)
+                val imaginaryBits = IEEE754.doubleToBinary64(result._2)
+                if (AMDGPUEnvironment.trace("calls") && lane == 0)
+                  scribe.debug(
                     s"Gemstone AMDGPU cacosE input=($real,$imaginary) result=${result._1},${result._2}"
                   )
                 vector(0)(lane) = Bits.low32(realBits)
@@ -3832,11 +3843,11 @@ object DispatchInterpreter {
               AdvanceStep
             case Some(name) if name.contains("catanf") =>
               foreachActive { lane =>
-                val real      = IEEE754.binary32ToFloat(Bits.low32(vector(0)(lane))).toDouble
-                val imaginary = IEEE754.binary32ToFloat(Bits.low32(vector(1)(lane))).toDouble
+                val real      = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(vector(0)(lane)))).toDouble
+                val imaginary = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(vector(1)(lane)))).toDouble
                 val result    = complexAtan(real, imaginary)
-                vector(0)(lane) = IEEE754.floatToBinary32(result._1.toFloat)
-                vector(1)(lane) = IEEE754.floatToBinary32(result._2.toFloat)
+                vector(0)(lane) = IEEE754.floatToBinary32(result._1.toFloat).value
+                vector(1)(lane) = IEEE754.floatToBinary32(result._2.toFloat).value
               }
               AdvanceStep
             case Some(name) if name.contains("catanE") =>
@@ -3844,8 +3855,8 @@ object DispatchInterpreter {
                 val real          = IEEE754.binary64ToDouble(pair(vector, 0, lane))
                 val imaginary     = IEEE754.binary64ToDouble(pair(vector, 2, lane))
                 val result        = complexAtan(real, imaginary)
-                val realBits      = java.lang.Double.doubleToRawLongBits(result._1)
-                val imaginaryBits = java.lang.Double.doubleToRawLongBits(result._2)
+                val realBits      = IEEE754.doubleToBinary64(result._1)
+                val imaginaryBits = IEEE754.doubleToBinary64(result._2)
                 vector(0)(lane) = Bits.low32(realBits)
                 vector(1)(lane) = Bits.high32(realBits)
                 vector(2)(lane) = Bits.low32(imaginaryBits)
@@ -3854,11 +3865,11 @@ object DispatchInterpreter {
               AdvanceStep
             case Some(name) if name.contains("cacoshf") =>
               foreachActive { lane =>
-                val real      = IEEE754.binary32ToFloat(Bits.low32(vector(0)(lane))).toDouble
-                val imaginary = IEEE754.binary32ToFloat(Bits.low32(vector(1)(lane))).toDouble
+                val real      = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(vector(0)(lane)))).toDouble
+                val imaginary = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(vector(1)(lane)))).toDouble
                 val result    = complexAcosh(real, imaginary)
-                vector(0)(lane) = IEEE754.floatToBinary32(result._1.toFloat)
-                vector(1)(lane) = IEEE754.floatToBinary32(result._2.toFloat)
+                vector(0)(lane) = IEEE754.floatToBinary32(result._1.toFloat).value
+                vector(1)(lane) = IEEE754.floatToBinary32(result._2.toFloat).value
               }
               AdvanceStep
             case Some(name) if name.contains("cacoshE") =>
@@ -3866,8 +3877,8 @@ object DispatchInterpreter {
                 val real          = IEEE754.binary64ToDouble(pair(vector, 0, lane))
                 val imaginary     = IEEE754.binary64ToDouble(pair(vector, 2, lane))
                 val result        = complexAcosh(real, imaginary)
-                val realBits      = java.lang.Double.doubleToRawLongBits(result._1)
-                val imaginaryBits = java.lang.Double.doubleToRawLongBits(result._2)
+                val realBits      = IEEE754.doubleToBinary64(result._1)
+                val imaginaryBits = IEEE754.doubleToBinary64(result._2)
                 vector(0)(lane) = Bits.low32(realBits)
                 vector(1)(lane) = Bits.high32(realBits)
                 vector(2)(lane) = Bits.low32(imaginaryBits)
@@ -3876,11 +3887,11 @@ object DispatchInterpreter {
               AdvanceStep
             case Some(name) if name.contains("catanhf") =>
               foreachActive { lane =>
-                val real      = IEEE754.binary32ToFloat(Bits.low32(vector(0)(lane))).toDouble
-                val imaginary = IEEE754.binary32ToFloat(Bits.low32(vector(1)(lane))).toDouble
+                val real      = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(vector(0)(lane)))).toDouble
+                val imaginary = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(vector(1)(lane)))).toDouble
                 val result    = complexAtanh(real, imaginary)
-                vector(0)(lane) = IEEE754.floatToBinary32(result._1.toFloat)
-                vector(1)(lane) = IEEE754.floatToBinary32(result._2.toFloat)
+                vector(0)(lane) = IEEE754.floatToBinary32(result._1.toFloat).value
+                vector(1)(lane) = IEEE754.floatToBinary32(result._2.toFloat).value
               }
               AdvanceStep
             case Some(name) if name.contains("catanhE") =>
@@ -3888,8 +3899,8 @@ object DispatchInterpreter {
                 val real          = IEEE754.binary64ToDouble(pair(vector, 0, lane))
                 val imaginary     = IEEE754.binary64ToDouble(pair(vector, 2, lane))
                 val result        = complexAtanh(real, imaginary)
-                val realBits      = java.lang.Double.doubleToRawLongBits(result._1)
-                val imaginaryBits = java.lang.Double.doubleToRawLongBits(result._2)
+                val realBits      = IEEE754.doubleToBinary64(result._1)
+                val imaginaryBits = IEEE754.doubleToBinary64(result._2)
                 vector(0)(lane) = Bits.low32(realBits)
                 vector(1)(lane) = Bits.high32(realBits)
                 vector(2)(lane) = Bits.low32(imaginaryBits)
@@ -3898,33 +3909,33 @@ object DispatchInterpreter {
               AdvanceStep
             case Some(name) if name.contains("csinhf") =>
               foreachActive { lane =>
-                val real            = IEEE754.binary32ToFloat(Bits.low32(vector(0)(lane))).toDouble
-                val imaginary       = IEEE754.binary32ToFloat(Bits.low32(vector(1)(lane))).toDouble
+                val real            = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(vector(0)(lane)))).toDouble
+                val imaginary       = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(vector(1)(lane)))).toDouble
                 val resultReal      = math.sinh(real) * math.cos(imaginary)
                 val resultImaginary = math.cosh(real) * math.sin(imaginary)
-                vector(0)(lane) = IEEE754.floatToBinary32(resultReal.toFloat)
-                vector(1)(lane) = IEEE754.floatToBinary32(resultImaginary.toFloat)
+                vector(0)(lane) = IEEE754.floatToBinary32(resultReal.toFloat).value
+                vector(1)(lane) = IEEE754.floatToBinary32(resultImaginary.toFloat).value
               }
               AdvanceStep
             case Some(name) if name.contains("ccoshf") =>
               foreachActive { lane =>
-                val real            = IEEE754.binary32ToFloat(Bits.low32(vector(0)(lane))).toDouble
-                val imaginary       = IEEE754.binary32ToFloat(Bits.low32(vector(1)(lane))).toDouble
+                val real            = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(vector(0)(lane)))).toDouble
+                val imaginary       = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(vector(1)(lane)))).toDouble
                 val resultReal      = math.cosh(real) * math.cos(imaginary)
                 val resultImaginary = math.sinh(real) * math.sin(imaginary)
-                vector(0)(lane) = IEEE754.floatToBinary32(resultReal.toFloat)
-                vector(1)(lane) = IEEE754.floatToBinary32(resultImaginary.toFloat)
+                vector(0)(lane) = IEEE754.floatToBinary32(resultReal.toFloat).value
+                vector(1)(lane) = IEEE754.floatToBinary32(resultImaginary.toFloat).value
               }
               AdvanceStep
             case Some(name) if name.contains("ctanhf") =>
               foreachActive { lane =>
-                val real            = IEEE754.binary32ToFloat(Bits.low32(vector(0)(lane))).toDouble
-                val imaginary       = IEEE754.binary32ToFloat(Bits.low32(vector(1)(lane))).toDouble
+                val real            = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(vector(0)(lane)))).toDouble
+                val imaginary       = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(vector(1)(lane)))).toDouble
                 val denominator     = math.cosh(2.0 * real) + math.cos(2.0 * imaginary)
                 val resultReal      = math.sinh(2.0 * real) / denominator
                 val resultImaginary = math.sin(2.0 * imaginary) / denominator
-                vector(0)(lane) = IEEE754.floatToBinary32(resultReal.toFloat)
-                vector(1)(lane) = IEEE754.floatToBinary32(resultImaginary.toFloat)
+                vector(0)(lane) = IEEE754.floatToBinary32(resultReal.toFloat).value
+                vector(1)(lane) = IEEE754.floatToBinary32(resultImaginary.toFloat).value
               }
               AdvanceStep
             case Some(name) if name.contains("csinhE") =>
@@ -3933,8 +3944,8 @@ object DispatchInterpreter {
                 val imaginary       = IEEE754.binary64ToDouble(pair(vector, 2, lane))
                 val resultReal      = math.sinh(real) * math.cos(imaginary)
                 val resultImaginary = math.cosh(real) * math.sin(imaginary)
-                val realBits        = java.lang.Double.doubleToRawLongBits(resultReal)
-                val imaginaryBits   = java.lang.Double.doubleToRawLongBits(resultImaginary)
+                val realBits        = IEEE754.doubleToBinary64(resultReal)
+                val imaginaryBits   = IEEE754.doubleToBinary64(resultImaginary)
                 vector(0)(lane) = Bits.low32(realBits)
                 vector(1)(lane) = Bits.high32(realBits)
                 vector(2)(lane) = Bits.low32(imaginaryBits)
@@ -3947,8 +3958,8 @@ object DispatchInterpreter {
                 val imaginary       = IEEE754.binary64ToDouble(pair(vector, 2, lane))
                 val resultReal      = math.cosh(real) * math.cos(imaginary)
                 val resultImaginary = math.sinh(real) * math.sin(imaginary)
-                val realBits        = java.lang.Double.doubleToRawLongBits(resultReal)
-                val imaginaryBits   = java.lang.Double.doubleToRawLongBits(resultImaginary)
+                val realBits        = IEEE754.doubleToBinary64(resultReal)
+                val imaginaryBits   = IEEE754.doubleToBinary64(resultImaginary)
                 vector(0)(lane) = Bits.low32(realBits)
                 vector(1)(lane) = Bits.high32(realBits)
                 vector(2)(lane) = Bits.low32(imaginaryBits)
@@ -3962,8 +3973,8 @@ object DispatchInterpreter {
                 val denominator     = math.cosh(2.0 * real) + math.cos(2.0 * imaginary)
                 val resultReal      = math.sinh(2.0 * real) / denominator
                 val resultImaginary = math.sin(2.0 * imaginary) / denominator
-                val realBits        = java.lang.Double.doubleToRawLongBits(resultReal)
-                val imaginaryBits   = java.lang.Double.doubleToRawLongBits(resultImaginary)
+                val realBits        = IEEE754.doubleToBinary64(resultReal)
+                val imaginaryBits   = IEEE754.doubleToBinary64(resultImaginary)
                 vector(0)(lane) = Bits.low32(realBits)
                 vector(1)(lane) = Bits.high32(realBits)
                 vector(2)(lane) = Bits.low32(imaginaryBits)
@@ -3971,17 +3982,17 @@ object DispatchInterpreter {
               }
               AdvanceStep
             case Some(name) if name.contains("expIf") =>
-              if (Environment.trace("calls")) {
-                val real      = IEEE754.binary32ToFloat(Bits.low32(vector(0)(0)))
-                val imaginary = IEEE754.binary32ToFloat(Bits.low32(vector(1)(0)))
-                System.err.println(s"Gemstone AMDGPU call name=$name real=$real imaginary=$imaginary")
+              if (AMDGPUEnvironment.trace("calls")) {
+                val real      = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(vector(0)(0))))
+                val imaginary = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(vector(1)(0))))
+                scribe.debug(s"Gemstone AMDGPU call name=$name real=$real imaginary=$imaginary")
               }
               foreachActive { lane =>
-                val real      = IEEE754.binary32ToFloat(Bits.low32(vector(0)(lane))).toDouble
-                val imaginary = IEEE754.binary32ToFloat(Bits.low32(vector(1)(lane))).toDouble
+                val real      = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(vector(0)(lane)))).toDouble
+                val imaginary = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(vector(1)(lane)))).toDouble
                 val scale     = math.exp(real)
-                vector(0)(lane) = IEEE754.floatToBinary32((scale * math.cos(imaginary)).toFloat)
-                vector(1)(lane) = IEEE754.floatToBinary32((scale * math.sin(imaginary)).toFloat)
+                vector(0)(lane) = IEEE754.floatToBinary32((scale * math.cos(imaginary)).toFloat).value
+                vector(1)(lane) = IEEE754.floatToBinary32((scale * math.sin(imaginary)).toFloat).value
               }
               AdvanceStep
             case Some(name) if name.contains("expId") =>
@@ -3989,8 +4000,8 @@ object DispatchInterpreter {
                 val real          = IEEE754.binary64ToDouble(pair(vector, 0, lane))
                 val imaginary     = IEEE754.binary64ToDouble(pair(vector, 2, lane))
                 val scale         = math.exp(real)
-                val realBits      = java.lang.Double.doubleToRawLongBits(scale * math.cos(imaginary))
-                val imaginaryBits = java.lang.Double.doubleToRawLongBits(scale * math.sin(imaginary))
+                val realBits      = IEEE754.doubleToBinary64(scale * math.cos(imaginary))
+                val imaginaryBits = IEEE754.doubleToBinary64(scale * math.sin(imaginary))
                 vector(0)(lane) = Bits.low32(realBits)
                 vector(1)(lane) = Bits.high32(realBits)
                 vector(2)(lane) = Bits.low32(imaginaryBits)
@@ -4015,11 +4026,11 @@ object DispatchInterpreter {
                       case _ => 0
                     }
                   case "__ockl_get_local_id" =>
-                    val linear = localStart + lane
+                    val local = laneCoordinates(lane)
                     dimension match {
-                      case 0 => linear                                % groupWidth
-                      case 1 => (linear / groupWidth)                 % groupHeight
-                      case 2 => (linear / (groupWidth * groupHeight)) % groupDepth
+                      case 0 => local.x
+                      case 1 => local.y
+                      case 2 => local.z
                       case _ => 0
                     }
                   case _ => 0
@@ -4027,9 +4038,12 @@ object DispatchInterpreter {
                 vector(0)(lane) = Bits.unsigned32(value)
               }
               AdvanceStep
-            case Some(name) => Left(ExecutionFailure.Unsupported(s"AMDGPU call to $name is not implemented"))
-            case None       =>
-              Left(ExecutionFailure.Failed(f"AMDGPU call target 0x$target%X is not present in the code object"))
+            case Some(name) =>
+              Left(ExecutionFailure.Unsupported(s"AMDGPU call to $name is not implemented"))
+            case None =>
+              Left(ExecutionFailure.Failed(
+                f"AMDGPU call target 0x$target%X is not present in the code object"
+              ))
           }
         }
       case DecodedInstruction.SAndSaveExec(dest, src, width) =>
@@ -4040,14 +4054,14 @@ object DispatchInterpreter {
         saveExecWrite(126, result, width)
         scalarCarry = result != 0L
         if (traceMergeRank && index >= 1548 && index <= 1625)
-          System.err.println(
+          scribe.debug(
             s"Gemstone AMDGPU merge rank saveexec index=$index dest=$dest src=$src previous=0x${previous.toHexString} source=0x${sourceValue.toHexString} result=0x${result.toHexString}"
           )
-        if (traceControl) System.err.println(
+        if (traceControl) scribe.debug(
           s"Gemstone AMDGPU control and dest=$dest src=$src previous=$previous source=$sourceValue result=$result"
         )
         if (traceSetControl)
-          System.err.println(
+          scribe.debug(
             s"Gemstone AMDGPU set and kernel=${kernel.name} localStart=$localStart index=$index dest=$dest src=$src width=$width previous=0x${previous.toHexString} source=0x${sourceValue.toHexString} result=0x${result.toHexString}"
           )
         AdvanceStep
@@ -4062,11 +4076,11 @@ object DispatchInterpreter {
         saveExecWrite(dest, previous, width)
         saveExecWrite(126, result, width)
         scalarCarry = result != 0L
-        if (traceControl) System.err.println(
+        if (traceControl) scribe.debug(
           s"Gemstone AMDGPU control andn2 dest=$dest src=$src previous=$previous source=$sourceValue result=$result"
         )
         if (traceSetControl)
-          System.err.println(
+          scribe.debug(
             s"Gemstone AMDGPU set andn2 kernel=${kernel.name} localStart=$localStart index=$index dest=$dest src=$src width=$width previous=0x${previous.toHexString} source=0x${sourceValue.toHexString} result=0x${result.toHexString}"
           )
         AdvanceStep
@@ -4089,10 +4103,10 @@ object DispatchInterpreter {
       case DecodedInstruction.SUnary(opcode, dest, src) =>
         val result = opcode match {
           case "s_abs_i32"       => Bits.low32(math.abs(Bits.low32(source(src, 0)).toInt).toLong)
-          case "s_sext_i32_i8"   => Bits.low32(Bits.signExtend(source(src, 0) & 0xffL, 8))
-          case "s_sext_i32_i16"  => Bits.low32(Bits.signExtend(source(src, 0) & 0xffffL, 16))
-          case "s_bcnt1_i32_b32" => Bits.bitCount(source(src, 0), 32).toLong
-          case "s_bcnt1_i32_b64" => Bits.bitCount(sourceScalar64(src), 64).toLong
+          case "s_sext_i32_i8"   => Bits.low32(Bits.signExtend(source(src, 0) & 0xffL, BitWidth(8)))
+          case "s_sext_i32_i16"  => Bits.low32(Bits.signExtend(source(src, 0) & 0xffffL, BitWidth(16)))
+          case "s_bcnt1_i32_b32" => Bits.bitCount(source(src, 0), BitWidth(32)).toLong
+          case "s_bcnt1_i32_b64" => Bits.bitCount(sourceScalar64(src), BitWidth(64)).toLong
           case "s_brev_b32"      => bitReverse32(source(src, 0))
           case "s_not_b32"       => Bits.low32(~source(src, 0))
           case "s_not_b64"       => ~sourceScalar64(src)
@@ -4103,7 +4117,7 @@ object DispatchInterpreter {
         if (opcode == "s_not_b64") writeScalar64(dest, result) else writeScalar32(dest, result)
         if (opcode == "s_not_b32" || opcode == "s_not_b64") scalarCarry = result != 0L
         if (traceControl && (dest == 18 || dest == 19))
-          System.err.println(s"Gemstone AMDGPU control sunary opcode=$opcode dest=$dest src=$src value=$result")
+          scribe.debug(s"Gemstone AMDGPU control sunary opcode=$opcode dest=$dest src=$src value=$result")
         AdvanceStep
       case DecodedInstruction.SBinary(opcode, dest, srcA, srcB) =>
         val left   = Bits.low32(source(srcA, 0))
@@ -4138,9 +4152,12 @@ object DispatchInterpreter {
           case "s_bfe_i32" =>
             val shift = (right & 0x3fL).toInt
             val width = ((right >>> 16) & 0x3fL).toInt
-            if (width >= 32) Bits.low32(Bits.signExtend(left >>> shift, 32))
+            if (width >= 32) Bits.low32(Bits.signExtend(left >>> shift, BitWidth(32)))
             else if (width == 0) 0L
-            else Bits.low32(Bits.signExtend((left >>> shift) & ((1L << width) - 1L), width))
+            else {
+              val bitWidth = BitWidth.assume(width)
+              Bits.low32(Bits.signExtend((left >>> shift) & ((1L << width) - 1L), bitWidth))
+            }
           case "s_lshr_b32"                                                     => left >>> (right.toInt & 31)
           case minMax @ ("s_min_u32" | "s_max_u32" | "s_min_i32" | "s_max_i32") =>
             val (selected, sourceZeroWon) = scalarMinMax(minMax, left, right)
@@ -4183,7 +4200,7 @@ object DispatchInterpreter {
         }
         writeScalar32(dest, result)
         if (traceSetControl)
-          System.err.println(
+          scribe.debug(
             s"Gemstone AMDGPU set sbinary kernel=${kernel.name} localStart=$localStart index=$index opcode=$opcode dest=$dest srcA=$srcA srcB=$srcB left=0x${left.toHexString} right=0x${right.toHexString} result=0x${scalar(dest).toHexString} scc=$scalarCarry"
           )
         AdvanceStep
@@ -4203,18 +4220,21 @@ object DispatchInterpreter {
           case "s_bfe_i64"   =>
             val shift = (right & 0x3fL).toInt
             val width = ((right >>> 16) & 0x3fL).toInt
-            if (width >= 64) Bits.signExtend(left >>> shift, 64)
+            if (width >= 64) Bits.signExtend(left >>> shift, BitWidth(64))
             else if (width == 0) 0L
-            else Bits.signExtend((left >>> shift) & Bits.mask(width), width)
+            else {
+              val bitWidth = BitWidth.assume(width)
+              Bits.signExtend((left >>> shift) & Bits.mask(bitWidth), bitWidth)
+            }
         }
         writeScalar64(dest, result)
         scalarCarry = result != 0L
         if (traceMergeRank && index >= 1548 && index <= 1625)
-          System.err.println(
+          scribe.debug(
             s"Gemstone AMDGPU merge rank mask index=$index opcode=$opcode dest=$dest srcA=$srcA srcB=$srcB left=0x${left.toHexString} right=0x${right.toHexString} result=0x${result.toHexString} active=0x${laneMask(active).toHexString}"
           )
         if (traceControl)
-          System.err.println(
+          scribe.debug(
             s"Gemstone AMDGPU control sbinary64 opcode=$opcode dest=$dest srcA=$srcA left=$left srcB=$srcB right=$right result=$result active=${laneMask(active)} vcc=${laneMask(carry)}"
           )
         AdvanceStep
@@ -4272,22 +4292,24 @@ object DispatchInterpreter {
         else {
           val sourceValues = vector(indexed)
           foreachActive(lane => vector(dest)(lane) = Bits.low32(sourceValues(lane)))
-          if (Environment.trace("movrel") && localStart == 0)
-            System.err.println(
+          if (AMDGPUEnvironment.trace("movrel") && localStart == 0)
+            scribe.debug(
               s"Gemstone AMDGPU movrels kernel=${kernel.name} index=$index dest=$dest src=$src m0=${Bits.low32(scalar(124))} indexed=$indexed v0=0x${Bits.low32(sourceValues(0)).toHexString}"
             )
           AdvanceStep
         }
       case DecodedInstruction.VMoveRelative(_, source) =>
-        Left(ExecutionFailure.Failed(s"v_movrels_b32 requires a vector-register source, found $source"))
+        Left(ExecutionFailure.Failed(
+          s"v_movrels_b32 requires a vector-register source, found $source"
+        ))
       case DecodedInstruction.VMoveRelativeDestination(dest, src) =>
         val indexed = dest + (Bits.low32(scalar(124)) & 0xffL).toInt
         if (indexed < 0 || indexed >= 256)
           Left(ExecutionFailure.Failed(s"v_movreld_b32 indexed VGPR $indexed is out of range"))
         else {
           foreachActive(lane => vector(indexed)(lane) = Bits.low32(source(src, lane)))
-          if (Environment.trace("movrel") && localStart == 0)
-            System.err.println(
+          if (AMDGPUEnvironment.trace("movrel") && localStart == 0)
+            scribe.debug(
               s"Gemstone AMDGPU movreld kernel=${kernel.name} index=$index dest=$dest src=$src m0=${Bits.low32(scalar(124))} indexed=$indexed v0=0x${Bits.low32(source(src, 0)).toHexString}"
             )
           AdvanceStep
@@ -4332,16 +4354,16 @@ object DispatchInterpreter {
               if (value == 0.0 || value.isNaN || value.isInfinite) 0 else Math.getExponent(value) + 1
             )
           } else if (opcode == "v_frexp_exp_i32_f32") {
-            val value = IEEE754.binary32ToFloat(Bits.low32(source(src, lane)))
+            val value = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(source(src, lane))))
             vector(dest)(lane) = Bits.unsigned32(
               if (value == 0.0f || value.isNaN || value.isInfinite) 0 else Math.getExponent(value) + 1
             )
           } else if (opcode == "v_frexp_mant_f32") {
-            val value    = IEEE754.binary32ToFloat(Bits.low32(source(src, lane)))
+            val value    = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(source(src, lane))))
             val mantissa =
               if (value == 0.0f || value.isNaN || value.isInfinite) value
               else Math.scalb(value, -Math.getExponent(value) - 1)
-            vector(dest)(lane) = IEEE754.floatToBinary32(mantissa)
+            vector(dest)(lane) = IEEE754.floatToBinary32(mantissa).value
           } else if (opcode == "v_frexp_mant_f64") {
             val value    = IEEE754.binary64ToDouble(sourceFloating64(src, lane, scalar, vector))
             val mantissa =
@@ -4351,24 +4373,24 @@ object DispatchInterpreter {
             vector(dest)(lane) = Bits.low32(bits)
             vector(dest + 1)(lane) = Bits.high32(bits)
           } else if (opcode == "v_rcp_iflag_f32" || opcode == "v_rcp_f32") {
-            val value = 1.0f / IEEE754.binary32ToFloat(Bits.low32(source(src, lane)))
-            vector(dest)(lane) = IEEE754.floatToBinary32(value)
+            val value = 1.0f / IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(source(src, lane))))
+            vector(dest)(lane) = IEEE754.floatToBinary32(value).value
           } else if (opcode == "v_rcp_legacy_f32") {
-            val value = 1.0f / IEEE754.binary32ToFloat(Bits.low32(source(src, lane)))
-            vector(dest)(lane) = IEEE754.floatToBinary32(value)
+            val value = 1.0f / IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(source(src, lane))))
+            vector(dest)(lane) = IEEE754.floatToBinary32(value).value
           } else if (opcode == "v_rcp_f64") {
             val value = IEEE754.binary64ToDouble(sourceFloating64(src, lane, scalar, vector))
-            val bits  = java.lang.Double.doubleToRawLongBits(1.0 / value)
+            val bits  = IEEE754.doubleToBinary64(1.0 / value)
             vector(dest)(lane) = Bits.low32(bits)
             vector(dest + 1)(lane) = Bits.high32(bits)
           } else if (opcode == "v_trunc_f32" || opcode == "v_floor_f32" || opcode == "v_rndne_f32") {
-            val value  = IEEE754.binary32ToFloat(Bits.low32(source(src, lane)))
+            val value  = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(source(src, lane))))
             val result =
               if (opcode == "v_trunc_f32") {
                 if (value >= 0.0f) math.floor(value.toDouble) else math.ceil(value.toDouble)
               } else if (opcode == "v_floor_f32") math.floor(value.toDouble)
               else Math.rint(value.toDouble)
-            vector(dest)(lane) = IEEE754.floatToBinary32(result.toFloat)
+            vector(dest)(lane) = IEEE754.floatToBinary32(result.toFloat).value
           } else if (opcode == "v_trunc_f64" || opcode == "v_floor_f64" || opcode == "v_fract_f64") {
             val value  = IEEE754.binary64ToDouble(sourceFloating64(src, lane, scalar, vector))
             val result =
@@ -4376,55 +4398,57 @@ object DispatchInterpreter {
                 if (value >= 0.0) math.floor(value) else math.ceil(value)
               } else if (opcode == "v_floor_f64") math.floor(value)
               else value - math.floor(value)
-            val bits = java.lang.Double.doubleToRawLongBits(result)
+            val bits = IEEE754.doubleToBinary64(result)
             vector(dest)(lane) = Bits.low32(bits)
             vector(dest + 1)(lane) = Bits.high32(bits)
           } else if (opcode == "v_rndne_f64") {
             val value = IEEE754.binary64ToDouble(sourceFloating64(src, lane, scalar, vector))
-            val bits  = java.lang.Double.doubleToRawLongBits(Math.rint(value))
+            val bits  = IEEE754.doubleToBinary64(Math.rint(value))
             vector(dest)(lane) = Bits.low32(bits)
             vector(dest + 1)(lane) = Bits.high32(bits)
           } else if (opcode == "v_rsq_f32") {
-            val value = IEEE754.binary32ToFloat(Bits.low32(source(src, lane)))
-            vector(dest)(lane) = IEEE754.floatToBinary32((1.0 / math.sqrt(value.toDouble)).toFloat)
+            val value = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(source(src, lane))))
+            vector(dest)(lane) = IEEE754.floatToBinary32((1.0 / math.sqrt(value.toDouble)).toFloat).value
           } else if (opcode == "v_rsq_f64") {
             val value = IEEE754.binary64ToDouble(sourceFloating64(src, lane, scalar, vector))
-            val bits  = java.lang.Double.doubleToRawLongBits(1.0 / math.sqrt(value))
+            val bits  = IEEE754.doubleToBinary64(1.0 / math.sqrt(value))
             vector(dest)(lane) = Bits.low32(bits)
             vector(dest + 1)(lane) = Bits.high32(bits)
           } else if (opcode == "v_sqrt_f32") {
-            val value  = IEEE754.binary32ToFloat(Bits.low32(source(src, lane)))
+            val value  = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(source(src, lane))))
             val result = math.sqrt(value.toDouble).toFloat
-            vector(dest)(lane) = IEEE754.floatToBinary32(result)
+            vector(dest)(lane) = IEEE754.floatToBinary32(result).value
             if (traceSqrt && lane == 0)
-              System.err.println(s"Gemstone AMDGPU sqrt unary dest=$dest src=$src input=$value result=$result")
+              scribe.debug(s"Gemstone AMDGPU sqrt unary dest=$dest src=$src input=$value result=$result")
           } else if (opcode == "v_exp_f32") {
-            val value = IEEE754.binary32ToFloat(Bits.low32(source(src, lane)))
-            vector(dest)(lane) = IEEE754.floatToBinary32(math.pow(2.0, value.toDouble).toFloat)
+            val value = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(source(src, lane))))
+            vector(dest)(lane) = IEEE754.floatToBinary32(math.pow(2.0, value.toDouble).toFloat).value
           } else if (opcode == "v_sin_f32") {
-            val value = IEEE754.binary32ToFloat(Bits.low32(source(src, lane)))
-            vector(dest)(lane) = IEEE754.floatToBinary32(trigF32(opcode, value))
+            val value = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(source(src, lane))))
+            vector(dest)(lane) = IEEE754.floatToBinary32(trigF32(opcode, value)).value
           } else if (opcode == "v_cos_f32") {
-            val value = IEEE754.binary32ToFloat(Bits.low32(source(src, lane)))
-            vector(dest)(lane) = IEEE754.floatToBinary32(trigF32(opcode, value))
+            val value = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(source(src, lane))))
+            vector(dest)(lane) = IEEE754.floatToBinary32(trigF32(opcode, value)).value
           } else if (opcode == "v_log_f32" || opcode == "v_log_legacy_f32") {
-            val value = IEEE754.binary32ToFloat(Bits.low32(source(src, lane)))
-            vector(dest)(lane) = IEEE754.floatToBinary32((math.log(value.toDouble) / math.log(2.0)).toFloat)
+            val value = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(source(src, lane))))
+            vector(dest)(lane) = IEEE754.floatToBinary32((math.log(value.toDouble) / math.log(2.0)).toFloat).value
             if (traceLog && lane == 0)
-              System.err.println(
-                s"Gemstone AMDGPU log convert opcode=$opcode dest=$dest src=$src input=$value result=${IEEE754.binary32ToFloat(Bits.low32(vector(dest)(lane)))}"
+              scribe.debug(
+                s"Gemstone AMDGPU log convert opcode=$opcode dest=$dest src=$src input=$value result=${IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(vector(dest)(lane))))}"
               )
           } else if (opcode == "v_trunc_f32") {
-            val value = IEEE754.binary32ToFloat(Bits.low32(source(src, lane)))
+            val value = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(source(src, lane))))
             vector(dest)(lane) =
-              IEEE754.floatToBinary32(if (value.isNaN || value.isInfinite) value else value.toInt.toFloat)
+              IEEE754.floatToBinary32(if (value.isNaN || value.isInfinite) value else value.toInt.toFloat).value
           } else if (opcode == "v_rndne_f32") {
-            val value = IEEE754.binary32ToFloat(Bits.low32(source(src, lane)))
-            vector(dest)(lane) = IEEE754.floatToBinary32(Math.rint(value.toDouble).toFloat)
+            val value = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(source(src, lane))))
+            vector(dest)(lane) = IEEE754.floatToBinary32(Math.rint(value.toDouble).toFloat).value
           } else if (opcode == "v_cvt_i32_f32") {
-            vector(dest)(lane) = Bits.unsigned32(IEEE754.binary32ToFloat(Bits.low32(source(src, lane))).toInt)
+            vector(dest)(lane) =
+              Bits.unsigned32(IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(source(src, lane)))).toInt)
           } else if (opcode == "v_cvt_u32_f32") {
-            vector(dest)(lane) = unsignedFloatToInt32(IEEE754.binary32ToFloat(Bits.low32(source(src, lane))))
+            vector(dest)(lane) =
+              unsignedFloatToInt32(IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(source(src, lane)))))
           } else if (opcode == "v_cvt_i32_f64") {
             val value = IEEE754.binary64ToDouble(source64(src, lane, scalar, vector)).toInt
             vector(dest)(lane) = Bits.unsigned32(value)
@@ -4434,66 +4458,65 @@ object DispatchInterpreter {
           } else if (opcode.startsWith("v_cvt_f32_ubyte")) {
             val shift = opcode.last - '0'
             val value = ((raw >>> (shift * 8)) & 0xff).toFloat
-            vector(dest)(lane) = IEEE754.floatToBinary32(value)
+            vector(dest)(lane) = IEEE754.floatToBinary32(value).value
           } else if (opcode == "v_cvt_f32_f64") {
             val value = IEEE754.binary64ToDouble(sourceFloating64(src, lane, scalar, vector)).toFloat
-            vector(dest)(lane) = IEEE754.floatToBinary32(value)
+            vector(dest)(lane) = IEEE754.floatToBinary32(value).value
           } else if (opcode == "v_cvt_f32_f16") {
-            val value = IEEE754.binary16ToFloat(raw & 0xffffL)
-            vector(dest)(lane) = IEEE754.floatToBinary32(value)
+            val value = IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(raw & 0xffffL)))
+            vector(dest)(lane) = IEEE754.floatToBinary32(value).value
           } else if (opcode == "v_cvt_f16_f32") {
-            val value = IEEE754.binary32ToFloat(Bits.low32(source(src, lane)))
-            vector(dest)(lane) = IEEE754.floatToBinary16(value)
+            val value = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(source(src, lane))))
+            vector(dest)(lane) = IEEE754.floatToBinary16(value).value
           } else if (opcode == "v_cvt_i16_f16") {
-            val value = IEEE754.binary16ToFloat(raw & 0xffffL)
+            val value = IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(raw & 0xffffL)))
             vector(dest)(lane) = Bits.low16(value.toInt.toLong)
           } else if (opcode == "v_cvt_f64_i32" || opcode == "v_cvt_f64_u32" || opcode == "v_cvt_f64_f32") {
             val value =
               if (opcode == "v_cvt_f64_i32") raw.toDouble
               else if (opcode == "v_cvt_f64_u32") Integer.toUnsignedLong(raw).toDouble
-              else IEEE754.binary32ToFloat(Bits.low32(source(src, lane))).toDouble
-            val bits = java.lang.Double.doubleToRawLongBits(value)
+              else IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(source(src, lane)))).toDouble
+            val bits = IEEE754.doubleToBinary64(value)
             vector(dest)(lane) = Bits.low32(bits)
             vector(dest + 1)(lane) = Bits.high32(bits)
           } else {
             val value = if (opcode == "v_cvt_f32_i32") raw.toFloat else Integer.toUnsignedLong(raw).toFloat
-            vector(dest)(lane) = IEEE754.floatToBinary32(value)
+            vector(dest)(lane) = IEEE754.floatToBinary32(value).value
           }
         }
         AdvanceStep
       case DecodedInstruction.VMoveDPP(dest, src, control, rowMask, bankMask, boundControl, fetchInactive) =>
         val sourceValues = vector(src).clone()
         if (
-          Environment.trace(
+          AMDGPUEnvironment.trace(
             "reduce"
           ) && kernel.name.contains("wrapped_reduce") && localStart == 0 && index < 300
         )
-          System.err.println(
-            s"Gemstone AMDGPU reduce dpp index=$index dest=$dest src=$src control=0x${control.toHexString} rowMask=0x${rowMask.toHexString} bankMask=0x${bankMask.toHexString} v0=${sourceValues.take(math.min(4, lanes)).mkString(",")}"
+          scribe.debug(
+            s"Gemstone AMDGPU reduce dpp index=$index dest=$dest src=$src control=0x${control.toHexString} " +
+              s"rowMask=0x${rowMask.toHexString} bankMask=0x${bankMask.toHexString} " +
+              s"v0=${sourceValues.take(math.min(4, lanes.value)).mkString(",")}"
           )
         foreachActive { lane =>
           if (dppLaneEnabled(lane, rowMask, bankMask)) {
             dppSourceLane(lane, control) match {
-              case Some(sourceLane) if sourceLane < lanes =>
+              case Some(sourceLane) if sourceLane < lanes.value =>
                 vector(dest)(lane) =
                   if (fetchInactive || active(sourceLane)) Bits.low32(sourceValues(sourceLane)) else 0L
               case _ if boundControl => vector(dest)(lane) = 0L
               case _                 => ()
             }
             if (traceByteSortRank && lane == 0)
-              System.err.println(
+              scribe.debug(
                 s"Gemstone AMDGPU byte-sort dpp index=$index control=0x${control.toHexString} src=$src dest=$dest source=0x${sourceValues(lane).toHexString} result=0x${vector(dest)(lane).toHexString}"
               )
           }
         }
         AdvanceStep
       case DecodedInstruction.VCndMask(dest, srcA, srcB, condition, absA, absB, negateA, negateB) =>
-        // CNDMASK.B32 consumes one 32-bit scalar condition per lane.
-        // Reading an SGPR pair here incorrectly folded the following
-        // SGPR into the mask (for example s1:s2), changing otherwise
-        // valid conditions on wave32.  VCC/EXEC pseudo registers are
-        // already exposed with their low 32 bits by `source`.
-        val conditionMask = Bits.low32(source(condition, 0))
+        // Wave32 conditions occupy one SGPR. Wave64 conditions occupy an
+        // SGPR pair; truncating that pair makes lanes 32-63 always select A.
+        val conditionMask = waveConditionMask(sourceScalar64(condition), lanes)
         foreachActive { lane =>
           val selectB       = (conditionMask & (1L << lane)) != 0L
           val selected      = if (selectB) srcB else srcA
@@ -4509,38 +4532,39 @@ object DispatchInterpreter {
               "set_operations"
             ) && localStart == 0 && index >= 2148 && index <= 2163 && lane < 2
           )
-            System.err.println(
+            scribe.debug(
               s"Gemstone AMDGPU set cndmask kernel=${kernel.name} index=$index lane=$lane dest=$dest srcA=$srcA srcB=$srcB condition=$condition conditionMask=0x${conditionMask.toHexString} selectB=$selectB a=0x${Bits.low32(source(srcA, lane)).toHexString} b=0x${Bits.low32(source(srcB, lane)).toHexString} result=0x${vector(dest)(lane).toHexString}"
             )
           if (
-            Environment.trace("merge-select") &&
+            AMDGPUEnvironment.trace("merge-select") &&
             lane == 0 && kernel.name.contains("wrapped_merge_sort") && index >= 1550 && index <= 1625
           )
-            System.err.println(
+            scribe.debug(
               s"Gemstone AMDGPU merge select index=$index dest=$dest srcA=$srcA srcB=$srcB condition=$conditionMask active=${active(lane)} a=0x${Bits.low32(source(srcA, lane)).toHexString} b=0x${Bits.low32(source(srcB, lane)).toHexString} result=0x${vector(dest)(lane).toHexString}"
             )
           if (
-            Environment.trace("merge-stage") &&
+            AMDGPUEnvironment.trace("merge-stage") &&
             lane == 0 && kernel.name.contains("wrapped_merge_sort") && index >= 1400 && index <= 1494
           )
-            System.err.println(
+            scribe.debug(
               s"Gemstone AMDGPU merge stage select index=$index dest=$dest condition=0x${conditionMask.toHexString} a=0x${Bits.low32(source(srcA, lane)).toHexString} b=0x${Bits.low32(source(srcB, lane)).toHexString} result=0x${vector(dest)(lane).toHexString} v1=0x${vector(1)(lane).toHexString} v2=0x${vector(2)(lane).toHexString} v3=0x${vector(3)(lane).toHexString} v4=0x${vector(4)(lane).toHexString} v5=0x${vector(5)(lane).toHexString} v6=0x${vector(6)(lane).toHexString} v7=0x${vector(7)(lane).toHexString} v8=0x${vector(8)(lane).toHexString} v9=0x${vector(9)(lane).toHexString} v10=0x${vector(10)(lane).toHexString} v11=0x${vector(11)(lane).toHexString} v12=0x${vector(12)(lane).toHexString}"
             )
           if (traceLog && lane == 0)
-            System.err.println(
-              s"Gemstone AMDGPU log cndmask dest=$dest srcA=$srcA srcB=$srcB condition=$conditionMask selectB=$selectB value=${IEEE754.binary32ToFloat(Bits.low32(modified))}"
+            scribe.debug(
+              s"Gemstone AMDGPU log cndmask dest=$dest srcA=$srcA srcB=$srcB condition=$conditionMask selectB=$selectB value=${IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(modified)))}"
             )
         }
         AdvanceStep
       case DecodedInstruction.VReadFirstLane(dest, src) =>
-        active.first.toRight(ExecutionFailure.Failed("v_readfirstlane_b32 has an empty EXEC mask"))
-          .map { lane =>
-            scalar(dest) = Bits.low32(source(src, lane))
-            Some(index + 1)
-          }
+        active.first match {
+          case None       => Left(ExecutionFailure.Failed("v_readfirstlane_b32 has an empty EXEC mask"))
+          case Some(lane) =>
+            scalar(dest) = Bits.low32(source(src, lane.value))
+            Right(Some(index + 1))
+        }
       case DecodedInstruction.VReadLane(dest, src, lane) =>
         val selected = source(lane, 0).toInt
-        if (selected < 0 || selected >= lanes)
+        if (selected < 0 || selected >= lanes.value)
           Left(ExecutionFailure.Failed("v_readlane_b32 selected an invalid lane"))
         else {
           scalar(dest) = Bits.low32(source(src, selected))
@@ -4548,7 +4572,7 @@ object DispatchInterpreter {
         }
       case DecodedInstruction.VWriteLane(dest, src, lane) =>
         val selected = source(lane, 0).toInt
-        if (selected < 0 || selected >= lanes)
+        if (selected < 0 || selected >= lanes.value)
           Left(ExecutionFailure.Failed("v_writelane_b32 selected an invalid lane"))
         else {
           vector(dest)(selected) = Bits.low32(source(src, selected))
@@ -4556,15 +4580,15 @@ object DispatchInterpreter {
         }
       case DecodedInstruction.VMaskBitCount(dest, mask, base, high) =>
         val executionMask =
-          if (Environment.containsKey("GEMSTONE_AMDGPU_MBCNT_UNMASKED")) -1L else laneMask(active)
-        if (Environment.trace("set-mask") && kernel.name.contains("set_operations") && localStart == 0)
-          System.err.println(
+          if (AMDGPUEnvironment.containsKey("GEMSTONE_AMDGPU_MBCNT_UNMASKED")) -1L else laneMask(active)
+        if (AMDGPUEnvironment.trace("set-mask") && kernel.name.contains("set_operations") && localStart == 0)
+          scribe.debug(
             s"Gemstone AMDGPU set mbcnt pre kernel=${kernel.name} index=$index dest=$dest mask=$mask base=$base high=$high active=0x${laneMask(active).toHexString} mask0=0x${source(mask, 0).toHexString} base0=0x${source(base, 0).toHexString} v0=0x${vector(dest)(0).toHexString}"
           )
         foreachActive { lane =>
           vector(dest)(lane) = mbCount(source(mask, lane), executionMask, lane, high, source(base, lane))
           if (traceByteSortRank && lane == 0)
-            System.err.println(
+            scribe.debug(
               s"Gemstone AMDGPU byte-sort mbcnt index=$index high=$high mask=0x${source(mask, lane).toHexString} base=0x${source(base, lane).toHexString} result=0x${vector(dest)(lane).toHexString}"
             )
         }
@@ -4583,20 +4607,20 @@ object DispatchInterpreter {
         AdvanceStep
       case DecodedInstruction.VMadMkF32(dest, srcA, multiplier, addend) =>
         foreachActive { lane =>
-          val left  = IEEE754.binary32ToFloat(Bits.low32(source(srcA, lane)))
-          val scale = IEEE754.binary32ToFloat(Bits.low32(multiplier))
-          val right = IEEE754.binary32ToFloat(Bits.low32(source(addend, lane)))
-          vector(dest)(lane) = IEEE754.floatToBinary32(left * scale + right)
+          val left  = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(source(srcA, lane))))
+          val scale = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(multiplier)))
+          val right = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(source(addend, lane))))
+          vector(dest)(lane) = IEEE754.floatToBinary32(left * scale + right).value
         }
         AdvanceStep
       case DecodedInstruction.VMadAkF32(dest, srcA, srcB, addend) =>
         foreachActive { lane =>
-          val left    = IEEE754.binary32ToFloat(Bits.low32(source(srcA, lane)))
-          val right   = IEEE754.binary32ToFloat(Bits.low32(source(srcB, lane)))
-          val literal = IEEE754.binary32ToFloat(Bits.low32(addend))
+          val left    = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(source(srcA, lane))))
+          val right   = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(source(srcB, lane))))
+          val literal = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(addend)))
           // MADAK is the literal-addend form of MAD.  Unlike FMA it
           // rounds the product before adding the literal.
-          vector(dest)(lane) = IEEE754.floatToBinary32(left * right + literal)
+          vector(dest)(lane) = IEEE754.floatToBinary32(left * right + literal).value
         }
         AdvanceStep
       case DecodedInstruction.VMadF32(
@@ -4614,9 +4638,9 @@ object DispatchInterpreter {
             clamp
           ) =>
         foreachActive { lane =>
-          val left           = IEEE754.binary32ToFloat(Bits.low32(source(srcA, lane)))
-          val right          = IEEE754.binary32ToFloat(Bits.low32(source(srcB, lane)))
-          val addend         = IEEE754.binary32ToFloat(Bits.low32(source(srcC, lane)))
+          val left           = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(source(srcA, lane))))
+          val right          = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(source(srcB, lane))))
+          val addend         = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(source(srcC, lane))))
           val preparedLeft   = if (absA) math.abs(left) else left
           val preparedRight  = if (absB) math.abs(right) else right
           val preparedAddend = if (absC) math.abs(addend) else addend
@@ -4626,38 +4650,43 @@ object DispatchInterpreter {
           val result         =
             if (opcode == "v_fma_f32") Math.fma(productLeft, productRight, productAddend)
             else productLeft * productRight + productAddend
-          vector(dest)(lane) = IEEE754.floatToBinary32(if (clamp) clampF32(result) else result)
+          vector(dest)(lane) = IEEE754.floatToBinary32(if (clamp) clampF32(result) else result).value
           if (traceSqrt && lane == 0)
-            System.err.println(
+            scribe.debug(
               s"Gemstone AMDGPU sqrt mad dest=$dest left=$left right=$right addend=$addend result=$result"
             )
         }
         AdvanceStep
-      case DecodedInstruction.VMadF64(dest, srcA, srcB, srcC, negateA, negateB, negateC) =>
+      case DecodedInstruction.VMadF64(dest, srcA, srcB, srcC, absA, absB, absC, negateA, negateB, negateC) =>
         foreachActive { lane =>
-          val left    = IEEE754.binary64ToDouble(sourceFloating64(srcA, lane, scalar, vector))
-          val right   = IEEE754.binary64ToDouble(sourceFloating64(srcB, lane, scalar, vector))
-          val addend  = IEEE754.binary64ToDouble(sourceFloating64(srcC, lane, scalar, vector))
-          val product = (if (negateA) -left else left) * (if (negateB) -right else right)
-          val result  = product + (if (negateC) -addend else addend)
-          val bits    = java.lang.Double.doubleToRawLongBits(result)
+          val rawLeft        = IEEE754.binary64ToDouble(sourceFloating64(srcA, lane, scalar, vector))
+          val rawRight       = IEEE754.binary64ToDouble(sourceFloating64(srcB, lane, scalar, vector))
+          val rawAddend      = IEEE754.binary64ToDouble(sourceFloating64(srcC, lane, scalar, vector))
+          val preparedLeft   = if (absA) math.abs(rawLeft) else rawLeft
+          val preparedRight  = if (absB) math.abs(rawRight) else rawRight
+          val preparedAddend = if (absC) math.abs(rawAddend) else rawAddend
+          val left           = if (negateA) -preparedLeft else preparedLeft
+          val right          = if (negateB) -preparedRight else preparedRight
+          val addend         = if (negateC) -preparedAddend else preparedAddend
+          val result         = Math.fma(left, right, addend)
+          val bits           = IEEE754.doubleToBinary64(result)
           vector(dest)(lane) = Bits.low32(bits)
           vector(dest + 1)(lane) = Bits.high32(bits)
           if (traceF64 && lane == 0)
-            System.err.println(
+            scribe.debug(
               s"Gemstone AMDGPU f64 mad dest=$dest left=$left right=$right addend=$addend result=$result"
             )
         }
         AdvanceStep
       case DecodedInstruction.VUnaryF32Modified(opcode, dest, src, absolute, negate, clamp) =>
         foreachActive { lane =>
-          val raw      = IEEE754.binary32ToFloat(Bits.low32(source(src, lane)))
+          val raw      = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(source(src, lane))))
           val prepared = if (absolute) math.abs(raw) else raw
           val value    = if (negate) -prepared else prepared
           val result   = opcode match {
             case "v_rcp_f32" => 1.0f / value
           }
-          vector(dest)(lane) = IEEE754.floatToBinary32(if (clamp) clampF32(result) else result)
+          vector(dest)(lane) = IEEE754.floatToBinary32(if (clamp) clampF32(result) else result).value
         }
         AdvanceStep
       case DecodedInstruction.VUnaryF64Modified(opcode, dest, src, absolute, negate) =>
@@ -4668,11 +4697,11 @@ object DispatchInterpreter {
           val mantissa =
             if (value == 0.0 || value.isNaN || value.isInfinite) value
             else Math.scalb(value, -Math.getExponent(value) - 1)
-          val bits = java.lang.Double.doubleToRawLongBits(mantissa)
+          val bits = IEEE754.doubleToBinary64(mantissa)
           vector(dest)(lane) = Bits.low32(bits)
           vector(dest + 1)(lane) = Bits.high32(bits)
           if (traceF64 && lane == 0)
-            System.err.println(s"Gemstone AMDGPU f64 unary opcode=$opcode dest=$dest raw=$raw result=$mantissa")
+            scribe.debug(s"Gemstone AMDGPU f64 unary opcode=$opcode dest=$dest raw=$raw result=$mantissa")
         }
         AdvanceStep
       case DecodedInstruction.VTrigPreopF64(dest, src, segment, absolute, negate) =>
@@ -4680,7 +4709,7 @@ object DispatchInterpreter {
           val raw      = IEEE754.binary64ToDouble(sourceFloating64(src, lane, scalar, vector))
           val prepared = if (absolute) math.abs(raw) else raw
           val value    = if (negate) -prepared else prepared
-          val bits     = java.lang.Double.doubleToRawLongBits(value)
+          val bits     = IEEE754.doubleToBinary64(value)
           val exponent = (bits >>> 52) & 0x7ffL
           var shift    = (source(segment, lane).toInt & 0x1f) * 53
           if (exponent > 1077L) shift += (exponent - 1077L).toInt
@@ -4688,7 +4717,7 @@ object DispatchInterpreter {
           var scale = -53 - shift
           if (exponent >= 1968L) scale += 128
           val result     = Math.scalb(chunk, scale)
-          val resultBits = java.lang.Double.doubleToRawLongBits(result)
+          val resultBits = IEEE754.doubleToBinary64(result)
           vector(dest)(lane) = Bits.low32(resultBits)
           vector(dest + 1)(lane) = Bits.high32(resultBits)
         }
@@ -4705,8 +4734,8 @@ object DispatchInterpreter {
             clamp
           ) =>
         foreachActive { lane =>
-          val rawA = IEEE754.binary32ToFloat(Bits.low32(source(srcA, lane)))
-          val rawB = IEEE754.binary32ToFloat(Bits.low32(source(srcB, lane)))
+          val rawA = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(source(srcA, lane))))
+          val rawB = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(source(srcB, lane))))
           // VOP3 source modifiers apply absolute value before negation.
           val preparedA = if (absA) math.abs(rawA) else rawA
           val preparedB = if (absB) math.abs(rawB) else rawB
@@ -4721,17 +4750,17 @@ object DispatchInterpreter {
             case "v_max_f32"    => math.max(valueA, valueB)
             case "v_min_f32"    => math.min(valueA, valueB)
           }
-          vector(dest)(lane) = IEEE754.floatToBinary32(if (clamp) clampF32(result) else result)
+          vector(dest)(lane) = IEEE754.floatToBinary32(if (clamp) clampF32(result) else result).value
         }
         AdvanceStep
       case DecodedInstruction.VDivScaleF32(dest, conditionDest, srcA, srcB, srcC) =>
-        val conditions                      = Array.fill(lanes)(false)
+        val conditions                      = Array.fill(lanes.value)(false)
         def denormal(value: Float): Boolean =
           value != 0.0f && !value.isNaN && !value.isInfinite && math.abs(value) < java.lang.Float.MIN_NORMAL
         foreachActive { lane =>
-          val s0     = IEEE754.binary32ToFloat(Bits.low32(source(srcA, lane)))
-          val s1     = IEEE754.binary32ToFloat(Bits.low32(source(srcB, lane)))
-          val s2     = IEEE754.binary32ToFloat(Bits.low32(source(srcC, lane)))
+          val s0     = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(source(srcA, lane))))
+          val s1     = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(source(srcB, lane))))
+          val s2     = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(source(srcC, lane))))
           var result = s0
           if (s1 == 0.0f || s2 == 0.0f) {
             result = Float.NaN
@@ -4748,20 +4777,20 @@ object DispatchInterpreter {
           } else if (denormal(s2 / s1)) {
             conditions(lane) = true
             if (s0 == s2) result = Math.scalb(s0, 64)
-          } else if (Math.getExponent(s2) <= 23) {
+          } else if (Math.getExponent(s2) <= 23 - 127) {
             result = Math.scalb(s0, 64)
           }
-          vector(dest)(lane) = IEEE754.floatToBinary32(result)
+          vector(dest)(lane) = IEEE754.floatToBinary32(result).value
           if (traceSqrt && lane == 0)
-            System.err.println(
+            scribe.debug(
               s"Gemstone AMDGPU sqrt divscale dest=$dest s0=$s0 s1=$s1 s2=$s2 result=$result condition=${conditions(lane)}"
             )
         }
-        if (waveSize <= 32) writeScalar32(conditionDest, booleanLaneMask(conditions))
+        if (waveSize.value <= 32) writeScalar32(conditionDest, booleanLaneMask(conditions))
         else writeScalar64(conditionDest, booleanLaneMask(conditions))
         AdvanceStep
       case DecodedInstruction.VDivScaleF64(dest, conditionDest, srcA, srcB, srcC) =>
-        val conditions                       = Array.fill(lanes)(false)
+        val conditions                       = Array.fill(lanes.value)(false)
         def denormal(value: Double): Boolean =
           value != 0.0 && !value.isNaN && !value.isInfinite && math.abs(value) < java.lang.Double.MIN_NORMAL
         foreachActive { lane =>
@@ -4784,18 +4813,18 @@ object DispatchInterpreter {
           } else if (denormal(s2 / s1)) {
             conditions(lane) = true
             if (s0 == s2) result = Math.scalb(s0, 128)
-          } else if (Math.getExponent(s2) <= 53) {
+          } else if (Math.getExponent(s2) <= 53 - 1023) {
             result = Math.scalb(s0, 128)
           }
-          val bits = java.lang.Double.doubleToRawLongBits(result)
+          val bits = IEEE754.doubleToBinary64(result)
           vector(dest)(lane) = Bits.low32(bits)
           vector(dest + 1)(lane) = Bits.high32(bits)
           if (traceF64 && lane == 0)
-            System.err.println(
+            scribe.debug(
               s"Gemstone AMDGPU f64 divscale dest=$dest s0=$s0 s1=$s1 s2=$s2 result=$result condition=${conditions(lane)}"
             )
         }
-        if (waveSize <= 32) writeScalar32(conditionDest, booleanLaneMask(conditions))
+        if (waveSize.value <= 32) writeScalar32(conditionDest, booleanLaneMask(conditions))
         else writeScalar64(conditionDest, booleanLaneMask(conditions))
         AdvanceStep
       case DecodedInstruction.VDivFmasF64(dest, srcA, srcB, srcC) =>
@@ -4803,47 +4832,57 @@ object DispatchInterpreter {
           val left   = IEEE754.binary64ToDouble(sourceFloating64(srcA, lane, scalar, vector))
           val right  = IEEE754.binary64ToDouble(sourceFloating64(srcB, lane, scalar, vector))
           val addend = IEEE754.binary64ToDouble(sourceFloating64(srcC, lane, scalar, vector))
-          val result = left * right + addend
+          val result = Math.fma(left, right, addend)
           val scaled = (laneMask(carry) & (1L << lane)) != 0L
-          val bits   = java.lang.Double.doubleToRawLongBits(if (scaled) Math.scalb(result, 64) else result)
+          val bits   = IEEE754.doubleToBinary64(if (scaled) Math.scalb(result, 64) else result)
           vector(dest)(lane) = Bits.low32(bits)
           vector(dest + 1)(lane) = Bits.high32(bits)
           if (traceF64 && lane == 0)
-            System.err.println(
+            scribe.debug(
               s"Gemstone AMDGPU f64 divfmas dest=$dest left=$left right=$right addend=$addend result=$result scaled=$scaled"
             )
         }
         AdvanceStep
-      case DecodedInstruction.VDivFixupF32(dest, quotient, denominator, numerator) =>
+      case DecodedInstruction.VDivFixupF32(dest, quotient, denominator, numerator, absolute, negate) =>
         foreachActive { lane =>
-          val q      = IEEE754.binary32ToFloat(Bits.low32(source(quotient, lane)))
-          val d      = IEEE754.binary32ToFloat(Bits.low32(source(denominator, lane)))
-          val n      = IEEE754.binary32ToFloat(Bits.low32(source(numerator, lane)))
+          def operand(value: InstructionSource, index: Int): Float = {
+            val raw      = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(source(value, lane))))
+            val prepared = if ((absolute & (1 << index)) != 0) math.abs(raw) else raw
+            if ((negate & (1 << index)) != 0) -prepared else prepared
+          }
+          val q      = operand(quotient, 0)
+          val d      = operand(denominator, 1)
+          val n      = operand(numerator, 2)
           val result =
             if (n.isNaN || d.isNaN || (n.isInfinite && d.isInfinite) || (n == 0.0f && d == 0.0f)) Float.NaN
             else if (d == 0.0f || n.isInfinite) Math.copySign(
               Float.PositiveInfinity,
-              if ((java.lang.Float.floatToRawIntBits(n) ^ java.lang.Float.floatToRawIntBits(d)) < 0) -1.0f
+              if (((IEEE754.floatToBinary32(n).value ^ IEEE754.floatToBinary32(d).value) & 0x80000000L) != 0L) -1.0f
               else 1.0f
             )
             else if (d.isInfinite || n == 0.0f) Math.copySign(
               0.0f,
-              if ((java.lang.Float.floatToRawIntBits(n) ^ java.lang.Float.floatToRawIntBits(d)) < 0) -1.0f
+              if (((IEEE754.floatToBinary32(n).value ^ IEEE754.floatToBinary32(d).value) & 0x80000000L) != 0L) -1.0f
               else 1.0f
             )
             else q
-          vector(dest)(lane) = IEEE754.floatToBinary32(result)
+          vector(dest)(lane) = IEEE754.floatToBinary32(result).value
           if (traceSqrt && lane == 0)
-            System.err.println(s"Gemstone AMDGPU sqrt divfixup dest=$dest q=$q d=$d n=$n result=$result")
+            scribe.debug(s"Gemstone AMDGPU sqrt divfixup dest=$dest q=$q d=$d n=$n result=$result")
         }
         AdvanceStep
-      case DecodedInstruction.VDivFixupF64(dest, quotient, denominator, numerator) =>
+      case DecodedInstruction.VDivFixupF64(dest, quotient, denominator, numerator, absolute, negate) =>
         foreachActive { lane =>
-          val q    = IEEE754.binary64ToDouble(sourceFloating64(quotient, lane, scalar, vector))
-          val d    = IEEE754.binary64ToDouble(sourceFloating64(denominator, lane, scalar, vector))
-          val n    = IEEE754.binary64ToDouble(sourceFloating64(numerator, lane, scalar, vector))
+          def operand(value: InstructionSource, index: Int): Double = {
+            val raw      = IEEE754.binary64ToDouble(sourceFloating64(value, lane, scalar, vector))
+            val prepared = if ((absolute & (1 << index)) != 0) math.abs(raw) else raw
+            if ((negate & (1 << index)) != 0) -prepared else prepared
+          }
+          val q    = operand(quotient, 0)
+          val d    = operand(denominator, 1)
+          val n    = operand(numerator, 2)
           val sign =
-            if ((java.lang.Double.doubleToRawLongBits(n) ^ java.lang.Double.doubleToRawLongBits(d)) < 0L)
+            if ((IEEE754.doubleToBinary64(n) ^ IEEE754.doubleToBinary64(d)) < 0L)
               -1.0
             else 1.0
           val result =
@@ -4851,11 +4890,11 @@ object DispatchInterpreter {
             else if (d == 0.0 || n.isInfinite) Math.copySign(Double.PositiveInfinity, sign)
             else if (d.isInfinite || n == 0.0) Math.copySign(0.0, sign)
             else q
-          val bits = java.lang.Double.doubleToRawLongBits(result)
+          val bits = IEEE754.doubleToBinary64(result)
           vector(dest)(lane) = Bits.low32(bits)
           vector(dest + 1)(lane) = Bits.high32(bits)
           if (traceF64 && lane == 0)
-            System.err.println(s"Gemstone AMDGPU f64 divfixup dest=$dest q=$q d=$d n=$n result=$result")
+            scribe.debug(s"Gemstone AMDGPU f64 divfixup dest=$dest q=$q d=$d n=$n result=$result")
         }
         AdvanceStep
       case DecodedInstruction.VBinary(opcode, dest, srcA, srcB, clamp) =>
@@ -4889,7 +4928,9 @@ object DispatchInterpreter {
               vector(dest)(lane) =
                 if (clamp) math.max(0L, right - left) else unsignedSubtractReverse32(left, right)
             case "v_subrev_f32" => vector(dest)(lane) =
-                IEEE754.floatToBinary32(IEEE754.binary32ToFloat(right) - IEEE754.binary32ToFloat(left))
+                IEEE754.floatToBinary32(IEEE754.binary32ToFloat(
+                  Binary32.fromLow(Bits.low32(right))
+                ) - IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(left)))).value
             case "v_mul_u32_u24"    => vector(dest)(lane) = unsignedMultiply24(left, right)
             case "v_mul_hi_u32_u24" => vector(dest)(lane) = unsignedMultiplyHigh24(left, right)
             case "v_mul_i32_i24"    => vector(dest)(lane) = signedMultiply24(left, right)
@@ -4900,71 +4941,95 @@ object DispatchInterpreter {
             case "v_min_i32"        => vector(dest)(lane) = Bits.low32(math.min(left.toInt, right.toInt).toLong)
             case "v_min_i16"        => vector(dest)(lane) =
                 Bits.low16(math.min(
-                  Bits.signExtend(Bits.low16(left), 16),
-                  Bits.signExtend(Bits.low16(right), 16)
+                  Bits.signExtend(Bits.low16(left), BitWidth(16)),
+                  Bits.signExtend(Bits.low16(right), BitWidth(16))
                 ))
             case "v_min_u16" => vector(dest)(lane) = Bits.low16(math.min(Bits.low16(left), Bits.low16(right)))
             case "v_min_f32" =>
               vector(dest)(lane) =
-                IEEE754.floatToBinary32(math.min(IEEE754.binary32ToFloat(left), IEEE754.binary32ToFloat(right)))
-            case "v_min_f16" => vector(dest)(lane) = minimumF16(left, right)
+                IEEE754.floatToBinary32(math.min(
+                  IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(left))),
+                  IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(right)))
+                )).value
+            case "v_min_f16" => vector(dest)(lane) = minimumF16(left, right).value
             case "v_max_i32" => vector(dest)(lane) = math.max(left.toInt, right.toInt).toLong & Bits.Mask32
             case "v_max_i16" => vector(dest)(lane) =
                 Bits.low16(math.max(
-                  Bits.signExtend(Bits.low16(left), 16),
-                  Bits.signExtend(Bits.low16(right), 16)
+                  Bits.signExtend(Bits.low16(left), BitWidth(16)),
+                  Bits.signExtend(Bits.low16(right), BitWidth(16))
                 ))
             case "v_max_u16" => vector(dest)(lane) = Bits.low16(math.max(Bits.low16(left), Bits.low16(right)))
             case "v_max_f32" =>
               vector(dest)(lane) =
-                IEEE754.floatToBinary32(math.max(IEEE754.binary32ToFloat(left), IEEE754.binary32ToFloat(right)))
+                IEEE754.floatToBinary32(math.max(
+                  IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(left))),
+                  IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(right)))
+                )).value
             case "v_max_f16" =>
               vector(dest)(lane) = IEEE754.floatToBinary16(
-                math.max(IEEE754.binary16ToFloat(Bits.low16(left)), IEEE754.binary16ToFloat(Bits.low16(right)))
-              )
+                math.max(
+                  IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(left))),
+                  IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(right)))
+                )
+              ).value
             case "v_ldexp_f32" =>
               vector(dest)(lane) =
-                IEEE754.floatToBinary32(Math.scalb(IEEE754.binary32ToFloat(left), right.toInt))
+                IEEE754.floatToBinary32(Math.scalb(
+                  IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(left))),
+                  right.toInt
+                )).value
             case "v_add_f32" =>
-              val result = IEEE754.binary32ToFloat(left) + IEEE754.binary32ToFloat(right)
-              vector(dest)(lane) = IEEE754.floatToBinary32(result)
+              val result = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(left))) + IEEE754.binary32ToFloat(
+                Binary32.fromLow(Bits.low32(right))
+              )
+              vector(dest)(lane) = IEEE754.floatToBinary32(result).value
               if (traceLog && lane == 0)
-                System.err.println(
-                  s"Gemstone AMDGPU log binary opcode=$opcode dest=$dest left=${IEEE754.binary32ToFloat(left)} right=${IEEE754.binary32ToFloat(right)} result=$result"
+                scribe.debug(
+                  s"Gemstone AMDGPU log binary opcode=$opcode dest=$dest left=${IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(left)))} right=${IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(right)))} result=$result"
                 )
             case "v_mul_f32" =>
-              val result = IEEE754.binary32ToFloat(left) * IEEE754.binary32ToFloat(right)
-              vector(dest)(lane) = IEEE754.floatToBinary32(result)
+              val result = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(left))) * IEEE754.binary32ToFloat(
+                Binary32.fromLow(Bits.low32(right))
+              )
+              vector(dest)(lane) = IEEE754.floatToBinary32(result).value
               if (traceLog && lane == 0)
-                System.err.println(
-                  s"Gemstone AMDGPU log binary opcode=$opcode dest=$dest left=${IEEE754.binary32ToFloat(left)} right=${IEEE754.binary32ToFloat(right)} result=$result"
+                scribe.debug(
+                  s"Gemstone AMDGPU log binary opcode=$opcode dest=$dest left=${IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(left)))} right=${IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(right)))} result=$result"
                 )
             case "v_mac_f32" =>
-              val result = IEEE754.binary32ToFloat(left) * IEEE754.binary32ToFloat(right) +
-                IEEE754.binary32ToFloat(previous)
-              vector(dest)(lane) = IEEE754.floatToBinary32(result)
+              val result = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(left))) * IEEE754.binary32ToFloat(
+                Binary32.fromLow(Bits.low32(right))
+              ) +
+                IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(previous)))
+              vector(dest)(lane) = IEEE754.floatToBinary32(result).value
             case "v_add_f16" =>
               val result =
-                IEEE754.binary16ToFloat(Bits.low16(left)) + IEEE754.binary16ToFloat(Bits.low16(right))
-              vector(dest)(lane) = IEEE754.floatToBinary16(result)
+                IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(left))) + IEEE754.binary16ToFloat(
+                  Binary16.fromLow(Bits.low16(right))
+                )
+              vector(dest)(lane) = IEEE754.floatToBinary16(result).value
             case "v_mul_f16" =>
               val result =
-                IEEE754.binary16ToFloat(Bits.low16(left)) * IEEE754.binary16ToFloat(Bits.low16(right))
-              vector(dest)(lane) = IEEE754.floatToBinary16(result)
+                IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(left))) * IEEE754.binary16ToFloat(
+                  Binary16.fromLow(Bits.low16(right))
+                )
+              vector(dest)(lane) = IEEE754.floatToBinary16(result).value
             case "v_fmac_f16" =>
               vector(dest)(lane) = IEEE754.floatToBinary16(
                 Math.fma(
-                  IEEE754.binary16ToFloat(Bits.low16(left)),
-                  IEEE754.binary16ToFloat(Bits.low16(right)),
-                  IEEE754.binary16ToFloat(Bits.low16(previous))
+                  IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(left))),
+                  IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(right))),
+                  IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(previous)))
                 )
-              )
+              ).value
             case "v_sub_f32" =>
-              val result = IEEE754.binary32ToFloat(left) - IEEE754.binary32ToFloat(right)
-              vector(dest)(lane) = IEEE754.floatToBinary32(result)
+              val result = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(left))) - IEEE754.binary32ToFloat(
+                Binary32.fromLow(Bits.low32(right))
+              )
+              vector(dest)(lane) = IEEE754.floatToBinary32(result).value
               if (traceLog && lane == 0)
-                System.err.println(
-                  s"Gemstone AMDGPU log binary opcode=$opcode dest=$dest left=${IEEE754.binary32ToFloat(left)} right=${IEEE754.binary32ToFloat(right)} result=$result"
+                scribe.debug(
+                  s"Gemstone AMDGPU log binary opcode=$opcode dest=$dest left=${IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(left)))} right=${IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(right)))} result=$result"
                 )
             case "v_add_co_u32" =>
               val sum = left + right
@@ -4984,15 +5049,15 @@ object DispatchInterpreter {
               carry(lane) = borrow
           }
           if (traceByteSort && lane == 0 && index >= 540 && index <= 620)
-            System.err.println(
+            scribe.debug(
               s"Gemstone AMDGPU byte-sort VBinary index=$index opcode=$opcode dest=$dest left=0x${left.toHexString} right=0x${right.toHexString} result=0x${vector(dest)(lane).toHexString}"
             )
           if (
-            Environment.trace("reduce") &&
+            AMDGPUEnvironment.trace("reduce") &&
             kernel.name.contains("wrapped_reduce") && lane == 0 &&
             opcode == "v_add_u32"
           )
-            System.err.println(
+            scribe.debug(
               s"Gemstone AMDGPU reduce add index=$index dest=$dest left=0x${left.toHexString} right=0x${right.toHexString} result=0x${vector(dest)(lane).toHexString} localStart=$localStart decoded=${operations(index)}"
             )
         }
@@ -5004,7 +5069,7 @@ object DispatchInterpreter {
             Bits.low32(source(srcB, lane)),
             vector(dest)(lane),
             accumulate
-          )
+          ).value
         }
         AdvanceStep
       case DecodedInstruction.VDot4U32U8(dest, srcA, srcB, srcC) =>
@@ -5025,11 +5090,11 @@ object DispatchInterpreter {
             case "v_mul_f64" | "v_mul_f64_e64" =>
               value * IEEE754.binary64ToDouble(sourceFloating64(srcB, lane, scalar, vector))
           }
-          val bits = java.lang.Double.doubleToRawLongBits(result)
+          val bits = IEEE754.doubleToBinary64(result)
           vector(dest)(lane) = Bits.low32(bits)
           vector(dest + 1)(lane) = Bits.high32(bits)
           if (traceF64 && lane == 0)
-            System.err.println(
+            scribe.debug(
               s"Gemstone AMDGPU f64 binary opcode=$opcode dest=$dest value=$value result=$result"
             )
         }
@@ -5049,11 +5114,11 @@ object DispatchInterpreter {
             case "v_max_f64" | "v_max_f64_e64" => math.max(valueA, valueB)
             case "v_min_f64" | "v_min_f64_e64" => math.min(valueA, valueB)
           }
-          val bits = java.lang.Double.doubleToRawLongBits(result)
+          val bits = IEEE754.doubleToBinary64(result)
           vector(dest)(lane) = Bits.low32(bits)
           vector(dest + 1)(lane) = Bits.high32(bits)
           if (traceF64 && lane == 0)
-            System.err.println(
+            scribe.debug(
               s"Gemstone AMDGPU f64 binary-mod opcode=$opcode dest=$dest rawA=$rawA rawB=$rawB result=$result"
             )
         }
@@ -5081,8 +5146,10 @@ object DispatchInterpreter {
             case "v_add_u16"                  => Bits.low16(left + right)
             case "v_add_f16"                  =>
               IEEE754.floatToBinary16(
-                IEEE754.binary16ToFloat(Bits.low16(left)) + IEEE754.binary16ToFloat(Bits.low16(right))
-              )
+                IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(left))) + IEEE754.binary16ToFloat(
+                  Binary16.fromLow(Bits.low16(right))
+                )
+              ).value
             case "v_add_co_u32" =>
               val sum = left + right
               carry(lane) = sum > Bits.Mask32
@@ -5099,16 +5166,21 @@ object DispatchInterpreter {
             case "v_max_i16"     => Bits.low16(math.max(left, right))
             case "v_max_f16"     =>
               IEEE754.floatToBinary16(
-                math.max(IEEE754.binary16ToFloat(Bits.low16(left)), IEEE754.binary16ToFloat(Bits.low16(right)))
-              )
+                math.max(
+                  IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(left))),
+                  IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(right)))
+                )
+              ).value
             case "v_min_i16"    => Bits.low16(math.min(left, right))
-            case "v_min_f16"    => minimumF16(left, right)
+            case "v_min_f16"    => minimumF16(left, right).value
             case "v_min_u16"    => Bits.low16(math.min(Bits.low16(left), Bits.low16(right)))
             case "v_mul_lo_u16" => Bits.low16(left * right)
             case "v_mul_f16"    =>
               val result =
-                IEEE754.binary16ToFloat(Bits.low16(left)) * IEEE754.binary16ToFloat(Bits.low16(right))
-              IEEE754.floatToBinary16(result)
+                IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(left))) * IEEE754.binary16ToFloat(
+                  Binary16.fromLow(Bits.low16(right))
+                )
+              IEEE754.floatToBinary16(result).value
             case "v_mul_u32_u24" => unsignedMultiply24(left, right)
             case "v_mul_i32_i24" => signedMultiply24(left, right)
             case "v_or_b32"      => left | right
@@ -5143,25 +5215,30 @@ object DispatchInterpreter {
             case "v_pk_add_u16" => Bits.low16(a + b)
             case "v_pk_add_f16" =>
               Bits.low16(IEEE754.floatToBinary16(
-                IEEE754.binary16ToFloat(Bits.low16(a)) + IEEE754.binary16ToFloat(Bits.low16(b))
-              ))
+                IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(a))) + IEEE754.binary16ToFloat(
+                  Binary16.fromLow(Bits.low16(b))
+                )
+              ).value)
             case "v_pk_mul_lo_u16" => Bits.low16(a * b)
             case "v_pk_mul_f16"    =>
               Bits.low16(IEEE754.floatToBinary16(
-                IEEE754.binary16ToFloat(Bits.low16(a)) * IEEE754.binary16ToFloat(Bits.low16(b))
-              ))
+                IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(a))) * IEEE754.binary16ToFloat(
+                  Binary16.fromLow(Bits.low16(b))
+                )
+              ).value)
             case "v_pk_max_f16" =>
               Bits.low16(IEEE754.floatToBinary16(math.max(
-                IEEE754.binary16ToFloat(Bits.low16(a)),
-                IEEE754.binary16ToFloat(Bits.low16(b))
-              )))
+                IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(a))),
+                IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(b)))
+              )).value)
             case "v_pk_min_f16" =>
               Bits.low16(IEEE754.floatToBinary16(math.min(
-                IEEE754.binary16ToFloat(Bits.low16(a)),
-                IEEE754.binary16ToFloat(Bits.low16(b))
-              )))
+                IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(a))),
+                IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(b)))
+              )).value)
             case "v_pk_max_i16" =>
-              if (Bits.signExtend(Bits.low16(a), 16) >= Bits.signExtend(Bits.low16(b), 16)) Bits.low16(a)
+              if (Bits.signExtend(Bits.low16(a), BitWidth(16)) >= Bits.signExtend(Bits.low16(b), BitWidth(16)))
+                Bits.low16(a)
               else Bits.low16(b)
             case "v_pk_max_u16"     => math.max(Bits.low16(a), Bits.low16(b))
             case "v_pk_sub_i16"     => Bits.low16(a - b)
@@ -5177,9 +5254,9 @@ object DispatchInterpreter {
         AdvanceStep
       case DecodedInstruction.VPackB32F16(dest, srcA, srcB) =>
         foreachActive { lane =>
-          val low  = IEEE754.floatToBinary16(IEEE754.binary32ToFloat(Bits.low32(source(srcA, lane))))
-          val high = IEEE754.floatToBinary16(IEEE754.binary32ToFloat(Bits.low32(source(srcB, lane))))
-          vector(dest)(lane) = Bits.low16(low) | (Bits.low16(high) << 16)
+          val low  = IEEE754.floatToBinary16(IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(source(srcA, lane)))))
+          val high = IEEE754.floatToBinary16(IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(source(srcB, lane)))))
+          vector(dest)(lane) = low.value | (high.value << 16)
         }
         AdvanceStep
       case DecodedInstruction.VPackedFmaF16(
@@ -5258,7 +5335,7 @@ object DispatchInterpreter {
         }
         AdvanceStep
       case DecodedInstruction.VAddCarry(dest, carryDest, srcA, srcB, carryIn) =>
-        val outputCarry = Array.fill(lanes)(false)
+        val outputCarry = Array.fill(lanes.value)(false)
         foreachActive { lane =>
           val left     = Bits.low32(source(srcA, lane))
           val right    = Bits.low32(source(srcB, lane))
@@ -5271,7 +5348,7 @@ object DispatchInterpreter {
         updateLaneMask(carryDest, carryMask)
         AdvanceStep
       case DecodedInstruction.VSubCarry(dest, carryDest, srcA, srcB, carryIn) =>
-        val outputCarry = Array.fill(lanes)(false)
+        val outputCarry = Array.fill(lanes.value)(false)
         foreachActive { lane =>
           val left                 = Bits.low32(source(srcA, lane))
           val right                = Bits.low32(source(srcB, lane))
@@ -5286,7 +5363,7 @@ object DispatchInterpreter {
         updateLaneMask(carryDest, carryMask)
         AdvanceStep
       case DecodedInstruction.VSubReverseCarry(dest, carryDest, srcA, srcB, carryIn) =>
-        val outputCarry = Array.fill(lanes)(false)
+        val outputCarry = Array.fill(lanes.value)(false)
         foreachActive { lane =>
           val left                 = Bits.low32(source(srcA, lane))
           val right                = Bits.low32(source(srcB, lane))
@@ -5314,9 +5391,12 @@ object DispatchInterpreter {
               case "v_max3_u32" => math.max(math.max(left, right), addend)
               case "v_min3_i32" => math.min(math.min(left.toInt, right.toInt), addend.toInt).toLong
               case "v_min3_f32" => IEEE754.floatToBinary32(math.min(
-                  math.min(IEEE754.binary32ToFloat(left), IEEE754.binary32ToFloat(right)),
-                  IEEE754.binary32ToFloat(addend)
-                ))
+                  math.min(
+                    IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(left))),
+                    IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(right)))
+                  ),
+                  IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(addend)))
+                )).value
               case "v_min3_u32" => math.min(math.min(left, right), addend)
               case "v_med3_i32" =>
                 val a = left.toInt
@@ -5324,40 +5404,52 @@ object DispatchInterpreter {
                 val c = addend.toInt
                 math.max(math.min(a, b), math.min(math.max(a, b), c)).toLong
               case "v_max3_i16" => Bits.low16(math.max(
-                  math.max(Bits.signExtend(Bits.low16(left), 16), Bits.signExtend(Bits.low16(right), 16)),
-                  Bits.signExtend(Bits.low16(addend), 16)
+                  math.max(
+                    Bits.signExtend(Bits.low16(left), BitWidth(16)),
+                    Bits.signExtend(Bits.low16(right), BitWidth(16))
+                  ),
+                  Bits.signExtend(Bits.low16(addend), BitWidth(16))
                 ))
               case "v_max3_u16" =>
                 Bits.low16(math.max(math.max(Bits.low16(left), Bits.low16(right)), Bits.low16(addend)))
               case "v_min3_i16" => Bits.low16(math.min(
-                  math.min(Bits.signExtend(Bits.low16(left), 16), Bits.signExtend(Bits.low16(right), 16)),
-                  Bits.signExtend(Bits.low16(addend), 16)
+                  math.min(
+                    Bits.signExtend(Bits.low16(left), BitWidth(16)),
+                    Bits.signExtend(Bits.low16(right), BitWidth(16))
+                  ),
+                  Bits.signExtend(Bits.low16(addend), BitWidth(16))
                 ))
               case "v_min3_u16" =>
                 Bits.low16(math.min(math.min(Bits.low16(left), Bits.low16(right)), Bits.low16(addend)))
               case "v_mad_u16" => Bits.low16(Bits.low16(left) * Bits.low16(right) + Bits.low16(addend))
               case "v_fma_f32" => IEEE754.floatToBinary32(
-                  IEEE754.binary32ToFloat(left) * IEEE754.binary32ToFloat(right) + IEEE754.binary32ToFloat(
+                  IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(left))) * IEEE754.binary32ToFloat(
+                    Binary32.fromLow(Bits.low32(right))
+                  ) + IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(
                     addend
-                  )
-                )
+                  )))
+                ).value
               case "v_fma_f16" =>
                 IEEE754.floatToBinary16(
-                  IEEE754.binary16ToFloat(Bits.low16(left)) * IEEE754.binary16ToFloat(Bits.low16(right)) +
-                    IEEE754.binary16ToFloat(Bits.low16(addend))
-                )
+                  IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(left))) * IEEE754.binary16ToFloat(
+                    Binary16.fromLow(Bits.low16(right))
+                  ) +
+                    IEEE754.binary16ToFloat(Binary16.fromLow(Bits.low16(addend)))
+                ).value
               case "v_div_fmas_f32" =>
                 val result =
-                  IEEE754.binary32ToFloat(left) * IEEE754.binary32ToFloat(right) + IEEE754.binary32ToFloat(
+                  IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(left))) * IEEE754.binary32ToFloat(
+                    Binary32.fromLow(Bits.low32(right))
+                  ) + IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(
                     addend
-                  )
+                  )))
                 val scaled      = (laneMask(carry) & (1L << lane)) != 0L
                 val finalResult = if (scaled) Math.scalb(result, 32) else result
                 if (traceSqrt && lane == 0)
-                  System.err.println(
-                    s"Gemstone AMDGPU sqrt divfmas dest=$dest left=${IEEE754.binary32ToFloat(left)} right=${IEEE754.binary32ToFloat(right)} addend=${IEEE754.binary32ToFloat(addend)} result=$finalResult scaled=$scaled"
+                  scribe.debug(
+                    s"Gemstone AMDGPU sqrt divfmas dest=$dest left=${IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(left)))} right=${IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(right)))} addend=${IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(addend)))} result=$finalResult scaled=$scaled"
                   )
-                IEEE754.floatToBinary32(finalResult)
+                IEEE754.floatToBinary32(finalResult).value
               case "v_mad_legacy_u16" => Bits.low16(left) * Bits.low16(right) + Bits.low16(addend)
               case "v_mad_u32_u24"    => unsignedMultiplyAdd24(left, right, addend)
               case "v_mad_i32_i24"    => Bits.low32(signedMultiply24(left, right) + addend)
@@ -5374,7 +5466,7 @@ object DispatchInterpreter {
                 if (width == 0) 0L
                 else {
                   val mask = (1L << width) - 1L
-                  Bits.low32(Bits.signExtend((left >>> (right.toInt & 31)) & mask, width))
+                  Bits.low32(Bits.signExtend((left >>> (right.toInt & 31)) & mask, BitWidth.assume(width)))
                 }
               case "v_bfe_u32" =>
                 val width = addend.toInt & 31
@@ -5389,7 +5481,7 @@ object DispatchInterpreter {
         }
         AdvanceStep
       case DecodedInstruction.VMadU64U32(dest, carryDest, srcA, srcB, srcC) =>
-        val madCarry = Array.fill(lanes)(false)
+        val madCarry = Array.fill(lanes.value)(false)
         foreachActive { lane =>
           val rawA    = source(srcA, lane)
           val rawB    = source(srcB, lane)
@@ -5400,24 +5492,24 @@ object DispatchInterpreter {
           vector(dest + 1)(lane) = Bits.high32(sum)
           madCarry(lane) = java.lang.Long.compareUnsigned(sum, product) < 0
           if (
-            Environment.trace("merge-rank-reads") &&
+            AMDGPUEnvironment.trace("merge-rank-reads") &&
             lane == 0 && localStart == 0 && kernel.name.contains("wrapped_merge_sort") &&
             Set(1557, 1563).contains(index)
           )
-            System.err.println(
+            scribe.debug(
               s"Gemstone AMDGPU merge rank mad index=$index dest=$dest carryDest=$carryDest srcA=$srcA srcB=$srcB srcC=$srcC rawA=0x${rawA.toHexString} rawB=0x${rawB.toHexString} addend=0x${addend.toHexString} result=0x${sum.toHexString} carry=${madCarry(lane)}"
             )
         }
         updateLaneMask(carryDest, booleanLaneMask(madCarry))
         AdvanceStep
       case DecodedInstruction.VMadI64I32(dest, carryDest, srcA, srcB, srcC) =>
-        val madCarry = Array.fill(lanes)(false)
+        val madCarry = Array.fill(lanes.value)(false)
         foreachActive { lane =>
           val rawA    = source(srcA, lane)
           val rawB    = source(srcB, lane)
           val addend  = source64(srcC, lane, scalar, vector)
-          val left    = Bits.signExtend(Bits.low32(rawA), 32)
-          val right   = Bits.signExtend(Bits.low32(rawB), 32)
+          val left    = Bits.signExtend(Bits.low32(rawA), BitWidth(32))
+          val right   = Bits.signExtend(Bits.low32(rawB), BitWidth(32))
           val product = left * right
           val sum     = product + addend
           vector(dest)(lane) = Bits.low32(sum)
@@ -5442,13 +5534,15 @@ object DispatchInterpreter {
             val compared = comparisonOpcode match {
               case "v_cmp_eq_u32" => leftLow == rightLow
               case "v_cmp_eq_u64" => left64 == right64
-              case "v_cmp_eq_f32" => IEEE754.binary32ToFloat(leftLow) == IEEE754.binary32ToFloat(rightLow)
+              case "v_cmp_eq_f32" => IEEE754.binary32ToFloat(
+                  Binary32.fromLow(Bits.low32(leftLow))
+                ) == IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(rightLow)))
               case "v_cmp_eq_f16" | "v_cmp_neq_f16" | "v_cmp_lg_f16" | "v_cmp_lt_f16" |
                   "v_cmp_le_f16" | "v_cmp_gt_f16" | "v_cmp_ge_f16" | "v_cmp_nlt_f16" |
                   "v_cmp_nle_f16" | "v_cmp_ngt_f16" | "v_cmp_nge_f16" | "v_cmp_o_f16" | "v_cmp_u_f16" =>
                 compareF16(opcode, leftLow, rightLow)
               case "v_cmp_class_f32" =>
-                (floatClassMask(IEEE754.binary32ToFloat(leftLow)) & rightLow) != 0L
+                (floatClassMask(IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(leftLow)))) & rightLow) != 0L
               case "v_cmp_class_f64" =>
                 (doubleClassMask(IEEE754.binary64ToDouble(sourceFloating64(
                   srcA,
@@ -5487,11 +5581,17 @@ object DispatchInterpreter {
                 !(IEEE754.binary64ToDouble(sourceFloating64(srcA, lane, scalar, vector)) <=
                   IEEE754.binary64ToDouble(sourceFloating64(srcB, lane, scalar, vector)))
               case "v_cmp_neq_f32" =>
-                IEEE754.binary32ToFloat(leftLow) != IEEE754.binary32ToFloat(rightLow)
+                IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(leftLow))) != IEEE754.binary32ToFloat(
+                  Binary32.fromLow(Bits.low32(rightLow))
+                )
               case "v_cmp_lg_f32" =>
-                IEEE754.binary32ToFloat(leftLow) != IEEE754.binary32ToFloat(rightLow)
+                IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(leftLow))) != IEEE754.binary32ToFloat(
+                  Binary32.fromLow(Bits.low32(rightLow))
+                )
               case "v_cmp_u_f32" =>
-                IEEE754.binary32ToFloat(leftLow).isNaN || IEEE754.binary32ToFloat(rightLow).isNaN
+                IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(leftLow))).isNaN || IEEE754.binary32ToFloat(
+                  Binary32.fromLow(Bits.low32(rightLow))
+                ).isNaN
               case "v_cmp_gt_f64" =>
                 IEEE754.binary64ToDouble(sourceFloating64(srcA, lane, scalar, vector)) >
                   IEEE754.binary64ToDouble(sourceFloating64(srcB, lane, scalar, vector))
@@ -5509,17 +5609,29 @@ object DispatchInterpreter {
                 val right = IEEE754.binary64ToDouble(sourceFloating64(srcB, lane, scalar, vector))
                 left.isNaN || right.isNaN
               case "v_cmp_lt_f32" =>
-                IEEE754.binary32ToFloat(leftLow) < IEEE754.binary32ToFloat(rightLow)
+                IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(leftLow))) < IEEE754.binary32ToFloat(
+                  Binary32.fromLow(Bits.low32(rightLow))
+                )
               case "v_cmp_gt_f32" =>
-                IEEE754.binary32ToFloat(leftLow) > IEEE754.binary32ToFloat(rightLow)
+                IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(leftLow))) > IEEE754.binary32ToFloat(
+                  Binary32.fromLow(Bits.low32(rightLow))
+                )
               case "v_cmp_ge_f32" =>
-                IEEE754.binary32ToFloat(leftLow) >= IEEE754.binary32ToFloat(rightLow)
+                IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(leftLow))) >= IEEE754.binary32ToFloat(
+                  Binary32.fromLow(Bits.low32(rightLow))
+                )
               case "v_cmp_le_f32" =>
-                IEEE754.binary32ToFloat(leftLow) <= IEEE754.binary32ToFloat(rightLow)
+                IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(leftLow))) <= IEEE754.binary32ToFloat(
+                  Binary32.fromLow(Bits.low32(rightLow))
+                )
               case "v_cmp_ngt_f32" =>
-                !(IEEE754.binary32ToFloat(leftLow) > IEEE754.binary32ToFloat(rightLow))
+                !(IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(leftLow))) > IEEE754.binary32ToFloat(
+                  Binary32.fromLow(Bits.low32(rightLow))
+                ))
               case "v_cmp_nge_f32" =>
-                !(IEEE754.binary32ToFloat(leftLow) >= IEEE754.binary32ToFloat(rightLow))
+                !(IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(leftLow))) >= IEEE754.binary32ToFloat(
+                  Binary32.fromLow(Bits.low32(rightLow))
+                ))
               case "v_cmp_lt_f64" =>
                 IEEE754.binary64ToDouble(sourceFloating64(srcA, lane, scalar, vector)) <
                   IEEE754.binary64ToDouble(sourceFloating64(srcB, lane, scalar, vector))
@@ -5527,23 +5639,35 @@ object DispatchInterpreter {
                 !(IEEE754.binary64ToDouble(sourceFloating64(srcA, lane, scalar, vector)) <
                   IEEE754.binary64ToDouble(sourceFloating64(srcB, lane, scalar, vector)))
               case "v_cmp_gt_i16" =>
-                Bits.signExtend(Bits.low16(leftLow), 16) > Bits.signExtend(Bits.low16(rightLow), 16)
+                Bits.signExtend(Bits.low16(leftLow), BitWidth(16)) > Bits.signExtend(Bits.low16(rightLow), BitWidth(16))
               case "v_cmp_gt_u16" => Bits.low16(leftLow) > Bits.low16(rightLow)
               case "v_cmp_le_u16" => Bits.low16(leftLow) <= Bits.low16(rightLow)
               case "v_cmp_ge_i16" =>
-                Bits.signExtend(Bits.low16(leftLow), 16) >= Bits.signExtend(Bits.low16(rightLow), 16)
+                Bits.signExtend(
+                  Bits.low16(leftLow),
+                  BitWidth(16)
+                ) >= Bits.signExtend(Bits.low16(rightLow), BitWidth(16))
               case "v_cmp_ge_u16" => Bits.low16(leftLow) >= Bits.low16(rightLow)
               case "v_cmp_lt_i16" =>
-                Bits.signExtend(Bits.low16(leftLow), 16) < Bits.signExtend(Bits.low16(rightLow), 16)
+                Bits.signExtend(Bits.low16(leftLow), BitWidth(16)) < Bits.signExtend(Bits.low16(rightLow), BitWidth(16))
               case "v_cmp_lt_u16" => Bits.low16(leftLow) < Bits.low16(rightLow)
               case "v_cmp_le_i16" =>
-                Bits.signExtend(Bits.low16(leftLow), 16) <= Bits.signExtend(Bits.low16(rightLow), 16)
+                Bits.signExtend(
+                  Bits.low16(leftLow),
+                  BitWidth(16)
+                ) <= Bits.signExtend(Bits.low16(rightLow), BitWidth(16))
               case "v_cmp_nlt_f32" =>
-                !(IEEE754.binary32ToFloat(leftLow) < IEEE754.binary32ToFloat(rightLow))
+                !(IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(leftLow))) < IEEE754.binary32ToFloat(
+                  Binary32.fromLow(Bits.low32(rightLow))
+                ))
               case "v_cmp_nle_f32" =>
-                !(IEEE754.binary32ToFloat(leftLow) <= IEEE754.binary32ToFloat(rightLow))
+                !(IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(leftLow))) <= IEEE754.binary32ToFloat(
+                  Binary32.fromLow(Bits.low32(rightLow))
+                ))
               case "v_cmp_o_f32" =>
-                !IEEE754.binary32ToFloat(leftLow).isNaN && !IEEE754.binary32ToFloat(rightLow).isNaN
+                !IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(leftLow))).isNaN && !IEEE754.binary32ToFloat(
+                  Binary32.fromLow(Bits.low32(rightLow))
+                ).isNaN
               case "v_cmp_ne_u32" => leftLow != rightLow
               case "v_cmp_ne_u16" => Bits.low16(leftLow) != Bits.low16(rightLow)
               case "v_cmp_ne_u64" => left64 != right64
@@ -5566,7 +5690,7 @@ object DispatchInterpreter {
             }
             if (compared) resultMask |= 1L << lane
             if (traceByteSortCompare && lane == 0)
-              System.err.println(
+              scribe.debug(
                 s"Gemstone AMDGPU byte-sort compare index=$index opcode=$opcode srcA=$srcA srcB=$srcB left=0x${source(srcA, lane).toHexString} right=0x${source(srcB, lane).toHexString} result=$compared active=${active(lane)}"
               )
           } else {
@@ -5574,14 +5698,14 @@ object DispatchInterpreter {
           }
         }
         if (traceByteSortCompare)
-          System.err.println(
+          scribe.debug(
             s"Gemstone AMDGPU byte-sort compare-mask index=$index opcode=$opcode mask=0x${resultMask.toHexString}"
           )
         // Both compare forms materialize a complete result mask.
         if (!compareAndExec) carry.bits = resultMask
         if (compareAndExec) active.bits = resultMask
         if (traceControl && kernel.name.contains("fasten_main"))
-          System.err.println(
+          scribe.debug(
             s"Gemstone AMDGPU miniBUDE VCompare index=$index opcode=$opcode mask=0x${resultMask.toHexString} active=0x${laneMask(active).toHexString}"
           )
         AdvanceStep
@@ -5595,7 +5719,7 @@ object DispatchInterpreter {
             srcBSignExtend,
             destination
           ) =>
-        val result = Array.fill(lanes)(false)
+        val result = Array.fill(lanes.value)(false)
         foreachActive { lane =>
           val left  = selectSubDword(source(srcA, lane), srcASelection, srcASignExtend)
           val right = selectSubDword(source(srcB, lane), srcBSelection, srcBSignExtend)
@@ -5606,7 +5730,9 @@ object DispatchInterpreter {
                 "v_cmp_nle_f16" | "v_cmp_ngt_f16" | "v_cmp_nge_f16" | "v_cmp_o_f16" | "v_cmp_u_f16" =>
               compareF16(opcode, left, right)
             case "v_cmp_eq_f32" =>
-              IEEE754.binary32ToFloat(Bits.low32(left)) == IEEE754.binary32ToFloat(Bits.low32(right))
+              IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(left))) == IEEE754.binary32ToFloat(
+                Binary32.fromLow(Bits.low32(right))
+              )
             case "v_cmp_eq_i16" | "v_cmp_eq_u16" => Bits.low16(left) == Bits.low16(right)
             case "v_cmp_lg_i16" | "v_cmp_lg_u16" | "v_cmp_ne_i16" | "v_cmp_ne_u16" =>
               Bits.low16(left) != Bits.low16(right)
@@ -5614,20 +5740,22 @@ object DispatchInterpreter {
             case "v_cmp_gt_i32"                  => Bits.low32(left).toInt > Bits.low32(right).toInt
             case "v_cmp_gt_u32"                  => Bits.low32(left) > Bits.low32(right)
             case "v_cmp_gt_f32"                  =>
-              IEEE754.binary32ToFloat(Bits.low32(left)) > IEEE754.binary32ToFloat(Bits.low32(right))
+              IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(left))) > IEEE754.binary32ToFloat(
+                Binary32.fromLow(Bits.low32(right))
+              )
             case "v_cmp_ge_i32" => Bits.low32(left).toInt >= Bits.low32(right).toInt
             case "v_cmp_ge_u32" => Bits.low32(left) >= Bits.low32(right)
             case "v_cmp_gt_i16" =>
-              Bits.signExtend(Bits.low16(left), 16) > Bits.signExtend(Bits.low16(right), 16)
+              Bits.signExtend(Bits.low16(left), BitWidth(16)) > Bits.signExtend(Bits.low16(right), BitWidth(16))
             case "v_cmp_gt_u16" => Bits.low16(left) > Bits.low16(right)
             case "v_cmp_ge_i16" =>
-              Bits.signExtend(Bits.low16(left), 16) >= Bits.signExtend(Bits.low16(right), 16)
+              Bits.signExtend(Bits.low16(left), BitWidth(16)) >= Bits.signExtend(Bits.low16(right), BitWidth(16))
             case "v_cmp_ge_u16" => Bits.low16(left) >= Bits.low16(right)
             case "v_cmp_lt_i16" =>
-              Bits.signExtend(Bits.low16(left), 16) < Bits.signExtend(Bits.low16(right), 16)
+              Bits.signExtend(Bits.low16(left), BitWidth(16)) < Bits.signExtend(Bits.low16(right), BitWidth(16))
             case "v_cmp_lt_u16" => Bits.low16(left) < Bits.low16(right)
             case "v_cmp_le_i16" =>
-              Bits.signExtend(Bits.low16(left), 16) <= Bits.signExtend(Bits.low16(right), 16)
+              Bits.signExtend(Bits.low16(left), BitWidth(16)) <= Bits.signExtend(Bits.low16(right), BitWidth(16))
             case "v_cmp_le_u16" => Bits.low16(left) <= Bits.low16(right)
             case "v_cmp_lt_i32" => Bits.low32(left).toInt < Bits.low32(right).toInt
             case "v_cmp_lt_u32" => Bits.low32(left) < Bits.low32(right)
@@ -5645,7 +5773,7 @@ object DispatchInterpreter {
             carry.bits = booleanLaneMask(result)
         }
         if (traceControl && kernel.name.contains("wrapped_transform_config"))
-          System.err.println(
+          scribe.debug(
             s"Gemstone AMDGPU transform VOPC index=$index opcode=$opcode result=${booleanLaneMask(result)} active=${laneMask(active)}"
           )
         AdvanceStep
@@ -5655,10 +5783,10 @@ object DispatchInterpreter {
         val needsFloat64     = comparisonOpcode.endsWith("_f64")
         var resultMask       = 0L
         var lane             = 0
-        while (lane < lanes) {
+        while (lane < lanes.value) {
           if (active(lane)) {
             def modifiedFloat(sourceRegister: InstructionSource, absolute: Boolean, negate: Boolean): Float = {
-              val raw      = IEEE754.binary32ToFloat(Bits.low32(source(sourceRegister, lane)))
+              val raw      = IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(source(sourceRegister, lane))))
               val prepared = if (absolute) math.abs(raw) else raw
               if (negate) -prepared else prepared
             }
@@ -5748,15 +5876,15 @@ object DispatchInterpreter {
               case "v_cmp_gt_i16" =>
                 Bits.signExtend(
                   Bits.low16(source(srcA, lane)),
-                  16
-                ) > Bits.signExtend(Bits.low16(source(srcB, lane)), 16)
+                  BitWidth(16)
+                ) > Bits.signExtend(Bits.low16(source(srcB, lane)), BitWidth(16))
               case "v_cmp_gt_u16" =>
                 Bits.low16(source(srcA, lane)) > Bits.low16(source(srcB, lane))
               case "v_cmp_ge_i16" =>
                 Bits.signExtend(
                   Bits.low16(source(srcA, lane)),
-                  16
-                ) >= Bits.signExtend(Bits.low16(source(srcB, lane)), 16)
+                  BitWidth(16)
+                ) >= Bits.signExtend(Bits.low16(source(srcB, lane)), BitWidth(16))
               case "v_cmp_ge_u32" =>
                 Bits.low32(source(srcA, lane)) >= Bits.low32(source(srcB, lane))
               case "v_cmp_ge_i32" =>
@@ -5770,13 +5898,13 @@ object DispatchInterpreter {
               case "v_cmp_lt_i16" =>
                 Bits.signExtend(
                   Bits.low16(source(srcA, lane)),
-                  16
-                ) < Bits.signExtend(Bits.low16(source(srcB, lane)), 16)
+                  BitWidth(16)
+                ) < Bits.signExtend(Bits.low16(source(srcB, lane)), BitWidth(16))
               case "v_cmp_le_i16" =>
                 Bits.signExtend(
                   Bits.low16(source(srcA, lane)),
-                  16
-                ) <= Bits.signExtend(Bits.low16(source(srcB, lane)), 16)
+                  BitWidth(16)
+                ) <= Bits.signExtend(Bits.low16(source(srcB, lane)), BitWidth(16))
               case "v_cmp_le_u16" =>
                 Bits.low16(source(srcA, lane)) <= Bits.low16(source(srcB, lane))
               case "v_cmp_gt_i64" =>
@@ -5835,23 +5963,23 @@ object DispatchInterpreter {
                 "set_operations"
               ) && localStart == 0 && index >= 1833 && index <= 1835 && lane < 4
             )
-              System.err.println(
+              scribe.debug(
                 s"Gemstone AMDGPU set compare3 kernel=${kernel.name} index=$index lane=$lane opcode=$opcode srcA=$srcA srcB=$srcB left=0x${source(srcA, lane).toHexString} right=0x${source(srcB, lane).toHexString} result=$laneResult active=${active(lane)}"
               )
             if (laneResult) resultMask |= 1L << lane
             if (
-              Environment.trace("set-compare") &&
+              AMDGPUEnvironment.trace("set-compare") &&
               kernel.name.contains("set_operations") && lane < 4
             )
-              System.err.println(
+              scribe.debug(
                 s"Gemstone AMDGPU set compare index=$index lane=$lane opcode=$opcode srcA=$srcA srcB=$srcB left=0x${source(srcA, lane).toHexString} right=0x${source(srcB, lane).toHexString} result=$laneResult active=${active(lane)}"
               )
             if (traceControl && lane == 0)
-              System.err.println(
+              scribe.debug(
                 s"Gemstone AMDGPU control compare kernel=${kernel.name} index=$index opcode=$opcode srcA=$leftFloat srcB=$rightFloat rawA=0x${source(srcA, lane).toHexString} rawB=0x${source(srcB, lane).toHexString} result=$laneResult active=${active(lane)}"
               )
             if (traceByteSortCompare && lane == 0)
-              System.err.println(
+              scribe.debug(
                 s"Gemstone AMDGPU byte-sort compare3 index=$index opcode=$opcode srcA=$srcA srcB=$srcB left=0x${source(srcA, lane).toHexString} right=0x${source(srcB, lane).toHexString} result=$laneResult active=${active(lane)}"
               )
           }
@@ -5867,38 +5995,38 @@ object DispatchInterpreter {
         val compareMask =
           (sourceScalar64(InstructionSource.Scalar(dest)) & ~activeMask) | (resultMask & activeMask)
         if (
-          Environment.trace("merge-compare-detail") &&
+          AMDGPUEnvironment.trace("merge-compare-detail") &&
           laneMask(active) != 0L && kernel.name.contains("wrapped_merge_sort") &&
           index >= 1530 && index <= 1625
         )
-          System.err.println(
+          scribe.debug(
             s"Gemstone AMDGPU merge compare detail index=$index opcode=$opcode dest=$dest active=0x${activeMask.toHexString} result=0x${resultMask.toHexString} lane0=${active(0)} left=0x${Bits.low32(source(srcA, 0)).toHexString} right=0x${Bits.low32(source(srcB, 0)).toHexString}"
           )
         if (
-          Environment.trace("merge-stage") &&
+          AMDGPUEnvironment.trace("merge-stage") &&
           laneMask(active) != 0L && kernel.name.contains("wrapped_merge_sort") && index >= 1400 && index <= 1494
         )
-          System.err.println(
+          scribe.debug(
             s"Gemstone AMDGPU merge stage compare index=$index opcode=$opcode dest=$dest active=0x${activeMask.toHexString} result=0x${resultMask.toHexString} written=0x${compareMask.toHexString} v1=0x${vector(1)(0).toHexString} v2=0x${vector(2)(0).toHexString} v3=0x${vector(3)(0).toHexString} v4=0x${vector(4)(0).toHexString} v5=0x${vector(5)(0).toHexString} v6=0x${vector(6)(0).toHexString} v7=0x${vector(7)(0).toHexString} v8=0x${vector(8)(0).toHexString} v9=0x${vector(9)(0).toHexString} v10=0x${vector(10)(0).toHexString} v11=0x${vector(11)(0).toHexString} v12=0x${vector(12)(0).toHexString}"
           )
         if (
-          Environment.trace("merge-select") &&
+          AMDGPUEnvironment.trace("merge-select") &&
           kernel.name.contains("wrapped_merge_sort") && index >= 1550 && index <= 1625
         )
-          System.err.println(
+          scribe.debug(
             s"Gemstone AMDGPU merge compare index=$index opcode=$opcode dest=$dest active=0x${activeMask.toHexString} result=0x${resultMask.toHexString} written=0x${compareMask.toHexString}"
           )
         if (traceByteSortCompare)
-          System.err.println(
+          scribe.debug(
             s"Gemstone AMDGPU byte-sort compare3-mask index=$index opcode=$opcode dest=$dest mask=0x${resultMask.toHexString}"
           )
         if (traceControl)
-          System.err.println(
+          scribe.debug(
             s"Gemstone AMDGPU transform compare index=$index opcode=$opcode dest=$dest result=$resultMask active=${laneMask(active)}"
           )
         if (traceSetControl)
-          System.err.println(
-            s"Gemstone AMDGPU set compare-mask kernel=${kernel.name} localStart=$localStart index=$index opcode=$opcode dest=$dest result=0x${resultMask.toHexString} active=0x${laneMask(active).toHexString} carry=0x${laneMask(carry).toHexString} srcA0=0x${source(srcA, 0).toHexString} srcB0=0x${source(srcB, 0).toHexString} srcA1=0x${source(srcA, math.min(1, lanes - 1)).toHexString} srcB1=0x${source(srcB, math.min(1, lanes - 1)).toHexString}"
+          scribe.debug(
+            s"Gemstone AMDGPU set compare-mask kernel=${kernel.name} localStart=$localStart index=$index opcode=$opcode dest=$dest result=0x${resultMask.toHexString} active=0x${laneMask(active).toHexString} carry=0x${laneMask(carry).toHexString} srcA0=0x${source(srcA, 0).toHexString} srcB0=0x${source(srcB, 0).toHexString} srcA1=0x${source(srcA, math.min(1, lanes.value - 1)).toHexString} srcB1=0x${source(srcB, math.min(1, lanes.value - 1)).toHexString}"
           )
         AdvanceStep
       case DecodedInstruction.VShiftLeft64(dest, amount, src) =>
@@ -5940,8 +6068,9 @@ object DispatchInterpreter {
         }
         AdvanceStep
       case DecodedInstruction.DSReadD16(dest, addressRegister, byteCount, offset, high) =>
+        val scalarByteCount                                     = ScalarByteWidth.assume(byteCount)
         def loadLane(lane: Int): Either[ExecutionFailure, Unit] =
-          if (lane == lanes) Right(())
+          if (lane == lanes.value) Right(())
           else if (!active(lane)) loadLane(lane + 1)
           else {
             val base         = Bits.low32(vector(addressRegister)(lane))
@@ -5949,7 +6078,7 @@ object DispatchInterpreter {
             if (sourceOffset == InvalidLdsOffset)
               Left(ldsFailure(base + offset.toLong, byteCount))
             else {
-              val loaded = LittleEndian.decode(lds, sourceOffset, byteCount)
+              val loaded = LittleEndian.decode(lds, sourceOffset, scalarByteCount)
               vector(dest)(lane) =
                 if (high) (vector(dest)(lane) & 0x0000ffffL) | (loaded << 16)
                 else (vector(dest)(lane) & 0xffff0000L) | loaded
@@ -5958,8 +6087,10 @@ object DispatchInterpreter {
           }
         advanceAfter(loadLane(0))
       case DecodedInstruction.DSSignedReadD16(dest, addressRegister, byteCount, offset, high) =>
+        val scalarByteCount                                     = ScalarByteWidth.assume(byteCount)
+        val bitWidth                                            = BitWidth.assume(byteCount * 8)
         def loadLane(lane: Int): Either[ExecutionFailure, Unit] =
-          if (lane == lanes) Right(())
+          if (lane == lanes.value) Right(())
           else if (!active(lane)) loadLane(lane + 1)
           else {
             val base         = Bits.low32(vector(addressRegister)(lane))
@@ -5968,7 +6099,9 @@ object DispatchInterpreter {
               Left(ldsFailure(base + offset.toLong, byteCount))
             else {
               val loaded =
-                Bits.low16(Bits.signExtend(LittleEndian.decode(lds, sourceOffset, byteCount), byteCount * 8))
+                Bits.low16(
+                  Bits.signExtend(LittleEndian.decode(lds, sourceOffset, scalarByteCount), bitWidth)
+                )
               vector(dest)(lane) =
                 if (high) (vector(dest)(lane) & 0x0000ffffL) | (loaded << 16)
                 else (vector(dest)(lane) & 0xffff0000L) | loaded
@@ -5977,8 +6110,10 @@ object DispatchInterpreter {
           }
         advanceAfter(loadLane(0))
       case DecodedInstruction.DSRead(dest, addressRegister, byteCount, offsetA, offsetB) =>
+        // DS_READ can transfer 16 bytes, while trace previews intentionally show only the first scalar word.
+        val previewWidth                                        = ScalarByteWidth.assume(math.min(8, byteCount))
         def loadLane(lane: Int): Either[ExecutionFailure, Unit] =
-          if (lane == lanes) Right(())
+          if (lane == lanes.value) Right(())
           else if (!active(lane)) loadLane(lane + 1)
           else {
             val base  = Bits.low32(vector(addressRegister)(lane))
@@ -5997,49 +6132,49 @@ object DispatchInterpreter {
                 if (second != InvalidLdsOffset)
                   writeVectorBytes(vector, dest + (byteCount + 3) / 4, lane, lds, second, byteCount)
                 if (traceLds && dest == 22 && addressRegister == 22)
-                  System.err.println(
-                    s"Gemstone AMDGPU LDS read index=$index lane=$lane addressRegister=$addressRegister base=0x${base.toHexString} bytes=$byteCount value=0x${LittleEndian.decode(lds, first, byteCount).toHexString}"
+                  scribe.debug(
+                    s"Gemstone AMDGPU LDS read index=$index lane=$lane addressRegister=$addressRegister base=0x${base.toHexString} bytes=$byteCount value=0x${LittleEndian.decode(lds, first, previewWidth).toHexString}"
                   )
                 if (traceSetLds && lane < 4)
-                  System.err.println(
-                    s"Gemstone AMDGPU set LDS read kernel=${kernel.name} localStart=$localStart index=$index lane=$lane dest=$dest addressRegister=$addressRegister base=0x${base.toHexString} offsetA=$offsetA offsetB=${offsetB.getOrElse(-1)} bytes=$byteCount first=0x${LittleEndian.decode(lds, first, byteCount).toHexString} second=${
+                  scribe.debug(
+                    s"Gemstone AMDGPU set LDS read kernel=${kernel.name} localStart=$localStart index=$index lane=$lane dest=$dest addressRegister=$addressRegister base=0x${base.toHexString} offsetA=$offsetA offsetB=${offsetB.getOrElse(-1)} bytes=$byteCount first=0x${LittleEndian.decode(lds, first, previewWidth).toHexString} second=${
                         if (second == InvalidLdsOffset) "-"
-                        else LittleEndian.decode(lds, second, byteCount).toHexString
+                        else LittleEndian.decode(lds, second, previewWidth).toHexString
                       }"
                   )
                 if (
-                  Environment.trace("scan-lds") &&
+                  AMDGPUEnvironment.trace("scan-lds") &&
                   kernel.name.contains("wrapped_scan") && lane < 8
                 )
-                  System.err.println(
-                    s"Gemstone AMDGPU scan LDS read index=$index lane=$lane dest=$dest base=0x${base.toHexString} offsetA=$offsetA bytes=$byteCount value=0x${LittleEndian.decode(lds, first, byteCount).toHexString}"
+                  scribe.debug(
+                    s"Gemstone AMDGPU scan LDS read index=$index lane=$lane dest=$dest base=0x${base.toHexString} offsetA=$offsetA bytes=$byteCount value=0x${LittleEndian.decode(lds, first, previewWidth).toHexString}"
                   )
                 if (traceByteSort && lane == 0 && index >= 540)
-                  System.err.println(
-                    s"Gemstone AMDGPU byte-sort LDS read index=$index dest=$dest base=0x${base.toHexString} bytes=$byteCount value=0x${LittleEndian.decode(lds, first, byteCount).toHexString}"
+                  scribe.debug(
+                    s"Gemstone AMDGPU byte-sort LDS read index=$index dest=$dest base=0x${base.toHexString} bytes=$byteCount value=0x${LittleEndian.decode(lds, first, previewWidth).toHexString}"
                   )
                 if (
-                  Environment.trace("merge-reads") &&
+                  AMDGPUEnvironment.trace("merge-reads") &&
                   lane == 0 && kernel.name.contains("wrapped_merge_sort") && index >= 2050
                 )
-                  System.err.println(
-                    s"Gemstone AMDGPU merge LDS read index=$index dest=$dest base=0x${base.toHexString} offsetA=$offsetA bytes=$byteCount value=0x${LittleEndian.decode(lds, first, byteCount).toHexString}"
+                  scribe.debug(
+                    s"Gemstone AMDGPU merge LDS read index=$index dest=$dest base=0x${base.toHexString} offsetA=$offsetA bytes=$byteCount value=0x${LittleEndian.decode(lds, first, previewWidth).toHexString}"
                   )
                 if (
-                  Environment.trace("merge-rank-reads") &&
+                  AMDGPUEnvironment.trace("merge-rank-reads") &&
                   lane == 0 && localStart == 0 && kernel.name.contains("wrapped_merge_sort") &&
                   index >= 1400 && index <= 1625
                 )
-                  System.err.println(
-                    s"Gemstone AMDGPU merge rank read index=$index dest=$dest addressRegister=$addressRegister base=0x${base.toHexString} offsetA=$offsetA bytes=$byteCount value=0x${LittleEndian.decode(lds, first, byteCount).toHexString} v1=0x${vector(1)(lane).toHexString} v2=0x${vector(2)(lane).toHexString} v3=0x${vector(3)(lane).toHexString} v7=0x${vector(7)(lane).toHexString} v8=0x${vector(8)(lane).toHexString} v9=0x${vector(9)(lane).toHexString} v10=0x${vector(10)(lane).toHexString} v13=0x${vector(13)(lane).toHexString} v14=0x${vector(14)(lane).toHexString} v23=0x${vector(23)(lane).toHexString}"
+                  scribe.debug(
+                    s"Gemstone AMDGPU merge rank read index=$index dest=$dest addressRegister=$addressRegister base=0x${base.toHexString} offsetA=$offsetA bytes=$byteCount value=0x${LittleEndian.decode(lds, first, previewWidth).toHexString} v1=0x${vector(1)(lane).toHexString} v2=0x${vector(2)(lane).toHexString} v3=0x${vector(3)(lane).toHexString} v7=0x${vector(7)(lane).toHexString} v8=0x${vector(8)(lane).toHexString} v9=0x${vector(9)(lane).toHexString} v10=0x${vector(10)(lane).toHexString} v13=0x${vector(13)(lane).toHexString} v14=0x${vector(14)(lane).toHexString} v23=0x${vector(23)(lane).toHexString}"
                   )
                 if (
-                  Environment.trace("merge-input") &&
+                  AMDGPUEnvironment.trace("merge-input") &&
                   kernel.name.contains("wrapped_merge_sort") && localStart == 0 && lane < 8 &&
                   (index >= 1300 && index <= 1302)
                 )
-                  System.err.println(
-                    s"Gemstone AMDGPU merge input read index=$index localStart=$localStart lane=$lane dest=$dest address=0x${base.toHexString} offsetA=$offsetA offsetB=${offsetB.getOrElse(-1)} value=0x${LittleEndian.decode(lds, first, byteCount).toHexString} vdest=0x${vector(dest)(lane).toHexString} vdestNext=0x${vector(dest + (byteCount + 3) / 4)(lane).toHexString}"
+                  scribe.debug(
+                    s"Gemstone AMDGPU merge input read index=$index localStart=$localStart lane=$lane dest=$dest address=0x${base.toHexString} offsetA=$offsetA offsetB=${offsetB.getOrElse(-1)} value=0x${LittleEndian.decode(lds, first, previewWidth).toHexString} vdest=0x${vector(dest)(lane).toHexString} vdestNext=0x${vector(dest + (byteCount + 3) / 4)(lane).toHexString}"
                   )
                 loadLane(lane + 1)
               }
@@ -6047,8 +6182,10 @@ object DispatchInterpreter {
           }
         advanceAfter(loadLane(0))
       case DecodedInstruction.DSSignedRead(dest, addressRegister, byteCount, offsetA, offsetB) =>
+        val scalarByteCount                                     = ScalarByteWidth.assume(byteCount)
+        val bitWidth                                            = BitWidth.assume(byteCount * 8)
         def loadLane(lane: Int): Either[ExecutionFailure, Unit] =
-          if (lane == lanes) Right(())
+          if (lane == lanes.value) Right(())
           else if (!active(lane)) loadLane(lane + 1)
           else {
             val base  = Bits.low32(vector(addressRegister)(lane))
@@ -6067,7 +6204,7 @@ object DispatchInterpreter {
                   vector,
                   dest,
                   lane,
-                  Bits.signExtend(LittleEndian.decode(lds, first, byteCount), byteCount * 8),
+                  Bits.signExtend(LittleEndian.decode(lds, first, scalarByteCount), bitWidth),
                   4
                 )
                 if (second != InvalidLdsOffset)
@@ -6075,7 +6212,7 @@ object DispatchInterpreter {
                     vector,
                     dest + 1,
                     lane,
-                    Bits.signExtend(LittleEndian.decode(lds, second, byteCount), byteCount * 8),
+                    Bits.signExtend(LittleEndian.decode(lds, second, scalarByteCount), bitWidth),
                     4
                   )
                 loadLane(lane + 1)
@@ -6096,8 +6233,8 @@ object DispatchInterpreter {
         val sources   = vector(src).clone()
         val result    = vector(dest).clone()
         foreachActive { lane =>
-          val destinationLane = permuteDestinationLane(addresses(lane), offset.toLong, lanes)
-          if (destinationLane < lanes)
+          val destinationLane = permuteDestinationLane(addresses(lane), offset.toLong, waveSize)
+          if (destinationLane < lanes.value)
             result(destinationLane) = Bits.low32(sources(lane))
         }
         foreachLane { lane => vector(dest)(lane) = result(lane) }
@@ -6112,7 +6249,7 @@ object DispatchInterpreter {
           // `offset:124` read lane 0 instead of lane 31, dropping
           // the final cross-wave reduction contribution.
           val sourceLane = bpermuteSourceLane(addresses(lane), offset.toLong)
-          vector(dest)(lane) = if (sourceLane < lanes) Bits.low32(sources(sourceLane)) else 0L
+          vector(dest)(lane) = if (sourceLane < lanes.value) Bits.low32(sources(sourceLane)) else 0L
         }
         AdvanceStep
       case DecodedInstruction.DSSwizzle(dest, src, control) =>
@@ -6128,17 +6265,18 @@ object DispatchInterpreter {
         foreachActive { lane =>
           val sourceLane = ((lane & andMask) | orMask) ^ xorMask
           vector(dest)(lane) =
-            if (sourceLane >= 0 && sourceLane < lanes) Bits.low32(sources(sourceLane)) else 0L
+            if (sourceLane >= 0 && sourceLane < lanes.value) Bits.low32(sources(sourceLane)) else 0L
         }
         AdvanceStep
       case DecodedInstruction.DSAtomic(opcode, dest, addressRegister, src, byteCount, offset) =>
+        val scalarByteCount                                       = ScalarByteWidth.assume(byteCount)
         def atomicLane(lane: Int): Either[ExecutionFailure, Unit] =
-          if (lane == lanes) Right(())
+          if (lane == lanes.value) Right(())
           else if (!active(lane)) atomicLane(lane + 1)
           else {
             val base = Bits.low32(vector(addressRegister)(lane))
             readLDS(lds, base + offset.toLong, byteCount).flatMap { bytes =>
-              val previous = LittleEndian.decode(bytes, 0, byteCount)
+              val previous = LittleEndian.decode(bytes, 0, scalarByteCount)
               val operand  = if (byteCount == 8)
                 (vector(src)(lane) & 0xffffffffL) | ((vector(src + 1)(lane) & 0xffffffffL) << 32)
               else Bits.low32(vector(src)(lane))
@@ -6147,6 +6285,8 @@ object DispatchInterpreter {
                 case "ds_sub_u32" | "ds_sub_rtn_u32" => Bits.low32(previous - operand)
                 case "ds_inc_u32" | "ds_inc_rtn_u32" => Bits.low32(previous + 1L)
                 case "ds_dec_u32" | "ds_dec_rtn_u32" => Bits.low32(previous - 1L)
+                case "ds_min_i32"                    => math.min(previous.toInt, operand.toInt).toLong & 0xffffffffL
+                case "ds_max_i32"                    => math.max(previous.toInt, operand.toInt).toLong & 0xffffffffL
                 case "ds_min_u32"                    => math.min(Bits.low32(previous), Bits.low32(operand))
                 case "ds_max_u32"                    => math.max(Bits.low32(previous), Bits.low32(operand))
                 case "ds_add_rtn_u64"                => previous + operand
@@ -6170,48 +6310,51 @@ object DispatchInterpreter {
                 case "ds_max_rtn_u64" =>
                   if (java.lang.Long.compareUnsigned(previous, operand) >= 0) previous else operand
                 case "ds_add_rtn_f32" =>
-                  java.lang.Float.floatToRawIntBits(
-                    java.lang.Float.intBitsToFloat(previous.toInt) + java.lang.Float.intBitsToFloat(
-                      operand.toInt
+                  IEEE754.floatToBinary32(
+                    IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(previous.toInt))) + IEEE754.binary32ToFloat(
+                      Binary32.fromLow(Bits.low32(
+                        operand.toInt
+                      ))
                     )
-                  ).toLong & 0xffffffffL
+                  ).value.toLong & 0xffffffffL
                 case "ds_min_rtn_f32" =>
-                  java.lang.Float.floatToRawIntBits(
+                  IEEE754.floatToBinary32(
                     math.min(
-                      java.lang.Float.intBitsToFloat(previous.toInt),
-                      java.lang.Float.intBitsToFloat(operand.toInt)
+                      IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(previous.toInt))),
+                      IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(operand.toInt)))
                     )
-                  ).toLong & 0xffffffffL
+                  ).value.toLong & 0xffffffffL
                 case "ds_max_rtn_f32" =>
-                  java.lang.Float.floatToRawIntBits(
+                  IEEE754.floatToBinary32(
                     math.max(
-                      java.lang.Float.intBitsToFloat(previous.toInt),
-                      java.lang.Float.intBitsToFloat(operand.toInt)
+                      IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(previous.toInt))),
+                      IEEE754.binary32ToFloat(Binary32.fromLow(Bits.low32(operand.toInt)))
                     )
-                  ).toLong & 0xffffffffL
+                  ).value.toLong & 0xffffffffL
                 case "ds_add_rtn_f64" =>
-                  java.lang.Double.doubleToRawLongBits(
-                    java.lang.Double.longBitsToDouble(previous) + java.lang.Double.longBitsToDouble(operand)
+                  IEEE754.doubleToBinary64(
+                    IEEE754.binary64ToDouble(previous) + IEEE754.binary64ToDouble(operand)
                   )
                 case "ds_min_rtn_f64" =>
-                  java.lang.Double.doubleToRawLongBits(
+                  IEEE754.doubleToBinary64(
                     math.min(
-                      java.lang.Double.longBitsToDouble(previous),
-                      java.lang.Double.longBitsToDouble(operand)
+                      IEEE754.binary64ToDouble(previous),
+                      IEEE754.binary64ToDouble(operand)
                     )
                   )
                 case "ds_max_rtn_f64" =>
-                  java.lang.Double.doubleToRawLongBits(
+                  IEEE754.doubleToBinary64(
                     math.max(
-                      java.lang.Double.longBitsToDouble(previous),
-                      java.lang.Double.longBitsToDouble(operand)
+                      IEEE754.binary64ToDouble(previous),
+                      IEEE754.binary64ToDouble(operand)
                     )
                   )
               }
-              writeVectorBytes(vector, dest, lane, LittleEndian.toArray(previous, byteCount))
-              writeLDS(lds, base + offset.toLong, LittleEndian.toArray(updated, byteCount)).flatMap { _ =>
+              if (opcode.contains("_rtn_"))
+                writeVectorBytes(vector, dest, lane, LittleEndian.toArray(previous, scalarByteCount))
+              writeLDS(lds, base + offset.toLong, LittleEndian.toArray(updated, scalarByteCount)).flatMap { _ =>
                 if (traceSetLds && lane < 4)
-                  System.err.println(
+                  scribe.debug(
                     s"Gemstone AMDGPU set LDS atomic kernel=${kernel.name} index=$index lane=$lane opcode=$opcode dest=$dest addressRegister=$addressRegister base=0x${base.toHexString} offset=$offset bytes=$byteCount previous=0x${previous.toHexString} operand=0x${operand.toHexString} updated=0x${updated.toHexString}"
                   )
                 atomicLane(lane + 1)
@@ -6220,8 +6363,9 @@ object DispatchInterpreter {
           }
         advanceAfter(atomicLane(0))
       case DecodedInstruction.DSWrite(addressRegister, srcA, srcB, byteCount, offsetA, offsetB) =>
+        val previewWidth                                         = ScalarByteWidth.assume(math.min(4, byteCount))
         def storeLane(lane: Int): Either[ExecutionFailure, Unit] =
-          if (lane == lanes) Right(())
+          if (lane == lanes.value) Right(())
           else if (!active(lane)) storeLane(lane + 1)
           else {
             val base = Bits.low32(vector(addressRegister)(lane))
@@ -6230,67 +6374,67 @@ object DispatchInterpreter {
               firstBytes   = vectorBytes(vector, srcA, lane, byteCount)
               _ <- writeLDS(lds, firstAddress, firstBytes).map { _ =>
                 if (traceSetLds && lane < 4)
-                  System.err.println(
-                    s"Gemstone AMDGPU set LDS write kernel=${kernel.name} localStart=$localStart index=$index lane=$lane addressRegister=$addressRegister base=0x${base.toHexString} offset=$offsetA bytes=$byteCount address=0x${firstAddress.toHexString} src=$srcA value=0x${LittleEndian.decode(firstBytes, 0, byteCount).toHexString}"
+                  scribe.debug(
+                    s"Gemstone AMDGPU set LDS write kernel=${kernel.name} localStart=$localStart index=$index lane=$lane addressRegister=$addressRegister base=0x${base.toHexString} offset=$offsetA bytes=$byteCount address=0x${firstAddress.toHexString} src=$srcA value=0x${LittleEndian.decode(firstBytes, 0, previewWidth).toHexString}"
                   )
                 if (
-                  Environment.trace("merge-lds") &&
+                  AMDGPUEnvironment.trace("merge-lds") &&
                   lane == 0 && kernel.name.contains("wrapped_merge_sort") && firstAddress < 0x1000L
                 )
-                  System.err.println(
-                    s"Gemstone AMDGPU merge LDS write index=$index address=0x${firstAddress.toHexString} bytes=$byteCount value=0x${LittleEndian.decode(firstBytes, 0, math.min(4, firstBytes.length)).toHexString}"
+                  scribe.debug(
+                    s"Gemstone AMDGPU merge LDS write index=$index address=0x${firstAddress.toHexString} bytes=$byteCount value=0x${LittleEndian.decode(firstBytes, 0, previewWidth).toHexString}"
                   )
                 if (
-                  Environment.trace("merge-lds-detail") &&
+                  AMDGPUEnvironment.trace("merge-lds-detail") &&
                   kernel.name.contains("wrapped_merge_sort") && localStart == 0 && lane < 8 &&
                   ((index >= 1190 && index <= 1205) || (index >= 1358 && index <= 1386) ||
                     (index >= 1480 && index <= 1520) || (index >= 1625 && index <= 1645))
                 )
-                  System.err.println(
+                  scribe.debug(
                     s"Gemstone AMDGPU merge LDS detail index=$index lane=$lane active=${active(lane)} address=0x${firstAddress.toHexString} bytes=$byteCount src=$srcA v0=0x${vector(srcA)(lane).toHexString} v1=0x${vector(srcA + 1)(lane).toHexString} v2=0x${vector(srcA + 2)(lane).toHexString} v3=0x${vector(srcA + 3)(lane).toHexString} v4=0x${vector(srcA + 4)(lane).toHexString}"
                   )
                 if (
-                  Environment.trace("merge-input") &&
+                  AMDGPUEnvironment.trace("merge-input") &&
                   kernel.name.contains("wrapped_merge_sort") && localStart == 0 && lane < 8 &&
                   ((index >= 1066 && index <= 1082) || (index >= 1194 && index <= 1203) ||
                     (index >= 1272 && index <= 1295))
                 )
-                  System.err.println(
-                    s"Gemstone AMDGPU merge input LDS index=$index localStart=$localStart lane=$lane active=${active(lane)} address=0x${firstAddress.toHexString} bytes=$byteCount src=$srcA value=0x${LittleEndian.decode(firstBytes, 0, math.min(4, firstBytes.length)).toHexString} v0=0x${vector(0)(lane).toHexString} v1=0x${vector(1)(lane).toHexString} v3=0x${vector(3)(lane).toHexString} v4=0x${vector(4)(lane).toHexString} v5=0x${vector(5)(lane).toHexString} v7=0x${vector(7)(lane).toHexString} v9=0x${vector(9)(lane).toHexString} v13=0x${vector(13)(lane).toHexString} v14=0x${vector(14)(lane).toHexString} v17=0x${vector(17)(lane).toHexString} v18=0x${vector(18)(lane).toHexString} v19=0x${vector(19)(lane).toHexString} v20=0x${vector(20)(lane).toHexString}"
+                  scribe.debug(
+                    s"Gemstone AMDGPU merge input LDS index=$index localStart=$localStart lane=$lane active=${active(lane)} address=0x${firstAddress.toHexString} bytes=$byteCount src=$srcA value=0x${LittleEndian.decode(firstBytes, 0, previewWidth).toHexString} v0=0x${vector(0)(lane).toHexString} v1=0x${vector(1)(lane).toHexString} v3=0x${vector(3)(lane).toHexString} v4=0x${vector(4)(lane).toHexString} v5=0x${vector(5)(lane).toHexString} v7=0x${vector(7)(lane).toHexString} v9=0x${vector(9)(lane).toHexString} v13=0x${vector(13)(lane).toHexString} v14=0x${vector(14)(lane).toHexString} v17=0x${vector(17)(lane).toHexString} v18=0x${vector(18)(lane).toHexString} v19=0x${vector(19)(lane).toHexString} v20=0x${vector(20)(lane).toHexString}"
                   )
                 if (traceByteSort && lane == 0 && index >= 200 && index <= 562)
-                  System.err.println(
+                  scribe.debug(
                     s"Gemstone AMDGPU byte-sort rank-write localStart=$localStart index=$index address=0x${firstAddress.toHexString} bytes=$byteCount src=$srcA value=0x${vector(srcA)(lane).toHexString} v11=0x${vector(11)(lane).toHexString} v12=0x${vector(12)(lane).toHexString} v13=0x${vector(13)(lane).toHexString} v14=0x${vector(14)(lane).toHexString} v17=0x${vector(17)(lane).toHexString} v29=0x${vector(29)(lane).toHexString} v25=0x${vector(25)(lane).toHexString} v28=0x${vector(28)(lane).toHexString} v31=0x${vector(31)(lane).toHexString} v34=0x${vector(34)(lane).toHexString}"
                   )
                 if (traceByteSort && firstAddress == 0xb20L)
-                  System.err.println(
+                  scribe.debug(
                     s"Gemstone AMDGPU byte-sort counter-write localStart=$localStart index=$index lane=$lane address=0x${firstAddress.toHexString} bytes=$byteCount src=$srcA value=0x${vector(srcA)(lane).toHexString}"
                   )
                 if (traceByteSortRank && lane == 0 && index >= 550 && index <= 562)
-                  System.err.println(
+                  scribe.debug(
                     s"Gemstone AMDGPU byte-sort final-write index=$index addressRegister=$addressRegister address=0x${firstAddress.toHexString} src=$srcA value=0x${vector(srcA)(lane).toHexString} v1=0x${vector(1)(lane).toHexString} v2=0x${vector(2)(lane).toHexString} v3=0x${vector(3)(lane).toHexString} v4=0x${vector(4)(lane).toHexString} v10=0x${vector(10)(lane).toHexString} v25=0x${vector(25)(lane).toHexString} v26=0x${vector(26)(lane).toHexString} v27=0x${vector(27)(lane).toHexString} v28=0x${vector(28)(lane).toHexString} v34=0x${vector(34)(lane).toHexString} v35=0x${vector(35)(lane).toHexString} v36=0x${vector(36)(lane).toHexString} v37=0x${vector(37)(lane).toHexString}"
                   )
                 if (traceLds && firstAddress >= 0x0f00L && firstAddress < 0x1010L)
-                  System.err.println(
+                  scribe.debug(
                     s"Gemstone AMDGPU LDS write index=$index lane=$lane addressRegister=$addressRegister base=0x${base.toHexString} address=0x${firstAddress.toHexString} bytes=$byteCount src=$srcA value=${vector(srcA)(lane)}"
                   )
                 if (traceByteSort && (lane == 0 || firstAddress < 0x100L))
-                  System.err.println(
+                  scribe.debug(
                     s"Gemstone AMDGPU byte-sort LDS write index=$index lane=$lane address=0x${firstAddress.toHexString} bytes=$byteCount src=$srcA value=0x${vector(srcA)(lane).toHexString}"
                   )
                 ()
               }.leftMap { error =>
-                if (traceLds) System.err.println(
+                if (traceLds) scribe.debug(
                   s"Gemstone AMDGPU LDS write index=$index op=${operations.lift(index)} lane=$lane addressRegister=$addressRegister base=0x${base.toHexString} address=0x${firstAddress.toHexString} bytes=$byteCount length=${lds.length} src=$srcA value=${vector(srcA)(lane)} v22=0x${vector(22)(lane).toHexString} v23=0x${vector(23)(lane).toHexString} v24=0x${vector(24)(lane).toHexString} v25=0x${vector(25)(lane).toHexString}"
                 )
                 error
               }
               _ =
                 if (
-                  Environment.trace("scan-lds") &&
+                  AMDGPUEnvironment.trace("scan-lds") &&
                   kernel.name.contains("wrapped_scan") && lane < 8
                 )
-                  System.err.println(
+                  scribe.debug(
                     s"Gemstone AMDGPU scan LDS write index=$index lane=$lane address=0x${firstAddress.toHexString} bytes=$byteCount src=$srcA value=0x${vector(srcA)(lane).toHexString}"
                   )
               _ <- (srcB, offsetB) match {
@@ -6299,27 +6443,27 @@ object DispatchInterpreter {
                   val bytes   = vectorBytes(vector, register, lane, byteCount)
                   writeLDS(lds, address, bytes).map { _ =>
                     if (
-                      Environment.trace("merge-lds") &&
+                      AMDGPUEnvironment.trace("merge-lds") &&
                       lane == 0 && kernel.name.contains("wrapped_merge_sort") && address < 0x1000L
                     )
-                      System.err.println(
-                        s"Gemstone AMDGPU merge LDS write index=$index address=0x${address.toHexString} bytes=$byteCount value=0x${LittleEndian.decode(bytes, 0, math.min(4, bytes.length)).toHexString}"
+                      scribe.debug(
+                        s"Gemstone AMDGPU merge LDS write index=$index address=0x${address.toHexString} bytes=$byteCount value=0x${LittleEndian.decode(bytes, 0, previewWidth).toHexString}"
                       )
                     if (traceByteSort && lane == 0 && index >= 200 && index <= 562)
-                      System.err.println(
+                      scribe.debug(
                         s"Gemstone AMDGPU byte-sort rank-write localStart=$localStart index=$index address=0x${address.toHexString} bytes=$byteCount src=$register value=0x${vector(register)(lane).toHexString}"
                       )
                     if (traceByteSort && address == 0xb20L)
-                      System.err.println(
+                      scribe.debug(
                         s"Gemstone AMDGPU byte-sort counter-write localStart=$localStart index=$index lane=$lane address=0x${address.toHexString} bytes=$byteCount src=$register value=0x${vector(register)(lane).toHexString}"
                       )
                     if (traceByteSort && (lane == 0 || address < 0x100L))
-                      System.err.println(
+                      scribe.debug(
                         s"Gemstone AMDGPU byte-sort LDS write index=$index lane=$lane address=0x${address.toHexString} bytes=$byteCount src=$register value=0x${vector(register)(lane).toHexString}"
                       )
                     ()
                   }.leftMap { error =>
-                    if (traceLds) System.err.println(
+                    if (traceLds) scribe.debug(
                       s"Gemstone AMDGPU LDS write index=$index op=${operations.lift(index)} lane=$lane addressRegister=$addressRegister base=0x${base.toHexString} address=0x${address.toHexString} bytes=$byteCount length=${lds.length} src=$register value=${vector(register)(lane)}"
                     )
                     error
@@ -6333,14 +6477,14 @@ object DispatchInterpreter {
         advanceAfter(storeLane(0))
       case DecodedInstruction.DSWriteD16High(addressRegister, src, offset) =>
         def storeLane(lane: Int): Either[ExecutionFailure, Unit] =
-          if (lane == lanes) Right(())
+          if (lane == lanes.value) Right(())
           else if (!active(lane)) storeLane(lane + 1)
           else {
             val base    = Bits.low32(vector(addressRegister)(lane))
             val value   = vector(src)(lane) >>> 16
             val address = base + offset.toLong
-            writeLDS(lds, address, LittleEndian.toArray(value, 2)).leftMap { error =>
-              if (traceLds) System.err.println(
+            writeLDS(lds, address, LittleEndian.toArray(value, ScalarByteWidth(2))).leftMap { error =>
+              if (traceLds) scribe.debug(
                 s"Gemstone AMDGPU LDS write index=$index lane=$lane address=0x${address.toHexString} bytes=2 length=${lds.length} src=$src value=$value"
               )
               error
@@ -6349,14 +6493,14 @@ object DispatchInterpreter {
         advanceAfter(storeLane(0))
       case DecodedInstruction.DSWriteD16HighByte(addressRegister, src, offset) =>
         def storeLane(lane: Int): Either[ExecutionFailure, Unit] =
-          if (lane == lanes) Right(())
+          if (lane == lanes.value) Right(())
           else if (!active(lane)) storeLane(lane + 1)
           else {
             val base    = Bits.low32(vector(addressRegister)(lane))
             val value   = vector(src)(lane) >>> 16
             val address = base + offset.toLong
-            writeLDS(lds, address, LittleEndian.toArray(value, 1)).leftMap { error =>
-              if (traceLds) System.err.println(
+            writeLDS(lds, address, LittleEndian.toArray(value, ScalarByteWidth(1))).leftMap { error =>
+              if (traceLds) scribe.debug(
                 s"Gemstone AMDGPU LDS write index=$index lane=$lane address=0x${address.toHexString} bytes=1 length=${lds.length} src=$src value=$value"
               )
               error
@@ -6365,7 +6509,7 @@ object DispatchInterpreter {
         advanceAfter(storeLane(0))
       case DecodedInstruction.GlobalLoad(dest, addressRegister, scalarAddress, byteCount, offset) =>
         def loadLane(lane: Int): Either[ExecutionFailure, Unit] =
-          if (lane == lanes) Right(())
+          if (lane == lanes.value) Right(())
           else if (!active(lane)) loadLane(lane + 1)
           else {
             val address = scalarAddress
@@ -6375,7 +6519,7 @@ object DispatchInterpreter {
               if (byteCount <= 8)
                 readValue(
                   address,
-                  byteCount,
+                  MemoryValueByteWidth.assume(byteCount),
                   kernarg,
                   dispatchBytes,
                   kernel.readOnlyAddress,
@@ -6399,8 +6543,8 @@ object DispatchInterpreter {
                   memory
                 ).map(bytes => writeVectorBytes(vector, dest, lane, bytes))
             loaded.flatMap { _ =>
-              if (Environment.trace("loads") && lane < 8)
-                System.err.println(
+              if (AMDGPUEnvironment.trace("loads") && lane < 8)
+                scribe.debug(
                   s"Gemstone AMDGPU global load index=$index lane=$lane kernel=${kernel.name} address=0x${address.toHexString} bytes=$byteCount dest=$dest v0=0x${vector(dest)(
                       lane
                     ).toHexString} v1=0x${(if (byteCount > 4) vector(dest + 1)(lane)
@@ -6411,7 +6555,7 @@ object DispatchInterpreter {
                                                                                                        else 0L).toHexString}"
                 )
               if (traceByteSort && lane == 0)
-                System.err.println(
+                scribe.debug(
                   s"Gemstone AMDGPU byte-sort GlobalLoad index=$index dest=$dest address=0x${address.toHexString} bytes=$byteCount value=0x${vector(dest)(lane).toHexString}"
                 )
               loadLane(lane + 1)
@@ -6419,8 +6563,10 @@ object DispatchInterpreter {
           }
         advanceAfter(loadLane(0))
       case DecodedInstruction.GlobalLoadSigned(dest, addressRegister, scalarAddress, byteCount, offset) =>
+        val scalarByteCount                                     = ScalarByteWidth.assume(byteCount)
+        val bitWidth                                            = BitWidth.assume(byteCount * 8)
         def loadLane(lane: Int): Either[ExecutionFailure, Unit] =
-          if (lane == lanes) Right(())
+          if (lane == lanes.value) Right(())
           else if (!active(lane)) loadLane(lane + 1)
           else {
             val address = scalarAddress
@@ -6436,16 +6582,18 @@ object DispatchInterpreter {
               kernel.globalMemory,
               allocations,
               memory
-            ).flatMap { bytes =>
-              val value = Bits.signExtend(LittleEndian.decode(bytes, 0, byteCount), byteCount * 8)
-              vector(dest)(lane) = Bits.low32(value)
-              loadLane(lane + 1)
+            ) match {
+              case Left(error)  => Left(error)
+              case Right(bytes) =>
+                val value = Bits.signExtend(LittleEndian.decode(bytes, 0, scalarByteCount), bitWidth)
+                vector(dest)(lane) = Bits.low32(value)
+                loadLane(lane + 1)
             }
           }
         advanceAfter(loadLane(0))
       case DecodedInstruction.GlobalLoadD16(dest, addressRegister, scalarAddress, offset, high) =>
         def loadLane(lane: Int): Either[ExecutionFailure, Unit] =
-          if (lane == lanes) Right(())
+          if (lane == lanes.value) Right(())
           else if (!active(lane)) loadLane(lane + 1)
           else {
             val address = scalarAddress
@@ -6461,25 +6609,27 @@ object DispatchInterpreter {
               kernel.globalMemory,
               allocations,
               memory
-            ).flatMap { bytes =>
-              val loaded = LittleEndian.decode(bytes, 0, 2)
-              vector(dest)(lane) =
-                if (high) (vector(dest)(lane) & 0x0000ffffL) | (loaded << 16)
-                else (vector(dest)(lane) & 0xffff0000L) | loaded
-              loadLane(lane + 1)
+            ) match {
+              case Left(error)  => Left(error)
+              case Right(bytes) =>
+                val loaded = LittleEndian.decode(bytes, 0, ScalarByteWidth(2))
+                vector(dest)(lane) =
+                  if (high) (vector(dest)(lane) & 0x0000ffffL) | (loaded << 16)
+                  else (vector(dest)(lane) & 0xffff0000L) | loaded
+                loadLane(lane + 1)
             }
           }
         advanceAfter(loadLane(0))
       case DecodedInstruction.GlobalStore(addressRegister, scalarAddress, src, byteCount, offset) =>
         def storeLane(lane: Int): Either[ExecutionFailure, Unit] =
-          if (lane == lanes) Right(())
+          if (lane == lanes.value) Right(())
           else if (!active(lane)) storeLane(lane + 1)
           else {
             val address = scalarAddress
               .map(register => pair(scalar, register) + Bits.low32(vector(addressRegister)(lane)))
               .getOrElse(pair(vector, addressRegister, lane)) + signed13(offset)
-            if (Environment.trace("stores") && lane < 8)
-              System.err.println(
+            if (AMDGPUEnvironment.trace("stores") && lane < 8)
+              scribe.debug(
                 s"Gemstone AMDGPU global store index=$index lane=$lane kernel=${kernel.name} address=0x${address.toHexString} bytes=$byteCount src=$src v0=0x${vector(src)(
                     lane
                   ).toHexString} v1=0x${(if (byteCount > 4) vector(src + 1)(lane)
@@ -6494,14 +6644,17 @@ object DispatchInterpreter {
                 writeValue(
                   address,
                   if (byteCount <= 4) vector(src)(lane) else pair(vector, src, lane),
-                  byteCount,
+                  MemoryValueByteWidth.assume(byteCount),
                   allocations,
                   memory,
                   kernel.globalMemory
                 )
               else
                 writeBytes(address, vectorBytes(vector, src, lane, byteCount), allocations, memory, kernel.globalMemory)
-            stored.flatMap(_ => storeLane(lane + 1))
+            stored match {
+              case Left(error) => Left(error)
+              case Right(_)    => storeLane(lane + 1)
+            }
           }
         advanceAfter(storeLane(0))
       case DecodedInstruction.GlobalAtomicAdd(
@@ -6513,46 +6666,37 @@ object DispatchInterpreter {
             offset,
             returnValue
           ) =>
-        if (Environment.trace("set-mask") && kernel.name.contains("set_operations") && localStart == 0)
-          System.err.println(
+        if (AMDGPUEnvironment.trace("set-mask") && kernel.name.contains("set_operations") && localStart == 0)
+          scribe.debug(
             s"Gemstone AMDGPU set atomic-add pre kernel=${kernel.name} index=$index dest=$dest address=$addressRegister scalarAddress=$scalarAddress src=$src bytes=$byteCount offset=$offset active=0x${laneMask(active).toHexString} addr0=0x${pair(vector, addressRegister, 0).toHexString} src0=0x${vector(src)(0).toHexString}"
           )
         def atomicLane(lane: Int): Either[ExecutionFailure, Unit] =
-          if (lane == lanes) Right(())
+          if (lane == lanes.value) Right(())
           else if (!active(lane)) atomicLane(lane + 1)
           else {
             val address = scalarAddress
               .map(register => pair(scalar, register) + Bits.low32(vector(addressRegister)(lane)))
               .getOrElse(pair(vector, addressRegister, lane)) + signed13(offset)
-            readBytes(
+            val operand = if (byteCount == 8) pair(vector, src, lane) else Bits.low32(vector(src)(lane))
+            atomicModifyValue(
               address,
-              byteCount,
-              kernarg,
-              dispatchBytes,
-              kernel.readOnlyAddress,
-              kernel.readOnly,
-              kernel.globalMemory,
+              MemoryValueByteWidth.assume(byteCount),
               allocations,
-              memory
-            ).flatMap { bytes =>
-              val oldValue = LittleEndian.decode(bytes, 0, byteCount)
-              val operand  = if (byteCount == 8) pair(vector, src, lane) else Bits.low32(vector(src)(lane))
-              val newValue = if (byteCount == 8) oldValue + operand else Bits.low32(oldValue + operand)
-              if (returnValue) {
-                if (byteCount == 8) {
-                  vector(dest)(lane) = Bits.low32(oldValue)
-                  vector(dest + 1)(lane) = Bits.high32(oldValue)
-                } else vector(dest)(lane) = Bits.low32(oldValue)
-              }
-              writeBytes(
-                address,
-                LittleEndian.toArray(newValue, byteCount),
-                allocations,
-                memory,
-                kernel.globalMemory
-              ).flatMap(_ =>
+              memory,
+              kernel.globalMemory,
+              kernel.globalMemoryLocks
+            ) { oldValue =>
+              if (byteCount == 8) oldValue + operand else Bits.low32(oldValue + operand)
+            } match {
+              case Left(error)     => Left(error)
+              case Right(oldValue) =>
+                if (returnValue) {
+                  if (byteCount == 8) {
+                    vector(dest)(lane) = Bits.low32(oldValue)
+                    vector(dest + 1)(lane) = Bits.high32(oldValue)
+                  } else vector(dest)(lane) = Bits.low32(oldValue)
+                }
                 atomicLane(lane + 1)
-              )
             }
           }
         advanceAfter(atomicLane(0))
@@ -6566,44 +6710,34 @@ object DispatchInterpreter {
             returnValue
           ) =>
         def atomicLane(lane: Int): Either[ExecutionFailure, Unit] =
-          if (lane == lanes) Right(())
+          if (lane == lanes.value) Right(())
           else if (!active(lane)) atomicLane(lane + 1)
           else {
             val address = scalarAddress
               .map(register => pair(scalar, register) + Bits.low32(vector(addressRegister)(lane)))
               .getOrElse(pair(vector, addressRegister, lane)) + signed13(offset)
-            readBytes(
+            val limit = if (byteCount == 8) pair(vector, src, lane) else Bits.low32(vector(src)(lane))
+            atomicModifyValue(
               address,
-              byteCount,
-              kernarg,
-              dispatchBytes,
-              kernel.readOnlyAddress,
-              kernel.readOnly,
-              kernel.globalMemory,
+              MemoryValueByteWidth.assume(byteCount),
               allocations,
-              memory
-            ).flatMap { bytes =>
-              val oldValue = LittleEndian.decode(bytes, 0, byteCount)
-              val limit    = if (byteCount == 8) pair(vector, src, lane) else Bits.low32(vector(src)(lane))
-              val newValue =
-                if (java.lang.Long.compareUnsigned(oldValue, limit) >= 0) 0L
-                else if (byteCount == 8) oldValue + 1L
-                else Bits.low32(oldValue + 1L)
-              if (returnValue) {
-                if (byteCount == 8) {
-                  vector(dest)(lane) = Bits.low32(oldValue)
-                  vector(dest + 1)(lane) = Bits.high32(oldValue)
-                } else vector(dest)(lane) = Bits.low32(oldValue)
-              }
-              writeBytes(
-                address,
-                LittleEndian.toArray(newValue, byteCount),
-                allocations,
-                memory,
-                kernel.globalMemory
-              ).flatMap(_ =>
+              memory,
+              kernel.globalMemory,
+              kernel.globalMemoryLocks
+            ) { oldValue =>
+              if (java.lang.Long.compareUnsigned(oldValue, limit) >= 0) 0L
+              else if (byteCount == 8) oldValue + 1L
+              else Bits.low32(oldValue + 1L)
+            } match {
+              case Left(error)     => Left(error)
+              case Right(oldValue) =>
+                if (returnValue) {
+                  if (byteCount == 8) {
+                    vector(dest)(lane) = Bits.low32(oldValue)
+                    vector(dest + 1)(lane) = Bits.high32(oldValue)
+                  } else vector(dest)(lane) = Bits.low32(oldValue)
+                }
                 atomicLane(lane + 1)
-              )
             }
           }
         advanceAfter(atomicLane(0))
@@ -6618,182 +6752,192 @@ object DispatchInterpreter {
             returnValue
           ) =>
         def atomicLane(lane: Int): Either[ExecutionFailure, Unit] =
-          if (lane == lanes) Right(())
+          if (lane == lanes.value) Right(())
           else if (!active(lane)) atomicLane(lane + 1)
           else {
             val address = scalarAddress
               .map(register => pair(scalar, register) + Bits.low32(vector(addressRegister)(lane)))
               .getOrElse(pair(vector, addressRegister, lane)) + signed13(offset)
-            readBytes(
+            val (compare, swap) =
+              if (byteCount == 8) (pair(vector, compareSrc, lane), pair(vector, swapSrc, lane))
+              else (Bits.low32(vector(compareSrc)(lane)), Bits.low32(vector(swapSrc)(lane)))
+            atomicModifyValue(
               address,
-              byteCount,
-              kernarg,
-              dispatchBytes,
-              kernel.readOnlyAddress,
-              kernel.readOnly,
-              kernel.globalMemory,
+              MemoryValueByteWidth.assume(byteCount),
               allocations,
-              memory
-            ).flatMap { bytes =>
-              val oldValue        = LittleEndian.decode(bytes, 0, byteCount)
-              val (compare, swap) =
-                if (byteCount == 8) (pair(vector, compareSrc, lane), pair(vector, swapSrc, lane))
-                else (Bits.low32(vector(compareSrc)(lane)), Bits.low32(vector(swapSrc)(lane)))
-              if (returnValue) {
-                if (byteCount == 8) {
-                  vector(dest)(lane) = Bits.low32(oldValue)
-                  vector(dest + 1)(lane) = Bits.high32(oldValue)
-                } else vector(dest)(lane) = Bits.low32(oldValue)
-              }
-              val updated = if (oldValue == compare) swap else oldValue
-              writeBytes(
-                address,
-                LittleEndian.toArray(updated, byteCount),
-                allocations,
-                memory,
-                kernel.globalMemory
-              ).flatMap(_ =>
+              memory,
+              kernel.globalMemory,
+              kernel.globalMemoryLocks
+            ) { oldValue =>
+              if (oldValue == compare) swap else oldValue
+            } match {
+              case Left(error)     => Left(error)
+              case Right(oldValue) =>
+                if (returnValue) {
+                  if (byteCount == 8) {
+                    vector(dest)(lane) = Bits.low32(oldValue)
+                    vector(dest + 1)(lane) = Bits.high32(oldValue)
+                  } else vector(dest)(lane) = Bits.low32(oldValue)
+                }
                 atomicLane(lane + 1)
-              )
             }
           }
         advanceAfter(atomicLane(0))
       case DecodedInstruction.GlobalStoreD16High(addressRegister, scalarAddress, src, byteCount, offset) =>
+        val scalarByteCount                                      = ScalarByteWidth.assume(byteCount)
         def storeLane(lane: Int): Either[ExecutionFailure, Unit] =
-          if (lane == lanes) Right(())
+          if (lane == lanes.value) Right(())
           else if (!active(lane)) storeLane(lane + 1)
           else {
             val address = scalarAddress
               .map(register => pair(scalar, register) + Bits.low32(vector(addressRegister)(lane)))
               .getOrElse(pair(vector, addressRegister, lane)) + signed13(offset)
-            val bytes = LittleEndian.toArray(vector(src)(lane) >>> 16, byteCount)
-            writeBytes(address, bytes, allocations, memory, kernel.globalMemory).flatMap(_ => storeLane(lane + 1))
+            val bytes = LittleEndian.toArray(vector(src)(lane) >>> 16, scalarByteCount)
+            writeBytes(address, bytes, allocations, memory, kernel.globalMemory) match {
+              case Left(error) => Left(error)
+              case Right(_)    => storeLane(lane + 1)
+            }
           }
         advanceAfter(storeLane(0))
       case DecodedInstruction.FlatLoad(dest, addressRegister, byteCount, offset) =>
+        val previewWidth                                        = ScalarByteWidth.assume(math.min(4, byteCount))
         def loadLane(lane: Int): Either[ExecutionFailure, Unit] =
-          if (lane == lanes) Right(())
+          if (lane == lanes.value) Right(())
           else if (!active(lane)) loadLane(lane + 1)
           else {
             val address = pair(vector, addressRegister, lane) + flatOffset(offset)
             val bytes   = flatLoad(lane, address, byteCount)
-            bytes.flatMap { bytes =>
-              writeVectorBytes(vector, dest, lane, bytes)
-              if (Environment.trace("loads") && lane < 8)
-                System.err.println(
-                  s"Gemstone AMDGPU flat load index=$index kernel=${kernel.name} address=0x${address.toHexString} bytes=$byteCount dest=$dest v0=0x${vector(dest)(
-                      lane
-                    ).toHexString} v1=0x${(if (byteCount > 4) vector(dest + 1)(lane)
-                                           else 0L).toHexString} v2=0x${(if (byteCount > 8) vector(dest + 2)(lane)
-                                                                         else 0L).toHexString} v3=0x${(if (
-                                                                                                         byteCount > 12
-                                                                                                       ) vector(dest + 3)(lane)
-                                                                                                       else 0L).toHexString}"
+            bytes match {
+              case Left(error)  => Left(error)
+              case Right(bytes) =>
+                writeVectorBytes(vector, dest, lane, bytes)
+                if (AMDGPUEnvironment.trace("loads") && lane < 8)
+                  scribe.debug(
+                    s"Gemstone AMDGPU flat load index=$index kernel=${kernel.name} address=0x${address.toHexString} bytes=$byteCount dest=$dest v0=0x${vector(dest)(
+                        lane
+                      ).toHexString} v1=0x${(if (byteCount > 4) vector(dest + 1)(lane)
+                                             else 0L).toHexString} v2=0x${(if (byteCount > 8) vector(dest + 2)(lane)
+                                                                           else 0L).toHexString} v3=0x${(if (
+                                                                                                           byteCount > 12
+                                                                                                         ) vector(dest + 3)(lane)
+                                                                                                         else 0L).toHexString}"
+                  )
+                if (
+                  AMDGPUEnvironment.trace("merge-loads") &&
+                  lane < 8 && kernel.name.contains("wrapped_merge_sort")
                 )
-              if (
-                Environment.trace("merge-loads") &&
-                lane < 8 && kernel.name.contains("wrapped_merge_sort")
-              )
-                System.err.println(
-                  s"Gemstone AMDGPU merge flat load index=$index lane=$lane dest=$dest address=0x${address.toHexString} bytes=$byteCount value=0x${LittleEndian.decode(bytes, 0, math.min(4, bytes.length)).toHexString}"
+                  scribe.debug(
+                    s"Gemstone AMDGPU merge flat load index=$index lane=$lane dest=$dest address=0x${address.toHexString} bytes=$byteCount value=0x${LittleEndian.decode(bytes, 0, previewWidth).toHexString}"
+                  )
+                if (
+                  AMDGPUEnvironment.trace("merge-input") &&
+                  lane < 8 && kernel.name.contains("wrapped_merge_sort") &&
+                  ((index >= 1244 && index <= 1268) || (index >= 1304 && index <= 1316))
                 )
-              if (
-                Environment.trace("merge-input") &&
-                lane < 8 && kernel.name.contains("wrapped_merge_sort") &&
-                ((index >= 1244 && index <= 1268) || (index >= 1304 && index <= 1316))
-              )
-                System.err.println(
-                  s"Gemstone AMDGPU merge input load index=$index localStart=$localStart lane=$lane dest=$dest address=0x${address.toHexString} bytes=$byteCount value=0x${LittleEndian.decode(bytes, 0, math.min(4, bytes.length)).toHexString}"
-                )
-              loadLane(lane + 1)
+                  scribe.debug(
+                    s"Gemstone AMDGPU merge input load index=$index localStart=$localStart lane=$lane dest=$dest address=0x${address.toHexString} bytes=$byteCount value=0x${LittleEndian.decode(bytes, 0, previewWidth).toHexString}"
+                  )
+                loadLane(lane + 1)
             }
           }
         advanceAfter(loadLane(0))
       case DecodedInstruction.FlatLoadSigned(dest, addressRegister, byteCount, offset) =>
+        val scalarByteCount                                     = ScalarByteWidth.assume(byteCount)
+        val bitWidth                                            = BitWidth.assume(byteCount * 8)
         def loadLane(lane: Int): Either[ExecutionFailure, Unit] =
-          if (lane == lanes) Right(())
+          if (lane == lanes.value) Right(())
           else if (!active(lane)) loadLane(lane + 1)
           else {
             val address = pair(vector, addressRegister, lane) + flatOffset(offset)
             val bytes   = flatLoad(lane, address, byteCount)
-            bytes.flatMap { bytes =>
-              val value = Bits.signExtend(LittleEndian.decode(bytes, 0, byteCount), byteCount * 8)
-              vector(dest)(lane) = Bits.low32(value)
-              loadLane(lane + 1)
+            bytes match {
+              case Left(error)  => Left(error)
+              case Right(bytes) =>
+                val value = Bits.signExtend(LittleEndian.decode(bytes, 0, scalarByteCount), bitWidth)
+                vector(dest)(lane) = Bits.low32(value)
+                loadLane(lane + 1)
             }
           }
         advanceAfter(loadLane(0))
       case DecodedInstruction.VFlatLoadD16(dest, addressRegister, offset, high) =>
         def loadLane(lane: Int): Either[ExecutionFailure, Unit] =
-          if (lane == lanes) Right(())
+          if (lane == lanes.value) Right(())
           else if (!active(lane)) loadLane(lane + 1)
           else {
             val address = pair(vector, addressRegister, lane) + flatOffset(offset)
             val bytes   = flatLoad(lane, address, 2)
-            bytes.flatMap { loadedBytes =>
-              val loaded = LittleEndian.decode(loadedBytes, 0, 2)
-              vector(dest)(lane) =
-                if (high) (vector(dest)(lane) & 0x0000ffffL) | (loaded << 16)
-                else (vector(dest)(lane) & 0xffff0000L) | loaded
-              loadLane(lane + 1)
+            bytes match {
+              case Left(error)        => Left(error)
+              case Right(loadedBytes) =>
+                val loaded = LittleEndian.decode(loadedBytes, 0, ScalarByteWidth(2))
+                vector(dest)(lane) =
+                  if (high) (vector(dest)(lane) & 0x0000ffffL) | (loaded << 16)
+                  else (vector(dest)(lane) & 0xffff0000L) | loaded
+                loadLane(lane + 1)
             }
           }
         advanceAfter(loadLane(0))
       case DecodedInstruction.FlatStore(addressRegister, src, byteCount, offset) =>
         def storeLane(lane: Int): Either[ExecutionFailure, Unit] = {
           if (
-            Environment.trace("stores") &&
+            AMDGPUEnvironment.trace("stores") &&
             (lane == 0 || (kernel.name.contains("wrapped_merge_sort") && lane < 8))
           )
-            System.err.println(
+            scribe.debug(
               "Gemstone AMDGPU store entry kernel=" + kernel.name + " active0=" + active(0) + " lanes=" + lanes
             )
-          if (lane == lanes) Right(())
+          if (lane == lanes.value) Right(())
           else if (!active(lane)) storeLane(lane + 1)
           else {
             val address = pair(vector, addressRegister, lane) + flatOffset(offset)
             val bytes   = vectorBytes(vector, src, lane, byteCount)
             if (
-              Environment.trace("stores") &&
+              AMDGPUEnvironment.trace("stores") &&
               (lane == 0 || (kernel.name.contains("wrapped_merge_sort") && lane < 8))
             )
-              System.err.println(
+              scribe.debug(
                 "Gemstone AMDGPU store index=" + index + " kernel=" + kernel.name + " src=" + src + " bytes=" + bytes.length + " address=0x" + java.lang.Long.toHexString(
                   address
                 )
               )
             if (
-              Environment.trace("stores") &&
+              AMDGPUEnvironment.trace("stores") &&
               (lane == 0 || (kernel.name.contains("wrapped_merge_sort") && lane < 8))
             )
-              System.err.println("Gemstone AMDGPU store values first=" + vector(src)(
+              scribe.debug("Gemstone AMDGPU store values first=" + vector(src)(
                 lane
               ) + " second=" + (if (byteCount > 4) vector(src + 1)(lane)
                                 else 0L) + " third=" + (if (byteCount > 8) vector(src + 2)(lane)
                                                         else 0L) + " fourth=" + (if (byteCount > 12)
                                                                                    vector(src + 3)(lane)
                                                                                  else 0L))
-            val result = flatStore(lane, address, bytes)
-            result.flatMap(_ => storeLane(lane + 1))
+            flatStore(lane, address, bytes) match {
+              case Left(error) => Left(error)
+              case Right(_)    => storeLane(lane + 1)
+            }
           }
         }
         advanceAfter(storeLane(0))
       case DecodedInstruction.FlatStoreD16High(addressRegister, src, byteCount, offset) =>
+        val scalarByteCount                                      = ScalarByteWidth.assume(byteCount)
         def storeLane(lane: Int): Either[ExecutionFailure, Unit] =
-          if (lane == lanes) Right(())
+          if (lane == lanes.value) Right(())
           else if (!active(lane)) storeLane(lane + 1)
           else {
             val address = pair(vector, addressRegister, lane) + flatOffset(offset)
-            flatStore(lane, address, LittleEndian.toArray(vector(src)(lane) >>> 16, byteCount))
-              .flatMap(_ => storeLane(lane + 1))
+            flatStore(lane, address, LittleEndian.toArray(vector(src)(lane) >>> 16, scalarByteCount)) match {
+              case Left(error) => Left(error)
+              case Right(_)    => storeLane(lane + 1)
+            }
           }
         advanceAfter(storeLane(0))
       case DecodedInstruction.BufferCacheInvalidate(_) =>
         // Cache invalidation has no observable effect in the CPU-backed emulator.
         AdvanceStep
       case DecodedInstruction.BufferLoad(dest, address, resource, scalarOffset, byteCount, offset) =>
+        val previewWidth                                        = ScalarByteWidth.assume(math.min(8, byteCount))
         def loadLane(lane: Int): Either[ExecutionFailure, Unit] =
-          if (lane == lanes) Right(())
+          if (lane == lanes.value) Right(())
           else if (!active(lane)) loadLane(lane + 1)
           else {
             val start =
@@ -6816,13 +6960,15 @@ object DispatchInterpreter {
                 kernel.globalMemory,
                 allocations,
                 memory
-              ).flatMap { bytes =>
-                writeVectorBytes(vector, dest, lane, bytes)
-                if (Environment.trace("loads") && lane < 8)
-                  System.err.println(
-                    s"Gemstone AMDGPU buffer load index=$index kernel=${kernel.name} lane=$lane start=$start base=0x${base.toHexString} bytes=$byteCount dest=$dest value=0x${LittleEndian.decode(bytes, 0, byteCount).toHexString}"
-                  )
-                loadLane(lane + 1)
+              ) match {
+                case Left(error)  => Left(error)
+                case Right(bytes) =>
+                  writeVectorBytes(vector, dest, lane, bytes)
+                  if (AMDGPUEnvironment.trace("loads") && lane < 8)
+                    scribe.debug(
+                      s"Gemstone AMDGPU buffer load index=$index kernel=${kernel.name} lane=$lane start=$start base=0x${base.toHexString} bytes=$byteCount dest=$dest value=0x${LittleEndian.decode(bytes, 0, previewWidth).toHexString}"
+                    )
+                  loadLane(lane + 1)
               }
             else if (start < 0L || start > scratch(lane).length.toLong - byteCount.toLong)
               Left(ExecutionFailure.Failed(
@@ -6831,17 +6977,18 @@ object DispatchInterpreter {
             else {
               val bytes = java.util.Arrays.copyOfRange(scratch(lane), start.toInt, start.toInt + byteCount)
               writeVectorBytes(vector, dest, lane, bytes)
-              if (Environment.trace("loads") && lane < 8)
-                System.err.println(
-                  s"Gemstone AMDGPU buffer load index=$index kernel=${kernel.name} lane=$lane start=$start bytes=$byteCount dest=$dest value=0x${LittleEndian.decode(bytes, 0, byteCount).toHexString}"
+              if (AMDGPUEnvironment.trace("loads") && lane < 8)
+                scribe.debug(
+                  s"Gemstone AMDGPU buffer load index=$index kernel=${kernel.name} lane=$lane start=$start bytes=$byteCount dest=$dest value=0x${LittleEndian.decode(bytes, 0, previewWidth).toHexString}"
                 )
               loadLane(lane + 1)
             }
           }
         advanceAfter(loadLane(0))
       case DecodedInstruction.BufferLoadD16(dest, address, resource, scalarOffset, byteCount, offset, high) =>
+        val scalarByteCount                                     = ScalarByteWidth.assume(byteCount)
         def loadLane(lane: Int): Either[ExecutionFailure, Unit] =
-          if (lane == lanes) Right(())
+          if (lane == lanes.value) Right(())
           else if (!active(lane)) loadLane(lane + 1)
           else {
             val start =
@@ -6852,7 +6999,7 @@ object DispatchInterpreter {
             val range  = Bits.low32(scalar(resource + 2))
             val loaded =
               if (base != 0L && (start < 0L || start > range - byteCount.toLong))
-                Right(Col.fill(byteCount)(0.toByte))
+                Right(Vec.fill(byteCount)(0.toByte))
               else if (base != 0L)
                 readBytes(
                   base + start,
@@ -6869,51 +7016,33 @@ object DispatchInterpreter {
                 Left(ExecutionFailure.Failed(
                   s"buffer D16 load ${operations(index)} at instruction $index lane $lane offset $start size $byteCount exceeds private scratch ${scratch(lane).length}"
                 ))
-              else Right(Col.unsafeFromArray(java.util.Arrays.copyOfRange(
+              else Right(Vec.unsafeFromArray(java.util.Arrays.copyOfRange(
                 scratch(lane),
                 start.toInt,
                 start.toInt + byteCount
               )))
-            loaded.flatMap { bytes =>
-              val value = Bits.low16(LittleEndian.decode(bytes, 0, byteCount))
-              vector(dest)(lane) = mergeD16(vector(dest)(lane), value, high)
-              loadLane(lane + 1)
+            loaded match {
+              case Left(error)  => Left(error)
+              case Right(bytes) =>
+                val value = Bits.low16(LittleEndian.decode(bytes, 0, scalarByteCount))
+                vector(dest)(lane) = mergeD16(vector(dest)(lane), value, high)
+                loadLane(lane + 1)
             }
           }
         advanceAfter(loadLane(0))
-      case DecodedInstruction.BufferStore(address, resource, scalarOffset, src, byteCount, offset, high) =>
-        def storedBytes(lane: Int): Array[Byte] =
-          if (high) LittleEndian.toArray(vector(src)(lane) >>> 16, byteCount)
-          else vectorBytes(vector, src, lane, byteCount)
-        def storeLane(lane: Int): Either[ExecutionFailure, Unit] =
-          if (lane == lanes) Right(())
-          else if (!active(lane)) storeLane(lane + 1)
-          else {
-            val start =
-              address.map(register => Bits.low32(vector(register)(lane))).getOrElse(0L) + scalarOffset.fold(0L)(
-                register => Bits.low32(scalar(register))
-              ) + offset.toLong
-            val base  = sourceScalar64(InstructionSource.Scalar(resource)) & 0x0000ffffffffffffL
-            val range = Bits.low32(scalar(resource + 2))
-            if (Environment.trace("all-stores") && lane < 4)
-              System.err.println(
-                s"Gemstone AMDGPU buffer store index=$index kernel=${kernel.name} lane=$lane start=$start base=0x${base.toHexString} src=$src value=0x${vector(src)(lane).toHexString}"
-              )
-            if (base != 0L && (start < 0L || start > range - byteCount.toLong)) storeLane(lane + 1)
-            else if (base != 0L)
-              writeBytes(base + start, storedBytes(lane), allocations, memory, kernel.globalMemory)
-                .flatMap(_ => storeLane(lane + 1))
-            else if (start < 0L || start > scratch(lane).length.toLong - byteCount.toLong)
-              Left(ExecutionFailure.Failed(
-                s"buffer store ${operations(index)} at instruction $index lane $lane offset $start size $byteCount exceeds private scratch ${scratch(lane).length}"
-              ))
-            else {
-              val bytes = storedBytes(lane)
-              System.arraycopy(bytes, 0, scratch(lane), start.toInt, byteCount)
-              storeLane(lane + 1)
-            }
-          }
-        advanceAfter(storeLane(0))
+      case DecodedInstruction.BufferStore(address, resource, scalarOffset, src, byteCount, offset) =>
+        executeBufferStore(index, address, resource, scalarOffset, src, byteCount, offset, None)
+      case DecodedInstruction.BufferStoreD16High(address, resource, scalarOffset, src, byteCount, offset) =>
+        executeBufferStore(
+          index,
+          address,
+          resource,
+          scalarOffset,
+          src,
+          byteCount.assume[Interval.Closed[1, 16]],
+          offset,
+          Some(ScalarByteWidth.assume(byteCount))
+        )
     }
 
     def step(index: Int): Either[ExecutionFailure, Option[Int]] =
@@ -6922,18 +7051,18 @@ object DispatchInterpreter {
       else {
         val instruction = executable(index)
         if (traceSetControl && index >= 1780 && index <= 1875 && localStart == 0)
-          System.err.println(s"Gemstone AMDGPU set instruction index=$index decoded=${operations(index)}")
+          scribe.debug(s"Gemstone AMDGPU set instruction index=$index decoded=${operations(index)}")
         if (
           traceSetOps && localStart == 0 &&
           ((index <= 120) || (index >= 780 && index <= 860) || (index >= 2120 && index <= 2170) ||
             (traceSetTail && index >= 59000))
         )
-          System.err.println(
+          scribe.debug(
             s"Gemstone AMDGPU set op kernel=${kernel.name} group=$groupX,$groupY,$groupZ localStart=$localStart index=$index decoded=${operations(index)} active=0x${laneMask(active).toHexString} carry=0x${laneMask(carry).toHexString} v0=0x${vector(0)(0).toHexString} v1=0x${vector(1)(0).toHexString} v2=0x${vector(2)(0).toHexString} v3=0x${vector(3)(0).toHexString} v4=0x${vector(4)(0).toHexString} v5=0x${vector(5)(0).toHexString} v6=0x${vector(6)(0).toHexString} v7=0x${vector(7)(0).toHexString} v8=0x${vector(8)(0).toHexString} v9=0x${vector(9)(0).toHexString}"
           )
         if (traceSetOps && localStart == 0 && index >= 1825 && index <= 1868)
-          (0 until math.min(lanes, 4)).foreach { lane =>
-            System.err.println(
+          (0 until math.min(lanes.value, 4)).foreach { lane =>
+            scribe.debug(
               s"Gemstone AMDGPU set lookback kernel=${kernel.name} localStart=$localStart index=$index lane=$lane decoded=${operations(index)} active=${active(lane)} carry=${carry(lane)} v3=0x${vector(3)(lane).toHexString} v7=0x${vector(7)(lane).toHexString} v8=0x${vector(8)(lane).toHexString} v9=0x${vector(9)(lane).toHexString} v23=0x${vector(23)(lane).toHexString} v24=0x${vector(24)(lane).toHexString} v25=0x${vector(25)(lane).toHexString} v26=0x${vector(26)(lane).toHexString} v27=0x${vector(27)(lane).toHexString} v28=0x${vector(28)(lane).toHexString} v29=0x${vector(29)(lane).toHexString} v34=0x${vector(34)(lane).toHexString} v35=0x${vector(35)(lane).toHexString} v36=0x${vector(36)(lane).toHexString} v37=0x${vector(37)(lane).toHexString} v38=0x${vector(38)(lane).toHexString} v39=0x${vector(39)(lane).toHexString} v40=0x${vector(40)(lane).toHexString} v41=0x${vector(41)(lane).toHexString}"
             )
           }
@@ -6988,7 +7117,9 @@ object DispatchInterpreter {
             )
             AdvanceStep
           case ExecutableInstruction.FallbackTag => stepDecoded(index)
-          case other => Left(ExecutionFailure.Failed(s"unknown packed AMDGPU instruction tag $other at $index"))
+          case other                             => Left(ExecutionFailure.Failed(
+              s"unknown packed AMDGPU instruction tag $other at $index"
+            ))
         }
       }
 
@@ -7002,7 +7133,7 @@ object DispatchInterpreter {
       def flush(): ExecutionFailure | Null =
         if (pendingInstructionCost == 0L) null
         else
-          control.checkpoint(math.min(pendingInstructionCost, Int.MaxValue.toLong).toInt) match {
+          control.checkpoint(math.min(pendingInstructionCost, Int.MaxValue.toLong).toInt.assume[Positive]) match {
             case Left(fault) => ExecutionFailure.Failed(fault.message)
             case Right(())   =>
               pendingInstructionCost = math.max(0L, pendingInstructionCost - Int.MaxValue.toLong)
@@ -7012,18 +7143,18 @@ object DispatchInterpreter {
       // Deferred charges cannot share unreserved credits between concurrent waves.
       if (control.parallelism.parallelism > 1) {
         if (cost == 0) null
-        else control.checkpoint(cost) match {
+        else control.checkpoint(cost.assume[Positive]) match {
           case Left(fault) => ExecutionFailure.Failed(fault.message)
           case Right(())   => null
         }
       } else if (cost == 0) flush()
       else if (pendingInstructionCost == 0L && control.cancellation.isCancelled)
-        ExecutionFailure.Failed(ExecutionFault.Cancelled.message)
+        ExecutionFailure.Failed(ExecutionControlFailure.Cancelled.message)
       else if (pendingInstructionCost.toLong + cost.toLong > control.remainingInstructions) {
         val flushFailure = flush()
         if (flushFailure != null) flushFailure
         else
-          control.checkpoint(cost) match {
+          control.checkpoint(cost.assume[Positive]) match {
             case Left(fault) => ExecutionFailure.Failed(fault.message)
             case Right(())   => null
           }
@@ -7039,12 +7170,12 @@ object DispatchInterpreter {
         case null                    =>
           val stepResult = step(instructionIndex)
           if (
-            Environment.trace("merge-state") &&
+            AMDGPUEnvironment.trace("merge-state") &&
             localStart == 0 && kernel.name.contains("wrapped_merge_sort") &&
             instructionIndex >= 1380 && instructionIndex <= 1500
           )
-            System.err.println(
-              s"Gemstone AMDGPU merge state index=$instructionIndex active=0x${laneMask(active).toHexString} s4=0x${pair(scalar, 4).toHexString} s6=0x${pair(scalar, 6).toHexString} s8=0x${pair(scalar, 8).toHexString} s10=0x${pair(scalar, 10).toHexString} v1=0x${vector(1)(0).toHexString} v2=0x${vector(2)(0).toHexString} v3=0x${vector(3)(0).toHexString} v4=0x${vector(4)(0).toHexString} v5=0x${vector(5)(0).toHexString} v6=0x${vector(6)(0).toHexString} v7=0x${vector(7)(0).toHexString} v8=0x${vector(8)(0).toHexString} v9=0x${vector(9)(0).toHexString} v10=0x${vector(10)(0).toHexString} v11=0x${vector(11)(0).toHexString} v12=0x${vector(12)(0).toHexString} v13=0x${vector(13)(0).toHexString} v14=0x${vector(14)(0).toHexString} v21=0x${vector(21)(0).toHexString} v22=0x${vector(22)(0).toHexString} v24=0x${vector(24)(0).toHexString} v25=0x${vector(25)(0).toHexString} v26=0x${vector(26)(0).toHexString} lanes_v3_v4_v6_v24_v25=${(0 until math.min(8, lanes)).map(
+            scribe.debug(
+              s"Gemstone AMDGPU merge state index=$instructionIndex active=0x${laneMask(active).toHexString} s4=0x${pair(scalar, 4).toHexString} s6=0x${pair(scalar, 6).toHexString} s8=0x${pair(scalar, 8).toHexString} s10=0x${pair(scalar, 10).toHexString} v1=0x${vector(1)(0).toHexString} v2=0x${vector(2)(0).toHexString} v3=0x${vector(3)(0).toHexString} v4=0x${vector(4)(0).toHexString} v5=0x${vector(5)(0).toHexString} v6=0x${vector(6)(0).toHexString} v7=0x${vector(7)(0).toHexString} v8=0x${vector(8)(0).toHexString} v9=0x${vector(9)(0).toHexString} v10=0x${vector(10)(0).toHexString} v11=0x${vector(11)(0).toHexString} v12=0x${vector(12)(0).toHexString} v13=0x${vector(13)(0).toHexString} v14=0x${vector(14)(0).toHexString} v21=0x${vector(21)(0).toHexString} v22=0x${vector(22)(0).toHexString} v24=0x${vector(24)(0).toHexString} v25=0x${vector(25)(0).toHexString} v26=0x${vector(26)(0).toHexString} lanes_v3_v4_v6_v24_v25=${(0 until math.min(8, lanes.value)).map(
                   lane =>
                     f"(${vector(3)(lane)}%08x,${vector(4)(lane)}%08x,${vector(6)(lane)}%08x,${vector(24)(lane)}%08x,${vector(25)(lane)}%08x)"
                 ).mkString("[", ",", "]")}"
@@ -7075,6 +7206,8 @@ object DispatchInterpreter {
     }
   }
 
+  // These memory-instruction helpers consume the allocation-free null sentinel returned by the hot region lookup.
+  @SuppressWarnings(Array("scalafix:DisableSyntax.null", "scalafix:GemstoneNoAssume"))
   private def readBytes(
       address: Long,
       size: Int,
@@ -7085,38 +7218,53 @@ object DispatchInterpreter {
       globalMemory: Array[(Long, Array[Byte])],
       allocations: Array[AllocationRegion],
       memory: ExecutionMemory
-  ): Either[ExecutionFailure, Col[Byte]] = {
+  ): Either[ExecutionFailure, Vec[Byte]] = {
     val binding = aliasedRegion(address, allocations)
-    if (binding != null) memory.read(binding.id, binding.offset + address - binding.base, size)
+    if (binding != null)
+      memory.read(
+        binding.id,
+        (binding.offset + address - binding.base).assume[Positive0],
+        size.assume[Positive0]
+      )
     else localRead(address, size, KernargAddress, kernarg)
       .orElse(localRead(address, size, DispatchAddress, dispatch))
       .orElse(localRead(address, size, readOnlyAddress, readOnly))
-      .orElse(globalRead(address, size, globalMemory))
-      .map(bytes => Right(Col.unsafeFromArray(bytes)))
-      .getOrElse(resolve(address, allocations).flatMap { case (region, relative) =>
-        memory.read(region.id, region.offset + relative, size).left.map { error =>
-          ExecutionFailure.Failed(
-            s"AMDGPU memory read address=0x${address.toHexString} size=$size allocation=${region.id.toLong} offset=${region.offset + relative}: ${error.message}"
-          )
-        }.map { bytes =>
-          val result = bytes
-          if (Environment.trace("memory-bytes") && size >= 8)
-            System.err.println(s"Gemstone AMDGPU memory read address=0x${address.toHexString} bytes=${result.map(b =>
-                f"0x${b & 0xff}%02x"
-              ).mkString("[", ",", "]")}")
-          if (Environment.trace("loads") && size == 4)
-            System.err.println(
-              s"Gemstone AMDGPU resolved read address=0x${address.toHexString} allocation=${region.id.toLong} relative=$relative value=0x${LittleEndian.decode(result, 0, size).toHexString}"
-            )
-          result
+      .orElse(globalRead(address, size, globalMemory)) match {
+      case Some(bytes) => Right(Vec.unsafeFromArray(bytes))
+      case None        =>
+        resolve(address, allocations) match {
+          case Left(error)               => Left(error)
+          case Right((region, relative)) =>
+            memory.read(
+              region.id,
+              (region.offset + relative).assume[Positive0],
+              size.assume[Positive0]
+            ).leftMap { error =>
+              ExecutionFailure.Failed(
+                s"AMDGPU memory read address=0x${address.toHexString} size=$size allocation=${region.id.value} offset=${region.offset + relative}: ${error.message}"
+              )
+            } match {
+              case Left(error)   => Left(error)
+              case Right(result) =>
+                if (AMDGPUEnvironment.trace("memory-bytes") && size >= 8)
+                  scribe.debug(s"Gemstone AMDGPU memory read address=0x${address.toHexString} bytes=${result.map(b =>
+                      f"0x${b & 0xff}%02x"
+                    ).mkString("[", ",", "]")}")
+                if (AMDGPUEnvironment.trace("loads") && size == 4)
+                  scribe.debug(
+                    s"Gemstone AMDGPU resolved read address=0x${address.toHexString} allocation=${region.id.value} relative=$relative value=0x${LittleEndian.decode(result, 0, ScalarByteWidth(4)).toHexString}"
+                  )
+                Right(result)
+            }
         }
-      })
+    }
 
   }
 
+  @SuppressWarnings(Array("scalafix:DisableSyntax.null", "scalafix:GemstoneNoAssume"))
   private def readValue(
       address: Long,
-      size: Int,
+      size: MemoryValueByteWidth,
       kernarg: Array[Byte],
       dispatch: Array[Byte],
       readOnlyAddress: Long,
@@ -7125,32 +7273,37 @@ object DispatchInterpreter {
       allocations: Array[AllocationRegion],
       memory: ExecutionMemory
   ): Either[ExecutionFailure, Long] = {
-    val binding = aliasedRegion(address, allocations)
-    if (binding != null) memory.readValue(binding.id, binding.offset + address - binding.base, size)
+    val scalarSize = size.scalarByteWidth
+    val binding    = aliasedRegion(address, allocations)
+    if (binding != null)
+      memory.readValue(binding.id, (binding.offset + address - binding.base).assume[Positive0], size)
     else {
       val kernargOffset = address - KernargAddress
-      if (ByteRange.contains(kernarg.length, kernargOffset, size.toLong))
-        Right(LittleEndian.decode(kernarg, kernargOffset.toInt, size))
+      if (ByteRange.contains(kernarg.length, kernargOffset, size.value.toLong))
+        Right(LittleEndian.decode(kernarg, kernargOffset.toInt, scalarSize))
       else {
         val dispatchOffset = address - DispatchAddress
-        if (ByteRange.contains(dispatch.length, dispatchOffset, size.toLong))
-          Right(LittleEndian.decode(dispatch, dispatchOffset.toInt, size))
+        if (ByteRange.contains(dispatch.length, dispatchOffset, size.value.toLong))
+          Right(LittleEndian.decode(dispatch, dispatchOffset.toInt, scalarSize))
         else {
           val readOnlyOffset = address - readOnlyAddress
-          if (ByteRange.contains(readOnly.length, readOnlyOffset, size.toLong))
-            Right(LittleEndian.decode(readOnly, readOnlyOffset.toInt, size))
+          if (ByteRange.contains(readOnly.length, readOnlyOffset, size.value.toLong))
+            Right(LittleEndian.decode(readOnly, readOnlyOffset.toInt, scalarSize))
           else {
-            globalRead(address, size, globalMemory).map(bytes => LittleEndian.decode(bytes, 0, size)).toRight(
+            globalRead(address, size.value, globalMemory).map(bytes =>
+              LittleEndian.decode(bytes, 0, scalarSize)
+            ).toRight(
               ExecutionFailure.Failed(s"unmapped AMDGPU address=0x${address.toHexString}")
             ).orElse {
               val region = resolveRegion(address, allocations)
-              if (region == null) Left(ExecutionFailure.Failed(s"unmapped AMDGPU address=0x${address.toHexString}"))
+              if (region == null)
+                Left(ExecutionFailure.Failed(s"unmapped AMDGPU address=0x${address.toHexString}"))
               else {
-                val offset = region.offset + address - region.base
+                val offset = (region.offset + address - region.base).assume[Positive0]
                 memory.readValue(region.id, offset, size) match {
                   case Left(error) =>
                     Left(ExecutionFailure.Failed(
-                      s"AMDGPU memory read address=0x${address.toHexString} size=$size allocation=${region.id.toLong} offset=$offset: ${error.message}"
+                      s"AMDGPU memory read address=0x${address.toHexString} size=$size allocation=${region.id.value} offset=$offset: ${error.message}"
                     ))
                   case success => success
                 }
@@ -7162,6 +7315,7 @@ object DispatchInterpreter {
     }
   }
 
+  @SuppressWarnings(Array("scalafix:DisableSyntax.null", "scalafix:GemstoneNoAssume"))
   private def writeBytes(
       address: Long,
       bytes: Array[Byte],
@@ -7170,53 +7324,113 @@ object DispatchInterpreter {
       globalMemory: Array[(Long, Array[Byte])]
   ): Either[ExecutionFailure, Unit] = {
     val binding = aliasedRegion(address, allocations)
-    if (binding != null) memory.write(binding.id, binding.offset + address - binding.base, Col.unsafeFromArray(bytes))
+    if (binding != null)
+      memory.write(
+        binding.id,
+        (binding.offset + address - binding.base).assume[Positive0],
+        Vec.unsafeFromArray(bytes)
+      )
     else globalWrite(address, bytes, globalMemory) match {
       case Some(_) => Right(())
       case None    =>
-        resolve(address, allocations).flatMap { case (region, relative) =>
-          val result = memory.write(region.id, region.offset + relative, Col.unsafeFromArray(bytes))
-          if (Environment.trace("memory-bytes") && bytes.length >= 8)
-            System.err.println(
-              s"Gemstone AMDGPU memory write address=0x${address.toHexString} bytes=${bytes.map(b =>
-                  f"0x${b & 0xff}%02x"
-                ).mkString("[", ",", "]")}"
+        resolve(address, allocations) match {
+          case Left(error)               => Left(error)
+          case Right((region, relative)) =>
+            val result = memory.write(
+              region.id,
+              (region.offset + relative).assume[Positive0],
+              Vec.unsafeFromArray(bytes)
             )
-          result.left.map { error =>
-            ExecutionFailure.Failed(
-              s"AMDGPU memory write address=0x${address.toHexString} size=${bytes.length} allocation=${region.id.toLong} offset=${region.offset + relative}: ${error.message}"
-            )
-          }
+            if (AMDGPUEnvironment.trace("memory-bytes") && bytes.length >= 8)
+              scribe.debug(
+                s"Gemstone AMDGPU memory write address=0x${address.toHexString} bytes=${bytes.map(b =>
+                    f"0x${b & 0xff}%02x"
+                  ).mkString("[", ",", "]")}"
+              )
+            result.leftMap { error =>
+              ExecutionFailure.Failed(
+                s"AMDGPU memory write address=0x${address.toHexString} size=${bytes.length} allocation=${region.id.value} offset=${region.offset + relative}: ${error.message}"
+              )
+            }
         }
     }
 
   }
 
+  @SuppressWarnings(Array("scalafix:DisableSyntax.null", "scalafix:GemstoneNoAssume"))
   private def writeValue(
       address: Long,
       value: Long,
-      size: Int,
+      size: MemoryValueByteWidth,
       allocations: Array[AllocationRegion],
       memory: ExecutionMemory,
       globalMemory: Array[(Long, Array[Byte])]
   ): Either[ExecutionFailure, Unit] = {
-    val binding = aliasedRegion(address, allocations)
-    if (binding != null) memory.writeValue(binding.id, binding.offset + address - binding.base, value, size)
+    val scalarSize = size.scalarByteWidth
+    val binding    = aliasedRegion(address, allocations)
+    if (binding != null)
+      memory.writeValue(binding.id, (binding.offset + address - binding.base).assume[Positive0], value, size)
     else {
-      val bytes = LittleEndian.toArray(value, size)
+      val bytes = LittleEndian.toArray(value, scalarSize)
       globalWrite(address, bytes, globalMemory) match {
         case Some(_) => Right(())
         case None    =>
           val region = resolveRegion(address, allocations)
-          if (region == null) Left(ExecutionFailure.Failed(s"unmapped AMDGPU address=0x${address.toHexString}"))
+          if (region == null)
+            Left(ExecutionFailure.Failed(s"unmapped AMDGPU address=0x${address.toHexString}"))
           else {
-            val offset = region.offset + address - region.base
+            val offset = (region.offset + address - region.base).assume[Positive0]
             memory.writeValue(region.id, offset, value, size) match {
               case Left(error) =>
                 Left(ExecutionFailure.Failed(
-                  s"AMDGPU memory write address=0x${address.toHexString} size=$size allocation=${region.id.toLong} offset=$offset: ${error.message}"
+                  s"AMDGPU memory write address=0x${address.toHexString} size=$size allocation=${region.id.value} offset=$offset: ${error.message}"
                 ))
               case success => success
+            }
+          }
+      }
+    }
+  }
+
+  @SuppressWarnings(Array("scalafix:DisableSyntax.null", "scalafix:GemstoneNoAssume"))
+  private def atomicModifyValue(
+      address: Long,
+      size: MemoryValueByteWidth,
+      allocations: Array[AllocationRegion],
+      memory: ExecutionMemory,
+      globalMemory: Array[(Long, Array[Byte])],
+      globalMemoryLocks: Array[ReentrantLock]
+  )(update: Long => Long): Either[ExecutionFailure, Long] = {
+    val scalarSize = size.scalarByteWidth
+    val binding    = aliasedRegion(address, allocations)
+    if (binding != null)
+      memory.atomicModifyValue(
+        binding.id,
+        (binding.offset + address - binding.base).assume[Positive0],
+        size
+      )(update)
+    else {
+      val local = globalMemory.iterator.zip(globalMemoryLocks.iterator).find { case ((base, bytes), _) =>
+        address >= base && address - base <= bytes.length.toLong - size.value.toLong
+      }
+      local match {
+        case Some(((base, bytes), lock)) =>
+          lock.withLock {
+            val offset   = (address - base).toInt
+            val previous = LittleEndian.decode(bytes, offset, scalarSize)
+            LittleEndian.write(update(previous), bytes, offset, scalarSize)
+            Right(previous)
+          }
+        case None =>
+          val region = resolveRegion(address, allocations)
+          if (region == null)
+            Left(ExecutionFailure.Failed(s"unmapped AMDGPU address=0x${address.toHexString}"))
+          else {
+            val offset = (region.offset + address - region.base).assume[Positive0]
+            memory.atomicModifyValue(region.id, offset, size)(update).left.map { error =>
+              ExecutionFailure.Failed(
+                s"AMDGPU atomic address=0x${address.toHexString} size=$size allocation=${region.id.value} offset=$offset: ${error.message}"
+              )
             }
           }
       }
@@ -7230,12 +7444,17 @@ object DispatchInterpreter {
     }
 
   private def globalWrite(address: Long, value: Array[Byte], regions: Array[(Long, Array[Byte])]): Option[Unit] =
-    regions.iterator.collectFirst {
-      case (base, bytes) if address >= base && address - base <= bytes.length.toLong - value.length.toLong =>
-        System.arraycopy(value, 0, bytes, (address - base).toInt, value.length)
-        ()
+    regions.iterator.find { case (base, bytes) =>
+      address >= base && address - base <= bytes.length.toLong - value.length.toLong
+    } match {
+      case Some((base, bytes)) =>
+        Array.copy(value, 0, bytes, (address - base).toInt, value.length)
+        Some(())
+      case None => None
     }
 
+  // Null is the allocation-free miss sentinel in this memory-instruction hot path.
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var", "scalafix:DisableSyntax.null"))
   private def aliasedRegion(address: Long, allocations: Array[AllocationRegion]): AllocationRegion | Null = {
     var index                           = 0
     var result: AllocationRegion | Null = null
@@ -7247,6 +7466,8 @@ object DispatchInterpreter {
     result
   }
 
+  // Null is the allocation-free miss sentinel in this memory-instruction hot path.
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var", "scalafix:DisableSyntax.null"))
   private def resolveRegion(address: Long, allocations: Array[AllocationRegion]): AllocationRegion | Null = {
     var index                           = 0
     var result: AllocationRegion | Null = null
@@ -7266,7 +7487,7 @@ object DispatchInterpreter {
       if (slot < Long.MaxValue) {
         result = AllocationRegion(
           AllocationBase + slot * AllocationSpan,
-          AllocationId.unsafe(slot + 1L),
+          AllocationId.applyUnsafe(slot + 1L),
           0L
         )
       }
@@ -7274,12 +7495,14 @@ object DispatchInterpreter {
     result
   }
 
+  @SuppressWarnings(Array("scalafix:DisableSyntax.null"))
   private def resolve(
       address: Long,
       allocations: Array[AllocationRegion]
   ): Either[ExecutionFailure, (AllocationRegion, Long)] = {
     val region = resolveRegion(address, allocations)
-    if (region == null) Left(ExecutionFailure.Failed(s"unmapped AMDGPU address=0x${address.toHexString}"))
+    if (region == null)
+      Left(ExecutionFailure.Failed(s"unmapped AMDGPU address=0x${address.toHexString}"))
     else Right(region -> (address - region.base))
   }
 
@@ -7297,9 +7520,11 @@ object DispatchInterpreter {
       s"truncated $size-byte instruction"
     )
 
-  private def unsignedInt(bytes: Col[Byte], offset: Int): Long = LittleEndian.decode(bytes, offset, 4)
+  private def unsignedInt(bytes: Vec[Byte], offset: Int): Long =
+    LittleEndian.decode(bytes, offset, ScalarByteWidth(4))
 
-  private def unsignedInt(bytes: Array[Byte], offset: Int): Long = LittleEndian.decode(bytes, offset, 4)
+  private def unsignedInt(bytes: Array[Byte], offset: Int): Long =
+    LittleEndian.decode(bytes, offset, ScalarByteWidth(4))
 
   private def pair(registers: Array[Long], first: Int): Long =
     Bits.join32(registers(first), registers(first + 1))
@@ -7331,10 +7556,10 @@ object DispatchInterpreter {
       case SubDwordDestinationUnused.Preserve   => Bits.low32((existing & ~mask) | selected)
       case SubDwordDestinationUnused.SignExtend =>
         val endMask =
-          if (selection.shift + selection.width == 32) Bits.Mask32
-          else Bits.mask(selection.shift + selection.width)
+          if (selection.upperBit.value == 32) Bits.Mask32
+          else Bits.mask(selection.upperBit)
         val upper =
-          if ((selected & (1L << (selection.shift + selection.width - 1))) != 0L) Bits.Mask32 & ~endMask
+          if ((selected & (1L << (selection.upperBit.value - 1))) != 0L) Bits.Mask32 & ~endMask
           else 0L
         Bits.low32(selected | upper)
     }
@@ -7370,7 +7595,9 @@ object DispatchInterpreter {
 
   private def ldsFailure(address: Long, size: Int): ExecutionFailure = {
     val offset = ldsOffset(address)
-    ExecutionFailure.Failed(f"out-of-bounds AMDGPU LDS read at 0x$address%x (offset 0x$offset%x, $size bytes)")
+    ExecutionFailure.Failed(
+      f"out-of-bounds AMDGPU LDS read at 0x$address%x (offset 0x$offset%x, $size bytes)"
+    )
   }
 
   private def readLDS(lds: Array[Byte], address: Long, size: Int): Either[ExecutionFailure, Array[Byte]] = {
@@ -7383,7 +7610,7 @@ object DispatchInterpreter {
     val offset = ldsOffset(address)
     Either.cond(
       ByteRange.contains(lds.length, offset, bytes.length.toLong), {
-        System.arraycopy(bytes, 0, lds, offset.toInt, bytes.length)
+        Array.copy(bytes, 0, lds, offset.toInt, bytes.length)
         ()
       },
       ExecutionFailure.Failed(
@@ -7404,17 +7631,23 @@ object DispatchInterpreter {
     }
 
   /** Consume the owned memory snapshot directly; copying it into another array adds no isolation. */
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var", "scalafix:GemstoneNoAssume"))
   private def writeVectorBytes(
       registers: VectorRegisters,
       first: Int,
       lane: Int,
-      bytes: Col[Byte]
+      bytes: Vec[Byte]
   ): Unit = {
     var offset   = 0
     var register = first
     while (offset < bytes.size) {
       val width = math.min(4, bytes.size - offset)
-      registers(register)(lane) = LittleEndian.decode(bytes, offset, width)
+      // The loop guard proves at least one byte remains; each register consumes at most four bytes.
+      registers(register)(lane) = LittleEndian.decode(
+        bytes,
+        offset,
+        ScalarByteWidth.assume(width)
+      )
       offset += width
       register += 1
     }
@@ -7427,6 +7660,8 @@ object DispatchInterpreter {
       bytes: Array[Byte]
   ): Unit = writeVectorBytes(registers, first, lane, bytes, 0, bytes.length)
 
+  // Pack complete VGPR words in one pass on the memory hot path.
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private def writeVectorBytes(
       registers: VectorRegisters,
       first: Int,
@@ -7508,7 +7743,7 @@ object DispatchInterpreter {
     case _ => source64(source, lane, scalar, vector)
   }
 
-  private def signed13(value: Int): Long = Bits.signExtend(value.toLong, 13)
+  private def signed13(value: Int): Long = Bits.signExtend(value.toLong, BitWidth(13))
 
   // FLAT uses a 12-bit unsigned byte offset on GFX10+ (the encoded bit 12
   // is ignored), unlike GLOBAL/SCRATCH which use a signed 13-bit offset.
@@ -7516,5 +7751,5 @@ object DispatchInterpreter {
   // immediate as an unsigned mask makes reverse iterators (and any pointer
   // arithmetic that walks backwards from an end iterator) wrap by +4096
   // instead of stepping back by the requested number of bytes.
-  private def flatOffset(value: Int): Long = Bits.signExtend(value.toLong, 12)
+  private def flatOffset(value: Int): Long = Bits.signExtend(value.toLong, BitWidth(12))
 }

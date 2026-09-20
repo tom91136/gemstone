@@ -3,28 +3,25 @@ package net.kurobako.gemstone.isa.amdgpu
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.nio.charset.StandardCharsets
+import scala.util.Using
 
-import net.kurobako.gemstone.Col
-import net.kurobako.gemstone.Col.*
-
-final case class OracleCase(target: Target, assembly: String, bytes: Col[Byte], source: String)
-final case class OracleDiagnostic(target: Target, assembly: String, message: String, source: String)
+import net.kurobako.gemstone.Vec
+import net.kurobako.gemstone.Vec.*
 
 /** Checked-in, readable subset of the pinned LLVM MC AMDGPU oracle. */
 object LLVMOracle {
-  private final case class Loaded(cases: Col[OracleCase], diagnostics: Col[OracleDiagnostic])
+  final case class OracleCase(target: Target, assembly: String, bytes: Vec[Byte], source: String)
+  final case class OracleDiagnostic(target: Target, assembly: String, message: String, source: String)
 
-  private val Root            = "/net/kurobako/gemstone/isa/amdgpu/llvm-oracle/"
-  private val Encoding        = raw"// ENCODING: \[([^]]*)\]".r
-  private val Error           = raw"// ERROR: (.*)".r
-  private val SourceDirective = raw"// SOURCE: (.+)".r
-  private val TargetDirective = raw"// TARGET: (.+)".r
+  private final case class Loaded(cases: Vec[OracleCase], diagnostics: Vec[OracleDiagnostic])
 
-  private lazy val manifest: Map[String, Col[String]] =
+  private val Root = "/net/kurobako/gemstone/isa/amdgpu/llvm-oracle/"
+
+  private lazy val manifest: Map[String, Vec[String]] =
     lines("manifest.txt").filterNot(line => line.isBlank || line.startsWith("#")).map { line =>
-      line.split("=", 2) match {
-        case Array(key, value) => key -> value
-        case _                 => throw IllegalArgumentException(s"invalid LLVM oracle manifest line: $line")
+      line match {
+        case s"$key=$value" => key -> value
+        case _              => throw IllegalArgumentException(s"invalid LLVM oracle manifest line: $line")
       }
     }.groupMap(_._1)(_._2)
 
@@ -37,15 +34,15 @@ object LLVMOracle {
   val selectedDiagnosticCount: Int    = property("selected-diagnostic-cases")
 
   private lazy val loaded: Loaded =
-    manifest.getOrElse("file", Col.empty[String]).map(load)
-      .foldLeft(Loaded(Col.empty[OracleCase], Col.empty[OracleDiagnostic])) { (all, current) =>
+    manifest.getOrElse("file", Vec.empty[String]).map(load(_))
+      .foldLeft(Loaded(Vec.empty[OracleCase], Vec.empty[OracleDiagnostic])) { (all, current) =>
         Loaded(all.cases ++ current.cases, all.diagnostics ++ current.diagnostics)
       }
 
-  lazy val cases: Col[OracleCase]             = loaded.cases
-  lazy val diagnostics: Col[OracleDiagnostic] = loaded.diagnostics
-  lazy val targets: Col[Target]               = cases.map(_.target).distinct
-  lazy val diagnosticTargets: Col[Target]     = diagnostics.map(_.target).distinct
+  lazy val cases: Vec[OracleCase]             = loaded.cases
+  lazy val diagnostics: Vec[OracleDiagnostic] = loaded.diagnostics
+  lazy val targets: Vec[Target]               = cases.map(_.target).distinct
+  lazy val diagnosticTargets: Vec[Target]     = diagnostics.map(_.target).distinct
 
   private def property(name: String): Int =
     manifest.get(name).flatMap(_.headOption).map(_.toInt)
@@ -53,18 +50,20 @@ object LLVMOracle {
 
   private def load(name: String): Loaded = {
     val content = lines(name)
-    val target  = content.collectFirst { case TargetDirective(value) => Target.unsafe(value) }
+    val target  = content.collectFirst { case s"// TARGET: $value" =>
+      Target.either(value.toLowerCase).fold(message => throw IllegalArgumentException(message), value => value)
+    }
       .getOrElse(throw IllegalArgumentException(s"missing target in LLVM oracle fixture $name"))
     val initial =
-      (Option.empty[String], Option.empty[String], Col.empty[OracleCase], Col.empty[OracleDiagnostic])
+      (Option.empty[String], Option.empty[String], Vec.empty[OracleCase], Vec.empty[OracleDiagnostic])
     val (_, _, cases, diagnostics) = content.foldLeft(initial) {
-      case ((_, pending, cases, diagnostics), SourceDirective(source)) =>
+      case ((_, pending, cases, diagnostics), s"// SOURCE: $source") =>
         (Some(source), pending, cases, diagnostics)
-      case ((Some(source), Some(assembly), cases, diagnostics), Encoding(encoded)) =>
+      case ((Some(source), Some(assembly), cases, diagnostics), s"// ENCODING: [$encoded]") =>
         val bytes = encoded.split(',').iterator.map(_.trim).filter(_.nonEmpty)
-          .map(value => Integer.parseInt(value.drop(2), 16).toByte).toCol
+          .map(value => Integer.parseInt(value.drop(2), 16).toByte).toVec
         (Some(source), None, cases :+ OracleCase(target, assembly, bytes, source), diagnostics)
-      case ((Some(source), Some(assembly), cases, diagnostics), Error(message)) =>
+      case ((Some(source), Some(assembly), cases, diagnostics), s"// ERROR: $message") =>
         (Some(source), None, cases, diagnostics :+ OracleDiagnostic(target, assembly, message, source))
       case ((source, pending, cases, diagnostics), line) if line.isBlank || line.startsWith("//") =>
         (source, pending, cases, diagnostics)
@@ -78,11 +77,18 @@ object LLVMOracle {
     Loaded(cases, diagnostics)
   }
 
-  private def lines(name: String): Col[String] = {
+  /** BufferedReader uses null as its Java end-of-stream sentinel; keep it confined to this pattern match. */
+  @SuppressWarnings(Array("scalafix:DisableSyntax.null"))
+  private def lines(name: String): Vec[String] = {
     val input = Option(getClass.getResourceAsStream(Root + name))
       .getOrElse(throw IllegalArgumentException(s"missing LLVM oracle resource $name"))
-    val reader = BufferedReader(InputStreamReader(input, StandardCharsets.UTF_8))
-    try Iterator.continually(reader.readLine()).takeWhile(_ != null).toCol
-    finally reader.close()
+    Using.resource(BufferedReader(InputStreamReader(input, StandardCharsets.UTF_8))) { reader =>
+      Iterator.unfold(()) { _ =>
+        reader.readLine() match {
+          case null => None
+          case line => Some(line -> ())
+        }
+      }.toVec
+    }
   }
 }

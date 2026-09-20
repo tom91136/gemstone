@@ -2753,6 +2753,9 @@ v_add_co_u32 v84, s[4:5], v13, v31 clamp
 buffer_atomic_add_f32 v255, off, s[8:11], s3 offset:4095
 // ERROR: instruction not supported on this GPU (bonaire): buffer_atomic_add_f32
 
+buffer_load_format_d16_xyzw v[1:2], off, s[4:7], s1
+// ERROR: instruction not supported on this GPU (bonaire): buffer_load_format_d16_xyzw
+
 buffer_load_sbyte_d16 v1, off, s[4:7], s1
 // ERROR: instruction not supported on this GPU (bonaire): buffer_load_sbyte_d16
 
@@ -2779,6 +2782,9 @@ global_atomic_or v[1:2], v2, off
 
 global_atomic_swap_x2 v[1:2], v[254:255], off offset:-1
 // ERROR: instruction not supported on this GPU (bonaire): global_atomic_swap_x2
+
+global_atomic_xor v[1:2], v2, off
+// ERROR: instruction not supported on this GPU (bonaire): global_atomic_xor
 
 global_load_short_d16_hi v1, v[3:4], off
 // ERROR: instruction not supported on this GPU (bonaire): global_load_short_d16_hi
@@ -2816,9 +2822,6 @@ s_atomic_cmpswap_x2 s[20:23], s[2:3], 0x0
 s_atomic_or s5, s[2:3], 0x0
 // ERROR: instruction not supported on this GPU (bonaire): s_atomic_or
 
-s_atomic_umax s5, s[2:3], s0 glc
-// ERROR: instruction not supported on this GPU (bonaire): s_atomic_umax
-
 s_atomic_umin_x2 s[10:11], s[2:3], s0 glc
 // ERROR: instruction not supported on this GPU (bonaire): s_atomic_umin_x2
 
@@ -2843,8 +2846,8 @@ s_mul_hi_u32 exec_hi, s1, s2
 s_nand_saveexec_b32 exec_hi, s1
 // ERROR: instruction not supported on this GPU (bonaire): s_nand_saveexec_b32
 
-s_rfe_restore_b64 -1, s2
-// ERROR: instruction not supported on this GPU (bonaire): s_rfe_restore_b64
+s_pack_ll_b32_b16 exec_hi, s1, s2
+// ERROR: instruction not supported on this GPU (bonaire): s_pack_ll_b32_b16
 
 s_set_gpr_idx_mode 0
 // ERROR: instruction not supported on this GPU (bonaire): s_set_gpr_idx_mode
@@ -2864,8 +2867,8 @@ scratch_load_ubyte_d16_hi v1, v2, off
 scratch_store_dwordx4 off, v[252:255], s3 offset:-1
 // ERROR: instruction not supported on this GPU (bonaire): scratch_store_dwordx4
 
-tbuffer_load_format_d16_x v0, off, s[0:3]
-// ERROR: instruction not supported on this GPU (bonaire): tbuffer_load_format_d16_x
+scratch_store_short_d16_hi off, v2, flat_scratch_hi offset:-1
+// ERROR: instruction not supported on this GPU (bonaire): scratch_store_short_d16_hi
 
 v_accvgpr_write_b32 a0, 65
 // ERROR: instruction not supported on this GPU (bonaire): v_accvgpr_write_b32
@@ -2933,9 +2936,6 @@ v_interp_p1lv_f16 v255, v2, attr0.x, v3
 v_lshl_or_b32 v1, v2, v3, v4
 // ERROR: instruction not supported on this GPU (bonaire): v_lshl_or_b32
 
-v_mad_i32_i16 v255, v1, v2, v3
-// ERROR: instruction not supported on this GPU (bonaire): v_mad_i32_i16
-
 v_mad_legacy_f16 v255, v1, v2, v3
 // ERROR: instruction not supported on this GPU (bonaire): v_mad_legacy_f16
 
@@ -2969,8 +2969,8 @@ v_rsq_f16 v1, v0 dst_sel:DWORD dst_unused:UNUSED_PAD src0_sel:WORD_1
 v_subbrev_co_u32 v0, vcc, src_lds_direct, v0, vcc
 // ERROR: instruction not supported on this GPU (bonaire): v_subbrev_co_u32
 
-v_trunc_f16 v1, v0 dst_sel:DWORD dst_unused:UNUSED_PAD src0_sel:WORD_1
-// ERROR: instruction not supported on this GPU (bonaire): v_trunc_f16
+v_swaprel_b32 v255, v1
+// ERROR: instruction not supported on this GPU (bonaire): v_swaprel_b32
 
 // SOURCE: lds_direct-ci.s
 
@@ -3003,9 +3003,6 @@ image_load_mip_pck v5, v[1:4], s[8:15] dmask:0x1 d16
 
 tbuffer_load_format_x v1, off, s[4:7], s1 format:[BUF_DATA_FORMAT_RESERVED_15,BUF_NUM_FORMAT_USCALED]
 // ENCODING: [0x00, 0x00, 0x78, 0xe9, 0x00, 0x01, 0x01, 0x01]
-
-tbuffer_store_format_xyzw v[1:4], off, ttmp[4:7] dfmt:1 nfmt:-1 s0
-// ERROR: out of range nfmt
 
 tbuffer_store_format_xyzw v[1:4], off, ttmp[4:7] dfmt:16 nfmt:1 s0
 // ERROR: out of range dfmt

@@ -1,6 +1,14 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
-import net.kurobako.gemstone.Col
+import Program.*
+
+import ISA.*
+import VirtualMachine.*
+
+import io.github.iltotore.iron.*
+import io.github.iltotore.iron.constraint.all.*
+
+import net.kurobako.gemstone.Vec
 
 final class SyntaxSuite extends munit.FunSuite {
   test("empty line comments are valid trivia") {
@@ -48,7 +56,7 @@ final class SyntaxSuite extends munit.FunSuite {
     }
 
   test("version and instruction specifications are generated at package level") {
-    assertEquals(Instruction.version, PTXVersion(9, 3))
+    assertEquals(Instruction.version, Version(9, 3))
     assert(Instruction.definitions.size >= 170)
   }
 
@@ -58,16 +66,28 @@ final class SyntaxSuite extends munit.FunSuite {
             instruction @ Instruction.LdGlobalNc(destination, address, None, modifiers, Some(predicate))
           ) =>
         assertEquals(predicate.negated, false)
-        assertEquals(instruction.opcode, "ld.global.nc")
-        assertEquals(modifiers.map(_.name).toSeq, Seq("L1::evict_last", "v2", "f64"))
+        assertEquals(instruction.opcode.value, "ld.global.nc")
+        assertEquals(modifiers.map(_.name.value).toSeq, Seq("L1::evict_last", "v2", "f64"))
         assert(destination.isInstanceOf[Operand.VectorLiteral])
         assert(address.isInstanceOf[Operand.Address])
       case other => fail(s"unexpected statement: $other")
     }
   }
 
+  test("documented tcgen05 collector shorthand is canonicalized") {
+    val parsed = statement(
+      "tcgen05.mma.ws.cta_group::1.kind::i8.collector::b2:use [d], [a], b, idesc, p;"
+    )
+    parsed match {
+      case Statement.Instruction(instruction) =>
+        assert(instruction.mods.exists(_.name.value == "collector::b2::use"))
+        assert(Printer.render(Program(Vec(parsed))).contains("collector::b2::use"))
+      case other => fail(s"unexpected statement: $other")
+    }
+  }
+
   test("module declarations, entry parameters, labels, and instructions parse") {
-    val entryFragments = Col(
+    val entryFragments = Vec(
       ".visible .entry kernel() {}",
       ".visible .entry kernel(.param .u64 pointer) {}",
       ".visible .entry kernel(.param .u64 pointer) { .reg .b32 %r<2>; }",
@@ -96,9 +116,9 @@ final class SyntaxSuite extends munit.FunSuite {
     }
     assertEquals(statements.statements.size, 4)
     statements.statements.last match {
-      case Statement.Entry(true, "kernel", parameters, body) =>
-        assertEquals(parameters.map(_.name).toSeq, Seq("pointer"))
-        assert(body.contains(Statement.Label("again")))
+      case Statement.Entry(true, name, parameters, body) if name.value == "kernel" =>
+        assertEquals(parameters.map(_.name.value).toSeq, Seq("pointer"))
+        assert(body.contains(Statement.Label(LabelName("again"))))
         assertEquals(body.collect { case _: Statement.Instruction => 1 }.sum, 2)
       case other => fail(s"unexpected statement: $other")
     }
@@ -114,7 +134,7 @@ final class SyntaxSuite extends munit.FunSuite {
   }
 
   test("data declaration initializers are accepted") {
-    val sources = Col(
+    val sources = Vec(
       ".global table;",
       ".global .align;",
       ".global .align 4;",
@@ -129,8 +149,34 @@ final class SyntaxSuite extends munit.FunSuite {
     sources.foreach(source => assert(Parser.parse(source).isRight, s"$source: ${Parser.parse(source).left}"))
   }
 
+  test("data declarations retain structured storage, type, extent, and initializer") {
+    statement(".global .align 4 .b8 table[4] = {65, 144, 67, 60};") match {
+      case Statement.Data(DataAddressSpace.Global, qualifiers, DataType.B8, name, Some(4), initializer)
+          if name == SymbolName("table") =>
+        assertEquals(qualifiers.toSeq, Seq(DeclarationQualifier.Alignment(4)))
+        assertEquals(initializer.size, 4)
+      case other => fail(s"unexpected declaration: $other")
+    }
+  }
+
+  test("unsized external shared declarations retain structured storage") {
+    statement(".extern .shared .align 16 .b8 shmem[];") match {
+      case Statement.Data(DataAddressSpace.Shared, qualifiers, DataType.B8, name, None, initializer)
+          if name == SymbolName("shmem") =>
+        assertEquals(
+          qualifiers.toSeq,
+          Seq(
+            DeclarationQualifier.Attribute(QualifierName("extern")),
+            DeclarationQualifier.Alignment(16)
+          )
+        )
+        assertEquals(initializer, Vec.empty[Operand])
+      case other => fail(s"unexpected declaration: $other")
+    }
+  }
+
   test("complex instruction forms round-trip to an identical AST") {
-    val sources = Col(
+    val sources = Vec(
       "@!p mbarrier.arrive.release.cta.shared::cta.b64 state, [addr];",
       "cp.async.bulk.tensor.2d.shared::cluster.global.mbarrier::complete_tx::bytes [dst], [tmap, {x, y}], [mbar];",
       "st.global.v4.u32 [%rd6+16], {%r1, %r2, %r3, %r4};",

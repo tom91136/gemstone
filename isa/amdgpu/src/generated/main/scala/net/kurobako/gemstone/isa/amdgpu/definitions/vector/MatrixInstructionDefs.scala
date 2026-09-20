@@ -1,2246 +1,500 @@
 // Generated from the pinned Mesa ACO and AMD machine-readable ISA inputs. Do not edit by hand.
+// scalafix:off GemstoneNoAssume; values were validated by the generator
 package net.kurobako.gemstone.isa.amdgpu
 
-import net.kurobako.gemstone.Col
+import net.kurobako.gemstone.Vec
 
 private[amdgpu] object MatrixInstructionDefs {
   case object SWaitTensorcnt extends InstructionDef(
-        "s_wait_tensorcnt",
+        AMDGPUOpcode.assume("s_wait_tensorcnt"),
         decoder(form(1)((operands, mods) => Instruction.SWaitTensorcnt(operands(0), mods))),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA5,
-            "cdna5",
-            "SOPP",
-            75,
-            Col(
-              OperandInfo(Some("SIMM16"), "SIMM16", 16, true, false, false)
-            ),
-            Some("WAVE_CONTROL"),
-            MetadataSource.AMDXML
-          )
-        ))
+        1264
       )
   case object TensorLoadToLds extends InstructionDef(
-        "tensor_load_to_lds",
+        AMDGPUOpcode.assume("tensor_load_to_lds"),
         decoder(form(4)((operands, mods) =>
           Instruction.TensorLoadToLds(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA5,
-            "cdna5",
-            "VIMAGE",
-            196,
-            Col(
-              OperandInfo(Some("VADDR0"), "SGPR", 128, true, false, false),
-              OperandInfo(Some("VADDR1"), "SGPR", 256, true, false, false),
-              OperandInfo(Some("VADDR2"), "SREG", 128, true, false, false),
-              OperandInfo(Some("VADDR3"), "SREG", 128, true, false, false)
-            ),
-            Some("VMEM"),
-            MetadataSource.AMDXML
-          )
-        ))
+        1359
       )
   case object TensorStoreFromLds extends InstructionDef(
-        "tensor_store_from_lds",
+        AMDGPUOpcode.assume("tensor_store_from_lds"),
         decoder(form(4)((operands, mods) =>
           Instruction.TensorStoreFromLds(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA5,
-            "cdna5",
-            "VIMAGE",
-            197,
-            Col(
-              OperandInfo(Some("VADDR0"), "SGPR", 128, true, false, false),
-              OperandInfo(Some("VADDR1"), "SGPR", 256, true, false, false),
-              OperandInfo(Some("VADDR2"), "SREG", 128, true, false, false),
-              OperandInfo(Some("VADDR3"), "SREG", 128, true, false, false)
-            ),
-            Some("VMEM"),
-            MetadataSource.AMDXML
-          )
-        ))
+        1360
       )
   case object VMfmaF3216x16x128F8f6f4 extends InstructionDef(
-        "v_mfma_f32_16x16x128_f8f6f4",
+        AMDGPUOpcode.assume("v_mfma_f32_16x16x128_f8f6f4"),
         decoder(form(4)((operands, mods) =>
           Instruction.VMfmaF3216x16x128F8f6f4(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA4,
-            "cdna4",
-            "VOP3P_MFMA",
-            45,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 256, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 256, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 128, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2027
       )
   case object VMfmaF3216x16x16Bf16 extends InstructionDef(
-        "v_mfma_f32_16x16x16_bf16",
+        AMDGPUOpcode.assume("v_mfma_f32_16x16x16_bf16"),
         decoder(form(4)((operands, mods) =>
           Instruction.VMfmaF3216x16x16Bf16(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA3,
-            "cdna3",
-            "VOP3P_MFMA",
-            97,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 128, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          ),
-          Encoding(
-            Family.CDNA4,
-            "cdna4",
-            "VOP3P_MFMA",
-            97,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 128, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2028
       )
   case object VMfmaF3216x16x16F16_1 extends InstructionDef(
-        "v_mfma_f32_16x16x16_f16",
+        AMDGPUOpcode.assume("v_mfma_f32_16x16x16_f16"),
         decoder(form(4)((operands, mods) =>
           Instruction.VMfmaF3216x16x16F16_1(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA3,
-            "cdna3",
-            "VOP3P_MFMA",
-            77,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 128, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          ),
-          Encoding(
-            Family.CDNA4,
-            "cdna4",
-            "VOP3P_MFMA",
-            77,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 128, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2029
       )
   case object VMfmaF3216x16x16bf161k extends InstructionDef(
-        "v_mfma_f32_16x16x16bf16_1k",
+        AMDGPUOpcode.assume("v_mfma_f32_16x16x16bf16_1k"),
         decoder(form(4)((operands, mods) =>
           Instruction.VMfmaF3216x16x16bf161k(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA2,
-            "cdna2",
-            "VOP3P_MFMA",
-            103,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 128, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2030
       )
   case object VMfmaF3216x16x16f16_2 extends InstructionDef(
-        "v_mfma_f32_16x16x16f16",
+        AMDGPUOpcode.assume("v_mfma_f32_16x16x16f16"),
         decoder(form(4)((operands, mods) =>
           Instruction.VMfmaF3216x16x16f16_2(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA1,
-            "cdna1",
-            "VOP3P_MFMA",
-            77,
-            Col(
-              OperandInfo(Some("VDST"), "ACCVGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_ACCVGPR_OR_CONST", 128, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          ),
-          Encoding(
-            Family.CDNA2,
-            "cdna2",
-            "VOP3P_MFMA",
-            77,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 128, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2031
       )
   case object VMfmaF3216x16x14bF32 extends InstructionDef(
-        "v_mfma_f32_16x16x1_4b_f32",
+        AMDGPUOpcode.assume("v_mfma_f32_16x16x1_4b_f32"),
         decoder(form(4)((operands, mods) =>
           Instruction.VMfmaF3216x16x14bF32(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA3,
-            "cdna3",
-            "VOP3P_MFMA",
-            65,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 512, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 512, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          ),
-          Encoding(
-            Family.CDNA4,
-            "cdna4",
-            "VOP3P_MFMA",
-            65,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 512, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 512, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2032
       )
   case object VMfmaF3216x16x1f32 extends InstructionDef(
-        "v_mfma_f32_16x16x1f32",
+        AMDGPUOpcode.assume("v_mfma_f32_16x16x1f32"),
         decoder(form(4)((operands, mods) =>
           Instruction.VMfmaF3216x16x1f32(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA1,
-            "cdna1",
-            "VOP3P_MFMA",
-            65,
-            Col(
-              OperandInfo(Some("VDST"), "ACCVGPR", 512, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_ACCVGPR_OR_CONST", 512, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          ),
-          Encoding(
-            Family.CDNA2,
-            "cdna2",
-            "VOP3P_MFMA",
-            65,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 512, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 512, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2033
       )
   case object VMfmaF3216x16x2bf16 extends InstructionDef(
-        "v_mfma_f32_16x16x2bf16",
+        AMDGPUOpcode.assume("v_mfma_f32_16x16x2bf16"),
         decoder(form(4)((operands, mods) =>
           Instruction.VMfmaF3216x16x2bf16(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA1,
-            "cdna1",
-            "VOP3P_MFMA",
-            105,
-            Col(
-              OperandInfo(Some("VDST"), "ACCVGPR", 512, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_ACCVGPR_OR_CONST", 512, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          ),
-          Encoding(
-            Family.CDNA2,
-            "cdna2",
-            "VOP3P_MFMA",
-            105,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 512, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 512, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2034
       )
   case object VMfmaF3216x16x32Bf16 extends InstructionDef(
-        "v_mfma_f32_16x16x32_bf16",
+        AMDGPUOpcode.assume("v_mfma_f32_16x16x32_bf16"),
         decoder(form(4)((operands, mods) =>
           Instruction.VMfmaF3216x16x32Bf16(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA4,
-            "cdna4",
-            "VOP3P_MFMA",
-            53,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 128, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2035
       )
   case object VMfmaF3216x16x32Bf8Bf8 extends InstructionDef(
-        "v_mfma_f32_16x16x32_bf8_bf8",
+        AMDGPUOpcode.assume("v_mfma_f32_16x16x32_bf8_bf8"),
         decoder(form(4)((operands, mods) =>
           Instruction.VMfmaF3216x16x32Bf8Bf8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA3,
-            "cdna3",
-            "VOP3P_MFMA",
-            112,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 128, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          ),
-          Encoding(
-            Family.CDNA4,
-            "cdna4",
-            "VOP3P_MFMA",
-            112,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 128, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2036
       )
   case object VMfmaF3216x16x32Bf8Fp8 extends InstructionDef(
-        "v_mfma_f32_16x16x32_bf8_fp8",
+        AMDGPUOpcode.assume("v_mfma_f32_16x16x32_bf8_fp8"),
         decoder(form(4)((operands, mods) =>
           Instruction.VMfmaF3216x16x32Bf8Fp8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA3,
-            "cdna3",
-            "VOP3P_MFMA",
-            113,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 128, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          ),
-          Encoding(
-            Family.CDNA4,
-            "cdna4",
-            "VOP3P_MFMA",
-            113,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 128, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2037
       )
   case object VMfmaF3216x16x32F16 extends InstructionDef(
-        "v_mfma_f32_16x16x32_f16",
+        AMDGPUOpcode.assume("v_mfma_f32_16x16x32_f16"),
         decoder(form(4)((operands, mods) =>
           Instruction.VMfmaF3216x16x32F16(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA4,
-            "cdna4",
-            "VOP3P_MFMA",
-            84,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 128, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2038
       )
   case object VMfmaF3216x16x32Fp8Bf8 extends InstructionDef(
-        "v_mfma_f32_16x16x32_fp8_bf8",
+        AMDGPUOpcode.assume("v_mfma_f32_16x16x32_fp8_bf8"),
         decoder(form(4)((operands, mods) =>
           Instruction.VMfmaF3216x16x32Fp8Bf8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA3,
-            "cdna3",
-            "VOP3P_MFMA",
-            114,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 128, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          ),
-          Encoding(
-            Family.CDNA4,
-            "cdna4",
-            "VOP3P_MFMA",
-            114,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 128, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2039
       )
   case object VMfmaF3216x16x32Fp8Fp8 extends InstructionDef(
-        "v_mfma_f32_16x16x32_fp8_fp8",
+        AMDGPUOpcode.assume("v_mfma_f32_16x16x32_fp8_fp8"),
         decoder(form(4)((operands, mods) =>
           Instruction.VMfmaF3216x16x32Fp8Fp8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA3,
-            "cdna3",
-            "VOP3P_MFMA",
-            115,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 128, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          ),
-          Encoding(
-            Family.CDNA4,
-            "cdna4",
-            "VOP3P_MFMA",
-            115,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 128, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2040
       )
   case object VMfmaF3216x16x44bBf16 extends InstructionDef(
-        "v_mfma_f32_16x16x4_4b_bf16",
+        AMDGPUOpcode.assume("v_mfma_f32_16x16x4_4b_bf16"),
         decoder(form(4)((operands, mods) =>
           Instruction.VMfmaF3216x16x44bBf16(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA3,
-            "cdna3",
-            "VOP3P_MFMA",
-            94,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 512, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 512, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          ),
-          Encoding(
-            Family.CDNA4,
-            "cdna4",
-            "VOP3P_MFMA",
-            94,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 512, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 512, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2041
       )
   case object VMfmaF3216x16x44bF16 extends InstructionDef(
-        "v_mfma_f32_16x16x4_4b_f16",
+        AMDGPUOpcode.assume("v_mfma_f32_16x16x4_4b_f16"),
         decoder(form(4)((operands, mods) =>
           Instruction.VMfmaF3216x16x44bF16(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA3,
-            "cdna3",
-            "VOP3P_MFMA",
-            73,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 512, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 512, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          ),
-          Encoding(
-            Family.CDNA4,
-            "cdna4",
-            "VOP3P_MFMA",
-            73,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 512, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 512, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2042
       )
   case object VMfmaF3216x16x4F32_1 extends InstructionDef(
-        "v_mfma_f32_16x16x4_f32",
+        AMDGPUOpcode.assume("v_mfma_f32_16x16x4_f32"),
         decoder(form(4)((operands, mods) =>
           Instruction.VMfmaF3216x16x4F32_1(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA3,
-            "cdna3",
-            "VOP3P_MFMA",
-            69,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 128, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          ),
-          Encoding(
-            Family.CDNA4,
-            "cdna4",
-            "VOP3P_MFMA",
-            69,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 128, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2043
       )
   case object VMfmaF3216x16x4bf161k extends InstructionDef(
-        "v_mfma_f32_16x16x4bf16_1k",
+        AMDGPUOpcode.assume("v_mfma_f32_16x16x4bf16_1k"),
         decoder(form(4)((operands, mods) =>
           Instruction.VMfmaF3216x16x4bf161k(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA2,
-            "cdna2",
-            "VOP3P_MFMA",
-            100,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 512, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 512, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2044
       )
   case object VMfmaF3216x16x4f16 extends InstructionDef(
-        "v_mfma_f32_16x16x4f16",
+        AMDGPUOpcode.assume("v_mfma_f32_16x16x4f16"),
         decoder(form(4)((operands, mods) =>
           Instruction.VMfmaF3216x16x4f16(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA1,
-            "cdna1",
-            "VOP3P_MFMA",
-            73,
-            Col(
-              OperandInfo(Some("VDST"), "ACCVGPR", 512, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_ACCVGPR_OR_CONST", 512, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          ),
-          Encoding(
-            Family.CDNA2,
-            "cdna2",
-            "VOP3P_MFMA",
-            73,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 512, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 512, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2045
       )
   case object VMfmaF3216x16x4f32_2 extends InstructionDef(
-        "v_mfma_f32_16x16x4f32",
+        AMDGPUOpcode.assume("v_mfma_f32_16x16x4f32"),
         decoder(form(4)((operands, mods) =>
           Instruction.VMfmaF3216x16x4f32_2(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA1,
-            "cdna1",
-            "VOP3P_MFMA",
-            69,
-            Col(
-              OperandInfo(Some("VDST"), "ACCVGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_ACCVGPR_OR_CONST", 128, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          ),
-          Encoding(
-            Family.CDNA2,
-            "cdna2",
-            "VOP3P_MFMA",
-            69,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 128, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2046
       )
   case object VMfmaF3216x16x8Xf32 extends InstructionDef(
-        "v_mfma_f32_16x16x8_xf32",
+        AMDGPUOpcode.assume("v_mfma_f32_16x16x8_xf32"),
         decoder(form(4)((operands, mods) =>
           Instruction.VMfmaF3216x16x8Xf32(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA3,
-            "cdna3",
-            "VOP3P_MFMA",
-            62,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 128, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2047
       )
   case object VMfmaF3216x16x8bf16 extends InstructionDef(
-        "v_mfma_f32_16x16x8bf16",
+        AMDGPUOpcode.assume("v_mfma_f32_16x16x8bf16"),
         decoder(form(4)((operands, mods) =>
           Instruction.VMfmaF3216x16x8bf16(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA1,
-            "cdna1",
-            "VOP3P_MFMA",
-            109,
-            Col(
-              OperandInfo(Some("VDST"), "ACCVGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_ACCVGPR_OR_CONST", 128, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          ),
-          Encoding(
-            Family.CDNA2,
-            "cdna2",
-            "VOP3P_MFMA",
-            109,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 128, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2048
       )
   case object VMfmaF3232x32x16Bf16 extends InstructionDef(
-        "v_mfma_f32_32x32x16_bf16",
+        AMDGPUOpcode.assume("v_mfma_f32_32x32x16_bf16"),
         decoder(form(4)((operands, mods) =>
           Instruction.VMfmaF3232x32x16Bf16(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA4,
-            "cdna4",
-            "VOP3P_MFMA",
-            55,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 512, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 512, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2049
       )
   case object VMfmaF3232x32x16Bf8Bf8 extends InstructionDef(
-        "v_mfma_f32_32x32x16_bf8_bf8",
+        AMDGPUOpcode.assume("v_mfma_f32_32x32x16_bf8_bf8"),
         decoder(form(4)((operands, mods) =>
           Instruction.VMfmaF3232x32x16Bf8Bf8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA3,
-            "cdna3",
-            "VOP3P_MFMA",
-            116,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 512, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 512, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          ),
-          Encoding(
-            Family.CDNA4,
-            "cdna4",
-            "VOP3P_MFMA",
-            116,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 512, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 512, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2050
       )
   case object VMfmaF3232x32x16Bf8Fp8 extends InstructionDef(
-        "v_mfma_f32_32x32x16_bf8_fp8",
+        AMDGPUOpcode.assume("v_mfma_f32_32x32x16_bf8_fp8"),
         decoder(form(4)((operands, mods) =>
           Instruction.VMfmaF3232x32x16Bf8Fp8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA3,
-            "cdna3",
-            "VOP3P_MFMA",
-            117,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 512, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 512, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          ),
-          Encoding(
-            Family.CDNA4,
-            "cdna4",
-            "VOP3P_MFMA",
-            117,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 512, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 512, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2051
       )
   case object VMfmaF3232x32x16F16 extends InstructionDef(
-        "v_mfma_f32_32x32x16_f16",
+        AMDGPUOpcode.assume("v_mfma_f32_32x32x16_f16"),
         decoder(form(4)((operands, mods) =>
           Instruction.VMfmaF3232x32x16F16(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA4,
-            "cdna4",
-            "VOP3P_MFMA",
-            85,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 512, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 512, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2052
       )
   case object VMfmaF3232x32x16Fp8Bf8 extends InstructionDef(
-        "v_mfma_f32_32x32x16_fp8_bf8",
+        AMDGPUOpcode.assume("v_mfma_f32_32x32x16_fp8_bf8"),
         decoder(form(4)((operands, mods) =>
           Instruction.VMfmaF3232x32x16Fp8Bf8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA3,
-            "cdna3",
-            "VOP3P_MFMA",
-            118,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 512, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 512, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          ),
-          Encoding(
-            Family.CDNA4,
-            "cdna4",
-            "VOP3P_MFMA",
-            118,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 512, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 512, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2053
       )
   case object VMfmaF3232x32x16Fp8Fp8 extends InstructionDef(
-        "v_mfma_f32_32x32x16_fp8_fp8",
+        AMDGPUOpcode.assume("v_mfma_f32_32x32x16_fp8_fp8"),
         decoder(form(4)((operands, mods) =>
           Instruction.VMfmaF3232x32x16Fp8Fp8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA3,
-            "cdna3",
-            "VOP3P_MFMA",
-            119,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 512, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 512, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          ),
-          Encoding(
-            Family.CDNA4,
-            "cdna4",
-            "VOP3P_MFMA",
-            119,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 512, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 512, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2054
       )
   case object VMfmaF3232x32x12bF32 extends InstructionDef(
-        "v_mfma_f32_32x32x1_2b_f32",
+        AMDGPUOpcode.assume("v_mfma_f32_32x32x1_2b_f32"),
         decoder(form(4)((operands, mods) =>
           Instruction.VMfmaF3232x32x12bF32(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA3,
-            "cdna3",
-            "VOP3P_MFMA",
-            64,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 1024, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 1024, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          ),
-          Encoding(
-            Family.CDNA4,
-            "cdna4",
-            "VOP3P_MFMA",
-            64,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 1024, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 1024, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2055
       )
   case object VMfmaF3232x32x1f32 extends InstructionDef(
-        "v_mfma_f32_32x32x1f32",
+        AMDGPUOpcode.assume("v_mfma_f32_32x32x1f32"),
         decoder(form(4)((operands, mods) =>
           Instruction.VMfmaF3232x32x1f32(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA1,
-            "cdna1",
-            "VOP3P_MFMA",
-            64,
-            Col(
-              OperandInfo(Some("VDST"), "ACCVGPR", 1024, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_ACCVGPR_OR_CONST", 1024, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          ),
-          Encoding(
-            Family.CDNA2,
-            "cdna2",
-            "VOP3P_MFMA",
-            64,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 1024, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 1024, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2056
       )
   case object VMfmaF3232x32x2F32_1 extends InstructionDef(
-        "v_mfma_f32_32x32x2_f32",
+        AMDGPUOpcode.assume("v_mfma_f32_32x32x2_f32"),
         decoder(form(4)((operands, mods) =>
           Instruction.VMfmaF3232x32x2F32_1(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA3,
-            "cdna3",
-            "VOP3P_MFMA",
-            68,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 512, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 512, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          ),
-          Encoding(
-            Family.CDNA4,
-            "cdna4",
-            "VOP3P_MFMA",
-            68,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 512, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 512, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2057
       )
   case object VMfmaF3232x32x2bf16 extends InstructionDef(
-        "v_mfma_f32_32x32x2bf16",
+        AMDGPUOpcode.assume("v_mfma_f32_32x32x2bf16"),
         decoder(form(4)((operands, mods) =>
           Instruction.VMfmaF3232x32x2bf16(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA1,
-            "cdna1",
-            "VOP3P_MFMA",
-            104,
-            Col(
-              OperandInfo(Some("VDST"), "ACCVGPR", 1024, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_ACCVGPR_OR_CONST", 1024, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          ),
-          Encoding(
-            Family.CDNA2,
-            "cdna2",
-            "VOP3P_MFMA",
-            104,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 1024, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 1024, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2058
       )
   case object VMfmaF3232x32x2f32_2 extends InstructionDef(
-        "v_mfma_f32_32x32x2f32",
+        AMDGPUOpcode.assume("v_mfma_f32_32x32x2f32"),
         decoder(form(4)((operands, mods) =>
           Instruction.VMfmaF3232x32x2f32_2(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA1,
-            "cdna1",
-            "VOP3P_MFMA",
-            68,
-            Col(
-              OperandInfo(Some("VDST"), "ACCVGPR", 512, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_ACCVGPR_OR_CONST", 512, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          ),
-          Encoding(
-            Family.CDNA2,
-            "cdna2",
-            "VOP3P_MFMA",
-            68,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 512, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 512, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2059
       )
   case object VMfmaF3232x32x42bBf16 extends InstructionDef(
-        "v_mfma_f32_32x32x4_2b_bf16",
+        AMDGPUOpcode.assume("v_mfma_f32_32x32x4_2b_bf16"),
         decoder(form(4)((operands, mods) =>
           Instruction.VMfmaF3232x32x42bBf16(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA3,
-            "cdna3",
-            "VOP3P_MFMA",
-            93,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 1024, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 1024, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          ),
-          Encoding(
-            Family.CDNA4,
-            "cdna4",
-            "VOP3P_MFMA",
-            93,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 1024, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 1024, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2060
       )
   case object VMfmaF3232x32x42bF16 extends InstructionDef(
-        "v_mfma_f32_32x32x4_2b_f16",
+        AMDGPUOpcode.assume("v_mfma_f32_32x32x4_2b_f16"),
         decoder(form(4)((operands, mods) =>
           Instruction.VMfmaF3232x32x42bF16(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA3,
-            "cdna3",
-            "VOP3P_MFMA",
-            72,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 1024, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 1024, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          ),
-          Encoding(
-            Family.CDNA4,
-            "cdna4",
-            "VOP3P_MFMA",
-            72,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 1024, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 1024, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2061
       )
   case object VMfmaF3232x32x4Xf32 extends InstructionDef(
-        "v_mfma_f32_32x32x4_xf32",
+        AMDGPUOpcode.assume("v_mfma_f32_32x32x4_xf32"),
         decoder(form(4)((operands, mods) =>
           Instruction.VMfmaF3232x32x4Xf32(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA3,
-            "cdna3",
-            "VOP3P_MFMA",
-            63,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 512, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 512, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2062
       )
   case object VMfmaF3232x32x4bf16 extends InstructionDef(
-        "v_mfma_f32_32x32x4bf16",
+        AMDGPUOpcode.assume("v_mfma_f32_32x32x4bf16"),
         decoder(form(4)((operands, mods) =>
           Instruction.VMfmaF3232x32x4bf16(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA1,
-            "cdna1",
-            "VOP3P_MFMA",
-            108,
-            Col(
-              OperandInfo(Some("VDST"), "ACCVGPR", 512, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_ACCVGPR_OR_CONST", 512, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          ),
-          Encoding(
-            Family.CDNA2,
-            "cdna2",
-            "VOP3P_MFMA",
-            108,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 512, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 512, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2063
       )
   case object VMfmaF3232x32x4bf161k extends InstructionDef(
-        "v_mfma_f32_32x32x4bf16_1k",
+        AMDGPUOpcode.assume("v_mfma_f32_32x32x4bf16_1k"),
         decoder(form(4)((operands, mods) =>
           Instruction.VMfmaF3232x32x4bf161k(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA2,
-            "cdna2",
-            "VOP3P_MFMA",
-            99,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 1024, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 1024, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2064
       )
   case object VMfmaF3232x32x4f16 extends InstructionDef(
-        "v_mfma_f32_32x32x4f16",
+        AMDGPUOpcode.assume("v_mfma_f32_32x32x4f16"),
         decoder(form(4)((operands, mods) =>
           Instruction.VMfmaF3232x32x4f16(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA1,
-            "cdna1",
-            "VOP3P_MFMA",
-            72,
-            Col(
-              OperandInfo(Some("VDST"), "ACCVGPR", 1024, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_ACCVGPR_OR_CONST", 1024, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          ),
-          Encoding(
-            Family.CDNA2,
-            "cdna2",
-            "VOP3P_MFMA",
-            72,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 1024, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 1024, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2065
       )
   case object VMfmaF3232x32x64F8f6f4 extends InstructionDef(
-        "v_mfma_f32_32x32x64_f8f6f4",
+        AMDGPUOpcode.assume("v_mfma_f32_32x32x64_f8f6f4"),
         decoder(form(4)((operands, mods) =>
           Instruction.VMfmaF3232x32x64F8f6f4(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA4,
-            "cdna4",
-            "VOP3P_MFMA",
-            46,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 512, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 256, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 256, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 512, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2066
       )
   case object VMfmaF3232x32x8Bf16 extends InstructionDef(
-        "v_mfma_f32_32x32x8_bf16",
+        AMDGPUOpcode.assume("v_mfma_f32_32x32x8_bf16"),
         decoder(form(4)((operands, mods) =>
           Instruction.VMfmaF3232x32x8Bf16(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA3,
-            "cdna3",
-            "VOP3P_MFMA",
-            96,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 512, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 512, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          ),
-          Encoding(
-            Family.CDNA4,
-            "cdna4",
-            "VOP3P_MFMA",
-            96,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 512, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 512, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2067
       )
   case object VMfmaF3232x32x8F16_1 extends InstructionDef(
-        "v_mfma_f32_32x32x8_f16",
+        AMDGPUOpcode.assume("v_mfma_f32_32x32x8_f16"),
         decoder(form(4)((operands, mods) =>
           Instruction.VMfmaF3232x32x8F16_1(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA3,
-            "cdna3",
-            "VOP3P_MFMA",
-            76,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 512, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 512, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          ),
-          Encoding(
-            Family.CDNA4,
-            "cdna4",
-            "VOP3P_MFMA",
-            76,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 512, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 512, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2068
       )
   case object VMfmaF3232x32x8bf161k extends InstructionDef(
-        "v_mfma_f32_32x32x8bf16_1k",
+        AMDGPUOpcode.assume("v_mfma_f32_32x32x8bf16_1k"),
         decoder(form(4)((operands, mods) =>
           Instruction.VMfmaF3232x32x8bf161k(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA2,
-            "cdna2",
-            "VOP3P_MFMA",
-            102,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 512, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 512, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2069
       )
   case object VMfmaF3232x32x8f16_2 extends InstructionDef(
-        "v_mfma_f32_32x32x8f16",
+        AMDGPUOpcode.assume("v_mfma_f32_32x32x8f16"),
         decoder(form(4)((operands, mods) =>
           Instruction.VMfmaF3232x32x8f16_2(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA1,
-            "cdna1",
-            "VOP3P_MFMA",
-            76,
-            Col(
-              OperandInfo(Some("VDST"), "ACCVGPR", 512, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_ACCVGPR_OR_CONST", 512, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          ),
-          Encoding(
-            Family.CDNA2,
-            "cdna2",
-            "VOP3P_MFMA",
-            76,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 512, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 512, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2070
       )
   case object VMfmaF324x4x116bF32 extends InstructionDef(
-        "v_mfma_f32_4x4x1_16b_f32",
+        AMDGPUOpcode.assume("v_mfma_f32_4x4x1_16b_f32"),
         decoder(form(4)((operands, mods) =>
           Instruction.VMfmaF324x4x116bF32(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA3,
-            "cdna3",
-            "VOP3P_MFMA",
-            66,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 128, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          ),
-          Encoding(
-            Family.CDNA4,
-            "cdna4",
-            "VOP3P_MFMA",
-            66,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 128, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2071
       )
   case object VMfmaF324x4x1f32 extends InstructionDef(
-        "v_mfma_f32_4x4x1f32",
+        AMDGPUOpcode.assume("v_mfma_f32_4x4x1f32"),
         decoder(form(4)((operands, mods) =>
           Instruction.VMfmaF324x4x1f32(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA1,
-            "cdna1",
-            "VOP3P_MFMA",
-            66,
-            Col(
-              OperandInfo(Some("VDST"), "ACCVGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_ACCVGPR_OR_CONST", 128, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          ),
-          Encoding(
-            Family.CDNA2,
-            "cdna2",
-            "VOP3P_MFMA",
-            66,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 128, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2072
       )
   case object VMfmaF324x4x2bf16 extends InstructionDef(
-        "v_mfma_f32_4x4x2bf16",
+        AMDGPUOpcode.assume("v_mfma_f32_4x4x2bf16"),
         decoder(form(4)((operands, mods) =>
           Instruction.VMfmaF324x4x2bf16(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA1,
-            "cdna1",
-            "VOP3P_MFMA",
-            107,
-            Col(
-              OperandInfo(Some("VDST"), "ACCVGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_ACCVGPR_OR_CONST", 128, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          ),
-          Encoding(
-            Family.CDNA2,
-            "cdna2",
-            "VOP3P_MFMA",
-            107,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 128, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2073
       )
   case object VMfmaF324x4x416bBf16 extends InstructionDef(
-        "v_mfma_f32_4x4x4_16b_bf16",
+        AMDGPUOpcode.assume("v_mfma_f32_4x4x4_16b_bf16"),
         decoder(form(4)((operands, mods) =>
           Instruction.VMfmaF324x4x416bBf16(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA3,
-            "cdna3",
-            "VOP3P_MFMA",
-            95,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 128, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          ),
-          Encoding(
-            Family.CDNA4,
-            "cdna4",
-            "VOP3P_MFMA",
-            95,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 128, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2074
       )
   case object VMfmaF324x4x416bF16 extends InstructionDef(
-        "v_mfma_f32_4x4x4_16b_f16",
+        AMDGPUOpcode.assume("v_mfma_f32_4x4x4_16b_f16"),
         decoder(form(4)((operands, mods) =>
           Instruction.VMfmaF324x4x416bF16(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA3,
-            "cdna3",
-            "VOP3P_MFMA",
-            74,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 128, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          ),
-          Encoding(
-            Family.CDNA4,
-            "cdna4",
-            "VOP3P_MFMA",
-            74,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 128, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2075
       )
   case object VMfmaF324x4x4bf161k extends InstructionDef(
-        "v_mfma_f32_4x4x4bf16_1k",
+        AMDGPUOpcode.assume("v_mfma_f32_4x4x4bf16_1k"),
         decoder(form(4)((operands, mods) =>
           Instruction.VMfmaF324x4x4bf161k(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA2,
-            "cdna2",
-            "VOP3P_MFMA",
-            101,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 128, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2076
       )
   case object VMfmaF324x4x4f16 extends InstructionDef(
-        "v_mfma_f32_4x4x4f16",
+        AMDGPUOpcode.assume("v_mfma_f32_4x4x4f16"),
         decoder(form(4)((operands, mods) =>
           Instruction.VMfmaF324x4x4f16(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA1,
-            "cdna1",
-            "VOP3P_MFMA",
-            74,
-            Col(
-              OperandInfo(Some("VDST"), "ACCVGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_ACCVGPR_OR_CONST", 128, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          ),
-          Encoding(
-            Family.CDNA2,
-            "cdna2",
-            "VOP3P_MFMA",
-            74,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 128, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2077
       )
   case object VMfmaF6416x16x4F64_1 extends InstructionDef(
-        "v_mfma_f64_16x16x4_f64",
+        AMDGPUOpcode.assume("v_mfma_f64_16x16x4_f64"),
         decoder(form(4)((operands, mods) =>
           Instruction.VMfmaF6416x16x4F64_1(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA3,
-            "cdna3",
-            "VOP3P_MFMA",
-            110,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 256, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 256, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          ),
-          Encoding(
-            Family.CDNA4,
-            "cdna4",
-            "VOP3P_MFMA",
-            110,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 256, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 256, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2078
       )
   case object VMfmaF6416x16x4f64_2 extends InstructionDef(
-        "v_mfma_f64_16x16x4f64",
+        AMDGPUOpcode.assume("v_mfma_f64_16x16x4f64"),
         decoder(form(4)((operands, mods) =>
           Instruction.VMfmaF6416x16x4f64_2(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA2,
-            "cdna2",
-            "VOP3P_MFMA",
-            110,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 256, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 256, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2079
       )
   case object VMfmaF644x4x44bF64 extends InstructionDef(
-        "v_mfma_f64_4x4x4_4b_f64",
+        AMDGPUOpcode.assume("v_mfma_f64_4x4x4_4b_f64"),
         decoder(form(4)((operands, mods) =>
           Instruction.VMfmaF644x4x44bF64(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA3,
-            "cdna3",
-            "VOP3P_MFMA",
-            111,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 64, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 64, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          ),
-          Encoding(
-            Family.CDNA4,
-            "cdna4",
-            "VOP3P_MFMA",
-            111,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 64, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 64, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2080
       )
   case object VMfmaF644x4x4f64 extends InstructionDef(
-        "v_mfma_f64_4x4x4f64",
+        AMDGPUOpcode.assume("v_mfma_f64_4x4x4f64"),
         decoder(form(4)((operands, mods) =>
           Instruction.VMfmaF644x4x4f64(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA2,
-            "cdna2",
-            "VOP3P_MFMA",
-            111,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 64, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 64, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2081
       )
   case object VMfmaI3216x16x16i8 extends InstructionDef(
-        "v_mfma_i32_16x16x16i8",
+        AMDGPUOpcode.assume("v_mfma_i32_16x16x16i8"),
         decoder(form(4)((operands, mods) =>
           Instruction.VMfmaI3216x16x16i8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA1,
-            "cdna1",
-            "VOP3P_MFMA",
-            85,
-            Col(
-              OperandInfo(Some("VDST"), "ACCVGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_ACCVGPR_OR_CONST", 128, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          ),
-          Encoding(
-            Family.CDNA2,
-            "cdna2",
-            "VOP3P_MFMA",
-            85,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 128, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2082
       )
   case object VMfmaI3216x16x32I8 extends InstructionDef(
-        "v_mfma_i32_16x16x32_i8",
+        AMDGPUOpcode.assume("v_mfma_i32_16x16x32_i8"),
         decoder(form(4)((operands, mods) =>
           Instruction.VMfmaI3216x16x32I8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA3,
-            "cdna3",
-            "VOP3P_MFMA",
-            87,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 128, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          ),
-          Encoding(
-            Family.CDNA4,
-            "cdna4",
-            "VOP3P_MFMA",
-            87,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 128, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2083
       )
   case object VMfmaI3216x16x44bI8 extends InstructionDef(
-        "v_mfma_i32_16x16x4_4b_i8",
+        AMDGPUOpcode.assume("v_mfma_i32_16x16x4_4b_i8"),
         decoder(form(4)((operands, mods) =>
           Instruction.VMfmaI3216x16x44bI8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA3,
-            "cdna3",
-            "VOP3P_MFMA",
-            81,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 512, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 512, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          ),
-          Encoding(
-            Family.CDNA4,
-            "cdna4",
-            "VOP3P_MFMA",
-            81,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 512, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 512, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2084
       )
   case object VMfmaI3216x16x4i8 extends InstructionDef(
-        "v_mfma_i32_16x16x4i8",
+        AMDGPUOpcode.assume("v_mfma_i32_16x16x4i8"),
         decoder(form(4)((operands, mods) =>
           Instruction.VMfmaI3216x16x4i8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA1,
-            "cdna1",
-            "VOP3P_MFMA",
-            81,
-            Col(
-              OperandInfo(Some("VDST"), "ACCVGPR", 512, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_ACCVGPR_OR_CONST", 512, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          ),
-          Encoding(
-            Family.CDNA2,
-            "cdna2",
-            "VOP3P_MFMA",
-            81,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 512, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 512, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2085
       )
   case object VMfmaI3216x16x64I8 extends InstructionDef(
-        "v_mfma_i32_16x16x64_i8",
+        AMDGPUOpcode.assume("v_mfma_i32_16x16x64_i8"),
         decoder(form(4)((operands, mods) =>
           Instruction.VMfmaI3216x16x64I8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA4,
-            "cdna4",
-            "VOP3P_MFMA",
-            54,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 128, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2086
       )
   case object VMfmaI3232x32x16I8 extends InstructionDef(
-        "v_mfma_i32_32x32x16_i8",
+        AMDGPUOpcode.assume("v_mfma_i32_32x32x16_i8"),
         decoder(form(4)((operands, mods) =>
           Instruction.VMfmaI3232x32x16I8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA3,
-            "cdna3",
-            "VOP3P_MFMA",
-            86,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 512, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 512, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          ),
-          Encoding(
-            Family.CDNA4,
-            "cdna4",
-            "VOP3P_MFMA",
-            86,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 512, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 512, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2087
       )
   case object VMfmaI3232x32x32I8 extends InstructionDef(
-        "v_mfma_i32_32x32x32_i8",
+        AMDGPUOpcode.assume("v_mfma_i32_32x32x32_i8"),
         decoder(form(4)((operands, mods) =>
           Instruction.VMfmaI3232x32x32I8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA4,
-            "cdna4",
-            "VOP3P_MFMA",
-            56,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 512, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 512, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2088
       )
   case object VMfmaI3232x32x42bI8 extends InstructionDef(
-        "v_mfma_i32_32x32x4_2b_i8",
+        AMDGPUOpcode.assume("v_mfma_i32_32x32x4_2b_i8"),
         decoder(form(4)((operands, mods) =>
           Instruction.VMfmaI3232x32x42bI8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA3,
-            "cdna3",
-            "VOP3P_MFMA",
-            80,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 1024, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 1024, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          ),
-          Encoding(
-            Family.CDNA4,
-            "cdna4",
-            "VOP3P_MFMA",
-            80,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 1024, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 1024, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2089
       )
   case object VMfmaI3232x32x4i8 extends InstructionDef(
-        "v_mfma_i32_32x32x4i8",
+        AMDGPUOpcode.assume("v_mfma_i32_32x32x4i8"),
         decoder(form(4)((operands, mods) =>
           Instruction.VMfmaI3232x32x4i8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA1,
-            "cdna1",
-            "VOP3P_MFMA",
-            80,
-            Col(
-              OperandInfo(Some("VDST"), "ACCVGPR", 1024, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_ACCVGPR_OR_CONST", 1024, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          ),
-          Encoding(
-            Family.CDNA2,
-            "cdna2",
-            "VOP3P_MFMA",
-            80,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 1024, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 1024, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2090
       )
   case object VMfmaI3232x32x8i8 extends InstructionDef(
-        "v_mfma_i32_32x32x8i8",
+        AMDGPUOpcode.assume("v_mfma_i32_32x32x8i8"),
         decoder(form(4)((operands, mods) =>
           Instruction.VMfmaI3232x32x8i8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA1,
-            "cdna1",
-            "VOP3P_MFMA",
-            84,
-            Col(
-              OperandInfo(Some("VDST"), "ACCVGPR", 512, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_ACCVGPR_OR_CONST", 512, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          ),
-          Encoding(
-            Family.CDNA2,
-            "cdna2",
-            "VOP3P_MFMA",
-            84,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 512, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 512, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2091
       )
   case object VMfmaI324x4x416bI8 extends InstructionDef(
-        "v_mfma_i32_4x4x4_16b_i8",
+        AMDGPUOpcode.assume("v_mfma_i32_4x4x4_16b_i8"),
         decoder(form(4)((operands, mods) =>
           Instruction.VMfmaI324x4x416bI8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA3,
-            "cdna3",
-            "VOP3P_MFMA",
-            82,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 128, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          ),
-          Encoding(
-            Family.CDNA4,
-            "cdna4",
-            "VOP3P_MFMA",
-            82,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 128, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2092
       )
   case object VMfmaI324x4x4i8 extends InstructionDef(
-        "v_mfma_i32_4x4x4i8",
+        AMDGPUOpcode.assume("v_mfma_i32_4x4x4i8"),
         decoder(form(4)((operands, mods) =>
           Instruction.VMfmaI324x4x4i8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA1,
-            "cdna1",
-            "VOP3P_MFMA",
-            82,
-            Col(
-              OperandInfo(Some("VDST"), "ACCVGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_ACCVGPR_OR_CONST", 128, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          ),
-          Encoding(
-            Family.CDNA2,
-            "cdna2",
-            "VOP3P_MFMA",
-            82,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 32, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 128, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2093
       )
   case object VMfmaScaleF3216x16x128F8f6f4 extends InstructionDef(
-        "v_mfma_scale_f32_16x16x128_f8f6f4",
+        AMDGPUOpcode.assume("v_mfma_scale_f32_16x16x128_f8f6f4"),
         decoder(form(6)((operands, mods) =>
           Instruction.VMfmaScaleF3216x16x128F8f6f4(
             operands(0),
@@ -2252,27 +506,10 @@ private[amdgpu] object MatrixInstructionDefs {
             mods
           )
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA4,
-            "cdna4",
-            "VOP3PX2",
-            45,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 256, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 256, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 128, true, false, false),
-              OperandInfo(Some("SCALE_SRC0"), "SRC_SIMPLE", 32, true, false, false),
-              OperandInfo(Some("SCALE_SRC1"), "SRC_SIMPLE", 32, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2094
       )
   case object VMfmaScaleF3232x32x64F8f6f4 extends InstructionDef(
-        "v_mfma_scale_f32_32x32x64_f8f6f4",
+        AMDGPUOpcode.assume("v_mfma_scale_f32_32x32x64_f8f6f4"),
         decoder(form(6)((operands, mods) =>
           Instruction.VMfmaScaleF3232x32x64F8f6f4(
             operands(0),
@@ -2284,2349 +521,633 @@ private[amdgpu] object MatrixInstructionDefs {
             mods
           )
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA4,
-            "cdna4",
-            "VOP3PX2",
-            46,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 512, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 256, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 256, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_ACCVGPR_OR_CONST", 512, true, false, false),
-              OperandInfo(Some("SCALE_SRC0"), "SRC_SIMPLE", 32, true, false, false),
-              OperandInfo(Some("SCALE_SRC1"), "SRC_SIMPLE", 32, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2095
       )
   case object VSmfmacF3216x16x128Bf8Bf8 extends InstructionDef(
-        "v_smfmac_f32_16x16x128_bf8_bf8",
+        AMDGPUOpcode.assume("v_smfmac_f32_16x16x128_bf8_bf8"),
         decoder(form(4)((operands, mods) =>
           Instruction.VSmfmacF3216x16x128Bf8Bf8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA4,
-            "cdna4",
-            "VOP3P_MFMA",
-            59,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 256, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR", 32, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2271
       )
   case object VSmfmacF3216x16x128Bf8Fp8 extends InstructionDef(
-        "v_smfmac_f32_16x16x128_bf8_fp8",
+        AMDGPUOpcode.assume("v_smfmac_f32_16x16x128_bf8_fp8"),
         decoder(form(4)((operands, mods) =>
           Instruction.VSmfmacF3216x16x128Bf8Fp8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA4,
-            "cdna4",
-            "VOP3P_MFMA",
-            60,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 256, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR", 32, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2272
       )
   case object VSmfmacF3216x16x128Fp8Bf8 extends InstructionDef(
-        "v_smfmac_f32_16x16x128_fp8_bf8",
+        AMDGPUOpcode.assume("v_smfmac_f32_16x16x128_fp8_bf8"),
         decoder(form(4)((operands, mods) =>
           Instruction.VSmfmacF3216x16x128Fp8Bf8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA4,
-            "cdna4",
-            "VOP3P_MFMA",
-            61,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 256, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR", 32, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2273
       )
   case object VSmfmacF3216x16x128Fp8Fp8 extends InstructionDef(
-        "v_smfmac_f32_16x16x128_fp8_fp8",
+        AMDGPUOpcode.assume("v_smfmac_f32_16x16x128_fp8_fp8"),
         decoder(form(4)((operands, mods) =>
           Instruction.VSmfmacF3216x16x128Fp8Fp8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA4,
-            "cdna4",
-            "VOP3P_MFMA",
-            67,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 256, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR", 32, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2274
       )
   case object VSmfmacF3216x16x32Bf16 extends InstructionDef(
-        "v_smfmac_f32_16x16x32_bf16",
+        AMDGPUOpcode.assume("v_smfmac_f32_16x16x32_bf16"),
         decoder(form(4)((operands, mods) =>
           Instruction.VSmfmacF3216x16x32Bf16(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA3,
-            "cdna3",
-            "VOP3P_MFMA",
-            102,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR", 32, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          ),
-          Encoding(
-            Family.CDNA4,
-            "cdna4",
-            "VOP3P_MFMA",
-            102,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR", 32, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2275
       )
   case object VSmfmacF3216x16x32F16 extends InstructionDef(
-        "v_smfmac_f32_16x16x32_f16",
+        AMDGPUOpcode.assume("v_smfmac_f32_16x16x32_f16"),
         decoder(form(4)((operands, mods) =>
           Instruction.VSmfmacF3216x16x32F16(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA3,
-            "cdna3",
-            "VOP3P_MFMA",
-            98,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR", 32, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          ),
-          Encoding(
-            Family.CDNA4,
-            "cdna4",
-            "VOP3P_MFMA",
-            98,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR", 32, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2276
       )
   case object VSmfmacF3216x16x64Bf16 extends InstructionDef(
-        "v_smfmac_f32_16x16x64_bf16",
+        AMDGPUOpcode.assume("v_smfmac_f32_16x16x64_bf16"),
         decoder(form(4)((operands, mods) =>
           Instruction.VSmfmacF3216x16x64Bf16(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA4,
-            "cdna4",
-            "VOP3P_MFMA",
-            57,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 256, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR", 32, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2277
       )
   case object VSmfmacF3216x16x64Bf8Bf8 extends InstructionDef(
-        "v_smfmac_f32_16x16x64_bf8_bf8",
+        AMDGPUOpcode.assume("v_smfmac_f32_16x16x64_bf8_bf8"),
         decoder(form(4)((operands, mods) =>
           Instruction.VSmfmacF3216x16x64Bf8Bf8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA3,
-            "cdna3",
-            "VOP3P_MFMA",
-            120,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR", 32, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          ),
-          Encoding(
-            Family.CDNA4,
-            "cdna4",
-            "VOP3P_MFMA",
-            120,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR", 32, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2278
       )
   case object VSmfmacF3216x16x64Bf8Fp8 extends InstructionDef(
-        "v_smfmac_f32_16x16x64_bf8_fp8",
+        AMDGPUOpcode.assume("v_smfmac_f32_16x16x64_bf8_fp8"),
         decoder(form(4)((operands, mods) =>
           Instruction.VSmfmacF3216x16x64Bf8Fp8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA3,
-            "cdna3",
-            "VOP3P_MFMA",
-            121,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR", 32, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          ),
-          Encoding(
-            Family.CDNA4,
-            "cdna4",
-            "VOP3P_MFMA",
-            121,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR", 32, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2279
       )
   case object VSmfmacF3216x16x64F16 extends InstructionDef(
-        "v_smfmac_f32_16x16x64_f16",
+        AMDGPUOpcode.assume("v_smfmac_f32_16x16x64_f16"),
         decoder(form(4)((operands, mods) =>
           Instruction.VSmfmacF3216x16x64F16(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA4,
-            "cdna4",
-            "VOP3P_MFMA",
-            90,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 256, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR", 32, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2280
       )
   case object VSmfmacF3216x16x64Fp8Bf8 extends InstructionDef(
-        "v_smfmac_f32_16x16x64_fp8_bf8",
+        AMDGPUOpcode.assume("v_smfmac_f32_16x16x64_fp8_bf8"),
         decoder(form(4)((operands, mods) =>
           Instruction.VSmfmacF3216x16x64Fp8Bf8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA3,
-            "cdna3",
-            "VOP3P_MFMA",
-            122,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR", 32, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          ),
-          Encoding(
-            Family.CDNA4,
-            "cdna4",
-            "VOP3P_MFMA",
-            122,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR", 32, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2281
       )
   case object VSmfmacF3216x16x64Fp8Fp8 extends InstructionDef(
-        "v_smfmac_f32_16x16x64_fp8_fp8",
+        AMDGPUOpcode.assume("v_smfmac_f32_16x16x64_fp8_fp8"),
         decoder(form(4)((operands, mods) =>
           Instruction.VSmfmacF3216x16x64Fp8Fp8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA3,
-            "cdna3",
-            "VOP3P_MFMA",
-            123,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR", 32, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          ),
-          Encoding(
-            Family.CDNA4,
-            "cdna4",
-            "VOP3P_MFMA",
-            123,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR", 32, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2282
       )
   case object VSmfmacF3232x32x16Bf16 extends InstructionDef(
-        "v_smfmac_f32_32x32x16_bf16",
+        AMDGPUOpcode.assume("v_smfmac_f32_32x32x16_bf16"),
         decoder(form(4)((operands, mods) =>
           Instruction.VSmfmacF3232x32x16Bf16(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA3,
-            "cdna3",
-            "VOP3P_MFMA",
-            104,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 512, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR", 32, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          ),
-          Encoding(
-            Family.CDNA4,
-            "cdna4",
-            "VOP3P_MFMA",
-            104,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 512, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR", 32, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2283
       )
   case object VSmfmacF3232x32x16F16 extends InstructionDef(
-        "v_smfmac_f32_32x32x16_f16",
+        AMDGPUOpcode.assume("v_smfmac_f32_32x32x16_f16"),
         decoder(form(4)((operands, mods) =>
           Instruction.VSmfmacF3232x32x16F16(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA3,
-            "cdna3",
-            "VOP3P_MFMA",
-            100,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 512, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR", 32, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          ),
-          Encoding(
-            Family.CDNA4,
-            "cdna4",
-            "VOP3P_MFMA",
-            100,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 512, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR", 32, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2284
       )
   case object VSmfmacF3232x32x32Bf16 extends InstructionDef(
-        "v_smfmac_f32_32x32x32_bf16",
+        AMDGPUOpcode.assume("v_smfmac_f32_32x32x32_bf16"),
         decoder(form(4)((operands, mods) =>
           Instruction.VSmfmacF3232x32x32Bf16(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA4,
-            "cdna4",
-            "VOP3P_MFMA",
-            70,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 512, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 256, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR", 32, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2285
       )
   case object VSmfmacF3232x32x32Bf8Bf8 extends InstructionDef(
-        "v_smfmac_f32_32x32x32_bf8_bf8",
+        AMDGPUOpcode.assume("v_smfmac_f32_32x32x32_bf8_bf8"),
         decoder(form(4)((operands, mods) =>
           Instruction.VSmfmacF3232x32x32Bf8Bf8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA3,
-            "cdna3",
-            "VOP3P_MFMA",
-            124,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 512, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR", 32, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          ),
-          Encoding(
-            Family.CDNA4,
-            "cdna4",
-            "VOP3P_MFMA",
-            124,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 512, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR", 32, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2286
       )
   case object VSmfmacF3232x32x32Bf8Fp8 extends InstructionDef(
-        "v_smfmac_f32_32x32x32_bf8_fp8",
+        AMDGPUOpcode.assume("v_smfmac_f32_32x32x32_bf8_fp8"),
         decoder(form(4)((operands, mods) =>
           Instruction.VSmfmacF3232x32x32Bf8Fp8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA3,
-            "cdna3",
-            "VOP3P_MFMA",
-            125,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 512, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR", 32, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          ),
-          Encoding(
-            Family.CDNA4,
-            "cdna4",
-            "VOP3P_MFMA",
-            125,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 512, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR", 32, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2287
       )
   case object VSmfmacF3232x32x32F16 extends InstructionDef(
-        "v_smfmac_f32_32x32x32_f16",
+        AMDGPUOpcode.assume("v_smfmac_f32_32x32x32_f16"),
         decoder(form(4)((operands, mods) =>
           Instruction.VSmfmacF3232x32x32F16(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA4,
-            "cdna4",
-            "VOP3P_MFMA",
-            91,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 512, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 256, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR", 32, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2288
       )
   case object VSmfmacF3232x32x32Fp8Bf8 extends InstructionDef(
-        "v_smfmac_f32_32x32x32_fp8_bf8",
+        AMDGPUOpcode.assume("v_smfmac_f32_32x32x32_fp8_bf8"),
         decoder(form(4)((operands, mods) =>
           Instruction.VSmfmacF3232x32x32Fp8Bf8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA3,
-            "cdna3",
-            "VOP3P_MFMA",
-            126,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 512, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR", 32, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          ),
-          Encoding(
-            Family.CDNA4,
-            "cdna4",
-            "VOP3P_MFMA",
-            126,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 512, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR", 32, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2289
       )
   case object VSmfmacF3232x32x32Fp8Fp8 extends InstructionDef(
-        "v_smfmac_f32_32x32x32_fp8_fp8",
+        AMDGPUOpcode.assume("v_smfmac_f32_32x32x32_fp8_fp8"),
         decoder(form(4)((operands, mods) =>
           Instruction.VSmfmacF3232x32x32Fp8Fp8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA3,
-            "cdna3",
-            "VOP3P_MFMA",
-            127,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 512, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR", 32, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          ),
-          Encoding(
-            Family.CDNA4,
-            "cdna4",
-            "VOP3P_MFMA",
-            127,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 512, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR", 32, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2290
       )
   case object VSmfmacF3232x32x64Bf8Bf8 extends InstructionDef(
-        "v_smfmac_f32_32x32x64_bf8_bf8",
+        AMDGPUOpcode.assume("v_smfmac_f32_32x32x64_bf8_bf8"),
         decoder(form(4)((operands, mods) =>
           Instruction.VSmfmacF3232x32x64Bf8Bf8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA4,
-            "cdna4",
-            "VOP3P_MFMA",
-            75,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 512, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 256, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR", 32, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2291
       )
   case object VSmfmacF3232x32x64Bf8Fp8 extends InstructionDef(
-        "v_smfmac_f32_32x32x64_bf8_fp8",
+        AMDGPUOpcode.assume("v_smfmac_f32_32x32x64_bf8_fp8"),
         decoder(form(4)((operands, mods) =>
           Instruction.VSmfmacF3232x32x64Bf8Fp8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA4,
-            "cdna4",
-            "VOP3P_MFMA",
-            78,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 512, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 256, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR", 32, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2292
       )
   case object VSmfmacF3232x32x64Fp8Bf8 extends InstructionDef(
-        "v_smfmac_f32_32x32x64_fp8_bf8",
+        AMDGPUOpcode.assume("v_smfmac_f32_32x32x64_fp8_bf8"),
         decoder(form(4)((operands, mods) =>
           Instruction.VSmfmacF3232x32x64Fp8Bf8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA4,
-            "cdna4",
-            "VOP3P_MFMA",
-            79,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 512, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 256, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR", 32, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2293
       )
   case object VSmfmacF3232x32x64Fp8Fp8 extends InstructionDef(
-        "v_smfmac_f32_32x32x64_fp8_fp8",
+        AMDGPUOpcode.assume("v_smfmac_f32_32x32x64_fp8_fp8"),
         decoder(form(4)((operands, mods) =>
           Instruction.VSmfmacF3232x32x64Fp8Fp8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA4,
-            "cdna4",
-            "VOP3P_MFMA",
-            83,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 512, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 256, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR", 32, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2294
       )
   case object VSmfmacI3216x16x128I8 extends InstructionDef(
-        "v_smfmac_i32_16x16x128_i8",
+        AMDGPUOpcode.assume("v_smfmac_i32_16x16x128_i8"),
         decoder(form(4)((operands, mods) =>
           Instruction.VSmfmacI3216x16x128I8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA4,
-            "cdna4",
-            "VOP3P_MFMA",
-            58,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 256, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR", 32, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2295
       )
   case object VSmfmacI3216x16x64I8 extends InstructionDef(
-        "v_smfmac_i32_16x16x64_i8",
+        AMDGPUOpcode.assume("v_smfmac_i32_16x16x64_i8"),
         decoder(form(4)((operands, mods) =>
           Instruction.VSmfmacI3216x16x64I8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA3,
-            "cdna3",
-            "VOP3P_MFMA",
-            106,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR", 32, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          ),
-          Encoding(
-            Family.CDNA4,
-            "cdna4",
-            "VOP3P_MFMA",
-            106,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR", 32, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2296
       )
   case object VSmfmacI3232x32x32I8 extends InstructionDef(
-        "v_smfmac_i32_32x32x32_i8",
+        AMDGPUOpcode.assume("v_smfmac_i32_32x32x32_i8"),
         decoder(form(4)((operands, mods) =>
           Instruction.VSmfmacI3232x32x32I8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA3,
-            "cdna3",
-            "VOP3P_MFMA",
-            108,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 512, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR", 32, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          ),
-          Encoding(
-            Family.CDNA4,
-            "cdna4",
-            "VOP3P_MFMA",
-            108,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 512, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR", 32, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2297
       )
   case object VSmfmacI3232x32x64I8 extends InstructionDef(
-        "v_smfmac_i32_32x32x64_i8",
+        AMDGPUOpcode.assume("v_smfmac_i32_32x32x64_i8"),
         decoder(form(4)((operands, mods) =>
           Instruction.VSmfmacI3232x32x64I8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA4,
-            "cdna4",
-            "VOP3P_MFMA",
-            71,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR_OR_ACCVGPR", 512, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR_OR_ACCVGPR", 128, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR_OR_ACCVGPR", 256, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR", 32, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2298
       )
   case object VSwmmacBf1616x16x32Bf16 extends InstructionDef(
-        "v_swmmac_bf16_16x16x32_bf16",
+        AMDGPUOpcode.assume("v_swmmac_bf16_16x16x32_bf16"),
         decoder(form(4)((operands, mods) =>
           Instruction.VSwmmacBf1616x16x32Bf16(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.GFX12,
-            "rdna4",
-            "VOP3P",
-            83,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR", 128, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR", 256, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR", 32, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2328
       )
   case object VSwmmacBf1616x16x64Bf16 extends InstructionDef(
-        "v_swmmac_bf16_16x16x64_bf16",
+        AMDGPUOpcode.assume("v_swmmac_bf16_16x16x64_bf16"),
         decoder(form(4)((operands, mods) =>
           Instruction.VSwmmacBf1616x16x64Bf16(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA5,
-            "cdna5",
-            "VOP3P",
-            104,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR", 256, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR", 512, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR", 32, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2329
       )
   case object VSwmmacBf16f3216x16x64Bf16 extends InstructionDef(
-        "v_swmmac_bf16f32_16x16x64_bf16",
+        AMDGPUOpcode.assume("v_swmmac_bf16f32_16x16x64_bf16"),
         decoder(form(4)((operands, mods) =>
           Instruction.VSwmmacBf16f3216x16x64Bf16(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA5,
-            "cdna5",
-            "VOP3P",
-            105,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR", 256, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR", 256, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR", 512, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR", 32, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2330
       )
   case object VSwmmacF1616x16x128Bf8Bf8 extends InstructionDef(
-        "v_swmmac_f16_16x16x128_bf8_bf8",
+        AMDGPUOpcode.assume("v_swmmac_f16_16x16x128_bf8_bf8"),
         decoder(form(4)((operands, mods) =>
           Instruction.VSwmmacF1616x16x128Bf8Bf8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA5,
-            "cdna5",
-            "VOP3P",
-            122,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR", 256, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR", 512, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR", 64, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2331
       )
   case object VSwmmacF1616x16x128Bf8Fp8 extends InstructionDef(
-        "v_swmmac_f16_16x16x128_bf8_fp8",
+        AMDGPUOpcode.assume("v_swmmac_f16_16x16x128_bf8_fp8"),
         decoder(form(4)((operands, mods) =>
           Instruction.VSwmmacF1616x16x128Bf8Fp8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA5,
-            "cdna5",
-            "VOP3P",
-            121,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR", 256, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR", 512, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR", 64, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2332
       )
   case object VSwmmacF1616x16x128Fp8Bf8 extends InstructionDef(
-        "v_swmmac_f16_16x16x128_fp8_bf8",
+        AMDGPUOpcode.assume("v_swmmac_f16_16x16x128_fp8_bf8"),
         decoder(form(4)((operands, mods) =>
           Instruction.VSwmmacF1616x16x128Fp8Bf8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA5,
-            "cdna5",
-            "VOP3P",
-            120,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR", 256, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR", 512, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR", 64, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2333
       )
   case object VSwmmacF1616x16x128Fp8Fp8 extends InstructionDef(
-        "v_swmmac_f16_16x16x128_fp8_fp8",
+        AMDGPUOpcode.assume("v_swmmac_f16_16x16x128_fp8_fp8"),
         decoder(form(4)((operands, mods) =>
           Instruction.VSwmmacF1616x16x128Fp8Fp8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA5,
-            "cdna5",
-            "VOP3P",
-            119,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR", 256, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR", 512, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR", 64, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2334
       )
   case object VSwmmacF1616x16x32F16 extends InstructionDef(
-        "v_swmmac_f16_16x16x32_f16",
+        AMDGPUOpcode.assume("v_swmmac_f16_16x16x32_f16"),
         decoder(form(4)((operands, mods) =>
           Instruction.VSwmmacF1616x16x32F16(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.GFX12,
-            "rdna4",
-            "VOP3P",
-            82,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR", 128, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR", 256, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR", 32, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2335
       )
   case object VSwmmacF1616x16x64F16 extends InstructionDef(
-        "v_swmmac_f16_16x16x64_f16",
+        AMDGPUOpcode.assume("v_swmmac_f16_16x16x64_f16"),
         decoder(form(4)((operands, mods) =>
           Instruction.VSwmmacF1616x16x64F16(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA5,
-            "cdna5",
-            "VOP3P",
-            103,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR", 256, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR", 512, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR", 32, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2336
       )
   case object VSwmmacF3216x16x128Bf8Bf8 extends InstructionDef(
-        "v_swmmac_f32_16x16x128_bf8_bf8",
+        AMDGPUOpcode.assume("v_swmmac_f32_16x16x128_bf8_bf8"),
         decoder(form(4)((operands, mods) =>
           Instruction.VSwmmacF3216x16x128Bf8Bf8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA5,
-            "cdna5",
-            "VOP3P",
-            118,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR", 256, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR", 256, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR", 512, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR", 64, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2337
       )
   case object VSwmmacF3216x16x128Bf8Fp8 extends InstructionDef(
-        "v_swmmac_f32_16x16x128_bf8_fp8",
+        AMDGPUOpcode.assume("v_swmmac_f32_16x16x128_bf8_fp8"),
         decoder(form(4)((operands, mods) =>
           Instruction.VSwmmacF3216x16x128Bf8Fp8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA5,
-            "cdna5",
-            "VOP3P",
-            117,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR", 256, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR", 256, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR", 512, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR", 64, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2338
       )
   case object VSwmmacF3216x16x128Fp8Bf8 extends InstructionDef(
-        "v_swmmac_f32_16x16x128_fp8_bf8",
+        AMDGPUOpcode.assume("v_swmmac_f32_16x16x128_fp8_bf8"),
         decoder(form(4)((operands, mods) =>
           Instruction.VSwmmacF3216x16x128Fp8Bf8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA5,
-            "cdna5",
-            "VOP3P",
-            116,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR", 256, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR", 256, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR", 512, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR", 64, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2339
       )
   case object VSwmmacF3216x16x128Fp8Fp8 extends InstructionDef(
-        "v_swmmac_f32_16x16x128_fp8_fp8",
+        AMDGPUOpcode.assume("v_swmmac_f32_16x16x128_fp8_fp8"),
         decoder(form(4)((operands, mods) =>
           Instruction.VSwmmacF3216x16x128Fp8Fp8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA5,
-            "cdna5",
-            "VOP3P",
-            115,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR", 256, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR", 256, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR", 512, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR", 64, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2340
       )
   case object VSwmmacF3216x16x32Bf16 extends InstructionDef(
-        "v_swmmac_f32_16x16x32_bf16",
+        AMDGPUOpcode.assume("v_swmmac_f32_16x16x32_bf16"),
         decoder(form(4)((operands, mods) =>
           Instruction.VSwmmacF3216x16x32Bf16(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.GFX12,
-            "rdna4",
-            "VOP3P",
-            81,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR", 256, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR", 128, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR", 256, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR", 32, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2341
       )
   case object VSwmmacF3216x16x32Bf8Bf8 extends InstructionDef(
-        "v_swmmac_f32_16x16x32_bf8_bf8",
+        AMDGPUOpcode.assume("v_swmmac_f32_16x16x32_bf8_bf8"),
         decoder(form(4)((operands, mods) =>
           Instruction.VSwmmacF3216x16x32Bf8Bf8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.GFX12,
-            "rdna4",
-            "VOP3P",
-            90,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR", 256, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR", 128, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR", 32, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2342
       )
   case object VSwmmacF3216x16x32Bf8Fp8 extends InstructionDef(
-        "v_swmmac_f32_16x16x32_bf8_fp8",
+        AMDGPUOpcode.assume("v_swmmac_f32_16x16x32_bf8_fp8"),
         decoder(form(4)((operands, mods) =>
           Instruction.VSwmmacF3216x16x32Bf8Fp8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.GFX12,
-            "rdna4",
-            "VOP3P",
-            89,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR", 256, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR", 128, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR", 32, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2343
       )
   case object VSwmmacF3216x16x32F16 extends InstructionDef(
-        "v_swmmac_f32_16x16x32_f16",
+        AMDGPUOpcode.assume("v_swmmac_f32_16x16x32_f16"),
         decoder(form(4)((operands, mods) =>
           Instruction.VSwmmacF3216x16x32F16(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.GFX12,
-            "rdna4",
-            "VOP3P",
-            80,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR", 256, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR", 128, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR", 256, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR", 32, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2344
       )
   case object VSwmmacF3216x16x32Fp8Bf8 extends InstructionDef(
-        "v_swmmac_f32_16x16x32_fp8_bf8",
+        AMDGPUOpcode.assume("v_swmmac_f32_16x16x32_fp8_bf8"),
         decoder(form(4)((operands, mods) =>
           Instruction.VSwmmacF3216x16x32Fp8Bf8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.GFX12,
-            "rdna4",
-            "VOP3P",
-            88,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR", 256, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR", 128, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR", 32, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2345
       )
   case object VSwmmacF3216x16x32Fp8Fp8 extends InstructionDef(
-        "v_swmmac_f32_16x16x32_fp8_fp8",
+        AMDGPUOpcode.assume("v_swmmac_f32_16x16x32_fp8_fp8"),
         decoder(form(4)((operands, mods) =>
           Instruction.VSwmmacF3216x16x32Fp8Fp8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.GFX12,
-            "rdna4",
-            "VOP3P",
-            87,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR", 256, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR", 128, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR", 32, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2346
       )
   case object VSwmmacF3216x16x64Bf16 extends InstructionDef(
-        "v_swmmac_f32_16x16x64_bf16",
+        AMDGPUOpcode.assume("v_swmmac_f32_16x16x64_bf16"),
         decoder(form(4)((operands, mods) =>
           Instruction.VSwmmacF3216x16x64Bf16(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA5,
-            "cdna5",
-            "VOP3P",
-            102,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR", 256, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR", 256, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR", 512, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR", 32, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2347
       )
   case object VSwmmacF3216x16x64F16 extends InstructionDef(
-        "v_swmmac_f32_16x16x64_f16",
+        AMDGPUOpcode.assume("v_swmmac_f32_16x16x64_f16"),
         decoder(form(4)((operands, mods) =>
           Instruction.VSwmmacF3216x16x64F16(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA5,
-            "cdna5",
-            "VOP3P",
-            101,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR", 256, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR", 256, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR", 512, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR", 32, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2348
       )
   case object VSwmmacI3216x16x128Iu8 extends InstructionDef(
-        "v_swmmac_i32_16x16x128_iu8",
+        AMDGPUOpcode.assume("v_swmmac_i32_16x16x128_iu8"),
         decoder(form(4)((operands, mods) =>
           Instruction.VSwmmacI3216x16x128Iu8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA5,
-            "cdna5",
-            "VOP3P",
-            123,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR", 256, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR", 256, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR", 512, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR", 64, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2349
       )
   case object VSwmmacI3216x16x32Iu4 extends InstructionDef(
-        "v_swmmac_i32_16x16x32_iu4",
+        AMDGPUOpcode.assume("v_swmmac_i32_16x16x32_iu4"),
         decoder(form(4)((operands, mods) =>
           Instruction.VSwmmacI3216x16x32Iu4(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.GFX12,
-            "rdna4",
-            "VOP3P",
-            85,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR", 256, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR", 32, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR", 64, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR", 32, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2350
       )
   case object VSwmmacI3216x16x32Iu8 extends InstructionDef(
-        "v_swmmac_i32_16x16x32_iu8",
+        AMDGPUOpcode.assume("v_swmmac_i32_16x16x32_iu8"),
         decoder(form(4)((operands, mods) =>
           Instruction.VSwmmacI3216x16x32Iu8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.GFX12,
-            "rdna4",
-            "VOP3P",
-            84,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR", 256, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR", 128, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR", 32, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2351
       )
   case object VSwmmacI3216x16x64Iu4 extends InstructionDef(
-        "v_swmmac_i32_16x16x64_iu4",
+        AMDGPUOpcode.assume("v_swmmac_i32_16x16x64_iu4"),
         decoder(form(4)((operands, mods) =>
           Instruction.VSwmmacI3216x16x64Iu4(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.GFX12,
-            "rdna4",
-            "VOP3P",
-            86,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR", 256, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR", 128, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR", 32, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2352
       )
   case object VWmmaBf1616x16x16Bf16 extends InstructionDef(
-        "v_wmma_bf16_16x16x16_bf16",
+        AMDGPUOpcode.assume("v_wmma_bf16_16x16x16_bf16"),
         decoder(form(4)((operands, mods) =>
           Instruction.VWmmaBf1616x16x16Bf16(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.GFX11,
-            "rdna3",
-            "VOP3P",
-            67,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR", 256, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR", 256, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR", 256, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_INLINE", 256, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          ),
-          Encoding(
-            Family.GFX11,
-            "rdna3_5",
-            "VOP3P",
-            67,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR", 256, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR", 256, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR", 256, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_INLINE", 256, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          ),
-          Encoding(
-            Family.GFX12,
-            "rdna4",
-            "VOP3P",
-            67,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR", 128, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR", 128, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_INLINE", 128, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2360
       )
   case object VWmmaBf1616x16x32Bf16 extends InstructionDef(
-        "v_wmma_bf16_16x16x32_bf16",
+        AMDGPUOpcode.assume("v_wmma_bf16_16x16x32_bf16"),
         decoder(form(4)((operands, mods) =>
           Instruction.VWmmaBf1616x16x32Bf16(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA5,
-            "cdna5",
-            "VOP3P",
-            99,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR", 256, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR", 256, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_INLINE", 128, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2361
       )
   case object VWmmaBf16f3216x16x32Bf16 extends InstructionDef(
-        "v_wmma_bf16f32_16x16x32_bf16",
+        AMDGPUOpcode.assume("v_wmma_bf16f32_16x16x32_bf16"),
         decoder(form(4)((operands, mods) =>
           Instruction.VWmmaBf16f3216x16x32Bf16(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA5,
-            "cdna5",
-            "VOP3P",
-            100,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR", 256, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR", 256, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_INLINE", 256, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2362
       )
   case object VWmmaF1616x16x128Bf8Bf8 extends InstructionDef(
-        "v_wmma_f16_16x16x128_bf8_bf8",
+        AMDGPUOpcode.assume("v_wmma_f16_16x16x128_bf8_bf8"),
         decoder(form(4)((operands, mods) =>
           Instruction.VWmmaF1616x16x128Bf8Bf8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA5,
-            "cdna5",
-            "VOP3P",
-            135,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR", 512, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR", 512, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_INLINE", 128, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2363
       )
   case object VWmmaF1616x16x128Bf8Fp8 extends InstructionDef(
-        "v_wmma_f16_16x16x128_bf8_fp8",
+        AMDGPUOpcode.assume("v_wmma_f16_16x16x128_bf8_fp8"),
         decoder(form(4)((operands, mods) =>
           Instruction.VWmmaF1616x16x128Bf8Fp8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA5,
-            "cdna5",
-            "VOP3P",
-            134,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR", 512, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR", 512, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_INLINE", 128, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2364
       )
   case object VWmmaF1616x16x128Fp8Bf8 extends InstructionDef(
-        "v_wmma_f16_16x16x128_fp8_bf8",
+        AMDGPUOpcode.assume("v_wmma_f16_16x16x128_fp8_bf8"),
         decoder(form(4)((operands, mods) =>
           Instruction.VWmmaF1616x16x128Fp8Bf8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA5,
-            "cdna5",
-            "VOP3P",
-            133,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR", 512, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR", 512, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_INLINE", 128, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2365
       )
   case object VWmmaF1616x16x128Fp8Fp8 extends InstructionDef(
-        "v_wmma_f16_16x16x128_fp8_fp8",
+        AMDGPUOpcode.assume("v_wmma_f16_16x16x128_fp8_fp8"),
         decoder(form(4)((operands, mods) =>
           Instruction.VWmmaF1616x16x128Fp8Fp8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA5,
-            "cdna5",
-            "VOP3P",
-            132,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR", 512, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR", 512, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_INLINE", 128, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2366
       )
   case object VWmmaF1616x16x16F16 extends InstructionDef(
-        "v_wmma_f16_16x16x16_f16",
+        AMDGPUOpcode.assume("v_wmma_f16_16x16x16_f16"),
         decoder(form(4)((operands, mods) =>
           Instruction.VWmmaF1616x16x16F16(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.GFX11,
-            "rdna3",
-            "VOP3P",
-            66,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR", 256, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR", 256, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR", 256, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_INLINE", 256, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          ),
-          Encoding(
-            Family.GFX11,
-            "rdna3_5",
-            "VOP3P",
-            66,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR", 256, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR", 256, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR", 256, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_INLINE", 256, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          ),
-          Encoding(
-            Family.GFX12,
-            "rdna4",
-            "VOP3P",
-            66,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR", 128, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR", 128, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_INLINE", 128, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2367
       )
   case object VWmmaF1616x16x32F16 extends InstructionDef(
-        "v_wmma_f16_16x16x32_f16",
+        AMDGPUOpcode.assume("v_wmma_f16_16x16x32_f16"),
         decoder(form(4)((operands, mods) =>
           Instruction.VWmmaF1616x16x32F16(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA5,
-            "cdna5",
-            "VOP3P",
-            97,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR", 256, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR", 256, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_INLINE", 128, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2368
       )
   case object VWmmaF1616x16x64Bf8Bf8 extends InstructionDef(
-        "v_wmma_f16_16x16x64_bf8_bf8",
+        AMDGPUOpcode.assume("v_wmma_f16_16x16x64_bf8_bf8"),
         decoder(form(4)((operands, mods) =>
           Instruction.VWmmaF1616x16x64Bf8Bf8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA5,
-            "cdna5",
-            "VOP3P",
-            113,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR", 256, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR", 256, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_INLINE", 128, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2369
       )
   case object VWmmaF1616x16x64Bf8Fp8 extends InstructionDef(
-        "v_wmma_f16_16x16x64_bf8_fp8",
+        AMDGPUOpcode.assume("v_wmma_f16_16x16x64_bf8_fp8"),
         decoder(form(4)((operands, mods) =>
           Instruction.VWmmaF1616x16x64Bf8Fp8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA5,
-            "cdna5",
-            "VOP3P",
-            112,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR", 256, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR", 256, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_INLINE", 128, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2370
       )
   case object VWmmaF1616x16x64Fp8Bf8 extends InstructionDef(
-        "v_wmma_f16_16x16x64_fp8_bf8",
+        AMDGPUOpcode.assume("v_wmma_f16_16x16x64_fp8_bf8"),
         decoder(form(4)((operands, mods) =>
           Instruction.VWmmaF1616x16x64Fp8Bf8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA5,
-            "cdna5",
-            "VOP3P",
-            111,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR", 256, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR", 256, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_INLINE", 128, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2371
       )
   case object VWmmaF1616x16x64Fp8Fp8 extends InstructionDef(
-        "v_wmma_f16_16x16x64_fp8_fp8",
+        AMDGPUOpcode.assume("v_wmma_f16_16x16x64_fp8_fp8"),
         decoder(form(4)((operands, mods) =>
           Instruction.VWmmaF1616x16x64Fp8Fp8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA5,
-            "cdna5",
-            "VOP3P",
-            110,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR", 128, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR", 256, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR", 256, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_INLINE", 128, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2372
       )
   case object VWmmaF3216x16x128Bf8Bf8 extends InstructionDef(
-        "v_wmma_f32_16x16x128_bf8_bf8",
+        AMDGPUOpcode.assume("v_wmma_f32_16x16x128_bf8_bf8"),
         decoder(form(4)((operands, mods) =>
           Instruction.VWmmaF3216x16x128Bf8Bf8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA5,
-            "cdna5",
-            "VOP3P",
-            131,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR", 256, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR", 512, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR", 512, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_INLINE", 256, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2373
       )
   case object VWmmaF3216x16x128Bf8Fp8 extends InstructionDef(
-        "v_wmma_f32_16x16x128_bf8_fp8",
+        AMDGPUOpcode.assume("v_wmma_f32_16x16x128_bf8_fp8"),
         decoder(form(4)((operands, mods) =>
           Instruction.VWmmaF3216x16x128Bf8Fp8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA5,
-            "cdna5",
-            "VOP3P",
-            130,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR", 256, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR", 512, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR", 512, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_INLINE", 256, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2374
       )
   case object VWmmaF3216x16x128F8f6f4 extends InstructionDef(
-        "v_wmma_f32_16x16x128_f8f6f4",
+        AMDGPUOpcode.assume("v_wmma_f32_16x16x128_f8f6f4"),
         decoder(form(4)((operands, mods) =>
           Instruction.VWmmaF3216x16x128F8f6f4(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA5,
-            "cdna5",
-            "VOP3P",
-            51,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR", 256, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR", 512, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR", 512, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_INLINE", 256, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2375
       )
   case object VWmmaF3216x16x128Fp8Bf8 extends InstructionDef(
-        "v_wmma_f32_16x16x128_fp8_bf8",
+        AMDGPUOpcode.assume("v_wmma_f32_16x16x128_fp8_bf8"),
         decoder(form(4)((operands, mods) =>
           Instruction.VWmmaF3216x16x128Fp8Bf8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA5,
-            "cdna5",
-            "VOP3P",
-            129,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR", 256, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR", 512, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR", 512, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_INLINE", 256, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2376
       )
   case object VWmmaF3216x16x128Fp8Fp8 extends InstructionDef(
-        "v_wmma_f32_16x16x128_fp8_fp8",
+        AMDGPUOpcode.assume("v_wmma_f32_16x16x128_fp8_fp8"),
         decoder(form(4)((operands, mods) =>
           Instruction.VWmmaF3216x16x128Fp8Fp8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA5,
-            "cdna5",
-            "VOP3P",
-            128,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR", 256, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR", 512, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR", 512, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_INLINE", 256, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2377
       )
   case object VWmmaF3216x16x16Bf16 extends InstructionDef(
-        "v_wmma_f32_16x16x16_bf16",
+        AMDGPUOpcode.assume("v_wmma_f32_16x16x16_bf16"),
         decoder(form(4)((operands, mods) =>
           Instruction.VWmmaF3216x16x16Bf16(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.GFX11,
-            "rdna3",
-            "VOP3P",
-            65,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR", 256, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR", 256, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR", 256, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_INLINE", 256, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          ),
-          Encoding(
-            Family.GFX11,
-            "rdna3_5",
-            "VOP3P",
-            65,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR", 256, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR", 256, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR", 256, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_INLINE", 256, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          ),
-          Encoding(
-            Family.GFX12,
-            "rdna4",
-            "VOP3P",
-            65,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR", 256, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR", 128, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR", 128, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_INLINE", 256, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2378
       )
   case object VWmmaF3216x16x16Bf8Bf8 extends InstructionDef(
-        "v_wmma_f32_16x16x16_bf8_bf8",
+        AMDGPUOpcode.assume("v_wmma_f32_16x16x16_bf8_bf8"),
         decoder(form(4)((operands, mods) =>
           Instruction.VWmmaF3216x16x16Bf8Bf8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.GFX12,
-            "rdna4",
-            "VOP3P",
-            73,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR", 256, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR", 64, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_INLINE", 256, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2379
       )
   case object VWmmaF3216x16x16Bf8Fp8 extends InstructionDef(
-        "v_wmma_f32_16x16x16_bf8_fp8",
+        AMDGPUOpcode.assume("v_wmma_f32_16x16x16_bf8_fp8"),
         decoder(form(4)((operands, mods) =>
           Instruction.VWmmaF3216x16x16Bf8Fp8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.GFX12,
-            "rdna4",
-            "VOP3P",
-            72,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR", 256, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR", 64, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_INLINE", 256, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2380
       )
   case object VWmmaF3216x16x16F16 extends InstructionDef(
-        "v_wmma_f32_16x16x16_f16",
+        AMDGPUOpcode.assume("v_wmma_f32_16x16x16_f16"),
         decoder(form(4)((operands, mods) =>
           Instruction.VWmmaF3216x16x16F16(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.GFX11,
-            "rdna3",
-            "VOP3P",
-            64,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR", 256, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR", 256, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR", 256, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_INLINE", 256, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          ),
-          Encoding(
-            Family.GFX11,
-            "rdna3_5",
-            "VOP3P",
-            64,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR", 256, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR", 256, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR", 256, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_INLINE", 256, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          ),
-          Encoding(
-            Family.GFX12,
-            "rdna4",
-            "VOP3P",
-            64,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR", 256, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR", 128, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR", 128, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_INLINE", 256, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2381
       )
   case object VWmmaF3216x16x16Fp8Bf8 extends InstructionDef(
-        "v_wmma_f32_16x16x16_fp8_bf8",
+        AMDGPUOpcode.assume("v_wmma_f32_16x16x16_fp8_bf8"),
         decoder(form(4)((operands, mods) =>
           Instruction.VWmmaF3216x16x16Fp8Bf8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.GFX12,
-            "rdna4",
-            "VOP3P",
-            71,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR", 256, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR", 64, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_INLINE", 256, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2382
       )
   case object VWmmaF3216x16x16Fp8Fp8 extends InstructionDef(
-        "v_wmma_f32_16x16x16_fp8_fp8",
+        AMDGPUOpcode.assume("v_wmma_f32_16x16x16_fp8_fp8"),
         decoder(form(4)((operands, mods) =>
           Instruction.VWmmaF3216x16x16Fp8Fp8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.GFX12,
-            "rdna4",
-            "VOP3P",
-            70,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR", 256, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR", 64, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_INLINE", 256, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2383
       )
   case object VWmmaF3216x16x32Bf16 extends InstructionDef(
-        "v_wmma_f32_16x16x32_bf16",
+        AMDGPUOpcode.assume("v_wmma_f32_16x16x32_bf16"),
         decoder(form(4)((operands, mods) =>
           Instruction.VWmmaF3216x16x32Bf16(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA5,
-            "cdna5",
-            "VOP3P",
-            98,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR", 256, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR", 256, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR", 256, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_INLINE", 256, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2384
       )
   case object VWmmaF3216x16x32F16 extends InstructionDef(
-        "v_wmma_f32_16x16x32_f16",
+        AMDGPUOpcode.assume("v_wmma_f32_16x16x32_f16"),
         decoder(form(4)((operands, mods) =>
           Instruction.VWmmaF3216x16x32F16(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA5,
-            "cdna5",
-            "VOP3P",
-            96,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR", 256, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR", 256, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR", 256, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_INLINE", 256, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2385
       )
   case object VWmmaF3216x16x4F32 extends InstructionDef(
-        "v_wmma_f32_16x16x4_f32",
+        AMDGPUOpcode.assume("v_wmma_f32_16x16x4_f32"),
         decoder(form(4)((operands, mods) =>
           Instruction.VWmmaF3216x16x4F32(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA5,
-            "cdna5",
-            "VOP3P",
-            93,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR", 256, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR", 64, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_INLINE", 256, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2386
       )
   case object VWmmaF3216x16x64Bf8Bf8 extends InstructionDef(
-        "v_wmma_f32_16x16x64_bf8_bf8",
+        AMDGPUOpcode.assume("v_wmma_f32_16x16x64_bf8_bf8"),
         decoder(form(4)((operands, mods) =>
           Instruction.VWmmaF3216x16x64Bf8Bf8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA5,
-            "cdna5",
-            "VOP3P",
-            109,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR", 256, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR", 256, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR", 256, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_INLINE", 256, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2387
       )
   case object VWmmaF3216x16x64Bf8Fp8 extends InstructionDef(
-        "v_wmma_f32_16x16x64_bf8_fp8",
+        AMDGPUOpcode.assume("v_wmma_f32_16x16x64_bf8_fp8"),
         decoder(form(4)((operands, mods) =>
           Instruction.VWmmaF3216x16x64Bf8Fp8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA5,
-            "cdna5",
-            "VOP3P",
-            108,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR", 256, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR", 256, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR", 256, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_INLINE", 256, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2388
       )
   case object VWmmaF3216x16x64Fp8Bf8 extends InstructionDef(
-        "v_wmma_f32_16x16x64_fp8_bf8",
+        AMDGPUOpcode.assume("v_wmma_f32_16x16x64_fp8_bf8"),
         decoder(form(4)((operands, mods) =>
           Instruction.VWmmaF3216x16x64Fp8Bf8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA5,
-            "cdna5",
-            "VOP3P",
-            107,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR", 256, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR", 256, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR", 256, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_INLINE", 256, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2389
       )
   case object VWmmaF3216x16x64Fp8Fp8 extends InstructionDef(
-        "v_wmma_f32_16x16x64_fp8_fp8",
+        AMDGPUOpcode.assume("v_wmma_f32_16x16x64_fp8_fp8"),
         decoder(form(4)((operands, mods) =>
           Instruction.VWmmaF3216x16x64Fp8Fp8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA5,
-            "cdna5",
-            "VOP3P",
-            106,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR", 256, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR", 256, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR", 256, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_INLINE", 256, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2390
       )
   case object VWmmaF3232x16x128F4 extends InstructionDef(
-        "v_wmma_f32_32x16x128_f4",
+        AMDGPUOpcode.assume("v_wmma_f32_32x16x128_f4"),
         decoder(form(4)((operands, mods) =>
           Instruction.VWmmaF3232x16x128F4(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA5,
-            "cdna5",
-            "VOP3P",
-            136,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR", 512, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR", 512, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR", 256, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_INLINE", 512, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2391
       )
   case object VWmmaI3216x16x16Iu4 extends InstructionDef(
-        "v_wmma_i32_16x16x16_iu4",
+        AMDGPUOpcode.assume("v_wmma_i32_16x16x16_iu4"),
         decoder(form(4)((operands, mods) =>
           Instruction.VWmmaI3216x16x16Iu4(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.GFX11,
-            "rdna3",
-            "VOP3P",
-            69,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR", 256, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR", 64, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_INLINE", 256, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          ),
-          Encoding(
-            Family.GFX11,
-            "rdna3_5",
-            "VOP3P",
-            69,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR", 256, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR", 64, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_INLINE", 256, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          ),
-          Encoding(
-            Family.GFX12,
-            "rdna4",
-            "VOP3P",
-            69,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR", 256, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR", 32, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR", 32, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_INLINE", 256, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2392
       )
   case object VWmmaI3216x16x16Iu8 extends InstructionDef(
-        "v_wmma_i32_16x16x16_iu8",
+        AMDGPUOpcode.assume("v_wmma_i32_16x16x16_iu8"),
         decoder(form(4)((operands, mods) =>
           Instruction.VWmmaI3216x16x16Iu8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.GFX11,
-            "rdna3",
-            "VOP3P",
-            68,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR", 256, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR", 128, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR", 128, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_INLINE", 256, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          ),
-          Encoding(
-            Family.GFX11,
-            "rdna3_5",
-            "VOP3P",
-            68,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR", 256, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR", 128, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR", 128, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_INLINE", 256, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          ),
-          Encoding(
-            Family.GFX12,
-            "rdna4",
-            "VOP3P",
-            68,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR", 256, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR", 64, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_INLINE", 256, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2393
       )
   case object VWmmaI3216x16x32Iu4 extends InstructionDef(
-        "v_wmma_i32_16x16x32_iu4",
+        AMDGPUOpcode.assume("v_wmma_i32_16x16x32_iu4"),
         decoder(form(4)((operands, mods) =>
           Instruction.VWmmaI3216x16x32Iu4(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.GFX12,
-            "rdna4",
-            "VOP3P",
-            74,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR", 256, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR", 64, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR", 64, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_INLINE", 256, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2394
       )
   case object VWmmaI3216x16x64Iu8 extends InstructionDef(
-        "v_wmma_i32_16x16x64_iu8",
+        AMDGPUOpcode.assume("v_wmma_i32_16x16x64_iu8"),
         decoder(form(4)((operands, mods) =>
           Instruction.VWmmaI3216x16x64Iu8(operands(0), operands(1), operands(2), operands(3), mods)
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA5,
-            "cdna5",
-            "VOP3P",
-            114,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR", 256, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR", 256, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR", 256, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_INLINE", 256, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2395
       )
   case object VWmmaScale16F3216x16x128F8f6f4 extends InstructionDef(
-        "v_wmma_scale16_f32_16x16x128_f8f6f4",
+        AMDGPUOpcode.assume("v_wmma_scale16_f32_16x16x128_f8f6f4"),
         decoder(form(6)((operands, mods) =>
           Instruction.VWmmaScale16F3216x16x128F8f6f4(
             operands(0),
@@ -4638,27 +1159,10 @@ private[amdgpu] object MatrixInstructionDefs {
             mods
           )
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA5,
-            "cdna5",
-            "VOP3PX3",
-            51,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR", 256, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR", 512, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR", 512, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_INLINE", 256, true, false, false),
-              OperandInfo(Some("SCALE_SRC0"), "SRC_SIMPLE", 64, true, false, false),
-              OperandInfo(Some("SCALE_SRC1"), "SRC_SIMPLE", 64, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2396
       )
   case object VWmmaScale16F3232x16x128F4 extends InstructionDef(
-        "v_wmma_scale16_f32_32x16x128_f4",
+        AMDGPUOpcode.assume("v_wmma_scale16_f32_32x16x128_f4"),
         decoder(form(6)((operands, mods) =>
           Instruction.VWmmaScale16F3232x16x128F4(
             operands(0),
@@ -4670,27 +1174,10 @@ private[amdgpu] object MatrixInstructionDefs {
             mods
           )
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA5,
-            "cdna5",
-            "VOP3PX3",
-            136,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR", 512, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR", 512, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR", 256, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_INLINE", 512, true, false, false),
-              OperandInfo(Some("SCALE_SRC0"), "SRC_SIMPLE", 64, true, false, false),
-              OperandInfo(Some("SCALE_SRC1"), "SRC_SIMPLE", 64, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2397
       )
   case object VWmmaScaleF3216x16x128F8f6f4 extends InstructionDef(
-        "v_wmma_scale_f32_16x16x128_f8f6f4",
+        AMDGPUOpcode.assume("v_wmma_scale_f32_16x16x128_f8f6f4"),
         decoder(form(6)((operands, mods) =>
           Instruction.VWmmaScaleF3216x16x128F8f6f4(
             operands(0),
@@ -4702,27 +1189,10 @@ private[amdgpu] object MatrixInstructionDefs {
             mods
           )
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA5,
-            "cdna5",
-            "VOP3PX2",
-            51,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR", 256, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR", 512, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR", 512, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_INLINE", 256, true, false, false),
-              OperandInfo(Some("SCALE_SRC0"), "SRC_SIMPLE", 32, true, false, false),
-              OperandInfo(Some("SCALE_SRC1"), "SRC_SIMPLE", 32, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2398
       )
   case object VWmmaScaleF3232x16x128F4 extends InstructionDef(
-        "v_wmma_scale_f32_32x16x128_f4",
+        AMDGPUOpcode.assume("v_wmma_scale_f32_32x16x128_f4"),
         decoder(form(6)((operands, mods) =>
           Instruction.VWmmaScaleF3232x16x128F4(
             operands(0),
@@ -4734,27 +1204,10 @@ private[amdgpu] object MatrixInstructionDefs {
             mods
           )
         )),
-        Metadata(Col(
-          Encoding(
-            Family.CDNA5,
-            "cdna5",
-            "VOP3PX2",
-            136,
-            Col(
-              OperandInfo(Some("VDST"), "VGPR", 512, false, true, false),
-              OperandInfo(Some("SRC0"), "SRC_VGPR", 512, true, false, false),
-              OperandInfo(Some("SRC1"), "SRC_VGPR", 256, true, false, false),
-              OperandInfo(Some("SRC2"), "SRC_VGPR_OR_INLINE", 512, true, false, false),
-              OperandInfo(Some("SCALE_SRC0"), "SRC_SIMPLE", 32, true, false, false),
-              OperandInfo(Some("SCALE_SRC1"), "SRC_SIMPLE", 32, true, false, false)
-            ),
-            Some("VALU"),
-            MetadataSource.AMDXML
-          )
-        ))
+        2399
       )
 
-  val definitions: Col[InstructionDef] = Col(
+  val definitions: Vec[InstructionDef] = Vec(
     SWaitTensorcnt,
     TensorLoadToLds,
     TensorStoreFromLds,

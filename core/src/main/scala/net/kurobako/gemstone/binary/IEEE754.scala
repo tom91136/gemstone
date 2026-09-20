@@ -1,18 +1,52 @@
 package net.kurobako.gemstone.binary
 
-/** Raw IEEE-754 interchange encodings used by ISA registers and memory. */
-object IEEE754 {
-  inline def binary32ToFloat(bits: Long): Float = java.lang.Float.intBitsToFloat(bits.toInt)
+import io.github.iltotore.iron.*
+import io.github.iltotore.iron.constraint.all.*
 
-  inline def floatToBinary32(value: Float): Long = Bits.unsigned32(java.lang.Float.floatToRawIntBits(value))
+private[gemstone] type FloatingPointWidth = FloatingPointWidth.T
+private[gemstone] object FloatingPointWidth extends RefinedType[Int, In[(16, 32, 64)]] {
+  extension (width: FloatingPointWidth) {
+
+    /** Every supported IEEE-754 interchange width is also a valid scalar bit width. */
+    @SuppressWarnings(Array("scalafix:GemstoneNoAssume"))
+    def bitWidth: BitWidth = BitWidth.assume(width.value)
+
+    /** Every supported IEEE-754 interchange width is byte-aligned and at most eight bytes wide. */
+    @SuppressWarnings(Array("scalafix:GemstoneNoAssume"))
+    def scalarByteWidth: ScalarByteWidth = ScalarByteWidth.assume(width.value / 8)
+  }
+}
+
+private[gemstone] type Binary16 = Binary16.T
+private[gemstone] object Binary16 extends RefinedType[Long, Interval.Closed[0L, 65535L]] {
+  def fromLow(value: Long :| Interval.Closed[0L, 65535L]): Binary16 = Binary16(value)
+
+  @SuppressWarnings(Array("scalafix:GemstoneNoAssume"))
+  def low(value: Long): Binary16 = this.assume(value & Bits.Mask16)
+}
+
+private[gemstone] type Binary32 = Binary32.T
+private[gemstone] object Binary32 extends RefinedType[Long, Interval.Closed[0L, 4294967295L]] {
+  def fromLow(value: Long :| Interval.Closed[0L, 4294967295L]): Binary32 = Binary32(value)
+
+  @SuppressWarnings(Array("scalafix:GemstoneNoAssume"))
+  def low(value: Long): Binary32 = this.assume(value & Bits.Mask32)
+}
+
+/** Raw IEEE-754 interchange encodings used by ISA registers and memory. */
+private[gemstone] object IEEE754 {
+  inline def binary32ToFloat(bits: Binary32): Float = java.lang.Float.intBitsToFloat(bits.value.toInt)
+
+  inline def floatToBinary32(value: Float): Binary32 =
+    Binary32.fromLow(Bits.unsigned32(java.lang.Float.floatToRawIntBits(value)))
 
   inline def binary64ToDouble(bits: Long): Double = java.lang.Double.longBitsToDouble(bits)
 
   inline def doubleToBinary64(value: Double): Long = java.lang.Double.doubleToRawLongBits(value)
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  def binary16ToFloat(value: Long): Float = {
-    val bits16   = value.toInt
+  def binary16ToFloat(value: Binary16): Float = {
+    val bits16   = value.value.toInt
     val sign     = (bits16 & 0x8000) << 16
     val exponent = (bits16 >>> 10) & 0x1f
     val fraction = bits16 & 0x3ff
@@ -33,7 +67,7 @@ object IEEE754 {
     java.lang.Float.intBitsToFloat(bits32)
   }
 
-  def floatToBinary16(value: Float): Long = {
+  def floatToBinary16(value: Float): Binary16 = {
     val bits     = java.lang.Float.floatToRawIntBits(value)
     val sign     = (bits >>> 16) & 0x8000
     val exponent = (bits >>> 23) & 0xff
@@ -59,41 +93,42 @@ object IEEE754 {
           } else sign | (halfExponent << 10) | (rounded >>> 13)
         }
       }
-    encoded.toLong & Bits.Mask16
+    Binary16.low(encoded.toLong)
   }
 
   /** One round-to-nearest, ties-to-even step from the full binary64 significand. */
-  def doubleToBinary16(value: Double): Long = {
+  def doubleToBinary16(value: Double): Binary16 = {
     val bits        = java.lang.Double.doubleToRawLongBits(value)
     val sign        = (bits >>> 48) & 0x8000L
     val rawExponent = ((bits >>> 52) & 0x7ffL).toInt
     val fraction    = bits & 0x000fffffffffffffL
     val exponent    = rawExponent - 1023
-    if (rawExponent == 0x7ff) sign | (if (fraction == 0L) 0x7c00L else 0x7e00L)
-    else if (exponent > 15) sign | 0x7c00L
-    else if (exponent < -25) sign
-    else {
-      val significand = fraction | 0x0010000000000000L
-      val shift       = if (exponent < -14) 28 - exponent else 42
-      val retained    = significand >>> shift
-      val discarded   = significand & ((1L << shift) - 1L)
-      val halfway     = 1L << (shift - 1)
-      val rounded = retained + (if (discarded > halfway || (discarded == halfway && (retained & 1L) != 0L)) 1L else 0L)
-      sign | (if (exponent < -14) rounded else ((exponent + 14).toLong << 10) + rounded)
-    }
+    val encoded     =
+      if (rawExponent == 0x7ff) sign | (if (fraction == 0L) 0x7c00L else 0x7e00L)
+      else if (exponent > 15) sign | 0x7c00L
+      else if (exponent < -25) sign
+      else {
+        val significand = fraction | 0x0010000000000000L
+        val shift       = if (exponent < -14) 28 - exponent else 42
+        val retained    = significand >>> shift
+        val discarded   = significand & ((1L << shift) - 1L)
+        val halfway     = 1L << (shift - 1)
+        val rounded     =
+          retained + (if (discarded > halfway || (discarded == halfway && (retained & 1L) != 0L)) 1L else 0L)
+        sign | (if (exponent < -14) rounded else ((exponent + 14).toLong << 10) + rounded)
+      }
+    Binary16.low(encoded)
   }
 
-  def toDouble(bits: Long, width: Int): Double = width match {
-    case 16 => binary16ToFloat(bits).toDouble
-    case 32 => binary32ToFloat(bits).toDouble
+  def toDouble(bits: Long, width: FloatingPointWidth): Double = width.value match {
+    case 16 => binary16ToFloat(Binary16.low(bits)).toDouble
+    case 32 => binary32ToFloat(Binary32.fromLow(Bits.low32(bits))).toDouble
     case 64 => binary64ToDouble(bits)
-    case _  => throw IllegalArgumentException(s"floating-point width must be 16, 32, or 64, found $width")
   }
 
-  def fromDouble(value: Double, width: Int): Long = width match {
-    case 16 => doubleToBinary16(value)
-    case 32 => floatToBinary32(value.toFloat)
+  def fromDouble(value: Double, width: FloatingPointWidth): Long = width.value match {
+    case 16 => doubleToBinary16(value).value
+    case 32 => floatToBinary32(value.toFloat).value
     case 64 => doubleToBinary64(value)
-    case _  => throw IllegalArgumentException(s"floating-point width must be 16, 32, or 64, found $width")
   }
 }

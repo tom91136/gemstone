@@ -1,39 +1,43 @@
 package net.kurobako.gemstone.isa.spirv.v1_6
 
-import net.kurobako.gemstone.Col
-import net.kurobako.gemstone.isa.ValidationResult
+import net.kurobako.gemstone.Vec
+import net.kurobako.gemstone.isa.ValidationOutcome
 
 import cats.syntax.all.*
-
-enum DecodeError {
-  case Binary(error: BinaryError)
-  case Instruction(error: ModuleDecodeError)
-
-  def message: String = this match {
-    case Binary(error)      => error.message
-    case Instruction(error) => error.message
-  }
-}
+import io.github.iltotore.iron.*
+import io.github.iltotore.iron.constraint.all.*
 
 object ISA {
+  enum DecodeError {
+    case Binary(error: net.kurobako.gemstone.isa.spirv.v1_6.Binary.BinaryError)
+    case Instruction(error: ModuleDecodeError)
+
+    def message: String = this match {
+      case Binary(error)      => error.message
+      case Instruction(error) => error.message
+    }
+  }
+
   val version: SPIRVVersion             = Instruction.version
-  val instructions: Col[InstructionDef] = Instruction.definitions
+  val instructions: Vec[InstructionDef] = Instruction.definitions
 
   def decode(module: RawModule): Either[ModuleDecodeError, Module] =
     module.instructions.zipWithIndex
       .traverse { case (instruction, index) =>
-        Instruction.decode(instruction).leftMap(ModuleDecodeError.Instruction(index, _))
+        Instruction.decode(instruction).leftMap(error =>
+          ModuleDecodeError.Instruction(index.refineUnsafe[Positive0], error)
+        )
       }
       .map(Module(module.header, _, module.endianness))
 
-  def decode(bytes: Col[Byte]): Either[DecodeError, Module] = for {
-    raw    <- Binary.decode(bytes).leftMap(DecodeError.Binary.apply)
-    module <- decode(raw).leftMap(DecodeError.Instruction.apply)
+  def decode(bytes: Vec[Byte]): Either[DecodeError, Module] = for {
+    raw    <- Binary.decode(bytes).leftMap(DecodeError.Binary(_))
+    module <- decode(raw).leftMap(DecodeError.Instruction(_))
   } yield module
 
-  def encode(module: Module): Either[BinaryError, Col[Byte]] =
+  def encode(module: Module): Either[Binary.BinaryError, Vec[Byte]] =
     Binary.encode(RawModule(module.header, module.instructions.map(Instruction.encode), module.endianness))
 
-  def validate(module: Module, environment: Environment): ValidationResult[ValidationIssue] =
-    Validator.validate(module, environment)
+  def validate(module: Module, environment: Validation.Environment): ValidationOutcome[Validation.Issue] =
+    Validation.validate(module, environment)
 }

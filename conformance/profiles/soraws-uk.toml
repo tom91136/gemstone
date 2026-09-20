@@ -1,0 +1,113 @@
+# RTX 4060 Ti (sm_89), Radeon gfx1036 exposed as ISA-compatible gfx1030, and Intel Arc A750.
+[[targets]]
+name = "nvidia-cuda"
+backend = "cuda"
+architecture = "sm_89"
+device = "*RTX 4060 Ti*"
+
+[[targets]]
+name = "amd-hsa"
+backend = "hsa"
+architecture = "gfx1030"
+device = "*gfx1030*"
+environment = { HSA_OVERRIDE_GFX_VERSION = "10.3.0" }
+
+[[targets]]
+name = "amd-hip"
+backend = "hip"
+architecture = "gfx1030"
+device = "*gfx1030*"
+environment = { HSA_OVERRIDE_GFX_VERSION = "10.3.0" }
+# These variants bypass the HIP runtime's ISA-compatibility path: OpenMP
+# offload rejects the overridden gfx1030 image, while Kokkos executes it with
+# incorrect results. The native HIP variants cover the same miniapps.
+skips = [
+  "babelstream_omp_target",
+  "minibude_omp_target",
+  "cloverleaf_omp_target",
+  "tealeaf_omp_target",
+  "cloverleaf_kokkos",
+  "tealeaf_kokkos",
+]
+
+[[targets]]
+name = "amd-opencl"
+backend = "opencl"
+device = "*gfx1036*"
+environment = { OCL_ICD_VENDORS = "/etc/OpenCL/vendors/amdocl64.icd" }
+# Known defects in the AMD proprietary OpenCL 2.0 runtime exposed by this APU.
+skips = [
+  "cts/opencl/api/negative_create_command_queue",
+  "cts/opencl/api/negative_create_command_queue_with_properties",
+  "cts/opencl/api/negative_create_context",
+  "cts/opencl/api/negative_create_context_from_type",
+  "cts/opencl/api/negative_get_device_ids",
+  "cts/opencl/api/negative_invalid_arg_queue",
+  "cts/opencl/api/negative_invalid_arg_sampler",
+  "cts/opencl/api/negative_set_read_write_image_arg",
+  "cts/opencl/api/min_max_read_image_args",
+  "cts/opencl/basic/enqueue_map_image",
+  "cts/opencl/basic/imagearraycopy3d",
+  "cts/opencl/basic/imagecopy3d",
+  "cts/opencl/basic/imagerandomcopy",
+  # Intermittently miscompares after a HIP process has used the same GPU.
+  "cts/opencl/basic/imagecopy",
+  "cts/opencl/basic/progvar_prog_scope_misc",
+  "cts/opencl/compiler/get_program_info_kernel_names",
+  "cts/opencl/printf/double_limits",
+  "cts/opencl/printf/float_limits",
+  "cts/opencl/printf/format_string",
+  "cts/opencl/printf/half_limits",
+  "cts/opencl/printf/length_specifier",
+  "cts/opencl/printf/mixed_format_random",
+  "cts/opencl/printf/string",
+  "cts/opencl/printf/vector",
+]
+
+[[targets]]
+name = "intel-opencl"
+backend = "opencl"
+device = "*Intel*OpenCL Graphics*Arc*A750*"
+environment = { OCL_ICD_VENDORS = "/etc/OpenCL/vendors/intel.icd" }
+skips = [
+  "cts/opencl/api/local_arg_size_zero",
+  "cts/opencl/basic/imagedim_non_pow2",
+  "cts/opencl/basic/imagedim_pow2",
+  "cts/opencl/compiler/opencl_c_versions",
+]
+
+[[targets]]
+name = "nvidia-opencl"
+backend = "opencl"
+device = "*NVIDIA*RTX 4060 Ti*"
+environment = { OCL_ICD_VENDORS = "/etc/OpenCL/vendors/nvidia.icd" }
+skips = [
+  "cts/opencl/compiler/execute_after_included_header_link",
+  "cts/opencl/multiples/context_multiple_contexts_same_device",
+]
+
+[[targets]]
+name = "rusticl-amd-opencl"
+backend = "opencl"
+device = "*rusticl*AMD*"
+environment = { OCL_ICD_VENDORS = "/etc/OpenCL/vendors/rusticl.icd", RUSTICL_ENABLE = "radeonsi" }
+skips = [
+  "cts/opencl/basic/imagedim_non_pow2",
+]
+
+[[targets]]
+name = "rusticl-intel-opencl"
+backend = "opencl"
+device = "*rusticl*Intel*"
+environment = { OCL_ICD_VENDORS = "/etc/OpenCL/vendors/rusticl.icd", RUSTICL_ENABLE = "iris" }
+skips = [
+  "cts/opencl/api/clone_kernel_with_exec_info",
+  "cts/opencl/api/clone_kernel_with_svm_ptrs",
+  "cts/opencl/basic/vector_creation",
+]
+
+[[targets]]
+name = "intel-sycl"
+backend = "sycl"
+device = "sycl:level_zero:*Arc*A750*"
+environment = { OverrideDefaultFP64Settings = "1", IGC_EnableDPEmulation = "1", SYCL_CACHE_PERSISTENT = "1" }

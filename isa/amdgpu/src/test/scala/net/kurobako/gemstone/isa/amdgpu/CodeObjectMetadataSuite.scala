@@ -1,0 +1,118 @@
+package net.kurobako.gemstone.isa.amdgpu
+
+import io.github.iltotore.iron.*
+import io.github.iltotore.iron.constraint.all.*
+
+import net.kurobako.gemstone.Vec
+import net.kurobako.gemstone.execution.KernelParameterKind
+import net.kurobako.gemstone.execution.KernelName
+import net.kurobako.gemstone.execution.LinkageName
+
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
+import java.nio.charset.StandardCharsets
+
+final class CodeObjectMetadataSuite extends munit.FunSuite {
+  test("decode the server-owned AMDGPU launch manifest") {
+    val result = CodeObjectMetadata.decode(Vec.unsafeFromArray(codeObject(hidden = false))).toOption.get
+
+    assertEquals(result.size, 1)
+    val kernel = result.head
+    assertEquals(kernel.name, KernelName("add"))
+    assertEquals(kernel.symbol, LinkageName("add.kd"))
+    assertEquals(kernel.metadata.argumentBlockSize, 20)
+    assertEquals(kernel.metadata.explicitParameterCount, 3)
+    assertEquals(
+      kernel.metadata.parameters.map(parameter =>
+        (parameter.offset, parameter.width, parameter.kind, parameter.containsPointers)
+      ),
+      Vec(
+        (0, 8, KernelParameterKind.Allocation, false),
+        (8, 8, KernelParameterKind.Allocation, false),
+        (16, 4, KernelParameterKind.Scalar, true)
+      )
+    )
+  }
+
+  test("exclude hidden AMDGPU fields from the explicit parameter count") {
+    val metadata = CodeObjectMetadata.decode(Vec.unsafeFromArray(codeObject(hidden = true))).toOption.get.head.metadata
+
+    assertEquals(metadata.argumentBlockSize, 24)
+    assertEquals(metadata.parameters.size, 4)
+    assertEquals(metadata.explicitParameterCount, 3)
+  }
+
+  private def codeObject(hidden: Boolean): Array[Byte] = {
+    val arguments = Seq(
+      argument(0, 8, "global_buffer"),
+      argument(8, 8, "global_buffer"),
+      argument(16, 4, "by_value")
+    ) ++ Option.when(hidden)(argument(20, 4, "hidden_block_count_x"))
+    val metadata = concat(
+      Array(0x81.toByte),
+      string("amdhsa.kernels"),
+      Array(0x91.toByte, 0x84.toByte),
+      string(".args"),
+      Array((0x90 | arguments.size).toByte),
+      concat(arguments*),
+      string(".kernarg_segment_size"),
+      unsigned(if (hidden) 24 else 20),
+      string(".name"),
+      string("add"),
+      string(".symbol"),
+      string("add.kd")
+    )
+    val noteOffset        = 64
+    val paddedDescription = (metadata.length + 3) & ~3
+    val noteSize          = 12 + 8 + paddedDescription
+    val sectionOffset     = noteOffset + noteSize
+    val image             = Array.ofDim[Byte](sectionOffset + 2 * 64)
+    val buffer            = ByteBuffer.wrap(image).order(ByteOrder.LITTLE_ENDIAN)
+
+    buffer.put(0, 0x7f.toByte)
+    buffer.put(1, 'E'.toByte)
+    buffer.put(2, 'L'.toByte)
+    buffer.put(3, 'F'.toByte)
+    buffer.put(4, 2.toByte)
+    buffer.put(5, 1.toByte)
+    buffer.putShort(16, 3.toShort)
+    buffer.putShort(18, 224.toShort)
+    buffer.putInt(20, 1)
+    buffer.putLong(40, sectionOffset.toLong)
+    buffer.putShort(52, 64.toShort)
+    buffer.putShort(58, 64.toShort)
+    buffer.putShort(60, 2.toShort)
+    buffer.putInt(noteOffset, 7)
+    buffer.putInt(noteOffset + 4, metadata.length)
+    buffer.putInt(noteOffset + 8, 32)
+    Array.copy("AMDGPU\u0000".getBytes(StandardCharsets.US_ASCII), 0, image, noteOffset + 12, 7)
+    Array.copy(metadata, 0, image, noteOffset + 20, metadata.length)
+    val noteSection = sectionOffset + 64
+    buffer.putInt(noteSection + 4, 7)
+    buffer.putLong(noteSection + 24, noteOffset.toLong)
+    buffer.putLong(noteSection + 32, noteSize.toLong)
+    image
+  }
+
+  private def argument(offset: Int, size: Int, kind: String): Array[Byte] = concat(
+    Array(0x83.toByte),
+    string(".offset"),
+    unsigned(offset),
+    string(".size"),
+    unsigned(size),
+    string(".value_kind"),
+    string(kind)
+  )
+
+  private def string(value: String): Array[Byte] = {
+    val bytes = value.getBytes(StandardCharsets.UTF_8)
+    assert(bytes.length < 32)
+    Array((0xa0 | bytes.length).toByte) ++ bytes
+  }
+
+  private def unsigned(value: Int): Array[Byte] =
+    if (value < 128) Array(value.toByte)
+    else Array(0xce.toByte, (value >>> 24).toByte, (value >>> 16).toByte, (value >>> 8).toByte, value.toByte)
+
+  private def concat(parts: Array[Byte]*): Array[Byte] = parts.iterator.flatten.toArray
+}

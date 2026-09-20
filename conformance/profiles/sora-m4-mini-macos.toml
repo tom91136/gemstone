@@ -1,0 +1,5 @@
+# Apple M4 CPU and GPU. There is no Metal backend here.
+[[targets]]
+name = "apple-opencl"
+backend = "opencl"
+device = "*Apple*"

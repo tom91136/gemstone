@@ -1,184 +1,120 @@
-# Conformance
+# GPU conformance
 
-The conformance inventory consists of the unified C++ cases, the four-miniapp model matrix, and pinned upstream
-OpenCL/SYCL CTS profiles. CTest sees one exact case execution per test. Oracle and Gemstone variants have separate
-names, results, deadlines and logs. The retired vendor harnesses remain retired; CTS uses the same fixture-build,
-CTest and reporting lifecycle as the other cases. Retained coverage limits are described in the
-[unified guide](unified/README.md#coverage-limits).
+This independent CMake/CTest project builds relocatable artifacts for `cuda`, `hip`, `hsa`, `opencl`, `sycl`,
+and `openacc`. Commands in this file run from this directory.
 
-```console
-sbt --server --batch integration/testFull
-GEMSTONE_TEST_PROFILE=default sbt --server --batch conformanceIntegration/testFull
-GEMSTONE_CONFORMANCE_BACKENDS=cuda GEMSTONE_CONFORMANCE_FILTER='^unified/cuda/algorithms/copy/i32/n1$' sbt --server --batch conformanceIntegration/testFull
-GEMSTONE_CONFORMANCE_BACKENDS= GEMSTONE_MINIAPP_APPS=babelstream sbt --server --batch conformanceIntegration/testFull
+Each backend has Catch2 test programs, a runtime closure, and a data bundle plus one small overlay per compiled
+architecture. CUDA support bundles are keyed by SDK because overlays built by different CUDA generations cannot safely
+share one runtime closure. Workloads select tests at runtime; they do not change what is compiled.
+
+## Artifacts
+
+The outer CMake project expands a named target set into serial container builds. Architecture targets depend on their
+backend's support target and export this layout:
+
+```text
+cuda/support-11.8/
+cuda/support-13.3/
+cuda/sm_89/
+hip/support/
+hip/gfx1030/
+hsa/support/
+hsa/gfx1030/
+opencl/
+sycl/
 ```
 
-Integration defaults to a shared 2-billion-instruction execution budget; an explicit environment override wins.
-For the aligned full qualification matrix:
+Support directories contain the shared `lib/`, `data/`, and `licenses/` payloads; the root driver is built once,
+outside every backend artifact. Architecture directories are flat and
+contain `artifact.toml`, `conformance-device`, `test-programs.txt`, and their Catch2 test executables. Architecture
+metadata names the exact support bundle it needs. The driver asks each test executable for its Catch2 inventory,
+filters it through the selected workload, and materializes one lean CTest entry per selected case.
+
+Configure and build the default target set from this directory:
 
 ```console
-UNIFIED_SUITE_CTEST_PROFILE=full GEMSTONE_EXECUTION_MAX_INSTRUCTIONS=2000000000 \
-  sbt --server --batch conformanceIntegration/testFull
+cmake -S artifacts -B build/artifacts -G Ninja
+cmake --build build/artifacts
 ```
 
-Use `--server --batch` so the sbt JVM observes the selected environment. Root `test` remains MUnit unit tests.
-`integration/testFull` builds the native providers, prepares fixtures, starts one shared server, invokes CTest, and closes
-all sessions and the server. The Scala integration suite is a lifecycle bridge, not a second case scheduler.
+Artifacts are written to `build/artifacts/output`.
 
-## Host profiles
+`artifacts/targets/default.cmake` selects CUDA `sm_89`, HIP and HSA `gfx1030`, OpenCL, and SYCL. Extend or replace
+the matrix at configure time:
 
-Profile selection follows Polyregion's polytest conventions: `GEMSTONE_TEST_PROFILE` with an OS suffix, the explicit
-profile without a suffix, short hostname with an OS suffix, hostname, then `profiles/default.env`. OS suffixes are
-`linux`, `windows` and `darwin`. Files accept comments, `export KEY=value`, and append assignments `KEY+=value`.
+```console
+cmake -S artifacts -B build/artifacts -G Ninja \
+  -DCONFORMANCE_BACKENDS=cuda,hip,hsa,opencl,sycl \
+  -DCUDA_ARCHITECTURES=sm_89,sm_90 -DAMDGPU_ARCHITECTURES=gfx1036,gfx1100
+```
 
-`GEMSTONE_TEST_ORACLES` contains colon- or semicolon-separated `provider@target!physical-resource` entries. For example,
-`hip@gfx1036!amd-0` and `hsa@gfx1036!amd-0` share one GPU lock. OpenCL and SYCL OpenCL entries identify an ICD vendor;
-SYCL OpenCL and Level Zero targeting the same Intel GPU share `intel-0`. The harness isolates the selected OpenCL ICD.
-The initial profiles describe device zero for each listed vendor. Target architectures also supply fixture build defaults.
-Explicit architecture settings can still override these defaults.
+The outer matrix is always serial; each artifact build retains its internal parallelism. Ninja avoids unchanged entries,
+and Podman caches only reusable toolchain images. Compilation runs in disposable containers, so intermediate build trees
+do not consume persistent container storage. Set `CONTAINER_EXECUTABLE=docker` to use Docker. Build one entry with
+`cmake --build build/artifacts --target cuda-sm_89`.
 
-On `soraws-uk`, the physical Radeon is gfx1036, while the bundled ROCm BLAS library contains gfx1030 kernels.
-The host profile uses a tested gfx1030 compatibility target and `HSA_OVERRIDE_GFX_VERSION=10.3.0` consistently for
-HIP/HSA fixture compilation and execution. This is not an official vendor support claim. Regenerate ROCm artifacts
-and case plans after changing that profile; do not reuse gfx1036-only runners with the override.
+The `complete` target set covers the maintained CUDA and ROCm 7 architecture generations:
 
-The same host profile enables native SYCL persistent compilation caching with `SYCL_CACHE_PERSISTENT=1`.
-Independent oracle processes reuse compiled device binaries in the SDK's stable user-cache directory; the SDK
-retains its normal cache-size and eviction limits. This profile setting is passed to oracle plans, not injected
-into emulation plans. See [Intel's cache settings](https://intel.github.io/llvm/EnvironmentVariables.html).
+```console
+cmake -S artifacts -B build/complete -G Ninja \
+  -DCONFORMANCE_TARGET_SET=complete
+cmake --build build/complete
+```
 
-The generic profile declares no GPU oracle. Such oracle tests exit with CTest skip code 77 before spawning a workload;
-emulation still runs. `sora-framework16.env` describes Radeon gfx1150 and deliberately contains no NVIDIA target.
-The profile format/precedence and hardware descriptions were adapted from `polyregion/native/polytest` and
-`polyregion/native/test-profiles`; the harness has no build-time dependency on the Polyregion checkout, LLVM or Aspartame.
+CUDA `sm_35`, `sm_50`, `sm_60`, and `sm_70` use CUDA 11.8; `sm_75` through `sm_120` use CUDA 13.3. The complete AMD
+matrix spans `gfx803` through `gfx1201`. The `gfx803` HIP overlay remains intentionally limited: it keeps rocThrust and
+viable miniapps, while rocBLAS cases are omitted because current ROCm releases no longer ship a matching kernel
+library. Use the independent `legacy-gfx803` target set when that is the only artifact required.
 
-## Runtime routes and upstream CTS
+```console
+cmake -S artifacts -B build/gfx803 -G Ninja \
+  -DCONFORMANCE_TARGET_SET=legacy-gfx803
+cmake --build build/gfx803
+```
 
-On compatible Linux ROCm artifacts, unified HIP and HIP/Kokkos/StdPar miniapps run through both `hip` (Gemstone HIP)
-and `hip-hsa` (the artifact’s vendor HIP over Gemstone HSA). The same binary and workload arguments share one native
-HIP oracle. Reports retain actual library binding evidence for each emulated route. Windows HIP does not imply HSA;
-`hip-hsa` is Linux-only. OpenMP target and direct HSA workloads remain HSA cases. See
-[HIP runtime routes](../server/HIP_RUNTIME_ROUTES.md) for the API/platform distinction.
+## Driver
 
-The initial upstream profiles are deliberately bounded: OpenCL builds five categories and schedules ten representative
-cases by default; SYCL schedules eleven `item`/`range` cases through both Level Zero and OpenCL. This is partial upstream
-coverage, not CTS certification. Upstream result files distinguish passes, failures and unsupported-case skips; device
-cases still require authenticated emulation activity. Reviewed host/header/property-only OpenCL entries and two
-host-only SYCL cases waive device activity but still require a validated upstream result.
+Build the dual-use driver without building suites:
 
-`GEMSTONE_CTS_SUITES` selects `opencl,sycl` by default; an empty value disables CTS. An explicit
-`GEMSTONE_CONFORMANCE_FILTER` can select any exported OpenCL case, including cases outside the default ten. Thus
-`^cts/opencl/` requests every exported OpenCL case, rather than just the smoke profile. Pinned sources, profile scope
-and artifact contracts are documented in [OpenCL CTS](cts/opencl/README.md) and [SYCL CTS](cts/sycl/README.md).
+```console
+cmake -S . -B build/executable -G Ninja \
+  -DBUILD_TESTING=OFF \
+  -DCONFORMANCE_BUILD_UNIFIED=OFF -DCONFORMANCE_BUILD_CTS=OFF \
+  -DCONFORMANCE_BUILD_MINIAPPS=OFF
+cmake --build build/executable --target conformance
+```
 
-## Scheduling and ownership
+`conformance run` is the profile coordinator. It resolves artifacts, probes their physical devices, discovers Catch2
+cases, writes a run-local CTest inventory, and starts CTest. Each CTest entry calls `conformance exec`, which applies
+profile skips, takes the physical-device lock, and runs exactly one case in its owning Catch2 executable.
 
-Native runtimes built by sbt default to CMake `Release`, matching fixture optimisation. Standard `CMAKE_BUILD_TYPE`
-or an explicit `nativeConfigureArguments` build-type argument can override this; native tests retain assertions.
+Machine profiles select backends, architectures, devices, environment, and explicit skips. Each invocation selects one
+profile; omit `--machine` to use the profile matching the local short hostname.
+`--isolated-launcher` skips duplicate resolved routes, disables physical-device locks, and gives each serial launcher route
+the machine-wide CTest worker budget.
 
-Fixture projects build sequentially under the shared build lock. `CMAKE_BUILD_PARALLEL_LEVEL` controls compiler jobs
-inside that one build. The container engine defaults to Podman; its build and run scopes join `GEMSTONE_BUILD_SLICE`
-when set. This keeps fixture builds and test processes inside the same systemd resource envelope.
+Run directly or through any compiler-wrapper-style launcher:
 
-CTest schedules independent case processes concurrently. The CPU resource capacity is the configured
-`GEMSTONE_EXECUTION_PARALLELISM`, or the available CPU count. CTest's process limit adds one slot per configured
-physical GPU, allowing GPU oracles to start even when all CPU resources are occupied. Only oracle executions acquire physical GPU
-`RESOURCE_LOCK`s. CUDA, HIP/HSA and Intel oracle work can overlap on different GPUs. CPU emulation has no oracle GPU lock.
+```console
+build/executable/bin/conformance run \
+  --profiles profiles --artifacts build/artifacts/output \
+  --machine soraws-uk --workload full --output build/reports/direct
 
-The generated `resources.json` describes the shared CPU capacity. Emulation and host-reference cases request
-CPU slots through CTest's standard `RESOURCE_GROUPS` property. Large emulated GEMMs reserve that whole capacity:
-edge GEMMs from n512 and matrix shapes with at least 16 million multiply-accumulates. Ordinary CPU cases request
-one slot. CloverLeaf OpenMP-target emulation also reserves the whole pool: measured isolated execution fits its
-unchanged deadline, while competing CPU cases can push it over. GPU oracles use their physical GPU locks and do not consume emulation CPU slots, so a heavy kernel can
-run alongside them. The shared worker pool and systemd envelope still bound actual CPU execution; resource
-allocation adds no worker threads. Workload sizes and per-backend deadlines are unchanged.
+build/executable/bin/conformance run \
+  --profiles profiles --artifacts build/artifacts/output \
+  --machine soraws-uk --workload full --output build/reports/emulated --isolated-launcher \
+  --launcher -- /path/to/launcher
+```
 
-All emulated cases connect to one server JVM. Each case receives a separate credential, with process state keyed by
-PID and process incarnation inside that client scope. Multiple connections from one process share its API state;
-other clients cannot access its allocations or satisfy its attestation. Closing a client cancels and releases its state.
+Pass backend or target names before `--launcher` to narrow a run. `CONFORMANCE_JOBS` controls CTest parallelism.
+`workloads/compact.toml` and `workloads/full.toml` define the available workload sizes.
 
-Emulated cases require an authenticated request from their own client session. The reviewed entries in
-`unified/execution-metadata.json` identify the narrow exceptions: canonical empty-input operations and four
-host-only rocThrust tuple/serialization probes. An exception still runs its unchanged native case and must report
-exactly one PASS; runtime probes, canary work, unknown operations, and nonzero device workloads keep mandatory
-attestation. The driver verifies that the selected `--case` matches the inventory identity and records the applied
-requirement/reason, counters, native exit status, and any validation error. Changes to the execution behavior of a
-listed case require review of this metadata; a generic `/n0` suffix is not an exemption.
+## Unit tests
 
-
-The server has one bounded CPU execution pool, shared across clients and ISAs. Jobs rotate after workgroups, allowing
-small jobs to progress alongside large kernels. Necessarily sequential kernels use a single worker. Parsed immutable
-programs may be reused through bounded caches; allocations, contexts, queues and completions remain private.
-
-## Results and controls
-
-The generated matrix and authoritative per-case JUnit report are in `target/conformance/ctest/` by default,
-or `<GEMSTONE_CONFORMANCE_REPORT_DIR>/ctest/`. `cases/` retains stdout, stderr, timing and child-process peak RSS for
-each execution. `profile.json` records the selected host profile and oracle resources.
-
-For direct CTest iteration after generating a matrix, keep a server running with
-`sbt --server --batch 'server/run serve --endpoint-file <matrix>/server.json'`, then use
-ordinary `ctest --test-dir <matrix> --resource-spec-file <matrix>/resources.json -R <regex> -j35`
-for 32 CPU slots and three physical GPUs. The matrix reads the refreshed endpoint file; no JVM is started per case.
-
-Run `python3 conformance/tools/report-run.py <report-directory>` to summarize results. It distinguishes oracle skips
-from native passes. Summed case durations overlap under parallel execution; the report also shows wall spans. Client
-RSS excludes the shared server; the systemd scope provides the combined memory peak.
-
-| Setting | Purpose |
-| --- | --- |
-| `GEMSTONE_TEST_PROFILE` | Select a host profile; `default` forces the generic no-GPU profile |
-| `GEMSTONE_TEST_ORACLES` | Explicit override of the profile's oracle target list |
-| `GEMSTONE_CONFORMANCE_BACKENDS` | Unified artifact backends; empty selects no unified artifacts |
-| `GEMSTONE_CONFORMANCE_FILTER` | Regex over individual logical case names |
-| `GEMSTONE_MINIAPP_APPS`, `GEMSTONE_MINIAPP_PORTS` | Miniapp/model selection |
-| `CMAKE_BUILD_PARALLEL_LEVEL` | Compiler jobs inside the current fixture build |
-| `GEMSTONE_EXECUTION_PARALLELISM` | Shared emulation workers and default CTest job count |
-| `GEMSTONE_CONFORMANCE_REPORT_DIR` | Logs, profiles and measurements |
-| `GEMSTONE_CONFORMANCE_ARTIFACTS` | Relocatable artifact cache root |
-| `GEMSTONE_BUILD_SLICE`, `GEMSTONE_RESOURCE_CGROUP` | Shared container/systemd accounting |
-| `GEMSTONE_<BACKEND>_IMAGE` | Optional pinned-image override |
-
-Hash shards and the `GEMSTONE_NO_ORACLE` / `GEMSTONE_ORACLE_ONLY` modes are retired. Select the generic profile to skip
-GPU oracles. Workload sizes and types remain ordinary runner arguments / `UNIFIED_SUITE_*` CMake settings.
-
-## Debugging
-
-Keep transport recording and execution limits available for diagnosis. AMDGPU instruction diagnostics use one
-`GEMSTONE_AMDGPU_TRACE` comma-separated category selector, for example `dispatch,arguments,loads,stores` or `all`.
-Former `GEMSTONE_AMDGPU_TRACE_*` switches map to lowercase hyphenated categories (`MERGE_STATE` becomes
-`merge-state`). Categories are read once; `control` traces control flow for all kernels. Architecture-affecting
-AMDGPU options remain separate from tracing and have not been changed by this cleanup.
-
-Native facade diagnostics use the same category convention: `GEMSTONE_HSA_TRACE` accepts
-`api,memory,packets,loaders`, `GEMSTONE_HIP_TRACE` accepts `modules,allocations`, and
-`GEMSTONE_OPENCL_TRACE` accepts `allocations`. Each also accepts `all`.
-
-Oracle and emulator executions are independent; paired comparisons run after both finish. A passing paired
-acceptance result requires both successes and evidence that the emulator received execution requests. A generic-profile run validates emulation without claiming native GPU coverage. A configured oracle failure remains a failure.
-
-## Measured full runs
-
-`GEMSTONE_CONFORMANCE_ARTIFACTS` selects a common artifact root (`unified`, `miniapps` and `cts` subdirectories), allowing a
-fresh fixture build without removing prior artifacts. `GEMSTONE_CONFORMANCE_REPORT_DIR` retains per-process logs,
-case/fixture timing and cgroup peak measurements, plus integration JFR recordings. `GEMSTONE_BUILD_SLICE` places
-Podman build/run containers in the same systemd slice as sbt; limits on the sbt service alone would not cover sibling
-libpod scopes. `GEMSTONE_RESOURCE_CGROUP` identifies that slice's cgroup for peak-memory measurements.
-HIP loader provenance is captured once for each runner/runtime-route combination and reused by later cases in the
-same report. Full loader output is retained for that qualification or for a failure, rather than for every case.
-
-Native builds and SDK fixture builds share a POSIX lock. Each build uses `CMAKE_BUILD_PARALLEL_LEVEL` workers;
-fixture builds and test groups do not fan out across projects. Backend suites and per-model lazy miniapp fixtures
-isolate build failures so unrelated jobs are still attempted. The configured interpreter worker count is honored
-by every miniapp model; ISA execution code still decides when a dispatch must be sequential.
-
-Virtual runtime targets use `GEMSTONE_CUDA_TARGET` and `GEMSTONE_AMDGPU_TARGET`. The CUDA runtime still accepts
-`GEMSTONE_CUDA_TARGET_ARCH` as a compatibility fallback; a non-empty `GEMSTONE_CUDA_TARGET` takes precedence.
-These execution settings are distinct from the fixture compilation settings `GEMSTONE_CUDA_ARCH` and
-`GEMSTONE_AMDGPU_TARGETS`.
-
-CTS builders publish completed artifacts from private staging directories. Failed stages are removed;
-recognized legacy partial artifacts are preserved beside their replacement. Unrecognized destination contents
-are rejected. Container execution uses the image ID produced by the build, so another checkout cannot retag
-its selected builder. Measurement failures preserve an existing command failure and become infrastructure
-errors when the command otherwise succeeds.
+```console
+cmake -S . -B build/unit -G Ninja \
+  -DCONFORMANCE_BUILD_UNIFIED=OFF -DCONFORMANCE_BUILD_CTS=OFF \
+  -DCONFORMANCE_BUILD_MINIAPPS=OFF
+cmake --build build/unit --target conformance_unit_tests
+ctest --test-dir build/unit --output-on-failure
+```

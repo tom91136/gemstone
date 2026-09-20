@@ -1,0 +1,78 @@
+#include "conformance/environment.hpp"
+
+#include <algorithm>
+#include <cstdlib>
+#include <vector>
+
+#include "conformance/driver.hpp"
+
+#if defined(_WIN32)
+  #include <windows.h>
+#else
+extern char **environ;
+#endif
+
+namespace conformance::driver {
+std::map<std::string, std::string> base_environment() {
+  std::map<std::string, std::string> result;
+  for (const auto *name : {"HOME", "USER", "LOGNAME", "TMPDIR", "TMP", "TEMP", "LANG", "LC_ALL", "SystemRoot", "WINDIR", "COMSPEC",
+                           "DISPLAY", "WAYLAND_DISPLAY", "XDG_RUNTIME_DIR"})
+    if (const auto *value = std::getenv(name)) result[name] = value;
+  // Gemstone's explicit launcher configuration must survive the clean runtime environment.
+#if defined(_WIN32)
+  auto *block = GetEnvironmentStringsA();
+  if (block) {
+    for (auto *entry = block; *entry; entry += std::char_traits<char>::length(entry) + 1) {
+      std::string text(entry);
+      const auto end = text.find('=');
+      if (text.starts_with("GEMSTONE_") && end != std::string::npos) result[text.substr(0, end)] = text.substr(end + 1);
+    }
+    FreeEnvironmentStringsA(block);
+  }
+  const auto system = result.contains("SystemRoot") ? result.at("SystemRoot") : "C:\\Windows";
+  result["PATH"] = system + "\\System32;" + system;
+#else
+  for (auto **entry = environ; entry && *entry; ++entry) {
+    std::string text(*entry);
+    const auto end = text.find('=');
+    if (text.starts_with("GEMSTONE_") && end != std::string::npos) result[text.substr(0, end)] = text.substr(end + 1);
+  }
+  result["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin";
+#endif
+  return result;
+}
+void prepare_runtime_environment(std::map<std::string, std::string> &environment, const std::filesystem::path &artifact,
+                                 const std::filesystem::path &support, std::string_view backend) {
+  environment["CONFORMANCE_ARTIFACT_ROOT"] = artifact.string();
+  environment["CONFORMANCE_SUPPORT_ROOT"] = support.string();
+  // This map is used with env::empty, so absent variables really are absent.
+  for (auto i = environment.begin(); i != environment.end();) {
+    const auto &key = i->first;
+    if (reserved_environment_key(key) && !key.starts_with("CONFORMANCE_") && key != "PATH") i = environment.erase(i);
+    else ++i;
+  }
+#if defined(_WIN32)
+  environment["PATH"] = artifact.string() + ";" + (support / "lib").string() + ";" + base_environment().at("PATH");
+#elif defined(__APPLE__)
+  environment["DYLD_LIBRARY_PATH"] = (artifact / "lib").string() + ":" + (support / "lib").string();
+#else
+  environment["LD_LIBRARY_PATH"] = (artifact / "lib").string() + ":" + (support / "lib").string();
+#endif
+  if (std::filesystem::is_regular_file(support / "data/libdrm/amdgpu.ids"))
+    environment["AMDGPU_ASIC_ID_TABLE_PATHS"] = (support / "data/libdrm").string();
+  if (std::filesystem::is_directory(support / "lib/rocblas/library"))
+    environment["ROCBLAS_TENSILE_LIBPATH"] = (support / "lib/rocblas/library").string();
+  if (backend == "cuda" || backend == "openacc") environment["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID";
+  if (backend == "sycl") {
+    environment.try_emplace("OverrideDefaultFP64Settings", "1");
+    environment.try_emplace("IGC_EnableDPEmulation", "1");
+    std::vector<std::filesystem::path> adapters;
+    if (std::filesystem::is_directory(support / "lib"))
+      for (const auto &file : std::filesystem::directory_iterator(support / "lib"))
+        if (file.is_regular_file() && file.path().filename().string().starts_with("libur_adapter_level_zero.so"))
+          adapters.push_back(file.path());
+    std::sort(adapters.begin(), adapters.end());
+    if (!adapters.empty()) environment["UR_ADAPTERS_FORCE_LOAD"] = adapters.front().string();
+  }
+}
+} // namespace conformance::driver

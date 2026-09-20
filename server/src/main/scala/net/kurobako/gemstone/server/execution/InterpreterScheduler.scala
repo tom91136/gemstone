@@ -1,0 +1,182 @@
+package net.kurobako.gemstone.server.execution
+
+import net.kurobako.gemstone.execution.*
+import net.kurobako.gemstone.concurrent.withLock
+import net.kurobako.gemstone.PlatformTime
+
+import io.github.iltotore.iron.*
+import io.github.iltotore.iron.constraint.all.*
+
+import java.util.concurrent.locks.ReentrantLock
+import scala.collection.mutable
+import scala.util.control.NonFatal
+
+/** One fixed CPU pool. Jobs rotate after each workgroup, and nested dispatch callers help the same queue. */
+private[server] final class InterpreterScheduler private[server] (
+    val parallelism: Int :| Positive,
+    minGroups: Long = 16L,
+    minWorkItems: Long = 64L
+) extends ExecutionParallelism with AutoCloseable {
+  private final class Job(
+      val count: Long :| Positive0,
+      val task: Long :| Positive0 => Either[ExecutionFailure, Unit]
+  ) {
+    @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+    var next = 0L
+    @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+    var active = 0
+    @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+    var failure: Option[ExecutionFailure] = None
+    @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+    @volatile var finished                    = count == 0L
+    val observed: Option[mutable.Set[String]] = Option.when(trace)(mutable.Set.empty)
+  }
+  private val trace     = sys.env.contains("GEMSTONE_PERF_TRACE")
+  private val lock      = ReentrantLock()
+  private val available = lock.newCondition()
+  private val queue     = mutable.ArrayDeque.empty[Job]
+  private val inWorker  = ThreadLocal.withInitial[Boolean](() => false)
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+  @volatile private var closed = false
+  private val threads          = Array.tabulate(parallelism) { index =>
+    val thread = Thread(() => workerLoop(), s"gemstone-worker-$index")
+    thread.setDaemon(true)
+    thread.start()
+    thread
+  }
+
+  private def enqueue(
+      count: Long :| Positive0,
+      task: Long :| Positive0 => Either[ExecutionFailure, Unit]
+  ): Job = lock.withLock {
+    if (closed) throw java.util.concurrent.RejectedExecutionException("execution pool is closed")
+    val job = Job(count, task)
+    if (count > 0L) queue.append(job)
+    available.signalAll()
+    job
+  }
+
+  private def take(until: Option[Job]): Option[(Job, Long)] = lock.withLock {
+    while (!closed && queue.isEmpty && until.forall(!_.finished)) available.await()
+    if (closed || until.exists(_.finished)) None
+    else {
+      val job   = queue.removeHead()
+      val index = job.next
+      job.next += 1L
+      job.active += 1
+      job.observed.foreach(_ += Thread.currentThread().getName)
+      if (job.next < job.count) queue.append(job)
+      Some(job -> index)
+    }
+  }
+
+  private def execute(work: (Job, Long)): Unit = {
+    val (job, index) = work
+    val result       = try job.task(index.refineUnsafe[Positive0])
+    catch {
+      case NonFatal(error) =>
+        val detail = Option(error.getMessage).filter(_.nonEmpty).getOrElse(error.getClass.getName)
+        Left(ExecutionFailure.Failed(detail))
+    }
+    lock.withLock {
+      job.active -= 1
+      result.left.toOption.foreach { error =>
+        if (job.failure.isEmpty) job.failure = Some(error)
+        queue.filterInPlace(_ ne job)
+        job.next = job.count
+      }
+      if (job.active == 0 && job.next == job.count) job.finished = true
+      available.signalAll()
+    }
+  }
+
+  private def workerLoop(): Unit = {
+    inWorker.set(true)
+    // ThreadLocal membership is worker state rather than an AutoCloseable resource.
+    try while (!closed) take(None).foreach(execute(_))
+    catch { case _: InterruptedException => Thread.currentThread().interrupt() }
+    finally inWorker.remove()
+  }
+
+  private def await(job: Job): Either[ExecutionFailure, Unit] = {
+    if (inWorker.get()) {
+      while (!job.finished && !closed) take(Some(job)).foreach(execute(_))
+    } else lock.withLock {
+      while (!job.finished && !closed) available.await()
+    }
+    if (!job.finished) Left(ExecutionFailure.Failed("execution pool closed before the job completed"))
+    else job.failure.toLeft(())
+  }
+
+  def schedule(runnable: Runnable): Unit = {
+    val _ = enqueue(1L, _ => { runnable.run(); Right(()) })
+  }
+
+  def call[A](action: () => A): A =
+    if (inWorker.get()) action()
+    else {
+      val result = java.util.concurrent.atomic.AtomicReference(Option.empty[A])
+      val job    = enqueue(1L, _ => { result.set(Some(action())); Right(()) })
+      await(job).fold(
+        error => throw IllegalStateException(error.message),
+        _ => result.get().fold(throw IllegalStateException("execution result is absent"))(value => value)
+      )
+    }
+
+  override def shouldParallel(taskCount: Long :| Positive0, workItemsPerTask: Long :| Positive0): Boolean =
+    parallelism > 1 && taskCount > 1L && (taskCount >= minGroups || workItemsPerTask >= minWorkItems)
+
+  override def parallelFor(taskCount: Long :| Positive0)(
+      task: Long :| Positive0 => Either[ExecutionFailure, Unit]
+  ): Either[ExecutionFailure, Unit] = {
+    val started = if (trace) PlatformTime.monotonicNanos else 0L
+    val job     = enqueue(taskCount, task)
+    val result  = await(job)
+    job.observed.foreach { observed =>
+      scribe.info(
+        s"Gemstone parallel groups=$taskCount configured=$parallelism workers=${observed.size} elapsed_ns=${PlatformTime.monotonicNanos -
+            started}"
+      )
+    }
+    result
+  }
+
+  override def close(): Unit = {
+    lock.withLock { closed = true; queue.clear(); available.signalAll() }
+    threads.foreach(_.interrupt())
+    threads.iterator.filterNot(_ eq Thread.currentThread()).foreach(_.join())
+  }
+}
+
+private[server] object InterpreterScheduler {
+  val EnvironmentName                                 = "GEMSTONE_EXECUTION_PARALLELISM"
+  private val Maximum                                 = 64
+  private given (Interval.Closed[1, 64] ==> Positive) = Implication()
+
+  def fromEnvironment(environment: Map[String, String]): InterpreterScheduler = {
+    val available                   = hostBound
+    val configured: Int :| Positive = environment.get(EnvironmentName) match {
+      // Leave a small amount of host capacity for RPC, launcher, and GC work;
+      // the remaining logical CPUs are available to the bounded interpreter.
+      case None        => defaultParallelism
+      case Some(value) =>
+        value.toIntOption
+          .toRight(s"$EnvironmentName must be a positive integer: $value")
+          .flatMap(_.refineEither[Positive].left.map(_ => s"$EnvironmentName must be positive: $value"))
+          .fold(message => throw IllegalArgumentException(message), value => value)
+    }
+    if (configured > available)
+      throw IllegalArgumentException(s"$EnvironmentName=$configured exceeds host bound $available")
+    InterpreterScheduler(
+      configured,
+      minGroups = configured.toLong * 4L,
+      minWorkItems = 64L
+    )
+  }
+
+  private def hostBound: Int :| Interval.Closed[1, 64] =
+    math.max(1, math.min(Maximum, sys.runtime.availableProcessors())).refineUnsafe[Interval.Closed[1, 64]]
+
+  private def defaultParallelism: Int :| Interval.Closed[1, 64] =
+    math.max(1, hostBound - 2).refineUnsafe[Interval.Closed[1, 64]]
+}

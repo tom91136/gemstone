@@ -65,14 +65,14 @@ buffer_load_b32 v5, v1, s[8:11], s3 offen offset:4095 nv
 cluster_load_async_to_lds_b32 v1, v[2:3], off th:TH_LOAD_BYPASS scope:SCOPE_SYS
 // ERROR: instruction not supported on this GPU (gfx1200): cluster_load_async_to_lds_b32
 
+cluster_load_b32 v1, v[2:3], off th:TH_LOAD_BYPASS scope:SCOPE_SYS
+// ERROR: instruction not supported on this GPU (gfx1200): cluster_load_b32
+
 flat_atomic_add_f32 v0, v1, v2, s[2:3] offset:8000000 scale_offset th:TH_ATOMIC_RETURN
 // ERROR: not a valid operand.
 
 flat_atomic_min_num_f64 v[0:1], v[2:3] offset:4095
 // ERROR: instruction not supported on this GPU (gfx1200): flat_atomic_min_num_f64
-
-flat_load_monitor_b128 v[0:3], v[4:5]
-// ERROR: instruction not supported on this GPU (gfx1200): flat_load_monitor_b128
 
 flat_prefetch_b8 v[2:3]
 // ERROR: instruction not supported on this GPU (gfx1200): flat_prefetch_b8
@@ -85,9 +85,6 @@ global_store_async_from_lds_b128 v[2:3], v1, off th:TH_STORE_BYPASS scope:SCOPE_
 
 global_store_async_from_lds_b64 v[2:3], v1, off th:TH_STORE_BYPASS scope:SCOPE_SYS
 // ERROR: instruction not supported on this GPU (gfx1200): global_store_async_from_lds_b64
-
-tensor_stop
-// ERROR: instruction not supported on this GPU (gfx1200): tensor_stop
 
 // SOURCE: gfx1250_asm_vop1_dpp16-fake16.s
 
@@ -185,9 +182,6 @@ v_pk_min3_num_f16 v8, v1, s1, v4
 
 v_pk_min3_u16 v10, v1, v2, v3
 // ERROR: instruction not supported on this GPU (gfx1200): v_pk_min3_u16
-
-v_pk_min_num_bf16 v5, v1, v2
-// ERROR: instruction not supported on this GPU (gfx1200): v_pk_min_num_bf16
 
 // SOURCE: gfx1250_asm_vop3p_dpp16.s
 
@@ -1587,8 +1581,8 @@ v_swmmac_bf16_16x16x32_bf16 v[6:7], v[0:1], v[2:5], v8
 image_load v0, v0, s[0:7] dmask:0x1 dim:SQ_RSRC_IMG_1D th:TH_STORE_NT
 // ERROR: invalid th value for load instructions
 
-image_store v0, v0, s[0:7] dmask:0x1 dim:SQ_RSRC_IMG_1D th:TH_STORE_LU
-// ERROR: invalid th value
+image_store v0, v0, s[0:7] dmask:0x1 dim:SQ_RSRC_IMG_1D th:TH_STORE_WB scope:SCOPE_SYS
+// ERROR: scope and th combination is not valid
 
 s_buffer_load_b64 s[10:11], s[4:7], s0 offset:0x0 th:TH_LOAD_RT_NT
 // ERROR: invalid th value for SMEM instruction
@@ -1618,8 +1612,8 @@ ds_cmpstore_rtn_f32 v0, v1, v2, v3
 flat_atomic_csub v1, v[0:1], v2 offset:64 th:TH_ATOMIC_RETURN
 // ERROR: invalid instruction
 
-s_cbranch_cdbgsys 0
-// ERROR: instruction not supported on this GPU (gfx1200): s_cbranch_cdbgsys
+s_cbranch_cdbgsys_and_user 0
+// ERROR: instruction not supported on this GPU (gfx1200): s_cbranch_cdbgsys_and_user
 
 s_cmpk_ge_i32 s0, 0
 // ERROR: instruction not supported on this GPU (gfx1200): s_cmpk_ge_i32
@@ -1633,8 +1627,8 @@ s_cmpk_lt_i32 s0, 0
 s_waitcnt_lgkmcnt exec_hi, 0x1234
 // ERROR: instruction not supported on this GPU (gfx1200): s_waitcnt_lgkmcnt
 
-v_cmp_f_f16 v0, v1
-// ERROR: instruction not supported on this GPU (gfx1200): v_cmp_f_f16
+v_cmp_f_f32 v0, v1
+// ERROR: instruction not supported on this GPU (gfx1200): v_cmp_f_f32
 
 v_cmp_t_f32 v0, v1
 // ERROR: instruction not supported on this GPU (gfx1200): v_cmp_t_f32

@@ -1,9 +1,15 @@
 package net.kurobako.gemstone.memory
 
-import net.kurobako.gemstone.Col
-import net.kurobako.gemstone.binary.LittleEndian
+import net.kurobako.gemstone.Vec
+import net.kurobako.gemstone.Vec.*
+import net.kurobako.gemstone.binary.{LittleEndian, ScalarByteWidth}
+import net.kurobako.gemstone.concurrent.withLock
+
+import io.github.iltotore.iron.*
+import io.github.iltotore.iron.constraint.all.*
 
 import java.util.TreeMap
+import java.util.concurrent.locks.ReentrantLock
 
 /** AddressMemory overlay for device-side allocations such as CUDA's malloc/free.
   *
@@ -14,122 +20,171 @@ final class DynamicAddressMemory(
     delegate: AddressMemory,
     state: DynamicAddressMemory.State = DynamicAddressMemory.State()
 ) extends DeviceAllocationMemory {
-  private val allocations = state.allocations
+  private val mutableAllocations = state.mutableAllocations
 
-  def allocate(size: Long): Long = allocate(size, Array.empty[Byte])
+  override def allocate(size: DeviceAllocationByteSize): Either[MemoryError, GuestAddress] = allocate(size, Vec.empty)
 
-  def allocate(size: Long, initial: Array[Byte]): Long = state.synchronized {
-    if (size <= 0L || size > Int.MaxValue.toLong) 0L
-    else {
-      val bytes = size.toInt
-      val span  = (bytes.toLong + 255L) & -256L
-      val start = state.nextAddress
-      state.nextAddress = Math.addExact(start, span)
-      val contents = Array.ofDim[Byte](bytes)
-      Array.copy(initial, 0, contents, 0, Math.min(initial.length, contents.length))
-      allocations.put(start, contents)
-      start
+  def allocate(size: DeviceAllocationByteSize, initial: Vec[Byte]): Either[MemoryError, GuestAddress] =
+    if (initial.length > size.value)
+      Left(MemoryError.AllocationInitializerTooLarge(size, initial.length))
+    else state.lock.withLock {
+      val byteCount       = size.value.toInt
+      val span            = (byteCount.toLong + 255L) & -256L
+      val start           = state.mutableNextAddress
+      val mutableContents = Array.ofDim[Byte](byteCount)
+      val _               = initial.copyToArray(mutableContents, 0, initial.length)
+      try {
+        state.mutableNextAddress = GuestAddress(Math.addExact(start.value, span))
+        val _ = mutableAllocations.put(start.value, mutableContents)
+        Right(start)
+      } catch {
+        case _: ArithmeticException => Left(MemoryError.AddressSpaceExhausted(size))
+      }
     }
-  }
 
-  def free(address: Long): Unit = state.synchronized {
-    val _ = allocations.remove(address)
+  override def free(address: GuestAddress): Boolean = state.lock.withLock {
+    val found = mutableAllocations.containsKey(address.value)
+    if (found) { val _ = mutableAllocations.remove(address.value) }
+    found
   }
 
   override def readInt8(address: GuestAddress): Either[MemoryError, Byte] =
-    state.synchronized {
+    state.lock.withLock {
       dynamicRange(address, 1).map { case (bytes, offset) => Right(bytes(offset)) }
     }.getOrElse(delegate.readInt8(address))
 
   override def readInt32(address: GuestAddress): Either[MemoryError, Int] =
-    state.synchronized {
-      dynamicRange(address, 4).map { case (bytes, offset) => Right(LittleEndian.decode(bytes, offset, 4).toInt) }
-        .orElse(Option.when(overlapsDynamic(address, 4))(super.readLittleEndian(address, 4).map(_.toInt)))
+    state.lock.withLock {
+      dynamicRange(address, 4).map { case (bytes, offset) =>
+        Right(LittleEndian.decode(bytes, offset, ScalarByteWidth(4)).toInt)
+      }
+        .orElse(
+          Option.when(overlapsDynamic(address, 4))(
+            super.readLittleEndian(address, MemoryValueByteWidth(4)).map(_.toInt)
+          )
+        )
     }.getOrElse(delegate.readInt32(address))
 
   override def writeInt8(address: GuestAddress, value: Byte): Either[MemoryError, Unit] =
-    state.synchronized {
-      dynamicRange(address, 1).map { case (bytes, offset) =>
-        bytes(offset) = value
-        Right(())
+    state.lock.withLock {
+      dynamicRange(address, 1) match {
+        case Some((bytes, offset)) =>
+          bytes(offset) = value
+          Some(Right(()))
+        case None => None
       }
     }.getOrElse(delegate.writeInt8(address, value))
 
   override def writeInt32(address: GuestAddress, value: Int): Either[MemoryError, Unit] =
-    state.synchronized {
-      dynamicRange(address, 4).map { case (bytes, offset) =>
-        LittleEndian.write(value.toLong, bytes, offset, 4)
-        Right(())
-      }.orElse(Option.when(overlapsDynamic(address, 4))(super.writeLittleEndian(address, value.toLong, 4)))
+    state.lock.withLock {
+      dynamicRange(address, 4) match {
+        case Some((bytes, offset)) =>
+          LittleEndian.write(value.toLong, bytes, offset, ScalarByteWidth(4))
+          Some(Right(()))
+        case None =>
+          if (overlapsDynamic(address, 4))
+            Some(super.writeLittleEndian(address, value.toLong, MemoryValueByteWidth(4)))
+          else None
+      }
     }.getOrElse(delegate.writeInt32(address, value))
 
-  override def readBytes(address: GuestAddress, size: Int): Either[MemoryError, Col[Byte]] = {
-    require(size >= 0, s"memory byte count must be non-negative, found $size")
-    state.synchronized {
+  override def readBytes(address: GuestAddress, size: Int :| Positive0): Either[MemoryError, Vec[Byte]] =
+    state.lock.withLock {
       dynamicRange(address, size).map { case (bytes, offset) =>
-        Right(Col.unsafeFromArray(java.util.Arrays.copyOfRange(bytes, offset, offset + size)))
+        Right(Vec.unsafeFromArray(java.util.Arrays.copyOfRange(bytes, offset, offset + size)))
       }.orElse(Option.when(overlapsDynamic(address, size))(super.readBytes(address, size)))
     }.getOrElse(delegate.readBytes(address, size))
-  }
 
-  override def writeBytes(address: GuestAddress, bytes: Col[Byte]): Either[MemoryError, Unit] =
-    state.synchronized {
-      dynamicRange(address, bytes.size).map { case (destination, offset) =>
-        val _ = bytes.copyToArray(destination, offset, bytes.size)
-        Right(())
-      }.orElse(Option.when(overlapsDynamic(address, bytes.size))(super.writeBytes(address, bytes)))
+  override def writeBytes(address: GuestAddress, bytes: Vec[Byte]): Either[MemoryError, Unit] =
+    state.lock.withLock {
+      dynamicRange(address, bytes.nonNegativeSize) match {
+        case Some((destination, offset)) =>
+          val _ = bytes.copyToArray(destination, offset, bytes.size)
+          Some(Right(()))
+        case None =>
+          if (overlapsDynamic(address, bytes.nonNegativeSize)) Some(super.writeBytes(address, bytes))
+          else None
+      }
     }.getOrElse(delegate.writeBytes(address, bytes))
 
-  override def readLittleEndian(address: GuestAddress, size: Int): Either[MemoryError, Long] =
-    state.synchronized {
-      dynamicRange(address, size).map { case (bytes, offset) => Right(LittleEndian.decode(bytes, offset, size)) }
-        .orElse(Option.when(overlapsDynamic(address, size))(super.readLittleEndian(address, size)))
+  override def readLittleEndian(address: GuestAddress, size: MemoryValueByteWidth): Either[MemoryError, Long] =
+    state.lock.withLock {
+      dynamicRange(address, size.value).map { case (bytes, offset) =>
+        Right(LittleEndian.decode(bytes, offset, size.scalarByteWidth))
+      }.orElse(
+        Option.when(overlapsDynamic(address, size.value))(super.readLittleEndian(address, size))
+      )
     }.getOrElse(delegate.readLittleEndian(address, size))
 
-  override def writeLittleEndian(address: GuestAddress, value: Long, size: Int): Either[MemoryError, Unit] =
-    state.synchronized {
-      dynamicRange(address, size).map { case (bytes, offset) =>
-        LittleEndian.write(value, bytes, offset, size)
-        Right(())
-      }.orElse(Option.when(overlapsDynamic(address, size))(super.writeLittleEndian(address, value, size)))
+  override def writeLittleEndian(
+      address: GuestAddress,
+      value: Long,
+      size: MemoryValueByteWidth
+  ): Either[MemoryError, Unit] =
+    state.lock.withLock {
+      dynamicRange(address, size.value) match {
+        case Some((bytes, offset)) =>
+          LittleEndian.write(value, bytes, offset, size.scalarByteWidth)
+          Some(Right(()))
+        case None =>
+          if (overlapsDynamic(address, size.value))
+            Some(super.writeLittleEndian(address, value, size))
+          else None
+      }
     }.getOrElse(delegate.writeLittleEndian(address, value, size))
 
-  /** Called while holding State's monitor. Mixed ranges retain byte-wise overlay routing; wholly delegated words reach
-    * the delegate as one transaction even while unrelated device allocations exist.
+  override def atomicModifyLittleEndian(
+      address: GuestAddress,
+      size: MemoryValueByteWidth
+  )(update: Long => Long): Either[MemoryError, Long] =
+    state.lock.withLock {
+      dynamicRange(address, size.value) match {
+        case Some((bytes, offset)) =>
+          val width    = size.scalarByteWidth
+          val previous = LittleEndian.decode(bytes, offset, width)
+          LittleEndian.write(update(previous), bytes, offset, width)
+          Some(Right(previous))
+        case None =>
+          if (overlapsDynamic(address, size.value))
+            Some(super.atomicModifyLittleEndian(address, size)(update))
+          else None
+      }
+    }.getOrElse(delegate.atomicModifyLittleEndian(address, size)(update))
+
+  /** Called while holding State's lock. Mixed ranges retain byte-wise overlay routing; wholly delegated words reach the
+    * delegate as one transaction even while unrelated device allocations exist.
     */
   private def overlapsDynamic(address: GuestAddress, size: Int): Boolean = {
-    val previous = allocations.floorEntry(address.value)
-    val next     = allocations.ceilingEntry(address.value)
+    val previous = Option(mutableAllocations.floorEntry(address.value))
+    val next     = Option(mutableAllocations.ceilingEntry(address.value))
     size > 0 &&
-    ((previous != null && address.value - previous.getKey < previous.getValue.length.toLong) ||
-      (next != null && next.getKey - address.value < size.toLong))
+    (previous.exists(entry =>
+      java.lang.Long.compareUnsigned(address.value - entry.getKey, entry.getValue.length.toLong) < 0
+    ) || next.exists(entry => java.lang.Long.compareUnsigned(entry.getKey - address.value, size.toLong) < 0))
   }
 
-  /** Caller holds State's monitor for the complete lookup and access. */
-  private def dynamicRange(address: GuestAddress, size: Int): Option[(Array[Byte], Int)] =
-    Option(allocations.floorEntry(address.value)).flatMap { entry =>
+  /** Caller holds State's lock for the complete lookup and access. */
+  private def dynamicRange(
+      address: GuestAddress,
+      size: Int
+  ): Option[(Array[Byte], Int)] =
+    Option(mutableAllocations.floorEntry(address.value)).flatMap { entry =>
       val bytes    = entry.getValue
       val relative = address.value - entry.getKey
-      Option.when(relative >= 0L && relative <= bytes.length.toLong - size.toLong)(bytes -> relative.toInt)
+      Option.when(
+        size >= 0 && size <= bytes.length &&
+          java.lang.Long.compareUnsigned(relative, bytes.length.toLong - size.toLong) <= 0
+      )(bytes -> relative.toInt)
     }
 }
 
 object DynamicAddressMemory {
-  @SuppressWarnings(Array("scalafix:GemstoneNoExplicitNew.explicit-new"))
-  def apply(delegate: AddressMemory, state: State = State()): DynamicAddressMemory =
-    new DynamicAddressMemory(delegate, state)
-
-  @SuppressWarnings(
-    Array("scalafix:GemstoneNoExplicitNew.explicit-new")
-  )
-  object State {
-    def apply(initialAddress: GuestAddress = GuestAddress(0x700000000000L)): State =
-      new State(initialAddress)
-  }
-
-  @SuppressWarnings(Array("scalafix:DisableSyntax.var", "scalafix:GemstoneNoExplicitNew.explicit-new"))
   final class State(initialAddress: GuestAddress = GuestAddress(0x700000000000L)) {
-    private[memory] val allocations = new TreeMap[Long, Array[Byte]]()
-    private[memory] var nextAddress = initialAddress.value
+    private[memory] val lock = ReentrantLock()
+    // java.util.TreeMap accepts the unsigned comparator required by the 64-bit device address domain.
+    private[memory] val mutableAllocations =
+      TreeMap[Long, Array[Byte]]((left, right) => java.lang.Long.compareUnsigned(left, right))
+    @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+    private[memory] var mutableNextAddress: GuestAddress = initialAddress
   }
 }

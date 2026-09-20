@@ -1,34 +1,39 @@
 package net.kurobako.gemstone.isa.spirv.v1_6
 
-import net.kurobako.gemstone.Col
+import io.github.iltotore.iron.*
+import io.github.iltotore.iron.constraint.all.*
+
+import net.kurobako.gemstone.Vec
 import net.kurobako.gemstone.binary.Bits
 import net.kurobako.gemstone.binary.LittleEndian
-
+import net.kurobako.gemstone.binary.ScalarByteWidth
 import cats.data.Chain
 
-enum BinaryError {
-  case MisalignedByteLength(length: Int)
-  case TruncatedHeader(wordCount: Int)
-  case InvalidMagic(found: Long)
-  case ZeroInstructionWordCount(wordOffset: Int)
-  case TruncatedInstruction(wordOffset: Int, declaredWords: Int, remainingWords: Int)
-  case InstructionTooLong(opcodeNumber: Int, wordCount: Int)
-
-  def message: String = this match {
-    case MisalignedByteLength(length)                      => s"SPIR-V binary length $length is not a multiple of four"
-    case TruncatedHeader(wordCount)                        => s"SPIR-V header needs five words, found $wordCount"
-    case InvalidMagic(found)                               => f"invalid SPIR-V magic 0x$found%08x"
-    case ZeroInstructionWordCount(offset)                  => s"instruction at word $offset has zero word count"
-    case TruncatedInstruction(offset, declared, remaining) =>
-      s"instruction at word $offset declares $declared words with only $remaining remaining"
-    case InstructionTooLong(opcode, count) => s"opcode $opcode has unencodable word count $count"
-  }
-}
+import scala.annotation.tailrec
 
 object Binary {
+  enum BinaryError {
+    case MisalignedByteLength(length: Int)
+    case TruncatedHeader(wordCount: Int)
+    case InvalidMagic(found: Long)
+    case ZeroInstructionWordCount(wordOffset: Int)
+    case TruncatedInstruction(wordOffset: Int, declaredWords: Int, remainingWords: Int)
+    case InstructionTooLong(opcodeNumber: SPIRVOpcodeNumber, wordCount: Int :| Positive)
+
+    def message: String = (this match {
+      case MisalignedByteLength(length)     => s"SPIR-V binary length $length is not a multiple of four"
+      case TruncatedHeader(wordCount)       => s"SPIR-V header needs five words, found $wordCount"
+      case InvalidMagic(found)              => f"invalid SPIR-V magic 0x$found%08x"
+      case ZeroInstructionWordCount(offset) => s"instruction at word $offset has zero word count"
+      case TruncatedInstruction(offset, declared, remaining) =>
+        s"instruction at word $offset declares $declared words with only $remaining remaining"
+      case InstructionTooLong(opcode, count) => s"opcode $opcode has unencodable word count $count"
+    }).refineUnsafe[MinLength[1]]
+  }
+
   val Magic: Int = 0x07230203
 
-  def decode(bytes: Col[Byte]): Either[BinaryError, RawModule] =
+  def decode(bytes: Vec[Byte]): Either[BinaryError, RawModule] =
     for {
       _ <- Either.cond(
         bytes.length % 4 == 0,
@@ -42,17 +47,18 @@ object Binary {
         if (rawMagic == Magic) Right(Endianness.Little)
         else if (java.lang.Integer.reverseBytes(rawMagic) == Magic) Right(Endianness.Big)
         else Left(BinaryError.InvalidMagic(Bits.unsigned32(rawMagic)))
-      words  = Col.tabulate(wordCount)(index => Word(readInt(bytes, index * 4, endianness)))
+      words  = Vec.tabulate(wordCount)(index => Word(readInt(bytes, index * 4, endianness)))
       header = Header(SPIRVVersion.fromWord(words(1)), words(2), words(3), words(4))
       instructions <- parseInstructions(words, 5, Chain.empty)
     } yield RawModule(header, instructions, endianness)
 
+  @tailrec
   private def parseInstructions(
-      words: Col[Word],
+      words: Vec[Word],
       offset: Int,
       instructions: Chain[RawInstruction]
-  ): Either[BinaryError, Col[RawInstruction]] =
-    if (offset >= words.size) Right(Col.from(instructions.iterator))
+  ): Either[BinaryError, Vec[RawInstruction]] =
+    if (offset >= words.size) Right(Vec.from(instructions.iterator))
     else {
       val first       = words(offset).bits
       val declared    = first >>> 16
@@ -65,16 +71,18 @@ object Binary {
         parseInstructions(
           words,
           offset + declared,
-          instructions.append(RawInstruction(opcodeValue, words.slice(offset + 1, offset + declared)))
+          instructions.append(
+            RawInstruction(SPIRVOpcodeNumber.applyUnsafe(opcodeValue), words.slice(offset + 1, offset + declared))
+          )
         )
     }
 
-  def encode(module: RawModule): Either[BinaryError, Col[Byte]] =
+  def encode(module: RawModule): Either[BinaryError, Vec[Byte]] =
     module.instructions.find(_.wordCount > 0xffff) match {
       case Some(instruction) =>
         Left(BinaryError.InstructionTooLong(instruction.opcodeNumber, instruction.wordCount))
       case None =>
-        val header = Col(
+        val header = Vec(
           Word(Magic),
           module.header.version.word,
           module.header.generator,
@@ -82,23 +90,24 @@ object Binary {
           module.header.schema
         )
         val body = module.instructions.flatMap { instruction =>
-          Col(Word((instruction.wordCount << 16) | instruction.opcodeNumber)) ++ instruction.operandWords
+          Vec(Word((instruction.wordCount << 16) | instruction.opcodeNumber.value)) ++ instruction.operandWords
         }
         Right((header ++ body).flatMap(word => writeInt(word.bits, module.endianness)))
     }
 
-  private def readInt(bytes: Col[Byte], offset: Int, endianness: Endianness): Int =
+  private def readInt(bytes: Vec[Byte], offset: Int, endianness: Endianness): Int =
     endianness match {
-      case Endianness.Little => LittleEndian.decode(bytes, offset, 4).toInt
-      case Endianness.Big    => java.lang.Integer.reverseBytes(LittleEndian.decode(bytes, offset, 4).toInt)
+      case Endianness.Little => LittleEndian.decode(bytes, offset, ScalarByteWidth(4)).toInt
+      case Endianness.Big    =>
+        java.lang.Integer.reverseBytes(LittleEndian.decode(bytes, offset, ScalarByteWidth(4)).toInt)
     }
 
-  private def writeInt(value: Int, endianness: Endianness): Col[Byte] =
-    LittleEndian.toCol(
+  private def writeInt(value: Int, endianness: Endianness): Vec[Byte] =
+    LittleEndian.toVec(
       endianness match {
         case Endianness.Little => value.toLong
         case Endianness.Big    => java.lang.Integer.reverseBytes(value).toLong
       },
-      4
+      ScalarByteWidth(4)
     )
 }

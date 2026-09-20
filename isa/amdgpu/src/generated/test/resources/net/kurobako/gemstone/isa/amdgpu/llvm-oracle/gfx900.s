@@ -171,11 +171,11 @@ v_fma_mix_f32 v0, v1, v2, v3 op_sel_hi:[1,0,0]
 
 // SOURCE: gfx9-asm-err.s
 
+global_load_lds_dword v[2:3], off
+// ERROR: instruction not supported on this GPU (gfx900): global_load_lds_dword
+
 s_sendmsg sendmsg(MSG_SYSMSG, SYSMSG_OP_HOST_TRAP_ACK)
 // ERROR: specified operation id is not supported on this GPU
-
-scratch_load_dword v2, off, offset:256
-// ERROR: too few operands for instruction
 
 // SOURCE: gfx9-vop2be-literal.s
 
@@ -729,114 +729,111 @@ v_cmpx_u_f16_e32 vcc, -1, v2
 s_set_gpr_idx_on s0, gpr_idx
 // ERROR: expected absolute expression
 
-tbuffer_store_format_xyzw v[1:4], off, ttmp[4:7] dfmt:1 nfmt:-1 s0
-// ERROR: out of range nfmt
+s_set_gpr_idx_on s0, gpr_idx(SRC0,DST,SRC1,DST)
+// ERROR: duplicate VGPR index mode
 
-tbuffer_store_format_xyzw v[1:4], off, ttmp[4:7], dfmt:1 s0 format:[BUF_NUM_FORMAT_FLOAT]
-// ERROR: duplicate format
+tbuffer_store_format_xyzw v[1:4], off, ttmp[4:7] dfmt:16 nfmt:1 s0
+// ERROR: out of range dfmt
 
 // SOURCE: gfx9_unsupported.s
 
-buffer_atomic_fmax_x2 v[0:1], v0, s[0:3], s0 idxen offset:4095
-// ERROR: instruction not supported on this GPU (gfx900): buffer_atomic_fmax_x2
+buffer_atomic_fmin_x2 v[0:1], off, s[0:3], s0 offset:4095 slc
+// ERROR: instruction not supported on this GPU (gfx900): buffer_atomic_fmin_x2
 
-flat_atomic_fmin_x2 v[0:1], v[1:2], v[2:3] glc
-// ERROR: instruction not supported on this GPU (gfx900): flat_atomic_fmin_x2
-
-image_sample_c_cd_g16 v[5:6], v[1:4], s[8:15], s[12:15] dmask:0x3
-// ERROR: instruction not supported on this GPU (gfx900): image_sample_c_cd_g16
-
-image_sample_c_d_cl_g16 v[5:6], v[1:5], s[8:15], s[12:15] dmask:0x3
-// ERROR: instruction not supported on this GPU (gfx900): image_sample_c_d_cl_g16
-
-image_sample_c_d_g16 v[5:6], v[1:4], s[8:15], s[12:15] dmask:0x3
-// ERROR: instruction not supported on this GPU (gfx900): image_sample_c_d_g16
-
-image_sample_d_cl_o_g16 v[5:6], v[1:5], s[8:15], s[12:15] dmask:0x3
-// ERROR: instruction not supported on this GPU (gfx900): image_sample_d_cl_o_g16
+image_sample_d_g16 v[5:6], v[1:3], s[8:15], s[12:15] dmask:0x3
+// ERROR: instruction not supported on this GPU (gfx900): image_sample_d_g16
 
 s_andn2_wrexec_b32 exec_hi, s1
 // ERROR: instruction not supported on this GPU (gfx900): s_andn2_wrexec_b32
 
-s_get_waveid_in_workgroup s0
-// ERROR: instruction not supported on this GPU (gfx900): s_get_waveid_in_workgroup
+s_gl1_inv
+// ERROR: instruction not supported on this GPU (gfx900): s_gl1_inv
 
 s_round_mode 0x0
 // ERROR: instruction not supported on this GPU (gfx900): s_round_mode
 
-s_subvector_loop_end exec_hi, 0x1234
-// ERROR: instruction not supported on this GPU (gfx900): s_subvector_loop_end
+s_ttracedata_imm 0x0
+// ERROR: instruction not supported on this GPU (gfx900): s_ttracedata_imm
 
-s_version 0x1234
-// ERROR: instruction not supported on this GPU (gfx900): s_version
+s_waitcnt_expcnt exec_hi, 0x1234
+// ERROR: instruction not supported on this GPU (gfx900): s_waitcnt_expcnt
 
-v_accvgpr_write_b32 a0, 65
-// ERROR: instruction not supported on this GPU (gfx900): v_accvgpr_write_b32
+v_add_co_ci_u32 v1, sext(v1), sext(v4) dst_sel:DWORD dst_unused:UNUSED_PAD src0_sel:BYTE_0 src1_sel:DWORD
+// ERROR: instruction not supported on this GPU (gfx900): v_add_co_ci_u32
 
 v_add_nc_u32_dpp v5, v1, v2 dpp8:[7,6,5,4,3,2,1,0] fi:1
 // ERROR: instruction not supported on this GPU (gfx900): v_add_nc_u32
 
-v_ashr_i64 v[254:255], v[1:2], v2
-// ERROR: instruction not supported on this GPU (gfx900): v_ashr_i64
+v_cmps_eq_f32 vcc, -1, v2
+// ERROR: instruction not supported on this GPU (gfx900): v_cmps_eq_f32
 
-v_cmps_ngt_f32 vcc, -1, v2
-// ERROR: instruction not supported on this GPU (gfx900): v_cmps_ngt_f32
+v_cmps_le_f64 vcc, -1, v[2:3]
+// ERROR: instruction not supported on this GPU (gfx900): v_cmps_le_f64
 
-v_cmps_ngt_f64 vcc, -1, v[2:3]
-// ERROR: instruction not supported on this GPU (gfx900): v_cmps_ngt_f64
+v_cmps_nle_f32 vcc, -1, v2
+// ERROR: instruction not supported on this GPU (gfx900): v_cmps_nle_f32
 
-v_cmps_o_f64 vcc, -1, v[2:3]
-// ERROR: instruction not supported on this GPU (gfx900): v_cmps_o_f64
+v_cmps_tru_f32 vcc, -1, v2
+// ERROR: instruction not supported on this GPU (gfx900): v_cmps_tru_f32
 
-v_cmpsx_ge_f32 vcc, -1, v2
-// ERROR: instruction not supported on this GPU (gfx900): v_cmpsx_ge_f32
+v_cmpsx_ge_f64 vcc, -1, v[2:3]
+// ERROR: instruction not supported on this GPU (gfx900): v_cmpsx_ge_f64
 
-v_cmpsx_lt_f64 vcc, -1, v[2:3]
-// ERROR: instruction not supported on this GPU (gfx900): v_cmpsx_lt_f64
+v_cmpsx_neq_f32 vcc, -1, v2
+// ERROR: instruction not supported on this GPU (gfx900): v_cmpsx_neq_f32
 
-v_cmpsx_nlg_f32 vcc, -1, v2
-// ERROR: instruction not supported on this GPU (gfx900): v_cmpsx_nlg_f32
+v_cmpsx_nlg_f64 vcc, -1, v[2:3]
+// ERROR: instruction not supported on this GPU (gfx900): v_cmpsx_nlg_f64
 
-v_cmpsx_nlt_f32 vcc, -1, v2
-// ERROR: instruction not supported on this GPU (gfx900): v_cmpsx_nlt_f32
+v_cmpsx_nlt_f64 vcc, -1, v[2:3]
+// ERROR: instruction not supported on this GPU (gfx900): v_cmpsx_nlt_f64
 
-v_dot8_u32_u4 v0, v1, v2, v3
-// ERROR: instruction not supported on this GPU (gfx900): v_dot8_u32_u4
+v_dot2_f32_f16 v0, -v1, -v2, -v3
+// ERROR: instruction not supported on this GPU (gfx900): v_dot2_f32_f16
+
+v_dot8c_i32_i4 v0, v1, v2
+// ERROR: instruction not supported on this GPU (gfx900): v_dot8c_i32_i4
 
 v_fmac_f32 v0, v1, v2
 // ERROR: instruction not supported on this GPU (gfx900): v_fmac_f32
 
-v_log_clamp_f32 v1, 0.5
-// ERROR: instruction not supported on this GPU (gfx900): v_log_clamp_f32
+v_lshl_b32 v255, v1, v2
+// ERROR: instruction not supported on this GPU (gfx900): v_lshl_b32
 
-v_mfma_f32_16x16x2bf16 a[0:15], a0, a1, -2.0
-// ERROR: instruction not supported on this GPU (gfx900): v_mfma_f32_16x16x2bf16
+v_mfma_f32_16x16x4f16 a[0:15], a[0:1], a[1:2], -2.0
+// ERROR: instruction not supported on this GPU (gfx900): v_mfma_f32_16x16x4f16
 
-v_mfma_f32_4x4x1f32 a[0:3], a0, a1, -2.0
-// ERROR: instruction not supported on this GPU (gfx900): v_mfma_f32_4x4x1f32
+v_mfma_f32_16x16x4f32 a[0:3], a0, a1, -2.0
+// ERROR: instruction not supported on this GPU (gfx900): v_mfma_f32_16x16x4f32
 
-v_rcp_clamp_f32 v255, v1
-// ERROR: instruction not supported on this GPU (gfx900): v_rcp_clamp_f32
+v_mfma_f32_4x4x2bf16 a[0:3], a0, a1, -2.0
+// ERROR: instruction not supported on this GPU (gfx900): v_mfma_f32_4x4x2bf16
 
-v_sub_nc_u16 v255, v1, v2
-// ERROR: instruction not supported on this GPU (gfx900): v_sub_nc_u16
+v_movrels_b32 v0, v2 dpp8:[0,0,0,0,0,0,0,0]
+// ERROR: instruction not supported on this GPU (gfx900): v_movrels_b32
+
+v_permlanex16_b32 v0, lds_direct, s0, s0
+// ERROR: instruction not supported on this GPU (gfx900): v_permlanex16_b32
+
+v_rcp_clamp_f64 v[254:255], v[1:2]
+// ERROR: instruction not supported on this GPU (gfx900): v_rcp_clamp_f64
 
 v_sub_nc_u32_e32 v255, v1, v2
 // ERROR: instruction not supported on this GPU (gfx900): v_sub_nc_u32
 
-v_subbrev_u32 v1, s[0:1], v2, v3, vcc
-// ERROR: instruction not supported on this GPU (gfx900): v_subbrev_u32
+v_subrev_co_ci_u32 v0, vcc_lo, src_lds_direct, v0, vcc_lo
+// ERROR: instruction not supported on this GPU (gfx900): v_subrev_co_ci_u32
 
-v_swaprel_b32 v255, v1
-// ERROR: instruction not supported on this GPU (gfx900): v_swaprel_b32
+v_xnor_b32 v0, v1, v2
+// ERROR: instruction not supported on this GPU (gfx900): v_xnor_b32
 
 // SOURCE: lds_direct-err.s
 
 s_and_b32 s2, lds_direct, s1
 // ERROR: invalid operand for instruction
 
-v_ashrrev_i16 v0, lds_direct, v0
-// ERROR: lds_direct cannot be used with this instruction
+v_add_i32 v0, v0, lds_direct
+// ERROR: lds_direct may be used as src0 only
 
 // SOURCE: lds_direct.s
 
@@ -848,8 +845,11 @@ v_madmk_f16 v0, src_lds_direct, 0x1121, v0
 
 // SOURCE: literals.s
 
-v_dot2_bf16_bf16 v5.l, v1, v2, 1.0
-// ERROR: instruction not supported on this GPU (gfx900): v_dot2_bf16_bf16
+v_cvt_pk_fp8_f16 v1.l, 1.0
+// ERROR: instruction not supported on this GPU (gfx900): v_cvt_pk_fp8_f16
+
+v_sqrt_f32 v2, lit 123.0
+// ERROR: expected left paren after lit
 
 // SOURCE: mad-mix.s
 
@@ -868,13 +868,13 @@ buffer_load_sbyte_d16 v1, off, s[4:7], s1
 
 // SOURCE: out-of-range-registers.s
 
-s_mov_b64 s[0:17], -1
-// ERROR: invalid or unsupported register size
+s_mov_b64 s[103:104], -1
+// ERROR: invalid register alignment
 
 // SOURCE: sopk-err.s
 
-s_setreg_b32  typo(0x40), s2
-// ERROR: expected a hwreg macro, structured immediate or an absolute expression
+s_setreg_b32  hwreg(0x40), s2
+// ERROR: invalid hardware register: only 6-bit values are legal
 
 // SOURCE: sopp-gfx9.s
 
@@ -901,8 +901,8 @@ v_add_f64 v[0:1], s0, v[0:1]
 
 // SOURCE: vop3p-err.s
 
-v_max3_f16 v5, v1, v2, v3 op_sel:[1,1,1,1,
-// ERROR: expected a closing square bracket
+v_pk_add_u16 v1, v2, v3 op_sel:[0,2]
+// ERROR: invalid op_sel value.
 
 v_pk_add_u16 v1, v2, v3 op_sel:[]
 // ERROR: unknown token in expression

@@ -90,8 +90,8 @@ ds_max_src2_i64 v1
 ds_min_src2_f32 v1
 // ERROR: instruction not supported on this GPU (gfx90a): ds_min_src2_f32
 
-ds_min_src2_u64 v1
-// ERROR: instruction not supported on this GPU (gfx90a): ds_min_src2_u64
+ds_min_src2_u32 v1
+// ERROR: instruction not supported on this GPU (gfx90a): ds_min_src2_u32
 
 ds_or_src2_b32 v1
 // ERROR: instruction not supported on this GPU (gfx90a): ds_or_src2_b32
@@ -114,8 +114,8 @@ image_sample_d v[0:3], v[0:1], s[4:11], s[16:19] dmask:0xf
 v_add_f32 v5, v1, lds_direct
 // ERROR: lds_direct is not supported on this GPU
 
-v_interp_p2_f16 v5, v2, attr0.x, v3
-// ERROR: instruction not supported on this GPU (gfx90a): v_interp_p2_f16
+v_interp_p1lv_f16 v5, v2, attr0.x, v3
+// ERROR: instruction not supported on this GPU (gfx90a): v_interp_p1lv_f16
 
 v_mul_legacy_f32_dpp v5, v1, v2  quad_perm:[0,1,2,3] row_mask:0x0 bank_mask:0x0
 // ERROR: dpp variant of this instruction is not supported
@@ -489,11 +489,11 @@ tbuffer_store_format_xyzw a[2:5], off, ttmp[4:7], ttmp1 format:[BUF_DATA_FORMAT_
 
 // SOURCE: gfx950_asm_features.s
 
+buffer_atomic_pk_add_bf16 v5, off, s[96:99], s3 offset:4095
+// ERROR: instruction not supported on this GPU (gfx90a): buffer_atomic_pk_add_bf16
+
 global_load_lds_dwordx4 v2, s[4:5] offset:4
 // ERROR: instruction not supported on this GPU (gfx90a): global_load_lds_dwordx4
-
-v_cvt_scalef32_f16_bf8 v1, 22, v3 op_sel:[1,0,1]
-// ERROR: instruction not supported on this GPU (gfx90a): v_cvt_scalef32_f16_bf8
 
 v_cvt_scalef32_f32_bf8 v1, 33, v3 op_sel:[0,1,1]
 // ERROR: instruction not supported on this GPU (gfx90a): v_cvt_scalef32_f32_bf8
@@ -501,8 +501,8 @@ v_cvt_scalef32_f32_bf8 v1, 33, v3 op_sel:[0,1,1]
 v_cvt_scalef32_pk32_bf16_bf6 v[10:25], v[20:25], v8
 // ERROR: instruction not supported on this GPU (gfx90a): v_cvt_scalef32_pk32_bf16_bf6
 
-v_cvt_scalef32_pk32_bf6_bf16 v[20:25], v[10:25], v8
-// ERROR: instruction not supported on this GPU (gfx90a): v_cvt_scalef32_pk32_bf6_bf16
+v_cvt_scalef32_pk32_bf6_f16 v[20:25], v[10:25], v8
+// ERROR: instruction not supported on this GPU (gfx90a): v_cvt_scalef32_pk32_bf6_f16
 
 v_cvt_scalef32_pk32_f16_bf6 v[10:25], v[20:25], v8
 // ERROR: instruction not supported on this GPU (gfx90a): v_cvt_scalef32_pk32_f16_bf6
@@ -516,17 +516,20 @@ v_cvt_scalef32_pk_f16_bf8 v1, s2, 3
 v_cvt_scalef32_pk_f32_bf8 v[2:3], s2, 3
 // ERROR: instruction not supported on this GPU (gfx90a): v_cvt_scalef32_pk_f32_bf8
 
-v_cvt_scalef32_pk_fp4_bf16 v1, -|s2|, v3
-// ERROR: instruction not supported on this GPU (gfx90a): v_cvt_scalef32_pk_fp4_bf16
+v_cvt_scalef32_pk_fp4_f16 v1, -|s2|, v3
+// ERROR: instruction not supported on this GPU (gfx90a): v_cvt_scalef32_pk_fp4_f16
 
 v_cvt_scalef32_sr_bf8_f16 v0, -v1, v2, v3
 // ERROR: instruction not supported on this GPU (gfx90a): v_cvt_scalef32_sr_bf8_f16
 
-v_cvt_scalef32_sr_fp8_f32 v0, -v1, v2, v3
-// ERROR: instruction not supported on this GPU (gfx90a): v_cvt_scalef32_sr_fp8_f32
+v_cvt_scalef32_sr_pk32_bf6_bf16 v[0:5], v[6:21], v22, v23
+// ERROR: instruction not supported on this GPU (gfx90a): v_cvt_scalef32_sr_pk32_bf6_bf16
 
 v_cvt_scalef32_sr_pk32_fp6_f16 v[0:5], v[6:21], v22, v23
 // ERROR: instruction not supported on this GPU (gfx90a): v_cvt_scalef32_sr_pk32_fp6_f16
+
+v_cvt_scalef32_sr_pk32_fp6_f32 v[0:5], v[6:37], v38, v39
+// ERROR: instruction not supported on this GPU (gfx90a): v_cvt_scalef32_sr_pk32_fp6_f32
 
 v_cvt_scalef32_sr_pk_fp4_f32 v0, -v[2:3], v4, v5
 // ERROR: instruction not supported on this GPU (gfx90a): v_cvt_scalef32_sr_pk_fp4_f32

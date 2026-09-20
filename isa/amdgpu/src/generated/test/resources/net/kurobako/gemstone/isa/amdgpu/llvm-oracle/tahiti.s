@@ -642,9 +642,6 @@ v_cmpx_eq_i16 vcc, v2, v4
 v_cmpx_f_u16 vcc, v2, v4
 // ERROR: instruction not supported on this GPU (tahiti): v_cmpx_f_u16
 
-v_cmpx_gt_i16 vcc, v2, v4
-// ERROR: instruction not supported on this GPU (tahiti): v_cmpx_gt_i16
-
 v_cmpx_gt_u16 vcc, v2, v4
 // ERROR: instruction not supported on this GPU (tahiti): v_cmpx_gt_u16
 

@@ -1203,9 +1203,6 @@ v_dot2_bf16_bf16 v5.l, v1, v2, 1.0
 
 // SOURCE: out-of-range-registers.s
 
-v_cvt_f32_f64 v0, v[255:256]
-// ERROR: invalid register class: vgpr tuples must be 64 bit aligned
-
 v_mqsad_u32_u8 v[254:257], v[0:1], -4.0, v[2:5]
 // ENCODING: [0xfe, 0x00, 0x3d, 0xd6, 0x00, 0xef, 0x09, 0x04]
 

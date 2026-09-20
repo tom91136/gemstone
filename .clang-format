@@ -12,16 +12,16 @@ SortIncludes: CaseSensitive
 IncludeBlocks: Regroup
 IncludeIsMainRegex: '(_test)?$'
 IncludeCategories:
-  - Regex: '^[<"](llvm|clang|lld|flang|mlir)/'
+  - Regex:    '^[<"](llvm|clang|lld|flang|mlir)/'
     Priority: 3
-  - Regex: '^[<"](aspartame|fmt|nlohmann|magic_enum|catch2|spirv|Vulkan|vk_mem_alloc)/|^[<"]quickjs\.h[>"]$'
+  - Regex:    '^[<"](aspartame|catch2|cub|glaze|hip|hsa|hsakmt|oneapi|reproc\+\+|rocblas|rocprim|sycl|thrust)/|^[<"](CL/|cublas|cuda|fire\.hpp|lz4\.h|ze_|zes_|zet_|zstd\.h)'
     Priority: 4
-  - Regex: '^[<"](polyregion|polyast|polyc|polycpp|polyfc|polyfront|polyinvoke|polyrt|polystl|polyreflect)/'
+  - Regex:    '^[<"](gemstone[/_]|conformance/)'
     Priority: 5
-  - Regex: '^<[a-z_]+\.h>$'
+  - Regex:    '^<[a-z_]+\.h>$'
     Priority: 2
-  - Regex: '^<[a-z_]+>$'
+  - Regex:    '^<[a-z_]+>$'
     Priority: 1
-  - Regex: '.*'
+  - Regex:    '.*'
     Priority: 6
 ...

@@ -1,0 +1,5 @@
+# RISC-V CPU and PowerVR BXM OpenCL/Vulkan GPU. There is no Vulkan backend here.
+[[targets]]
+name = "powervr-opencl"
+backend = "opencl"
+device = "*PowerVR*"

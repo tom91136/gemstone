@@ -84,8 +84,8 @@ exp pos4 v4, v3, v2, v1
 
 // SOURCE: flat-scratch-st-mode.s
 
-scratch_load_dwordx2 v[1:2], off, off
-// ERROR: instruction not supported on this GPU (tonga): scratch_load_dwordx2
+scratch_load_dwordx3 v[1:3], off, off
+// ERROR: instruction not supported on this GPU (tonga): scratch_load_dwordx3
 
 scratch_load_short_d16 v1, off, off
 // ERROR: instruction not supported on this GPU (tonga): scratch_load_short_d16
@@ -483,29 +483,14 @@ buffer_store_byte_d16_hi v1, off, s[12:15], -1 offset:4095
 buffer_store_format_d16_hi_x v1, off, s[12:15], s4 offset:4095 glc
 // ERROR: instruction not supported on this GPU (tonga): buffer_store_format_d16_hi_x
 
-flat_atomic_fcmpswap_x2 v[0:1], v[1:2], v[2:5] glc
-// ERROR: instruction not supported on this GPU (tonga): flat_atomic_fcmpswap_x2
-
-flat_atomic_fmax v0, v[1:2], v2 glc
-// ERROR: instruction not supported on this GPU (tonga): flat_atomic_fmax
-
 flat_load_sbyte_d16_hi v1, v[3:4]
 // ERROR: instruction not supported on this GPU (tonga): flat_load_sbyte_d16_hi
 
 flat_load_ubyte_d16 v1, v[3:4]
 // ERROR: instruction not supported on this GPU (tonga): flat_load_ubyte_d16
 
-global_atomic_add_x2 v[1:2], v[254:255], off offset:-1
-// ERROR: instruction not supported on this GPU (tonga): global_atomic_add_x2
-
 global_atomic_cmpswap_x2 v[1:2], v[252:255], off offset:-1
 // ERROR: instruction not supported on this GPU (tonga): global_atomic_cmpswap_x2
-
-global_atomic_dec v[1:2], v2, off
-// ERROR: instruction not supported on this GPU (tonga): global_atomic_dec
-
-global_atomic_or v[1:2], v2, off
-// ERROR: instruction not supported on this GPU (tonga): global_atomic_or
 
 global_atomic_xor v[1:2], v2, off
 // ERROR: instruction not supported on this GPU (tonga): global_atomic_xor
@@ -513,14 +498,11 @@ global_atomic_xor v[1:2], v2, off
 global_load_ushort v1, v[3:4], off
 // ERROR: instruction not supported on this GPU (tonga): global_load_ushort
 
-image_sample_c_d_g16 v[5:6], v[1:4], s[8:15], s[12:15] dmask:0x3
-// ERROR: instruction not supported on this GPU (tonga): image_sample_c_d_g16
+image_sample_c_d_o_g16 v[5:6], v[1:5], s[8:15], s[12:15] dmask:0x3
+// ERROR: instruction not supported on this GPU (tonga): image_sample_c_d_o_g16
 
 image_sample_d_o_g16 v[5:6], v[1:4], s[8:15], s[12:15] dmask:0x3
 // ERROR: instruction not supported on this GPU (tonga): image_sample_d_o_g16
-
-s_andn2_wrexec_b64 exec, s[2:3]
-// ERROR: instruction not supported on this GPU (tonga): s_andn2_wrexec_b64
 
 s_atomic_add s5, s[2:3], 0x0
 // ERROR: instruction not supported on this GPU (tonga): s_atomic_add
@@ -540,8 +522,8 @@ s_atomic_umax s5, s[2:3], s0 glc
 s_buffer_atomic_and s101, s[4:7], s0
 // ERROR: instruction not supported on this GPU (tonga): s_buffer_atomic_and
 
-s_buffer_atomic_cmpswap_x2 s[20:23], s[4:7], 0x0
-// ERROR: instruction not supported on this GPU (tonga): s_buffer_atomic_cmpswap_x2
+s_buffer_atomic_dec s5, s[4:7], s0
+// ERROR: instruction not supported on this GPU (tonga): s_buffer_atomic_dec
 
 s_buffer_atomic_smax s5, s[4:7], s101
 // ERROR: instruction not supported on this GPU (tonga): s_buffer_atomic_smax
@@ -591,32 +573,38 @@ v_cmps_nlg_f64 vcc, -1, v[2:3]
 v_cmps_o_f32 vcc, -1, v2
 // ERROR: instruction not supported on this GPU (tonga): v_cmps_o_f32
 
-v_cmpsx_eq_f32 vcc, -1, v2
-// ERROR: instruction not supported on this GPU (tonga): v_cmpsx_eq_f32
-
 v_cmpsx_eq_f64 vcc, -1, v[2:3]
 // ERROR: instruction not supported on this GPU (tonga): v_cmpsx_eq_f64
 
 v_cmpsx_lg_f64 vcc, -1, v[2:3]
 // ERROR: instruction not supported on this GPU (tonga): v_cmpsx_lg_f64
 
+v_cmpsx_nge_f64 vcc, -1, v[2:3]
+// ERROR: instruction not supported on this GPU (tonga): v_cmpsx_nge_f64
+
 v_cmpsx_nle_f32 vcc, -1, v2
 // ERROR: instruction not supported on this GPU (tonga): v_cmpsx_nle_f32
+
+v_cmpsx_nlg_f32 vcc, -1, v2
+// ERROR: instruction not supported on this GPU (tonga): v_cmpsx_nlg_f32
 
 v_cmpsx_tru_f32 vcc, -1, v2
 // ERROR: instruction not supported on this GPU (tonga): v_cmpsx_tru_f32
 
-v_cvt_norm_i16_f16 v5, -4.0
-// ERROR: instruction not supported on this GPU (tonga): v_cvt_norm_i16_f16
+v_cvt_norm_u16_f16 v5, s101
+// ERROR: instruction not supported on this GPU (tonga): v_cvt_norm_u16_f16
 
 v_dot2_f32_f16 v0, -v1, -v2, -v3
 // ERROR: instruction not supported on this GPU (tonga): v_dot2_f32_f16
 
+v_dot8c_i32_i4 v0, v1, v2
+// ERROR: instruction not supported on this GPU (tonga): v_dot8c_i32_i4
+
 v_fmamk_f32 v255, v1, 0x1121, v3
 // ERROR: instruction not supported on this GPU (tonga): v_fmamk_f32
 
-v_lshr_b32 v255, v1, v2
-// ERROR: instruction not supported on this GPU (tonga): v_lshr_b32
+v_lshr_b64 v[254:255], v[1:2], v2
+// ERROR: instruction not supported on this GPU (tonga): v_lshr_b64
 
 v_max3_f16 v0, src_lds_direct, v0, v0
 // ERROR: instruction not supported on this GPU (tonga): v_max3_f16
@@ -627,17 +615,20 @@ v_med3_u16 v1, v2, v3, v4
 v_mfma_f32_16x16x4f16 a[0:15], a[0:1], a[1:2], -2.0
 // ERROR: instruction not supported on this GPU (tonga): v_mfma_f32_16x16x4f16
 
-v_mfma_f32_32x32x2bf16 a[0:31], a0, a1, -2.0
-// ERROR: instruction not supported on this GPU (tonga): v_mfma_f32_32x32x2bf16
+v_mfma_f32_32x32x2f32 a[0:15], a0, a1, -2.0
+// ERROR: instruction not supported on this GPU (tonga): v_mfma_f32_32x32x2f32
 
-v_mfma_f32_4x4x1f32 a[0:3], a0, a1, -2.0
-// ERROR: instruction not supported on this GPU (tonga): v_mfma_f32_4x4x1f32
+v_mfma_f32_4x4x2bf16 a[0:3], a0, a1, -2.0
+// ERROR: instruction not supported on this GPU (tonga): v_mfma_f32_4x4x2bf16
 
-v_mfma_i32_16x16x16i8 a[0:3], a0, a1, 2
-// ERROR: instruction not supported on this GPU (tonga): v_mfma_i32_16x16x16i8
+v_mfma_i32_16x16x4i8 a[0:15], a0, a1, 2
+// ERROR: instruction not supported on this GPU (tonga): v_mfma_i32_16x16x4i8
 
 v_min3_u16 v1, v2, v3, v4
 // ERROR: instruction not supported on this GPU (tonga): v_min3_u16
+
+v_permlanex16_b32 v0, lds_direct, s0, s0
+// ERROR: instruction not supported on this GPU (tonga): v_permlanex16_b32
 
 v_pk_add_f16 v0, execz, v0
 // ERROR: instruction not supported on this GPU (tonga): v_pk_add_f16
@@ -650,6 +641,9 @@ v_pk_min_u16 v0, v1, v2
 
 v_pk_sub_u16 v255, v1, v2
 // ERROR: instruction not supported on this GPU (tonga): v_pk_sub_u16
+
+v_sub_i16 v255, v1, v2
+// ERROR: instruction not supported on this GPU (tonga): v_sub_i16
 
 v_subb_co_u32 v1, vcc, v2, v3, vcc row_shl:1 row_mask:0xa bank_mask:0x1 bound_ctrl:0
 // ERROR: instruction not supported on this GPU (tonga): v_subb_co_u32

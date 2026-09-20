@@ -1,0 +1,17 @@
+# Compact matrix registrations retain the smaller size/type sets.
+specs = ["~[full-matrix]~[regression]"]
+exclude_programs = [
+  "opencl_cts_contractions", "opencl_cts_device_partition", "opencl_cts_device_timer",
+  "opencl_cts_generic_address_space", "opencl_cts_geometrics", "opencl_cts_mem_host_flags",
+  "opencl_cts_multiples", "opencl_cts_non_uniform_work_group", "opencl_cts_pipes",
+  "opencl_cts_printf", "opencl_cts_profiling", "opencl_cts_thread_dimensions", "opencl_cts_workgroups",
+  "sycl_cts_bit_cast", "sycl_cts_context", "sycl_cts_device", "sycl_cts_device_event",
+  "sycl_cts_device_selector", "sycl_cts_error", "sycl_cts_event", "sycl_cts_exception_handling",
+  "sycl_cts_function_objects", "sycl_cts_group", "sycl_cts_h_item", "sycl_cts_id",
+  "sycl_cts_is_device_copyable", "sycl_cts_kernel", "sycl_cts_kernel_args", "sycl_cts_language",
+  "sycl_cts_namespace", "sycl_cts_nd_item", "sycl_cts_nd_range", "sycl_cts_platform",
+  "sycl_cts_pointers", "sycl_cts_property", "sycl_cts_queue", "sycl_cts_sub_group",
+  "babelstream_omp_target", "babelstream_kokkos", "minibude_omp_target", "minibude_kokkos",
+  "cloverleaf_omp_target", "cloverleaf_kokkos", "cloverleaf_sycl_acc",
+  "tealeaf_omp_target", "tealeaf_kokkos", "tealeaf_sycl_acc"
+]

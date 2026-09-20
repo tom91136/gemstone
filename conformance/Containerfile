@@ -1,0 +1,129 @@
+ARG UBUNTU_IMAGE=docker.io/library/ubuntu@sha256:1e0a86e57d247923571b75e0aaf48a1449cf8c543d51fb3e07a4a7d7bfa79316
+ARG CUDA_IMAGE=docker.io/nvidia/cuda@sha256:a535b42e387b5ea69f3be73e14e79eb979913b622bc61b21c8000830b4965ea4
+ARG SYCL_IMAGE=docker.io/intel/oneapi-toolkit@sha256:e9db518398753434ee5aab9740a25f1d3134396a30be1569cfad8f8b0d90740c
+ARG NVHPC_IMAGE=nvcr.io/nvidia/nvhpc@sha256:25621a24ed39fe0dce3e9458e56e3f11194c122ac0206a44532246a58972a854
+
+ARG CUDA_PACKAGE_VERSION=13-3
+ARG CMAKE_VERSION=3.31.10
+ARG CMAKE_LINUX_X86_64_SHA256=3cb3dd247b6a1de2d0f4b20c6fd4326c9024e894cebc9dc8699758887e566ca7
+ARG ROCM_VERSION=7.1.1
+ARG ROCM_DISTRIBUTION=noble
+
+FROM ${UBUNTU_IMAGE} AS ubuntu-build-base
+USER root
+ARG DEBIAN_FRONTEND=noninteractive
+RUN apt-get update \
+    && apt-get install --no-install-recommends --yes \
+       binutils build-essential ca-certificates cmake ninja-build patchelf \
+    && rm -rf /var/lib/apt/lists/*
+
+FROM ubuntu-build-base AS toolchain-opencl
+ARG DEBIAN_FRONTEND=noninteractive
+RUN apt-get update \
+    && apt-get install --no-install-recommends --yes \
+       ocl-icd-opencl-dev opencl-headers python3 spirv-tools \
+    && rm -rf /var/lib/apt/lists/*
+
+FROM ubuntu-build-base AS rocm-repository
+ARG DEBIAN_FRONTEND=noninteractive
+ARG ROCM_VERSION
+ARG ROCM_DISTRIBUTION
+RUN apt-get update \
+    && apt-get install --no-install-recommends --yes ca-certificates curl gpg \
+    && install -d -m 0755 /etc/apt/keyrings \
+    && curl -fsSL https://repo.radeon.com/rocm/rocm.gpg.key \
+       | gpg --dearmor -o /etc/apt/keyrings/rocm.gpg \
+    && echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/${ROCM_VERSION} ${ROCM_DISTRIBUTION} main" \
+       > /etc/apt/sources.list.d/rocm.list \
+    && echo "Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600" \
+       > /etc/apt/preferences.d/rocm-pin-600 \
+    && rm -rf /var/lib/apt/lists/*
+
+FROM rocm-repository AS toolchain-hip
+ARG DEBIAN_FRONTEND=noninteractive
+RUN apt-get update \
+    && apt-get install --no-install-recommends --yes hip-dev rocblas-dev rocprim-dev rocthrust-dev \
+    && rm -rf /var/lib/apt/lists/*
+RUN apt-get update \
+    && apt-get install --no-install-recommends --yes rocm-device-libs \
+    && rm -rf /usr/include/hip \
+    && rm -rf /var/lib/apt/lists/*
+ENV PATH="/opt/rocm/bin:/opt/rocm/llvm/bin:${PATH}" \
+    CC=/opt/rocm/llvm/bin/amdclang \
+    CXX=/opt/rocm/llvm/bin/amdclang++ \
+    HIPCXX=/opt/rocm/llvm/bin/amdclang++ \
+    ROCM_PATH=/opt/rocm \
+    CPATH=/opt/rocm/include \
+    LIBRARY_PATH=/opt/rocm/lib \
+    LD_LIBRARY_PATH=/opt/rocm/lib
+
+FROM rocm-repository AS toolchain-hsa
+ARG DEBIAN_FRONTEND=noninteractive
+RUN apt-get update \
+    && apt-get install --no-install-recommends --yes hsa-rocr-dev hip-dev rocm-device-libs rocm-llvm \
+    && rm -rf /var/lib/apt/lists/*
+ENV PATH="/opt/rocm/bin:/opt/rocm/llvm/bin:${PATH}" \
+    ROCM_PATH=/opt/rocm \
+    CPATH=/opt/rocm/include \
+    LIBRARY_PATH=/opt/rocm/lib \
+    LD_LIBRARY_PATH=/opt/rocm/lib
+
+FROM ${CUDA_IMAGE} AS toolchain-cuda
+USER root
+ARG DEBIAN_FRONTEND=noninteractive
+ARG CUDA_PACKAGE_VERSION
+ARG CMAKE_VERSION
+ARG CMAKE_LINUX_X86_64_SHA256
+RUN apt-get update \
+    && apt-get install --no-install-recommends --yes \
+       binutils build-essential ca-certificates curl ninja-build patchelf xz-utils \
+       cuda-nvcc-${CUDA_PACKAGE_VERSION} cuda-cudart-dev-${CUDA_PACKAGE_VERSION} \
+       cuda-cccl-${CUDA_PACKAGE_VERSION} \
+       libcublas-dev-${CUDA_PACKAGE_VERSION} \
+    && rm -rf /var/lib/apt/lists/*
+RUN archive="cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz" \
+    && curl -fsSLO "https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/${archive}" \
+    && echo "${CMAKE_LINUX_X86_64_SHA256}  ${archive}" | sha256sum --check --strict \
+    && mkdir -p /opt/cmake \
+    && tar -xzf "${archive}" --strip-components=1 -C /opt/cmake \
+    && rm "${archive}"
+ENV PATH="/opt/cmake/bin:/usr/local/cuda/bin:${PATH}" \
+    CUDAToolkit_ROOT=/usr/local/cuda \
+    CPATH=/usr/local/cuda/targets/x86_64-linux/include \
+    LIBRARY_PATH=/usr/local/cuda/targets/x86_64-linux/lib \
+    LD_LIBRARY_PATH=/usr/local/cuda/targets/x86_64-linux/lib:/usr/local/cuda/compat
+
+FROM ${SYCL_IMAGE} AS toolchain-sycl
+USER root
+ARG DEBIAN_FRONTEND=noninteractive
+RUN apt-get update \
+    && apt-get install --no-install-recommends --yes \
+       binutils build-essential ca-certificates cmake ninja-build patchelf \
+       libdrm2 libhwloc15 libnuma1 libze1 python3 \
+    && rm -rf /var/lib/apt/lists/*
+ENV PATH="/opt/intel/oneapi/compiler/latest/bin:${PATH}" \
+    CC=icx \
+    CXX=icpx \
+    ONEAPI_ROOT=/opt/intel/oneapi \
+    MKLROOT=/opt/intel/oneapi/mkl/latest \
+    TBBROOT=/opt/intel/oneapi/tbb/latest \
+    CPATH=/opt/intel/oneapi/dpl/latest/include:/opt/intel/oneapi/mkl/latest/include \
+    LIBRARY_PATH=/opt/intel/oneapi/compiler/latest/lib:/opt/intel/oneapi/mkl/latest/lib:/opt/intel/oneapi/tbb/latest/lib:/opt/intel/oneapi/umf/latest/lib \
+    LD_LIBRARY_PATH=/opt/intel/oneapi/compiler/latest/lib:/opt/intel/oneapi/mkl/latest/lib:/opt/intel/oneapi/tbb/latest/lib:/opt/intel/oneapi/umf/latest/lib \
+    CMAKE_PREFIX_PATH=/opt/intel/oneapi/compiler/latest:/opt/intel/oneapi/dpl/latest:/opt/intel/oneapi/mkl/latest:/opt/intel/oneapi/tbb/latest:/opt/intel/oneapi/umf/latest
+
+FROM ${NVHPC_IMAGE} AS toolchain-openacc
+USER root
+ARG DEBIAN_FRONTEND=noninteractive
+ARG NVHPC_VERSION=26.5
+RUN apt-get update \
+    && apt-get install --no-install-recommends --yes \
+       binutils build-essential ca-certificates cmake ninja-build patchelf \
+    && rm -rf /var/lib/apt/lists/*
+ENV NVHPC_ROOT="/opt/nvidia/hpc_sdk/Linux_x86_64/${NVHPC_VERSION}" \
+    PATH="/opt/nvidia/hpc_sdk/Linux_x86_64/${NVHPC_VERSION}/compilers/bin:${PATH}" \
+    CC="/opt/nvidia/hpc_sdk/Linux_x86_64/${NVHPC_VERSION}/compilers/bin/nvc" \
+    CXX="/opt/nvidia/hpc_sdk/Linux_x86_64/${NVHPC_VERSION}/compilers/bin/nvc++" \
+    CPATH="/opt/nvidia/hpc_sdk/Linux_x86_64/${NVHPC_VERSION}/compilers/include" \
+    LIBRARY_PATH="/opt/nvidia/hpc_sdk/Linux_x86_64/${NVHPC_VERSION}/compilers/lib" \
+    LD_LIBRARY_PATH="/opt/nvidia/hpc_sdk/Linux_x86_64/${NVHPC_VERSION}/compilers/lib"

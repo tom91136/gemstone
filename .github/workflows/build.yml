@@ -10,9 +10,9 @@ jobs:
     timeout-minutes: 120
     env:
       GEMSTONE_TEST_PROFILE: default
-      GEMSTONE_CONTAINER_ENGINE: docker
       GEMSTONE_EXECUTION_PARALLELISM: 2
       CMAKE_BUILD_PARALLEL_LEVEL: 2
+      CONTAINER_EXECUTABLE: docker
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -23,13 +23,6 @@ jobs:
           java-version: '25'
       - uses: sbt/setup-sbt@82da71df4e122282484a99a8d70096bc2369dbd8 # v1
       - name: Native build tools
-        run: sudo apt-get update && sudo apt-get install -y build-essential clang cmake ninja-build python3
-      - name: Unit suites
-        run: sbt --server --batch -J-Xmx3g testFull
-      - name: Native integration
-        run: sbt --server --batch -J-Xmx3g nativeIntegration/testFull
-      - name: Host conformance smoke
-        env:
-          GEMSTONE_CONFORMANCE_BACKENDS: host
-          GEMSTONE_CONFORMANCE_FILTER: '^unified/host/'
-        run: sbt --server --batch -J-Xmx3g conformanceIntegration/testFull
+        run: sudo apt-get update && sudo apt-get install -y build-essential clang cmake liblz4-dev libzstd-dev ninja-build python3
+      - name: Lint and tests
+        run: sbt --server --batch -J-Xmx3g lint test

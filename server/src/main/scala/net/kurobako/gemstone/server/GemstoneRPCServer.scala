@@ -1,17 +1,16 @@
 package net.kurobako.gemstone.server
 
-import net.kurobako.gemstone.Col
-import net.kurobako.gemstone.Col.*
-
-import net.kurobako.gemstone.abi.*
-import net.kurobako.gemstone.cuda.*
-import net.kurobako.gemstone.generated.{GeneratedCUDARPC, GeneratedCUDAWireCodec}
-import net.kurobako.gemstone.rpc.*
 import net.kurobako.gemstone.execution.ProgramExecutor
 import net.kurobako.gemstone.execution.ExecutionLimits
-import net.kurobako.gemstone.launcher.UsageSnapshot
+import net.kurobako.gemstone.concurrent.withLock
+import net.kurobako.gemstone.rpc.ExecutionRPC
+import net.kurobako.gemstone.server.execution.*
+import net.kurobako.gemstone.server.recording.*
+import net.kurobako.gemstone.server.transport.{ClientId, ControlProtocol, ExecutionRPCProtocol, RPCPort}
 
-import java.io.File
+import io.github.iltotore.iron.*
+import io.github.iltotore.iron.constraint.all.*
+
 import java.io.PushbackInputStream
 import java.io.DataInputStream
 import java.io.DataOutputStream
@@ -22,146 +21,86 @@ import java.net.ServerSocket
 import java.net.Socket
 import java.net.SocketException
 import java.nio.ByteBuffer
-import java.nio.ByteOrder
-import java.nio.charset.StandardCharsets
-import java.nio.file.Files
 import java.nio.file.Path
-import java.util.concurrent.atomic.AtomicReference
-import java.util.concurrent.atomic.LongAdder
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.{AtomicBoolean, AtomicLong, AtomicReference, LongAdder}
+import java.util.concurrent.locks.ReentrantLock
+import scala.util.Using
 
-object GemstoneRPCServer {
-  private val RequestMagic        = 0x474d5331
-  private val ResponseMagic       = 0x474d5231
-  private val ProtocolVersion     = GeneratedCUDARPC.ProtocolVersion
-  private val CallbackMagic       = 0x474d4331
-  private val CallbackReplyMagic  = 0x474d4131
-  private val FingerprintBytes    = 64
-  private val TokenBytes          = 64
-  private val MaximumNameBytes    = 128
-  private val MaximumPayload      = 128 * 1024 * 1024
-  private val SocketTimeoutMillis = 300000
+private[gemstone] object GemstoneRPCServer {
+  private val SocketTimeoutMillis: Int :| Positive = 300000
+  private val RootClient: ClientId                 = ClientId(1L)
 
   private final case class ExecutionSessionEntry(
       service: ExecutionService,
-      cuda: CUDARPCDispatcher,
-      cancellation: net.kurobako.gemstone.execution.CancellationToken.Source,
-      callbacks: CallbackOwnership,
-      connections: Int
+      connections: Int :| Positive
   )
 
-  /** Pending callbacks are serviced only by their originating CUDA connection. */
-  private final class CallbackOwnership {
-    private val unsupported =
-      RPCResponse.Failure(CUDAError(801, "pending CUDA callbacks require their originating connection"))
-    private val owner  = AtomicReference(Option.empty[CallbackConnection])
-    private val closed = java.util.concurrent.atomic.AtomicBoolean(false)
-    def dispatch(connection: CallbackConnection, request: RPCRequest)(run: => RPCResponse): RPCResponse = {
-      val registration   = request.functionName == "cuLaunchHostFunc" || request.functionName == "cuStreamAddCallback"
-      val draining       = request.functionName == "cuCtxSynchronize" || request.functionName == "cuCtxDestroy_v2"
-      def differentOwner = owner.get().exists(current => (current ne connection) && !current.isClosed)
-      if (!registration && !draining) run
-      // Do not wait on the owner's monitor while its callback is awaiting a reply.
-      else if (differentOwner) unsupported
-      else synchronized {
-        if (closed.get()) RPCResponse.Failure(CUDAError(1, "CUDA client session is closed"))
-        else if (differentOwner) unsupported
-        else {
-          val response = run
-          response match {
-            case RPCResponse.Success(WireValue.CallResult(status, _)) if status.isSuccess =>
-              if (registration) {
-                owner.set(Some(connection))
-                if (closed.get()) owner.getAndSet(None).foreach(_.cancel())
-              } else owner.set(None)
-            case _ => ()
-          }
-          response
-        }
-      }
-    }
-    def close(): Unit = {
-      closed.set(true)
-      owner.getAndSet(None).foreach(_.cancel())
-    }
-  }
-
   private final class UsageCounter {
-    val cuda      = LongAdder()
     val execution = LongAdder()
 
-    def snapshot: UsageSnapshot = UsageSnapshot(cuda.sum(), execution.sum())
+    def snapshot: ServerUsage = ServerUsage(
+      execution.sum().refineEither[Positive0]
+        .fold(message => throw IllegalStateException(s"execution request counter overflowed: $message"), value => value)
+    )
   }
 
   private[server] final class ExecutionSessions(
       executor: () => ProgramExecutor,
       executionLimits: ExecutionLimits,
-      executionPool: BoundedExecutionPool
-  ) {
+      executionPool: InterpreterScheduler
+  ) extends AutoCloseable {
     private val entries = AtomicReference(Map.empty[ExecutionRPCProtocol.SessionId, ExecutionSessionEntry])
-    private val closed  = java.util.concurrent.atomic.AtomicBoolean(false)
+    private val closed  = AtomicBoolean(false)
+    private val lock    = ReentrantLock()
 
     def connection(): ExecutionSessionConnection = ExecutionSessionConnection(this)
-    private def executeCUDA(
-        entry: ExecutionSessionEntry,
-        connection: CallbackConnection,
-        context: Long,
-        request: RPCRequest
-    ): RPCResponse =
-      entry.callbacks.dispatch(connection, request) {
-        if (request.functionName == "cuLaunchKernel") executionPool.call(() => entry.cuda.dispatch(request, context))
-        else entry.cuda.dispatch(request, context)
-      }
-
-    def close(): Unit = synchronized {
+    override def close(): Unit                   = lock.withLock {
       closed.set(true)
       entries.getAndSet(Map.empty).values.foreach { entry =>
-        entry.callbacks.close()
-        entry.cancellation.cancel()
         entry.service.close()
       }
     }
 
     private def acquire(session: ExecutionRPCProtocol.SessionId)
-        : Either[net.kurobako.gemstone.execution.ExecutionFailure, ExecutionSessionEntry] = synchronized {
+        : Either[net.kurobako.gemstone.execution.ExecutionFailure, ExecutionSessionEntry] = lock.withLock {
       if (closed.get()) Left(net.kurobako.gemstone.execution.ExecutionFailure.Failed("client session is closed"))
       else {
         val current = entries.get()
         Right(current.get(session) match {
           case Some(entry) =>
-            entries.set(current.updated(session, entry.copy(connections = Math.addExact(entry.connections, 1))))
+            entries.set(current.updated(
+              session,
+              entry.copy(
+                connections = Math.addExact(entry.connections, 1).refineUnsafe[Positive]
+              )
+            ))
             entry
           case None =>
-            val cancellation = net.kurobako.gemstone.execution.CancellationToken.Source()
-            val service      = ExecutionService(
+            val service = ExecutionService(
               executor(),
               schedule = executionPool.schedule,
               executionLimits = executionLimits,
               parallelism = executionPool
             )
-            val cuda = CUDARPCDispatcher.emulated(() =>
-              net.kurobako.gemstone.execution.ExecutionControl.create(
-                executionLimits,
-                cancellation,
-                executionPool
-              )
-            )
-            val entry = ExecutionSessionEntry(service, cuda, cancellation, CallbackOwnership(), 1)
+            val entry = ExecutionSessionEntry(service, 1)
             entries.set(current.updated(session, entry))
             entry
         })
       }
     }
 
-    private def release(session: ExecutionRPCProtocol.SessionId): Unit = synchronized {
+    private def release(session: ExecutionRPCProtocol.SessionId): Unit = lock.withLock {
       val current = entries.get()
       current.get(session).foreach { entry =>
         if (entry.connections == 1) {
           entries.set(current.removed(session))
-          entry.callbacks.close()
-          entry.cancellation.cancel()
           entry.service.close()
-        } else entries.set(current.updated(session, entry.copy(connections = entry.connections - 1)))
+        } else
+          entries.set(current.updated(
+            session,
+            entry.copy(connections = (entry.connections - 1).refineUnsafe[Positive])
+          ))
       }
     }
 
@@ -179,52 +118,45 @@ object GemstoneRPCServer {
               "a connection cannot change process identity"
             ))
           case None =>
-            sessions.acquire(session).map { acquired => active.set(Some(session)); acquired }
+            sessions.acquire(session) match {
+              case Right(acquired) =>
+                active.set(Some(session))
+                Right(acquired)
+              case Left(error) => Left(error)
+            }
         }
       override def service(session: ExecutionRPCProtocol.SessionId) = entry(session).map(_.service)
-      private[GemstoneRPCServer] def cuda(
-          session: ExecutionRPCProtocol.SessionId,
-          connection: CallbackConnection,
-          context: Long,
-          request: RPCRequest
-      ): RPCResponse =
-        entry(session).fold(
-          error => RPCResponse.Failure(CUDAError(1, error.message)),
-          value => sessions.executeCUDA(value, connection, context, request)
-        )
-      override def close(): Unit = active.getAndSet(None).foreach(sessions.release)
+      override def close(): Unit = active.getAndSet(None).foreach(sessions.release(_))
     }
   }
 
-  private final class Client(val token: Array[Byte], val executions: ExecutionSessions, val usage: UsageCounter) {
+  private final class Client(val id: ClientId, val executions: ExecutionSessions, val usage: UsageCounter) {
     def close(): Unit = executions.close()
   }
 
   private final class ClientRegistry(
-      rootToken: Array[Byte],
       executor: () => ProgramExecutor,
       limits: ExecutionLimits,
-      pool: BoundedExecutionPool,
+      pool: InterpreterScheduler,
       rootUsage: UsageCounter,
       journal: Option[RPCJournal.Writer]
   ) {
-    val root            = Client(rootToken, ExecutionSessions(executor, limits, pool), rootUsage)
-    private val clients = ConcurrentHashMap[String, Client]()
-    def find(token: Array[Byte]): Option[Client] =
-      if (RPCAuthentication.matches(rootToken, token)) Some(root)
-      else Option(clients.get(String(token, StandardCharsets.US_ASCII)))
-    def register(): String = {
-      val token = RPCAuthentication.token()
-      clients.put(
-        token,
-        Client(token.getBytes(StandardCharsets.US_ASCII), ExecutionSessions(executor, limits, pool), UsageCounter())
-      )
-      token
+    val root                               = Client(RootClient, ExecutionSessions(executor, limits, pool), rootUsage)
+    private val clients                    = ConcurrentHashMap[java.lang.Long, Client]()
+    private val next                       = AtomicLong(RootClient.value + 1L)
+    def find(id: ClientId): Option[Client] =
+      if (id == RootClient) Some(root) else Option(clients.get(id.value))
+    def register(): ClientId = {
+      val id = ClientId.either(next.getAndIncrement())
+        .fold(message => throw IllegalStateException(s"invalid client identity: $message"), value => value)
+      clients.put(id.value, Client(id, ExecutionSessions(executor, limits, pool), UsageCounter()))
+      id
     }
-    def usage(token: String): UsageSnapshot = Option(clients.get(token)).fold(UsageSnapshot(0L, 0L))(_.usage.snapshot)
-    def release(token: String): Unit        = Option(clients.remove(token)).foreach { client =>
+    def usage(id: ClientId): ServerUsage = find(id).fold(ServerUsage(0L))(_.usage.snapshot)
+    def release(id: ClientId): Unit      = if (id != RootClient) Option(clients.remove(id.value)).foreach { client =>
       client.close(); journal.foreach(_.clientClosed(client))
     }
+    else ()
     def close(): Unit = {
       root.close()
       journal.foreach(_.clientClosed(root))
@@ -234,31 +166,40 @@ object GemstoneRPCServer {
   }
 
   final class RunningServer private[GemstoneRPCServer] (
-      val port: Int,
+      val port: RPCPort,
+      val client: ClientId,
       server: ServerSocket,
       acceptThread: Thread,
       connections: ClientConnections,
       usageCounter: UsageCounter,
-      executionPool: BoundedExecutionPool,
+      executionPool: InterpreterScheduler,
       clients: ClientRegistry,
       journal: Option[RPCJournal.Writer]
   ) extends AutoCloseable {
-    def await(): Unit        = acceptThread.join()
-    def usage: UsageSnapshot = usageCounter.snapshot
+    def await(): Unit      = acceptThread.join()
+    def usage: ServerUsage = usageCounter.snapshot
 
-    private val closed         = java.util.concurrent.atomic.AtomicBoolean(false)
-    override def close(): Unit = synchronized {
+    private val closed         = AtomicBoolean(false)
+    private val lock           = ReentrantLock()
+    override def close(): Unit = lock.withLock {
       if (closed.compareAndSet(false, true)) {
-        server.close()
-        acceptThread.join()
-        try {
-          connections.closeAll(() => clients.close())
-          executionPool.close()
-        } catch {
-          case scala.util.control.NonFatal(error) =>
-            journal.foreach(_.markUnreplayable(s"server cleanup failed: ${error.getMessage}"))
-            throw error
-        } finally journal.foreach(_.close())
+        Using.Manager { use =>
+          journal.foreach { writer =>
+            val _ = use(writer)
+          }
+          val _ = use(executionPool)
+          try {
+            server.close()
+            acceptThread.join()
+            connections.closeAll(() => clients.close())
+          } catch {
+            case scala.util.control.NonFatal(error) =>
+              journal.foreach(_.markUnreplayable(
+                s"server cleanup failed: ${errorMessage(error)}"
+              ))
+              throw error
+          }
+        }.get
       }
     }
   }
@@ -274,139 +215,63 @@ object GemstoneRPCServer {
     }
   }
 
-  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  def main(arguments: Array[String]): Unit = arguments.toCol match {
-    case Col("inspect", archive) => println(RPCJournal.inspect(File(archive)))
-    case Col("replay", archive)  =>
-      println(RPCReplay.run(RPCReplay.Options(File(archive), GeneratedCUDARPC.SchemaFingerprint), replayEndpoint))
-    case Col("step", archive) =>
-      val session = RPCReplay.open(RPCReplay.Options(File(archive), GeneratedCUDARPC.SchemaFingerprint), replayEndpoint)
-      try {
-        var proceed = true
-        while (proceed && session.next.nonEmpty) {
-          println(s"${session.next.get}; Enter to execute, q to quit")
-          val command = scala.io.StdIn.readLine()
-          if (command == null || command == "q") proceed = false
-          else println(session.step().get)
-        }
-        println(session.report)
-      } finally session.close()
-    case Col("shutdown", rest*) =>
-      val options = parseArguments(Col.from(rest))
-      val token   = options.getOrElse("token", throw IllegalArgumentException("shutdown requires --token"))
-      require(validToken(token), "invalid shutdown token")
-      val socket = Socket()
-      try {
-        socket.connect(InetSocketAddress(InetAddress.getLoopbackAddress, options("port").toInt), 5000)
-        socket.setSoTimeout(5000)
-        val output = DataOutputStream(socket.getOutputStream)
-        output.writeInt(0x474d4330)
-        output.write(token.getBytes(StandardCharsets.US_ASCII))
-        output.writeInt(4)
-        output.flush()
-        require(DataInputStream(socket.getInputStream).readInt() == 0, "shutdown failed")
-      } finally socket.close()
-    case Col("run", _*)      => net.kurobako.gemstone.launcher.GemstoneLauncher.main(arguments)
-    case Col("serve", rest*) => run(Col.from(rest))
-    case _                   => run(arguments.toCol)
-  }
-
-  private def replayEndpoint(header: RPCJournal.Header): RPCReplay.Endpoint = {
-    val token   = RPCAuthentication.token()
-    val profile = header.executionProfile.getOrElse(throw IllegalArgumentException("capture has no execution profile"))
-    val environment = (sys.env - "GEMSTONE_RECORD").updated(
-      "GEMSTONE_EXECUTION_PARALLELISM",
-      profile.parallelism.toString
-    )
-    val running = start(token, ExecutionLimits(profile.maxInstructions, profile.quantum), environment)
-    RPCReplay.Endpoint(running.port, token, () => running.close())
-  }
-
-  private def run(arguments: Col[String]): Unit = {
-    val options      = parseArguments(arguments)
-    val portFile     = options.get("port-file").map(Path.of(_))
-    val endpointFile = options.get("endpoint-file").map(Path.of(_))
-    require(portFile.nonEmpty || endpointFile.nonEmpty, "provide --port-file or --endpoint-file")
-    val token = options.getOrElse(
-      "token",
-      RPCAuthentication.token()
-    )
-    require(validToken(token), "--token must contain exactly 64 lowercase hexadecimal characters")
-    val environment = options.get("record").fold(sys.env)(path => sys.env.updated("GEMSTONE_RECORD", path))
-    val running     = start(token, configuredExecutionLimits(environment), environment)
-    try {
-      portFile.foreach { file =>
-        Option(file.getParent).foreach(Files.createDirectories(_))
-        Files.writeString(file, s"${running.port}\n", StandardCharsets.US_ASCII)
-      }
-      endpointFile.foreach { file =>
-        Option(file.getParent).foreach(Files.createDirectories(_))
-        Files.writeString(file, s"""{"port":${running.port},"token":"$token"}""", StandardCharsets.US_ASCII)
-        Files.setPosixFilePermissions(file, java.nio.file.attribute.PosixFilePermissions.fromString("rw-------"))
-      }
-      System.out.println(s"gemstone RPC server listening on 127.0.0.1:${running.port}")
-      System.out.flush()
-      running.await()
-    } finally running.close()
-  }
-
-  def start(token: String): RunningServer =
-    startWith(token, () => RegisteredProgramExecutor.default, configuredExecutionLimits(sys.env), SocketTimeoutMillis)
+  def start(): RunningServer =
+    startWith(() => GemstoneProgramRegistry(), configuredExecutionLimits(sys.env), SocketTimeoutMillis)
 
   /** Start the default server with an explicit per-dispatch execution profile. */
-  def start(token: String, executionLimits: ExecutionLimits): RunningServer =
-    startWith(token, () => RegisteredProgramExecutor.default, executionLimits, SocketTimeoutMillis)
+  def start(executionLimits: ExecutionLimits): RunningServer =
+    startWith(() => GemstoneProgramRegistry(), executionLimits, SocketTimeoutMillis)
 
   /** Use the launcher's effective environment for the pool as well as its execution limits. */
-  def start(token: String, executionLimits: ExecutionLimits, environment: Map[String, String]): RunningServer =
-    startWith(token, () => RegisteredProgramExecutor.default, executionLimits, SocketTimeoutMillis, environment)
+  def start(executionLimits: ExecutionLimits, environment: Map[String, String]): RunningServer =
+    startWith(() => GemstoneProgramRegistry(), executionLimits, SocketTimeoutMillis, environment)
 
-  private[server] def start(token: String, executor: ProgramExecutor): RunningServer =
-    startWith(token, () => executor, ExecutionLimits.Default, SocketTimeoutMillis)
+  private[server] def start(executor: ProgramExecutor): RunningServer =
+    startWith(() => executor, ExecutionLimits.Default, SocketTimeoutMillis)
 
   private[server] def start(
-      token: String,
       executor: ProgramExecutor,
       executionLimits: ExecutionLimits
   ): RunningServer =
-    startWith(token, () => executor, executionLimits, SocketTimeoutMillis)
+    startWith(() => executor, executionLimits, SocketTimeoutMillis)
 
   private[server] def start(
-      token: String,
       executor: ProgramExecutor,
       executionLimits: ExecutionLimits,
-      socketTimeoutMillis: Int
-  ): RunningServer = {
-    require(socketTimeoutMillis >= 0, "socket timeout must be non-negative")
-    startWith(token, () => executor, executionLimits, socketTimeoutMillis)
-  }
+      socketTimeoutMillis: Int :| Positive
+  ): RunningServer =
+    startWith(() => executor, executionLimits, socketTimeoutMillis)
 
   private def startWith(
-      token: String,
       executor: () => ProgramExecutor,
       executionLimits: ExecutionLimits,
-      socketTimeoutMillis: Int,
+      socketTimeoutMillis: Int :| Positive,
       environment: Map[String, String] = sys.env
   ): RunningServer = {
-    require(validToken(token), "token must contain exactly 64 lowercase hexadecimal characters")
     // Resolve the actual pool before recording its profile, so replay does not inherit another machine's default.
-    val executionPool = BoundedExecutionPool.fromEnvironment(environment)
-    val journal       = try environment.get("GEMSTONE_RECORD").map { path =>
-        val profile = RPCJournal.ExecutionProfile(
-          executionLimits.maxInstructions,
-          executionLimits.quantum,
-          executionPool.parallelism
-        )
-        RPCJournal.Writer(
-          File(path),
-          RPCJournal.Header(GeneratedCUDARPC.SchemaFingerprint, executionProfile = Some(profile))
-        )
+    val executionPool = InterpreterScheduler.fromEnvironment(environment)
+    val journal       = try environment.get("GEMSTONE_RECORD") match {
+        case None       => None
+        case Some(path) =>
+          val profile = RPCJournal.ExecutionProfile(
+            executionLimits.maxInstructions,
+            executionLimits.quantum,
+            executionPool.parallelism
+          )
+          val protocolIdentity = RPCJournal.ProtocolIdentity.either(ExecutionRPC.Identity)
+            .fold(
+              message => throw IllegalStateException(s"invalid execution protocol identity: $message"),
+              value => value
+            )
+          Some(RPCJournal.Writer(
+            Path.of(path),
+            RPCJournal.Header(protocolIdentity, executionProfile = Some(profile))
+          ))
       }
     catch {
       case scala.util.control.NonFatal(error) => executionPool.close(); throw error
     }
-    val tokenBytes = token.getBytes(StandardCharsets.US_ASCII)
-    val server     = try ServerSocket()
+    val server = try ServerSocket()
     catch {
       case scala.util.control.NonFatal(error) =>
         executionPool.close()
@@ -416,15 +281,26 @@ object GemstoneRPCServer {
     try {
       val connections = ClientConnections()
       val usage       = UsageCounter()
-      val clients     = ClientRegistry(tokenBytes, executor, executionLimits, executionPool, usage, journal)
+      val clients     = ClientRegistry(executor, executionLimits, executionPool, usage, journal)
       server.bind(InetSocketAddress(InetAddress.getByName("127.0.0.1"), 0))
       val acceptThread = Thread(
-        () => acceptConnections(server, tokenBytes, clients, connections, socketTimeoutMillis, journal),
+        () => acceptConnections(server, clients, connections, socketTimeoutMillis, journal),
         "gemstone-rpc-accept"
       )
       acceptThread.setDaemon(true)
       acceptThread.start()
-      RunningServer(server.getLocalPort, server, acceptThread, connections, usage, executionPool, clients, journal)
+      RunningServer(
+        RPCPort.either(server.getLocalPort)
+          .fold(message => throw IllegalStateException(s"invalid bound port: $message"), value => value),
+        RootClient,
+        server,
+        acceptThread,
+        connections,
+        usage,
+        executionPool,
+        clients,
+        journal
+      )
     } catch {
       case scala.util.control.NonFatal(error) =>
         server.close()
@@ -435,20 +311,19 @@ object GemstoneRPCServer {
   }
 
   private def configuredExecutionLimits(environment: Map[String, String]): ExecutionLimits =
-    ExecutionLimits.fromEnvironment(environment).fold(message => throw IllegalArgumentException(message), identity)
+    ExecutionConfiguration.limits(environment).fold(message => throw IllegalArgumentException(message), value => value)
 
   private def acceptConnections(
       server: ServerSocket,
-      token: Array[Byte],
       clients: ClientRegistry,
       connections: ClientConnections,
-      socketTimeoutMillis: Int,
+      socketTimeoutMillis: Int :| Positive,
       journal: Option[RPCJournal.Writer]
   ): Unit =
     try
       Iterator.continually(server.accept()).foreach { socket =>
         val thread = Thread(
-          () => serve(socket, token, clients, connections, socketTimeoutMillis, journal, () => server.close()),
+          () => serve(socket, clients, connections, socketTimeoutMillis, journal, () => server.close()),
           s"gemstone-rpc-${socket.getPort}"
         )
         thread.setDaemon(true)
@@ -461,269 +336,108 @@ object GemstoneRPCServer {
 
   private def serve(
       socket: Socket,
-      expectedToken: Array[Byte],
       clients: ClientRegistry,
       connections: ClientConnections,
-      socketTimeoutMillis: Int,
+      socketTimeoutMillis: Int :| Positive,
       journal: Option[RPCJournal.Writer],
       shutdown: () => Unit
   ): Unit = {
-    val bound     = AtomicReference(Option.empty[(Client, ExecutionSessions#ExecutionSessionConnection)])
-    val buffered  = java.io.BufferedInputStream(socket.getInputStream)
-    val recording = journal.map(writer => RPCRecording(writer, buffered, socket.getOutputStream))
-    val pushback  =
-      PushbackInputStream(recording.fold[java.io.InputStream](buffered)(_.input), 4 + FingerprintBytes + TokenBytes)
-    val input     = DataInputStream(pushback)
-    val output    = DataOutputStream(recording.fold[java.io.OutputStream](socket.getOutputStream)(_.output))
-    val callbacks = CallbackConnection(input, output, recording, () => socket.close())
-    def client(input: DataInputStream, cuda: Boolean): (Client, ExecutionSessions#ExecutionSessionConnection) = {
-      val token    = peekClientToken(input, pushback, cuda)
-      val selected = clients.find(token).getOrElse(clients.root)
-      bound.get() match {
-        case Some(pair) if pair._1 eq selected => pair
-        case Some(_) => throw IllegalArgumentException("connection cannot change client credentials")
-        case None    =>
-          val pair = selected -> selected.executions.connection()
-          bound.set(Some(pair))
-          pair
-      }
-    }
-    try {
-      socket.setTcpNoDelay(true)
-      socket.setSoTimeout(socketTimeoutMillis)
-      def exchange(): Boolean = try {
-        recording.foreach(_.begin())
-        input.readInt() match {
-          case 0x474d4330 =>
-            val authenticated = readExactly(input, TokenBytes)
-            require(RPCAuthentication.matches(authenticated, expectedToken), "control authentication failed")
-            input.readInt() match {
-              case 1 => output.writeUTF(clients.register())
-              case 2 =>
-                val usage = clients.usage(String(readExactly(input, TokenBytes), StandardCharsets.US_ASCII))
-                output.writeLong(usage.cudaRequests)
-                output.writeLong(usage.executionRequests)
-              case 3 =>
-                clients.release(String(readExactly(input, TokenBytes), StandardCharsets.US_ASCII))
-                output.writeInt(0)
-              case 4     => output.writeInt(0); output.flush(); shutdown()
-              case other => throw IllegalArgumentException(s"unknown control operation $other")
-            }
-            output.flush()
-            false
-          case RequestMagic =>
-            val (owner, execution) = client(input, cuda = true)
-            val response           = readRequest(
-              input,
-              owner.token,
-              callbacks,
-              owner.usage,
-              () => recording.foreach(_.accepted(owner))
-            ) match {
-              case Right((session, context, request)) => execution.cuda(session, callbacks, context, request)
-              case Left(error)                        => RPCResponse.Failure(error)
-            }
-            writeResponse(output, response)
-            recording.foreach(_.response())
-            true
-          case ExecutionRPCProtocol.RequestMagic =>
-            val (owner, execution) = client(input, cuda = false)
-            socket.setSoTimeout(0)
-            val keep = ExecutionRPCProtocol.exchange(
-              input,
-              output,
-              owner.token,
-              execution,
-              () => { owner.usage.execution.increment(); recording.foreach(_.accepted(owner)) }
-            )
-            recording.foreach(_.response())
-            keep
-          case value => throw IllegalArgumentException(f"invalid request magic: 0x$value%08x")
-        }
-      } catch {
-        case _: EOFException                       => false
-        case _: SocketException if socket.isClosed => false
-        case scala.util.control.NonFatal(error)    =>
-          recording.foreach(_.failed(s"connection exchange failed: ${error.getMessage}"))
-          if sys.env.contains("GEMSTONE_RPC_DEBUG") then error.printStackTrace()
-          false
-      }
-      Iterator.continually(exchange()).takeWhile(identity).foreach(_ => ())
-    } finally
-      try {
-        callbacks.retire()
-        bound.get().foreach(_._2.close())
-        recording.foreach(_.close())
-      } finally
-        try socket.close()
-        finally connections.remove(socket)
-  }
-
-  private[server] def peekClientToken(
-      input: DataInputStream,
-      replay: java.io.PushbackInputStream,
-      cuda: Boolean
-  ): Array[Byte] = {
-    // Keep the buffered socket unmarked: Native marked refills can repeat bytes.
-    val prefixSize = (if cuda then 4 + FingerprintBytes else 4) + TokenBytes
-    val prefix     = readExactly(input, prefixSize)
-    replay.unread(prefix)
-    java.util.Arrays.copyOfRange(prefix, prefixSize - TokenBytes, prefixSize)
-  }
-
-  private def validToken(token: String): Boolean =
-    token.length == TokenBytes && token.forall(character =>
-      (character >= '0' && character <= '9') || (character >= 'a' && character <= 'f')
-    )
-
-  private def readRequest(
-      input: DataInputStream,
-      expectedToken: Array[Byte],
-      callbacks: CallbackConnection,
-      usage: UsageCounter,
-      onAuthenticated: () => Unit
-  ): Either[CUDAError, (ExecutionRPCProtocol.SessionId, Long, RPCRequest)] = {
-    if (input.readInt() != ProtocolVersion) throw IllegalArgumentException("unsupported protocol version")
-    val fingerprint = String(readExactly(input, FingerprintBytes), StandardCharsets.US_ASCII)
-    val token       = readExactly(input, TokenBytes)
-    val session     = ExecutionRPCProtocol.SessionId(input.readLong(), input.readLong())
-    val context     = input.readLong()
-    val messageId   = MessageId(input.readLong(), input.readLong())
-    val nameSize    = input.readInt()
-    val payloadSize = input.readInt()
-    if (nameSize <= 0 || nameSize > MaximumNameBytes)
-      throw IllegalArgumentException(s"invalid function-name size: $nameSize")
-    if (payloadSize < 0 || payloadSize > MaximumPayload)
-      throw IllegalArgumentException(s"invalid payload size: $payloadSize")
-    val functionName = String(readExactly(input, nameSize), StandardCharsets.US_ASCII)
-    val payload      = readExactly(input, payloadSize)
-
-    if (!RPCAuthentication.matches(token, expectedToken)) Left(CUDAError(1, "RPC authentication failed"))
-    else {
-      onAuthenticated()
-      if (fingerprint != GeneratedCUDARPC.SchemaFingerprint) {
-        Left(CUDAError(1, "CUDA RPC schema fingerprint mismatch"))
-      } else {
-        GeneratedCUDARPC.Schema.methods.find(method =>
-          method.messageId == messageId && method.name == functionName
-        ) match {
-          case None         => Left(CUDAError(1, s"unknown or mismatched CUDA RPC function: $functionName"))
-          case Some(method) =>
-            usage.cuda.increment()
-            decodeArguments(method, payload, callbacks).map(arguments =>
-              (session, context, RPCRequest(messageId, functionName, arguments))
-            )
-        }
-      }
-    }
-
-  }
-
-  private def decodeArguments(method: RPCMethod, payload: Array[Byte], callbacks: CallbackConnection)
-      : Either[CUDAError, Col[WireValue]] =
-    GeneratedCUDAWireCodec.decodeArguments(method, payload, callbacks, MaximumPayload)
-
-  private def writeResponse(output: DataOutputStream, response: RPCResponse): Unit = {
-    val encoded = response match {
-      case RPCResponse.Success(WireValue.CallResult(status, values)) => encodeValues(values).map(status.code -> _)
-      case RPCResponse.Success(value)                                => encodeValues(Col(value)).map(0 -> _)
-      case RPCResponse.Failure(error)                                => Left(error)
-    }
-    val (status, message, payload) = encoded.fold(
-      error =>
-        (error.code, error.message.getBytes(StandardCharsets.UTF_8).take(MaximumNameBytes * 8), Array.emptyByteArray),
-      result => (result._1, Array.emptyByteArray, result._2)
-    )
-    output.writeInt(ResponseMagic)
-    output.writeInt(ProtocolVersion)
-    output.writeInt(status)
-    output.writeInt(message.length)
-    output.writeInt(payload.length)
-    if message.nonEmpty then output.write(message)
-    if payload.nonEmpty then output.write(payload)
-    output.flush()
-  }
-
-  private def encodeValues(values: Col[WireValue]): Either[CUDAError, Array[Byte]] =
-    GeneratedCUDAWireCodec.encodedSize(values, MaximumPayload).flatMap { size =>
-      val bytes = Array.ofDim[Byte](size)
-      GeneratedCUDAWireCodec.writeValues(values, ByteBuffer.wrap(bytes), MaximumPayload).map(_ => bytes)
-    }
-
-  private[server] final class CallbackConnection(
-      input: DataInputStream,
-      output: DataOutputStream,
-      recording: Option[RPCRecording],
-      closeChannel: () => Unit
-  ) extends GeneratedCUDAWireCodec.CallbackResolver {
-    private val closed     = java.util.concurrent.atomic.AtomicBoolean(false)
-    def isClosed: Boolean  = closed.get()
-    def retire(): Unit     = closed.set(true)
-    def cancel(): Unit     = if (closed.compareAndSet(false, true)) closeChannel()
-    private val HostKind   = 1
-    private val StreamKind = 2
-
-    def host(callbackId: Long): CUhostFn = {
-      require(callbackId != 0L, "host callback ID must be non-zero")
-      CallbackTypedef.remote["CUhostFn", Tuple1[CallbackData], Unit] { arguments =>
-        invoke(callbackId, arguments._1, HostKind, Array.emptyByteArray)
-      }
-    }
-
-    def stream(callbackId: Long): CUstreamCallback = {
-      require(callbackId != 0L, "stream callback ID must be non-zero")
-      CallbackTypedef.remote["CUstreamCallback", (Stream, CUDAStatus, CallbackData), Unit] { arguments =>
-        val payload = ByteBuffer.allocate(12).order(ByteOrder.BIG_ENDIAN)
-          .putLong(arguments._1.handle)
-          .putInt(arguments._2.code)
-          .array()
-        invoke(callbackId, arguments._3, StreamKind, payload)
-      }
-    }
-
-    private def invoke(
-        callbackId: Long,
-        callbackData: CallbackData,
-        kind: Int,
-        payload: Array[Byte]
-    ): Either[CallbackFailure, Unit] = synchronized {
-      if (closed.get()) Right(())
-      else if (callbackData.capabilityId != callbackId) {
-        Left(CallbackFailure.Protocol("callback userdata does not belong to this callback capability"))
-      } else
-        try {
-          output.writeInt(CallbackMagic)
-          output.writeInt(ProtocolVersion)
-          output.writeLong(callbackId)
-          output.writeInt(kind)
-          output.writeInt(payload.length)
-          if payload.nonEmpty then output.write(payload)
-          output.flush()
-          recording.foreach(_.callbackRequest())
-
-          if (input.readInt() != CallbackReplyMagic)
-            Left(CallbackFailure.Protocol("invalid native callback reply magic"))
-          else if (input.readInt() != ProtocolVersion)
-            Left(CallbackFailure.Protocol("native callback protocol version mismatch"))
-          else {
-            val status       = input.readInt()
-            val messageSize  = input.readInt()
-            val responseSize = input.readInt()
-            if (messageSize < 0 || messageSize > 1024 || responseSize < 0 || responseSize > MaximumPayload) {
-              Left(CallbackFailure.Protocol("invalid native callback reply size"))
-            } else {
-              val message = String(readExactly(input, messageSize), StandardCharsets.UTF_8)
-              val _       = readExactly(input, responseSize)
-              recording.foreach(_.callbackReply())
-              if (status == 0 && responseSize == 0) Right(())
-              else Left(CallbackFailure.Failed(if (message.nonEmpty) message else s"native callback failed: $status"))
+    type BoundConnection = (client: Client, execution: ExecutionSessions#ExecutionSessionConnection)
+    try
+      Using.resource(socket) { socket =>
+        Using.Manager { use =>
+          val bound     = AtomicReference(Option.empty[BoundConnection])
+          val buffered  = java.io.BufferedInputStream(socket.getInputStream)
+          val recording = journal match {
+            case Some(writer) => Some(use(RPCRecording(writer, buffered, socket.getOutputStream)))
+            case None         => None
+          }
+          val pushback = use(PushbackInputStream(
+            recording.fold[java.io.InputStream](buffered)(_.input),
+            ExecutionRPCProtocol.RequestIdentityBytesAfterMagic
+          ))
+          val input  = use(DataInputStream(pushback))
+          val output = use(DataOutputStream(recording.fold[java.io.OutputStream](socket.getOutputStream)(_.output)))
+          def client(input: DataInputStream): BoundConnection = {
+            val id       = peekClientId(input, pushback)
+            val selected = clients.find(id).getOrElse(throw IllegalArgumentException(s"unknown client identity $id"))
+            bound.get() match {
+              case Some(pair) if pair.client eq selected => pair
+              case Some(_) => throw IllegalArgumentException("connection cannot change client identity")
+              case None    =>
+                val pair = (client = selected, execution = use(selected.executions.connection()))
+                bound.set(Some(pair))
+                pair
             }
           }
-        } catch {
-          case scala.util.control.NonFatal(error) => Left(CallbackFailure.Unavailable(error.getMessage))
-        }
-    }
+          socket.setTcpNoDelay(true)
+          socket.setSoTimeout(socketTimeoutMillis)
+          def exchange(): Boolean = try {
+            recording.foreach(_.begin())
+            input.readInt() match {
+              case ControlProtocol.Magic =>
+                input.readInt() match {
+                  case ControlProtocol.RegisterClient => output.writeLong(clients.register().value)
+                  case ControlProtocol.QueryUsage     =>
+                    val usage = clients.usage(readClientId(input))
+                    // Preserve the two-long control reply while retired clients disappear;
+                    // all API evidence is now the shared execution count.
+                    output.writeLong(0L)
+                    output.writeLong(usage.executionRequests)
+                  case ControlProtocol.ReleaseClient =>
+                    clients.release(readClientId(input))
+                    output.writeInt(0)
+                  case ControlProtocol.Shutdown => output.writeInt(0); output.flush(); shutdown()
+                  case other                    => throw IllegalArgumentException(s"unknown control operation $other")
+                }
+                output.flush()
+                false
+              case ExecutionRPC.RequestMagic =>
+                val (owner, execution) = client(input)
+                socket.setSoTimeout(0)
+                val keep = ExecutionRPCProtocol.exchange(
+                  input,
+                  output,
+                  owner.id,
+                  execution,
+                  () => { owner.usage.execution.increment(); recording.foreach(_.accepted(owner)) }
+                )
+                recording.foreach(_.response())
+                keep
+              case value => throw IllegalArgumentException(f"invalid request magic: 0x$value%08x")
+            }
+          } catch {
+            case _: EOFException                       => false
+            case _: SocketException if socket.isClosed => false
+            case scala.util.control.NonFatal(error)    =>
+              recording.foreach(_.failed(
+                s"connection exchange failed: ${errorMessage(error)}"
+              ))
+              scribe.debug("RPC connection exchange failed", error)
+              false
+          }
+          Iterator.continually(exchange()).takeWhile(value => value).foreach(_ => ())
+        }.get
+      }
+    // The socket itself is managed above; this finally maintains the live-connection registry on every exit path.
+    finally connections.remove(socket)
   }
+
+  private[server] def peekClientId(
+      input: DataInputStream,
+      replay: java.io.PushbackInputStream
+  ): ClientId = {
+    // Keep the buffered socket unmarked: Native marked refills can repeat bytes.
+    val prefix = readExactly(input, ExecutionRPCProtocol.RequestIdentityBytesAfterMagic)
+    replay.unread(prefix)
+    ClientId.either(
+      ByteBuffer.wrap(prefix, ExecutionRPCProtocol.RequestClientOffsetAfterMagic, java.lang.Long.BYTES).getLong()
+    ).fold(message => throw IllegalArgumentException(s"invalid client identity: $message"), value => value)
+  }
+
+  private def readClientId(input: DataInputStream): ClientId =
+    ClientId.either(input.readLong())
+      .fold(message => throw IllegalArgumentException(s"invalid client identity: $message"), value => value)
 
   private def readExactly(input: DataInputStream, size: Int): Array[Byte] = {
     val result = input.readNBytes(size)
@@ -731,12 +445,7 @@ object GemstoneRPCServer {
     result
   }
 
-  private def parseArguments(arguments: Col[String]): Map[String, String] = arguments match {
-    case Col()                                            => Map.empty
-    case Col(name, value, rest*) if name.startsWith("--") => parseArguments(rest.toCol) + (name.drop(2) -> value)
-    case _                                                => throw IllegalArgumentException(
-        "usage: GemstoneRPCServer run --api <api> [provider options] -- <command>; [serve] --endpoint-file <path> [--record <archive>] [--token <64-hex>]; replay|inspect|step <archive>; shutdown --port <port> --token <64-hex>"
-      )
-  }
+  private def errorMessage(error: Throwable): String =
+    Option(error.getMessage).filter(_.nonEmpty).getOrElse(error.getClass.getName)
 
 }

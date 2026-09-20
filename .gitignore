@@ -1,9 +1,9 @@
 # sbt, Scala, and IDE state
 **/target/
 /.bloop/
-/.bsp/
+**/.bsp/
 /.metals/
-/.scala-build/
+**/.scala-build/
 /.sbt/
 /.idea/
 /.vscode/
@@ -13,6 +13,7 @@
 *.iml
 
 # Native build products
+/native/**/build*/
 *.a
 *.dll
 *.dylib

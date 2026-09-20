@@ -1,0 +1,3 @@
+# Catch test specifications, interpreted by every suite's own Catch session.
+specs = ["~[compact-matrix]"]
+exclude_programs = []

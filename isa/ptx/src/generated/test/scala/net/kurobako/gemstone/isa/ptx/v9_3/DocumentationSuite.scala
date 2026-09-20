@@ -1,10 +1,10 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
-import net.kurobako.gemstone.Col
+import net.kurobako.gemstone.Vec
 
 // Generated from examples in the pinned NVIDIA PTX ISA 9.3 specification. Do not edit.
 final class DocumentationSuite extends munit.FunSuite {
-  private val examples: Col[(String, String)] = Col(
+  private val examples: Vec[(String, String)] = Vec(
     "integer-arithmetic-instructions-add" -> "@p  add.u32     x,y,z;",
     "integer-arithmetic-instructions-add" -> "add.sat.s32 c,c,1;",
     "integer-arithmetic-instructions-add" -> "add.u16x2   u,v,w;",
@@ -824,14 +824,17 @@ final class DocumentationSuite extends munit.FunSuite {
     "tcgen05-mma-instructions-mma" -> "mbarrier.try_wait.parity.b64 p, [mbarObj0], 0;",
     "tcgen05-mma-instructions-mma" -> "@!p bra loop;",
     "tcgen05-mma-instructions-mma-sp" -> "tcgen05.mma.sp.cta_group::1.kind::f16      [taddr0],  adesc,  bdesc, [tmem_spmeta0], idesc, p;",
+    "tcgen05-mma-instructions-mma-sp" -> "tcgen05.mma.sp.cta_group::1.kind::mxf8f6f4.collector::a:fill [taddr2],  [taddr1],  bdesc, [tmem_spmeta1], idesc, [tmem_scaleA], [tmem_scaleB], p;",
     "tcgen05-mma-instructions-mma-sp" -> "tcgen05.commit.cta_group::1.mbarrier::arrive::one.b64 [mbarObj0];",
     "tcgen05-mma-instructions-mma-sp" -> "loop:",
     "tcgen05-mma-instructions-mma-sp" -> "mbarrier.try_wait.parity.b64 p, [mbarObj0], 0;",
     "tcgen05-mma-instructions-mma-sp" -> "@!p bra loop;",
+    "tcgen05-mma-instructions-mma-ws" -> "tcgen05.mma.ws.cta_group::1.kind::i8.collector::b2:use [taddr2], [taddr1], bdesc, idesc, p;",
     "tcgen05-mma-instructions-mma-ws" -> "tcgen05.commit.cta_group::1.mbarrier::arrive::one.b64 [mbarObj0];",
     "tcgen05-mma-instructions-mma-ws" -> "loop:",
     "tcgen05-mma-instructions-mma-ws" -> "mbarrier.try_wait.parity.b64 p, [mbarObj0], 0;",
     "tcgen05-mma-instructions-mma-ws" -> "@!p bra loop;",
+    "tcgen05-mma-instructions-mma-ws-sp" -> "tcgen05.mma.ws.sp.cta_group::1.kind::tf32.collector::b1::fill  [taddr1], [taddr0], bdesc, [tmem_spmeta0], idesc, p;",
     "tcgen05-mma-instructions-mma-ws-sp" -> "tcgen05.commit.cta_group::1.mbarrier::arrive::one.b64 [mbarObj0];",
     "tcgen05-mma-instructions-mma-ws-sp" -> "loop:",
     "tcgen05-mma-instructions-mma-ws-sp" -> "mbarrier.try_wait.parity.b64 p, [mbarObj0], 0;",
@@ -902,8 +905,8 @@ final class DocumentationSuite extends munit.FunSuite {
   test("all documentation examples parse into the typed syntax tree") {
     val failures = examples.flatMap { case (id, source) =>
       Parser.parse(source) match {
-        case Left(error) => Col(s"$id: $source\n  $error")
-        case Right(_) => Col.empty[String]
+        case Left(error) => Vec(s"$id: $source\n  $error")
+        case Right(_) => Vec.empty[String]
       }
     }
     assertEquals(failures.toSeq, Seq.empty[String])
@@ -916,9 +919,9 @@ final class DocumentationSuite extends munit.FunSuite {
         case Right(first) =>
           val printed = Printer.render(first)
           Parser.parse(printed) match {
-            case Right(second) if Printer.render(second) == printed => Col.empty[String]
-            case Right(second) => Col(s"$id: $source\n  printed: $printed\n  first: $first\n  second: $second")
-            case Left(error) => Col(s"$id: $source\n  printed: $printed\n  reparse: $error")
+            case Right(second) if Printer.render(second) == printed => Vec.empty[String]
+            case Right(second) => Vec(s"$id: $source\n  printed: $printed\n  first: $first\n  second: $second")
+            case Left(error) => Vec(s"$id: $source\n  printed: $printed\n  reparse: $error")
           }
       }
     }

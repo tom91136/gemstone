@@ -1,6 +1,9 @@
 package net.kurobako.gemstone.isa.amdgpu
 
-class MetadataSuite extends munit.FunSuite {
+import io.github.iltotore.iron.*
+import io.github.iltotore.iron.constraint.all.*
+
+final class MetadataSuite extends munit.FunSuite {
   test("generate normalized ACO and official XML instruction metadata") {
     assert(MesaACORecordCount >= 3500)
     assert(AMDXMLRecordCount >= 40000)
@@ -9,7 +12,7 @@ class MetadataSuite extends munit.FunSuite {
 
     val definition = InstructionDef.forOpcode("v_add_f32").head
     val old        = encodingsFor(definition, Family.GFX6)
-    assert(old.exists(info => info.source == MetadataSource.MesaACO && info.format == "VOP2"))
+    assert(old.exists(info => info.source == MetadataSource.MesaACO && info.format.value == "VOP2"))
 
     val current = encodingsFor(definition, Family.GFX11)
     assert(current.exists(info => info.source == MetadataSource.AMDXML && info.operands.nonEmpty))
@@ -18,7 +21,7 @@ class MetadataSuite extends munit.FunSuite {
   test("every descriptor owns canonical metadata without a detached database lookup") {
     Instruction.definitions.foreach { definition =>
       assert(definition.meta.encodings.nonEmpty, definition.toString)
-      assertEquals(InstructionDef.forOpcode(definition.opcode).contains(definition), true)
+      assertEquals(InstructionDef.forOpcode(definition.opcode.value).contains(definition), true)
       assert(definition.decoder.operandCounts.nonEmpty)
     }
   }

@@ -76,20 +76,20 @@ v_dot4_u32_u8 v0, v1, v2, v3
 
 // SOURCE: gfx1030_err.s
 
+ds_add_src2_u32 v1 offset:65535
+// ERROR: instruction not supported on this GPU (gfx1030): ds_add_src2_u32
+
 ds_and_src2_b32 v1 offset:65535
 // ERROR: instruction not supported on this GPU (gfx1030): ds_and_src2_b32
 
 ds_dec_src2_u64 v1 offset:65535
 // ERROR: instruction not supported on this GPU (gfx1030): ds_dec_src2_u64
 
-ds_inc_src2_u32 v1 offset:65535
-// ERROR: instruction not supported on this GPU (gfx1030): ds_inc_src2_u32
+ds_inc_src2_u64 v1 offset:65535
+// ERROR: instruction not supported on this GPU (gfx1030): ds_inc_src2_u64
 
 ds_max_src2_f32 v1 offset:65535
 // ERROR: instruction not supported on this GPU (gfx1030): ds_max_src2_f32
-
-ds_min_src2_f64 v1 offset:65535
-// ERROR: instruction not supported on this GPU (gfx1030): ds_min_src2_f64
 
 ds_min_src2_i32 v1 offset:65535
 // ERROR: instruction not supported on this GPU (gfx1030): ds_min_src2_i32
@@ -103,8 +103,8 @@ ds_sub_src2_u64 v1 offset:65535
 s_get_waveid_in_workgroup s0
 // ERROR: instruction not supported on this GPU (gfx1030): s_get_waveid_in_workgroup
 
-s_waitcnt_depctr depctr_vm_(8)
-// ERROR: invalid counter name depctr_vm_
+s_waitcnt_depctr depctr_va_vdst(-1)
+// ERROR: invalid value for depctr_va_vdst
 
 // SOURCE: gfx1030_new.s
 
@@ -154,6 +154,9 @@ v_fmac_legacy_f32_e64 v0, s1, 2.0
 
 v_fmac_legacy_f32_dpp v255, v1, v2 quad_perm:[0,1,2,3] row_mask:0x0 bank_mask:0x0
 // ERROR: dpp variant of this instruction is not supported
+
+v_fmac_legacy_f32_sdwa v255, v1, v2 dst_sel:DWORD dst_unused:UNUSED_PAD src0_sel:DWORD src1_sel:DWORD
+// ERROR: sdwa variant of this instruction is not supported
 
 v_mul_lo_i32 v0, v1, v2
 // ERROR: instruction not supported on this GPU (gfx1030): v_mul_lo_i32

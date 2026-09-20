@@ -1,0 +1,103 @@
+package net.kurobako.gemstone.isa.amdgpu
+
+import CodeObject.*
+
+import io.github.iltotore.iron.*
+import io.github.iltotore.iron.constraint.all.*
+
+import net.kurobako.gemstone.Vec
+import net.kurobako.gemstone.binary.{ByteRange, LittleEndian, ScalarByteWidth}
+import net.kurobako.gemstone.concurrent.withLock
+import net.kurobako.gemstone.execution.*
+import net.kurobako.gemstone.memory.MemoryValueByteWidth
+
+import java.util.concurrent.locks.ReentrantLock
+
+/** RDNA2 ISA section12.18: GLC gates return; DATA has replacement before comparison; unsigned INC resets when the
+  * original value is at least its limit.
+  */
+final class AtomicOperationSuite extends munit.FunSuite with CodeObjectTestSupport {
+  private val allocation = AllocationId(1)
+  private final class Memory(groups: Int, old: Long) extends ExecutionMemory {
+    val bytes        = Array.ofDim[Byte](16 + groups * 8)
+    private val lock = ReentrantLock()
+    LittleEndian.write(old, bytes, 0, ScalarByteWidth(8))
+    def read(id: AllocationId, offset: Long :| Positive0, size: Int :| Positive0) =
+      Either.cond(
+        id == allocation && ByteRange.contains(bytes.length, offset, size),
+        Vec.from(bytes.slice(offset.toInt, offset.toInt + size)),
+        ExecutionFailure.InvalidRequest("test read bounds")
+      )
+    def write(id: AllocationId, offset: Long :| Positive0, value: Vec[Byte]) = {
+      assert(id == allocation && ByteRange.contains(bytes.length, offset, value.size))
+      val _ = value.copyToArray(bytes, offset.toInt, value.size); Right(())
+    }
+    override def atomicModifyValue(
+        id: AllocationId,
+        offset: Long :| Positive0,
+        size: MemoryValueByteWidth
+    )(update: Long => Long): Either[ExecutionFailure, Long] = lock.withLock {
+      val scalarWidth = size.scalarByteWidth
+      if (id == allocation && ByteRange.contains(bytes.length, offset, size.value)) {
+        val arrayOffset = offset.toInt
+        val previous    = LittleEndian.decode(bytes, arrayOffset, scalarWidth)
+        LittleEndian.write(update(previous), bytes, arrayOffset, scalarWidth)
+        Right(previous)
+      } else Left(ExecutionFailure.InvalidRequest("test atomic bounds"))
+    }
+    def recordPointerRelocation(value: PointerRelocation): Unit = ()
+  }
+  for {
+    op        <- Seq("add", "cas", "flatcas", "inc")
+    width     <- Seq(32, 64)
+    returning <- Seq(false, true)
+    groups    <- Seq(1, 5)
+    scenario  <- if (op == "inc") Seq("below", "equal", "above", "high")
+    else if (op.endsWith("cas")) Seq("equal", "different", "same-operands") else Seq("add")
+  } test(s"$op width=$width return=$returning groups=$groups scenario=$scenario") {
+    val mask = if (width == 64) -1L else 0xffffffffL
+    val old  =
+      (scenario match {
+        case "below" => 9L; case "equal" if op == "inc"               => 10L; case "above" => 11L;
+        case "high"  => Long.MinValue | 0x80000000L; case "different" => 9L; case _        => 7L
+      }) & mask
+    val operand  = if (op == "inc") 10L else if (scenario == "same-operands") 7L else 9L
+    val code     = AtomicOperationCode.bytes(op, width, returning)
+    val kernel   = CodeObjectKernel("atomic", Target("gfx1030"), 24, 0, 0, 0x80, 0x08, code)
+    val dispatch = KernelDispatch.validated(
+      ProgramId(1),
+      KernelName("atomic"),
+      Dimensions.One,
+      testDimensions(groups),
+      Vec(
+        KernelArgument.Allocation(allocation, 0),
+        KernelArgument.Scalar(LittleEndian.toVec(operand, ScalarByteWidth(8))),
+        KernelArgument.Scalar(LittleEndian.toVec(7, ScalarByteWidth(8)))
+      )
+    ).toOption.get
+    val memory   = Memory(groups, old)
+    val expected = (0 until groups).scanLeft(old) { (previous, _) =>
+      if (op == "add") (previous + operand) & mask
+      else if (op == "inc") { if (java.lang.Long.compareUnsigned(previous, operand) >= 0) 0L else previous + 1 }
+      else if (previous == 7L) operand else previous
+    }
+    assertEquals(
+      DispatchInterpreter.execute(
+        DispatchInterpreter.prepare(kernel).toOption.get,
+        dispatch,
+        memory,
+        ExecutionControl.default
+      ),
+      Right(())
+    )
+    val byteWidth = if (width == 64) ScalarByteWidth(8) else ScalarByteWidth(4)
+    assertEquals(LittleEndian.decode(memory.bytes, 0, byteWidth), expected.last)
+    val result = (0 until groups).map(index =>
+      LittleEndian.decode(memory.bytes, 16 + index * 8, ScalarByteWidth(8))
+    )
+    val returns = expected.dropRight(1).map(value =>
+      if (!returning) 0x7654321012345678L else if (width == 32) 0x7654321000000000L | value else value
+    )
+    assertEquals(result.sorted, returns.sorted)
+  }
+}

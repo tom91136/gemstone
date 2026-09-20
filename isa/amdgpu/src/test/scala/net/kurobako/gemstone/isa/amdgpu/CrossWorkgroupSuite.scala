@@ -1,43 +1,51 @@
 package net.kurobako.gemstone.isa.amdgpu
 
-import net.kurobako.gemstone.Col
-import net.kurobako.gemstone.binary.{ByteRange, LittleEndian}
+import CodeObject.*
+
+import io.github.iltotore.iron.*
+import io.github.iltotore.iron.constraint.all.*
+
+import net.kurobako.gemstone.Vec
+import net.kurobako.gemstone.binary.{ByteRange, LittleEndian, ScalarByteWidth}
+import net.kurobako.gemstone.concurrent.withLock
 import net.kurobako.gemstone.execution.*
+import net.kurobako.gemstone.memory.MemoryValueByteWidth
 import java.util.concurrent.{Callable, CountDownLatch, Executors, TimeUnit}
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.locks.ReentrantLock
+import scala.util.Using
 
 /** Real gfx1030 instructions, with host completion boundaries between reduction phases.
   *
-  * The raw words below are assembled from src/test/resources/cross-workgroup/{publish,reduce,prefix,lds-exchange}.s:
-  * llvm-mc -triple=amdgcn-amd-amdhsa -mcpu=gfx1030 -filetype=obj input.s -o input.o; llvm-objcopy --only-section=.text
-  * -O binary input.o input.bin (little-endian 32-bit words).
+  * The raw words below are embedded little-endian gfx1030 machine code so JVM and Native tests share one fixture.
   */
-final class CrossWorkgroupSuite extends munit.FunSuite {
+final class CrossWorkgroupSuite extends munit.FunSuite with CodeObjectTestSupport {
   private val counts                    = Vector(1, 2, 3, 5, 9) // P=4; deduplicated controls, P+1 and 2P+1.
-  private val output                    = AllocationId.fromLong(1).toOption.get
-  private val markers                   = AllocationId.fromLong(2).toOption.get
-  private val partials                  = AllocationId.fromLong(3).toOption.get
-  private val counter                   = AllocationId.fromLong(4).toOption.get
-  private val tickets                   = AllocationId.fromLong(5).toOption.get
-  private val prefixes                  = AllocationId.fromLong(6).toOption.get
-  private def scalar(value: Int)        = KernelArgument.Scalar(LittleEndian.toCol(value.toLong, 4))
+  private val output                    = AllocationId(1)
+  private val markers                   = AllocationId(2)
+  private val partials                  = AllocationId(3)
+  private val counter                   = AllocationId(4)
+  private val tickets                   = AllocationId(5)
+  private val prefixes                  = AllocationId(6)
+  private def scalar(value: Int)        = KernelArgument.Scalar(LittleEndian.toVec(value.toLong, ScalarByteWidth(4)))
   private def pointer(id: AllocationId) = KernelArgument.Allocation(id, 0L)
-  private def prepared(name: String, size: Int, code: Col[Long]) =
+  private def prepared(name: String, size: Int, code: Vec[Long]) =
     DispatchInterpreter.prepare(CodeObjectKernel(
       name,
-      Target.unsafe("gfx1030"),
+      Target("gfx1030"),
       size,
       512,
       0,
       0x80,
       0x8,
-      code.flatMap(word => LittleEndian.toCol(word, 4))
+      code.flatMap(word => LittleEndian.toVec(word, ScalarByteWidth(4)))
     )).toOption.get
   // Write lane values through private group LDS; publish one marker before the group barrier.
   private lazy val publish = prepared(
     "publish",
     28,
-    Col[Long](
+    Vec[Long](
       0xf4080100L, 0xfa000000L, 0xf4040200L, 0xfa000010L, 0xf4000280L, 0xfa000018L,
       0xbf8cc07fL, 0x93030902L, 0x4a020003L, 0xd4c1006aL, 0x00001101L, 0xbe8b3c6aL,
       0x4a06020aL, 0x34040082L, 0xd8340000L, 0x00000302L, 0x7d840080L, 0xbe8c3c6aL,
@@ -50,7 +58,7 @@ final class CrossWorkgroupSuite extends munit.FunSuite {
   private lazy val reduce = prepared(
     "reduce",
     40,
-    Col[Long](
+    Vec[Long](
       0xf4080100L, 0xfa000000L, 0xf4080200L, 0xfa000010L, 0xf4040300L, 0xfa000020L,
       0xbf8cc07fL, 0x7d840080L, 0xbe8e3c6aL, 0x93030d02L, 0x808c030cL, 0x838c0d0cL,
       0x7e020203L, 0x34020282L, 0x7e040280L, 0xdc308000L, 0x03040001L, 0xbf8c3f70L,
@@ -63,7 +71,7 @@ final class CrossWorkgroupSuite extends munit.FunSuite {
   private lazy val prefix = prepared(
     "prefix",
     16,
-    Col[Long](
+    Vec[Long](
       0xf4080100L, 0xfa000000L, 0xbf8cc07fL, 0x7d840080L, 0xbe883c6aL, 0x80038102L,
       0x7e020280L, 0x7e040280L, 0xdc308000L, 0x03040001L, 0xbf8c3f70L, 0x4a040702L,
       0x4a020284L, 0x80838103L, 0xbf078003L, 0xbf85fff8L, 0x7e080202L, 0x34080882L,
@@ -78,59 +86,58 @@ final class CrossWorkgroupSuite extends munit.FunSuite {
     tail     <- Vector(0, 1)
   }
     test(s"groups=$groups width=$width tail=$tail parallel=$parallel publication-reduction-LDS") {
-      val n       = groups * width - tail
-      val memory  = Memory(n, groups)
-      val workers = Workers(memory)
-      val policy  = if (parallel) workers else ExecutionParallelism.Sequential
-      def run(program: DispatchInterpreter.PreparedKernel, args: Col[KernelArgument]): Unit = {
-        val dispatch = KernelDispatch.create(
-          ProgramId.fromLong(1).toOption.get,
-          program.kernel.name,
-          Dimensions.create(width, 1, 1).toOption.get,
-          Dimensions.create(groups, 1, 1).toOption.get,
-          args,
-          globalSize = Some(Dimensions.create(n, 1, 1).toOption.get)
-        ).toOption.get
-        assertEquals(
-          DispatchInterpreter.execute(
-            program,
-            dispatch,
-            memory,
-            ExecutionControl.create(ExecutionLimits(5000000, 64), parallelism = policy)
-          ),
-          Right(())
-        )
-      }
-      try for (epoch <- Vector(7, 29)) {
+      val n      = groups * width - tail
+      val memory = Memory(n, groups)
+      Using.resource(Workers(memory)) { workers =>
+        val policy = if (parallel) workers else ExecutionParallelism.Sequential
+        def run(program: DispatchInterpreter.PreparedKernel, args: Vec[KernelArgument]): Unit = {
+          val dispatch = KernelDispatch.validated(
+            ProgramId(1),
+            KernelName.either(program.kernel.name).fold(fail(_), value => value),
+            testDimensions(width),
+            testDimensions(groups),
+            args,
+            globalSize = Some(testDimensions(n).toGlobalDimensions)
+          ).toOption.get
+          assertEquals(
+            DispatchInterpreter.execute(
+              program,
+              dispatch,
+              memory,
+              ExecutionControl(ExecutionLimits(5000000, 64), parallelism = policy)
+            ),
+            Right(())
+          )
+        }
+        for (epoch <- Vector(7, 29)) {
           memory.reset()
-          run(publish, Col(pointer(output), pointer(markers), scalar(n), scalar(width), scalar(epoch)))
+          run(publish, Vec(pointer(output), pointer(markers), scalar(n), scalar(width), scalar(epoch)))
           assertEquals(memory.ints(output).take(n), Vector.tabulate(n)(_ + epoch))
           assertEquals(memory.ints(output).last, -777) // Partial-final-group sentinel must remain untouched.
           assertEquals(memory.ints(markers), Vector.tabulate(groups)(g => g * width + epoch))
           val calls = workers.calls.get()
           run(
             reduce,
-            Col(pointer(output), pointer(partials), pointer(counter), pointer(tickets), scalar(n), scalar(width))
+            Vec(pointer(output), pointer(partials), pointer(counter), pointer(tickets), scalar(n), scalar(width))
           )
-          // Atomic dispatches currently use the interpreter's conservative group-serialization policy.
-          assertEquals(workers.calls.get(), calls)
+          assertEquals(workers.calls.get(), calls + (if (parallel && groups > 1) 1 else 0))
           val expected = Vector.tabulate(groups)(g => (g * width until math.min(n, (g + 1) * width)).map(_ + epoch).sum)
           assertEquals(memory.ints(partials), expected)
           assertEquals(memory.ints(counter), Vector(groups))
           assertEquals(memory.ints(tickets).sorted, Vector.range(0, groups))
           assertEquals(memory.publications.get(), groups)
-          run(prefix, Col(pointer(partials), pointer(prefixes)))
+          run(prefix, Vec(pointer(partials), pointer(prefixes)))
           assertEquals(memory.ints(prefixes), expected.scanLeft(0)(_ + _).tail)
           if (parallel && groups > 1) assert(workers.calls.get() >= 2)
         }
-      finally workers.close()
+      }
     }
 
   // The earlier consumer wave must not read LDS until the later producer wave reaches the barrier.
   private lazy val ldsExchange = prepared(
     "lds_exchange",
     28,
-    Col[Long](
+    Vec[Long](
       0xf4080100L, 0xfa000000L, 0xf4040200L, 0xfa000010L, 0xf4000280L, 0xfa000018L,
       0xbf8cc07fL, 0x93030902L, 0x4a020003L, 0x7e040280L, 0x808b8109L, 0x7d84000bL,
       0xbe8c3c6aL, 0xd5250003L, 0x0000040aL, 0xd8340000L, 0x00000302L, 0x7e0c0202L,
@@ -146,25 +153,25 @@ final class CrossWorkgroupSuite extends munit.FunSuite {
     width    <- Vector(33, 64, 65)
   }
     test(s"groups=$groups width=$width parallel=$parallel later-wave-LDS-producer") {
-      val n       = groups * width
-      val memory  = Memory(n, groups)
-      val workers = Workers(memory)
-      val policy  = if (parallel) workers else ExecutionParallelism.Sequential
-      try for (epoch <- Vector(7, 29)) {
+      val n      = groups * width
+      val memory = Memory(n, groups)
+      Using.resource(Workers(memory)) { workers =>
+        val policy = if (parallel) workers else ExecutionParallelism.Sequential
+        for (epoch <- Vector(7, 29)) {
           memory.reset()
-          val dispatch = KernelDispatch.create(
-            ProgramId.fromLong(2).toOption.get,
-            ldsExchange.kernel.name,
-            Dimensions.create(width, 1, 1).toOption.get,
-            Dimensions.create(groups, 1, 1).toOption.get,
-            Col(pointer(output), pointer(markers), scalar(n), scalar(width), scalar(epoch))
+          val dispatch = KernelDispatch.validated(
+            ProgramId(2),
+            KernelName.either(ldsExchange.kernel.name).fold(fail(_), value => value),
+            testDimensions(width),
+            testDimensions(groups),
+            Vec(pointer(output), pointer(markers), scalar(n), scalar(width), scalar(epoch))
           ).toOption.get
           assertEquals(
             DispatchInterpreter.execute(
               ldsExchange,
               dispatch,
               memory,
-              ExecutionControl.create(ExecutionLimits(5000000, 64), parallelism = policy)
+              ExecutionControl(ExecutionLimits(5000000, 64), parallelism = policy)
             ),
             Right(())
           )
@@ -173,11 +180,12 @@ final class CrossWorkgroupSuite extends munit.FunSuite {
           assertEquals(memory.ints(markers), Vector.tabulate(groups)(_ + epoch))
           if (parallel && groups > 1) assert(workers.calls.get() > 0)
         }
-      finally workers.close()
+      }
     }
 
+  // The marker gate is mutable coordination state confined to this final memory fixture.
   private final class Memory(n: Int, groups: Int) extends ExecutionMemory {
-    private val lock = Object()
+    private val lock = ReentrantLock()
     private val data = Map(
       output   -> Array.ofDim[Byte]((n + 1) * 4),
       markers  -> Array.ofDim[Byte](groups * 4),
@@ -186,65 +194,106 @@ final class CrossWorkgroupSuite extends munit.FunSuite {
       tickets  -> Array.ofDim[Byte](groups * 4),
       prefixes -> Array.ofDim[Byte](groups * 4)
     )
-    @volatile var markerGate: Int => Unit   = _ => ()
-    val publications                        = AtomicInteger()
-    def ints(id: AllocationId): Vector[Int] = lock.synchronized {
-      Vector.tabulate(data(id).length / 4)(i => LittleEndian.decode(data(id), i * 4, 4).toInt)
+    private val markerGate                         = AtomicReference[Int => Unit](_ => ())
+    val publications                               = AtomicInteger()
+    def installMarkerGate(gate: Int => Unit): Unit = markerGate.set(gate)
+    def ints(id: AllocationId): Vector[Int]        = lock.withLock {
+      Vector.tabulate(data(id).length / 4)(i =>
+        LittleEndian.decode(data(id), i * 4, ScalarByteWidth(4)).toInt
+      )
     }
-    def reset(): Unit = lock.synchronized {
+    def reset(): Unit = lock.withLock {
       data.foreach { case (id, bytes) =>
-        for (i <- 0 until bytes.length / 4) LittleEndian.write(if (id == counter) 0L else -777L, bytes, i * 4, 4)
+        for (i <- 0 until bytes.length / 4)
+          LittleEndian.write(
+            if (id == counter) 0L else -777L,
+            bytes,
+            i * 4,
+            ScalarByteWidth(4)
+          )
       }
       publications.set(0)
-      markerGate = _ => ()
+      markerGate.set(_ => ())
     }
-    override def read(id: AllocationId, offset: Long, size: Int): Either[ExecutionFailure, Col[Byte]] =
-      lock.synchronized {
+    override def read(
+        id: AllocationId,
+        offset: Long :| Positive0,
+        size: Int :| Positive0
+    ): Either[ExecutionFailure, Vec[Byte]] =
+      lock.withLock {
         val bytes = data(id)
         if (!ByteRange.contains(bytes.length, offset, size.toLong)) Left(ExecutionFailure.InvalidRequest("read bounds"))
-        else Right(Col.unsafeFromArray(java.util.Arrays.copyOfRange(bytes, offset.toInt, offset.toInt + size)))
+        else Right(Vec.unsafeFromArray(java.util.Arrays.copyOfRange(bytes, offset.toInt, offset.toInt + size)))
       }
-    override def write(id: AllocationId, offset: Long, bytes: Col[Byte]): Either[ExecutionFailure, Unit] = {
-      val result = lock.synchronized {
+    override def write(
+        id: AllocationId,
+        offset: Long :| Positive0,
+        bytes: Vec[Byte]
+    ): Either[ExecutionFailure, Unit] = {
+      val result = lock.withLock {
         val destination = data(id)
         if (!ByteRange.contains(destination.length, offset, bytes.length.toLong))
           Left(ExecutionFailure.InvalidRequest("write bounds"))
         else {
           val _ = bytes.copyToArray(destination, offset.toInt, bytes.length)
           if (id == counter) {
-            val published = LittleEndian.decode(destination, 0, 4).toInt
+            val published = LittleEndian.decode(destination, 0, ScalarByteWidth(4)).toInt
             // Observe payload at the publication operation itself, not just after dispatch completion.
-            require(ints(partials).count(_ != -777) >= published)
+            if (ints(partials).count(_ != -777) < published)
+              throw AssertionError("counter was published before its partial")
             val _ = publications.incrementAndGet()
           }
           Right(())
         }
       }
-      if (result.isRight && id == markers) markerGate((offset / 4).toInt)
+      if (result.isRight && id == markers) markerGate.get()((offset / 4).toInt)
       result
+    }
+    override def atomicModifyValue(
+        id: AllocationId,
+        offset: Long :| Positive0,
+        size: MemoryValueByteWidth
+    )(update: Long => Long): Either[ExecutionFailure, Long] = lock.withLock {
+      val destination = data(id)
+      val scalarWidth = size.scalarByteWidth
+      if (ByteRange.contains(destination.length, offset, size.value)) {
+        val arrayOffset = offset.toInt
+        val previous    = LittleEndian.decode(destination, arrayOffset, scalarWidth)
+        LittleEndian.write(update(previous), destination, arrayOffset, scalarWidth)
+        if (id == counter) {
+          val published = LittleEndian.decode(destination, 0, ScalarByteWidth(4)).toInt
+          // Observe payload at the publication operation itself, not just after dispatch completion.
+          if (ints(partials).count(_ != -777) < published)
+            throw AssertionError("counter was published before its partial")
+          val _ = publications.incrementAndGet()
+        }
+        Right(previous)
+      } else Left(ExecutionFailure.InvalidRequest("atomic bounds"))
     }
     override def recordPointerRelocation(relocation: PointerRelocation): Unit = ()
   }
 
-  private final class Workers(memory: Memory) extends ExecutionParallelism {
-    val parallelism                                                = 4
-    val calls                                                      = AtomicInteger()
-    private val pool                                               = Executors.newFixedThreadPool(parallelism)
-    override def shouldParallel(tasks: Long, lanes: Long): Boolean = tasks > 1
-    override def parallelFor(tasks: Long)(task: Long => Either[ExecutionFailure, Unit])
+  private final class Workers(memory: Memory) extends ExecutionParallelism with AutoCloseable {
+    val parallelism: Int :| Positive = 4
+    val calls                        = AtomicInteger()
+    private val pool                 = Executors.newFixedThreadPool(parallelism)
+    override def shouldParallel(tasks: Long :| Positive0, lanes: Long :| Positive0): Boolean = tasks > 1
+    override def parallelFor(tasks: Long :| Positive0)(task: Long :| Positive0 => Either[ExecutionFailure, Unit])
         : Either[ExecutionFailure, Unit] = {
       calls.incrementAndGet()
       // Only each bounded resident cohort rendezvous in the test memory hook. The guest kernel never waits on another group.
       for (start <- 0 until tasks.toInt by parallelism) {
         val indices = (start until math.min(start + parallelism, tasks.toInt)).reverse
         val arrived = CountDownLatch(indices.size)
-        memory.markerGate = group => {
-          require(indices.contains(group))
+        memory.installMarkerGate { group =>
+          if (!indices.contains(group))
+            throw AssertionError(s"group $group is outside the resident cohort $indices")
           arrived.countDown()
-          require(arrived.await(10, TimeUnit.SECONDS), "resident cohort did not publish")
+          if (!arrived.await(10, TimeUnit.SECONDS))
+            throw AssertionError("resident cohort did not publish")
         }
         val jobs = java.util.ArrayList[Callable[Either[ExecutionFailure, Unit]]]()
-        indices.foreach(i => jobs.add(() => task(i.toLong)))
+        indices.foreach(i => jobs.add(() => task(i.toLong.refineUnsafe[Positive0])))
         val results = pool.invokeAll(jobs, 15, TimeUnit.SECONDS).iterator()
         while (results.hasNext) {
           val result = results.next().get()

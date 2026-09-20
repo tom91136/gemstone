@@ -1,0 +1,23 @@
+# Ryzen AI 9 HX 370, Radeon 890M (gfx1150), and the CUDA target from Polyregion.
+[[targets]]
+name = "cuda-sm120"
+backend = "cuda"
+architecture = "sm_120"
+device = "*sm_120*"
+
+[[targets]]
+name = "amd-hsa"
+backend = "hsa"
+architecture = "gfx1150"
+device = "*gfx1150*"
+
+[[targets]]
+name = "amd-hip"
+backend = "hip"
+architecture = "gfx1150"
+device = "*gfx1150*"
+
+[[targets]]
+name = "amd-opencl"
+backend = "opencl"
+device = "*AMD*"

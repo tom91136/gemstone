@@ -1,0 +1,25 @@
+cmake_minimum_required(VERSION 3.25)
+foreach(required IN ITEMS EXECUTABLE ARCHITECTURE)
+  if(NOT DEFINED ${required} OR "${${required}}" STREQUAL "")
+    message(FATAL_ERROR "OpenMP target validation requires ${required}")
+  endif()
+endforeach()
+
+find_program(readelf NAMES llvm-readelf readelf REQUIRED)
+find_program(nm NAMES llvm-nm nm REQUIRED)
+find_program(strings NAMES llvm-strings strings REQUIRED)
+execute_process(COMMAND "${readelf}" -SW "${EXECUTABLE}" OUTPUT_VARIABLE sections
+  COMMAND_ERROR_IS_FATAL ANY)
+if(NOT sections MATCHES "llvm_offload_entries" AND NOT sections MATCHES "\\.llvm\\.offloading")
+  message(FATAL_ERROR "Installed executable contains no OpenMP device image")
+endif()
+execute_process(COMMAND "${nm}" -D "${EXECUTABLE}" OUTPUT_VARIABLE symbols
+  COMMAND_ERROR_IS_FATAL ANY)
+if(NOT symbols MATCHES "__tgt_target")
+  message(FATAL_ERROR "Installed executable contains no target launch reference")
+endif()
+execute_process(COMMAND "${strings}" "${EXECUTABLE}" OUTPUT_VARIABLE embedded_strings
+  COMMAND_ERROR_IS_FATAL ANY)
+if(NOT embedded_strings MATCHES "(^|[^A-Za-z0-9_])${ARCHITECTURE}([^A-Za-z0-9_]|$)")
+  message(FATAL_ERROR "OpenMP device image does not contain target architecture ${ARCHITECTURE}")
+endif()

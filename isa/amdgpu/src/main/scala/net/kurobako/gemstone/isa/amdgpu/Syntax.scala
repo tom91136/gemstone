@@ -1,12 +1,25 @@
 package net.kurobako.gemstone.isa.amdgpu
 
-import net.kurobako.gemstone.Col
+import net.kurobako.gemstone.NoNul
+import net.kurobako.gemstone.Vec
+
+import io.github.iltotore.iron.*
+import io.github.iltotore.iron.constraint.all.*
+
+type AMDGPUModifierName = AMDGPUModifierName.T
+object AMDGPUModifierName extends RefinedType[String, MinLength[1] & NoNul]
+
+type AMDGPUModifierValue = AMDGPUModifierValue.T
+object AMDGPUModifierValue extends RefinedType[String, MinLength[1] & NoNul]
+
+type AMDGPUOpcode = AMDGPUOpcode.T
+object AMDGPUOpcode extends RefinedType[String, MinLength[1] & NoNul]
 
 private[amdgpu] def normalizeOpcode(value: String): String =
   value.map(character => if (character >= 'A' && character <= 'Z') (character + ('a' - 'A')).toChar else character)
 
 /** A parsed AMDGPU assembly program. Source locations are deliberately kept out of the semantic tree. */
-final case class Program(statements: Col[Statement])
+final case class Program(statements: Vec[Statement])
 
 enum Statement {
   case Instruction(value: net.kurobako.gemstone.isa.amdgpu.Instruction)
@@ -33,8 +46,12 @@ enum Operand {
   case Absolute(value: Operand)
 }
 
-final case class Modifier(name: String, value: Option[String] = None)
+final case class Modifier(name: AMDGPUModifierName, value: Option[AMDGPUModifierValue] = None)
 
-final case class ParseError(line: Int, column: Int, message: String) {
+final case class ParseError(
+    line: Int :| Positive,
+    column: Int :| Positive,
+    message: String
+) {
   override def toString: String = s"$line:$column: $message"
 }

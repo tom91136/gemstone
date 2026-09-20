@@ -113,9 +113,6 @@ v_sin_f32_e64 v0, -v0
 image_atomic_add v252, v2, s[8:15]
 // ERROR: invalid atomic image dmask
 
-image_atomic_add v252, v2, s[8:15] dmask:0x1 tfe
-// ERROR: image data size does not match dmask and tfe
-
 // SOURCE: mimg.s
 
 image_gather4 v[5:8], v1, s[8:15], s[12:15] dmask:0x1

@@ -1,0 +1,66 @@
+package net.kurobako.gemstone.codegen
+
+import java.nio.charset.StandardCharsets
+import java.nio.file.AtomicMoveNotSupportedException
+import java.nio.file.Files
+import java.nio.file.Path
+import java.nio.file.StandardCopyOption
+import scala.jdk.CollectionConverters.*
+import scala.util.Using
+
+/** Atomic updates and exact freshness checks for checked-in generator outputs. */
+object GeneratedFiles {
+  def sync(path: Path, content: String, check: Boolean): Unit =
+    if (check) {
+      if (!Files.isRegularFile(path)) throw IllegalStateException(s"generated file is absent: $path")
+      if (Files.readString(path, StandardCharsets.UTF_8) != content)
+        throw IllegalStateException(s"generated file is stale: $path")
+    } else {
+      val _ = write(path, content)
+    }
+
+  def write(path: Path, content: String): Boolean = {
+    val current = Option.when(Files.isRegularFile(path))(Files.readString(path, StandardCharsets.UTF_8))
+    if (current.contains(content)) false
+    else {
+      val _                        = Files.createDirectories(path.getParent)
+      given Using.Releasable[Path] = temporary => { val _ = Files.deleteIfExists(temporary); () }
+      Using.resource(Files.createTempFile(path.getParent, s".${path.getFileName}.", ".tmp")) { temporary =>
+        val _ = Files.writeString(temporary, content, StandardCharsets.UTF_8)
+        try Files.move(temporary, path, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+        catch {
+          case _: AtomicMoveNotSupportedException =>
+            Files.move(temporary, path, StandardCopyOption.REPLACE_EXISTING)
+        }
+        true
+      }
+    }
+  }
+
+  def requireOnly(directory: Path, expected: Set[Path], include: Path => Boolean): Unit = {
+    val normalized = expected.map(_.toAbsolutePath.normalize)
+    val actual     =
+      if (!Files.isDirectory(directory)) Set.empty[Path]
+      else {
+        Using.resource(Files.walk(directory)) { paths =>
+          paths.iterator().asScala.filter(path => Files.isRegularFile(path) && include(path))
+            .map(_.toAbsolutePath.normalize).toSet
+        }
+      }
+    if (actual != normalized) {
+      val missing = normalized.diff(actual).toVector.sortBy(_.toString).mkString(", ")
+      val extra   = actual.diff(normalized).toVector.sortBy(_.toString).mkString(", ")
+      throw IllegalStateException(s"generated file set is stale under $directory; missing=[$missing], extra=[$extra]")
+    }
+  }
+
+  def removeUnexpected(directory: Path, expected: Set[Path], include: Path => Boolean): Unit =
+    if (Files.isDirectory(directory)) {
+      val normalized = expected.map(_.toAbsolutePath.normalize)
+      val unexpected = Using.resource(Files.walk(directory)) { paths =>
+        paths.iterator().asScala.filter(path => Files.isRegularFile(path) && include(path))
+          .map(_.toAbsolutePath.normalize).filterNot(normalized).toVector
+      }
+      unexpected.foreach(path => Files.delete(path))
+    }
+}

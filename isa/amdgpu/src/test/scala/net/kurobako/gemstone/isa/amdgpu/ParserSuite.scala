@@ -1,22 +1,28 @@
 package net.kurobako.gemstone.isa.amdgpu
 
-import net.kurobako.gemstone.Col
+import io.github.iltotore.iron.*
+import io.github.iltotore.iron.constraint.all.*
 
-class ParserSuite extends munit.FunSuite {
+import net.kurobako.gemstone.Vec
+
+final class ParserSuite extends munit.FunSuite {
   private def roundTrip(source: String): Unit = {
-    val first = Parser.parseInstruction(source).fold(error => fail(error.toString), identity)
-    val text  = Printer.render(first)
-    val next  = Parser.parseInstruction(text).fold(error => fail(error.toString), identity)
-    assertEquals(Printer.render(next), text)
+    val first = Parser.parseInstruction(source).fold(error => fail(error.toString), value => value)
+    val text  = ISA.Printer.render(first)
+    val next  = Parser.parseInstruction(text).fold(error => fail(error.toString), value => value)
+    assertEquals(ISA.Printer.render(next), text)
   }
 
   test("parse and canonically print typed operands") {
     val instruction =
-      Parser.parseInstruction("V_ADD_F32_e32 v0, |v1|, -v2 clamp").fold(error => fail(error.toString), identity)
-    assertEquals(instruction.opcode, "v_add_f32")
+      Parser.parseInstruction("V_ADD_F32_e32 v0, |v1|, -v2 clamp").fold(error => fail(error.toString), value => value)
+    assertEquals(instruction.opcode.value, "v_add_f32")
     assertEquals(instruction.operands.size, 3)
-    assertEquals(instruction.mods.toSeq, Seq(Modifier("e32"), Modifier("clamp")))
-    assertEquals(Printer.render(instruction), "v_add_f32 v0, |v1|, -v2 e32 clamp")
+    assertEquals(
+      instruction.mods.toSeq,
+      Seq(Modifier(AMDGPUModifierName("e32")), Modifier(AMDGPUModifierName("clamp")))
+    )
+    assertEquals(ISA.Printer.render(instruction), "v_add_f32 v0, |v1|, -v2 e32 clamp")
   }
 
   test("parse register ranges, literals, expressions, and named modifiers") {
@@ -28,8 +34,8 @@ class ParserSuite extends munit.FunSuite {
 
   test("parse programs without retaining comments") {
     val source = ".text\nentry:\n  s_nop 0 // delay\n  s_endpgm"
-    val parsed = Parser.parse(source).fold(error => fail(error.toString), identity)
-    assertEquals(Printer.render(parsed), ".text\nentry:\ns_nop 0\ns_endpgm")
+    val parsed = Parser.parse(source).fold(error => fail(error.toString), value => value)
+    assertEquals(ISA.Printer.render(parsed), ".text\nentry:\ns_nop 0\ns_endpgm")
   }
 
   test("reject malformed delimiters and empty operands") {

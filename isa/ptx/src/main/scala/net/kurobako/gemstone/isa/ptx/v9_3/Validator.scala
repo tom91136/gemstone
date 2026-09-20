@@ -1,0 +1,135 @@
+package net.kurobako.gemstone.isa.ptx.v9_3
+
+import Program.*
+
+import net.kurobako.gemstone.Vec
+import net.kurobako.gemstone.Vec.*
+import net.kurobako.gemstone.isa.ValidationOutcome
+
+import io.github.iltotore.iron.*
+import io.github.iltotore.iron.constraint.all.*
+import Metadata.*
+import ISA.*
+
+object Validator {
+  enum Issue {
+    case VersionTooOld(opcode: Opcode, required: Version, selected: Version)
+    case TargetTooOld(opcode: Opcode, required: Target, selected: Target)
+    case InvalidOperands(
+        opcode: Opcode,
+        message: String
+    )
+    case InvalidModifiers(
+        opcode: Opcode,
+        message: String
+    )
+    case Incomplete(detail: String)
+  }
+
+  def validate(
+      instruction: Instruction,
+      version: Version,
+      target: Target
+  ): ValidationOutcome[Issue] = {
+    val candidates = instruction.meta.entries
+    val available  = candidates.filter(info => version >= info.introduced && target >= info.minimumTarget)
+    if (available.isEmpty) {
+      val versionErrors = candidates.filter(_.introduced > version).map(info =>
+        Issue.VersionTooOld(instruction.opcode, info.introduced, version)
+      )
+      val targetErrors = candidates.filter(_.minimumTarget > target).map(info =>
+        Issue.TargetTooOld(instruction.opcode, info.minimumTarget, target)
+      )
+      ValidationOutcome.Rejected((versionErrors ++ targetErrors).distinct.refineUnsafe[MinLength[1]])
+    } else validateForms(instruction, available.flatMap(_.forms))
+  }
+
+  def validate(
+      program: Program,
+      version: Version,
+      target: Target
+  ): ValidationOutcome[Issue] = {
+    val instructions = collectInstructions(program.statements)
+    ValidationOutcome.combineAll(instructions.map(validate(_, version, target)))
+  }
+
+  private def validateForms(
+      instruction: Instruction,
+      forms: Vec[InstructionForm]
+  ): ValidationOutcome[Issue] =
+    if (forms.isEmpty)
+      unsupported(s"no normalized syntax form for ${instruction.qualifiedOpcode}")
+    else {
+      val sameCount = forms.filter(_.operands.size == instruction.operands.size)
+      if (sameCount.isEmpty)
+        ValidationOutcome.Rejected(
+          Vec.nonEmpty(
+            Issue.InvalidOperands(
+              instruction.opcode,
+              s"expected ${forms.map(_.operands.size).distinct.sorted.mkString(" or ")} operands, found ${instruction.operands.size}"
+            )
+          )
+        )
+      else {
+        val modifiers    = instruction.mods.map(_.name).toSet
+        val matchingMods = sameCount.filter(form => modifiersMatch(modifiers, form))
+        if (matchingMods.isEmpty)
+          ValidationOutcome.Rejected(
+            Vec.nonEmpty(Issue.InvalidModifiers(
+              instruction.opcode,
+              s"unsupported modifier set: ${modifiers.iterator.map(_.value).toArray.sorted.mkString(".")}"
+            ))
+          )
+        else {
+          val complete = matchingMods.filter(_.complete)
+          complete.find(form => operandsMatch(instruction.operands, form.operands)) match {
+            case Some(_)                   => ValidationOutcome.Accepted
+            case None if complete.nonEmpty =>
+              ValidationOutcome.Rejected(
+                Vec.nonEmpty(Issue.InvalidOperands(
+                  instruction.opcode,
+                  "operand kinds do not match the syntax form"
+                ))
+              )
+            case None =>
+              unsupported(
+                s"syntax form for ${instruction.qualifiedOpcode} is not fully normalized"
+              )
+          }
+        }
+      }
+    }
+
+  private def modifiersMatch(actual: Set[ModifierName], form: InstructionForm): Boolean = {
+    val allowed  = form.requiredModifierGroups.flatten.toSet ++ form.optionalModifiers
+    val required = form.requiredModifierGroups.forall(group => actual.count(group.contains) == 1)
+    required && actual.subsetOf(allowed)
+  }
+
+  private def unsupported(
+      detail: String
+  ): ValidationOutcome[Issue] =
+    ValidationOutcome.Incomplete(Vec.nonEmpty(Issue.Incomplete(detail)))
+
+  private def operandsMatch(actual: Vec[Operand], expected: Vec[OperandConstraint]): Boolean =
+    actual.zip(expected).forall {
+      case (Operand.Register(_, _), OperandConstraint.Register)        => true
+      case (Operand.WithPredicate(_, _), OperandConstraint.Register)   => true
+      case (Operand.Qualified(base, _), constraint)                    => operandsMatch(Vec(base), Vec(constraint))
+      case (_: Operand.Address, OperandConstraint.Address)             => true
+      case (_: Operand.VectorLiteral, OperandConstraint.VectorOperand) => true
+      case (_: Operand.Symbol | _: Operand.Qualifier, OperandConstraint.Symbol) => true
+      case (_, OperandConstraint.Value)                                         => true
+      case (_, OperandConstraint.Unknown(_))                                    => false
+      case _                                                                    => false
+    }
+
+  private def collectInstructions(statements: Vec[Statement]): Vec[Instruction] =
+    statements.flatMap {
+      case Statement.Instruction(value)         => Vec(value)
+      case Statement.Block(body)                => collectInstructions(body)
+      case Statement.Entry(_, _, _, body)       => collectInstructions(body)
+      case Statement.Function(_, _, _, _, body) => body.iterator.flatMap(collectInstructions(_)).toVec
+      case _                                    => Vec.empty[Instruction]
+    }
+}

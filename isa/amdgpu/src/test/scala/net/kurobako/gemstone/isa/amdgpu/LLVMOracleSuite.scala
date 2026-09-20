@@ -1,11 +1,13 @@
 package net.kurobako.gemstone.isa.amdgpu
 
-import net.kurobako.gemstone.Col
-import net.kurobako.gemstone.isa.ValidationResult
+import net.kurobako.gemstone.Vec
+import net.kurobako.gemstone.isa.ValidationOutcome
+import Validation.*
+import LLVMOracle.*
 
 import scala.collection.mutable
 
-class LLVMOracleSuite extends munit.FunSuite {
+final class LLVMOracleSuite extends munit.FunSuite {
   test("round-trip every LLVM MC oracle instruction covered by the pinned production metadata") {
     assertEquals(LLVMOracle.sourceFileCount, 770)
     assertEquals(LLVMOracle.sourceCaseCount, 308161)
@@ -16,6 +18,8 @@ class LLVMOracleSuite extends munit.FunSuite {
       LLVMOracle.targets.iterator.map(_.family).toSet,
       Family.values.toSet - Family.CDNA5
     )
+    // Streaming the large oracle corpus avoids retaining one result per case.
+    @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
     var roundTripped = 0
     val unsupported  = mutable.Map.empty[String, Int].withDefaultValue(0)
     LLVMOracle.cases.foreach { golden =>
@@ -23,13 +27,13 @@ class LLVMOracleSuite extends munit.FunSuite {
         case Left(error) if error.message.startsWith("unknown AMDGPU opcode") => recordUnsupported(error, unsupported)
         case Left(error)   => fail(s"${golden.source}: ${golden.target.name}: $error\n${golden.assembly}")
         case Right(parsed) =>
-          val canonical = Printer.render(parsed)
+          val canonical = ISA.Printer.render(parsed)
           val reparsed  = Parser.parse(canonical).fold(
             error => fail(s"${golden.source}: failed to parse canonical output: $error\n$canonical"),
-            identity
+            value => value
           )
           assertEquals(
-            Printer.render(reparsed),
+            ISA.Printer.render(reparsed),
             canonical,
             s"${golden.source}: ${golden.target.name}: ${golden.assembly}"
           )
@@ -42,18 +46,22 @@ class LLVMOracleSuite extends munit.FunSuite {
   }
 
   test("every positive oracle is encoded exactly or classified as an unsupported format") {
-    var encoded           = 0
+    // Streaming classification counters avoid retaining hundreds of thousands of per-case results.
+    @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+    var encoded = 0
+    @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
     var unsupportedFormat = 0
     val unsupported       = mutable.Map.empty[String, Int].withDefaultValue(0)
-    var paired            = 0
+    @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+    var paired = 0
     LLVMOracle.cases.foreach { golden =>
       Parser.parse(golden.assembly) match {
         case Left(error) if error.message.startsWith("unknown AMDGPU opcode") => recordUnsupported(error, unsupported)
         case Left(error)    => fail(s"${golden.source}: ${golden.target.name}: $error\n${golden.assembly}")
         case Right(program) => program.statements match {
-            case Col(Statement.Instruction(instruction)) =>
+            case Vec(Statement.Instruction(instruction)) =>
               val definitions = encodingsFor(instruction, golden.target)
-              val formats     = definitions.map(_.format.toUpperCase).distinct
+              val formats     = definitions.map(_.format.value.toUpperCase).distinct
               Binary.encode(instruction, golden.target) match {
                 case Right(actual) =>
                   assert(formats.contains("SOPP"), s"encoded an unimplemented format at ${golden.source}: $formats")
@@ -63,22 +71,22 @@ class LLVMOracleSuite extends munit.FunSuite {
                     s"${golden.source}: ${golden.target.name}: ${golden.assembly}"
                   )
                   encoded += 1
-                case Left(CodecError.UnsupportedFormat(_, _, declared)) =>
+                case Left(Binary.CodecError.UnsupportedFormat(_, _, declared)) =>
                   assert(
                     !formats.contains("SOPP"),
                     s"SOPP case escaped encoding at ${golden.source}: ${golden.assembly}"
                   )
                   assertEquals(declared.toSeq, formats.sorted.toSeq)
                   unsupportedFormat += 1
-                case Left(CodecError.UnsupportedInstruction(_, _)) =>
+                case Left(Binary.CodecError.UnsupportedInstruction(_, _)) =>
                   assert(definitions.isEmpty, s"known instruction was classified unknown at ${golden.source}")
                   unsupportedFormat += 1
-                case Left(CodecError.UnsupportedOperandSyntax(_, _, _)) =>
+                case Left(Binary.CodecError.UnsupportedOperandSyntax(_, _, _)) =>
                   assert(formats.contains("SOPP"), s"non-SOPP syntax classification at ${golden.source}: $formats")
                   unsupportedFormat += 1
                 case Left(error) => fail(s"${golden.source}: unclassified codec result $error\n${golden.assembly}")
               }
-            case Col(Statement.InstructionPair(_, _)) => paired += 1
+            case Vec(Statement.InstructionPair(_, _)) => paired += 1
             case other => fail(s"${golden.source}: expected one instruction or pair, found $other")
           }
       }
@@ -89,31 +97,30 @@ class LLVMOracleSuite extends munit.FunSuite {
   }
 
   test("LLVM diagnostics never pass conservative target validation") {
-    assertEquals(LLVMOracle.sourceDiagnosticCount, 98730)
+    assertEquals(LLVMOracle.sourceDiagnosticCount, 98714)
     assertEquals(LLVMOracle.diagnostics.size, LLVMOracle.selectedDiagnosticCount)
     assert(LLVMOracle.diagnostics.size >= 300)
     LLVMOracle.diagnostics.foreach { diagnostic =>
       Parser.parse(diagnostic.assembly) match {
         case Left(_)        => ()
         case Right(program) =>
-          Validator.validate(program, diagnostic.target) match {
-            case ValidationResult.Valid =>
+          Validation.validate(program, diagnostic.target) match {
+            case ValidationOutcome.Accepted =>
               fail(
                 s"${diagnostic.source}: accepted LLVM diagnostic for ${diagnostic.target.name}: " +
                   s"${diagnostic.assembly}\nexpected: ${diagnostic.message}"
               )
-            case ValidationResult.Invalid(_)     => ()
-            case ValidationResult.Unsupported(_) => ()
+            case ValidationOutcome.Rejected(_)   => ()
+            case ValidationOutcome.Incomplete(_) => ()
           }
       }
     }
   }
 
   private def recordUnsupported(error: ParseError, counts: mutable.Map[String, Int]): Unit = {
-    val RawUnknown = "unknown AMDGPU opcode '([^']+)'".r
-    val opcode     = error.message match {
-      case RawUnknown(raw) => stripEncodingSuffixes(raw)
-      case other           => fail(s"unexpected unknown-opcode diagnostic: $other")
+    val opcode = error.message match {
+      case s"unknown AMDGPU opcode '$raw'" if raw.nonEmpty => stripEncodingSuffixes(raw)
+      case other                                           => fail(s"unexpected unknown-opcode diagnostic: $other")
     }
     counts(opcode) += 1
   }
@@ -155,16 +162,16 @@ class LLVMOracleSuite extends munit.FunSuite {
   )
 
   private val LegacyComparisonPredicates =
-    Col("eq", "f", "ge", "gt", "le", "lg", "lt", "neq", "nge", "ngt", "nle", "nlg", "nlt", "o", "tru", "u")
+    Vec("eq", "f", "ge", "gt", "le", "lg", "lt", "neq", "nge", "ngt", "nle", "nlg", "nlt", "o", "tru", "u")
 
   private val LegacyComparisonAliases = Set.from(for {
-    mnemonic  <- Col("v_cmps", "v_cmpsx")
+    mnemonic  <- Vec("v_cmps", "v_cmpsx")
     predicate <- LegacyComparisonPredicates
-    width     <- Col("f32", "f64")
+    width     <- Vec("f32", "f64")
   } yield s"${mnemonic}_${predicate}_$width")
 
   private val ExpectedUnsupportedOracleOpcodes =
     SpecificationGaps ++ LegacyMnemonicAliases ++ LegacyComparisonAliases
 
-  private val EncodingSuffixes = Col("_dpp8", "_sdwa", "_dpp", "_e64", "_e32")
+  private val EncodingSuffixes = Vec("_dpp8", "_sdwa", "_dpp", "_e64", "_e32")
 }

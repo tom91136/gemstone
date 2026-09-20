@@ -1,39 +1,47 @@
 package net.kurobako.gemstone.binary
 
-import net.kurobako.gemstone.Col
+import net.kurobako.gemstone.Vec
 
-class BinarySuite extends munit.FunSuite {
+import io.github.iltotore.iron.*
+import io.github.iltotore.iron.constraint.all.*
+
+final class BinarySuite extends munit.FunSuite {
   test("little-endian scalars round-trip through arrays and runtime collections") {
     val value = 0x8877665544332211L
-    val bytes = LittleEndian.toArray(value, 8)
+    val width = ScalarByteWidth(8)
+    val bytes = LittleEndian.toArray(value, width)
 
     assertEquals(bytes.toSeq, Seq[Byte](0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88.toByte))
-    assertEquals(LittleEndian.decode(bytes, 0, 8), value)
-    assertEquals(LittleEndian.decode(Col.from(bytes), 0, 8), value)
+    assertEquals(LittleEndian.decode(bytes, 0, width), value)
+    assertEquals(LittleEndian.decode(Vec.from(bytes), 0, width), value)
   }
 
   test("fixed-width bit operations share one validated definition") {
-    assertEquals(Bits.mask(13), 0x1fffL)
-    assertEquals(Bits.truncate(0x12345L, 16), 0x2345L)
-    assertEquals(Bits.signExtend(0x1fffL, 13), -1L)
-    assertEquals(Bits.byteCount(64), 8)
+    assertEquals(Bits.mask(BitWidth(13)), 0x1fffL)
+    assertEquals(Bits.truncate(0x12345L, BitWidth(16)), 0x2345L)
+    assertEquals(Bits.signExtend(0x1fffL, BitWidth(13)), -1L)
+    assertEquals(Bits.byteCount(ByteAlignedBitWidth(64)).value, 8)
   }
 
   test("bit reversal and population count respect every supported width") {
     val values = Seq(0L, -1L, Long.MinValue, Long.MaxValue, 0x8877665544332211L)
     (1 to 64).foreach { width =>
+      val bitWidth = BitWidth.either(width).fold(message => fail(message), value => value)
       values.foreach { value =>
         val digits          = java.lang.Long.toBinaryString(value).reverse.padTo(64, '0').take(width)
         val expectedReverse = BigInt(digits, 2).longValue
-        assertEquals(Bits.reverseBits(value, width), expectedReverse)
-        assertEquals(Bits.bitCount(value, width), digits.count(_ == '1'))
-        assertEquals(Bits.reverseBits(Bits.reverseBits(value, width), width), Bits.truncate(value, width))
+        assertEquals(Bits.reverseBits(value, bitWidth), expectedReverse)
+        assertEquals(Bits.bitCount(value, bitWidth), digits.count(_ == '1'))
+        assertEquals(
+          Bits.reverseBits(Bits.reverseBits(value, bitWidth), bitWidth),
+          Bits.truncate(value, bitWidth)
+        )
       }
     }
     Seq(0, -1, 65).foreach { width =>
-      val _ = intercept[IllegalArgumentException](Bits.reverseBits(0L, width))
-      val _ = intercept[IllegalArgumentException](Bits.bitCount(0L, width))
+      assert(BitWidth.either(width).isLeft)
     }
+    assert(ByteAlignedBitWidth.either(7).isLeft)
   }
 
   test("32-bit words slice and join without sign extension") {
@@ -45,21 +53,31 @@ class BinarySuite extends munit.FunSuite {
   }
 
   test("IEEE-754 interchange encodings round trip representative values") {
-    assertEquals(IEEE754.floatToBinary16(1.5f), 0x3e00L)
-    assertEquals(IEEE754.binary16ToFloat(0x3e00L), 1.5f)
-    assertEquals(IEEE754.floatToBinary32(-0.0f), 0x80000000L)
-    assertEquals(java.lang.Float.floatToRawIntBits(IEEE754.binary32ToFloat(0x7fc01234L)), 0x7fc01234)
+    assertEquals(IEEE754.floatToBinary16(1.5f).value, 0x3e00L)
+    assertEquals(IEEE754.binary16ToFloat(Binary16(0x3e00L)), 1.5f)
+    assertEquals(IEEE754.floatToBinary32(-0.0f).value, 0x80000000L)
+    assertEquals(java.lang.Float.floatToRawIntBits(IEEE754.binary32ToFloat(Binary32(0x7fc01234L))), 0x7fc01234)
     assertEquals(IEEE754.doubleToBinary64(-0.0), Long.MinValue)
     assertEquals(
       java.lang.Double.doubleToRawLongBits(IEEE754.binary64ToDouble(0x7ff8000000001234L)),
       0x7ff8000000001234L
     )
+    assert(FloatingPointWidth.either(8).isLeft)
   }
 
   test("byte ranges reject negative and overflowing slices") {
-    assertEquals(ByteRange.start(16, 12L, 4), Some(12))
+    val start: Option[Int] = ByteRange.start(16, 12L, 4)
+    assertEquals(start, Some(12))
     assertEquals(ByteRange.start(16, 13L, 4), None)
     assertEquals(ByteRange.contains(16, Long.MaxValue, 1L), false)
     assertEquals(ByteRange.contains(16, -1L, 1L), false)
+  }
+
+  test("little-endian array access validates the complete runtime range") {
+    val bytes = Array.ofDim[Byte](8)
+    val _     = intercept[IllegalArgumentException](LittleEndian.decode(bytes, -1, ScalarByteWidth(1)))
+    val _     = intercept[IllegalArgumentException](LittleEndian.decode(bytes, 7, ScalarByteWidth(2)))
+    val _     = intercept[IllegalArgumentException](LittleEndian.write(0L, bytes, -1, ScalarByteWidth(1)))
+    val _     = intercept[IllegalArgumentException](LittleEndian.write(0L, bytes, 7, ScalarByteWidth(2)))
   }
 }

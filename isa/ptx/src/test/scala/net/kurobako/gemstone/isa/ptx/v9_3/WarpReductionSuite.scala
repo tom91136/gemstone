@@ -1,4 +1,11 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
+
+import Program.*
+
+import VirtualMachine.*
+
+import io.github.iltotore.iron.*
+import io.github.iltotore.iron.constraint.all.*
 import net.kurobako.gemstone.execution.*
 import net.kurobako.gemstone.memory.ArrayCheckedMemory
 
@@ -31,7 +38,7 @@ st.global.u32 [%address],%result;
 DONE:
 ret;
 }"""
-      val kernel = ISA.compile(source).fold(e => fail(e.toString), identity)
+      val kernel = ISA.compile(source).fold(e => fail(e.toString), value => value)
       val memory = ArrayCheckedMemory.allocate(128)
       val values =
         Vector.tabulate(32)(lane =>
@@ -44,11 +51,11 @@ ret;
         case (value, lane) if (mask & (1L << lane)) != 0 => if (signed) value.toLong else value.toLong & 0xffffffffL
       }
       val expected = (if (operation == "min") participating.min else participating.max).toInt
-      val geometry = LaunchGeometry.create(Dimensions.create(32, 1, 1).toOption.get, Dimensions.One).toOption.get
-      assert(Interpreter.execute(
+      val geometry = LaunchGeometry.forLaunch(Dimensions(32, 1, 1), Dimensions.One).toOption.get
+      assert(VirtualMachine.execute(
         kernel,
         geometry,
-        Map("data" -> Argument(memory.allocation.start.value)),
+        Map(ParameterName("data") -> Argument(memory.allocation.start.value)),
         memory,
         ExecutionControl.default,
         captureTrace = false
@@ -65,8 +72,8 @@ ret;
 .target sm_80
 .address_size 64
 .visible .entry empty() { .reg .u32 %value; redux.sync.min.u32 %value,1,0; ret; }""").toOption.get
-    val geometry = LaunchGeometry.create(Dimensions.One, Dimensions.One).toOption.get
-    assert(Interpreter.execute(
+    val geometry = LaunchGeometry.forLaunch(Dimensions.One, Dimensions.One).toOption.get
+    assert(VirtualMachine.execute(
       kernel,
       geometry,
       Map.empty,
