@@ -49,7 +49,7 @@ object ProgramImageKeyBenchmark {
     }
     val elapsed = math.max(0L, PlatformTime.monotonicNanos - started)
     Console.out.println(
-      s"key=${mode.toString.toLowerCase} bytes=$bytes lookups=$lookups " +
+      s"key=${mode.toString.toLowerCase(java.util.Locale.ROOT)} bytes=$bytes lookups=$lookups " +
         s"nsPerLookup=${elapsed.toDouble / lookups} checksum=$checksum"
     )
   }

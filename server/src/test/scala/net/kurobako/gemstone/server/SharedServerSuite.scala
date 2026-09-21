@@ -4,7 +4,8 @@ import net.kurobako.gemstone.Vec
 import net.kurobako.gemstone.rpc.ExecutionProtocol.{AllocationId, ExecutionFailure}
 import net.kurobako.gemstone.memory.AllocationKind
 import net.kurobako.gemstone.rpc.ExecutionRPC.Operation
-import net.kurobako.gemstone.server.transport.{ClientId, ControlProtocol, RPCPort}
+import net.kurobako.gemstone.server.transport.ServerControl
+import net.kurobako.gemstone.server.transport.Transport.*
 
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
@@ -34,7 +35,7 @@ final class SharedServerSuite extends munit.FunSuite {
     Using.resource(Socket("127.0.0.1", port.value)) { socket =>
       socket.setSoTimeout(10000)
       val output = DataOutputStream(socket.getOutputStream)
-      output.writeInt(ControlProtocol.Magic)
+      output.writeInt(ServerControl.Magic)
       output.writeInt(operation)
       client.foreach(id => output.writeLong(id.value))
       output.flush()
@@ -50,10 +51,10 @@ final class SharedServerSuite extends munit.FunSuite {
   test("shared clients cannot access each other's allocations or identify as each other") {
     Using.Manager { use =>
       val server = use(GemstoneRPCServer.start())
-      val a      = control(server.port, ControlProtocol.RegisterClient)(input =>
+      val a      = control(server.port, ServerControl.RegisterClient)(input =>
         ClientId.either(input.readLong()).fold(message => fail(message), value => value)
       )
-      val b = control(server.port, ControlProtocol.RegisterClient)(input =>
+      val b = control(server.port, ServerControl.RegisterClient)(input =>
         ClientId.either(input.readLong()).fold(message => fail(message), value => value)
       )
       val first  = use(ExecutionRPCTestClient(server.port, a))
@@ -62,13 +63,13 @@ final class SharedServerSuite extends munit.FunSuite {
       val firstAllocation = register(first, 4L)
       assert(first.call(Operation.ReadAllocation(firstAllocation, 0L, 4)).isRight)
       assertEquals(
-        control(server.port, ControlProtocol.QueryUsage, Some(b))(input => input.readLong() -> input.readLong()),
+        control(server.port, ServerControl.QueryUsage, Some(b))(input => input.readLong() -> input.readLong()),
         0L -> 0L
       )
       assert(second.call(Operation.ReadAllocation(firstAllocation, 0L, 4)).isLeft)
       val secondAllocation = register(second, 4L)
       assert(second.call(Operation.ReadAllocation(secondAllocation, 0L, 4)).isRight)
-      assertEquals(control(server.port, ControlProtocol.ReleaseClient, Some(a))(_.readInt()), 0)
+      assertEquals(control(server.port, ServerControl.ReleaseClient, Some(a))(_.readInt()), 0)
       val _ = intercept[java.io.EOFException](
         first.call(Operation.ReadAllocation(firstAllocation, 0L, 4))
       )
@@ -83,7 +84,7 @@ final class SharedServerSuite extends munit.FunSuite {
         val clients = Vector.fill(count)(
           use(ExecutionRPCTestClient(
             server.port,
-            control(server.port, ControlProtocol.RegisterClient)(input =>
+            control(server.port, ServerControl.RegisterClient)(input =>
               ClientId.either(input.readLong()).fold(message => fail(message), value => value)
             )
           ))
@@ -122,7 +123,7 @@ final class SharedServerSuite extends munit.FunSuite {
   test("process incarnation separates reused PIDs while same-process connections share state") {
     scala.util.Using.Manager { use =>
       val server = use(GemstoneRPCServer.start())
-      val client = control(server.port, ControlProtocol.RegisterClient)(input =>
+      val client = control(server.port, ServerControl.RegisterClient)(input =>
         ClientId.either(input.readLong()).fold(message => fail(message), value => value)
       )
       val first      = use(ExecutionRPCTestClient(server.port, client, 42L, 17L))

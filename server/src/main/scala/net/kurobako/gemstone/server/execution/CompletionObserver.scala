@@ -1,8 +1,7 @@
 package net.kurobako.gemstone.server.execution
 
-import net.kurobako.gemstone.vm.Event
-import net.kurobako.gemstone.vm.ObservationContext
-import net.kurobako.gemstone.vm.Observer
+import net.kurobako.gemstone.concurrent.withLock
+import net.kurobako.gemstone.vm.{Event, ObservationContext, Observer}
 
 import java.util.concurrent.locks.ReentrantLock
 import scala.collection.mutable
@@ -11,30 +10,22 @@ final class CompletionObserver extends Observer[Event] {
   private val lock  = ReentrantLock()
   private val sinks = mutable.Map.empty[ObservationContext, Event => Either[Observer.Error, Unit]]
 
-  def register(token: TaskToken)(sink: Event => Either[Observer.Error, Unit]): Either[RuntimeError, Unit] = {
-    lock.lock()
-    try
-      if (sinks.contains(token.observation))
-        Left(RuntimeError.Lifecycle(s"task token is already registered: ${token.value}"))
+  def register(
+      context: ObservationContext
+  )(sink: Event => Either[Observer.Error, Unit]): Either[RuntimeBackend.Error, Unit] =
+    lock.withLock {
+      if (sinks.contains(context))
+        Left(RuntimeBackend.Error.Failed(s"task token is already registered: ${context.value}"))
       else {
-        sinks(token.observation) = sink
+        sinks(context) = sink
         Right(())
       }
-    finally lock.unlock()
-  }
+    }
 
-  def remove(token: TaskToken): Unit = {
-    lock.lock()
-    try {
-      val _ = sinks.remove(token.observation)
-      ()
-    } finally lock.unlock()
-  }
+  def remove(context: ObservationContext): Unit = lock.withLock { val _ = sinks.remove(context) }
 
-  override def observe(context: ObservationContext, event: Event): Either[Observer.Error, Unit] = {
-    lock.lock()
-    val sink = try sinks.get(context)
-    finally lock.unlock()
-    sink.toRight(Observer.Error(s"no observer registered for execution ${context.value}")).flatMap(_(event))
-  }
+  override def observe(context: ObservationContext, event: Event): Either[Observer.Error, Unit] =
+    lock.withLock(sinks.get(context))
+      .toRight(Observer.Error(s"no observer registered for execution ${context.value}"))
+      .flatMap(_(event))
 }

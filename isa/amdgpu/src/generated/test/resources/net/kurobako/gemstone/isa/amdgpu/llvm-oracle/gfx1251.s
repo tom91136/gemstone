@@ -1,4 +1,4 @@
-// Generated from pinned LLVM MC/AMDGPU checks. Do not edit.
+// Generated from pinned LLVM MC/AMDGPU checks. Regenerate with: sbt codegen
 // TARGET: gfx1251
 
 // SOURCE: gfx1250_asm_vop3_err.s

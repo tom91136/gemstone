@@ -35,7 +35,7 @@ object Binary {
     val definitions = encodingsFor(instruction, target)
     if (definitions.isEmpty) Left(CodecError.UnsupportedInstruction(instruction.opcode, target))
     else {
-      val formats = definitions.map(_.format.value.toUpperCase).distinct.sorted
+      val formats = definitions.map(_.format.value.toUpperCase(java.util.Locale.ROOT)).distinct.sorted
       if (formats.contains("SOPP"))
         encodeSOPP(instruction, target).leftMap {
           case CodecError.InvalidOperand(_)

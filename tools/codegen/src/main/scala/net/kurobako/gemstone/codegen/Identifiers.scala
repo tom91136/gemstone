@@ -1,13 +1,6 @@
 package net.kurobako.gemstone.codegen
 
-private[gemstone] object Identifiers {
-  def isC(value: String): Boolean =
-    value.headOption.exists(character => character.isLetter || character == '_') &&
-      value.tail.forall(character => character.isLetterOrDigit || character == '_')
-
-  def startsWithOneOf(value: String, prefixes: String*): Boolean =
-    prefixes.exists(value.startsWith(_)) && value.forall(character => character.isLetterOrDigit || character == '_')
-
+object Identifiers {
   def isLowerSnake(value: String, prefix: String): Boolean =
     value.startsWith(prefix) && value.length > prefix.length &&
       value.drop(prefix.length).forall(character => character.isLower || character.isDigit || character == '_')
@@ -19,7 +12,7 @@ private[gemstone] object Identifiers {
   def sanitized(value: String): String = {
     val result = StringBuilder()
     value.foreach { character =>
-      if (asciiLetterOrDigit(character)) {
+      if (character.isLetterOrDigit) {
         val _ = result.append(character)
       } else if (result.lastOption.forall(_ != '_')) {
         val _ = result.append('_')
@@ -27,8 +20,4 @@ private[gemstone] object Identifiers {
     }
     result.result().stripSuffix("_")
   }
-
-  private def asciiLetterOrDigit(character: Char): Boolean =
-    character >= 'A' && character <= 'Z' || character >= 'a' && character <= 'z' ||
-      character >= '0' && character <= '9'
 }

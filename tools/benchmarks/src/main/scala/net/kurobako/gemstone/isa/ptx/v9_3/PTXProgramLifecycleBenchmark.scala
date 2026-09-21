@@ -128,7 +128,7 @@ object PTXProgramLifecycleBenchmark {
         if after >= before
       } yield after - before
       Console.out.println(
-        s"operation=${parsed.operation.toString.toLowerCase} iterations=${parsed.iterations} " +
+        s"operation=${parsed.operation.toString.toLowerCase(java.util.Locale.ROOT)} iterations=${parsed.iterations} " +
           s"images=${parsed.images} entries=${parsed.entries} instructions=${parsed.instructions} " +
           s"sourceBytes=${source.getBytes(StandardCharsets.UTF_8).length} " +
           s"nsPerOperation=${elapsed.toDouble / parsed.iterations} " +

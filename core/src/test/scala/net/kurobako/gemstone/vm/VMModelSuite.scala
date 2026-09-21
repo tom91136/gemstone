@@ -60,11 +60,11 @@ final class VMModelSuite extends munit.FunSuite {
       Right(LaunchGeometry.Dimensions(2, 2, 1))
     )
     assertEquals(
-      geometry.globalCoordinates(LaunchGeometry.Coordinates(1, 1, 0), LaunchGeometry.Coordinates(1, 2, 1)),
-      Right(LaunchGeometry.Coordinates(16, 5, 1))
+      geometry.globalCoordinatesLong(LaunchGeometry.Coordinates(1, 1, 0), LaunchGeometry.Coordinates(1, 2, 1)),
+      Right(LaunchGeometry.LongCoordinates(16, 5, 1))
     )
-    assert(geometry.containsGlobal(LaunchGeometry.Coordinates(11, 0, 0)))
-    assert(!geometry.containsGlobal(LaunchGeometry.Coordinates(10, 0, 0)))
+    assert(geometry.containsGlobal(LaunchGeometry.LongCoordinates(11, 0, 0)))
+    assert(!geometry.containsGlobal(LaunchGeometry.LongCoordinates(10, 0, 0)))
 
     val virtual = LaunchGeometry
       .virtual(LaunchGeometry.Dimensions(256, 1, 1), LaunchGeometry.Dimensions(16777216, 1, 1))

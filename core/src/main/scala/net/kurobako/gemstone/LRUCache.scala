@@ -90,15 +90,6 @@ private[gemstone] object LRUCache {
   def apply[K, V](capacity: Int :| Positive): LRUCache[K, V] =
     retained(capacity, value => () => Some(value))
 
-  def softValues[K, V <: AnyRef](capacity: Int :| Positive): LRUCache[K, V] =
-    retained(
-      capacity,
-      value => {
-        val reference = java.lang.ref.SoftReference(value)
-        () => Option(reference.get())
-      }
-    )
-
   @SuppressWarnings(Array("scalafix:GemstoneNoExplicitNew"))
   private def retained[K, V](capacity: Int :| Positive, retain: V => (() => Option[V])): LRUCache[K, V] =
     new LRUCache(capacity, retain)

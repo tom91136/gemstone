@@ -1,4 +1,4 @@
-// Generated from the pinned Mesa ACO and AMD machine-readable ISA inputs. Do not edit by hand.
+// Generated from the pinned Mesa ACO and AMD machine-readable ISA inputs. Regenerate with: sbt codegen
 // scalafix:off GemstoneNoAssume; values were validated by the generator
 package net.kurobako.gemstone.isa.amdgpu
 
@@ -6,6 +6,7 @@ import net.kurobako.gemstone.Vec
 import Instruction.*
 import Program.*
 
+@javax.annotation.processing.Generated(Array("sbt codegen"))
 private[amdgpu] object MatrixInstructionDefs {
   case object SWaitTensorcnt extends Definition(
         Opcode.assume("s_wait_tensorcnt"),

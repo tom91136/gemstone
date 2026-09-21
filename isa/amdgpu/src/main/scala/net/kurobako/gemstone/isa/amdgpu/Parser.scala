@@ -102,7 +102,7 @@ object Parser extends net.kurobako.gemstone.isa.Decoder[String, Program] {
       parseModifier(word) match {
         case Some(modifier)        => Right(Right(modifier))
         case None if wordIndex > 0 =>
-          val name = if (isIdentifier(word)) word.toLowerCase else word
+          val name = if (isIdentifier(word)) word.toLowerCase(java.util.Locale.ROOT) else word
           ModifierName.either(name)
             .leftMap(_ => parseError(line, instruction.indexOf(word) + 1, s"invalid modifier '$word'"))
             .map(value => Right(Modifier(value)))
@@ -121,7 +121,7 @@ object Parser extends net.kurobako.gemstone.isa.Decoder[String, Program] {
     }
 
   private def parseRegister(text: String): Option[Operand] =
-    text.toLowerCase match {
+    text.toLowerCase(java.util.Locale.ROOT) match {
       case s"$prefix[$first:$last]" if digits(first) && digits(last) =>
         for {
           firstValue <- first.toIntOption
@@ -151,7 +151,7 @@ object Parser extends net.kurobako.gemstone.isa.Decoder[String, Program] {
       Some(Operand.IntegerLiteral(BigInt(signed.drop(2), 16) * sign, 16))
     else if (digits(signed)) Some(Operand.IntegerLiteral(BigInt(signed) * sign, 10))
     else if (text.contains('.') && Try(BigDecimal(text)).isSuccess)
-      Some(Operand.DecimalLiteral(text.toLowerCase))
+      Some(Operand.DecimalLiteral(text.toLowerCase(java.util.Locale.ROOT)))
     else None
   }
 
@@ -164,10 +164,10 @@ object Parser extends net.kurobako.gemstone.isa.Decoder[String, Program] {
     val colon = topLevelColon(text)
     if (colon > 0 && colon < text.length - 1 && isIdentifier(text.take(colon)))
       ModifierValue.either(text.drop(colon + 1)).toOption.map(value =>
-        Modifier(ModifierName.applyUnsafe(text.take(colon).toLowerCase), Some(value))
+        Modifier(ModifierName.applyUnsafe(text.take(colon).toLowerCase(java.util.Locale.ROOT)), Some(value))
       )
-    else if (KnownFlagModifiers.contains(text.toLowerCase))
-      Some(Modifier(ModifierName.applyUnsafe(text.toLowerCase)))
+    else if (KnownFlagModifiers.contains(text.toLowerCase(java.util.Locale.ROOT)))
+      Some(Modifier(ModifierName.applyUnsafe(text.toLowerCase(java.util.Locale.ROOT))))
     else None
   }
 

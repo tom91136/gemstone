@@ -21,56 +21,50 @@ import java.nio.charset.StandardCharsets
 import java.util.concurrent.atomic.AtomicBoolean
 
 object PTXRuntimeBackend extends RuntimeBackend {
-  override val encoding: ProgramEncoding =
-    ProgramEncoding.from("ptx-text").fold(message => throw IllegalStateException(message), identity)
+  override val encoding: String = "ptx-text"
 
-  override def open(services: MachineServices): BackendSession = Session(services)
-
-  private final class Session(services: MachineServices) extends BackendSession {
-    private val closed  = AtomicBoolean()
-    private val machine = PTXMachine(services.observer, services.scheduler)
-
-    override def load(image: Vec[Byte]): Either[RuntimeError, RuntimeProgram] =
-      if (closed.get()) Left(RuntimeError.Lifecycle("PTX backend session is closed"))
-      else
-        for {
-          program <- Parser.decode(String(Vec.toArray(image), StandardCharsets.UTF_8))
-            .left.map(error => RuntimeError.Decode(error.message))
-          loaded <- machine.load(program).left.map(error => RuntimeError.Load(error.message))
-        } yield Program(machine)(loaded)
-
-    override def close(): Unit = closed.set(true)
+  override def load(
+      services: RuntimeBackend.Services,
+      image: Vec[Byte]
+  ): Either[RuntimeBackend.Error, RuntimeBackend.Program] = {
+    val machine = PTXMachine(services.observer, services.scheduler)
+    for {
+      program <- Parser.decode(String(Vec.toArray(image), StandardCharsets.UTF_8))
+        .left.map(error => RuntimeBackend.Error.Invalid(error.message))
+      loaded <- machine.load(program).left.map(error => RuntimeBackend.Error.Invalid(error.message))
+    } yield Program(machine)(loaded)
   }
 
-  private final class Program(machine: PTXMachine)(loaded: machine.LoadedProgram) extends RuntimeProgram {
+  private final class Program(machine: PTXMachine)(loaded: machine.LoadedProgram) extends RuntimeBackend.Program {
     private val closed = AtomicBoolean()
 
-    override def symbols: Either[RuntimeError, ProgramSymbols] =
-      open(machine.symbols(loaded).left.map(error => RuntimeError.Load(error.message)))
+    override def symbols: Either[RuntimeBackend.Error, ProgramSymbols] =
+      open(machine.symbols(loaded).left.map(error => RuntimeBackend.Error.Invalid(error.message)))
 
-    override def kernel(name: KernelName): Either[RuntimeError, KernelMetadata] =
-      open(machine.kernel(loaded, name).left.map(error => RuntimeError.Load(error.message)))
+    override def kernel(name: KernelName): Either[RuntimeBackend.Error, KernelMetadata] =
+      open(machine.kernel(loaded, name).left.map(error => RuntimeBackend.Error.Invalid(error.message)))
 
-    override val globals: Option[RuntimeProgram.Globals] = Some(Globals(machine)(loaded))
+    override val globals: Option[RuntimeBackend.Program.Globals] = Some(Globals(machine)(loaded))
 
     override def execute(
         task: KernelTask,
         memory: Memory,
         control: TaskControl
-    ): Either[RuntimeError, Result] =
-      open(machine.execute(loaded, task, memory, control).left.map(RuntimeError.Execution(_)))
+    ): Either[RuntimeBackend.Error, Result] =
+      open(machine.execute(loaded, task, memory, control).left.map(RuntimeBackend.Error.Execution(_)))
 
     override def close(): Unit =
       if (closed.compareAndSet(false, true)) machine.unload(loaded)
 
-    private def open[A](operation: => Either[RuntimeError, A]): Either[RuntimeError, A] =
-      if (closed.get()) Left(RuntimeError.Lifecycle("PTX program is closed")) else operation
+    private def open[A](operation: => Either[RuntimeBackend.Error, A]): Either[RuntimeBackend.Error, A] =
+      if (closed.get()) Left(RuntimeBackend.Error.Failed("PTX program is closed")) else operation
   }
 
-  private final class Globals(machine: PTXMachine)(loaded: machine.LoadedProgram) extends RuntimeProgram.Globals {
-    override def image(name: GlobalName): Either[RuntimeError, RuntimeProgram.Globals.Image] =
-      machine.global(loaded, name).left.map(error => RuntimeError.Load(error.message))
-        .map((size, initial) => RuntimeProgram.Globals.Image(size, initial))
+  private final class Globals(machine: PTXMachine)(loaded: machine.LoadedProgram)
+      extends RuntimeBackend.Program.Globals {
+    override def image(name: GlobalName): Either[RuntimeBackend.Error, RuntimeBackend.Program.Globals.Image] =
+      machine.global(loaded, name).left.map(error => RuntimeBackend.Error.Invalid(error.message))
+        .map((size, initial) => RuntimeBackend.Program.Globals.Image(size, initial))
 
     override def bind(
         name: GlobalName,
@@ -78,20 +72,22 @@ object PTXRuntimeBackend extends RuntimeBackend {
         offset: Long :| Positive0,
         regionSize: Long :| Positive,
         memory: Memory
-    ): Either[RuntimeError, Unit] = memory match {
+    ): Either[RuntimeBackend.Error, Unit] = memory match {
       case addresses: AddressSpace =>
-        machine.global(loaded, name).left.map(_ => RuntimeError.NotFound(s"PTX global '${name.value}' is not present"))
+        machine.global(loaded, name).left.map(_ =>
+          RuntimeBackend.Error.NotFound(s"PTX global '${name.value}' is not present")
+        )
           .flatMap(_ =>
             machine.bindGlobal(loaded, name, region, offset, regionSize, addresses)
-              .left.map(RuntimeError.Execution(_))
+              .left.map(RuntimeBackend.Error.Execution(_))
           )
-      case _ => Left(RuntimeError.Unsupported("PTX global binding requires address-space capable memory"))
+      case _ => Left(RuntimeBackend.Error.Unsupported("PTX global binding requires address-space capable memory"))
     }
 
     override def write(
         name: GlobalName,
         offset: Long :| Positive0,
         bytes: Vec[Byte]
-    ): Either[RuntimeError, Unit] = Left(RuntimeError.Unsupported("PTX globals are not writable"))
+    ): Either[RuntimeBackend.Error, Unit] = Left(RuntimeBackend.Error.Unsupported("PTX globals are not writable"))
   }
 }

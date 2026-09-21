@@ -6,25 +6,25 @@ import java.nio.file.Path
 import scala.util.Using
 
 final class ProcessExitSuite extends munit.FunSuite {
-  private val layout = RuntimeLayout(Path.of("/unused"), RuntimePlatform.Linux)
+  private val layout = RuntimeLayout(Path.of("/unused"))
   private val apis   = Set(ComputeAPI.HSA)
 
   test("child exit status is preserved") {
-    assertEquals(GemstoneProcess.run(apis, layout, Map.empty)(_ => 7), Right(7))
+    assertEquals(Launcher.launch(apis, layout, Map.empty)(_ => 7), Right(7))
   }
 
   test("child receives the selected provider environment") {
-    val result = GemstoneProcess.run(apis, layout, Map.empty) { environment =>
+    val result = Launcher.launch(apis, layout, Map.empty) { environment =>
       environment.set("LD_PRELOAD")
     }
-    assertEquals(result, Right("/unused/libhsa-runtime64.so.1"))
+    assertEquals(result, Right(layout.absolute.library(ComputeAPI.HSA).toString))
   }
 
   test("child receives an isolated client from a shared server") {
     Using.resource(GemstoneRPCServer.start()) { server =>
-      val result = GemstoneProcess.run(apis, layout, Map.empty, Some(server.port)) { environment =>
+      val result = Launcher.launch(apis, layout, Map.empty, Some(server.port)) { environment =>
         val first  = environment.set("GEMSTONE_RPC_CLIENT")
-        val second = GemstoneProcess.run(apis, layout, Map.empty, Some(server.port)) { other =>
+        val second = Launcher.launch(apis, layout, Map.empty, Some(server.port)) { other =>
           assertEquals(other.set("GEMSTONE_RPC_PORT"), server.port.value.toString)
           other.set("GEMSTONE_RPC_CLIENT")
         }

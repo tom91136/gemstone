@@ -9,8 +9,7 @@ final case class Encoding(
     family: Family,
     target: MetadataTarget,
     format: InstructionFormat,
-    opcode: Int :| Positive0,
+    opcode: Int,
     operands: Vec[OperandInfo],
-    functionalGroup: Option[FunctionalGroup],
     source: MetadataSource
 )

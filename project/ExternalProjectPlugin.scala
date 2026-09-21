@@ -13,4 +13,9 @@ object ExternalProjectPlugin extends AutoPlugin {
   override def requires: Plugins                         = plugins.CorePlugin
   override def trigger: PluginTrigger                    = noTrigger
   override def projectConfigurations: Seq[Configuration] = Seq(Compile, Test)
+
+  override def projectSettings: Seq[Def.Setting[?]] = Seq(
+    Compile / managedSources := Nil,
+    Test / managedSources    := Nil
+  )
 }

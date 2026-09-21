@@ -1,4 +1,4 @@
-#include "conformance/driver.hpp"
+#include "driver.hpp"
 
 #include <algorithm>
 #include <charconv>
@@ -12,50 +12,56 @@
 #include <thread>
 #include <tuple>
 
+#include <aspartame/all.hpp>
+#include <fmt/format.h>
 #include <glaze/json.hpp>
 #include <glaze/toml.hpp>
 
 #include "conformance/device.hpp"
-#include "conformance/environment.hpp"
+#include "environment.hpp"
+#include "suite_policy.hpp"
 
 #include "device_lock.hpp"
 
 namespace conformance::driver {
+using namespace aspartame;
 namespace fs = std::filesystem;
 using namespace std::chrono_literals;
 struct ArtifactMetadata {
   std::string backend, architecture, support;
 };
-struct Program {
+struct TestProgram {
   std::string name;
   fs::path path;
   uint32_t timeout_seconds;
 };
-struct CatchTest {
+struct CatchCase {
   std::string name;
 };
-struct CatchListings {
-  std::vector<CatchTest> tests;
+struct CatchListing {
+  std::vector<CatchCase> tests;
 };
-struct CatchInventory {
+struct CatchReport {
   uint32_t version = 0;
-  CatchListings listings;
+  CatchListing listings;
 };
 
-bool valid_name(std::string_view value) {
+namespace {
+bool valid_identifier(std::string_view value) {
   return !value.empty() && std::ranges::all_of(value, [](char c) {
     return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '.' || c == '_' || c == '-';
   });
 }
-void validate_configuration(Configuration &c) {
+void validate_run_options(RunOptions &c) {
   if (c.profiles.empty() || c.artifacts.empty() || c.output.empty())
     throw std::invalid_argument("run requires --profiles, --artifacts and --output");
-  if (!valid_name(c.workload) || c.workload == "." || c.workload == "..") throw std::invalid_argument("invalid workload name");
+  if (!valid_identifier(c.workload) || c.workload == "." || c.workload == "..") throw std::invalid_argument("invalid workload name");
   if (c.isolated_launcher && c.launcher.empty()) throw std::invalid_argument("--isolated-launcher requires --launcher -- command ...");
   c.profiles = fs::absolute(c.profiles).lexically_normal();
   c.artifacts = fs::absolute(c.artifacts).lexically_normal();
   c.output = fs::absolute(c.output).lexically_normal();
 }
+} // namespace
 int32_t configured_jobs(std::optional<std::string_view> configured, uint32_t hardware_concurrency) {
   if (!configured || configured->empty()) return static_cast<int32_t>(std::max(1u, hardware_concurrency));
   uint32_t result = 0;
@@ -64,8 +70,8 @@ int32_t configured_jobs(std::optional<std::string_view> configured, uint32_t har
     throw std::invalid_argument("CONFORMANCE_JOBS must be a positive 32-bit integer");
   return static_cast<int32_t>(result);
 }
-std::vector<std::string> catch_tests(std::string_view json, std::string_view program) {
-  CatchInventory inventory;
+std::vector<std::string> catch_case_names(std::string_view json, std::string_view program) {
+  CatchReport inventory;
   constexpr auto options = [] {
     auto o = glz::opts{};
     o.error_on_unknown_keys = false;
@@ -83,24 +89,20 @@ std::vector<std::string> catch_tests(std::string_view json, std::string_view pro
   }
   return result;
 }
-std::vector<std::string> catch_arguments(const std::vector<std::string> &specs, uint32_t index, uint32_t count) {
+std::vector<std::string> catch_shard_arguments(const std::vector<std::string> &specs, uint32_t index, uint32_t count) {
   if (count == 0 || index >= count) throw std::invalid_argument("invalid Catch shard");
-  std::vector<std::string> result{"--order", "lex", "--shard-count", std::to_string(count), "--shard-index", std::to_string(index)};
-  result.insert(result.end(), specs.begin(), specs.end());
-  return result;
+  return concat(std::vector<std::string>{"--order", "lex", "--shard-count", fmt::to_string(count), "--shard-index", fmt::to_string(index)},
+                specs);
 }
 std::vector<std::string> launcher_arguments(bool enabled, std::span<char *const> arguments) {
   if (!enabled) return {};
   const auto separator = std::ranges::find(arguments, std::string_view("--"));
   if (separator == arguments.end() || separator + 1 == arguments.end())
     throw std::invalid_argument("--launcher requires -- command [arguments ...]");
-  std::vector<std::string> result;
-  for (auto entry = separator + 1; entry != arguments.end(); ++entry)
-    result.emplace_back(*entry);
-  return result;
+  return {separator + 1, arguments.end()};
 }
-std::vector<profile::PlanTarget> unique_routes(const std::vector<profile::PlanTarget> &targets, bool isolated) {
-  std::vector<profile::PlanTarget> result;
+std::vector<profile::ResolvedTarget> unique_routes(const std::vector<profile::ResolvedTarget> &targets, bool isolated) {
+  std::vector<profile::ResolvedTarget> result;
   std::set<std::pair<std::string, std::optional<std::string>>> seen;
   for (const auto &target : targets) {
     // An isolated launcher replaces the native provider and device. Its route
@@ -112,14 +114,14 @@ std::vector<profile::PlanTarget> unique_routes(const std::vector<profile::PlanTa
   return result;
 }
 bool valid_artifact_key(std::string_view value) {
-  return !value.empty() && valid_name(value) && value.front() != '.' && value.front() != '_' && value.front() != '-';
+  return !value.empty() && valid_identifier(value) && value.front() != '.' && value.front() != '_' && value.front() != '-';
 }
-fs::path target_artifact(const Configuration &configuration, const conformance::profile::PlanTarget &target) {
+fs::path artifact_directory(const RunOptions &configuration, const conformance::profile::ResolvedTarget &target) {
   auto result = configuration.artifacts / target.backend;
   if (target.architecture) result /= *target.architecture;
   return result;
 }
-ArtifactMetadata validate_artifact(const fs::path &artifact, const conformance::profile::PlanTarget &target) {
+ArtifactMetadata validate_artifact(const fs::path &artifact, const conformance::profile::ResolvedTarget &target) {
   const auto file = artifact / "artifact.toml";
   ArtifactMetadata metadata;
   std::string buffer;
@@ -132,10 +134,10 @@ ArtifactMetadata validate_artifact(const fs::path &artifact, const conformance::
     throw std::runtime_error("conformance artifact has an invalid support key: " + file.string());
   return metadata;
 }
-fs::path support_path(const Configuration &configuration, const conformance::profile::PlanTarget &target,
+fs::path support_directory(const RunOptions &configuration, const conformance::profile::ResolvedTarget &target,
                       const ArtifactMetadata &metadata) {
   if (target.architecture) return configuration.artifacts / target.backend / (metadata.support.empty() ? "support" : metadata.support);
-  return target_artifact(configuration, target);
+  return artifact_directory(configuration, target);
 }
 
 std::vector<std::string> launched(const std::vector<std::string> &launcher, std::vector<std::string> command) {
@@ -145,7 +147,7 @@ std::vector<std::string> launched(const std::vector<std::string> &launcher, std:
   result.insert(result.end(), std::make_move_iterator(command.begin()), std::make_move_iterator(command.end()));
   return result;
 }
-Workload load_workload(const Configuration &configuration) {
+Workload load_workload(const RunOptions &configuration) {
   const auto file = configuration.profiles.parent_path() / "workloads" / (configuration.workload + ".toml");
   if (!fs::is_regular_file(file)) throw std::invalid_argument("conformance workload does not exist: " + file.string());
   Workload workload;
@@ -158,21 +160,16 @@ Workload load_workload(const Configuration &configuration) {
 uint32_t parse_timeout(std::string_view value, const fs::path &manifest) {
   constexpr uint64_t maximum_timeout_seconds = 24 * 60 * 60;
   uint64_t result = 0;
-  if (value.empty() || !std::ranges::all_of(value, [](char c) { return c >= '0' && c <= '9'; }))
-    throw std::runtime_error("invalid timeout in " + manifest.string());
-  for (const auto c : value) {
-    const auto digit = static_cast<uint64_t>(c - '0');
-    if (result > (maximum_timeout_seconds - digit) / 10) throw std::runtime_error("invalid timeout in " + manifest.string());
-    result = result * 10 + digit;
-  }
-  if (result == 0 || result > maximum_timeout_seconds) throw std::runtime_error("invalid timeout in " + manifest.string());
+  const auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), result);
+  if (error != std::errc{} || end != value.data() + value.size() || result == 0 || result > maximum_timeout_seconds)
+    throw std::runtime_error(fmt::format("invalid timeout in {}", manifest.string()));
   return static_cast<uint32_t>(result);
 }
-std::vector<Program> programs(const fs::path &artifact) {
+std::vector<TestProgram> test_programs(const fs::path &artifact) {
   const auto manifest = artifact / "test-programs.txt";
   std::ifstream input(manifest);
   if (!input) throw std::runtime_error("artifact has no test program manifest: " + manifest.string());
-  std::vector<Program> result;
+  std::vector<TestProgram> result;
   std::set<std::string> names;
   std::string line;
   while (std::getline(input, line)) {
@@ -180,7 +177,7 @@ std::vector<Program> programs(const fs::path &artifact) {
     const auto separator = line.find('\t');
     if (separator == std::string::npos) throw std::runtime_error("invalid test program manifest: " + manifest.string());
     auto name = line.substr(0, separator);
-    if (!valid_name(name) || !names.insert(name).second) throw std::runtime_error("invalid test program name: " + name);
+    if (!valid_identifier(name) || !names.insert(name).second) throw std::runtime_error("invalid test program name: " + name);
 #if defined(_WIN32)
     auto path = artifact / (name + ".exe");
 #else
@@ -192,6 +189,7 @@ std::vector<Program> programs(const fs::path &artifact) {
   if (result.empty()) throw std::runtime_error("artifact contains no test programs: " + artifact.string());
   return result;
 }
+namespace {
 std::string bracket_quote(std::string_view value) {
   for (size_t equals = 1;; ++equals) {
     const std::string delimiter(equals, '=');
@@ -199,13 +197,14 @@ std::string bracket_quote(std::string_view value) {
       return "[" + delimiter + "[" + std::string(value) + "]" + delimiter + "]";
   }
 }
-void write_json(const fs::path &path, const ExecConfiguration &configuration) {
+} // namespace
+void write_execution_config(const fs::path &path, const ExecutionConfig &configuration) {
   std::string buffer;
   if (const auto error = glz::write_file_json(configuration, path.string(), buffer); error)
     throw std::runtime_error("cannot write execution configuration " + path.string() + ": " + glz::format_error(error, buffer));
 }
-ExecConfiguration read_json(const fs::path &path) {
-  ExecConfiguration result;
+ExecutionConfig read_execution_config(const fs::path &path) {
+  ExecutionConfig result;
   std::string buffer;
   if (const auto error = glz::read_file_json(result, path.string(), buffer); error)
     throw std::runtime_error("cannot read execution configuration " + path.string() + ": " + glz::format_error(error, buffer));
@@ -214,19 +213,13 @@ ExecConfiguration read_json(const fs::path &path) {
 }
 
 std::vector<std::string> configured_skips(const std::map<std::string, std::string> &environment) {
-  std::vector<std::string> result;
-  if (const auto found = environment.find("CONFORMANCE_SKIPS"); found != environment.end()) {
-    std::string_view text = found->second;
-    while (!text.empty()) {
-      const auto end = text.find('\n');
-      result.emplace_back(text.substr(0, end));
-      if (end == std::string_view::npos) break;
-      text.remove_prefix(end + 1);
-    }
-  }
+  const auto found = environment.find("CONFORMANCE_SKIPS");
+  if (found == environment.end()) return {};
+  auto result = split(found->second, '\n');
+  std::erase(result, std::string{});
   return result;
 }
-void apply_probe(ExecConfiguration &configuration, const ProbeResult &probe) {
+void apply_device_probe(ExecutionConfig &configuration, const DeviceProbeResult &probe) {
   if (!valid_physical_device_key(probe.device)) throw std::runtime_error("invalid device probe identity");
   if (probe.environment.empty()) throw std::runtime_error("device probe returned no execution selection");
   for (const auto &[key, value] : probe.environment) {
@@ -237,37 +230,38 @@ void apply_probe(ExecConfiguration &configuration, const ProbeResult &probe) {
   configuration.device = probe.device;
   configuration.environment["CONFORMANCE_PHYSICAL_DEVICE"] = probe.device;
 }
-ProbeResult probe_device(const Configuration &configuration, const fs::path &artifact,
+DeviceProbeResult probe_device(const RunOptions &configuration, const fs::path &artifact,
                          const std::map<std::string, std::string> &environment, const std::string &id) {
   auto probe = artifact / "conformance-device";
 #ifdef _WIN32
   probe += ".exe";
 #endif
-  const auto result =
-      run_process(launched(configuration.launcher, {probe.string()}), artifact, environment, 2min, "[" + id + " device] ", true);
+  const auto result = run_process(launched(configuration.launcher, {probe.string()}), artifact, environment, 2min,
+                                  fmt::format("[{} device] ", id), true);
   if (result.status != 0)
     throw std::runtime_error("device probe failed for " + id + " (including runtime/selector verification): " + result.error);
-  ProbeResult parsed;
+  DeviceProbeResult parsed;
   if (const auto error = glz::read_json(parsed, result.output); error)
     throw std::runtime_error("invalid device probe JSON for " + id + ": " + glz::format_error(error, result.output));
   return parsed;
 }
-std::vector<Test> discover(const Configuration &configuration, const Workload &workload, const fs::path &artifact,
+std::vector<ScheduledCase> discover_cases(const RunOptions &configuration, const Workload &workload, const fs::path &artifact,
                            const std::map<std::string, std::string> &environment, const std::string &id) {
-  std::vector<Test> tests;
-  for (const auto &program : programs(artifact)) {
+  std::vector<ScheduledCase> tests;
+  for (const auto &program : test_programs(artifact)) {
     if (std::ranges::find(workload.exclude_programs, program.name) != workload.exclude_programs.end()) continue;
     auto command = std::vector<std::string>{program.path.string(), "--list-tests", "--reporter", "json", "--order", "lex"};
     command.insert(command.end(), workload.specs.begin(), workload.specs.end());
     const auto listing = run_process(launched(configuration.launcher, std::move(command)), artifact, environment, 10min,
-                                     "[" + id + "/" + program.name + " discovery] ", true);
-    if (listing.status != 0) throw std::runtime_error("Catch discovery failed for " + id + "/" + program.name + ": " + listing.error);
-    auto names = catch_tests(listing.output, program.name);
+                                     fmt::format("[{}/{} discovery] ", id, program.name), true);
+    if (listing.status != 0)
+      throw std::runtime_error(fmt::format("Catch discovery failed for {}/{}: {}", id, program.name, listing.error));
+    auto names = catch_case_names(listing.output, program.name);
     if (names.size() > UINT32_MAX) throw std::runtime_error("Catch inventory is too large");
     const auto count = static_cast<uint32_t>(names.size());
     auto timeout = program.timeout_seconds;
-    if (program.name.starts_with("opencl_cts_")) {
-      if (const auto found = environment.find("CONFORMANCE_OPENCL_CTS_TIMEOUT"); found != environment.end())
+    if (const auto key = suite_timeout_environment(program.name); !key.empty()) {
+      if (const auto found = environment.find(std::string(key)); found != environment.end())
         timeout = parse_timeout(found->second, artifact / "test-programs.txt");
     }
     for (uint32_t index = 0; index < count; ++index)
@@ -276,26 +270,22 @@ std::vector<Test> discover(const Configuration &configuration, const Workload &w
   if (tests.empty()) throw std::runtime_error("conformance target selected no tests: " + id);
   return tests;
 }
-PreparedTarget prepare_target(const Configuration &configuration, const Workload &workload, const profile::PlanTarget &target,
+TargetExecution prepare_target(const RunOptions &configuration, const Workload &workload, const profile::ResolvedTarget &target,
                               const fs::path &run_directory) {
-  const auto artifact = target_artifact(configuration, target);
+  const auto artifact = artifact_directory(configuration, target);
   const auto metadata = validate_artifact(artifact, target);
-  const auto support = support_path(configuration, target, metadata);
+  const auto support = support_directory(configuration, target, metadata);
   if (!fs::is_directory(support)) throw std::runtime_error("missing artifact support: " + support.string());
   auto environment = base_environment();
   for (const auto &[key, value] : target.environment)
     environment[key] = value;
   environment["CONFORMANCE_TARGET_BACKEND"] = target.backend;
   environment["CONFORMANCE_TARGET_ARCHITECTURE"] = target.architecture.value_or("");
-  if (configuration.isolated_launcher && target.backend == "opencl") {
-    environment["CONFORMANCE_OPENCL_CTS_ELEMENTS"] = "1024";
-    environment["CONFORMANCE_OPENCL_CTS_WIMPY"] = "1";
-    environment["CONFORMANCE_OPENCL_CTS_TIMEOUT"] = "600";
-  }
+  if (configuration.isolated_launcher) apply_suite_isolated_environment(environment, target.backend);
   prepare_runtime_environment(environment, artifact, support, target.backend);
   const auto reports = run_directory / target.id;
   fs::create_directories(reports);
-  ExecConfiguration exec{artifact.string(),
+  ExecutionConfig exec{artifact.string(),
                          reports.string(),
                          {},
                          environment,
@@ -303,16 +293,16 @@ PreparedTarget prepare_target(const Configuration &configuration, const Workload
                          configuration.isolated_launcher ? std::vector<std::string>{} : configured_skips(environment),
                          workload.specs,
                          target.deviceLock && !configuration.isolated_launcher};
-  apply_probe(exec, probe_device(configuration, artifact, environment, target.id));
+  apply_device_probe(exec, probe_device(configuration, artifact, environment, target.id));
   // Re-probe with the exact child environment: selection must survive visibility remapping.
   const auto verified = probe_device(configuration, artifact, exec.environment, target.id);
   if (verified.device != exec.device) throw std::runtime_error("device selection changed after propagation for " + target.id);
-  auto tests = discover(configuration, workload, artifact, exec.environment, target.id);
+  auto tests = discover_cases(configuration, workload, artifact, exec.environment, target.id);
   const auto path = run_directory / "ctest/targets" / (target.id + ".json");
-  write_json(path, exec);
+  write_execution_config(path, exec);
   return {target.id, target.backend, exec.deviceLock ? exec.device : "", path, std::move(tests)};
 }
-void materialize_ctest(const fs::path &directory, const fs::path &driver, const std::vector<PreparedTarget> &targets) {
+void materialize_ctest(const fs::path &directory, const fs::path &driver, const std::vector<TargetExecution> &targets) {
   std::ofstream file(directory / "CTestTestfile.cmake", std::ios::binary | std::ios::trunc);
   if (!file) throw std::runtime_error("cannot write CTest inventory");
   file << "cmake_policy(VERSION 3.25)\n";
@@ -344,22 +334,22 @@ void materialize_ctest(const fs::path &directory, const fs::path &driver, const 
   file.close();
   if (!file) throw std::runtime_error("cannot finish CTest inventory");
 }
-int32_t execute(const fs::path &path, const Test &test) {
-  const auto config = read_json(path);
-  if (!valid_name(test.program) || test.program == "." || test.program == "..") throw std::invalid_argument("invalid test program");
+int32_t execute_case(const fs::path &path, const ScheduledCase &test) {
+  const auto config = read_execution_config(path);
+  if (!valid_identifier(test.program) || test.program == "." || test.program == "..") throw std::invalid_argument("invalid test program");
   if (std::ranges::find(config.skips, test.program) != config.skips.end()
       || std::ranges::find(config.skips, test.identity) != config.skips.end()) {
     std::cout << "SKIP " << test.identity << ": machine profile\n";
     return 4;
   }
-  const bool identity_adapter = test.program.starts_with("opencl_cts_");
-  auto arguments = catch_arguments(config.specs, identity_adapter ? 0 : test.index, identity_adapter ? 1 : test.count);
+  const bool sharded = suite_uses_catch_sharding(test.program);
+  auto arguments = catch_shard_arguments(config.specs, sharded ? test.index : 0, sharded ? test.count : 1);
   auto program = fs::path(config.directory) / test.program;
 #ifdef _WIN32
   program += ".exe";
 #endif
   arguments.insert(arguments.begin(), program.string());
-  const auto report = fs::path(config.report_directory) / test.program / std::to_string(test.index);
+  const auto report = fs::path(config.report_directory) / test.program / fmt::to_string(test.index);
   fs::create_directories(report);
   auto environment = config.environment;
   environment["CONFORMANCE_TEST_IDENTITY"] = test.identity;
@@ -370,21 +360,22 @@ int32_t execute(const fs::path &path, const Test &test) {
       run_process(launched(config.launcher, std::move(arguments)), report, environment, std::chrono::seconds(test.timeout_seconds));
   return result.status;
 }
-int32_t run(Configuration configuration, const fs::path &driver) {
-  validate_configuration(configuration);
-  const auto resolved = profile::resolve(configuration.profiles, configuration.machine);
+int32_t run(RunOptions configuration, const fs::path &driver) {
+  validate_run_options(configuration);
+  const auto resolved_profile = profile::resolve_profile(configuration.profiles, configuration.machine);
   const auto workload = load_workload(configuration);
-  const auto root = configuration.output / resolved.name;
+  const auto root = configuration.output / resolved_profile.name;
   fs::create_directories(root);
   fs::path reports;
   for (uint64_t attempt = 0;; ++attempt) {
-    reports = root / ("run-" + std::to_string(std::chrono::system_clock::now().time_since_epoch().count()) + "-" + std::to_string(attempt));
+    reports = root / fmt::format("run-{}-{}", std::chrono::system_clock::now().time_since_epoch().count(), attempt);
     if (fs::create_directory(reports)) break;
   }
   const auto ctest_directory = reports / "ctest";
   fs::create_directories(ctest_directory / "targets");
-  std::vector<PreparedTarget> prepared;
-  for (const auto &target : unique_routes(profile::make_plan(resolved, configuration.selectors), configuration.isolated_launcher)) {
+  std::vector<TargetExecution> prepared;
+  for (const auto &target :
+       unique_routes(profile::resolve_targets(resolved_profile, configuration.selectors), configuration.isolated_launcher)) {
     auto value = prepare_target(configuration, workload, target, reports);
     std::cout << "conformance target " << value.id << " resolved to " << value.device << " with " << value.tests.size() << " test(s)\n";
     prepared.push_back(std::move(value));
@@ -395,7 +386,7 @@ int32_t run(Configuration configuration, const fs::path &driver) {
   const auto count =
       configured_jobs(jobs && *jobs ? std::optional<std::string_view>(jobs) : std::nullopt, std::thread::hardware_concurrency());
   std::cout << "conformance reports: " << reports << '\n';
-  return run_process({configuration.ctest.string(), "--test-dir", ctest_directory.string(), "--parallel", std::to_string(count),
+  return run_process({configuration.ctest.string(), "--test-dir", ctest_directory.string(), "--parallel", fmt::to_string(count),
                       "--output-on-failure", "--output-junit", (reports / "ctest.xml").string()},
                      ctest_directory, base_environment(), 24h)
       .status;

@@ -1,10 +1,10 @@
 package net.kurobako.gemstone.codegen
 
-private[codegen] object Text {
+object Text {
   def normalizeWhitespace(value: String): String = {
     val result = StringBuilder()
     value.foreach { character =>
-      if (asciiWhitespace(character)) {
+      if (character.isWhitespace) {
         if (result.nonEmpty && result.last != ' ') {
           val _ = result.append(' ')
         }
@@ -26,10 +26,10 @@ private[codegen] object Text {
   }
 
   def splitWords(value: String, separators: Set[Char] = Set.empty): Vector[String] =
-    nonEmptyWords(value)(character => asciiWhitespace(character) || separators(character))
+    nonEmptyWords(value)(character => character.isWhitespace || separators(character))
 
   def identifierWords(value: String): Vector[String] =
-    nonEmptyWords(value)(character => !asciiLetterOrDigit(character))
+    nonEmptyWords(value)(character => !character.isLetterOrDigit)
 
   def splitDelimited(value: String, separator: Char): Vector[String] = {
     val result  = Vector.newBuilder[String]
@@ -47,18 +47,18 @@ private[codegen] object Text {
   }
 
   def registerToken(value: String, prefix: Char): Boolean =
-    value.length > 1 && value.head == prefix && value.tail.forall(asciiDigit(_))
+    value.length > 1 && value.head == prefix && value.tail.forall(_.isDigit)
 
   def signedInteger(value: String): Boolean = {
     val digits = withoutLeadingSign(value)
-    digits.nonEmpty && digits.forall(asciiDigit(_))
+    digits.nonEmpty && digits.forall(_.isDigit)
   }
 
   def startsDecimalNumber(value: String): Boolean = {
     val unsigned = withoutLeadingSign(value)
-    val integral = unsigned.takeWhile(asciiDigit(_))
+    val integral = unsigned.takeWhile(_.isDigit)
     val fraction = unsigned.drop(integral.length) match {
-      case s".$digits" => digits.takeWhile(asciiDigit(_))
+      case s".$digits" => digits.takeWhile(_.isDigit)
       case _           => ""
     }
     integral.nonEmpty && fraction.nonEmpty
@@ -86,12 +86,4 @@ private[codegen] object Text {
     if (current.nonEmpty) result += current.result()
     result.result()
   }
-
-  private def asciiWhitespace(character: Char): Boolean =
-    character == ' ' || character >= '\t' && character <= '\r'
-
-  private def asciiLetterOrDigit(character: Char): Boolean =
-    character >= 'A' && character <= 'Z' || character >= 'a' && character <= 'z' || asciiDigit(character)
-
-  private def asciiDigit(character: Char): Boolean = character >= '0' && character <= '9'
 }

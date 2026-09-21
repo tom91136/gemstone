@@ -54,8 +54,27 @@ else()
   set(amd_architecture gfx908)
 endif()
 
-string(RANDOM LENGTH 12 ALPHABET 0123456789abcdef work_id)
-set(work "/tmp/conformance-${work_id}")
+if(NOT DEFINED CONFORMANCE_DEPENDENCY_CACHE)
+  set(CONFORMANCE_DEPENDENCY_CACHE "")
+endif()
+if(NOT DEFINED CONFORMANCE_OFFLINE)
+  set(CONFORMANCE_OFFLINE OFF)
+endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/../cmake/ArtifactWork.cmake")
+
+# The caller mounts a persistent directory at /work; without one, use a
+# disposable location. The build tree is reused only while the configuration
+# signature is unchanged.
+if(CONFORMANCE_WORK_DIRECTORY)
+  set(work "${CONFORMANCE_WORK_DIRECTORY}")
+else()
+  string(RANDOM LENGTH 12 ALPHABET 0123456789abcdef work_id)
+  set(work "/tmp/conformance-${work_id}")
+endif()
+set(configuration_signature
+  "${BACKEND}|${architecture}|${BUILD_UNIFIED}|${BUILD_CTS}|${BUILD_MINIAPPS}|${HIP_ENABLE_ROCBLAS}|${MINIAPP_MODELS}|${cuda_architecture}|${amd_architecture}|${ROCM_VERSION}|${CONFORMANCE_SUPPORT_KEY}|${backend_cmake_arguments}")
+conformance_artifact_prepare_work("${work}" "${configuration_signature}" work)
 set(build "${work}/build")
 set(ENV{HOME} "${work}/home")
 file(MAKE_DIRECTORY "$ENV{HOME}")
@@ -75,6 +94,8 @@ execute_process(
     "-DCONFORMANCE_MINIAPP_MODELS=${MINIAPP_MODELS}"
     -DCMAKE_CUDA_ARCHITECTURES=${cuda_architecture}
     -DCMAKE_HIP_ARCHITECTURES=${amd_architecture}
+    "-DCONFORMANCE_DEPENDENCY_CACHE=${CONFORMANCE_DEPENDENCY_CACHE}"
+    -DCONFORMANCE_OFFLINE=${CONFORMANCE_OFFLINE}
     -DBUILD_TESTING=OFF
     ${backend_cmake_arguments}
   COMMAND_ERROR_IS_FATAL ANY)

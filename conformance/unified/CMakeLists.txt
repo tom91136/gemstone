@@ -1,6 +1,8 @@
 if(TARGET conformance_unit_tests)
   target_sources(conformance_unit_tests PRIVATE
-    tests/reference_backend.cpp
+    tests/reference_algorithms.cpp
+    tests/reference_blas.cpp
+    tests/reference_edge.cpp
     tests/async_test.cpp
     tests/cases_test.cpp)
   target_include_directories(conformance_unit_tests PRIVATE src tests)
@@ -12,7 +14,7 @@ endif()
 
 add_executable(unified src/main.cpp)
 target_include_directories(unified PRIVATE src)
-target_link_libraries(unified PRIVATE Catch2::Catch2 conformance_device magic_enum::magic_enum)
+target_link_libraries(unified PRIVATE Catch2::Catch2 conformance_device magic_enum::magic_enum fmt::fmt-header-only)
 target_compile_definitions(unified PRIVATE CONFORMANCE_BACKEND_NAME="${CONFORMANCE_BACKEND}")
 set_target_properties(unified PROPERTIES
   CXX_STANDARD 20

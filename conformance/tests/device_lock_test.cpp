@@ -9,7 +9,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "conformance/device.hpp"
-#include "conformance/device_selector.hpp"
+#include "device_selector.hpp"
 
 #if !defined(_WIN32)
   #include <poll.h>
@@ -29,7 +29,7 @@ bool lock_contention_serializes_processes() {
   int attempting[2]{};
   int acquired[2]{};
   if (::pipe(ready) != 0 || ::pipe(release) != 0 || ::pipe(attempting) != 0 || ::pipe(acquired) != 0) return false;
-  const auto device = conformance::pci_device(static_cast<uint32_t>(::getpid()), 0xfe, 0x1f, 7);
+  const auto device = conformance::make_pci_device(static_cast<uint32_t>(::getpid()), 0xfe, 0x1f, 7);
   const auto holder = ::fork();
   if (holder == 0) {
     ::close(ready[0]);
@@ -156,9 +156,9 @@ bool lock_contention_serializes_processes() {
 
 bool distinct_devices_do_not_contend() {
   const auto domain = static_cast<uint32_t>(::getpid());
-  conformance::DeviceLock first(conformance::pci_device(domain, 0xfe, 0x1f, 6));
+  conformance::DeviceLock first(conformance::make_pci_device(domain, 0xfe, 0x1f, 6));
   const auto started = Clock::now();
-  conformance::DeviceLock second(conformance::pci_device(domain, 0xfe, 0x1f, 5));
+  conformance::DeviceLock second(conformance::make_pci_device(domain, 0xfe, 0x1f, 5));
   return std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - started).count() < 100;
 }
 #endif
@@ -166,11 +166,11 @@ bool distinct_devices_do_not_contend() {
 } // namespace
 
 TEST_CASE("physical device keys use canonical encoding", "[device-lock]") {
-  const auto pci = conformance::pci_device(0x12345678, 0x9a, 0xbc, 0xde);
+  const auto pci = conformance::make_pci_device(0x12345678, 0x9a, 0xbc, 0xde);
   CHECK(conformance::physical_device_key(pci) == "pci-123456789abcde000000000000000000");
-  CHECK(conformance::physical_device_key(conformance::registry_device("platform:device")).starts_with("reg-"));
-  CHECK(conformance::physical_device_key(conformance::registry_device("platform:device"))
-        == conformance::physical_device_key(conformance::registry_device("platform:device")));
+  CHECK(conformance::physical_device_key(conformance::make_registry_device("platform:device")).starts_with("reg-"));
+  CHECK(conformance::physical_device_key(conformance::make_registry_device("platform:device"))
+        == conformance::physical_device_key(conformance::make_registry_device("platform:device")));
   CHECK(conformance::physical_device_key(conformance::physical_device_from_key(conformance::physical_device_key(pci)))
         == conformance::physical_device_key(pci));
   CHECK_THROWS_AS(conformance::physical_device_from_key("host-00000000000000000000000000000000"), std::invalid_argument);

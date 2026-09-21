@@ -58,7 +58,7 @@ object PTXRegisterIndexBenchmark {
       if after >= before
     } yield after - before
     Console.out.println(
-      s"kind=${parsed.kind.toString.toLowerCase} names=${parsed.names} iterations=${parsed.iterations} " +
+      s"kind=${parsed.kind.toString.toLowerCase(java.util.Locale.ROOT)} names=${parsed.names} iterations=${parsed.iterations} " +
         s"nsPerIndex=${elapsed.toDouble / parsed.iterations} " +
         s"bytesPerIndex=${allocated.fold(Double.NaN)(_.toDouble / parsed.iterations)} checksum=$checksum"
     )

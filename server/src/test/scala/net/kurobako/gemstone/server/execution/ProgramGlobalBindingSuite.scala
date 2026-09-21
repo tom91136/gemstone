@@ -22,7 +22,7 @@ final class ProgramGlobalBindingSuite extends munit.FunSuite {
   ).flatMap(value => LittleEndian.toVec(value, ScalarByteWidth(4)))
   private val global                                      = AllocationId(1)
   private val output                                      = AllocationId(2)
-  private def service()                                   = ExecutionService(GemstoneBackendCatalog.default, _.run())
+  private def service()                                   = ExecutionService(RuntimeBackend.defaults)
   private def setup(service: ExecutionService): ProgramId = {
     assertEquals(service.registerAllocation(32, AllocationKind.Shared), Right(global))
     assertEquals(service.registerAllocation(16, AllocationKind.Shared), Right(output))

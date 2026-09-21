@@ -2,93 +2,11 @@
 #include <catch2/generators/catch_generators_adapters.hpp>
 #include <catch2/generators/catch_generators_range.hpp>
 
-#include "api_thrust.hpp"
-#include "template_algorithm.hpp"
+#include "backend_thrust.hpp"
+#include "algorithm_cases.hpp"
 
-#define DECLARE_ALGORITHMS_I8_FULL(name, check)                                                                                            \
-  TEST_CASE("algorithms/i8/full/" name, "[unified][full-matrix][algorithm][i8]") {                                                         \
-    const auto size = GENERATE(Catch::Generators::from_range(unified::algorithm_sizes));                                                   \
-    CAPTURE(size);                                                                                                                         \
-    unified::backend::ThrustAlgorithms backend;                                                                                            \
-    check<int8_t>(backend, size);                                                                                                          \
-  }
-
-DECLARE_ALGORITHMS_I8_FULL("copy", unified::algorithms::copy)
-DECLARE_ALGORITHMS_I8_FULL("copy_if", unified::algorithms::copy_if)
-DECLARE_ALGORITHMS_I8_FULL("copy_n", unified::algorithms::copy_n)
-DECLARE_ALGORITHMS_I8_FULL("uninitialized_copy", unified::algorithms::uninitialized_copy)
-DECLARE_ALGORITHMS_I8_FULL("uninitialized_fill", unified::algorithms::uninitialized_fill)
-DECLARE_ALGORITHMS_I8_FULL("fill", unified::algorithms::fill)
-DECLARE_ALGORITHMS_I8_FULL("generate", unified::algorithms::generate)
-DECLARE_ALGORITHMS_I8_FULL("for_each", unified::algorithms::for_each)
-DECLARE_ALGORITHMS_I8_FULL("transform_unary", unified::algorithms::transform_unary)
-DECLARE_ALGORITHMS_I8_FULL("transform_binary", unified::algorithms::transform_binary)
-DECLARE_ALGORITHMS_I8_FULL("replace_if", unified::algorithms::replace_if)
-DECLARE_ALGORITHMS_I8_FULL("replace_copy_if", unified::algorithms::replace_copy_if)
-DECLARE_ALGORITHMS_I8_FULL("remove_if", unified::algorithms::remove_if)
-DECLARE_ALGORITHMS_I8_FULL("remove_copy_if", unified::algorithms::remove_copy_if)
-DECLARE_ALGORITHMS_I8_FULL("reverse", unified::algorithms::reverse)
-DECLARE_ALGORITHMS_I8_FULL("reverse_copy", unified::algorithms::reverse_copy)
-DECLARE_ALGORITHMS_I8_FULL("shuffle", unified::algorithms::shuffle)
-DECLARE_ALGORITHMS_I8_FULL("swap_ranges", unified::algorithms::swap_ranges)
-DECLARE_ALGORITHMS_I8_FULL("reduce", unified::algorithms::reduce)
-DECLARE_ALGORITHMS_I8_FULL("transform_reduce", unified::algorithms::transform_reduce)
-DECLARE_ALGORITHMS_I8_FULL("inner_product", unified::algorithms::inner_product)
-DECLARE_ALGORITHMS_I8_FULL("inclusive_scan", unified::algorithms::inclusive_scan)
-DECLARE_ALGORITHMS_I8_FULL("exclusive_scan", unified::algorithms::exclusive_scan)
-DECLARE_ALGORITHMS_I8_FULL("transform_inclusive_scan", unified::algorithms::transform_inclusive_scan)
-DECLARE_ALGORITHMS_I8_FULL("transform_exclusive_scan", unified::algorithms::transform_exclusive_scan)
-DECLARE_ALGORITHMS_I8_FULL("adjacent_difference", unified::algorithms::adjacent_difference)
-DECLARE_ALGORITHMS_I8_FULL("sort", unified::algorithms::sort)
-DECLARE_ALGORITHMS_I8_FULL("stable_sort", unified::algorithms::stable_sort)
-DECLARE_ALGORITHMS_I8_FULL("sort_descending", unified::algorithms::sort_descending)
-DECLARE_ALGORITHMS_I8_FULL("sort_by_key", unified::algorithms::sort_by_key)
-DECLARE_ALGORITHMS_I8_FULL("stable_sort_by_key", unified::algorithms::stable_sort_by_key)
-DECLARE_ALGORITHMS_I8_FULL("unique", unified::algorithms::unique)
-DECLARE_ALGORITHMS_I8_FULL("unique_copy", unified::algorithms::unique_copy)
-DECLARE_ALGORITHMS_I8_FULL("count", unified::algorithms::count)
-DECLARE_ALGORITHMS_I8_FULL("count_if", unified::algorithms::count_if)
-DECLARE_ALGORITHMS_I8_FULL("find", unified::algorithms::find)
-DECLARE_ALGORITHMS_I8_FULL("find_if", unified::algorithms::find_if)
-DECLARE_ALGORITHMS_I8_FULL("all_of", unified::algorithms::all_of)
-DECLARE_ALGORITHMS_I8_FULL("any_of", unified::algorithms::any_of)
-DECLARE_ALGORITHMS_I8_FULL("none_of", unified::algorithms::none_of)
-DECLARE_ALGORITHMS_I8_FULL("equal", unified::algorithms::equal)
-DECLARE_ALGORITHMS_I8_FULL("mismatch", unified::algorithms::mismatch)
-DECLARE_ALGORITHMS_I8_FULL("lower_bound", unified::algorithms::lower_bound)
-DECLARE_ALGORITHMS_I8_FULL("upper_bound", unified::algorithms::upper_bound)
-DECLARE_ALGORITHMS_I8_FULL("binary_search", unified::algorithms::binary_search)
-DECLARE_ALGORITHMS_I8_FULL("equal_range", unified::algorithms::equal_range)
-DECLARE_ALGORITHMS_I8_FULL("merge", unified::algorithms::merge)
-DECLARE_ALGORITHMS_I8_FULL("partition", unified::algorithms::partition)
-DECLARE_ALGORITHMS_I8_FULL("stable_partition", unified::algorithms::stable_partition)
-DECLARE_ALGORITHMS_I8_FULL("partition_copy", unified::algorithms::partition_copy)
-DECLARE_ALGORITHMS_I8_FULL("is_partitioned", unified::algorithms::is_partitioned)
-DECLARE_ALGORITHMS_I8_FULL("is_partitioned_false", unified::algorithms::is_partitioned_false)
-DECLARE_ALGORITHMS_I8_FULL("partition_point", unified::algorithms::partition_point)
-DECLARE_ALGORITHMS_I8_FULL("set_union", unified::algorithms::set_union)
-DECLARE_ALGORITHMS_I8_FULL("set_intersection", unified::algorithms::set_intersection)
-DECLARE_ALGORITHMS_I8_FULL("set_difference", unified::algorithms::set_difference)
-DECLARE_ALGORITHMS_I8_FULL("set_symmetric_difference", unified::algorithms::set_symmetric_difference)
-DECLARE_ALGORITHMS_I8_FULL("min_element", unified::algorithms::min_element)
-DECLARE_ALGORITHMS_I8_FULL("max_element", unified::algorithms::max_element)
-DECLARE_ALGORITHMS_I8_FULL("minmax_element", unified::algorithms::minmax_element)
-DECLARE_ALGORITHMS_I8_FULL("is_sorted", unified::algorithms::is_sorted)
-DECLARE_ALGORITHMS_I8_FULL("is_sorted_false", unified::algorithms::is_sorted_false)
-DECLARE_ALGORITHMS_I8_FULL("is_sorted_until", unified::algorithms::is_sorted_until)
-DECLARE_ALGORITHMS_I8_FULL("rotate", unified::algorithms::rotate)
-DECLARE_ALGORITHMS_I8_FULL("rotate_copy", unified::algorithms::rotate_copy)
-DECLARE_ALGORITHMS_I8_FULL("includes", unified::algorithms::includes)
-DECLARE_ALGORITHMS_I8_FULL("includes_false", unified::algorithms::includes_false)
-DECLARE_ALGORITHMS_I8_FULL("gather", unified::algorithms::gather)
-DECLARE_ALGORITHMS_I8_FULL("scatter", unified::algorithms::scatter)
-DECLARE_ALGORITHMS_I8_FULL("reduce_by_key", unified::algorithms::reduce_by_key)
-DECLARE_ALGORITHMS_I8_FULL("inclusive_scan_by_key", unified::algorithms::inclusive_scan_by_key)
-DECLARE_ALGORITHMS_I8_FULL("exclusive_scan_by_key", unified::algorithms::exclusive_scan_by_key)
-DECLARE_ALGORITHMS_I8_FULL("unique_by_key", unified::algorithms::unique_by_key)
-DECLARE_ALGORITHMS_I8_FULL("merge_by_key", unified::algorithms::merge_by_key)
-DECLARE_ALGORITHMS_I8_FULL("partial_sort", unified::algorithms::partial_sort)
-DECLARE_ALGORITHMS_I8_FULL("nth_element", unified::algorithms::nth_element)
-DECLARE_ALGORITHMS_I8_FULL("inplace_merge", unified::algorithms::inplace_merge)
-
-#undef DECLARE_ALGORITHMS_I8_FULL
+#define UNIFIED_ALGORITHM_TYPE int8_t
+#define UNIFIED_ALGORITHM_NAME "i8"
+#define UNIFIED_ALGORITHM_MATRIX "full"
+#define UNIFIED_ALGORITHM_SIZES unified::algorithm_sizes
+#include "cases/algorithms.inl"

@@ -25,26 +25,6 @@ final case class LaunchGeometry private (
       activeZ <- activeSize(Axis.Z, group, group.z, groupSize.z, groupCount.z, globalExtent.z)
     } yield Dimensions(activeX, activeY, activeZ)
 
-  def globalCoordinates(
-      group: Coordinates,
-      local: Coordinates
-  ): Either[String, Coordinates] =
-    try
-      Right(
-        Coordinates(
-          Math.addExact(globalOffset.x, Math.addExact(Math.multiplyExact(group.x, groupSize.x), local.x))
-            .refineUnsafe[Positive0],
-          Math.addExact(globalOffset.y, Math.addExact(Math.multiplyExact(group.y, groupSize.y), local.y))
-            .refineUnsafe[Positive0],
-          Math.addExact(globalOffset.z, Math.addExact(Math.multiplyExact(group.z, groupSize.z), local.z))
-            .refineUnsafe[Positive0]
-        )
-      )
-    catch {
-      case _: ArithmeticException =>
-        Left(s"global coordinate overflows Int range: group=$group, local=$local")
-    }
-
   def globalCoordinatesLong(
       group: Coordinates,
       local: Coordinates
@@ -70,15 +50,6 @@ final case class LaunchGeometry private (
       case _: ArithmeticException =>
         Left(s"global coordinate overflows Long range: group=$group, local=$local")
     }
-
-  def containsGlobal(coordinates: Coordinates): Boolean =
-    containsGlobal(
-      LongCoordinates(
-        coordinates.x.toLong.refineUnsafe[Positive0],
-        coordinates.y.toLong.refineUnsafe[Positive0],
-        coordinates.z.toLong.refineUnsafe[Positive0]
-      )
-    )
 
   def containsGlobal(coordinates: LongCoordinates): Boolean =
     contains(coordinates.x, globalOffset.x.toLong, globalExtent.x) &&
@@ -153,21 +124,6 @@ object LaunchGeometry {
           },
           s"linear index $index is outside dimensions $this"
         ).flatten
-      }
-
-    def *(other: Dimensions): Either[String, Dimensions] =
-      try {
-        val productX = Math.multiplyExact(x, other.x)
-        val productY = Math.multiplyExact(y, other.y)
-        val productZ = Math.multiplyExact(z, other.z)
-        for {
-          refinedX <- productX.refineEither[Positive]
-          refinedY <- productY.refineEither[Positive]
-          refinedZ <- productZ.refineEither[Positive]
-        } yield Dimensions(refinedX, refinedY, refinedZ)
-      } catch {
-        case _: ArithmeticException =>
-          Left(s"dimension product overflows Int range: $this * $other")
       }
   }
 

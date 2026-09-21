@@ -1,6 +1,3 @@
-set(miniapp_tealeaf_url
-  https://codeload.github.com/UoB-HPC/TeaLeaf/tar.gz/e70261c0be40537da75b258108ed2898f84f3c58)
-set(miniapp_tealeaf_sha256 f454ab1cc89e750e0a6695bf65ce41cd3ebd64ba3e109a5109d02ae534bc6d16)
 set(miniapp_tealeaf_models cuda hip omp-target kokkos sycl-usm sycl-acc)
 set(miniapp_tealeaf_main driver/main.cpp)
 set(miniapp_tealeaf_executable [=[add_executable(${EXE_NAME} ${IMPL_SOURCES})]=])

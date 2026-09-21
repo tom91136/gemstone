@@ -119,7 +119,7 @@ object AMDGPUALUExecutionBenchmark {
         )
       }
     Console.out.println(
-      f"amdgpu-alu benchmark mode=${mode.toString.toLowerCase} dispatches=$measured warmup=$warmup instructions_per_dispatch=${instructionCount +
+      f"amdgpu-alu benchmark mode=${mode.toString.toLowerCase(java.util.Locale.ROOT)} dispatches=$measured warmup=$warmup instructions_per_dispatch=${instructionCount +
           1} " +
         f"elapsed_ms=${elapsed / 1000000.0}%.3f ns_per_dispatch=${elapsed.toDouble / measured.toDouble}%.1f " +
         f"allocated_bytes_per_dispatch=${(allocatedBefore, allocatedAfter) match {

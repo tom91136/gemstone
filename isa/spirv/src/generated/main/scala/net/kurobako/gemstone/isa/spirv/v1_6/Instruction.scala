@@ -1,4 +1,4 @@
-// Generated from the pinned Khronos SPIR-V core grammar. Do not edit by hand.
+// Generated from the pinned Khronos SPIR-V core grammar. Regenerate with: sbt codegen
 // scalafix:off GemstoneNoAssume; values were validated by the generator
 package net.kurobako.gemstone.isa.spirv.v1_6
 
@@ -10,6 +10,7 @@ import net.kurobako.gemstone.isa.spirv.v1_6.OperandDecoder.DecodedOperands
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 
+@javax.annotation.processing.Generated(Array("sbt codegen"))
 enum Instruction(val definition: Instruction.Definition, operandValues: Operand*) {
   case Nop() extends Instruction(Instruction.Definition.Nop)
   case Undef(resultType: Operand, dest: Operand) extends Instruction(Instruction.Definition.Undef, resultType, dest)
@@ -5546,6 +5547,7 @@ enum Instruction(val definition: Instruction.Definition, operandValues: Operand*
   final def meta: Metadata = definition.meta
 }
 
+@javax.annotation.processing.Generated(Array("sbt codegen"))
 object Instruction {
   type Decoder = RawInstruction => Either[InstructionDecodeError, Instruction]
 

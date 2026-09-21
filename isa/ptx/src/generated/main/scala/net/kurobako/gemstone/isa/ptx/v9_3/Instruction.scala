@@ -1,4 +1,4 @@
-// Generated PTX instruction model from the pinned NVIDIA ISA 9.3 specification. Do not edit by hand.
+// Generated PTX instruction model from the pinned NVIDIA ISA 9.3 specification. Regenerate with: sbt codegen
 // scalafix:off GemstoneNoAssume; values were validated by the generator
 package net.kurobako.gemstone.isa.ptx.v9_3
 
@@ -13,6 +13,7 @@ import net.kurobako.gemstone.Vec.*
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 
+@javax.annotation.processing.Generated(Array("sbt codegen"))
 enum Instruction(val definition: Instruction.Definition, operandValues: Operand*) {
   case Abs(dest: Operand, srcA: Operand, mods: Vec[Modifier], pred: Option[Predication])
       extends Instruction(Instruction.Definition.Abs, dest, srcA)
@@ -884,6 +885,7 @@ enum Instruction(val definition: Instruction.Definition, operandValues: Operand*
 
 }
 
+@javax.annotation.processing.Generated(Array("sbt codegen"))
 object Instruction {
   enum DecodeError {
     case UnknownOpcode(opcode: String)
@@ -17417,8 +17419,7 @@ object Instruction {
 
   val definitions: Vec[Definition] = Definition.values.toVec
 
-  private def normalizeOpcode(value: String): String =
-    value.map(character => if (character >= 'A' && character <= 'Z') (character + ('a' - 'A')).toChar else character)
+  private def normalizeOpcode(value: String): String = value.toLowerCase(java.util.Locale.ROOT)
 
   private lazy val DefinitionsByMnemonic: Map[String, Vec[Definition]] =
     definitions.groupMap(_.opcode.value.takeWhile(_ != '.'))(value => value)

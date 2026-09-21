@@ -12,7 +12,7 @@ import java.util.concurrent.TimeUnit
 import scala.concurrent.duration.FiniteDuration
 import scala.util.Using
 
-private[server] object NativeTestProcess {
+private object NativeTestProcess {
   private final class TemporaryOutput(
       val directory: Path,
       val stdout: Path,
@@ -78,13 +78,13 @@ private[server] object NativeTestProcess {
       environment.applyTo(builder.environment())
       Using.resource(RunningProcess(builder.start())) { running =>
         val completed = running.process.waitFor(timeout.toMillis, TimeUnit.MILLISECONDS)
-        if !completed then running.close()
+        if (!completed) running.close()
         Result(
           command,
-          if completed then running.process.exitValue() else -1,
+          if (completed) running.process.exitValue() else -1,
           Files.readString(output.stdout, StandardCharsets.UTF_8),
           Files.readString(output.stderr, StandardCharsets.UTF_8) +
-            (if completed then "" else s"\nprocess timed out after $timeout\n")
+            (if (completed) "" else s"\nprocess timed out after $timeout\n")
         )
       }
     }

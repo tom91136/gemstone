@@ -1,6 +1,3 @@
-set(miniapp_minibude_url
-  https://codeload.github.com/UoB-HPC/miniBUDE/tar.gz/570f66c1fd0c29b7f3ab6fa96fba87f4561aa44c)
-set(miniapp_minibude_sha256 4c1d349785771c1fca818a7abd69dc789d6f5b77990c76ea29a94f1fdec5aa9e)
 set(miniapp_minibude_models cuda hip omp-target kokkos ocl sycl acc)
 set(miniapp_minibude_license LICENSE.txt)
 set(miniapp_minibude_license_name miniBUDE.txt)
@@ -15,11 +12,16 @@ function(miniapp_minibude_patch model source)
   set(cmake_file "${source}/CMakeLists.txt")
   file(READ "${cmake_file}" content)
   string(REPLACE [=[${CMAKE_SOURCE_DIR}]=] [=[${CMAKE_CURRENT_SOURCE_DIR}]=] content "${content}")
+  # The upstream generated header is keyed to the top-level build directory,
+  # which collides when several models share one build tree. Scope it to the
+  # model's own binary directory.
+  string(REPLACE [=[${CMAKE_BINARY_DIR}/generated]=] [=[${CMAKE_CURRENT_BINARY_DIR}/generated]=] content "${content}")
   file(WRITE "${cmake_file}" "${content}")
   foreach(model_file IN ITEMS src/ocl/model.cmake src/sycl/model.cmake)
     set(path "${source}/${model_file}")
     file(READ "${path}" content)
     string(REPLACE [=[${CMAKE_SOURCE_DIR}]=] [=[${CMAKE_CURRENT_SOURCE_DIR}]=] content "${content}")
+    string(REPLACE [=[${CMAKE_BINARY_DIR}/generated]=] [=[${CMAKE_CURRENT_BINARY_DIR}/generated]=] content "${content}")
     file(WRITE "${path}" "${content}")
   endforeach()
   if(CONFORMANCE_BACKEND STREQUAL "opencl" AND model STREQUAL "ocl")

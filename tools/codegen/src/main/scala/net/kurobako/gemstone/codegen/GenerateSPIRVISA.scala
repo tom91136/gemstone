@@ -145,9 +145,8 @@ object GenerateSPIRVISA {
       s"  private def operandKinds$index: Vec[OperandKindInfo] = Vec(\n${values.mkString(",\n")}\n  )"
     }.toVector
     val kindExpression = kindChunks.indices.map(index => s"operandKinds$index").mkString("Vec(", ", ", ").flatten")
-    s"""|// Generated from the pinned Khronos SPIR-V core grammar. Do not edit by hand.
-        |// scalafix:off GemstoneNoAssume; values were validated by the generator
-        |package net.kurobako.gemstone.isa.spirv.${packageVersion.value}
+    GeneratedHeader.scala("from the pinned Khronos SPIR-V core grammar", assume = true) +
+      s"""|package net.kurobako.gemstone.isa.spirv.${packageVersion.value}
         |
         |import net.kurobako.gemstone.NoNul
         |import net.kurobako.gemstone.Vec
@@ -157,7 +156,7 @@ object GenerateSPIRVISA {
         |import io.github.iltotore.iron.*
         |import io.github.iltotore.iron.constraint.all.*
         |
-        |enum Instruction(val definition: Instruction.Definition, operandValues: Operand*) {
+        |${GeneratedHeader.annotation()}enum Instruction(val definition: Instruction.Definition, operandValues: Operand*) {
         |${cases.mkString("\n")}
         |
         |  final val operands: Vec[Operand] = operandValues.toVec
@@ -167,7 +166,7 @@ object GenerateSPIRVISA {
         |  final def meta: Metadata = definition.meta
         |}
         |
-        |object Instruction {
+        |${GeneratedHeader.annotation()}object Instruction {
         |  type Decoder = RawInstruction => Either[InstructionDecodeError, Instruction]
         |
         |  enum Definition(
@@ -409,15 +408,15 @@ object GenerateSPIRVISA {
       packageVersion: ScalaPackageVersion
   ): String = {
     val sourceRows = upstream.map { case (file, names) => s"    \"${escape(file)}\" -> ${names.size}" }.mkString(",\n")
-    s"""|// Generated from pinned Khronos grammar and SPIRV-Tools tests. Do not edit by hand.
-        |package net.kurobako.gemstone.isa.spirv.${packageVersion.value}
+    GeneratedHeader.scala("from pinned Khronos grammar and SPIRV-Tools tests") +
+      s"""|package net.kurobako.gemstone.isa.spirv.${packageVersion.value}
         |
         |import net.kurobako.gemstone.Vec
         |
         |import io.github.iltotore.iron.*
         |import io.github.iltotore.iron.constraint.all.*
         |
-        |final class ReferenceSuite extends munit.FunSuite {
+        |${GeneratedHeader.annotation()}final class ReferenceSuite extends munit.FunSuite {
         |  private val upstreamTestCounts: Map[String, Int] = Map(
         |$sourceRows
         |  )

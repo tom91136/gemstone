@@ -1,6 +1,7 @@
-// Generated from the normalized AMDGPU generation set. Do not edit by hand.
+// Generated from the normalized AMDGPU generation set. Regenerate with: sbt codegen
 package net.kurobako.gemstone.isa.amdgpu
 
+@javax.annotation.processing.Generated(Array("sbt codegen"))
 object Architectures {
   val gfx6: ISA = ISA(Family.GFX6)
   val gfx7: ISA = ISA(Family.GFX7)

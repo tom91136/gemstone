@@ -1,7 +1,7 @@
-#include "support.hpp"
+#include "test_support.hpp"
 
 #define UNIFIED_API_ROCTHRUST 1
-#include "api_thrust.hpp"
+#include "backend_thrust.hpp"
 #undef UNIFIED_API_ROCTHRUST
 #include <cstddef>
 #include <cstdint>
@@ -128,8 +128,8 @@ TEST_CASE("algorithms/roc-thrust-semantic/zip-iterator-reduce/i32/n11", "[unifie
     expected_value += values[index];
   }
   {
-    INFO("zip-iterator-reduce mismatch (actual=" + std::to_string(thrust::get<0>(actual)) + "," + std::to_string(thrust::get<1>(actual))
-         + "; expected=" + std::to_string(expected_key) + "," + std::to_string(expected_value) + ")");
+    INFO(fmt::format("zip-iterator-reduce mismatch (actual={},{}; expected={},{})", thrust::get<0>(actual), thrust::get<1>(actual),
+                     expected_key, expected_value));
     REQUIRE((thrust::get<0>(actual) == expected_key && thrust::get<1>(actual) == expected_value));
   }
 }
@@ -168,15 +168,15 @@ TEST_CASE("algorithms/roc-thrust-semantic/zip-iterator-reduce-by-key/i32/n11", "
   }
   for (size_t index = 0; index < count; ++index) {
     {
-      INFO("zip-iterator-reduce-by-key.key[" + std::to_string(index) + "] mismatch");
+      INFO(fmt::format("zip-iterator-reduce-by-key.key[{}] mismatch", index));
       REQUIRE((output_keys[index] == expected_keys[index]));
     }
     {
-      INFO("zip-iterator-reduce-by-key.first[" + std::to_string(index) + "] mismatch");
+      INFO(fmt::format("zip-iterator-reduce-by-key.first[{}] mismatch", index));
       REQUIRE((output_first[index] == thrust::get<0>(expected_values[index])));
     }
     {
-      INFO("zip-iterator-reduce-by-key.second[" + std::to_string(index) + "] mismatch");
+      INFO(fmt::format("zip-iterator-reduce-by-key.second[{}] mismatch", index));
       REQUIRE((output_second[index] == thrust::get<1>(expected_values[index])));
     }
   }

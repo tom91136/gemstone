@@ -1,6 +1,7 @@
 package net.kurobako.gemstone.server.recording
 
-import net.kurobako.gemstone.server.transport.RPCPort
+import net.kurobako.gemstone.rpc.ExecutionRPC
+import net.kurobako.gemstone.server.transport.Transport.*
 
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
@@ -30,9 +31,9 @@ final class RPCJournalSuite extends munit.FunSuite {
           Set(RPCJournal.RecordedClientId(1L))
         )
         val first = reader.frame(reader.events.head)
-        assertEquals(first.toSeq, RPCFrames.normalized(RPCJournal.Kind.Request, execution(), 4096).toSeq)
+        assertEquals(first.toSeq, RPCJournal.Frames.normalized(RPCJournal.Kind.Request, execution(), 4096).toSeq)
         first(0) = 0
-        assertEquals(RPCFrames.magic(reader.frame(reader.events.head)), RPCFrames.ExecutionRequest)
+        assertEquals(RPCJournal.Frames.magic(reader.frame(reader.events.head)), ExecutionRPC.RequestMagic)
       }
       val _ = intercept[IOException](RPCJournal.Writer(file, RPCJournal.Header(schema)))
     }
@@ -48,7 +49,7 @@ final class RPCJournalSuite extends munit.FunSuite {
         RPCReplay.run(
           RPCReplay.Options(file, schema),
           header => {
-            observed.set(header.executionProfile); RPCReplay.Endpoint(RPCPort(1), () => closed.set(true))
+            observed.set(header.executionProfile); RPCReplay.Target(RPCPort(1), () => closed.set(true))
           }
         ).events,
         0
@@ -83,7 +84,7 @@ final class RPCJournalSuite extends munit.FunSuite {
       val started = AtomicBoolean(false)
       val _       = intercept[IOException](RPCReplay.run(
         RPCReplay.Options(file, schema),
-        _ => { started.set(true); RPCReplay.Endpoint(RPCPort(1), () => ()) }
+        _ => { started.set(true); RPCReplay.Target(RPCPort(1), () => ()) }
       ))
       assert(!started.get())
     }

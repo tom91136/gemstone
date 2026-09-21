@@ -1,7 +1,8 @@
+// Generated encoding constants from pinned Mesa ACO inputs. Regenerate with: sbt codegen
+// Instruction metadata is attached directly to generated Instruction.Definition cases.
 package net.kurobako.gemstone.isa.amdgpu
 
-// Generated encoding constants from pinned Mesa ACO inputs. Instruction metadata is attached
-// directly to generated Instruction.Definition cases in Instruction.scala. Do not edit.
+@javax.annotation.processing.Generated(Array("sbt codegen"))
 private[amdgpu] object EncodingConstants {
   val MesaACORecordCount: Int = 3821
   val AMDXMLRecordCount: Int = 40059

@@ -1,41 +1,39 @@
 package net.kurobako.gemstone.launcher
 
-import net.kurobako.gemstone.server.execution.ExecutionConfiguration
-import net.kurobako.gemstone.server.transport.{ClientId, RPCPort}
+import net.kurobako.gemstone.server.execution.ExecutionService
+import net.kurobako.gemstone.server.transport.Transport.*
 
 import com.monovore.decline.Command
 
 import java.nio.file.Path
+import scala.util.Properties
 
 final class LaunchSuite extends munit.FunSuite {
-  private val endpoint = Endpoint(RPCPort(43123), ClientId(7L))
-  private val root     = Path.of("/opt/gemstone")
-  private val layout   = RuntimeLayout(root, RuntimePlatform.Linux)
+  private val port   = RPCPort(43123)
+  private val client = ClientId(7L)
+  private val root   = Path.of("/opt/gemstone")
+  private val layout = RuntimeLayout(root)
+
+  private def parse(arguments: String*): Either[String, Launcher.Options] =
+    Command("run", "test launcher options")(Launcher.options).parse(arguments).left.map(help => help.toString)
 
   test("API lists are comma-separated sets") {
-    assertEquals(
-      ComputeAPI.parseAll("hip,hsa,cuda,opencl,levelzero"),
-      Right(ComputeAPI.values.toSet)
-    )
-    assert(ComputeAPI.parseAll("sycl").isLeft)
-    assert(ComputeAPI.parseAll("cuda,").isLeft)
+    def apis(value: String) = parse("--apis", value, "--", "application").map(_.apis)
+    assertEquals(apis("hip,hsa,cuda,opencl,levelzero"), Right(ComputeAPI.values.toSet))
+    assert(apis("sycl").isLeft)
+    assert(apis("cuda,").isLeft)
   }
 
   test("platform defaults model the native runtime stack") {
-    assertEquals(
-      ComputeAPI.defaults(RuntimePlatform.Linux),
-      Set(ComputeAPI.HSA, ComputeAPI.CUDA, ComputeAPI.OpenCL, ComputeAPI.LevelZero)
-    )
-    assertEquals(
-      ComputeAPI.defaults(RuntimePlatform.Windows),
-      Set(ComputeAPI.HIP, ComputeAPI.CUDA, ComputeAPI.OpenCL, ComputeAPI.LevelZero)
-    )
+    val expected =
+      if (Properties.isLinux) Set(ComputeAPI.HSA, ComputeAPI.CUDA, ComputeAPI.OpenCL, ComputeAPI.LevelZero)
+      else Set(ComputeAPI.HIP, ComputeAPI.CUDA, ComputeAPI.OpenCL, ComputeAPI.LevelZero)
+    assertEquals(ComputeAPI.defaults, expected)
   }
 
   test("launcher accepts the public run syntax") {
-    val parsed = Command("run", "test launcher options")(GemstoneLauncher.options)
-      .parse(Seq("--apis", "hip,hsa", "--", "application", "argument"))
-      .fold(help => fail(s"$help"), value => value)
+    val parsed = parse("--apis", "hip,hsa", "--", "application", "argument")
+      .fold(help => fail(help), value => value)
 
     assertEquals(parsed.apis, Set(ComputeAPI.HIP, ComputeAPI.HSA))
     assertEquals(parsed.serverPort, None)
@@ -44,31 +42,31 @@ final class LaunchSuite extends munit.FunSuite {
   }
 
   test("launcher accepts a shared server port") {
-    val parsed = Command("run", "test launcher options")(GemstoneLauncher.options)
-      .parse(Seq("--server-port", "43123", "--", "application"))
-      .fold(help => fail(s"$help"), value => value)
+    val parsed = parse("--server-port", "43123", "--", "application")
+      .fold(help => fail(help), value => value)
 
     assertEquals(parsed.serverPort, Some(RPCPort(43123)))
   }
 
   test("all selected APIs coexist in one environment") {
-    val plan = Launch.plan(
+    val environment = Launcher.plan(
       ComputeAPI.values.toSet,
       layout,
-      endpoint,
+      port,
+      client,
       Map("LD_PRELOAD" -> "/existing.so", "LD_LIBRARY_PATH" -> "/vendor/lib")
-    ).fold(error => fail(error.message), value => value)
+    ).fold(error => fail(error), value => value)
 
     assertEquals(
-      plan.environment.set("LD_PRELOAD"),
-      s"${root.resolve("libcuda.so.1")}:${root.resolve("libamdhip64.so.7")}:${root.resolve("libhsa-runtime64.so.1")}:${root.resolve("libOpenCL_gemstone.so.1")}:/existing.so"
+      environment.set("LD_PRELOAD"),
+      s"${layout.library(ComputeAPI.CUDA)}:${layout.library(ComputeAPI.HIP)}:${layout.library(ComputeAPI.HSA)}:${layout.library(ComputeAPI.OpenCL)}:/existing.so"
     )
-    assertEquals(plan.environment.set("LD_LIBRARY_PATH"), s"$root:/vendor/lib")
-    assertEquals(plan.environment.set("OCL_ICD_FILENAMES"), s"${root.resolve("libOpenCL_gemstone.so.1")}")
-    assertEquals(plan.environment.set("ZE_ENABLE_ALT_DRIVERS"), s"${root.resolve("libze_gemstone.so.1")}")
-    assertEquals(plan.environment.set("GEMSTONE_RPC_PORT"), s"${endpoint.port.value}")
-    assertEquals(plan.environment.set("GEMSTONE_RPC_CLIENT"), s"${endpoint.client.value}")
-    assert(plan.environment.unset("CONFORMANCE_DEVICE"))
+    assertEquals(environment.set("LD_LIBRARY_PATH"), s"$root:/vendor/lib")
+    assertEquals(environment.set("OCL_ICD_FILENAMES"), s"${layout.library(ComputeAPI.OpenCL)}")
+    assertEquals(environment.set("ZE_ENABLE_ALT_DRIVERS"), s"${layout.library(ComputeAPI.LevelZero)}")
+    assertEquals(environment.set("GEMSTONE_RPC_PORT"), s"${port.value}")
+    assertEquals(environment.set("GEMSTONE_RPC_CLIENT"), s"${client.value}")
+    assert(environment.unset("CONFORMANCE_DEVICE"))
   }
 
   test("HIP and HSA are independently selectable") {
@@ -79,40 +77,41 @@ final class LaunchSuite extends munit.FunSuite {
       Set(ComputeAPI.HIP, ComputeAPI.HSA)
     )
     combinations.foreach { apis =>
-      val plan = Launch.plan(apis, layout, endpoint, Map.empty).fold(error => fail(error.message), value => value)
-      assertEquals(plan.apis, apis)
+      assert(Launcher.plan(apis, layout, port, client, Map.empty).isRight)
     }
   }
 
   test("conformance target context configures virtual architectures") {
-    val cuda = Launch.plan(
+    val cuda = Launcher.plan(
       Set(ComputeAPI.CUDA),
       layout,
-      endpoint,
+      port,
+      client,
       Map("CONFORMANCE_TARGET_BACKEND" -> "cuda", "CONFORMANCE_TARGET_ARCHITECTURE" -> "sm_89")
-    ).fold(error => fail(error.message), value => value)
-    assertEquals(cuda.environment.set.get("GEMSTONE_CUDA_TARGET"), Some("sm_89"))
+    ).fold(error => fail(error), value => value)
+    assertEquals(cuda.set.get("GEMSTONE_CUDA_TARGET"), Some("sm_89"))
 
-    val hsa = Launch.plan(
+    val hsa = Launcher.plan(
       Set(ComputeAPI.HSA),
       layout,
-      endpoint,
+      port,
+      client,
       Map("CONFORMANCE_TARGET_BACKEND" -> "hip", "CONFORMANCE_TARGET_ARCHITECTURE" -> "gfx1030")
-    ).fold(error => fail(error.message), value => value)
-    assertEquals(hsa.environment.set.get("GEMSTONE_AMDGPU_TARGET"), Some("gfx1030"))
+    ).fold(error => fail(error), value => value)
+    assertEquals(hsa.set.get("GEMSTONE_AMDGPU_TARGET"), Some("gfx1030"))
   }
 
   test("an empty API set is rejected") {
-    assert(Launch.plan(Set.empty, layout, endpoint, Map.empty).isLeft)
+    assert(Launcher.plan(Set.empty, layout, port, client, Map.empty).isLeft)
   }
 
   test("process-scoped execution profiles reject malformed values before launch") {
-    val result = GemstoneProcess.run(
+    val result = Launcher.launch(
       Set(ComputeAPI.CUDA),
       layout,
-      Map(ExecutionConfiguration.MaxInstructionsEnvironment -> "not-a-number")
+      Map(ExecutionService.MaxInstructionsEnvironment -> "not-a-number")
     )(_ => 0)
     assert(result.isLeft)
-    assert(result.swap.exists(_.message.contains("invalid execution profile")))
+    assert(result.swap.exists(_.contains("invalid execution profile")))
   }
 }

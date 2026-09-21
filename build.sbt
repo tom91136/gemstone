@@ -333,12 +333,12 @@ def authoredTextFiles(root: Path): Vector[Path] = {
       val segments  = relative.iterator.asScala.map(name => s"$name").toVector
       val name      = path.fileName
       val dot       = name.lastIndexOf('.')
-      val extension = Option.when(dot >= 0)(name.substring(dot + 1).toLowerCase)
+      val extension = Option.when(dot >= 0)(name.substring(dot + 1).toLowerCase(_root_.java.util.Locale.ROOT))
       !segments.exists(ignoredSegments) &&
       name != "PLAN.md" &&
       name != "CLEAN_UP_PLAN.md" &&
-      !name.toUpperCase.startsWith("LICENSE") &&
-      !name.toUpperCase.startsWith("LICENCE") &&
+      !name.toUpperCase(_root_.java.util.Locale.ROOT).startsWith("LICENSE") &&
+      !name.toUpperCase(_root_.java.util.Locale.ROOT).startsWith("LICENCE") &&
       (authoredTextFileNames(name) || extension.exists(authoredTextExtensions))
     }
     .toVector
@@ -630,10 +630,13 @@ def checkedInGeneratedSources = Seq(
     projectMatrixBaseDirectory.value.toPath.absolute / "src/generated/main/scala",
   Test / checkedInGeneratedSourceDirectory :=
     projectMatrixBaseDirectory.value.toPath.absolute / "src/generated/test/scala",
+  Compile / checkedInGeneratedResourceDirectory :=
+    projectMatrixBaseDirectory.value.toPath.absolute / "src/generated/main/resources",
   Test / checkedInGeneratedResourceDirectory :=
     projectMatrixBaseDirectory.value.toPath.absolute / "src/generated/test/resources",
   Compile / unmanagedSourceDirectories += (Compile / checkedInGeneratedSourceDirectory).value,
   Test / unmanagedSourceDirectories += (Test / checkedInGeneratedSourceDirectory).value,
+  Compile / unmanagedResourceDirectories += (Compile / checkedInGeneratedResourceDirectory).value,
   Test / unmanagedResourceDirectories += (Test / checkedInGeneratedResourceDirectory).value
 )
 
@@ -1098,6 +1101,7 @@ lazy val amdgpu = projectMatrix
     checkedInGeneratedSources,
     name := "gemstone-isa-amdgpu",
     libraryDependencies ++= Seq(
+      "com.lihaoyi"        %% "upickle"    % upickleVersion,
       "com.outr"           %% "scribe"     % scribeVersion,
       "io.github.iltotore" %% "iron"       % ironVersion,
       "org.typelevel"      %% "cats-core"  % catsCoreVersion,
@@ -1110,6 +1114,7 @@ lazy val amdgpu = projectMatrix
       val references   = (codegenProject / prepareAMDGPUReferences).value
       val python       = nonEmptyCommand("PYTHON", (Global / pythonExecutable).value)
       val sourceRoot   = (Compile / checkedInGeneratedSourceDirectory).value
+      val metadataRoot = (Compile / checkedInGeneratedResourceDirectory).value
       val resourceRoot = (Test / checkedInGeneratedResourceDirectory).value
       val classpath    = (codegenProject / Compile / fullClasspath).value.map(entry => converter.toPath(entry.data))
       val run          = (codegenProject / Compile / runner).value
@@ -1121,7 +1126,8 @@ lazy val amdgpu = projectMatrix
           "--python",
           python,
           s"$references",
-          s"$sourceRoot"
+          s"$sourceRoot",
+          s"$metadataRoot"
         ),
         log
       ).get
@@ -1134,19 +1140,22 @@ lazy val amdgpu = projectMatrix
         ),
         log
       ).get
-      val sources     = sourceRoot.descendants("*.scala")
-      val oracleFiles = resourceRoot.descendants("*").filter(_.isFile)
+      val sources       = sourceRoot.descendants("*.scala")
+      val metadataFiles = metadataRoot.descendants("*.json")
+      val oracleFiles   = resourceRoot.descendants("*").filter(_.isFile)
       require(
-        sources.nonEmpty && oracleFiles.nonEmpty && sources.forall(_.isFile) && oracleFiles.forall(_.isFile),
+        sources.nonEmpty && metadataFiles.nonEmpty && oracleFiles.nonEmpty &&
+          sources.forall(_.isFile) && metadataFiles.forall(_.isFile) && oracleFiles.forall(_.isFile),
         "AMDGPU generator outputs are incomplete"
       )
-      sources ++ oracleFiles
+      sources ++ metadataFiles ++ oracleFiles
     },
     checkGeneratedAMDGPU := Def.uncached {
       val converter    = fileConverter.value
       val references   = (codegenProject / prepareAMDGPUReferences).value
       val python       = nonEmptyCommand("PYTHON", (Global / pythonExecutable).value)
       val sourceRoot   = (Compile / checkedInGeneratedSourceDirectory).value
+      val metadataRoot = (Compile / checkedInGeneratedResourceDirectory).value
       val resourceRoot = (Test / checkedInGeneratedResourceDirectory).value
       val classpath    = (codegenProject / Compile / fullClasspath).value.map(entry => converter.toPath(entry.data))
       val run          = (codegenProject / Compile / runner).value
@@ -1159,7 +1168,8 @@ lazy val amdgpu = projectMatrix
           python,
           "--check",
           s"$references",
-          s"$sourceRoot"
+          s"$sourceRoot",
+          s"$metadataRoot"
         ),
         log
       ).get
@@ -1176,6 +1186,7 @@ lazy val amdgpu = projectMatrix
   .nativePlatform(
     scalaVersions = Seq(scala3Version),
     settings = Seq(
+      Compile / nativeConfig ~= (_.withEmbedResources(true)),
       Test / nativeConfig ~= (_.withEmbedResources(true))
     )
   )
@@ -1334,6 +1345,13 @@ lazy val conformance = project.in(file("conformance"))
       val build     = root / s"target/conformance/build/$targetSet"
       val artifacts = root / "target/conformance/artifacts"
       val log       = streams.value.log
+      val offline   = sys.env.get("CONFORMANCE_OFFLINE").exists(value =>
+        Set("1", "true", "on").contains(value.toLowerCase(_root_.java.util.Locale.ROOT))
+      )
+      val artifactParallelism = positiveEnvironmentInt(
+        "CONFORMANCE_ARTIFACT_PARALLELISM",
+        math.max(1, math.min(4, sys.runtime.availableProcessors() / 8))
+      )
       CMake.build(
         source = baseDirectory.value.toPath / "artifacts",
         build = build,
@@ -1345,7 +1363,11 @@ lazy val conformance = project.in(file("conformance"))
           s"-DCONTAINER_EXECUTABLE=${nonEmptyCommand("CONTAINER_EXECUTABLE", sys.env.getOrElse("CONTAINER_EXECUTABLE", "podman"))}",
           s"-DROCM_VERSION=$rocmVersion",
           s"-DCONFORMANCE_TARGET_SET=$targetSet",
-          s"-DCONFORMANCE_ARTIFACT_DIRECTORY=$artifacts"
+          s"-DCONFORMANCE_ARTIFACT_DIRECTORY=$artifacts",
+          s"-DCONFORMANCE_DEPENDENCY_DIRECTORY=$root/target/conformance/deps",
+          s"-DCONFORMANCE_WORK_DIRECTORY=$root/target/conformance/work",
+          s"-DCONFORMANCE_ARTIFACT_PARALLELISM=$artifactParallelism",
+          s"-DCONFORMANCE_OFFLINE=${if (offline) "ON" else "OFF"}"
         ),
         parallelism = positiveEnvironmentInt(
           "CMAKE_BUILD_PARALLEL_LEVEL",
@@ -1373,7 +1395,8 @@ lazy val conformance = project.in(file("conformance"))
           "-DCONFORMANCE_BACKEND=",
           "-DCONFORMANCE_BUILD_UNIFIED=OFF",
           "-DCONFORMANCE_BUILD_CTS=OFF",
-          "-DCONFORMANCE_BUILD_MINIAPPS=OFF"
+          "-DCONFORMANCE_BUILD_MINIAPPS=OFF",
+          s"-DCONFORMANCE_DEPENDENCY_CACHE=$root/target/conformance/deps"
         ),
         parallelism = positiveEnvironmentInt(
           "CMAKE_BUILD_PARALLEL_LEVEL",
@@ -1382,7 +1405,8 @@ lazy val conformance = project.in(file("conformance"))
         log = log.info,
         target = Some("conformance")
       )
-      val suffix = if (sys.props("os.name").toLowerCase.contains("windows")) ".exe" else ""
+      val suffix =
+        if (sys.props("os.name").toLowerCase(_root_.java.util.Locale.ROOT).contains("windows")) ".exe" else ""
       val result = build / s"bin/conformance$suffix"
       require(result.isFile, s"conformance executable was not produced: $result")
       result
@@ -1405,7 +1429,8 @@ lazy val conformance = project.in(file("conformance"))
           "-DCONFORMANCE_BACKEND=",
           "-DCONFORMANCE_BUILD_UNIFIED=OFF",
           "-DCONFORMANCE_BUILD_CTS=OFF",
-          "-DCONFORMANCE_BUILD_MINIAPPS=OFF"
+          "-DCONFORMANCE_BUILD_MINIAPPS=OFF",
+          s"-DCONFORMANCE_DEPENDENCY_CACHE=$root/target/conformance/deps"
         ),
         parallelism = positiveEnvironmentInt(
           "CMAKE_BUILD_PARALLEL_LEVEL",
@@ -1462,7 +1487,7 @@ lazy val conformance = project.in(file("conformance"))
         .map(entry => s"${converter.toPath(entry.data)}")
         .mkString(sys.props("path.separator"))
       val java = path"${sys.props("java.home")}" / "bin" /
-        (if (sys.props("os.name").toLowerCase.contains("windows")) "java.exe" else "java")
+        (if (sys.props("os.name").toLowerCase(_root_.java.util.Locale.ROOT).contains("windows")) "java.exe" else "java")
       val serverCommand = Vector(
         s"$java",
         "-Xms512m",
@@ -1535,7 +1560,7 @@ lazy val gemstone = project.in(file("."))
       val stem       = "con" + "tract"
       val lowerWord  = raw"\b${stem}s?\b"
       val camelWord  = s"${stem.capitalize}s?(?=\\z|[^a-z])"
-      val upperWord  = s"${stem.toUpperCase}s?(?=\\z|[^A-Z])"
+      val upperWord  = s"${stem.toUpperCase(_root_.java.util.Locale.ROOT)}s?(?=\\z|[^A-Z])"
       val prohibited = s"(?:$lowerWord|$camelWord|$upperWord)".r
       val violations = authoredTextFiles(root).flatMap { source =>
         Files.readAllLines(source, StandardCharsets.UTF_8).asScala.iterator.zipWithIndex.collect {
@@ -1576,7 +1601,7 @@ lazy val gemstone = project.in(file("."))
         .map(entry => s"${converter.toPath(entry.data)}")
         .mkString(sys.props("path.separator"))
       val java = path"${sys.props("java.home")}" / "bin" /
-        (if (sys.props("os.name").toLowerCase.contains("windows")) "java.exe" else "java")
+        (if (sys.props("os.name").toLowerCase(_root_.java.util.Locale.ROOT).contains("windows")) "java.exe" else "java")
       val command = Vector(
         s"$java",
         "-cp",

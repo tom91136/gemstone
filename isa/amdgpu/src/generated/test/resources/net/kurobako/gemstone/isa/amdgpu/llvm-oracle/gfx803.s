@@ -1,4 +1,4 @@
-// Generated from pinned LLVM MC/AMDGPU checks. Do not edit.
+// Generated from pinned LLVM MC/AMDGPU checks. Regenerate with: sbt codegen
 // TARGET: gfx803
 
 // SOURCE: isa-version-hsa.s

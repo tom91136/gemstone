@@ -1,4 +1,5 @@
 fix.GemstoneExplicitEtaExpansion
+fix.GemstoneExplicitLocale
 fix.GemstoneFilenameConventions
 fix.GemstoneForbiddenAPIs
 fix.GemstoneIronImports
@@ -6,4 +7,5 @@ fix.GemstoneNoAssume
 fix.GemstoneNoExplicitNew
 fix.GemstoneNoIntrinsicLocks
 fix.GemstoneNoIterator
+fix.GemstoneNoThen
 fix.GemstoneNoTypeCasting

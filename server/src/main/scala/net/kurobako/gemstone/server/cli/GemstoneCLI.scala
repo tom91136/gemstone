@@ -1,12 +1,13 @@
 package net.kurobako.gemstone.server.cli
 
 import net.kurobako.gemstone.Vec
-import net.kurobako.gemstone.launcher.GemstoneLauncher
+import net.kurobako.gemstone.launcher.Launcher
 import net.kurobako.gemstone.rpc.ExecutionRPC
 import net.kurobako.gemstone.server.GemstoneRPCServer
-import net.kurobako.gemstone.server.execution.ExecutionConfiguration
+import net.kurobako.gemstone.server.execution.ExecutionService
 import net.kurobako.gemstone.server.recording.{RPCJournal, RPCReplay}
-import net.kurobako.gemstone.server.transport.{RPCPort, ServerControl}
+import net.kurobako.gemstone.server.transport.ServerControl
+import net.kurobako.gemstone.server.transport.Transport.*
 import net.kurobako.gemstone.vm.TaskLimits
 
 import cats.syntax.all.*
@@ -23,7 +24,7 @@ object GemstoneCLI {
     case Inspect(archive: Path)
     case Replay(archive: Path)
     case Shutdown(port: RPCPort)
-    case Launch(options: GemstoneLauncher.Options)
+    case Launch(options: Launcher.Options)
   }
 
   private val archive      = Opts.argument[String]("archive").map(Path.of(_))
@@ -36,7 +37,7 @@ object GemstoneCLI {
     .map { case (portFile, endpointFile, record) => Action.Serve(portFile, endpointFile, record) }
   private val command = Command("gemstone", "Run or inspect the Gemstone execution server")(
     Opts.subcommands(
-      Command("run", "Run a process with a Gemstone compute API")(GemstoneLauncher.options.map(Action.Launch(_))),
+      Command("run", "Run a process with a Gemstone compute API")(Launcher.options.map(Action.Launch(_))),
       Command("serve", "Run the execution server")(serveOptions),
       Command("inspect", "Inspect an RPC journal")(archive.map(Action.Inspect(_))),
       Command("replay", "Replay an RPC journal")(archive.map(Action.Replay(_))),
@@ -61,13 +62,13 @@ object GemstoneCLI {
           Console.println(RPCReplay.run(RPCReplay.Options(file, protocolIdentity), replayEndpoint(_)))
         case Action.Shutdown(port)  => ServerControl.shutdown(port)
         case Action.Launch(options) =>
-          val status = GemstoneLauncher.run(options)
+          val status = Launcher.run(options)
           if (status != 0) sys.exit(status)
         case Action.Serve(portFile, endpointFile, record) => serve(portFile, endpointFile, record)
       }
   }
 
-  private def replayEndpoint(header: RPCJournal.Header): RPCReplay.Endpoint = {
+  private def replayEndpoint(header: RPCJournal.Header): RPCReplay.Target = {
     val profile = header.executionProfile.getOrElse(throw IllegalArgumentException("capture has no execution profile"))
     val environment = (sys.env - "GEMSTONE_RECORD").updated(
       "GEMSTONE_EXECUTION_PARALLELISM",
@@ -75,12 +76,12 @@ object GemstoneCLI {
     )
     val limits  = TaskLimits(profile.maxInstructions, profile.quantum)
     val running = GemstoneRPCServer.start(limits, environment)
-    RPCReplay.Endpoint(running.port, () => running.close())
+    RPCReplay.Target(running.port, () => running.close())
   }
 
   private def serve(portFile: Option[Path], endpointFile: Option[Path], record: Option[Path]): Unit = {
     val environment = record.fold(sys.env)(path => sys.env.updated("GEMSTONE_RECORD", path.toString))
-    val limits      = ExecutionConfiguration.limits(environment)
+    val limits      = ExecutionService.limits(environment)
       .fold(message => throw IllegalArgumentException(message), value => value)
     Using.resource(GemstoneRPCServer.start(limits, environment)) { running =>
       portFile.foreach { file =>

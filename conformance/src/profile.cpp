@@ -1,16 +1,18 @@
-#include "conformance/profile.hpp"
+#include "profile.hpp"
 
 #include <algorithm>
 #include <array>
 #include <cstddef>
 #include <set>
-#include <sstream>
 #include <stdexcept>
 #include <string_view>
 
+#include <aspartame/all.hpp>
+#include <fmt/format.h>
+#include <fmt/ranges.h>
 #include <glaze/toml.hpp>
 
-#include "conformance/environment.hpp"
+#include "environment.hpp"
 
 #if defined(_WIN32)
   #define WIN32_LEAN_AND_MEAN
@@ -20,11 +22,12 @@
 #endif
 
 namespace conformance::profile {
+using namespace aspartame;
 namespace {
 
 constexpr std::array<std::string_view, 6> supported_backends{"cuda", "hip", "hsa", "opencl", "sycl", "openacc"};
 
-std::string target_id(const Target &target) { return target.name.value_or(target.backend); }
+std::string target_id(const ProfileTarget &target) { return target.name.value_or(target.backend); }
 
 bool supported(std::string_view backend) { return std::ranges::find(supported_backends, backend) != supported_backends.end(); }
 
@@ -50,7 +53,7 @@ bool architecture(std::string_view value, std::string_view prefix, bool hexadeci
 std::string normalize_name(std::string value) {
   constexpr std::string_view suffix = ".toml";
   if (value.ends_with(suffix)) value.resize(value.size() - suffix.size());
-  if (!profile_name(value)) throw std::invalid_argument("invalid conformance machine profile name: " + value);
+  if (!profile_name(value)) throw std::invalid_argument(fmt::format("invalid conformance machine profile name: {}", value));
   return value;
 }
 
@@ -58,53 +61,52 @@ void validate_skips(std::string_view name, std::string_view scope, const std::ve
   std::set<std::string> unique;
   for (const auto &skip : skips) {
     if (skip.empty() || skip.find_first_of("\r\n") != std::string::npos)
-      throw std::invalid_argument("machine profile " + std::string(name) + " contains an invalid " + std::string(scope)
-                                  + " test skip identity");
+      throw std::invalid_argument(fmt::format("machine profile {} contains an invalid {} test skip identity", name, scope));
     if (!unique.insert(skip).second)
-      throw std::invalid_argument("machine profile " + std::string(name) + " repeats " + std::string(scope) + " test skip identities");
+      throw std::invalid_argument(fmt::format("machine profile {} repeats {} test skip identities", name, scope));
   }
 }
 
 void validate(std::string_view name, const Profile &profile) {
-  if (profile.targets.empty()) throw std::invalid_argument("machine profile " + std::string(name) + " must declare at least one target");
+  if (profile.targets.empty()) throw std::invalid_argument(fmt::format("machine profile {} must declare at least one target", name));
 
-  std::map<std::string, std::vector<const Target *>> by_backend;
+  std::map<std::string, std::vector<const ProfileTarget *>> by_backend;
   std::set<std::string> ids;
   for (const auto &target : profile.targets) {
     if (!supported(target.backend))
-      throw std::invalid_argument("machine profile " + std::string(name) + " has unknown backend: " + target.backend);
+      throw std::invalid_argument(fmt::format("machine profile {} has unknown backend: {}", name, target.backend));
     const auto id = target_id(target);
-    if (!profile_name(id)) throw std::invalid_argument("machine profile " + std::string(name) + " has invalid target name: " + id);
-    if (!ids.insert(id).second) throw std::invalid_argument("machine profile " + std::string(name) + " repeats target name: " + id);
+    if (!profile_name(id)) throw std::invalid_argument(fmt::format("machine profile {} has invalid target name: {}", name, id));
+    if (!ids.insert(id).second) throw std::invalid_argument(fmt::format("machine profile {} repeats target name: {}", name, id));
     by_backend[target.backend].push_back(&target);
 
     if (target.backend == "cuda" || target.backend == "openacc") {
       if (!target.architecture || !architecture(*target.architecture, "sm_", false))
-        throw std::invalid_argument("machine profile " + std::string(name) + " requires an sm_ architecture for " + target.backend);
+        throw std::invalid_argument(fmt::format("machine profile {} requires an sm_ architecture for {}", name, target.backend));
     } else if (target.backend == "hip" || target.backend == "hsa") {
       if (!target.architecture || !architecture(*target.architecture, "gfx", true))
-        throw std::invalid_argument("machine profile " + std::string(name) + " requires a gfx architecture for " + target.backend);
+        throw std::invalid_argument(fmt::format("machine profile {} requires a gfx architecture for {}", name, target.backend));
     } else if (target.architecture) {
-      throw std::invalid_argument("machine profile " + std::string(name) + " cannot set an architecture for " + target.backend);
+      throw std::invalid_argument(fmt::format("machine profile {} cannot set an architecture for {}", name, target.backend));
     }
     for (const auto &[key, value] : target.environment) {
       if (!valid_environment_entry(key, value))
-        throw std::invalid_argument("machine profile " + std::string(name) + " has a blank environment variable for " + target.backend);
-      if (reserved(key)) throw std::invalid_argument("machine profile environment must not define reserved variable: " + key);
+        throw std::invalid_argument(fmt::format("machine profile {} has a blank environment variable for {}", name, target.backend));
+      if (reserved(key)) throw std::invalid_argument(fmt::format("machine profile environment must not define reserved variable: {}", key));
     }
     validate_skips(name, "target " + id, target.skips);
   }
 
   for (const auto &[backend, targets] : by_backend) {
     if (targets.size() > 1) {
-      if (std::ranges::any_of(targets, [](const Target *target) { return !target->name; }))
-        throw std::invalid_argument("machine profile " + std::string(name) + " requires explicit names for repeated backend: " + backend);
+      if (std::ranges::any_of(targets, [](const ProfileTarget *target) { return !target->name; }))
+        throw std::invalid_argument(fmt::format("machine profile {} requires explicit names for repeated backend: {}", name, backend));
     }
   }
   for (const auto &[key, value] : profile.environment) {
     if (!valid_environment_entry(key, value))
-      throw std::invalid_argument("machine profile " + std::string(name) + " has a blank environment variable");
-    if (reserved(key)) throw std::invalid_argument("machine profile environment must not define reserved variable: " + key);
+      throw std::invalid_argument(fmt::format("machine profile {} has a blank environment variable", name));
+    if (reserved(key)) throw std::invalid_argument(fmt::format("machine profile environment must not define reserved variable: {}", key));
   }
   validate_skips(name, "global", profile.skips);
 }
@@ -113,17 +115,12 @@ Profile load(const std::filesystem::path &file) {
   std::string buffer;
   Profile profile;
   if (const auto error = glz::read_file_toml(profile, file.string(), buffer); error)
-    throw std::invalid_argument("cannot load conformance machine profile " + file.string() + ":\n" + glz::format_error(error, buffer));
+    throw std::invalid_argument(fmt::format("cannot load conformance machine profile {}:\n{}", file.string(), glz::format_error(error, buffer)));
   return profile;
 }
 
 std::string join(const std::vector<std::string> &values, std::string_view separator) {
-  std::ostringstream result;
-  for (size_t index = 0; index < values.size(); ++index) {
-    if (index) result << separator;
-    result << values[index];
-  }
-  return result.str();
+  return fmt::format("{}", fmt::join(values, separator));
 }
 
 } // namespace
@@ -147,8 +144,8 @@ std::string local_hostname() {
 #endif
 }
 
-Resolved resolve(const std::filesystem::path &directory, const std::optional<std::string> &requested,
-                 const std::optional<std::string> &hostname) {
+Profile resolve_profile(const std::filesystem::path &directory, const std::optional<std::string> &requested,
+                        const std::optional<std::string> &hostname) {
   std::optional<std::string> explicit_name = requested;
   std::string name;
   if (explicit_name) {
@@ -163,49 +160,48 @@ Resolved resolve(const std::filesystem::path &directory, const std::optional<std
   }
   auto profile = load(file);
   validate(name, profile);
-  return {name, std::move(profile)};
+  profile.name = name;
+  return profile;
 }
 
-std::vector<PlanTarget> make_plan(const Resolved &resolved, const std::vector<std::string> &selectors) {
+std::vector<ResolvedTarget> resolve_targets(const Profile &profile, const std::vector<std::string> &selectors) {
   if (std::ranges::find(selectors, "all") != selectors.end() && !(selectors.size() == 1 && selectors.front() == "all"))
     throw std::invalid_argument("all cannot be combined with target names");
 
   std::set<std::string> known;
-  for (const auto &target : resolved.profile.targets) {
+  for (const auto &target : profile.targets) {
     known.insert(target.backend);
     known.insert(target_id(target));
   }
   for (const auto &selector : selectors) {
     if (!known.contains(selector) && selector != "all") {
-      std::vector<std::string> ids;
-      for (const auto &target : resolved.profile.targets)
-        ids.push_back(target_id(target));
-      throw std::invalid_argument("machine profile " + resolved.name + " provides targets: " + join(ids, ", "));
+      const auto ids = profile.targets ^ map([](const ProfileTarget &target) { return target_id(target); });
+      throw std::invalid_argument(fmt::format("machine profile {} provides targets: {}", profile.name, join(ids, ", ")));
     }
   }
 
-  std::vector<PlanTarget> result;
-  for (const auto &target : resolved.profile.targets) {
-    const auto id = target_id(target);
-    if (!selectors.empty() && selectors != std::vector<std::string>{"all"}
-        && std::ranges::find(selectors, target.backend) == selectors.end() && std::ranges::find(selectors, id) == selectors.end())
-      continue;
-    PlanTarget planned{id, target.backend, target.architecture, resolved.profile.environment, target.deviceLock};
-    for (const auto &[key, value] : target.environment)
-      planned.environment[key] = value;
-    std::vector<std::string> skips = resolved.profile.skips;
-    for (const auto &skip : target.skips)
-      if (std::ranges::find(skips, skip) == skips.end()) skips.push_back(skip);
-    planned.environment["CONFORMANCE_DEVICE"] = target.device.value_or("");
-    planned.environment["CONFORMANCE_SKIPS"] = join(skips, "\n");
-    result.push_back(std::move(planned));
-  }
-  return result;
+  const auto all = selectors.empty() || selectors == std::vector<std::string>{"all"};
+  return profile.targets
+         | filter([&](const ProfileTarget &target) {
+             if (all) return true;
+             const auto id = target_id(target);
+             return std::ranges::find(selectors, target.backend) != selectors.end() || std::ranges::find(selectors, id) != selectors.end();
+           })
+         | map([&](const ProfileTarget &target) {
+             const auto id = target_id(target);
+             ResolvedTarget planned{id, target.backend, target.architecture, profile.environment, target.deviceLock};
+             for (const auto &[key, value] : target.environment)
+               planned.environment[key] = value;
+             planned.environment["CONFORMANCE_DEVICE"] = target.device.value_or("");
+             planned.environment["CONFORMANCE_SKIPS"] = join(concat(profile.skips, target.skips) ^ distinct(), "\n");
+             return planned;
+           })
+         | to_vector();
 }
 
 void validate_all(const std::filesystem::path &directory) {
   if (!std::filesystem::is_directory(directory))
-    throw std::invalid_argument("conformance profile directory does not exist: " + directory.string());
+    throw std::invalid_argument(fmt::format("conformance profile directory does not exist: {}", directory.string()));
   size_t count = 0;
   for (const auto &entry : std::filesystem::directory_iterator(directory)) {
     if (!entry.is_regular_file() || entry.path().extension() != ".toml") continue;
@@ -214,7 +210,7 @@ void validate_all(const std::filesystem::path &directory) {
     validate(name, profile);
     ++count;
   }
-  if (count == 0) throw std::invalid_argument("conformance profile directory contains no .toml files: " + directory.string());
+  if (count == 0) throw std::invalid_argument(fmt::format("conformance profile directory contains no .toml files: {}", directory.string()));
 }
 
 } // namespace conformance::profile

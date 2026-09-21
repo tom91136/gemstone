@@ -1,4 +1,4 @@
-// Generated from pinned Khronos grammar and SPIRV-Tools tests. Do not edit by hand.
+// Generated from pinned Khronos grammar and SPIRV-Tools tests. Regenerate with: sbt codegen
 package net.kurobako.gemstone.isa.spirv.v1_6
 
 import net.kurobako.gemstone.Vec
@@ -6,6 +6,7 @@ import net.kurobako.gemstone.Vec
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 
+@javax.annotation.processing.Generated(Array("sbt codegen"))
 final class ReferenceSuite extends munit.FunSuite {
   private val upstreamTestCounts: Map[String, Int] = Map(
     "binary_parse_test.cpp" -> 24,

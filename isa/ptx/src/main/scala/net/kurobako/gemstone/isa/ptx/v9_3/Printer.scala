@@ -59,7 +59,7 @@ object Printer extends net.kurobako.gemstone.isa.Printer[Program] {
       }
       val prefix = (Vec("." + addressSpace.mnemonic) ++ qualifierText ++ Vec("." + elementType.mnemonic)).mkString(" ")
       val extent = count.fold("")(value => s"[$value]")
-      val values = if initializer.isEmpty then "" else initializer.map(render(_)).mkString(" = {", ", ", "}")
+      val values = if (initializer.isEmpty) "" else initializer.map(render(_)).mkString(" = {", ", ", "}")
       s"$prefix $name$extent$values;"
     case Statement.Directive(path, arguments, terminator) =>
       val head = path.map(part => "." + part.value).mkString

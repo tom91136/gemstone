@@ -1,4 +1,4 @@
-// Generated from pinned LLVM MC/AMDGPU checks. Do not edit.
+// Generated from pinned LLVM MC/AMDGPU checks. Regenerate with: sbt codegen
 // TARGET: gfx1153
 
 // SOURCE: gfx1150_asm_features-fake16.s

@@ -1,4 +1,4 @@
-/* Generated from ExecutionRPC.Operation. Do not edit. */
+/* Generated from ExecutionRPC.Operation. Regenerate with: sbt codegen */
 #define _POSIX_C_SOURCE 200112L
 #include "gemstone_execution_rpc.hpp"
 #include "process_identity.hpp"

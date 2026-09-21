@@ -5,6 +5,17 @@ project(gpu_conformance VERSION 0.1.0 LANGUAGES C CXX)
 include(CTest)
 include(FetchContent)
 
+include(cmake/DependencyCache.cmake)
+include(cmake/Dependencies.cmake)
+include(cmake/SystemIncludes.cmake)
+
+if(NOT DEFINED CONFORMANCE_DEPENDENCY_CACHE AND DEFINED ENV{CONFORMANCE_DEPENDENCY_CACHE})
+  set(CONFORMANCE_DEPENDENCY_CACHE "$ENV{CONFORMANCE_DEPENDENCY_CACHE}")
+endif()
+set(CONFORMANCE_DEPENDENCY_CACHE "${CONFORMANCE_DEPENDENCY_CACHE}" CACHE PATH
+    "Shared source cache for conformance dependencies")
+option(CONFORMANCE_OFFLINE "Use only cached dependencies; forbid network fetches" OFF)
+
 # Keep compiler output independent of the checkout and build directory. This
 # also applies to the project-owned adapters compiled inside staged CTS and
 # miniapp source trees.
@@ -83,7 +94,9 @@ endfunction()
 
 # Fetch immutable source archives without letting source-only dependencies add
 # their own targets to the build before the owning subtree stages them.
-function(conformance_fetch_url name url sha256 output_variable)
+function(conformance_fetch_url name output_variable)
+  conformance_dependency_lookup("${CONFORMANCE_DEPENDENCY_SOURCES}" "${name}" url sha256 kind)
+  conformance_dependency_cache_apply("${CONFORMANCE_DEPENDENCY_CACHE}" "${name}" "${CONFORMANCE_OFFLINE}")
   FetchContent_Declare(${name}
     URL "${url}" URL_HASH "SHA256=${sha256}"
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE
@@ -92,69 +105,81 @@ function(conformance_fetch_url name url sha256 output_variable)
   set(${output_variable} "${${name}_SOURCE_DIR}" PARENT_SCOPE)
 endfunction()
 
+# Dependencies the root project builds or installs, and the FetchContent policy
+# for each. Kept here because it is project policy, not a generic helper.
+function(conformance_declare_dependencies)
+  set(glaze_INSTALL OFF CACHE BOOL "" FORCE)
+  set(MAGIC_ENUM_OPT_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+  set(MAGIC_ENUM_OPT_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+  set(MAGIC_ENUM_OPT_INSTALL OFF CACHE BOOL "" FORCE)
+  set(FMT_TEST OFF CACHE BOOL "" FORCE)
+  set(FMT_DOC OFF CACHE BOOL "" FORCE)
+  set(FMT_INSTALL OFF CACHE BOOL "" FORCE)
+  set(CATCH_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+  set(CATCH_BUILD_EXTRA_TESTS OFF CACHE BOOL "" FORCE)
+  set(CATCH_ENABLE_REPRODUCIBLE_BUILD ON CACHE BOOL "" FORCE)
+  set(CATCH_INSTALL_DOCS OFF CACHE BOOL "" FORCE)
+  set(CATCH_INSTALL_EXTRAS OFF CACHE BOOL "" FORCE)
+  set(ASPARTAME_ENABLE_TEST OFF CACHE BOOL "" FORCE)
+  set(ASPARTAME_ENABLE_BENCHMARK OFF CACHE BOOL "" FORCE)
+
+  foreach(name IN ITEMS glaze magic_enum fire Catch2 fmt aspartame)
+    conformance_dependency_lookup("${CONFORMANCE_DEPENDENCY_SOURCES}" "${name}" url sha256 kind)
+    conformance_dependency_cache_apply("${CONFORMANCE_DEPENDENCY_CACHE}" "${name}" "${CONFORMANCE_OFFLINE}")
+    if(kind STREQUAL "file")
+      set(options DOWNLOAD_NO_EXTRACT YES)
+    else()
+      set(options DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
+    endif()
+    if(name STREQUAL "Catch2")
+      list(APPEND options SOURCE_SUBDIR .conformance-source-only)
+    endif()
+    FetchContent_Declare(${name} URL "${url}" URL_HASH "SHA256=${sha256}" ${options})
+  endforeach()
+endfunction()
+
 set(conformance_artifact_targets)
 
-set(glaze_INSTALL OFF CACHE BOOL "" FORCE)
-FetchContent_Declare(glaze
-  URL https://github.com/stephenberry/glaze/archive/refs/tags/v7.9.1.tar.gz
-  URL_HASH SHA256=d6dee391276f5375672c35d06058e4fd8f1f30f62bae163a004b3bd13a4e2ae3
-  DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
-FetchContent_MakeAvailable(glaze)
+conformance_declare_dependencies()
 
-set(MAGIC_ENUM_OPT_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-set(MAGIC_ENUM_OPT_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-set(MAGIC_ENUM_OPT_INSTALL OFF CACHE BOOL "" FORCE)
-FetchContent_Declare(magic_enum
-  URL https://github.com/Neargye/magic_enum/archive/refs/tags/v0.9.8.tar.gz
-  URL_HASH SHA256=1e54959a3f3cb675938d858603ad69d0f3f7c82439fc2bf86d7232daec2bd10e
-  DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
+FetchContent_MakeAvailable(glaze)
+conformance_mark_system_includes(glaze::glaze)
+
 FetchContent_MakeAvailable(magic_enum)
+conformance_mark_system_includes(magic_enum)
+conformance_mark_system_includes(magic_enum::magic_enum)
 install(FILES "${magic_enum_SOURCE_DIR}/LICENSE"
   DESTINATION licenses RENAME magic_enum.txt COMPONENT support)
 
+FetchContent_MakeAvailable(fmt)
+conformance_mark_system_includes(fmt)
+conformance_mark_system_includes(fmt::fmt)
+conformance_mark_system_includes(fmt::fmt-header-only)
+install(FILES "${fmt_SOURCE_DIR}/LICENSE"
+  DESTINATION licenses RENAME fmt.txt COMPONENT support)
+
 if(NOT CONFORMANCE_BACKEND OR BUILD_TESTING)
-  FetchContent_Declare(fire
-    URL https://raw.githubusercontent.com/kongaskristjan/fire-hpp/c31b9d6593ee4edfdf9df875d006e26d9a8df879/include/fire-hpp/fire.hpp
-    URL_HASH SHA256=f9b82674d0c0a7322043fe837bce895d5798d18585f0e4b1ff105418a8a9e2f8
-    DOWNLOAD_NO_EXTRACT YES)
   FetchContent_MakeAvailable(fire)
-  set(REPROC++ ON CACHE BOOL "" FORCE)
-  set(REPROC_EXAMPLES OFF CACHE BOOL "" FORCE)
-  set(REPROC_INSTALL OFF CACHE BOOL "" FORCE)
-  set(REPROC_TEST OFF CACHE BOOL "" FORCE)
-  FetchContent_Declare(reproc
-    URL https://github.com/DaanDeMeyer/reproc/archive/refs/tags/v14.2.7.tar.gz
-    URL_HASH SHA256=77914ba566356d86986db240ecdb1762dfdd55bb1e8e127d016d9c5c4c9300e8
-    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
-    SOURCE_SUBDIR .conformance-source-only)
-  FetchContent_MakeAvailable(reproc)
-  include(cmake/ProcessGroups.cmake)
-  conformance_patch_reproc("${reproc_SOURCE_DIR}")
-  add_subdirectory("${reproc_SOURCE_DIR}" "${reproc_BINARY_DIR}" EXCLUDE_FROM_ALL)
+  FetchContent_MakeAvailable(aspartame)
+  conformance_mark_system_includes(aspartame)
+  conformance_mark_system_includes(Aspartame::Aspartame)
   add_library(conformance_driver STATIC src/driver.cpp src/profile.cpp src/environment.cpp src/process.cpp)
   target_compile_features(conformance_driver PUBLIC cxx_std_23)
   target_include_directories(conformance_driver PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include" PRIVATE src)
-  target_link_libraries(conformance_driver PUBLIC glaze::glaze magic_enum::magic_enum reproc++)
+  target_link_libraries(conformance_driver PUBLIC glaze::glaze magic_enum::magic_enum Aspartame::Aspartame fmt::fmt-header-only)
   add_executable(conformance src/main.cpp)
-  target_include_directories(conformance PRIVATE "${fire_SOURCE_DIR}")
+  target_include_directories(conformance SYSTEM PRIVATE "${fire_SOURCE_DIR}")
+  target_include_directories(conformance PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
   target_link_libraries(conformance PRIVATE conformance_driver)
   set_target_properties(conformance PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 endif()
 
 if(BUILD_TESTING OR CONFORMANCE_BUILD_UNIFIED OR CONFORMANCE_BUILD_CTS OR
     CONFORMANCE_BUILD_MINIAPPS)
-  set(CATCH_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-  set(CATCH_BUILD_EXTRA_TESTS OFF CACHE BOOL "" FORCE)
-  set(CATCH_ENABLE_REPRODUCIBLE_BUILD ON CACHE BOOL "" FORCE)
-  set(CATCH_INSTALL_DOCS OFF CACHE BOOL "" FORCE)
-  set(CATCH_INSTALL_EXTRAS OFF CACHE BOOL "" FORCE)
-  FetchContent_Declare(Catch2
-    URL https://github.com/catchorg/Catch2/archive/refs/tags/v3.15.3.tar.gz
-    URL_HASH SHA256=b0299ae552918220a7a6e21e7de5b714777f4e8c883fb70c4bb23fe01df8c6e3
-    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
-    SOURCE_SUBDIR .conformance-source-only)
   FetchContent_MakeAvailable(Catch2)
   add_subdirectory("${catch2_SOURCE_DIR}" "${catch2_BINARY_DIR}" EXCLUDE_FROM_ALL)
+  conformance_mark_system_includes(Catch2)
+  conformance_mark_system_includes(Catch2WithMain)
 
   install(FILES "${catch2_SOURCE_DIR}/LICENSE.txt"
     DESTINATION licenses RENAME Catch2.txt COMPONENT support)
@@ -189,8 +214,8 @@ if(CONFORMANCE_BACKEND)
   add_library(conformance_device STATIC src/device_runtime.cpp)
   set_target_properties(conformance_device PROPERTIES POSITION_INDEPENDENT_CODE ON)
   target_compile_features(conformance_device PRIVATE cxx_std_20)
-  target_include_directories(conformance_device PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include")
-  target_link_libraries(conformance_device PUBLIC magic_enum::magic_enum)
+  target_include_directories(conformance_device PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include" PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+  target_link_libraries(conformance_device PUBLIC magic_enum::magic_enum PRIVATE fmt::fmt-header-only)
 endif()
 if(CONFORMANCE_BACKEND MATCHES "^(cuda|openacc)$")
   string(REPLACE ";" "," conformance_device_targets "${CMAKE_CUDA_ARCHITECTURES}")

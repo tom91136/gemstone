@@ -3,7 +3,7 @@
 
 #include <fire.hpp>
 
-#include "conformance/driver.hpp"
+#include "driver.hpp"
 
 int conformance_main(std::vector<std::string> positional = fire::arg({0, "command/targets", fire::variadic()}),
                      std::string profiles = fire::arg("--profiles", ""), std::string artifacts = fire::arg("--artifacts", ""),
@@ -27,7 +27,7 @@ int conformance_main(std::vector<std::string> positional = fire::arg({0, "comman
     const auto command = positional.front();
     positional.erase(positional.begin());
     if (command == "run") {
-      conformance::driver::Configuration c;
+      conformance::driver::RunOptions c;
       c.profiles = profiles;
       c.artifacts = artifacts;
       c.output = output;
@@ -42,7 +42,7 @@ int conformance_main(std::vector<std::string> positional = fire::arg({0, "comman
     if (command == "exec") {
       if (config.empty() || program.empty() || test.empty() || !positional.empty() || launcher)
         throw std::invalid_argument("exec requires --config, --program and --test");
-      return conformance::driver::execute(config, {test, program, timeout, index, count});
+      return conformance::driver::execute_case(config, {test, program, timeout, index, count});
     }
     throw std::invalid_argument("unknown command: " + command);
   } catch (const std::exception &error) {

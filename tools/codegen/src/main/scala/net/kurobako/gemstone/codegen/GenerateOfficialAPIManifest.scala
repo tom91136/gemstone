@@ -105,10 +105,7 @@ object GenerateOfficialAPIManifest {
     Opts.argument[String]("manifest").map(Path.of(_))
   ).mapN(Request(_, _, _, _)))
 
-  def main(arguments: Array[String]): Unit = command.parse(arguments.toSeq).fold(
-    help => throw IllegalArgumentException(help.toString),
-    request => generate(request)
-  )
+  def main(arguments: Array[String]): Unit = CodegenCommand.run(command, arguments)(generate(_))
 
   private def generate(request: Request): Unit = {
     val manifest = Manifest(

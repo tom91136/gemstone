@@ -15,7 +15,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 
 final class RuntimeBoundarySuite extends munit.FunSuite {
-  private val Encoding = ProgramEncoding.from("test-binary").toOption.get
+  private val Encoding = "test-binary"
   private val Name     = KernelName("main")
 
   private object EmptyMemory extends Memory {
@@ -33,84 +33,72 @@ final class RuntimeBoundarySuite extends munit.FunSuite {
   }
 
   private final class FakeBackend extends RuntimeBackend {
-    override val encoding: ProgramEncoding                       = Encoding
-    override def open(services: MachineServices): BackendSession = FakeSession(services)
+    override val encoding: String = Encoding
+
+    override def load(
+        services: RuntimeBackend.Services,
+        image: Vec[Byte]
+    ): Either[RuntimeBackend.Error, RuntimeBackend.Program] =
+      if (image.isEmpty) Left(RuntimeBackend.Error.Invalid("empty test image")) else Right(FakeProgram(services))
   }
 
-  private final class FakeSession(services: MachineServices) extends BackendSession {
+  private final class FakeProgram(services: RuntimeBackend.Services) extends RuntimeBackend.Program {
     private val closed = AtomicBoolean()
 
-    override def load(image: Vec[Byte]): Either[RuntimeError, RuntimeProgram] =
-      if (closed.get()) Left(RuntimeError.Lifecycle("backend session is closed"))
-      else if (image.isEmpty) Left(RuntimeError.Decode("empty test image"))
-      else Right(FakeProgram(services))
-
-    override def close(): Unit = closed.set(true)
-  }
-
-  private final class FakeProgram(services: MachineServices) extends RuntimeProgram {
-    private val closed = AtomicBoolean()
-
-    override val symbols: Either[RuntimeError, ProgramSymbols] =
+    override val symbols: Either[RuntimeBackend.Error, ProgramSymbols] =
       Right(ProgramSymbols(Vec(KernelSymbol(Name, LinkageName("main"))), Vec.empty))
 
-    override def kernel(name: KernelName): Either[RuntimeError, KernelMetadata] =
-      if (name == Name) KernelMetadata.validated(0, 0, Vec.empty).left.map(RuntimeError.Load(_))
-      else Left(RuntimeError.NotFound(s"unknown kernel: ${name.value}"))
+    override def kernel(name: KernelName): Either[RuntimeBackend.Error, KernelMetadata] =
+      if (name == Name) KernelMetadata.validated(0, 0, Vec.empty).left.map(RuntimeBackend.Error.Invalid(_))
+      else Left(RuntimeBackend.Error.NotFound(s"unknown kernel: ${name.value}"))
 
-    override val globals: Option[RuntimeProgram.Globals] = None
+    override val globals: Option[RuntimeBackend.Program.Globals] = None
 
     override def execute(
         task: KernelTask,
         memory: Memory,
         control: TaskControl
-    ): Either[RuntimeError, Result] =
-      if (closed.get()) Left(RuntimeError.Lifecycle("program is closed"))
+    ): Either[RuntimeBackend.Error, Result] =
+      if (closed.get()) Left(RuntimeBackend.Error.Failed("program is closed"))
       else
         for {
-          _ <- control.checkpoint().left.map(RuntimeError.Execution(_))
+          _ <- control.checkpoint().left.map(RuntimeBackend.Error.Execution(_))
           _ <- services.observer
             .observe(control.observation, Event.Print("test", Vec.empty))
-            .left.map(error => RuntimeError.Execution(Fault.Observer(error.message)))
+            .left.map(error => RuntimeBackend.Error.Execution(Fault.Observer(error.message)))
         } yield Result(control.usedInstructions)
 
     override def close(): Unit = closed.set(true)
   }
 
-  test("open encoding routes to an isolated runtime program and correlated observer") {
+  test("backend load routes to an isolated runtime program and correlated observer") {
     val observer = CompletionObserver()
-    val token    = TaskToken(1L)
+    val token    = ObservationContext(1L)
     val observed = AtomicReference(Vec.empty[Event])
     assertEquals(observer.register(token) { event => observed.updateAndGet(_ :+ event); Right(()) }, Right(()))
 
-    val catalog = BackendCatalog.from(FakeBackend())
-    val session = catalog.backend(Encoding).map(_.open(MachineServices(observer, Scheduler.Sequential))).toOption.get
-    val program = session.load(Vec(1.toByte)).toOption.get
-    val task    = KernelTask.validated(
+    val program = FakeBackend()
+      .load(RuntimeBackend.Services(observer, Scheduler.Sequential), Vec(1.toByte)).toOption.get
+    val task = KernelTask.validated(
       Name,
       LaunchGeometry.Dimensions.One,
       LaunchGeometry.Dimensions.One,
       Vec.empty
     ).toOption.get
-    val control = TaskControl.forScheduler(observation = token.observation)
+    val control = TaskControl.forScheduler(observation = token)
 
     assertEquals(program.execute(task, EmptyMemory, control), Right(Result(1L)))
     assertEquals(observed.get(), Vec(Event.Print("test", Vec.empty)))
     program.close()
     assert(program.execute(task, EmptyMemory, control).isLeft)
-    session.close()
-    assert(session.load(Vec(1.toByte)).isLeft)
   }
 
-  test("runtime boundary preserves unknown encoding, decode, cancellation, and observer failures") {
+  test("runtime boundary preserves decode, cancellation, and observer failures") {
     val observer = CompletionObserver()
-    val catalog  = BackendCatalog.from(FakeBackend())
-    val missing  = ProgramEncoding.from("missing").toOption.get
-    assertEquals(catalog.backend(missing), Left(RuntimeError.UnknownEncoding(missing)))
-
-    val session = catalog.backend(Encoding).map(_.open(MachineServices(observer, Scheduler.Sequential))).toOption.get
-    assertEquals(session.load(Vec.empty), Left(RuntimeError.Decode("empty test image")))
-    val program = session.load(Vec(1.toByte)).toOption.get
+    val backend  = FakeBackend()
+    val services = RuntimeBackend.Services(observer, Scheduler.Sequential)
+    assertEquals(backend.load(services, Vec.empty), Left(RuntimeBackend.Error.Invalid("empty test image")))
+    val program = backend.load(services, Vec(1.toByte)).toOption.get
     val task    = KernelTask.validated(
       Name,
       LaunchGeometry.Dimensions.One,
@@ -119,10 +107,10 @@ final class RuntimeBoundarySuite extends munit.FunSuite {
     ).toOption.get
     val cancellation = TaskControl.Cancellation.Source()
     cancellation.cancel()
-    val cancelled = TaskControl.forScheduler(cancellation = cancellation, observation = TaskToken(2L).observation)
-    assertEquals(program.execute(task, EmptyMemory, cancelled), Left(RuntimeError.Execution(Fault.Cancelled)))
+    val cancelled = TaskControl.forScheduler(cancellation = cancellation, observation = ObservationContext(2L))
+    assertEquals(program.execute(task, EmptyMemory, cancelled), Left(RuntimeBackend.Error.Execution(Fault.Cancelled)))
 
-    val unobserved = TaskControl.forScheduler(observation = TaskToken(3L).observation)
+    val unobserved = TaskControl.forScheduler(observation = ObservationContext(3L))
     assert(program.execute(task, EmptyMemory, unobserved).left.exists(_.message.contains("no observer registered")))
   }
 }

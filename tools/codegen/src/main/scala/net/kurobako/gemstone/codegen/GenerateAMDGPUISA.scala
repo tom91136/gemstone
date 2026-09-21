@@ -14,7 +14,13 @@ import scala.util.Using
 
 /** Builds the normalized AMDGPU instruction catalog from pinned AMD XML and Mesa ACO sources. */
 object GenerateAMDGPUISA {
-  private final case class Request(python: String, check: Boolean, references: Path, sourceRoot: Path)
+  private final case class Request(
+      python: String,
+      check: Boolean,
+      references: Path,
+      sourceRoot: Path,
+      resourceRoot: Path
+  )
   private val ACOExporter = """import importlib.util
 import pathlib
 import sys
@@ -44,22 +50,20 @@ for name in sorted(module.instructions):
             print("\t".join((generation.upper(), name, instruction.format.name, str(opcode),
                               instruction.cls.value, ";".join(operands), "mesa-aco")))
 """
-  private final case class Operand(
+  final case class Operand(
       field: String,
       kind: String,
-      bits: Int,
       input: Boolean,
       output: Boolean,
       implicitOperand: Boolean
   )
-  private final case class Instruction(
+  final case class Instruction(
       name: String,
       generation: String,
       target: String,
       format: String,
       opcode: Int,
       operands: Vector[Operand],
-      group: String,
       source: String
   )
   private final case class SOPPRule(prefix: Long, opcodeShift: Int, immediateBits: Int)
@@ -102,7 +106,7 @@ for name in sorted(module.instructions):
   )
   private final case class InstructionSources(
       main: String,
-      metadataCatalog: String,
+      metadata: String,
       definitions: Vector[(String, String)]
   )
 
@@ -113,36 +117,39 @@ for name in sorted(module.instructions):
     Opts.option[String]("python", help = "Python executable for the pinned ACO model").withDefault("python3"),
     Opts.flag("check", help = "Verify the existing generated sources").orFalse,
     Opts.argument[String]("prepared-references").map(Path.of(_)),
-    Opts.argument[String]("generated-source-root").map(Path.of(_))
-  ).mapN(Request(_, _, _, _)))
+    Opts.argument[String]("generated-source-root").map(Path.of(_)),
+    Opts.argument[String]("generated-resource-root").map(Path.of(_))
+  ).mapN(Request(_, _, _, _, _)))
 
-  def main(arguments: Array[String]): Unit = command.parse(arguments.toSeq).fold(
-    help => throw IllegalArgumentException(help.toString),
-    request => {
-      val result          = extract(request.references, request.python)
-      val instructionRoot = request.sourceRoot.resolve(PackageRoot)
-      val constants       = instructionRoot.resolve("EncodingConstants.scala")
-      sync(constants, render(result.records, result.acoCount, result.xmlCount, result.sopp), request.check)
-      val instructions = renderInstructions(result.records)
-      sync(instructionRoot.resolve("Instruction.scala"), instructions.main, request.check)
-      val metadataCatalog = instructionRoot.resolve("MetadataCatalog.scala")
-      sync(metadataCatalog, instructions.metadataCatalog, request.check)
-      val definitionsRoot = instructionRoot.resolve("definitions")
-      val definitions     = instructions.definitions.map { case (name, content) =>
-        definitionsRoot.resolve(name) -> content
-      }
-      definitions.foreach { case (path, content) => sync(path, content, request.check) }
-      val architectures = instructionRoot.resolve("Architectures.scala")
-      sync(architectures, renderArchitectures(), request.check)
-      val expected = definitions.map(_._1).toSet ++
-        Set(constants, instructionRoot.resolve("Instruction.scala"), metadataCatalog, architectures)
-      val include = (path: Path) => path.getFileName.toString.endsWith(".scala")
-      if (request.check) GeneratedFiles.requireOnly(request.sourceRoot, expected, include)
-      else GeneratedFiles.removeUnexpected(request.sourceRoot, expected, include)
+  def main(arguments: Array[String]): Unit = CodegenCommand.run(command, arguments) { request =>
+    val result          = extract(request.references, request.python)
+    val instructionRoot = request.sourceRoot.resolve(PackageRoot)
+    val constants       = instructionRoot.resolve("EncodingConstants.scala")
+    sync(constants, render(result.records, result.acoCount, result.xmlCount, result.sopp), request.check)
+    val instructions = renderInstructions(result.records)
+    sync(instructionRoot.resolve("Instruction.scala"), instructions.main, request.check)
+    val definitionsRoot = instructionRoot.resolve("definitions")
+    val definitions     = instructions.definitions.map { case (name, content) =>
+      definitionsRoot.resolve(name) -> content
     }
-  )
+    definitions.foreach { case (path, content) => sync(path, content, request.check) }
+    val architectures = instructionRoot.resolve("Architectures.scala")
+    sync(architectures, renderArchitectures(), request.check)
+    val metadataResource = request.resourceRoot.resolve(PackageRoot).resolve("metadata.json")
+    GeneratedFiles.sync(metadataResource, instructions.metadata, request.check)
+    val expected = definitions.map(_._1).toSet ++
+      Set(constants, instructionRoot.resolve("Instruction.scala"), architectures)
+    val include = (path: Path) => path.getFileName.toString.endsWith(".scala")
+    if (request.check) {
+      GeneratedFiles.requireOnly(request.sourceRoot, expected, include)
+      GeneratedFiles.requireOnly(request.resourceRoot, Set(metadataResource), _ => true)
+    } else {
+      GeneratedFiles.removeUnexpected(request.sourceRoot, expected, include)
+      GeneratedFiles.removeUnexpected(request.resourceRoot, Set(metadataResource), _ => true)
+    }
+  }
 
-  private[codegen] def generate(references: Path): String = {
+  def generate(references: Path): String = {
     val result = extract(references)
     render(result.records, result.acoCount, result.xmlCount, result.sopp)
   }
@@ -186,8 +193,7 @@ for name in sorted(module.instructions):
         case element: Element => element
         case node             => throw IllegalArgumentException(s"Instruction node is not an XML element: $node")
       }
-      val name  = requiredText(instruction, "InstructionName").toLowerCase
-      val group = optionalDirectText(instruction, "FunctionalGroup", "Name").getOrElse("")
+      val name = requiredText(instruction, "InstructionName").toLowerCase(java.util.Locale.ROOT)
       directChildren(requiredDirect(instruction, "InstructionEncodings"), "InstructionEncoding").map { encoding =>
         val format   = requiredText(encoding, "EncodingName").stripPrefix("ENC_")
         val opcode   = parseRadix(requiredDirect(encoding, "Opcode"))
@@ -197,13 +203,12 @@ for name in sorted(module.instructions):
             Operand(
               field = optionalText(operand, "FieldName").getOrElse(""),
               kind = requiredText(operand, "OperandType").stripPrefix("OPR_"),
-              bits = requiredText(operand, "OperandSize").toInt,
               input = booleanAttribute(operand, "Input"),
               output = booleanAttribute(operand, "Output"),
               implicitOperand = booleanAttribute(operand, "IsImplicit")
             )
           }
-        Instruction(name, generation, target, format, opcode, operands, group, "AMDXML")
+        Instruction(name, generation, target, format, opcode, operands, "AMDXML")
       }
     }.flatten
   }
@@ -225,23 +230,15 @@ for name in sorted(module.instructions):
           Text.splitDelimited(columns(5), ';').map { encoded =>
             val fields = Text.splitDelimited(encoded, ',')
             if (fields.size != 6) throw IllegalArgumentException(s"invalid ACO operand: $encoded")
-            Operand(
-              "",
-              fields(0),
-              fields(1).toInt * fields(2).toInt,
-              fields(3) == "1",
-              fields(4) == "1",
-              fields(5) == "1"
-            )
+            Operand("", fields(0), fields(3) == "1", fields(4) == "1", fields(5) == "1")
           }
       Instruction(
         columns(1),
         columns(0),
-        columns(0).toLowerCase,
+        columns(0).toLowerCase(java.util.Locale.ROOT),
         columns(2),
         columns(3).toInt,
         operands,
-        columns(4),
         "MesaACO"
       )
     }
@@ -272,11 +269,11 @@ for name in sorted(module.instructions):
   }
 
   private def render(records: Vector[Instruction], acoCount: Int, xmlCount: Int, sopp: SOPPRule): String =
-    s"""|package net.kurobako.gemstone.isa.amdgpu
-        |
-        |// Generated encoding constants from pinned Mesa ACO inputs. Instruction metadata is attached
-        |// directly to generated Instruction.Definition cases in Instruction.scala. Do not edit.
-        |private[amdgpu] object EncodingConstants {
+    GeneratedHeader.scala("encoding constants from pinned Mesa ACO inputs") +
+      "// Instruction metadata is attached directly to generated Instruction.Definition cases.\n" +
+      s"""|package net.kurobako.gemstone.isa.amdgpu
+          |
+          |${GeneratedHeader.annotation()}private[amdgpu] object EncodingConstants {
         |  val MesaACORecordCount: Int = $acoCount
         |  val AMDXMLRecordCount: Int = $xmlCount
         |  val MetadataRecordCount: Int = ${records.size}
@@ -287,19 +284,14 @@ for name in sorted(module.instructions):
         |""".stripMargin
 
   private def renderInstructions(records: Vector[Instruction]): InstructionSources = {
-    val metadataByOpcode = records.groupBy(_.name)
-    val metadataEntries  = metadataByOpcode.toVector.sortBy(_._1).map { case (opcode, entries) =>
-      opcode -> entries.map(catalogEncoding(_))
-    }
+    val recordsByOpcode    = records.groupBy(_.name)
+    val metadataEntries    = recordsByOpcode.toVector.sortBy(_._1).map { case (opcode, entries) => opcode -> entries }
     val distinctMetadata   = metadataEntries.map(_._2).distinct
     val metadataIds        = distinctMetadata.zipWithIndex.toMap
     val metadataIdByOpcode = metadataEntries.map { case (opcode, metadata) =>
       opcode -> metadataIds(metadata)
     }.toMap
-    val catalog        = AMDGPUMetadataCatalogFormat.Catalog(distinctMetadata)
-    val encodedCatalog = AMDGPUMetadataCatalogFormat.encode(catalog)
-    if (AMDGPUMetadataCatalogFormat.decode(encodedCatalog.payload) != catalog)
-      throw IllegalStateException("AMDGPU metadata catalog failed its generation-time round trip")
+    val metadata         = renderMetadataJson(distinctMetadata)
     val forms            = instructionForms(records)
     val definitionGroups = forms
       .groupBy(_.opcode)
@@ -308,7 +300,7 @@ for name in sorted(module.instructions):
       .map { case (_, opcodeForms) => opcodeForms.sortBy(_.operandCount) }
     val definitionChunks = DefinitionDomain.values.toVector.flatMap { domain =>
       val domainGroups =
-        definitionGroups.filter(group => definitionDomain(group.head.opcode, metadataByOpcode) == domain)
+        definitionGroups.filter(group => definitionDomain(group.head.opcode, recordsByOpcode) == domain)
       val shards = weightedChunks(domainGroups)(group =>
         renderDefinitionCase(group, metadataIdByOpcode(group.head.opcode)).length
       )
@@ -345,15 +337,14 @@ for name in sorted(module.instructions):
     }
     val definitionChunkNames = definitionChunks.map(chunk => s"${chunk.objectName}.definitions").mkString(", ")
     val instructionCases     = forms.map(form => renderInstructionCase(form, definitionReferences(form.opcode)))
-    val main                 = s"""|// Generated from the pinned Mesa ACO and AMD machine-readable ISA inputs. Do not edit by hand.
-        |// scalafix:off GemstoneNoAssume; values were validated by the generator
-        |package net.kurobako.gemstone.isa.amdgpu
+    val main = GeneratedHeader.scala("from the pinned Mesa ACO and AMD machine-readable ISA inputs", assume = true) +
+      s"""|package net.kurobako.gemstone.isa.amdgpu
         |
         |import net.kurobako.gemstone.Vec
         |import net.kurobako.gemstone.Vec.*
         |import Program.*
         |
-        |enum Instruction(val definition: Instruction.Definition, operandValues: Operand*) {
+        |${GeneratedHeader.annotation()}enum Instruction(val definition: Instruction.Definition, operandValues: Operand*) {
         |${instructionCases.mkString("\n")}
         |
         |  def mods: Vec[Modifier]
@@ -362,7 +353,7 @@ for name in sorted(module.instructions):
         |  final val operands: Vec[Operand] = operandValues.toVec
         |}
         |
-        |object Instruction {
+        |${GeneratedHeader.annotation()}object Instruction {
         |  enum DecodeError {
         |    case UnknownOpcode(opcode: String)
         |    case InvalidOperandCount(opcode: String, expected: Vec[Int], actual: Int)
@@ -487,7 +478,7 @@ for name in sorted(module.instructions):
         |    }
         |}
         |""".stripMargin
-    InstructionSources(main, renderMetadataCatalog(encodedCatalog), definitionSources)
+    InstructionSources(main, metadata, definitionSources)
   }
 
   private def renderDefinitionChunkFile(
@@ -495,15 +486,14 @@ for name in sorted(module.instructions):
       groups: Vector[Vector[InstructionForm]],
       metadataIdByOpcode: Map[String, Int]
   ): String =
-    s"""|// Generated from the pinned Mesa ACO and AMD machine-readable ISA inputs. Do not edit by hand.
-        |// scalafix:off GemstoneNoAssume; values were validated by the generator
-        |package net.kurobako.gemstone.isa.amdgpu
-        |
-        |import net.kurobako.gemstone.Vec
-        |import Instruction.*
-        |import Program.*
-        |
-        |${renderDefinitionChunk(objectName, groups, metadataIdByOpcode)}
+    GeneratedHeader.scala("from the pinned Mesa ACO and AMD machine-readable ISA inputs", assume = true) +
+      s"""|package net.kurobako.gemstone.isa.amdgpu
+          |
+          |import net.kurobako.gemstone.Vec
+          |import Instruction.*
+          |import Program.*
+          |
+          |${renderDefinitionChunk(objectName, groups, metadataIdByOpcode)}
         |""".stripMargin
 
   private def comparisonClassification(opcode: String): Option[ComparisonClassification] = {
@@ -678,7 +668,7 @@ for name in sorted(module.instructions):
   ): String = {
     val cases      = groups.map(forms => renderDefinitionCase(forms, metadataIdByOpcode(forms.head.opcode)))
     val references = groups.map(_.head.definitionName).mkString(", ")
-    s"""|private[amdgpu] object $objectName {
+    s"""|${GeneratedHeader.annotation()}private[amdgpu] object $objectName {
         |${cases.mkString("\n")}
         |
         |  val definitions: Vec[Definition] = Vec($references)
@@ -699,49 +689,46 @@ for name in sorted(module.instructions):
         |  )""".stripMargin
   }
 
-  private def catalogEncoding(record: Instruction): AMDGPUMetadataCatalogFormat.Encoding =
-    AMDGPUMetadataCatalogFormat.Encoding(
-      family = record.generation,
-      target = record.target,
-      format = record.format,
-      opcode = record.opcode,
-      operands = record.operands.map { operand =>
-        AMDGPUMetadataCatalogFormat.Operand(
-          field = Option.when(operand.field.nonEmpty)(operand.field),
-          kind = operand.kind,
-          sizeBits = operand.bits,
-          input = operand.input,
-          output = operand.output,
-          implicitOperand = operand.implicitOperand
-        )
-      },
-      functionalGroup = Option.when(record.group.nonEmpty)(record.group),
-      source = record.source
-    )
-
-  private def renderMetadataCatalog(encoded: AMDGPUMetadataCatalogFormat.Encoded): String = {
-    val chunks = encoded.payload.grouped(16384).map(literal(_)).mkString(",\n    ")
-    s"""|// Generated from the pinned Mesa ACO and AMD machine-readable ISA inputs. Do not edit by hand.
-        |package net.kurobako.gemstone.isa.amdgpu
-        |
-        |import net.kurobako.gemstone.Vec
-        |
-        |private[amdgpu] object MetadataCatalog {
-        |  private val EncodedChunks: Array[String] = Array(
-        |    $chunks
-        |  )
-        |
-        |  private lazy val Values: Vec[Metadata] = Metadata.CatalogCodec.decode(
-        |    encoded = EncodedChunks.mkString,
-        |    expectedMetadataCount = ${encoded.metadataCount},
-        |    expectedEncodingCount = ${encoded.encodingCount}
-        |  )
-        |
-        |  def apply(metadataId: Int): Metadata =
-        |    if (metadataId >= 0 && metadataId < Values.size) Values(metadataId)
-        |    else throw IllegalArgumentException(s"invalid AMDGPU metadata catalog id: $$metadataId")
-        |}
-        |""".stripMargin
+  def renderMetadataJson(metadata: Vector[Vector[Instruction]]): String = {
+    val records = metadata.flatten
+    val strings = records.flatMap { record =>
+      Vector(record.generation, record.target, record.format, record.source) ++
+        record.operands.flatMap(operand => operand.kind +: Option.when(operand.field.nonEmpty)(operand.field).toVector)
+    }.distinct.sorted
+    val stringIds = strings.zipWithIndex.toMap
+    val schemas   = records.map(_.operands).distinct
+    val schemaIds = schemas.zipWithIndex.toMap
+    val offsets   = metadata.foldLeft(Vector.empty[(Int, Int)]) { (acc, group) =>
+      acc :+ (acc.lastOption.fold(0)((start, count) => start + count) -> group.size)
+    }
+    Vector(
+      "{",
+      "  \"strings\": [",
+      strings.map(value => "    " + ujson.write(ujson.Str(value))).mkString(",\n"),
+      "  ],",
+      "  \"schemas\": [",
+      schemas.map { operands =>
+        "    " + operands.map { operand =>
+          val field = if (operand.field.nonEmpty) stringIds(operand.field) else -1
+          s"[${field},${stringIds(operand.kind)},${operand.implicitOperand}]"
+        }.mkString("[", ",", "]")
+      }.mkString(",\n"),
+      "  ],",
+      "  \"encodings\": [",
+      records.map { record =>
+        val family = stringIds(record.generation)
+        val target = stringIds(record.target)
+        val format = stringIds(record.format)
+        val schema = schemaIds(record.operands)
+        val source = stringIds(record.source)
+        s"""    {"family":$family,"target":$target,"format":$format,"opcode":${record.opcode},"schema":$schema,"source":$source}"""
+      }.mkString(",\n"),
+      "  ],",
+      "  \"metadata\": [",
+      offsets.map { case (start, count) => s"    [$start,$count]" }.mkString(",\n"),
+      "  ]",
+      "}"
+    ).mkString("\n") + "\n"
   }
 
   private def renderInstructionCase(form: InstructionForm, definitionReference: String): String = {
@@ -759,7 +746,7 @@ for name in sorted(module.instructions):
       operands: Vector[Operand],
       arity: Int
   ): String = {
-    val fields                            = operands.map(_.field.toUpperCase).filter(_.nonEmpty)
+    val fields                            = operands.map(_.field.toUpperCase(java.util.Locale.ROOT)).filter(_.nonEmpty)
     val output                            = operands.exists(_.output)
     val input                             = operands.exists(_.input)
     def sourceName(position: Int): String =
@@ -839,8 +826,8 @@ for name in sorted(module.instructions):
       s"  val $name: ISA = ISA(Family.$generation)"
     }
     entries.mkString(
-      "// Generated from the normalized AMDGPU generation set. Do not edit by hand.\n" +
-        "package net.kurobako.gemstone.isa.amdgpu\n\nobject Architectures {\n",
+      GeneratedHeader.scala("from the normalized AMDGPU generation set") +
+        "package net.kurobako.gemstone.isa.amdgpu\n\n" + GeneratedHeader.annotation() + "object Architectures {\n",
       "\n",
       "\n}\n"
     )
@@ -877,11 +864,12 @@ for name in sorted(module.instructions):
     Integer.parseInt(element.getTextContent.trim, radix)
   }
 
-  private def booleanAttribute(element: Element, name: String): Boolean = element.getAttribute(name).toLowerCase match {
-    case "true"  => true
-    case "false" => false
-    case other   => throw IllegalArgumentException(s"invalid $name '$other'")
-  }
+  private def booleanAttribute(element: Element, name: String): Boolean =
+    element.getAttribute(name).toLowerCase(java.util.Locale.ROOT) match {
+      case "true"  => true
+      case "false" => false
+      case other   => throw IllegalArgumentException(s"invalid $name '$other'")
+    }
 
   private def requiredText(element: Element, name: String): String =
     optionalText(element, name).getOrElse(throw IllegalArgumentException(s"missing <$name>"))
@@ -895,9 +883,6 @@ for name in sorted(module.instructions):
     optionalDirect(element, name).getOrElse(throw IllegalArgumentException(s"missing direct <$name>"))
 
   private def optionalDirect(element: Element, name: String): Option[Element] = directChildren(element, name).headOption
-
-  private def optionalDirectText(element: Element, parent: String, name: String): Option[String] =
-    optionalDirect(element, parent).flatMap(value => optionalDirect(value, name)).map(_.getTextContent.trim)
 
   private def directChildren(element: Element, name: String): Vector[Element] = {
     val children = element.getChildNodes

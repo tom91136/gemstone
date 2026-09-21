@@ -40,7 +40,7 @@ object ISA {
     }
 
     def parse(value: String): Either[String, Target] = {
-      val normalized = value.toLowerCase.stripPrefix("sm_").stripSuffix("a").stripSuffix("f")
+      val normalized = value.toLowerCase(java.util.Locale.ROOT).stripPrefix("sm_").stripSuffix("a").stripSuffix("f")
       normalized.toIntOption.toRight(s"invalid SM target '$value'")
         .flatMap(Target.either(_).leftMap(_ => s"invalid SM target '$value'"))
     }

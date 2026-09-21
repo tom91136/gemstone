@@ -130,7 +130,7 @@ object PTXExecutionBenchmark {
         } yield (end - start).refineUnsafe[Positive0]
         verify()
         Console.out.println(
-          s"mode=${mode.toString.toLowerCase} round=$round launches=$measured nsPerLaunch=${elapsed.toDouble /
+          s"mode=${mode.toString.toLowerCase(java.util.Locale.ROOT)} round=$round launches=$measured nsPerLaunch=${elapsed.toDouble /
               measured} bytesPerLaunch=${allocated.fold(Double.NaN)(_.toDouble / measured)} verified=$size"
         )
         round += 1

@@ -30,7 +30,10 @@ final class InstructionSuite extends munit.FunSuite {
   test("generated runtime class names are portable to case-insensitive filesystems") {
     val classNames = Instruction.definitions.flatMap { definition =>
       definition.decoder.operandCounts.flatMap { operandCount =>
-        definition.decoder(operandsFor(operandCount), Vec.empty).map(_.getClass.getName.toLowerCase)
+        definition.decoder(
+          operandsFor(operandCount),
+          Vec.empty
+        ).map(_.getClass.getName.toLowerCase(java.util.Locale.ROOT))
       }
     }
     assertEquals(classNames.distinct.size, classNames.size)

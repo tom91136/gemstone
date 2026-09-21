@@ -1,22 +1,15 @@
 find_package(OpenCL REQUIRED)
 find_program(opencl_cts_spirv_as spirv-as REQUIRED)
 
-set(opencl_cts_revision 726a6d94da0876cf69bf6198d20d42197b0392de)
 # Keep the catalogue useful without compiling the multi-day numerical, image,
 # vector, and exhaustive conversion categories.
 set(opencl_cts_categories
   api basic compiler computeinfo events contractions device_partition
   device_timer generic_address_space geometrics mem_host_flags multiples
   non_uniform_work_group pipes printf profiling thread_dimensions workgroups)
-conformance_fetch_url(opencl_cts
-  "https://codeload.github.com/KhronosGroup/OpenCL-CTS/tar.gz/${opencl_cts_revision}"
-  b859bda3045735883848c09b4e794c89058cb17ec54d749b5acc0e361afba8e2 opencl_cts_source)
-conformance_fetch_url(opencl_opencl_headers
-  https://github.com/KhronosGroup/OpenCL-Headers/archive/refs/tags/v2026.05.29.zip
-  0bdef6f653c577827a75fac3e3f18b0bf000171e39fa65c2eb84ec804c822cab opencl_headers)
-conformance_fetch_url(opencl_spirv_headers
-  https://github.com/KhronosGroup/SPIRV-Headers/archive/refs/tags/vulkan-sdk-1.4.357.0.zip
-  7d40c8c1983c1aba6f6f2fcbcf7be345d33a5693aeee0cc5b8c579fb8e3f2fea spirv_headers)
+conformance_fetch_url(opencl_cts opencl_cts_source)
+conformance_fetch_url(opencl_opencl_headers opencl_headers)
+conformance_fetch_url(opencl_spirv_headers spirv_headers)
 
 set(staged_source "${CMAKE_CURRENT_BINARY_DIR}/source")
 file(REMOVE_RECURSE "${staged_source}")
@@ -87,6 +80,10 @@ foreach(category IN LISTS opencl_cts_categories)
   endif()
   set_target_properties("test_${category}" PROPERTIES
     BUILD_RPATH "${program_rpath}" INSTALL_RPATH "${program_rpath}")
+  # The pinned CTS harness emits an explanatory #warning in imageHelpers.cpp;
+  # leave every other diagnostic in place.
+  target_compile_options("test_${category}" PRIVATE
+    "$<$<COMPILE_LANG_AND_ID:CXX,GNU,Clang,AppleClang>:-Wno-cpp>")
   if(category STREQUAL "thread_dimensions")
     set(category_timeout 1800)
   elseif(category STREQUAL "multiples")

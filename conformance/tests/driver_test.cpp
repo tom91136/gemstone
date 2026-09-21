@@ -1,4 +1,4 @@
-#include "conformance/driver.hpp"
+#include "driver.hpp"
 
 #include <chrono>
 #include <cstdlib>
@@ -10,7 +10,7 @@
 #include <glaze/json.hpp>
 
 #include "conformance/device.hpp"
-#include "conformance/environment.hpp"
+#include "environment.hpp"
 
 #include "device_lock.hpp"
 #if !defined(_WIN32)
@@ -25,7 +25,7 @@ using namespace conformance::driver;
 using namespace std::chrono_literals;
 struct TemporaryDirectory {
   fs::path path =
-      fs::temp_directory_path() / ("conformance-test-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+      fs::temp_directory_path() / fmt::format("conformance-test-{}", std::chrono::steady_clock::now().time_since_epoch().count());
   TemporaryDirectory() { fs::create_directories(path); }
   ~TemporaryDirectory() {
     std::error_code error;
@@ -39,7 +39,7 @@ std::string read(const fs::path &path) {
   return {std::istreambuf_iterator<char>(file), {}};
 }
 std::vector<std::string> list_fixture() {
-  return catch_tests(run_process({fixture.string(), "--list-tests", "--reporter", "json", "--order", "lex", "[fixture]"},
+  return catch_case_names(run_process({fixture.string(), "--list-tests", "--reporter", "json", "--order", "lex", "[fixture]"},
                                  fixture.parent_path(), base_environment(), 10s, {}, true)
                          .output,
                      "fixture");
@@ -50,30 +50,30 @@ TEST_CASE("Catch JSON inventories preserve names and reject malformed input", "[
   const auto names = list_fixture();
   REQUIRE(names.size() == 2);
   CHECK(names[0].find(", bracket[quoted] star* backslash\\ semi; quote\" unicode-π") != std::string::npos);
-  CHECK_THROWS(catch_tests("<Name>not JSON</Name>", "bad"));
-  CHECK_THROWS(catch_tests(R"({"version":9,"listings":{"tests":[]}})", "bad"));
-  CHECK_THROWS(catch_tests(R"({"version":1,"listings":{"tests":[{"name":"same"},{"name":"same"}]}})", "duplicate"));
-  CHECK(catch_tests(R"({"version":1,"listings":{"tests":[]}})", "empty selection").empty());
+  CHECK_THROWS(catch_case_names("<Name>not JSON</Name>", "bad"));
+  CHECK_THROWS(catch_case_names(R"({"version":9,"listings":{"tests":[]}})", "bad"));
+  CHECK_THROWS(catch_case_names(R"({"version":1,"listings":{"tests":[{"name":"same"},{"name":"same"}]}})", "duplicate"));
+  CHECK(catch_case_names(R"({"version":1,"listings":{"tests":[]}})", "empty selection").empty());
 }
 
 TEST_CASE("native shards select exact names including Catch metacharacters", "[driver]") {
   const auto names = list_fixture();
   REQUIRE(names.size() == 2);
   for (uint32_t index = 0; index < names.size(); ++index) {
-    auto arguments = catch_arguments({"[fixture]"}, index, static_cast<uint32_t>(names.size()));
+    auto arguments = catch_shard_arguments({"[fixture]"}, index, static_cast<uint32_t>(names.size()));
     arguments.insert(arguments.begin(), fixture.string());
     const auto result = run_process(arguments, fixture.parent_path(), base_environment(), 10s, {}, true);
     CHECK(result.status == (index == 0 ? 0 : 4));
   }
-  CHECK_THROWS(catch_arguments({}, 1, 1));
-  CHECK_THROWS(catch_arguments({}, 0, 0));
+  CHECK_THROWS(catch_shard_arguments({}, 1, 1));
+  CHECK_THROWS(catch_shard_arguments({}, 0, 0));
 }
 
 TEST_CASE("CTest generation groups 52000 cases by timeout", "[driver]") {
   TemporaryDirectory directory;
-  PreparedTarget target{"route", "opencl", "pci-0123456789abcdef0123456789abcdef", directory.path / "route.json", {}};
+  TargetExecution target{"route", "opencl", "pci-0123456789abcdef0123456789abcdef", directory.path / "route.json", {}};
   for (uint32_t i = 0; i < 52000; ++i)
-    target.tests.push_back({"case/" + std::to_string(i), "fixture", i % 2 ? 120U : 300U, i, 52000});
+    target.tests.push_back({fmt::format("case/{}", i), "fixture", i % 2 ? 120U : 300U, i, 52000});
   const auto start = std::chrono::steady_clock::now();
   materialize_ctest(directory.path, driver, {target});
   const auto output = read(directory.path / "CTestTestfile.cmake");
@@ -91,8 +91,8 @@ TEST_CASE("CTest generation groups 52000 cases by timeout", "[driver]") {
 }
 
 TEST_CASE("isolated routes deduplicate physical variants by artifact ABI", "[driver]") {
-  using conformance::profile::PlanTarget;
-  PlanTarget first{"first", "hip", "gfx1030", {{"CONFORMANCE_DEVICE", "a"}, {"VALUE", "1"}}, true};
+  using conformance::profile::ResolvedTarget;
+  ResolvedTarget first{"first", "hip", "gfx1030", {{"CONFORMANCE_DEVICE", "a"}, {"VALUE", "1"}}, true};
   auto duplicate = first;
   duplicate.id = "duplicate";
   auto selector = first;
@@ -107,7 +107,7 @@ TEST_CASE("isolated routes deduplicate physical variants by artifact ABI", "[dri
   auto locking = first;
   locking.id = "locking";
   locking.deviceLock = false;
-  const std::vector<PlanTarget> targets{first, duplicate, selector, environment, architecture, locking};
+  const std::vector<ResolvedTarget> targets{first, duplicate, selector, environment, architecture, locking};
   const auto isolated = unique_routes(targets, true);
   REQUIRE(isolated.size() == 2);
   CHECK(isolated[0].id == "first");
@@ -118,9 +118,9 @@ TEST_CASE("isolated routes deduplicate physical variants by artifact ABI", "[dri
 TEST_CASE("execution preserves skips environment and distinct report paths", "[driver]") {
   TemporaryDirectory directory;
   const auto names = list_fixture();
-  ExecConfiguration config{fixture.parent_path().string(),
+  ExecutionConfig config{fixture.parent_path().string(),
                            directory.path.string(),
-                           conformance::physical_device_key(conformance::registry_device("fixture")),
+                           conformance::physical_device_key(conformance::make_registry_device("fixture")),
                            base_environment(),
                            {},
                            {},
@@ -132,13 +132,13 @@ TEST_CASE("execution preserves skips environment and distinct report paths", "[d
   std::string buffer;
   const auto file = directory.path / "config.json";
   REQUIRE(!glz::write_file_json(config, file.string(), buffer));
-  CHECK(execute(file, {names[0], fixture.stem().string(), 10, 0, 2}) == 0);
-  CHECK(execute(file, {names[1], fixture.stem().string(), 10, 1, 2}) == 4);
+  CHECK(execute_case(file, {names[0], fixture.stem().string(), 10, 0, 2}) == 0);
+  CHECK(execute_case(file, {names[1], fixture.stem().string(), 10, 1, 2}) == 4);
   CHECK(fs::is_regular_file(directory.path / fixture.stem() / "0/result.txt"));
   CHECK(fs::is_directory(directory.path / fixture.stem() / "1"));
   config.skips = {names[0]};
   REQUIRE(!glz::write_file_json(config, file.string(), buffer));
-  CHECK(execute(file, {names[0], fixture.stem().string(), 10, 0, 2}) == 4);
+  CHECK(execute_case(file, {names[0], fixture.stem().string(), 10, 0, 2}) == 4);
   CHECK_FALSE(fs::exists(directory.path / "skips.log"));
 }
 
@@ -160,11 +160,11 @@ TEST_CASE("runtime environment reserves owned keys and excludes inherited SDK pa
     CHECK(conformance::reserved_environment_key(key));
   CHECK_FALSE(conformance::valid_environment_entry("BAD=KEY", "value"));
   CHECK_FALSE(conformance::valid_environment_entry("KEY", std::string("bad\0value", 9)));
-  ExecConfiguration config;
-  apply_probe(config, {conformance::physical_device_key(conformance::registry_device("selected")), {{"CL_DEVICE_INDEX", "2"}}});
+  ExecutionConfig config;
+  apply_device_probe(config, {conformance::physical_device_key(conformance::make_registry_device("selected")), {{"CL_DEVICE_INDEX", "2"}}});
   CHECK(config.environment.at("CL_DEVICE_INDEX") == "2");
   CHECK(config.environment.at("CONFORMANCE_PHYSICAL_DEVICE") == config.device);
-  CHECK_THROWS(apply_probe(config, {config.device, {{"LD_PRELOAD", "unexpected"}}}));
+  CHECK_THROWS(apply_device_probe(config, {config.device, {{"LD_PRELOAD", "unexpected"}}}));
 }
 
 TEST_CASE("Fire CLI validates options and preserves raw launcher arguments", "[driver]") {
@@ -201,7 +201,7 @@ TEST_CASE("timeout kills a TERM-resistant process tree within a fixed bound", "[
   for (size_t attempt = 0; attempt < 50 && alive; ++attempt) {
     alive = kill(pid, 0) == 0;
   #if defined(__linux__)
-    const auto status = read(fs::path("/proc") / std::to_string(pid) / "stat");
+    const auto status = read(fs::path("/proc") / fmt::to_string(pid) / "stat");
     const auto end = status.rfind(')');
     if (end != std::string::npos && status.substr(end + 2, 1) == "Z") alive = false;
   #endif
@@ -211,7 +211,7 @@ TEST_CASE("timeout kills a TERM-resistant process tree within a fixed bound", "[
 }
 
 TEST_CASE("device lock acquisition has a deadline", "[driver][process]") {
-  const auto device = conformance::registry_device("deadline" + std::to_string(getpid()));
+  const auto device = conformance::make_registry_device(fmt::format("deadline{}", getpid()));
   conformance::DeviceLock lock(device);
   const auto start = std::chrono::steady_clock::now();
   CHECK_THROWS(conformance::DeviceLock(device, 30ms));

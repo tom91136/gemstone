@@ -51,7 +51,10 @@ object LLVMOracle {
   private def load(name: String): Loaded = {
     val content = lines(name)
     val target  = content.collectFirst { case s"// TARGET: $value" =>
-      Target.either(value.toLowerCase).fold(message => throw IllegalArgumentException(message), value => value)
+      Target.either(value.toLowerCase(java.util.Locale.ROOT)).fold(
+        message => throw IllegalArgumentException(message),
+        value => value
+      )
     }
       .getOrElse(throw IllegalArgumentException(s"missing target in LLVM oracle fixture $name"))
     val initial =

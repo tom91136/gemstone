@@ -42,7 +42,7 @@ final class CUDACrossWorkgroupSuite extends munit.FunSuite {
           90.seconds
         )
         assertEquals(result.exit, 0, result.diagnostic)
-        assert(server.usage.executionRequests > 0, "native CUDA client did not use the shared execution transport")
+        assert(server.usage > 0, "native CUDA client did not use the shared execution transport")
       }
 
     }

@@ -92,12 +92,11 @@ object GenerateAMDGPUOracle {
     Opts.argument[String]("generated-resource-root").map(Path.of(_))
   ).mapN(Request(_, _, _)))
 
-  def main(arguments: Array[String]): Unit = command.parse(arguments.toSeq).fold(
-    help => throw IllegalArgumentException(help.toString),
-    request => generate(request.references, request.resourceRoot, request.check)
+  def main(arguments: Array[String]): Unit = CodegenCommand.run(command, arguments)(request =>
+    generate(request.references, request.resourceRoot, request.check)
   )
 
-  private[codegen] def generate(references: Path, resourceRoot: Path, check: Boolean = false): Unit = {
+  private def generate(references: Path, resourceRoot: Path, check: Boolean = false): Unit = {
     val output = resourceRoot.resolve(OraclePath)
     val root   = references.resolve("llvm/llvm/test/MC/AMDGPU")
     if (!Files.isDirectory(root)) throw IllegalArgumentException(s"missing LLVM AMDGPU tests: $root")
@@ -270,7 +269,7 @@ object GenerateAMDGPUOracle {
   }
 
   private def diagnosticCategory(message: DiagnosticMessage): String = {
-    val withoutQuoted  = Quoted.replaceAllIn(message.value.toLowerCase, "<value>")
+    val withoutQuoted  = Quoted.replaceAllIn(message.value.toLowerCase(java.util.Locale.ROOT), "<value>")
     val withoutGPUName = GPUName.replaceAllIn(withoutQuoted, "<gpu>")
     Text.normalizeWhitespace(Number.replaceAllIn(withoutGPUName, "<number>"))
   }
@@ -313,17 +312,17 @@ object GenerateAMDGPUOracle {
         s"// SOURCE: ${sourceFile.value}\n\n$rendered"
       }.mkString("\n\n")
       name ->
-        s"""|// Generated from pinned LLVM MC/AMDGPU checks. Do not edit.
-            |// TARGET: ${target.value}
-            |
-            |$body
-            |""".stripMargin
+        (GeneratedHeader.line("//", "from pinned LLVM MC/AMDGPU checks") +
+          s"""|// TARGET: ${target.value}
+              |
+              |$body
+            |""".stripMargin)
     }
 
     val manifest =
-      s"""|# Generated from pinned LLVM MC/AMDGPU checks. Do not edit.
-          |source-files=$sourceFileCount
-          |source-encoding-checks=${corpus.encodingChecks}
+      GeneratedHeader.line("#", "from pinned LLVM MC/AMDGPU checks") +
+        s"""|source-files=$sourceFileCount
+            |source-encoding-checks=${corpus.encodingChecks}
           |source-diagnostic-checks=${corpus.diagnosticChecks}
           |source-positive-cases=${corpus.positives.size.toLong}
           |source-diagnostic-cases=${corpus.diagnostics.size.toLong}
@@ -358,7 +357,7 @@ object GenerateAMDGPUOracle {
     val pairs = lines.flatMap {
       case Run(command) if command.contains("llvm-mc") && !command.contains("-disassemble") =>
         Mcpu.findFirstMatchIn(command).toVector.flatMap { targetMatch =>
-          val rawTarget = targetMatch.group(1).toLowerCase
+          val rawTarget = targetMatch.group(1).toLowerCase(java.util.Locale.ROOT)
           familyForTargetOption(rawTarget).toVector.flatMap { _ =>
             val target = OracleTarget.applyUnsafe(rawTarget)
             CheckPrefixes.findFirstMatchIn(command).map(_.group(1).split(',').toVector).getOrElse(Vector("CHECK"))
@@ -389,7 +388,8 @@ object GenerateAMDGPUOracle {
     case _                                           => None
   }
 
-  private def normalizePrefix(prefix: String): String = CheckDirective.replaceFirstIn(prefix.toUpperCase, "")
+  private def normalizePrefix(prefix: String): String =
+    CheckDirective.replaceFirstIn(prefix.toUpperCase(java.util.Locale.ROOT), "")
 
   private def referencedLine(check: String, checkIndex: Int): Option[Int] =
     LineReference.findFirstMatchIn(check).map { reference =>

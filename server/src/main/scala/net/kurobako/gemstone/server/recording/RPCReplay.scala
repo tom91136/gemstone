@@ -5,7 +5,8 @@ import net.kurobako.gemstone.rpc.ExecutionRPC
 import net.kurobako.gemstone.rpc.ExecutionProtocol.CompletionStatus
 import net.kurobako.gemstone.rpc.ExecutionRPC.Operation
 import net.kurobako.gemstone.rpc.Wire
-import net.kurobako.gemstone.server.transport.{ClientId, RPCPort, ServerControl}
+import net.kurobako.gemstone.server.transport.ServerControl
+import net.kurobako.gemstone.server.transport.Transport.*
 
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
@@ -18,8 +19,8 @@ import scala.collection.mutable
 import scala.util.Using
 
 /** API-frame replay only: neither reverse instruction execution nor a scheduler for backend data races. */
-private[gemstone] object RPCReplay {
-  final case class Endpoint(port: RPCPort, closeFn: () => Unit) extends AutoCloseable {
+object RPCReplay {
+  final case class Target(port: RPCPort, closeFn: () => Unit) extends AutoCloseable {
     override def close(): Unit = closeFn()
   }
   final case class Options(
@@ -34,7 +35,7 @@ private[gemstone] object RPCReplay {
       extraCompletionPolls: Long :| Positive0
   )
 
-  private def connect(endpoint: Endpoint, timeoutMillis: Int :| Positive): ReplayConnection = {
+  private def connect(endpoint: Target, timeoutMillis: Int :| Positive): ReplayConnection = {
     val socket = Socket()
     // Ownership transfers only after the connection and stream wrappers are established.
     try {
@@ -72,7 +73,7 @@ private[gemstone] object RPCReplay {
   )
 
   // Replay is stateful internally but exposed only as a run-to-completion operation.
-  private final class Session(options: Options, reader: RPCJournal.Reader, endpoint: Endpoint)
+  private final class Session(options: Options, reader: RPCJournal.Reader, endpoint: Target)
       extends AutoCloseable {
     private val clients     = mutable.Map.empty[RPCJournal.RecordedClientId, ClientId]
     private val connections = mutable.Map.empty[RPCJournal.RecordedConnectionId, Active]
@@ -89,21 +90,16 @@ private[gemstone] object RPCReplay {
     private def report: Report =
       Report(cursor.refineUnsafe[Positive0], requests.refineUnsafe[Positive0], polls.refineUnsafe[Positive0])
 
-    private def registerClient(): ClientId = ServerControl.register(endpoint.port, options.timeoutMillis)
-
-    private def releaseClient(client: ClientId): Unit =
-      ServerControl.release(endpoint.port, client, options.timeoutMillis)
-
     private def assignedClient(client: RPCJournal.RecordedClientId): ClientId = clients.get(client) match {
       case Some(assigned) => assigned
       case None           =>
-        val assigned = registerClient()
+        val assigned = ServerControl.register(endpoint.port, options.timeoutMillis)
         clients.update(client, assigned)
         assigned
     }
     private def identified(frame: Array[Byte], client: RPCJournal.RecordedClientId): Array[Byte] = {
       val result = frame.clone()
-      ByteBuffer.wrap(result).putLong(RPCFrames.ClientOffset, assignedClient(client).value)
+      ByteBuffer.wrap(result).putLong(ExecutionRPC.RequestClientOffset, assignedClient(client).value)
       result
     }
     private def receive(active: Active, kind: RPCJournal.Kind): Array[Byte] = {
@@ -112,7 +108,7 @@ private[gemstone] object RPCReplay {
       val fingerprint = input.readLong()
       val prefix      = java.nio.ByteBuffer.allocate(ExecutionRPC.ResponseHeaderBytes)
       prefix.putInt(magic); prefix.putLong(fingerprint)
-      val payloadBytes = if (magic == RPCFrames.ExecutionResponse) {
+      val payloadBytes = if (magic == ExecutionRPC.ResponseMagic) {
         prefix.putInt(input.readInt())
         val payload = input.readInt()
         prefix.putInt(payload)
@@ -124,11 +120,11 @@ private[gemstone] object RPCReplay {
       val frame = Array.ofDim[Byte](ExecutionRPC.ResponseHeaderBytes + size)
       Array.copy(prefix.array(), 0, frame, 0, ExecutionRPC.ResponseHeaderBytes)
       input.readFully(frame, ExecutionRPC.ResponseHeaderBytes, size)
-      RPCFrames.validate(kind, frame, options.limits.maxFrameBytes, normalized = false)
+      RPCJournal.Frames.validate(kind, frame, options.limits.maxFrameBytes, normalized = false)
       frame
     }
     private def isQuery(frame: Array[Byte]): Boolean = {
-      val operationId = RPCFrames.long(frame, ExecutionRPC.RequestOperationOffset)
+      val operationId = RPCJournal.Frames.long(frame, ExecutionRPC.RequestOperationOffset)
       val payload     = java.util.Arrays.copyOfRange(frame, ExecutionRPC.RequestHeaderBytes, frame.length)
       Wire.Protocol[Operation].decodePayload(operationId, payload, ExecutionRPC.Limits).exists { decoded =>
         decoded.value match {
@@ -140,8 +136,8 @@ private[gemstone] object RPCReplay {
     private def completion(frame: Array[Byte]): Option[CompletionStatus] =
       Option.when(
         frame.length >= ExecutionRPC.ResponseHeaderBytes &&
-          RPCFrames.magic(frame) == RPCFrames.ExecutionResponse &&
-          RPCFrames.integer(frame, ExecutionRPC.ResponseStatusOffset) == 0
+          RPCJournal.Frames.magic(frame) == ExecutionRPC.ResponseMagic &&
+          RPCJournal.Frames.integer(frame, ExecutionRPC.ResponseStatusOffset) == 0
       ) {
         val payload = java.util.Arrays.copyOfRange(frame, ExecutionRPC.ResponseHeaderBytes, frame.length)
         summon[Wire.Codec[CompletionStatus]].decode(payload, ExecutionRPC.Limits).toOption
@@ -203,7 +199,9 @@ private[gemstone] object RPCReplay {
             val connection = event.connection.getOrElse(throw IOException("RPC replay: close has no connection"))
             connections.remove(connection).foreach(_.wire.finish())
           case RPCJournal.Kind.ClientClose =>
-            clients.remove(event.client).foreach(releaseClient(_))
+            clients.remove(event.client).foreach(client =>
+              ServerControl.release(endpoint.port, client, options.timeoutMillis)
+            )
         }
         cursor += 1
       } catch { case error: Exception => failed = true; throw error }
@@ -224,7 +222,7 @@ private[gemstone] object RPCReplay {
       }
   }
 
-  private def open(options: Options, startServer: RPCJournal.Header => Endpoint): Session = {
+  private def open(options: Options, startServer: RPCJournal.Header => Target): Session = {
     val reader = RPCJournal.open(options.archive, options.limits)
     // Reader and endpoint ownership transfer in stages; each acquisition failure closes only what it owns so far.
     try {
@@ -249,6 +247,6 @@ private[gemstone] object RPCReplay {
         throw error
     }
   }
-  def run(options: Options, startServer: RPCJournal.Header => Endpoint): Report =
+  def run(options: Options, startServer: RPCJournal.Header => Target): Report =
     Using.resource(open(options, startServer))(_.run())
 }

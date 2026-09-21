@@ -1,7 +1,7 @@
-#include "support.hpp"
+#include "test_support.hpp"
 
 #define UNIFIED_API_ROCTHRUST 1
-#include "api_thrust.hpp"
+#include "backend_thrust.hpp"
 #undef UNIFIED_API_ROCTHRUST
 #include <cstddef>
 #include <cstdint>
@@ -218,8 +218,7 @@ inline void require_almost_equal(const std::vector<Number> &actual, const std::v
     REQUIRE((actual.size() == expected.size()));
   }
   for (size_t index = 0; index < expected.size(); ++index) {
-    INFO(where + "[" + std::to_string(index) + "] mismatch (actual=" + std::to_string(actual[index])
-         + ", expected=" + std::to_string(expected[index]) + ")");
+    INFO(fmt::format("{}[{}] mismatch (actual={}, expected={})", where, index, actual[index], expected[index]));
     REQUIRE((std::fabs(actual[index] - expected[index]) <= tolerance));
   }
 }
@@ -277,13 +276,11 @@ inline void require_complex_equal(const std::vector<thrust::complex<Number>> &ac
   }
   for (size_t index = 0; index < expected.size(); ++index) {
     {
-      INFO(where + ".real[" + std::to_string(index) + "] mismatch (actual=" + std::to_string(actual[index].real())
-           + ", expected=" + std::to_string(expected[index].real()) + ")");
+      INFO(fmt::format("{}.real[{}] mismatch (actual={}, expected={})", where, index, actual[index].real(), expected[index].real()));
       REQUIRE((std::fabs(actual[index].real() - expected[index].real()) <= tolerance));
     }
     {
-      INFO(where + ".imag[" + std::to_string(index) + "] mismatch (actual=" + std::to_string(actual[index].imag())
-           + ", expected=" + std::to_string(expected[index].imag()) + ")");
+      INFO(fmt::format("{}.imag[{}] mismatch (actual={}, expected={})", where, index, actual[index].imag(), expected[index].imag()));
       REQUIRE((std::fabs(actual[index].imag() - expected[index].imag()) <= tolerance));
     }
   }
@@ -378,11 +375,11 @@ template <class Number> inline void check_complex_std_interop() {
   const std::vector<thrust::complex<Number>> actual(value.begin(), value.end());
   for (size_t index = 0; index < expected.size(); ++index) {
     {
-      INFO("complex-std-interop.real[" + std::to_string(index) + "] mismatch");
+      INFO(fmt::format("complex-std-interop.real[{}] mismatch", index));
       REQUIRE((actual[index].real() == expected[index].real()));
     }
     {
-      INFO("complex-std-interop.imag[" + std::to_string(index) + "] mismatch");
+      INFO(fmt::format("complex-std-interop.imag[{}] mismatch", index));
       REQUIRE((actual[index].imag() == expected[index].imag()));
     }
   }

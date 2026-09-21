@@ -401,7 +401,8 @@ object GeneratePTXISA {
       case s"-$rest" => rest
       case _         => value
     }
-    val name = unsigned.takeWhile(character => character.isLetterOrDigit || character == '_').toLowerCase
+    val name =
+      unsigned.takeWhile(character => character.isLetterOrDigit || character == '_').toLowerCase(java.util.Locale.ROOT)
     if (value.startsWith("[")) "Address" -> true
     else if (value.startsWith("{")) "Vector" -> true
     else if (Set("d", "dst", "p", "q", "r", "result").contains(name)) "Register" -> true
@@ -599,9 +600,11 @@ object GeneratePTXISA {
           |    ${renderMetadata(shape)}
           |  )""".stripMargin
     }
-    s"""|// Generated PTX instruction model from the pinned NVIDIA ISA ${version.source} specification. Do not edit by hand.
-        |// scalafix:off GemstoneNoAssume; values were validated by the generator
-        |package net.kurobako.gemstone.isa.ptx.${packageVersion.value}
+    GeneratedHeader.scala(
+      s"PTX instruction model from the pinned NVIDIA ISA ${version.source} specification",
+      assume = true
+    ) +
+      s"""|package net.kurobako.gemstone.isa.ptx.${packageVersion.value}
         |
         |import Program.*
         |import ISA.*
@@ -614,7 +617,7 @@ object GeneratePTXISA {
         |import io.github.iltotore.iron.*
         |import io.github.iltotore.iron.constraint.all.*
         |
-        |enum Instruction(val definition: Instruction.Definition, operandValues: Operand*) {
+        |${GeneratedHeader.annotation()}enum Instruction(val definition: Instruction.Definition, operandValues: Operand*) {
         |${cases.mkString("\n")}
         |
         |  final val operands: Vec[Operand] = operandValues.toVec
@@ -633,7 +636,7 @@ object GeneratePTXISA {
         |
         |}
         |
-        |object Instruction {
+        |${GeneratedHeader.annotation()}object Instruction {
         |  enum DecodeError {
         |    case UnknownOpcode(opcode: String)
         |    case InvalidOperandCount(opcode: String, expected: Vec[Int], actual: Int)
@@ -658,8 +661,7 @@ object GeneratePTXISA {
         |
         |  val definitions: Vec[Definition] = Definition.values.toVec
         |
-        |  private def normalizeOpcode(value: String): String =
-        |    value.map(character => if (character >= 'A' && character <= 'Z') (character + ('a' - 'A')).toChar else character)
+        |  private def normalizeOpcode(value: String): String = value.toLowerCase(java.util.Locale.ROOT)
         |
         |  private lazy val DefinitionsByMnemonic: Map[String, Vec[Definition]] =
         |    definitions.groupMap(_.opcode.value.takeWhile(_ != '.'))(value => value)
@@ -776,7 +778,7 @@ object GeneratePTXISA {
   }
 
   private def sectionOperations(section: Section): Vector[String] = {
-    val dotted = TitleOpcode.findAllIn(section.title).map(_.toLowerCase).toVector
+    val dotted = TitleOpcode.findAllIn(section.title).map(_.toLowerCase(java.util.Locale.ROOT)).toVector
       .filter(value => section.mnemonics.contains(value.takeWhile(_ != '.')))
     if (dotted.nonEmpty) dotted.distinct else section.mnemonics
   }
@@ -1009,7 +1011,7 @@ object GeneratePTXISA {
   private def sourceFieldName(source: String): String = {
     val value = Text.stripLeadingSignGroup(source.trim)
     if (value.startsWith("[")) {
-      val normalized = value.toLowerCase
+      val normalized = value.toLowerCase(java.util.Locale.ROOT)
       if (normalized.contains("dst")) "destinationAddress"
       else if (normalized.contains("src")) "sourceAddress"
       else if (normalized.contains("mbar") || normalized.contains("bar")) "barrierAddress"
@@ -1112,8 +1114,9 @@ object GeneratePTXISA {
         |
         |import net.kurobako.gemstone.Vec
         |
-        |// Generated from examples in the pinned NVIDIA PTX ISA ${version.source} specification. Do not edit.
-        |final class DocumentationSuite extends munit.FunSuite {
+        |${GeneratedHeader.scala(
+         s"from examples in the pinned NVIDIA PTX ISA ${version.source} specification"
+       )}${GeneratedHeader.annotation()}final class DocumentationSuite extends munit.FunSuite {
         |  private val examples: Vec[(String, String)] = Vec(
         |$values
         |  )
@@ -1193,7 +1196,10 @@ object GeneratePTXISA {
 
   private def stripComment(value: String): String            = Text.stripLineComment(value)
   private def extractMnemonic(value: String): Option[String] =
-    Mnemonic.findFirstMatchIn(Predication.replaceFirstIn(stripComment(value), "")).map(_.group(1).toLowerCase)
+    Mnemonic.findFirstMatchIn(Predication.replaceFirstIn(
+      stripComment(value),
+      ""
+    )).map(_.group(1).toLowerCase(java.util.Locale.ROOT))
   private def cleanHeading(value: String): String = Text.normalizeWhitespace(value.replace("\uf0c1", ""))
 
   private def parseSpecificationVersion(value: String): SpecificationVersion =

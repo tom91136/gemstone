@@ -78,8 +78,51 @@ set(artifact_scripts
   "${CMAKE_CURRENT_LIST_DIR}/Assemble.cmake"
   "${CMAKE_CURRENT_LIST_DIR}/Verify.cmake")
 
-set_property(GLOBAL PROPERTY JOB_POOLS container_build=1)
+# Container steps run concurrently with equal CPU shares, so a lone artifact
+# uses the whole machine while several share it (elastic scheduling). Bound the
+# value by memory, not cores: each toolchain build can need several GiB.
+set(CONFORMANCE_ARTIFACT_PARALLELISM 1 CACHE STRING
+  "Number of artifact container builds to run concurrently")
+set_property(GLOBAL PROPERTY JOB_POOLS "container_build=${CONFORMANCE_ARTIFACT_PARALLELISM}")
 set(artifact_outputs)
+
+# Shared, toolchain-independent source cache for every fetched dependency.
+set(CONFORMANCE_DEPENDENCY_DIRECTORY "${CMAKE_BINARY_DIR}/deps" CACHE PATH
+  "Shared source cache for conformance dependencies")
+option(CONFORMANCE_OFFLINE "Require cached dependencies and disable network fetches" OFF)
+# Persistent per-artifact build trees; empty disables reuse.
+set(CONFORMANCE_WORK_DIRECTORY "${CMAKE_BINARY_DIR}/work" CACHE PATH
+  "Persistent per-artifact build directory")
+option(CONFORMANCE_CLEAN_WORK "Discard persistent artifact build trees first" OFF)
+
+include("${CONFORMANCE_SOURCE_DIRECTORY}/cmake/DependencyCache.cmake")
+include("${CONFORMANCE_SOURCE_DIRECTORY}/cmake/Dependencies.cmake")
+include("${CONFORMANCE_SOURCE_DIRECTORY}/cmake/ContainerBuild.cmake")
+
+set(conformance_dependency_stamp "${CONFORMANCE_DEPENDENCY_DIRECTORY}/.conformance-populated")
+if(CONFORMANCE_OFFLINE)
+  conformance_dependency_cache_ready("${CONFORMANCE_DEPENDENCY_SOURCES}" "${CONFORMANCE_DEPENDENCY_DIRECTORY}"
+    conformance_dependencies_ready)
+  if(NOT conformance_dependencies_ready)
+    message(FATAL_ERROR
+      "CONFORMANCE_OFFLINE is set but the dependency cache is incomplete: ${CONFORMANCE_DEPENDENCY_DIRECTORY}")
+  endif()
+else()
+  add_custom_command(
+    OUTPUT "${conformance_dependency_stamp}"
+    COMMAND "${CMAKE_COMMAND}" -E make_directory "${CONFORMANCE_DEPENDENCY_DIRECTORY}"
+    COMMAND "${CMAKE_COMMAND}" "-DCONFORMANCE_DEPENDENCY_CACHE=${CONFORMANCE_DEPENDENCY_DIRECTORY}"
+      -P "${CONFORMANCE_SOURCE_DIRECTORY}/cmake/PopulateDependencies.cmake"
+    COMMAND "${CMAKE_COMMAND}" -E touch "${conformance_dependency_stamp}"
+    DEPENDS "${CONFORMANCE_SOURCE_DIRECTORY}/cmake/Dependencies.cmake"
+      "${CONFORMANCE_SOURCE_DIRECTORY}/cmake/PopulateDependencies.cmake"
+    COMMENT "Populating conformance dependency cache"
+    VERBATIM)
+  add_custom_target(conformance-dependencies DEPENDS "${conformance_dependency_stamp}")
+endif()
+if(CONFORMANCE_CLEAN_WORK AND EXISTS "${CONFORMANCE_WORK_DIRECTORY}")
+  file(REMOVE_RECURSE "${CONFORMANCE_WORK_DIRECTORY}")
+endif()
 
 string(SHA256 toolchain_namespace "${CONFORMANCE_SOURCE_DIRECTORY}")
 string(SUBSTRING "${toolchain_namespace}" 0 12 toolchain_namespace)
@@ -87,9 +130,9 @@ string(SUBSTRING "${toolchain_namespace}" 0 12 toolchain_namespace)
 execute_process(COMMAND id -u OUTPUT_VARIABLE container_uid OUTPUT_STRIP_TRAILING_WHITESPACE)
 execute_process(COMMAND id -g OUTPUT_VARIABLE container_gid OUTPUT_STRIP_TRAILING_WHITESPACE)
 if(CONTAINER_EXECUTABLE MATCHES "(^|/)podman$")
-  set(container_identity --userns keep-id --user "${container_uid}:${container_gid}")
+  set(container_identity "--userns keep-id --user ${container_uid}:${container_gid}")
 else()
-  set(container_identity --user "${container_uid}:${container_gid}")
+  set(container_identity "--user ${container_uid}:${container_gid}")
 endif()
 
 function(toolchain backend architecture image_output dependency_output support_output)
@@ -157,79 +200,65 @@ function(artifact_arguments backend architecture output_mode result)
   set(${result} "${arguments}" PARENT_SCOPE)
 endfunction()
 
-function(add_support_artifact backend architecture)
-  toolchain("${backend}" "${architecture}" image toolchain_stamp support)
-  artifact_arguments("${backend}" "${architecture}" both arguments)
-  set(support_directory "${CONFORMANCE_ARTIFACT_DIRECTORY}/${backend}/${support}")
-  set(overlay_directory "${CONFORMANCE_ARTIFACT_DIRECTORY}/${backend}/${architecture}")
-  set(executable "${support_directory}/support.stamp")
-  set(metadata "${overlay_directory}/artifact.toml")
-  add_custom_command(
-    OUTPUT "${executable}" "${metadata}"
-    COMMAND "${CMAKE_COMMAND}" -E make_directory "${CONFORMANCE_ARTIFACT_DIRECTORY}"
-    COMMAND "${CONTAINER_EXECUTABLE}" run --rm --security-opt label=disable ${container_identity}
-      --mount "type=bind,source=${CONFORMANCE_SOURCE_DIRECTORY},target=/source/conformance,readonly"
-      --mount "type=bind,source=${CONFORMANCE_ARTIFACT_DIRECTORY},target=/output"
-      "${image}" cmake ${arguments}
-      -P /source/conformance/artifacts/Assemble.cmake
-    DEPENDS ${artifact_inputs} ${artifact_scripts} "${toolchain_stamp}"
-    COMMENT "Building ${backend} ${architecture} conformance support and overlay"
-    JOB_POOL container_build
-    VERBATIM
-  )
-  string(REPLACE "." "-" support_target "${support}")
-  add_custom_target("${backend}-${support_target}" DEPENDS "${executable}")
-  add_custom_target("${backend}-${architecture}" DEPENDS "${metadata}")
-  list(APPEND artifact_outputs "${executable}" "${metadata}")
-  set(artifact_outputs "${artifact_outputs}" PARENT_SCOPE)
-endfunction()
-
-function(add_architecture_artifact backend architecture)
-  set(name "${backend}-${architecture}")
-  set(directory "${CONFORMANCE_ARTIFACT_DIRECTORY}/${backend}/${architecture}")
+function(add_artifact backend architecture output)
+  if(NOT output MATCHES "^(both|overlay|artifact)$")
+    message(FATAL_ERROR "Invalid artifact output mode: ${output}")
+  endif()
+  set(name "${backend}")
+  if(architecture)
+    set(name "${backend}-${architecture}")
+  endif()
+  set(directory "${CONFORMANCE_ARTIFACT_DIRECTORY}/${name}")
   set(metadata "${directory}/artifact.toml")
   toolchain("${backend}" "${architecture}" image toolchain_stamp support)
-  artifact_arguments("${backend}" "${architecture}" overlay arguments)
-  set(support_executable "${CONFORMANCE_ARTIFACT_DIRECTORY}/${backend}/${support}/support.stamp")
+  artifact_arguments("${backend}" "${architecture}" "${output}" arguments)
+
+  list(APPEND arguments
+    "-DCONFORMANCE_DEPENDENCY_CACHE=/conformance-deps"
+    "-DCONFORMANCE_OFFLINE=ON"
+    "-DCONFORMANCE_WORK_DIRECTORY=/work")
+  set(work_directory "${CONFORMANCE_WORK_DIRECTORY}/${name}")
+
+  set(dependencies ${artifact_inputs} ${artifact_scripts} "${toolchain_stamp}")
+  if(NOT CONFORMANCE_OFFLINE)
+    list(APPEND dependencies "${conformance_dependency_stamp}")
+  endif()
+  set(outputs "${metadata}")
+  if(architecture)
+    set(support_executable "${CONFORMANCE_ARTIFACT_DIRECTORY}/${backend}/${support}/support.stamp")
+    if(output STREQUAL "both")
+      list(APPEND outputs "${support_executable}")
+    else()
+      list(APPEND dependencies "${support_executable}")
+    endif()
+  endif()
+
+  conformance_container_command(container_command
+    EXECUTABLE "${CONTAINER_EXECUTABLE}"
+    IMAGE "${image}"
+    SOURCE "${CONFORMANCE_SOURCE_DIRECTORY}"
+    ARTIFACTS "${CONFORMANCE_ARTIFACT_DIRECTORY}"
+    DEPENDENCIES "${CONFORMANCE_DEPENDENCY_DIRECTORY}"
+    WORK "${work_directory}"
+    NETWORK none
+    CPU_SHARES 1024
+    IDENTITY "${container_identity}"
+    COMMAND cmake ${arguments} -P /source/conformance/artifacts/Assemble.cmake)
 
   add_custom_command(
-    OUTPUT "${metadata}"
-    COMMAND "${CMAKE_COMMAND}" -E make_directory "${CONFORMANCE_ARTIFACT_DIRECTORY}"
-    COMMAND "${CONTAINER_EXECUTABLE}" run --rm --security-opt label=disable ${container_identity}
-      --mount "type=bind,source=${CONFORMANCE_SOURCE_DIRECTORY},target=/source/conformance,readonly"
-      --mount "type=bind,source=${CONFORMANCE_ARTIFACT_DIRECTORY},target=/output"
-      "${image}" cmake ${arguments}
-      -P /source/conformance/artifacts/Assemble.cmake
-    DEPENDS ${artifact_inputs} ${artifact_scripts} "${toolchain_stamp}" "${support_executable}"
-    COMMENT "Building ${backend} ${architecture} conformance overlay"
+    OUTPUT ${outputs}
+    COMMAND "${CMAKE_COMMAND}" -E make_directory "${CONFORMANCE_ARTIFACT_DIRECTORY}" "${work_directory}"
+    COMMAND ${container_command}
+    DEPENDS ${dependencies}
+    COMMENT "Building ${name} conformance artifact"
     JOB_POOL container_build
-    VERBATIM
-  )
+    VERBATIM)
   add_custom_target("${name}" DEPENDS "${metadata}")
-  list(APPEND artifact_outputs "${metadata}")
-  set(artifact_outputs "${artifact_outputs}" PARENT_SCOPE)
-endfunction()
-
-function(add_artifact backend)
-  set(directory "${CONFORMANCE_ARTIFACT_DIRECTORY}/${backend}")
-  set(metadata "${directory}/artifact.toml")
-  toolchain("${backend}" "" image toolchain_stamp unused_support)
-  artifact_arguments("${backend}" "" artifact arguments)
-  add_custom_command(
-    OUTPUT "${metadata}"
-    COMMAND "${CMAKE_COMMAND}" -E make_directory "${CONFORMANCE_ARTIFACT_DIRECTORY}"
-    COMMAND "${CONTAINER_EXECUTABLE}" run --rm --security-opt label=disable ${container_identity}
-      --mount "type=bind,source=${CONFORMANCE_SOURCE_DIRECTORY},target=/source/conformance,readonly"
-      --mount "type=bind,source=${CONFORMANCE_ARTIFACT_DIRECTORY},target=/output"
-      "${image}" cmake ${arguments}
-      -P /source/conformance/artifacts/Assemble.cmake
-    DEPENDS ${artifact_inputs} ${artifact_scripts} "${toolchain_stamp}"
-    COMMENT "Building ${backend} conformance artifact"
-    JOB_POOL container_build
-    VERBATIM
-  )
-  add_custom_target("${backend}" DEPENDS "${metadata}")
-  list(APPEND artifact_outputs "${metadata}")
+  if(architecture AND output STREQUAL "both")
+    string(REPLACE "." "-" support_target "${support}")
+    add_custom_target("${backend}-${support_target}" DEPENDS "${support_executable}")
+  endif()
+  list(APPEND artifact_outputs ${outputs})
   set(artifact_outputs "${artifact_outputs}" PARENT_SCOPE)
 endfunction()
 
@@ -242,21 +271,22 @@ foreach(backend IN LISTS CONFORMANCE_BACKENDS)
       endif()
       cuda_toolchain("${architecture}" unused_image unused_package support)
       if(NOT support IN_LIST cuda_supports)
-        add_support_artifact("${backend}" "${architecture}")
+        add_artifact("${backend}" "${architecture}" both)
         list(APPEND cuda_supports "${support}")
       else()
-        add_architecture_artifact("${backend}" "${architecture}")
+        add_artifact("${backend}" "${architecture}" overlay)
       endif()
     endforeach()
   elseif(backend STREQUAL "openacc")
     list(GET CUDA_ARCHITECTURES 0 support_architecture)
-    add_support_artifact("${backend}" "${support_architecture}")
     foreach(architecture IN LISTS CUDA_ARCHITECTURES)
       if(NOT architecture MATCHES "^sm_[0-9]+$")
         message(FATAL_ERROR "Invalid CUDA architecture: ${architecture}")
       endif()
-      if(NOT "${architecture}" STREQUAL "${support_architecture}")
-        add_architecture_artifact("${backend}" "${architecture}")
+      if("${architecture}" STREQUAL "${support_architecture}")
+        add_artifact("${backend}" "${architecture}" both)
+      else()
+        add_artifact("${backend}" "${architecture}" overlay)
       endif()
     endforeach()
   elseif(backend STREQUAL "hip" OR backend STREQUAL "hsa")
@@ -267,17 +297,18 @@ foreach(backend IN LISTS CONFORMANCE_BACKENDS)
       # free of rocBLAS cases.
       set(support_architecture gfx908)
     endif()
-    add_support_artifact("${backend}" "${support_architecture}")
     foreach(architecture IN LISTS AMDGPU_ARCHITECTURES)
       if(NOT architecture MATCHES "^gfx[0-9a-f]+$")
         message(FATAL_ERROR "Invalid AMDGPU architecture: ${architecture}")
       endif()
-      if(NOT "${architecture}" STREQUAL "${support_architecture}")
-        add_architecture_artifact("${backend}" "${architecture}")
+      if("${architecture}" STREQUAL "${support_architecture}")
+        add_artifact("${backend}" "${architecture}" both)
+      else()
+        add_artifact("${backend}" "${architecture}" overlay)
       endif()
     endforeach()
   else()
-    add_artifact("${backend}")
+    add_artifact("${backend}" "" artifact)
   endif()
 endforeach()
 

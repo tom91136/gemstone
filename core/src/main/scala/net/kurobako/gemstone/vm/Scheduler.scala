@@ -10,6 +10,9 @@ trait Scheduler {
       taskCount: Long :| Positive0
   )(task: Long :| Positive0 => Either[Fault, Unit]): Either[Fault, Unit]
 
+  /** Runs work that is not part of a parallel task iteration; defaults to the calling thread. */
+  def schedule(runnable: Runnable): Unit = runnable.run()
+
   final def forEach(
       taskCount: Long :| Positive0,
       parallel: Boolean

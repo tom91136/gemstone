@@ -1,7 +1,8 @@
 package net.kurobako.gemstone.server
 
 import net.kurobako.gemstone.rpc.ExecutionRPC
-import net.kurobako.gemstone.server.transport.{ClientId, ExecutionRPCProtocol}
+import net.kurobako.gemstone.server.transport.ExecutionRPCProtocol
+import net.kurobako.gemstone.server.transport.Transport.*
 
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
@@ -40,7 +41,7 @@ final class RPCInputStreamSuite extends munit.FunSuite {
       val body    = Array.tabulate[Byte](17003)(index => (index * 17 + 3).toByte)
       val frame   = prefix ++ body
       val data    = frame ++ frame
-      val fixture = if socket then {
+      val fixture = if (socket) {
         val listener = ServerSocket(0, 1, InetAddress.getLoopbackAddress)
         val sender   = Socket(InetAddress.getLoopbackAddress, listener.getLocalPort)
         val receiver = listener.accept()
@@ -73,7 +74,7 @@ final class RPCInputStreamSuite extends munit.FunSuite {
         val input = DataInputStream(replay)
         for (_ <- 0 until 2) {
           assertEquals(GemstoneRPCServer.peekClientId(input, replay), client)
-          val actual = if fully then {
+          val actual = if (fully) {
             val bytes = Array.ofDim[Byte](frame.length)
             input.readFully(bytes)
             bytes

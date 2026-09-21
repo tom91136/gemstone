@@ -9,7 +9,7 @@ import scala.util.Using
 
 final class AllocationAddressSuite extends munit.FunSuite {
   test("allocation address aliases are immutable and non-overlapping") {
-    Using.resource(ExecutionService(BackendCatalog.from(), _.run())) { service =>
+    Using.resource(ExecutionService(List.empty)) { service =>
       val first  = service.registerAllocation(16L, AllocationKind.Shared).toOption.get
       val second = service.registerAllocation(16L, AllocationKind.Shared).toOption.get
 

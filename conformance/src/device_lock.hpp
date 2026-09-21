@@ -10,6 +10,8 @@
 #include <stdexcept>
 #include <thread>
 
+#include <fmt/format.h>
+
 #include "conformance/device.hpp"
 
 #if defined(_WIN32)
@@ -49,7 +51,7 @@ public:
     }
 #else
     const int file = ::open(path.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0644);
-    if (file < 0) throw std::runtime_error("cannot open device lock " + path.string() + " (errno=" + std::to_string(errno) + ")");
+    if (file < 0) throw std::runtime_error(fmt::format("cannot open device lock {} (errno={})", path.string(), errno));
     while (::flock(file, LOCK_EX | LOCK_NB) != 0) {
       const int error = errno;
       if ((error != EWOULDBLOCK && error != EAGAIN && error != EINTR) || std::chrono::steady_clock::now() >= deadline) {

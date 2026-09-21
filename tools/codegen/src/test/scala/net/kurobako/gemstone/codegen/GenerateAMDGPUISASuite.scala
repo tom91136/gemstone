@@ -12,43 +12,26 @@ final class GenerateAMDGPUISASuite extends munit.FunSuite {
     }
   }
 
-  test("metadata catalog round-trips records and counts") {
-    val operands = Vector(
-      AMDGPUMetadataCatalogFormat.Operand(
-        field = Some("VDST"),
-        kind = "vector",
-        sizeBits = 32,
-        input = false,
-        output = true,
-        implicitOperand = false
-      ),
-      AMDGPUMetadataCatalogFormat.Operand(
-        field = None,
-        kind = "scalar",
-        sizeBits = 64,
-        input = true,
-        output = false,
-        implicitOperand = true
-      )
+  test("metadata catalog JSON interns strings and schemas with stable offsets") {
+    import GenerateAMDGPUISA.{Instruction, Operand}
+    val operands = Vector(Operand("vdst", "VGPR", input = false, output = true, implicitOperand = false))
+    val metadata = Vector(
+      Vector(Instruction("v_add_f32", "GFX6", "gfx6", "VOP2", 17, operands, "MesaACO")),
+      Vector(Instruction("v_add_f32", "GFX11", "gfx11", "VOP2", 17, operands, "AMDXML"))
     )
-    val first = AMDGPUMetadataCatalogFormat.Encoding(
-      family = "GFX9",
-      target = "gfx9",
-      format = "VOP2",
-      opcode = 17,
-      operands = operands,
-      functionalGroup = Some("Vector ALU"),
-      source = "AMDXML"
+    val json    = ujson.read(GenerateAMDGPUISA.renderMetadataJson(metadata))
+    val strings = json("strings").arr.map(_.str).toVector
+    assertEquals(strings, strings.sorted)
+    assertEquals(strings.toSet, Set("AMDXML", "GFX11", "GFX6", "MesaACO", "VOP2", "VGPR", "gfx11", "gfx6", "vdst"))
+    val schemas = json("schemas").arr.map(_.arr.map { operand =>
+      val values = operand.arr
+      (values(0).num.toInt, values(1).num.toInt, values(2).bool)
+    }.toVector).toVector
+    assertEquals(schemas, Vector(Vector((strings.indexOf("vdst"), strings.indexOf("VGPR"), false))))
+    assertEquals(json("encodings").arr.size, 2)
+    assertEquals(
+      json("metadata").arr.map(entry => entry.arr.map(_.num.toInt).toVector).toVector,
+      Vector(Vector(0, 1), Vector(1, 1))
     )
-    val second  = first.copy(family = "GFX10", target = "rdna1", source = "MesaACO")
-    val catalog = AMDGPUMetadataCatalogFormat.Catalog(
-      Vector(Vector(first, second), Vector(second.copy(opcode = 18, operands = operands)))
-    )
-
-    val encoded = AMDGPUMetadataCatalogFormat.encode(catalog)
-
-    assertEquals(encoded.metadataCount, 2)
-    assertEquals(encoded.encodingCount, 3)
-    assertEquals(AMDGPUMetadataCatalogFormat.decode(encoded.payload), catalog)
   }
 }

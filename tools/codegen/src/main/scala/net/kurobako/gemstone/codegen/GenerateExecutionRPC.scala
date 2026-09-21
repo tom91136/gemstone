@@ -21,24 +21,21 @@ object GenerateExecutionRPC {
     Opts.argument[String]("output-directory").map(Path.of(_))
   ).mapN(Request(_, _)))
 
-  def main(arguments: Array[String]): Unit = command.parse(arguments.toSeq).fold(
-    help => throw IllegalArgumentException(help.toString),
-    request => {
-      val protocol = ExecutionRPC.Schema
-      val files    = Vector(
-        request.output.resolve("gemstone_execution_rpc.hpp") -> header(protocol),
-        request.output.resolve("gemstone_execution_rpc.cpp") -> source(protocol)
-      )
-      files.foreach { case (path, content) => GeneratedFiles.sync(path, content, request.check) }
-      GeneratedFiles.requireOnly(request.output, files.map(_._1).toSet, _ => true)
-      Console.out.println(s"${if request.check then "verified" else "generated"} ${files.size} execution RPC files")
-    }
-  )
+  def main(arguments: Array[String]): Unit = CodegenCommand.run(command, arguments) { request =>
+    val protocol = ExecutionRPC.Schema
+    val files    = Vector(
+      request.output.resolve("gemstone_execution_rpc.hpp") -> header(protocol),
+      request.output.resolve("gemstone_execution_rpc.cpp") -> source(protocol)
+    )
+    files.foreach { case (path, content) => GeneratedFiles.sync(path, content, request.check) }
+    GeneratedFiles.requireOnly(request.output, files.map(_._1).toSet, _ => true)
+    Console.out.println(s"${if (request.check) "verified" else "generated"} ${files.size} execution RPC files")
+  }
 
   private def hex(value: Long): String          = f"0x$value%016xULL"
   private def identifier(value: String): String = {
-    val result = value.map(character => if character.isLetterOrDigit || character == '_' then character else '_')
-    if result.headOption.exists(_.isDigit) then s"_$result" else result
+    val result = value.map(character => if (character.isLetterOrDigit || character == '_') character else '_')
+    if (result.headOption.exists(_.isDigit)) s"_$result" else result
   }
   private def constraintName(constraint: Wire.Constraint): String = constraint match {
     case Wire.Constraint.Positive                       => "Positive"
@@ -148,7 +145,7 @@ object GenerateExecutionRPC {
   }
 
   private def fields(value: Vector[Field], model: Model): String =
-    if value.isEmpty then ""
+    if (value.isEmpty) ""
     else value.map(field => s"  ${model.cppType(field.shape)} ${identifier(field.name)}{};").mkString("\n") + "\n"
 
   private def definition(named: Named, model: Model): String = named.shape match {
@@ -194,8 +191,8 @@ object GenerateExecutionRPC {
         )
       case _ => Vector.empty
     }.mkString("\n")
-    s"""/* Generated from ExecutionRPC.Operation. Do not edit. */
-       |#ifndef GEMSTONE_EXECUTION_RPC_HPP
+    GeneratedHeader.cpp("from ExecutionRPC.Operation") +
+      s"""|#ifndef GEMSTONE_EXECUTION_RPC_HPP
        |#define GEMSTONE_EXECUTION_RPC_HPP
        |
        |#include <stddef.h>
@@ -352,9 +349,9 @@ object GenerateExecutionRPC {
       val request   = identifier(operation.request.name)
       val reply     = model.cppType(operation.reply)
       val writes    = writeFields("request", requestFields, model)
-      val parameter = if requestFields.isEmpty then s"const $request &" else s"const $request &request"
-      val capture   = if requestFields.isEmpty then "" else "&"
-      val writer    = if requestFields.isEmpty then "Writer &" else "Writer &writer"
+      val parameter = if (requestFields.isEmpty) s"const $request &" else s"const $request &request"
+      val capture   = if (requestFields.isEmpty) "" else "&"
+      val writer    = if (requestFields.isEmpty) "Writer &" else "Writer &writer"
       s"""Result<$reply> Client::call($parameter) {
          |  return implementation_->call<$reply>(operation::$request, [$capture]($writer) { $writes });
          |}""".stripMargin
@@ -365,8 +362,8 @@ object GenerateExecutionRPC {
     val model  = Model(protocol)
     val codecs = model.named.map(codec(_, model)).mkString("\n\n")
     val calls  = protocol.operations.map(call(_, model)).mkString("\n\n")
-    s"""/* Generated from ExecutionRPC.Operation. Do not edit. */
-       |#define _POSIX_C_SOURCE 200112L
+    GeneratedHeader.cpp("from ExecutionRPC.Operation") +
+      s"""|#define _POSIX_C_SOURCE 200112L
        |#include "gemstone_execution_rpc.hpp"
        |#include "process_identity.hpp"
        |

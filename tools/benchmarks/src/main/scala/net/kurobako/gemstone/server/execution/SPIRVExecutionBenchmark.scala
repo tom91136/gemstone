@@ -71,7 +71,7 @@ object SPIRVExecutionBenchmark {
     ).fold(error => throw IllegalArgumentException(error), value => value)
 
     Using.resources(
-      InterpreterScheduler(parsed.parallelism, minGroups = 1L, minWorkItems = 1L),
+      WorkerPool(parsed.parallelism, minGroups = 1L, minWorkItems = 1L),
       PlatformMetrics.startRecording(parsed.recording)
     ) { (scheduler, _) =>
       val machine         = VirtualMachine(Validation.Environment.OpenCLCompute, Observer.discard, scheduler)

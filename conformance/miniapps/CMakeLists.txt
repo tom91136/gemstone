@@ -53,8 +53,7 @@ function(conformance_register_miniapp app)
     return()
   endif()
   set(source_variable "miniapp_${app}_source")
-  conformance_fetch_url("conformance_${app}" "${miniapp_${app}_url}"
-    "${miniapp_${app}_sha256}" "${source_variable}")
+  conformance_fetch_url("conformance_${app}" "${source_variable}")
   foreach(model IN LISTS selected_models)
     conformance_add_miniapp("${app}" "${model}")
   endforeach()
@@ -71,9 +70,7 @@ endfunction()
 function(conformance_fetch_kokkos output)
   get_property(source GLOBAL PROPERTY CONFORMANCE_KOKKOS_SOURCE)
   if(NOT source)
-    conformance_fetch_url(conformance_kokkos
-      https://codeload.github.com/kokkos/kokkos/tar.gz/62d2b6c879b74b6ae7bd06eb3e5e80139c4708e6
-      2738406dba3a8edd57c9da845009807d9c5f6ce64d6c098d479470a39bbb3ff9 source)
+    conformance_fetch_url(conformance_kokkos source)
     set_property(GLOBAL PROPERTY CONFORMANCE_KOKKOS_SOURCE "${source}")
     install(FILES "${source}/LICENSE"
       DESTINATION licenses RENAME Kokkos.txt COMPONENT support)
@@ -276,6 +273,26 @@ function(configure_miniapp app model stage target_output)
   # BabelStream, otherwise force the complete target back to C++14.
   target_compile_features("${CONFORMANCE_MINIAPP_TARGET}" PRIVATE cxx_std_17)
   target_link_libraries("${CONFORMANCE_MINIAPP_TARGET}" PRIVATE Catch2::Catch2WithMain conformance_device)
+  # The miniapp sources and Kokkos are vendored third-party code; silence their
+  # diagnostics so only project code is checked.
+  target_compile_options("${CONFORMANCE_MINIAPP_TARGET}" PRIVATE
+    "$<$<COMPILE_LANG_AND_ID:CXX,GNU>:-Wno-unused-result;-Wno-unused-variable;-Wno-maybe-uninitialized>"
+    "$<$<COMPILE_LANG_AND_ID:CXX,Clang,AppleClang,IntelLLVM>:-Wno-pass-failed>"
+    "$<$<COMPILE_LANG_AND_ID:CXX,Clang,AppleClang,IntelLLVM>:-Wno-vla-cxx-extension>"
+    "$<$<COMPILE_LANG_AND_ID:CXX,Clang,AppleClang,IntelLLVM>:-Wno-inconsistent-missing-override>"
+    "$<$<COMPILE_LANG_AND_ID:CXX,Clang,AppleClang,IntelLLVM>:-Wno-unused-result>"
+    "$<$<COMPILE_LANG_AND_ID:CXX,Clang,AppleClang,IntelLLVM>:-Wno-unused-variable>"
+    "$<$<COMPILE_LANG_AND_ID:CXX,Clang,AppleClang>:-Wno-nan-infinity-disabled>"
+    "$<$<COMPILE_LANG_AND_ID:CXX,Clang,AppleClang>:-Wno-sometimes-uninitialized>"
+    "$<$<COMPILE_LANG_AND_ID:CXX,IntelLLVM>:-Wno-deprecated-declarations>"
+    "$<$<COMPILE_LANG_AND_ID:CXX,IntelLLVM>:-Wno-deprecated-attributes>"
+    "$<$<COMPILE_LANG_AND_ID:CXX,IntelLLVM>:-Wno-sycl-strict>"
+    "$<$<COMPILE_LANG_AND_ID:CXX,IntelLLVM>:-Wno-user-defined-warnings>"
+    "$<$<COMPILE_LANG_AND_ID:CXX,IntelLLVM>:-Wno-cpp>")
+  # Device LTO passes (notably OpenMP offload) report the same pass-failed
+  # remark through ld.lld.
+  target_link_options("${CONFORMANCE_MINIAPP_TARGET}" PRIVATE
+    "$<$<CXX_COMPILER_ID:Clang,AppleClang>:-Wno-pass-failed>")
   if(CONFORMANCE_BACKEND STREQUAL "hip" AND model MATCHES "^(hip|kokkos)$")
     target_compile_options("${CONFORMANCE_MINIAPP_TARGET}" PRIVATE
       "$<$<COMPILE_LANGUAGE:CXX>:-x;hip>")

@@ -3,7 +3,7 @@ package net.kurobako.gemstone.server.recording
 import java.io.{ByteArrayOutputStream, IOException, InputStream, OutputStream}
 
 /** Capture consumed wire bytes above buffering and below client-identity pushback. Allocated only when enabled. */
-private[server] final class RPCRecording(writer: RPCJournal.Writer, source: InputStream, destination: OutputStream)
+final class RPCRecording(writer: RPCJournal.Writer, source: InputStream, destination: OutputStream)
     extends AutoCloseable {
   private final class Frame extends ByteArrayOutputStream {
     override def write(value: Int): Unit = {

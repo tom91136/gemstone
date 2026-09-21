@@ -1,12 +1,14 @@
 package net.kurobako.gemstone.server.transport
 
+import Transport.*
+
 import net.kurobako.gemstone.isa.KernelName as ISAKernelName
 import net.kurobako.gemstone.rpc.ExecutionRPC
 import net.kurobako.gemstone.rpc.ExecutionRPC.Operation
 import net.kurobako.gemstone.rpc.ExecutionProtocol.*
 import net.kurobako.gemstone.rpc.Wire
 import net.kurobako.gemstone.server.execution.ExecutionService
-import net.kurobako.gemstone.server.execution.ProgramEncoding
+import net.kurobako.gemstone.server.execution.RuntimeBackend
 import net.kurobako.gemstone.vm.{KernelTask, LaunchGeometry, MemoryRegion}
 
 import cats.syntax.all.*
@@ -16,7 +18,7 @@ import java.io.DataOutputStream
 import java.nio.charset.StandardCharsets
 import scala.compiletime.error
 
-private[server] object ExecutionRPCProtocol {
+object ExecutionRPCProtocol {
   val RequestIdentityBytesAfterMagic =
     ExecutionRPC.RequestClientOffset + java.lang.Long.BYTES - java.lang.Integer.BYTES
   val RequestClientOffsetAfterMagic = ExecutionRPC.RequestClientOffset - java.lang.Integer.BYTES
@@ -26,7 +28,7 @@ private[server] object ExecutionRPCProtocol {
 
   object SessionId {
     inline def apply(inline high: Long, inline low: Long): SessionId =
-      inline if high == 0L && low == 0L then error("execution session identity cannot be the zero sentinel")
+      inline if (high == 0L && low == 0L) error("execution session identity cannot be the zero sentinel")
       else (high, low)
 
     def fromWire(high: Long, low: Long): Either[ExecutionFailure, SessionId] =
@@ -117,10 +119,7 @@ private[server] object ExecutionRPCProtocol {
     case request @ Operation.ReadAllocation(allocation, offset, size) =>
       encode(request, service.read(allocation, offset, size))
     case request @ Operation.LoadProgram(encoding, image) =>
-      val loaded = ProgramEncoding.from(encoding)
-        .leftMap(ExecutionFailure.InvalidRequest(_))
-        .flatMap(service.load(_, image))
-      encode(request, loaded)
+      encode(request, service.load(encoding, image))
     case request @ Operation.UnloadProgram(program) =>
       encode(request, service.unload(program))
     case request @ Operation.DescribeProgram(program) =>
@@ -214,7 +213,7 @@ private[server] object ExecutionRPCProtocol {
     output.writeLong(ExecutionRPC.Schema.fingerprint)
     output.writeInt(status)
     output.writeInt(payload.length)
-    if payload.nonEmpty then output.write(payload)
+    if (payload.nonEmpty) output.write(payload)
     output.flush()
   }
 

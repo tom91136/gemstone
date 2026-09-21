@@ -36,11 +36,12 @@ final class PTXRuntimeBackendSuite extends munit.FunSuite {
   }
 
   test("loads and executes PTX through the typed runtime boundary") {
-    val catalog = BackendCatalog.from(PTXRuntimeBackend)
-    val backend = catalog.backend(PTXRuntimeBackend.encoding).fold(error => fail(error.message), value => value)
-    val session = backend.open(MachineServices(Observer.discard, Scheduler.Sequential))
     val source  = ".version 8.0\n.target sm_80\n.address_size 64\n.visible .entry empty() { ret; }\n"
-    val program = session.load(Vec.from(source.getBytes(StandardCharsets.UTF_8)))
+    val program = PTXRuntimeBackend
+      .load(
+        RuntimeBackend.Services(Observer.discard, Scheduler.Sequential),
+        Vec.from(source.getBytes(StandardCharsets.UTF_8))
+      )
       .fold(error => fail(error.message), value => value)
 
     assertEquals(program.symbols.map(_.kernels.map(_.name)), Right(Vec(KernelName("empty"))))
@@ -59,6 +60,5 @@ final class PTXRuntimeBackendSuite extends munit.FunSuite {
 
     program.close()
     assert(program.execute(task, EmptyMemory, TaskControl.default).isLeft)
-    session.close()
   }
 }

@@ -21,7 +21,7 @@ final class MetadataSuite extends munit.FunSuite {
     assert(current.exists(info => info.source == MetadataSource.AMDXML && info.operands.nonEmpty))
   }
 
-  test("every descriptor owns canonical metadata without a detached database lookup") {
+  test("every instruction definition exposes metadata, an opcode lookup, and decoder forms") {
     Instruction.definitions.foreach { definition =>
       assert(definition.meta.encodings.nonEmpty, definition.toString)
       assertEquals(Instruction.Definition.forOpcode(definition.opcode.value).contains(definition), true)

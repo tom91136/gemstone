@@ -5,7 +5,9 @@ import net.kurobako.gemstone.rpc.ExecutionRPC
 import net.kurobako.gemstone.rpc.ExecutionProtocol.ExecutionFailure
 import net.kurobako.gemstone.server.execution.*
 import net.kurobako.gemstone.server.recording.*
-import net.kurobako.gemstone.server.transport.{ClientId, ControlProtocol, ExecutionRPCProtocol, RPCPort}
+import net.kurobako.gemstone.server.transport.ExecutionRPCProtocol
+import net.kurobako.gemstone.server.transport.ServerControl
+import net.kurobako.gemstone.server.transport.Transport.*
 import net.kurobako.gemstone.vm.TaskLimits
 
 import io.github.iltotore.iron.*
@@ -27,7 +29,7 @@ import java.util.concurrent.atomic.{AtomicBoolean, AtomicLong, AtomicReference, 
 import java.util.concurrent.locks.ReentrantLock
 import scala.util.Using
 
-private[gemstone] object GemstoneRPCServer {
+object GemstoneRPCServer {
   private val SocketTimeoutMillis: Int :| Positive = 300000
   private val RootClient: ClientId                 = ClientId(1L)
 
@@ -36,19 +38,10 @@ private[gemstone] object GemstoneRPCServer {
       connections: Int :| Positive
   )
 
-  private final class UsageCounter {
-    val execution = LongAdder()
-
-    def snapshot: ServerUsage = ServerUsage(
-      execution.sum().refineEither[Positive0]
-        .fold(message => throw IllegalStateException(s"execution request counter overflowed: $message"), value => value)
-    )
-  }
-
-  private[server] final class ExecutionSessions(
-      backends: BackendCatalog,
+  final class ExecutionSessions(
+      backends: List[RuntimeBackend],
       taskLimits: TaskLimits,
-      executionPool: InterpreterScheduler
+      executionPool: WorkerPool
   ) extends AutoCloseable {
     private val entries = AtomicReference(Map.empty[ExecutionRPCProtocol.SessionId, ExecutionSessionEntry])
     private val closed  = AtomicBoolean(false)
@@ -79,7 +72,6 @@ private[gemstone] object GemstoneRPCServer {
           case None =>
             val service = ExecutionService(
               backends,
-              schedule = executionPool.schedule,
               taskLimits = taskLimits,
               scheduler = executionPool
             )
@@ -130,18 +122,25 @@ private[gemstone] object GemstoneRPCServer {
     }
   }
 
-  private final class Client(val id: ClientId, val executions: ExecutionSessions, val usage: UsageCounter) {
+  private final class Client(val id: ClientId, val executions: ExecutionSessions) {
+    private val usage = LongAdder()
+
+    def countUsage(): Unit = usage.increment()
+
+    def executionCount: Long =
+      usage.sum().refineEither[Positive0]
+        .fold(message => throw IllegalStateException(s"execution request counter overflowed: $message"), value => value)
+
     def close(): Unit = executions.close()
   }
 
   private final class ClientRegistry(
-      backends: BackendCatalog,
+      backends: List[RuntimeBackend],
       limits: TaskLimits,
-      pool: InterpreterScheduler,
-      rootUsage: UsageCounter,
+      pool: WorkerPool,
       journal: Option[RPCJournal.Writer]
   ) {
-    val root                               = Client(RootClient, ExecutionSessions(backends, limits, pool), rootUsage)
+    val root                               = Client(RootClient, ExecutionSessions(backends, limits, pool))
     private val clients                    = ConcurrentHashMap[java.lang.Long, Client]()
     private val next                       = AtomicLong(RootClient.value + 1L)
     def find(id: ClientId): Option[Client] =
@@ -149,11 +148,11 @@ private[gemstone] object GemstoneRPCServer {
     def register(): ClientId = {
       val id = ClientId.either(next.getAndIncrement())
         .fold(message => throw IllegalStateException(s"invalid client identity: $message"), value => value)
-      clients.put(id.value, Client(id, ExecutionSessions(backends, limits, pool), UsageCounter()))
+      clients.put(id.value, Client(id, ExecutionSessions(backends, limits, pool)))
       id
     }
-    def usage(id: ClientId): ServerUsage = find(id).fold(ServerUsage(0L))(_.usage.snapshot)
-    def release(id: ClientId): Unit      = if (id != RootClient) Option(clients.remove(id.value)).foreach { client =>
+    def usage(id: ClientId): Long   = find(id).fold(0L)(_.executionCount)
+    def release(id: ClientId): Unit = if (id != RootClient) Option(clients.remove(id.value)).foreach { client =>
       client.close(); journal.foreach(_.clientClosed(client))
     }
     else ()
@@ -171,13 +170,12 @@ private[gemstone] object GemstoneRPCServer {
       server: ServerSocket,
       acceptThread: Thread,
       connections: ClientConnections,
-      usageCounter: UsageCounter,
-      executionPool: InterpreterScheduler,
+      executionPool: WorkerPool,
       clients: ClientRegistry,
       journal: Option[RPCJournal.Writer]
   ) extends AutoCloseable {
-    def await(): Unit      = acceptThread.join()
-    def usage: ServerUsage = usageCounter.snapshot
+    def await(): Unit = acceptThread.join()
+    def usage: Long   = clients.usage(RootClient)
 
     private val closed         = AtomicBoolean(false)
     private val lock           = ReentrantLock()
@@ -204,7 +202,7 @@ private[gemstone] object GemstoneRPCServer {
     }
   }
 
-  private[server] final class ClientConnections {
+  final class ClientConnections {
     private val sockets                           = ConcurrentHashMap[Socket, Thread]()
     def add(socket: Socket, thread: Thread): Unit = { val _ = sockets.put(socket, thread) }
     def remove(socket: Socket): Unit              = { val _ = sockets.remove(socket) }
@@ -216,37 +214,24 @@ private[gemstone] object GemstoneRPCServer {
   }
 
   def start(): RunningServer =
-    startWith(GemstoneBackendCatalog.default, configuredExecutionLimits(sys.env), SocketTimeoutMillis)
-
-  /** Start the default server with an explicit per-dispatch execution profile. */
-  def start(taskLimits: TaskLimits): RunningServer =
-    startWith(GemstoneBackendCatalog.default, taskLimits, SocketTimeoutMillis)
+    startWith(
+      RuntimeBackend.defaults,
+      ExecutionService.limits(sys.env).fold(message => throw IllegalArgumentException(message), value => value),
+      SocketTimeoutMillis
+    )
 
   /** Use the launcher's effective environment for the pool as well as its execution limits. */
   def start(taskLimits: TaskLimits, environment: Map[String, String]): RunningServer =
-    startWith(GemstoneBackendCatalog.default, taskLimits, SocketTimeoutMillis, environment)
-
-  private[server] def start(
-      backends: BackendCatalog,
-      taskLimits: TaskLimits
-  ): RunningServer =
-    startWith(backends, taskLimits, SocketTimeoutMillis)
-
-  private[server] def start(
-      backends: BackendCatalog,
-      taskLimits: TaskLimits,
-      socketTimeoutMillis: Int :| Positive
-  ): RunningServer =
-    startWith(backends, taskLimits, socketTimeoutMillis)
+    startWith(RuntimeBackend.defaults, taskLimits, SocketTimeoutMillis, environment)
 
   private def startWith(
-      backends: BackendCatalog,
+      backends: List[RuntimeBackend],
       taskLimits: TaskLimits,
       socketTimeoutMillis: Int :| Positive,
       environment: Map[String, String] = sys.env
   ): RunningServer = {
     // Resolve the actual pool before recording its profile, so replay does not inherit another machine's default.
-    val executionPool = InterpreterScheduler.fromEnvironment(environment)
+    val executionPool = WorkerPool.fromEnvironment(environment)
     val journal       = try environment.get("GEMSTONE_RECORD") match {
         case None       => None
         case Some(path) =>
@@ -277,8 +262,7 @@ private[gemstone] object GemstoneRPCServer {
     }
     try {
       val connections = ClientConnections()
-      val usage       = UsageCounter()
-      val clients     = ClientRegistry(backends, taskLimits, executionPool, usage, journal)
+      val clients     = ClientRegistry(backends, taskLimits, executionPool, journal)
       server.bind(InetSocketAddress(InetAddress.getByName("127.0.0.1"), 0))
       val acceptThread = Thread(
         () => acceptConnections(server, clients, connections, socketTimeoutMillis, journal),
@@ -293,7 +277,6 @@ private[gemstone] object GemstoneRPCServer {
         server,
         acceptThread,
         connections,
-        usage,
         executionPool,
         clients,
         journal
@@ -306,9 +289,6 @@ private[gemstone] object GemstoneRPCServer {
         throw error
     }
   }
-
-  private def configuredExecutionLimits(environment: Map[String, String]): TaskLimits =
-    ExecutionConfiguration.limits(environment).fold(message => throw IllegalArgumentException(message), value => value)
 
   private def acceptConnections(
       server: ServerSocket,
@@ -372,20 +352,20 @@ private[gemstone] object GemstoneRPCServer {
           def exchange(): Boolean = try {
             recording.foreach(_.begin())
             input.readInt() match {
-              case ControlProtocol.Magic =>
+              case ServerControl.Magic =>
                 input.readInt() match {
-                  case ControlProtocol.RegisterClient => output.writeLong(clients.register().value)
-                  case ControlProtocol.QueryUsage     =>
+                  case ServerControl.RegisterClient => output.writeLong(clients.register().value)
+                  case ServerControl.QueryUsage     =>
                     val usage = clients.usage(readClientId(input))
                     // Preserve the two-long control reply while retired clients disappear;
                     // all API evidence is now the shared execution count.
                     output.writeLong(0L)
-                    output.writeLong(usage.executionRequests)
-                  case ControlProtocol.ReleaseClient =>
+                    output.writeLong(usage)
+                  case ServerControl.ReleaseClient =>
                     clients.release(readClientId(input))
                     output.writeInt(0)
-                  case ControlProtocol.Shutdown => output.writeInt(0); output.flush(); shutdown()
-                  case other                    => throw IllegalArgumentException(s"unknown control operation $other")
+                  case ServerControl.Shutdown => output.writeInt(0); output.flush(); shutdown()
+                  case other                  => throw IllegalArgumentException(s"unknown control operation $other")
                 }
                 output.flush()
                 false
@@ -397,7 +377,7 @@ private[gemstone] object GemstoneRPCServer {
                   output,
                   owner.id,
                   execution,
-                  () => { owner.usage.execution.increment(); recording.foreach(_.accepted(owner)) }
+                  () => { owner.countUsage(); recording.foreach(_.accepted(owner)) }
                 )
                 recording.foreach(_.response())
                 keep
@@ -420,7 +400,7 @@ private[gemstone] object GemstoneRPCServer {
     finally connections.remove(socket)
   }
 
-  private[server] def peekClientId(
+  def peekClientId(
       input: DataInputStream,
       replay: java.io.PushbackInputStream
   ): ClientId = {

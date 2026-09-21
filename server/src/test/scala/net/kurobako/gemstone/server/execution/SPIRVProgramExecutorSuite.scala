@@ -45,7 +45,7 @@ final class SPIRVProgramExecutorSuite extends munit.FunSuite {
       Endianness.Little
     )
 
-    Using.resource(ExecutionService(GemstoneBackendCatalog.default)) { service =>
+    Using.resource(ExecutionService(RuntimeBackend.defaults)) { service =>
       service.load(encoding, SPIRV.encode(module).toOption.get) match {
         case Left(ExecutionFailure.InvalidRequest(detail)) => assert(detail.contains("OpEntryPoint Kernel"))
         case result => fail(s"expected kernel entry-point validation failure, found $result")
@@ -70,7 +70,7 @@ final class SPIRVProgramExecutorSuite extends munit.FunSuite {
       ),
       Endianness.Little
     )
-    Using.resource(ExecutionService(GemstoneBackendCatalog.default)) { service =>
+    Using.resource(ExecutionService(RuntimeBackend.defaults)) { service =>
       service.load(encoding, SPIRV.encode(module).toOption.get) match {
         case Left(ExecutionFailure.InvalidRequest(detail)) => assert(detail.contains("OpCapability Kernel"))
         case result => fail(s"expected OpenCL environment validation failure, found $result")
@@ -106,7 +106,7 @@ final class SPIRVProgramExecutorSuite extends munit.FunSuite {
       Endianness.Little
     )
     val image = SPIRV.encode(module).toOption.get
-    Using.resource(ExecutionService(GemstoneBackendCatalog.default)) { service =>
+    Using.resource(ExecutionService(RuntimeBackend.defaults)) { service =>
       val allocation = service.registerAllocation(4L, AllocationKind.Shared).toOption.get
       val program    = service.load(encoding, image).toOption.get
       val task       = KernelTask
@@ -162,13 +162,19 @@ final class SPIRVProgramExecutorSuite extends munit.FunSuite {
           failure.get().toLeft(())
         }
       }
-      val schedule = ParallelGroups()
-      val queued   = AtomicReference(Option.empty[Runnable])
-      Using.resource(ExecutionService(
-        GemstoneBackendCatalog.default,
-        runnable => assert(queued.compareAndSet(None, Some(runnable))),
-        scheduler = if (parallel) schedule else Scheduler.Sequential
-      )) { service =>
+      final class Capturing(delegate: Scheduler, queued: AtomicReference[Option[Runnable]]) extends Scheduler {
+        override def parallelism                                                                 = delegate.parallelism
+        override def shouldParallel(tasks: Long :| Positive0, items: Long :| Positive0): Boolean =
+          delegate.shouldParallel(tasks, items)
+        override def parallelFor(tasks: Long :| Positive0)(
+            task: Long :| Positive0 => Either[Fault, Unit]
+        ): Either[Fault, Unit]                          = delegate.parallelFor(tasks)(task)
+        override def schedule(runnable: Runnable): Unit = assert(queued.compareAndSet(None, Some(runnable)))
+      }
+      val queued    = AtomicReference(Option.empty[Runnable])
+      val delegate  = if (parallel) ParallelGroups() else Scheduler.Sequential
+      val scheduler = Capturing(delegate, queued)
+      Using.resource(ExecutionService(RuntimeBackend.defaults, scheduler = scheduler)) { service =>
         val size           = ((groups + 3) * 65536 + 8).refineUnsafe[Positive]
         val allocationSize = size.toLong.refineUnsafe[Positive]
         val allocation     = service.registerAllocation(allocationSize, AllocationKind.Shared).toOption.get

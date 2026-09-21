@@ -4,11 +4,12 @@
 #include <catch2/catch_test_macros.hpp>
 #include <sycl/sycl.hpp>
 
-#include "support.hpp"
+#include <fmt/format.h>
+#include "test_support.hpp"
 
 TEST_CASE("edge-cases/runtime/sycl/accessor-local-barrier/i32/n128", "[unified][runtime][compact]") {
   constexpr size_t size = 128, local = 32;
-  const auto values = unified::runtime::input(size);
+  const auto values = unified::test_runtime::input(size);
   std::vector<int32_t> output(size, 0);
   sycl::queue queue(sycl::gpu_selector_v);
   {
@@ -28,14 +29,14 @@ TEST_CASE("edge-cases/runtime/sycl/accessor-local-barrier/i32/n128", "[unified][
     queue.wait_and_throw();
   } // Buffer destruction must publish the result into host storage.
   for (size_t i = 0; i < size; ++i) {
-    INFO("SYCL accessor/local barrier mismatch at " + std::to_string(i));
+    INFO(fmt::format("SYCL accessor/local barrier mismatch at {}", i));
     REQUIRE((output[i] == values[(i / local) * local + (i + 1) % local] + static_cast<int32_t>(i / local)));
   }
 }
 
 TEST_CASE("edge-cases/runtime/sycl/usm-event-offset/i32/n33", "[unified][runtime][compact]") {
   sycl::queue queue(sycl::gpu_selector_v); // No in-order property: dependencies must be explicit.
-  unified::runtime::Cleanup cleanup;
+  unified::test_runtime::Cleanup cleanup;
   auto *memory = sycl::malloc_device<int32_t>(35, queue);
   {
     INFO("device USM allocation failed");

@@ -1,10 +1,12 @@
-#include "conformance/environment.hpp"
+#include "environment.hpp"
 
 #include <algorithm>
 #include <cstdlib>
 #include <vector>
 
-#include "conformance/driver.hpp"
+#include <aspartame/all.hpp>
+
+#include "driver.hpp"
 
 #if defined(_WIN32)
   #include <windows.h>
@@ -13,6 +15,8 @@ extern char **environ;
 #endif
 
 namespace conformance::driver {
+using namespace aspartame;
+
 std::map<std::string, std::string> base_environment() {
   std::map<std::string, std::string> result;
   for (const auto *name : {"HOME", "USER", "LOGNAME", "TMPDIR", "TMP", "TEMP", "LANG", "LC_ALL", "SystemRoot", "WINDIR", "COMSPEC",
@@ -66,11 +70,17 @@ void prepare_runtime_environment(std::map<std::string, std::string> &environment
   if (backend == "sycl") {
     environment.try_emplace("OverrideDefaultFP64Settings", "1");
     environment.try_emplace("IGC_EnableDPEmulation", "1");
-    std::vector<std::filesystem::path> adapters;
-    if (std::filesystem::is_directory(support / "lib"))
-      for (const auto &file : std::filesystem::directory_iterator(support / "lib"))
-        if (file.is_regular_file() && file.path().filename().string().starts_with("libur_adapter_level_zero.so"))
-          adapters.push_back(file.path());
+    auto adapters = std::vector<std::filesystem::path>{};
+    if (std::filesystem::is_directory(support / "lib")) {
+      const std::vector<std::filesystem::directory_entry> entries{std::filesystem::directory_iterator(support / "lib"),
+                                                                  std::filesystem::directory_iterator{}};
+      adapters = entries
+                 | filter([](const std::filesystem::directory_entry &entry) {
+                     return entry.is_regular_file()
+                            && entry.path().filename().string().starts_with("libur_adapter_level_zero.so");
+                   })
+                 | map([](const std::filesystem::directory_entry &entry) { return entry.path(); }) | to_vector();
+    }
     std::sort(adapters.begin(), adapters.end());
     if (!adapters.empty()) environment["UR_ADAPTERS_FORCE_LOAD"] = adapters.front().string();
   }

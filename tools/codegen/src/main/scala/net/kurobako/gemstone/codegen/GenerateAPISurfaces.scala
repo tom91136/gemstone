@@ -59,10 +59,7 @@ object GenerateAPISurfaces {
     Opts.argument[String]("opencl-version")
   ).mapN(Request(_, _, _, _, _, _, _, _)))
 
-  def main(arguments: Array[String]): Unit = command.parse(arguments.toSeq).fold(
-    help => throw IllegalArgumentException(help.toString),
-    request => generate(request)
-  )
+  def main(arguments: Array[String]): Unit = CodegenCommand.run(command, arguments)(generate(_))
 
   private def generate(request: Request): Unit = {
     val manifest = read[GenerateOfficialAPIManifest.Manifest](
@@ -197,15 +194,15 @@ object GenerateAPISurfaces {
     val versionLines = target.versions.map { case (name, value) =>
       s"  val $name: String :| (MinLength[1] & NoNul) = ${literal(value)}"
     }
-    s"""|// Generated from pinned official headers by GenerateAPISurfaces. Do not edit mechanically.
-        |package ${target.packageName}
+    GeneratedHeader.scala("from pinned official headers by GenerateAPISurfaces") +
+      s"""|package ${target.packageName}
         |
         |import io.github.iltotore.iron.*
         |import io.github.iltotore.iron.constraint.all.*
         |import net.kurobako.gemstone.NoNul
         |import net.kurobako.gemstone.abi.ABI.*
         |
-        |object ${target.traitName} {
+        |${GeneratedHeader.annotation()}object ${target.traitName} {
         |${aliasLines.mkString("\n")}
         |
         |${versionLines.mkString("\n")}

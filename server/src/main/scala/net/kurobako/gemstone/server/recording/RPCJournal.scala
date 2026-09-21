@@ -10,6 +10,7 @@ import upickle.default.{ReadWriter, macroRW, readBinary, writeBinary}
 import upickle.implicits.key
 
 import java.io.{DataOutputStream, IOException, RandomAccessFile}
+import java.nio.ByteBuffer
 import java.nio.file.{FileAlreadyExistsException, Files, Path}
 import java.nio.file.attribute.{PosixFileAttributeView, PosixFilePermissions}
 import java.util.concurrent.locks.ReentrantLock
@@ -21,7 +22,7 @@ import scala.util.control.NonFatal
 /** Bounded MessagePack RPC archives. Client identities are normalized; application payloads remain sensitive data.
   * Record checksums detect accidental corruption; they are not security boundaries.
   */
-private[gemstone] object RPCJournal {
+object RPCJournal {
   private val Format              = "gemstone-rpc-journal"
   val Version                     = 1
   private val RecordFramingBytes  = 8L
@@ -87,6 +88,61 @@ private[gemstone] object RPCJournal {
       replayable: Boolean,
       reason: Option[FailureReason]
   )
+
+  object Frames {
+    def magic(bytes: Array[Byte]): Int                = ByteBuffer.wrap(bytes).getInt()
+    def integer(bytes: Array[Byte], offset: Int): Int = ByteBuffer.wrap(bytes, offset, 4).getInt()
+    def long(bytes: Array[Byte], offset: Int): Long   = ByteBuffer.wrap(bytes, offset, 8).getLong()
+
+    def normalized(
+        kind: Kind,
+        bytes: Array[Byte],
+        maximum: Int :| Interval.Closed[1, 2147479551]
+    ): Array[Byte] = {
+      validate(kind, bytes, maximum, normalized = false)
+      if (kind != Kind.Request) bytes
+      else {
+        val result = bytes.clone()
+        ByteBuffer.wrap(result).putLong(ExecutionRPC.RequestClientOffset, 0L)
+        result
+      }
+    }
+
+    def validate(
+        kind: Kind,
+        bytes: Array[Byte],
+        maximum: Int :| Interval.Closed[1, 2147479551],
+        normalized: Boolean
+    ): Unit =
+      validatePrefix(kind, bytes, bytes.length, maximum, normalized)
+
+    def validatePrefix(
+        kind: Kind,
+        bytes: Array[Byte],
+        frameSize: Int,
+        maximum: Int :| Interval.Closed[1, 2147479551],
+        normalized: Boolean
+    ): Unit = {
+      def check(value: Boolean): Unit = if (!value) throw IOException("RPC journal: invalid RPC frame")
+      check(bytes.length >= 12 && bytes.length <= frameSize && frameSize <= maximum)
+      check(long(bytes, ExecutionRPC.RequestFingerprintOffset) == ExecutionRPC.Schema.fingerprint)
+      val (header, payload) = kind match {
+        case Kind.Request if magic(bytes) == ExecutionRPC.RequestMagic =>
+          check(bytes.length >= ExecutionRPC.RequestHeaderBytes)
+          (ExecutionRPC.RequestHeaderBytes, integer(bytes, ExecutionRPC.RequestPayloadSizeOffset))
+        case Kind.Response if magic(bytes) == ExecutionRPC.ResponseMagic =>
+          check(bytes.length >= ExecutionRPC.ResponseHeaderBytes)
+          check(integer(bytes, ExecutionRPC.ResponseStatusOffset) == 0 ||
+            integer(bytes, ExecutionRPC.ResponseStatusOffset) == 1)
+          (ExecutionRPC.ResponseHeaderBytes, integer(bytes, ExecutionRPC.ResponsePayloadSizeOffset))
+        case _ => throw IOException("RPC journal: frame kind/magic differ")
+      }
+      check(payload >= 0 && header.toLong + payload == frameSize.toLong)
+      if (normalized && kind == Kind.Request) {
+        check(ByteBuffer.wrap(bytes).getLong(ExecutionRPC.RequestClientOffset) == 0L)
+      }
+    }
+  }
 
   private sealed trait Record
   @key("header")
@@ -230,7 +286,10 @@ private[gemstone] object RPCJournal {
             previous.copy(requestPending = true)
           case Kind.Response =>
             ensure(previous.requestPending, "response has no request")
-            ensure(RPCFrames.magic(frame) == RPCFrames.ExecutionResponse, "response protocol differs from its request")
+            ensure(
+              RPCJournal.Frames.magic(frame) == ExecutionRPC.ResponseMagic,
+              "response protocol differs from its request"
+            )
             previous.copy(requestPending = false)
           case Kind.ConnectionClose => previous.copy(closed = true)
           case Kind.ClientClose     => previous
@@ -318,7 +377,7 @@ private[gemstone] object RPCJournal {
         ensure(!closed, "capture is closed")
         try {
           ensure(sequence.value < header.limits.maxEvents, "event limit exceeded")
-          val frame   = Option.when(kind.hasFrame)(RPCFrames.normalized(kind, bytes, header.limits.maxFrameBytes))
+          val frame = Option.when(kind.hasFrame)(RPCJournal.Frames.normalized(kind, bytes, header.limits.maxFrameBytes))
           val eventId = sequence
           val record  = encode(EventRecord(
             eventId.value,
@@ -405,7 +464,7 @@ private[gemstone] object RPCJournal {
               connection == event.connection.fold(0L)(_.value),
             "event changed after archive verification"
           )
-          RPCFrames.validate(event.kind, frame, summary.header.limits.maxFrameBytes, normalized = true)
+          RPCJournal.Frames.validate(event.kind, frame, summary.header.limits.maxFrameBytes, normalized = true)
           frame
         case _ => invalid("frame record changed after archive verification")
       }
@@ -466,7 +525,7 @@ private[gemstone] object RPCJournal {
             val kind = Kind.values.find(_.code == code).getOrElse(invalid("unknown event kind"))
             ensure(sequence == count.toLong, "event sequence is not contiguous")
             ensure(frame.nonEmpty == kind.hasFrame, "event frame does not match its kind")
-            frame.foreach(bytes => RPCFrames.validate(kind, bytes, declared.maxFrameBytes, normalized = true))
+            frame.foreach(bytes => RPCJournal.Frames.validate(kind, bytes, declared.maxFrameBytes, normalized = true))
             val eventId = EventId.either(sequence)
               .fold(message => invalid(s"invalid event identity: $message"), value => value)
             val clientId = RecordedClientId.either(client)

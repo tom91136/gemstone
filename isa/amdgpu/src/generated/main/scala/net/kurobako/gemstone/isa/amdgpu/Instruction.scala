@@ -1,4 +1,4 @@
-// Generated from the pinned Mesa ACO and AMD machine-readable ISA inputs. Do not edit by hand.
+// Generated from the pinned Mesa ACO and AMD machine-readable ISA inputs. Regenerate with: sbt codegen
 // scalafix:off GemstoneNoAssume; values were validated by the generator
 package net.kurobako.gemstone.isa.amdgpu
 
@@ -6,6 +6,7 @@ import net.kurobako.gemstone.Vec
 import net.kurobako.gemstone.Vec.*
 import Program.*
 
+@javax.annotation.processing.Generated(Array("sbt codegen"))
 enum Instruction(val definition: Instruction.Definition, operandValues: Operand*) {
   case BufferAtomicAdd(dest: Operand, destAddr: Operand, resource: Operand, offset: Operand, mods: Vec[Modifier])
       extends Instruction(BufferInstructionDefs.BufferAtomicAdd, dest, destAddr, resource, offset)
@@ -5908,6 +5909,7 @@ enum Instruction(val definition: Instruction.Definition, operandValues: Operand*
   final val operands: Vec[Operand] = operandValues.toVec
 }
 
+@javax.annotation.processing.Generated(Array("sbt codegen"))
 object Instruction {
   enum DecodeError {
     case UnknownOpcode(opcode: String)

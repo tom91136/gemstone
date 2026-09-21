@@ -13,59 +13,53 @@ import java.util.concurrent.atomic.AtomicBoolean
 import scala.util.Using
 
 final class ExecutionServiceSuite extends munit.FunSuite {
-  private val encoding = ProgramEncoding.from("test-image").toOption.get
+  private val encoding = "test-image"
 
-  private final class Backend(failLoad: Boolean = false) extends RuntimeBackend {
-    val sessionClosed                      = AtomicBoolean()
-    override val encoding: ProgramEncoding = ExecutionServiceSuite.this.encoding
+  private final class Backend extends RuntimeBackend {
+    val programClosed             = AtomicBoolean()
+    override val encoding: String = ExecutionServiceSuite.this.encoding
 
-    override def open(services: MachineServices): BackendSession = Session(services)
-
-    private final class Session(services: MachineServices) extends BackendSession {
-      override def load(image: Vec[Byte]): Either[RuntimeError, RuntimeProgram] =
-        if (failLoad) Left(RuntimeError.Decode("bad image")) else Right(Program(services))
-      override def close(): Unit = sessionClosed.set(true)
-    }
+    override def load(
+        services: RuntimeBackend.Services,
+        image: Vec[Byte]
+    ): Either[RuntimeBackend.Error, RuntimeBackend.Program] = Right(Program(services, programClosed))
   }
 
-  private final class Program(services: MachineServices) extends RuntimeProgram {
-    private val mutableClosed = AtomicBoolean()
-    def closed: Boolean       = mutableClosed.get()
-
-    override def symbols: Either[RuntimeError, ProgramSymbols] = Right(ProgramSymbols(Vec.empty, Vec.empty))
-    override def kernel(name: ISAKernelName): Either[RuntimeError, ISAKernelMetadata] =
+  private final class Program(services: RuntimeBackend.Services, closed: AtomicBoolean) extends RuntimeBackend.Program {
+    override def symbols: Either[RuntimeBackend.Error, ProgramSymbols] = Right(ProgramSymbols(Vec.empty, Vec.empty))
+    override def kernel(name: ISAKernelName): Either[RuntimeBackend.Error, ISAKernelMetadata] =
       ISAKernelMetadata.validated(
         8,
         1,
         Vec(
           ISAKernelMetadata.Parameter(8, 0, ISAKernelMetadata.ParameterKind.Memory, false)
         )
-      ).left.map(RuntimeError.Load(_))
-    override val globals: Option[RuntimeProgram.Globals] = None
+      ).left.map(RuntimeBackend.Error.Invalid(_))
+    override val globals: Option[RuntimeBackend.Program.Globals] = None
 
     override def execute(
         task: KernelTask,
         memory: Memory,
         control: TaskControl
-    ): Either[RuntimeError, Result] =
+    ): Either[RuntimeBackend.Error, Result] =
       task.arguments.headOption match {
         case Some(KernelTask.Argument.Memory(region, offset)) =>
           for {
-            _ <- memory.write(region, offset, Vec[Byte](42)).left.map(RuntimeError.Execution(_))
+            _ <- memory.write(region, offset, Vec[Byte](42)).left.map(RuntimeBackend.Error.Execution(_))
             _ <- services.observer.observe(
               control.observation,
               Event.Print("done", Vec(Event.PrintArgument.Integer(Vec(42L), 32, true)))
-            ).left.map(error => RuntimeError.Execution(Fault.Observer(error.message)))
+            ).left.map(error => RuntimeBackend.Error.Execution(Fault.Observer(error.message)))
           } yield Result(control.usedInstructions)
-        case _ => Left(RuntimeError.Execution(Fault.InvalidTask("memory argument is required")))
+        case _ => Left(RuntimeBackend.Error.Execution(Fault.InvalidTask("memory argument is required")))
       }
 
-    override def close(): Unit = mutableClosed.set(true)
+    override def close(): Unit = closed.set(true)
   }
 
   test("service translates API ownership into a VM task and records VM events") {
     val backend = Backend()
-    Using.resource(ExecutionService(BackendCatalog.from(backend), _.run())) { service =>
+    Using.resource(ExecutionService(List(backend))) { service =>
       val allocation = service.registerAllocation(8, AllocationKind.Shared).toOption.get
       val program    = service.load(encoding, Vec[Byte](1)).toOption.get
       val task       = KernelTask.validated(
@@ -81,26 +75,18 @@ final class ExecutionServiceSuite extends munit.FunSuite {
       assertEquals(service.completionPrints(completion).map(_.map(_.format)), Right(Vec("done")))
       assert(service.completionDirtyRanges(completion).toOption.get.exists(_.allocation == allocation))
     }
-    assert(backend.sessionClosed.get())
+    assert(backend.programClosed.get())
   }
 
-  test("failed loads still leave their backend session under service ownership") {
-    val backend = Backend(failLoad = true)
-    val service = ExecutionService(BackendCatalog.from(backend), _.run())
-    assert(service.load(encoding, Vec.empty).isLeft)
-    service.close()
-    assert(backend.sessionClosed.get())
-  }
-
-  test("unknown encodings fail without opening a backend session") {
+  test("unknown encodings fail without invoking a backend") {
     val backend = Backend()
-    Using.resource(ExecutionService(BackendCatalog.from(backend), _.run())) { service =>
-      val unknown = ProgramEncoding.from("unknown-image").toOption.get
+    Using.resource(ExecutionService(List(backend))) { service =>
+      val unknown = "unknown-image"
       assert(service.load(unknown, Vec.empty).left.exists {
         case ExecutionFailure.Unsupported(_) => true
         case _                               => false
       })
     }
-    assert(!backend.sessionClosed.get())
+    assert(!backend.programClosed.get())
   }
 }

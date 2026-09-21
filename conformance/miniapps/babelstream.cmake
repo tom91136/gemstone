@@ -1,6 +1,3 @@
-set(miniapp_babelstream_url
-  https://codeload.github.com/UoB-HPC/BabelStream/tar.gz/17ab377b0e919e14fd3df2b67268761fdac8abb3)
-set(miniapp_babelstream_sha256 1600b92c6cefc09e0c61c1571da0f1807a0f5f2c96b47e52fbba0891c9b5da00)
 set(miniapp_babelstream_models cuda hip omp-target kokkos ocl sycl acc)
 set(miniapp_babelstream_license LICENSE)
 set(miniapp_babelstream_license_name BabelStream.txt)

@@ -6,7 +6,7 @@ import net.kurobako.gemstone.rpc.ExecutionRPC.Operation
 import scala.util.Using
 
 final class ExecutionRPCIntegrationSuite extends munit.FunSuite {
-  test("the current RPC schema reaches a backend-catalog server") {
+  test("a server with the default backends rejects an unregistered program encoding") {
     Using.Manager { use =>
       val server = use(GemstoneRPCServer.start())
       val client = use(ExecutionRPCTestClient(server.port, server.client))

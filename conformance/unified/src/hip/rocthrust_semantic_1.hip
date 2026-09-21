@@ -1,7 +1,7 @@
-#include "support.hpp"
+#include "test_support.hpp"
 
 #define UNIFIED_API_ROCTHRUST 1
-#include "api_thrust.hpp"
+#include "backend_thrust.hpp"
 #undef UNIFIED_API_ROCTHRUST
 #include <cstddef>
 #include <cstdint>
@@ -113,7 +113,7 @@ TEST_CASE("algorithms/roc-thrust-semantic/random-engine-validation/i32/n11", "[u
   using namespace thrust::random;
   const auto check = [](const char *name, int32_t value) {
     {
-      INFO(std::string("random-engine-validation: ") + name + " 10000th value mismatch");
+      INFO(fmt::format("random-engine-validation: {} 10000th value mismatch", name));
       REQUIRE((value == 1));
     }
   };
@@ -130,7 +130,7 @@ template <template <class> class Check> inline void check_all_engines(const char
   using namespace thrust::random;
   const auto check = [what](const char *name, int32_t value) {
     {
-      INFO(std::string(what) + ": " + name + " check failed");
+      INFO(fmt::format("{}: {} check failed", what, name));
       REQUIRE((value == 1));
     }
   };
@@ -165,7 +165,7 @@ template <class Engine> inline void check_engine_save_restore(const char *name) 
   buffer >> restored;
   restored.discard(random_draws);
   {
-    INFO(std::string("random-engine-save-restore: ") + name + " state mismatch");
+    INFO(fmt::format("random-engine-save-restore: {} state mismatch", name));
     REQUIRE((engine() == restored()));
   }
 }
@@ -191,9 +191,9 @@ template <template <class, class> class Check> inline void check_all_distributio
   const auto check = [what, &failures](const char *name, auto run) {
     try {
       if (run() == 1) return;
-      failures += std::string(" ") + name + " (out-of-range sample)";
+      failures += fmt::format(" {} (out-of-range sample)", name);
     } catch (const std::exception &error) {
-      failures += std::string(" ") + name + " (" + error.what() + ")";
+      failures += fmt::format(" {} ({})", name, error.what());
     }
   };
   check("uniform_int_distribution<int32_t>",
@@ -208,7 +208,7 @@ template <template <class, class> class Check> inline void check_all_distributio
         [] { return device_functor_result(Check<normal_distribution<float>, Engine>{normal_distribution<float>()}); });
   check("normal_distribution<double>",
         [] { return device_functor_result(Check<normal_distribution<double>, Engine>{normal_distribution<double>()}); });
-  if (!failures.empty()) throw std::runtime_error(std::string(what) + ": failing distributions:" + failures);
+  if (!failures.empty()) throw std::runtime_error(fmt::format("{}: failing distributions:{}", what, failures));
 }
 
 TEST_CASE("algorithms/roc-thrust-semantic/random-distribution-min/i32/n11", "[unified][rocthrust][compact]") {
@@ -226,7 +226,7 @@ template <class Distribution> inline void check_distribution_save_restore(const 
   Distribution restored;
   buffer >> restored;
   {
-    INFO(std::string("random-distribution-save-restore: ") + name + " state mismatch");
+    INFO(fmt::format("random-distribution-save-restore: {} state mismatch", name));
     REQUIRE((original == restored));
   }
 }

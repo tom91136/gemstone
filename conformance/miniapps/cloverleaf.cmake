@@ -1,6 +1,3 @@
-set(miniapp_cloverleaf_url
-  https://codeload.github.com/UoB-HPC/CloverLeaf/tar.gz/3e10ff9268d3704a744e5a2a4ea3c62831078082)
-set(miniapp_cloverleaf_sha256 d914a1ee547dec35818851b4cac8f6aeeb2ba067168e5826266598019445f25f)
 set(miniapp_cloverleaf_models cuda hip omp-target kokkos sycl-usm sycl-acc acc)
 set(miniapp_cloverleaf_license LICENCE.txt)
 set(miniapp_cloverleaf_license_name CloverLeaf.txt)

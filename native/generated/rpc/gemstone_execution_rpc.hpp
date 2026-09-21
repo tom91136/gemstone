@@ -1,4 +1,4 @@
-/* Generated from ExecutionRPC.Operation. Do not edit. */
+/* Generated from ExecutionRPC.Operation. Regenerate with: sbt codegen */
 #ifndef GEMSTONE_EXECUTION_RPC_HPP
 #define GEMSTONE_EXECUTION_RPC_HPP
 

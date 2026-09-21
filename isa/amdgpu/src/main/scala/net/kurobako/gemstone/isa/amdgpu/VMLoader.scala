@@ -36,13 +36,12 @@ private[amdgpu] object VMLoader {
       private val Marker                                           = "target_archE"
       def unapply(value: String): Option[(String, String, String)] = {
         val start = value.indexOf(Marker)
-        if start < 0 then None
+        if (start < 0) None
         else {
           val revisionStart = start + Marker.length
           val end           = value.indexOf('E', revisionStart)
-          val revision      = if end < 0 then "" else value.substring(revisionStart, end)
-          Option.when(revision.nonEmpty &&
-            revision.forall(character => character.isDigit || "abcdefABCDEF".contains(character)))(
+          val revision      = if (end < 0) "" else value.substring(revisionStart, end)
+          Option.when(revision.nonEmpty && revision.forall(character => Character.digit(character, 16) >= 0))(
             (value.substring(0, start), revision, value.substring(end + 1))
           )
         }
@@ -52,9 +51,7 @@ private[amdgpu] object VMLoader {
     // tag.  It is a sentinel, not a concrete architecture variant.
     private val GenericArch = "4294967295"
 
-    private def upperAscii(value: String): String = value.map { character =>
-      if (character >= 'a' && character <= 'z') (character - 'a' + 'A').toChar else character
-    }
+    private def upperAscii(value: String): String = value.toUpperCase(java.util.Locale.ROOT)
 
     private def logicalName(name: String): String = name match {
       case TargetArch(prefix, _, suffix) => prefix + "target_archE" + suffix
@@ -74,9 +71,11 @@ private[amdgpu] object VMLoader {
     private def archCandidates(targetName: String): Set[String] = {
       val target = upperAscii(targetName.drop(3))
       val family =
-        if target.length == 4 && target.forall(_.isDigit) &&
+        if (
+          target.length == 4 && target.forall(_.isDigit) &&
           ((target.startsWith("10") && target(2) >= '3') || target.startsWith("11") || target.startsWith("12"))
-        then target.take(3) + "0"
+        )
+          target.take(3) + "0"
         else target
       Set(target, family)
     }

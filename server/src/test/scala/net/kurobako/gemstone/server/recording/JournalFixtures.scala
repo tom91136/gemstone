@@ -9,7 +9,7 @@ import java.nio.ByteBuffer
 import java.nio.file.{Files, Path}
 import scala.util.Using
 
-private[server] object JournalFixtures {
+private object JournalFixtures {
   private final class TemporaryJournal(val directory: Path, val file: Path) extends AutoCloseable {
     override def close(): Unit = {
       Using.resource(Files.list(directory))(_.forEach { path =>
@@ -31,13 +31,13 @@ private[server] object JournalFixtures {
   def execution(operation: Long = ping, payload: Array[Byte] = Array.emptyByteArray, session: Long = 42): Array[Byte] =
     ByteBuffer.allocate(
       ExecutionRPC.RequestHeaderBytes + payload.length
-    ).putInt(RPCFrames.ExecutionRequest).putLong(ExecutionRPC.Schema.fingerprint)
+    ).putInt(ExecutionRPC.RequestMagic).putLong(ExecutionRPC.Schema.fingerprint)
       .putLong(23L).putLong(session).putLong(17)
       .putLong(operation).putInt(payload.length).put(payload).array()
   def response(
       value: Int = 0,
       payload: Array[Byte] = Array.emptyByteArray,
-      magic: Int = RPCFrames.ExecutionResponse
+      magic: Int = ExecutionRPC.ResponseMagic
   ): Array[Byte] =
     ByteBuffer.allocate(
       ExecutionRPC.ResponseHeaderBytes + payload.length

@@ -1,7 +1,7 @@
-#include "support.hpp"
+#include "test_support.hpp"
 
 #define UNIFIED_API_ROCTHRUST 1
-#include "api_thrust.hpp"
+#include "backend_thrust.hpp"
 #undef UNIFIED_API_ROCTHRUST
 #include <cstddef>
 #include <cstdint>
@@ -30,7 +30,7 @@ template <class Value> inline void check_set_by_key(SetKind kind, bool descendin
   }
   const auto expected = reference_set_by_key(left, right, kind, descending);
   {
-    INFO("set-" + std::string(magic_enum::enum_name(kind)) + (descending ? "-by-key-descending" : "-by-key"));
+    INFO(fmt::format("set-{}{}", magic_enum::enum_name(kind), descending ? "-by-key-descending" : "-by-key"));
     REQUIRE(((thrust_set_by_key(left, right, kind, descending)) == (expected)));
   }
 }
@@ -60,7 +60,7 @@ template <class Value> inline void check_set_descending(SetKind kind) {
   else end = thrust::set_symmetric_difference(a.begin(), a.end(), b.begin(), b.end(), output.begin(), less);
   output.resize(static_cast<size_t>(end - output.begin()));
   {
-    INFO("set-" + std::string(magic_enum::enum_name(kind)) + "-descending");
+    INFO(fmt::format("set-{}-descending", magic_enum::enum_name(kind)));
     REQUIRE(((std::vector<Value>(output.begin(), output.end())) == (expected)));
   }
 }
@@ -74,7 +74,7 @@ template <class Value> inline void check_pair_set(SetKind kind) {
   const auto expected = pair_expected(left, right, kind);
   const auto actual = thrust_set_pairs(left, right, kind);
   {
-    INFO("set-" + std::string(magic_enum::enum_name(kind)) + "-key-value");
+    INFO(fmt::format("set-{}-key-value", magic_enum::enum_name(kind)));
     REQUIRE(((actual) == (expected)));
   }
 }
@@ -101,7 +101,7 @@ TEST_CASE("algorithms/roc-thrust-semantic/set-operations-duplicate-heavy/i32/n11
     else end = thrust::set_symmetric_difference(a.begin(), a.end(), b.begin(), b.end(), output.begin());
     output.resize(static_cast<size_t>(end - output.begin()));
     {
-      INFO("set-" + std::string(magic_enum::enum_name(kind)) + "-duplicate-heavy");
+      INFO(fmt::format("set-{}-duplicate-heavy", magic_enum::enum_name(kind)));
       REQUIRE(((std::vector<TestType>(output.begin(), output.end())) == (expected)));
     }
   };
@@ -258,11 +258,11 @@ TEST_CASE("algorithms/roc-thrust-semantic/tuple-sort/i32/n11", "[unified][rocthr
   }
   for (size_t index = 0; index < expected.size(); ++index) {
     {
-      INFO("tuple-sort.key[" + std::to_string(index) + "] mismatch");
+      INFO(fmt::format("tuple-sort.key[{}] mismatch", index));
       REQUIRE((thrust::get<0>(actual[index]) == thrust::get<0>(expected[index])));
     }
     {
-      INFO("tuple-sort.value[" + std::to_string(index) + "] mismatch");
+      INFO(fmt::format("tuple-sort.value[{}] mismatch", index));
       REQUIRE((thrust::get<1>(actual[index]) == thrust::get<1>(expected[index])));
     }
   }
@@ -356,7 +356,7 @@ TEST_CASE("algorithms/roc-thrust-semantic/tuple-scan/i32/n11", "[unified][rocthr
     first += thrust::get<0>(input[index]);
     second += thrust::get<1>(input[index]);
     {
-      INFO("tuple-scan mismatch at " + std::to_string(index));
+      INFO(fmt::format("tuple-scan mismatch at {}", index));
       REQUIRE((thrust::get<0>(actual[index]) == first && thrust::get<1>(actual[index]) == second));
     }
   }
@@ -396,7 +396,7 @@ TEST_CASE("algorithms/roc-thrust-semantic/zip-iterator-scan/i32/n11", "[unified]
     expected_key += keys[index];
     expected_value += values[index];
     {
-      INFO("zip-iterator-scan mismatch at " + std::to_string(index));
+      INFO(fmt::format("zip-iterator-scan mismatch at {}", index));
       REQUIRE((thrust::get<0>(actual[index]) == expected_key && thrust::get<1>(actual[index]) == expected_value));
     }
   }
@@ -439,13 +439,13 @@ TEST_CASE("algorithms/roc-thrust-semantic/transform-input-output-iterator/i32/n1
   const auto first = thrust::make_counting_iterator<TestType>(TestType{1});
   thrust::copy(first, first + static_cast<ptrdiff_t>(size), io);
   for (size_t index = 0; index < size; ++index) {
-    INFO("transform-input-output write mismatch at " + std::to_string(index));
+    INFO(fmt::format("transform-input-output write mismatch at {}", index));
     REQUIRE((values[index] == static_cast<TestType>((index + 1) * (index + 1))));
   }
   thrust::device_vector<TestType> readback(size);
   thrust::copy(io, io + static_cast<ptrdiff_t>(size), readback.begin());
   for (size_t index = 0; index < size; ++index) {
-    INFO("transform-input-output read mismatch at " + std::to_string(index));
+    INFO(fmt::format("transform-input-output read mismatch at {}", index));
     REQUIRE((readback[index] == -values[index]));
   }
 }
@@ -461,7 +461,7 @@ TEST_CASE("algorithms/roc-thrust-semantic/zip-iterator-sort-by-key/i32/n11", "[u
   thrust::sort_by_key(device_keys.begin(), device_keys.end(), zipped);
   for (size_t index = 0; index < keys.size(); ++index) {
     const auto key = device_keys[index];
-    INFO("zip-iterator-sort-by-key association mismatch at " + std::to_string(index));
+    INFO(fmt::format("zip-iterator-sort-by-key association mismatch at {}", index));
     REQUIRE((device_values[index] == static_cast<int32_t>(key * 10) && device_tags[index] == static_cast<int32_t>(key)));
   }
 }

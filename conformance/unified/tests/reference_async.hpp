@@ -7,7 +7,7 @@
 #include <utility>
 #include <vector>
 
-#include "template_async.hpp"
+#include "async_cases.hpp"
 
 namespace unified::test {
 // The unit-test adapter is deliberately asynchronous so the semantic cases

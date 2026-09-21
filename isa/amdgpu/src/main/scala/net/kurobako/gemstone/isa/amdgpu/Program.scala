@@ -18,8 +18,7 @@ object Program {
 
   type Opcode = Opcode.T
   object Opcode extends RefinedType[String, MinLength[1] & NoNul] {
-    private[amdgpu] def normalize(value: String): String =
-      value.map(character => if (character >= 'A' && character <= 'Z') (character + ('a' - 'A')).toChar else character)
+    private[amdgpu] def normalize(value: String): String = value.toLowerCase(java.util.Locale.ROOT)
   }
 
   enum Statement {

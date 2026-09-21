@@ -1,6 +1,3 @@
-set(sycl_cts_url
-  https://codeload.github.com/KhronosGroup/SYCL-CTS/tar.gz/5ea625931cdbe608bab67046356722270449c883)
-set(sycl_cts_sha256 d0db51864d7f754f14daf6f5638e52fba50b2b92f19db4b03772c98a6ddcba88)
 # These categories are comparatively small and cover fundamental runtime
 # objects. Generated type matrices and exhaustive upstream mode are omitted.
 set(sycl_cts_categories
@@ -13,12 +10,8 @@ find_program(sycl_compiler NAMES icpx clang++ REQUIRED)
 if(NOT "${CMAKE_CXX_COMPILER}" STREQUAL "${sycl_compiler}")
   message(FATAL_ERROR "SYCL CTS must use the project C++ compiler: ${CMAKE_CXX_COMPILER}")
 endif()
-conformance_fetch_url(conformance_sycl_cts "${sycl_cts_url}" "${sycl_cts_sha256}"
-  sycl_cts_source)
-conformance_fetch_url(conformance_sycl_cts_opencl_headers
-  https://codeload.github.com/KhronosGroup/OpenCL-Headers/tar.gz/5e2f8c66476bcf60eb8c2921807e34efb30294ee
-  a21ebd5e11577ce4013c12743d46fc65240eab7edde0229c81a8f4aefee5eef6
-  sycl_cts_opencl_headers_source)
+conformance_fetch_url(conformance_sycl_cts sycl_cts_source)
+conformance_fetch_url(conformance_sycl_cts_opencl_headers sycl_cts_opencl_headers_source)
 
 set(staged_source "${CMAKE_CURRENT_BINARY_DIR}/source")
 file(REMOVE_RECURSE "${staged_source}")
@@ -107,6 +100,17 @@ foreach(category IN LISTS sycl_cts_categories)
   endif()
   set_target_properties("test_${category}" PROPERTIES
     BUILD_RPATH "${program_rpath}" INSTALL_RPATH "${program_rpath}")
+  if(TARGET "test_${category}_objects")
+    # The upstream SYCL CTS is vendored third-party code; silence its
+    # diagnostics so only project code is checked.
+    target_compile_options("test_${category}_objects" PRIVATE
+      "$<$<COMPILE_LANG_AND_ID:CXX,IntelLLVM,Clang,AppleClang>:-Wno-deprecated-declarations>"
+      "$<$<COMPILE_LANG_AND_ID:CXX,IntelLLVM,Clang,AppleClang>:-Wno-deprecated-attributes>"
+      "$<$<COMPILE_LANG_AND_ID:CXX,IntelLLVM,Clang,AppleClang>:-Wno-sycl-strict>"
+      "$<$<COMPILE_LANG_AND_ID:CXX,IntelLLVM,Clang,AppleClang>:-Wno-user-defined-warnings>"
+      "$<$<COMPILE_LANG_AND_ID:CXX,IntelLLVM,Clang,AppleClang>:-Wno-return-type>"
+      "$<$<COMPILE_LANG_AND_ID:CXX,IntelLLVM,Clang,AppleClang>:-Wno-cpp>")
+  endif()
   conformance_register_test_program("test_${category}" 120)
 endforeach()
 

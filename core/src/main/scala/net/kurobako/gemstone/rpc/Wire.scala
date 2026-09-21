@@ -58,13 +58,13 @@ object Wire {
     private var failure = Option.empty[String]
 
     def writeByte(value: Byte): Unit =
-      if ensure(1) then {
+      if (ensure(1)) {
         mutableBytes(length) = value
         length += 1
       }
 
     def writeInt(value: Int): Unit =
-      if ensure(4) then {
+      if (ensure(4)) {
         mutableBytes(length) = (value >>> 24).toByte
         mutableBytes(length + 1) = (value >>> 16).toByte
         mutableBytes(length + 2) = (value >>> 8).toByte
@@ -78,24 +78,24 @@ object Wire {
     }
 
     def writeBytes(value: Array[Byte]): Unit =
-      if ensure(value.length) then {
+      if (ensure(value.length)) {
         Array.copy(value, 0, mutableBytes, length, value.length)
         length += value.length
       }
 
-    def reject(message: String): Unit = if failure.isEmpty then failure = Some(message)
+    def reject(message: String): Unit = if (failure.isEmpty) failure = Some(message)
 
     def result(): Either[String, Array[Byte]] =
       failure.toLeft(java.util.Arrays.copyOf(mutableBytes, length))
 
     private def ensure(additional: Int): Boolean =
-      if failure.nonEmpty then false
-      else if additional < 0 || additional > limits.maximumBytes - length then {
+      if (failure.nonEmpty) false
+      else if (additional < 0 || additional > limits.maximumBytes - length) {
         reject(s"wire value exceeds the ${limits.maximumBytes}-byte limit")
         false
       } else {
         val required = length + additional
-        if required > mutableBytes.length then {
+        if (required > mutableBytes.length) {
           val doubled = math.min(limits.maximumBytes.toLong, math.max(1L, mutableBytes.length.toLong * 2L)).toInt
           mutableBytes = java.util.Arrays.copyOf(mutableBytes, math.max(required, doubled))
         }
@@ -530,7 +530,7 @@ object Wire {
       Shape.Text,
       (writer, value) => {
         val bytes = value.getBytes(StandardCharsets.UTF_8)
-        if bytes.length > writer.limits.maximumTextBytes then
+        if (bytes.length > writer.limits.maximumTextBytes)
           writer.reject(
             s"UTF-8 value exceeds the ${writer.limits.maximumTextBytes}-byte text limit"
           )
@@ -549,7 +549,7 @@ object Wire {
     given Codec[Vec[Byte]] = instance(
       Shape.Sequence(Shape.Int8),
       (writer, values) =>
-        if values.length > writer.limits.maximumBytes then
+        if (values.length > writer.limits.maximumBytes)
           writer.reject(
             s"byte collection exceeds the ${writer.limits.maximumBytes}-byte limit"
           )
@@ -567,7 +567,7 @@ object Wire {
     given [A: ClassTag](using element: Codec[A], notByte: NotGiven[A =:= Byte]): Codec[Vec[A]] = instance(
       Shape.Sequence(element.shape),
       (writer, values) =>
-        if values.length > writer.limits.maximumElements then
+        if (values.length > writer.limits.maximumElements)
           writer.reject(
             s"collection exceeds the ${writer.limits.maximumElements}-element limit"
           )

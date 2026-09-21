@@ -1,4 +1,4 @@
-// Generated from pinned official headers by GenerateAPISurfaces. Do not edit mechanically.
+// Generated from pinned official headers by GenerateAPISurfaces. Regenerate with: sbt codegen
 package net.kurobako.gemstone.levelzero
 
 import io.github.iltotore.iron.*
@@ -6,6 +6,7 @@ import io.github.iltotore.iron.constraint.all.*
 import net.kurobako.gemstone.NoNul
 import net.kurobako.gemstone.abi.ABI.*
 
+@javax.annotation.processing.Generated(Array("sbt codegen"))
 object LevelZero {
   type const_uint32_t = CValue["const uint32_t"]
   type const_ze_group_count_t = CValue["const ze_group_count_t"]

@@ -1,4 +1,4 @@
-#include "conformance/profile.hpp"
+#include "profile.hpp"
 
 #include <chrono>
 #include <filesystem>
@@ -6,6 +6,7 @@
 #include <string>
 
 #include <catch2/catch_test_macros.hpp>
+#include <fmt/format.h>
 
 namespace {
 
@@ -13,7 +14,7 @@ class TemporaryDirectory {
 public:
   TemporaryDirectory()
       : path_(std::filesystem::temp_directory_path()
-              / ("conformance-profile-test-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()))) {
+              / fmt::format("conformance-profile-test-{}", std::chrono::steady_clock::now().time_since_epoch().count())) {
     std::filesystem::create_directories(path_);
   }
 
@@ -49,16 +50,16 @@ backend = "opencl"
 device = "*second*"
 )";
 
-  const auto resolved = conformance::profile::resolve(directory.path(), std::nullopt, "local-machine");
+  const auto resolved = conformance::profile::resolve_profile(directory.path(), std::nullopt, "local-machine");
   REQUIRE(resolved.name == "local-machine");
 
-  const auto tests = conformance::profile::make_plan(resolved, {});
+  const auto tests = conformance::profile::resolve_targets(resolved, {});
   REQUIRE(tests.size() == 2);
   CHECK(tests[0].environment.at("SHARED") == "target");
   CHECK(tests[0].environment.at("CONFORMANCE_DEVICE") == "*first*");
   CHECK(tests[0].environment.at("CONFORMANCE_SKIPS") == "global/case\nlocal/case");
 
-  const auto selected = conformance::profile::make_plan(resolved, {"second-opencl"});
+  const auto selected = conformance::profile::resolve_targets(resolved, {"second-opencl"});
   REQUIRE(selected.size() == 1);
   CHECK(selected.front().id == "second-opencl");
   CHECK_FALSE(selected.front().architecture);
@@ -67,7 +68,7 @@ device = "*second*"
 
 TEST_CASE("machine profiles do not invent a fallback target", "[profile]") {
   TemporaryDirectory directory;
-  CHECK_THROWS_AS(conformance::profile::resolve(directory.path(), std::nullopt, "missing-machine"), std::invalid_argument);
+  CHECK_THROWS_AS(conformance::profile::resolve_profile(directory.path(), std::nullopt, "missing-machine"), std::invalid_argument);
 }
 
 TEST_CASE("machine profiles may select multiple architectures of one backend", "[profile]") {
@@ -84,8 +85,8 @@ backend = "cuda"
 architecture = "sm_90"
 )";
 
-  const auto resolved = conformance::profile::resolve(directory.path(), "multi");
-  const auto targets = conformance::profile::make_plan(resolved, {});
+  const auto resolved = conformance::profile::resolve_profile(directory.path(), "multi");
+  const auto targets = conformance::profile::resolve_targets(resolved, {});
   REQUIRE(targets.size() == 2);
   CHECK(targets[0].architecture == "sm_89");
   CHECK(targets[1].architecture == "sm_90");
@@ -97,7 +98,7 @@ TEST_CASE("machine profiles reject the retired host backend", "[profile]") {
 [[targets]]
 backend = "host"
 )";
-  CHECK_THROWS_AS(conformance::profile::resolve(directory.path(), "invalid"), std::invalid_argument);
+  CHECK_THROWS_AS(conformance::profile::resolve_profile(directory.path(), "invalid"), std::invalid_argument);
 }
 
 TEST_CASE("all shipped machine profiles are valid", "[profile]") {

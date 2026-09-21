@@ -3,8 +3,8 @@ package net.kurobako.gemstone.codegen
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 
-private[codegen] final class ScalaPackageVersionConstraint
-private[codegen] object ScalaPackageVersionConstraint {
+final class ScalaPackageVersionConstraint
+object ScalaPackageVersionConstraint {
   given RuntimeConstraint[String, ScalaPackageVersionConstraint] = RuntimeConstraint(
     value =>
       value.refineOption[MinLength[4]].exists {

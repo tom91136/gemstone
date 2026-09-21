@@ -1,4 +1,5 @@
-#include "support.hpp"
+#include <fmt/format.h>
+#include "test_support.hpp"
 
 // Focused port of the former direct-HSA dispatch sample. SPDX-License-Identifier: Apache-2.0
 #include <chrono>
@@ -21,7 +22,7 @@
 namespace {
 void check(hsa_status_t status, const char *operation) {
   {
-    INFO(std::string(operation) + " returned " + std::to_string(status));
+    INFO(fmt::format("{} returned {}", operation, static_cast<int>(status)));
     REQUIRE((status == HSA_STATUS_SUCCESS));
   }
 }
@@ -51,7 +52,7 @@ hsa_status_t find_kernarg(hsa_region_t region, void *data) {
 }
 
 void execute(bool asynchronous_copy) {
-  unified::runtime::Cleanup cleanup;
+  unified::test_runtime::Cleanup cleanup;
   check(hsa_init(), "init");
   cleanup.add([] { hsa_shut_down(); });
   Agents agents;
@@ -101,7 +102,7 @@ void execute(bool asynchronous_copy) {
   auto *source = allocate(256);
   auto *destination = allocate(256);
   auto *guard = allocate(256);
-  const auto expected = unified::runtime::input(64);
+  const auto expected = unified::test_runtime::input(64);
   check(hsa_memory_copy(source, expected.data(), 256), "upload");
   std::memset(destination, 0xa5, 256);
   std::memset(guard, 0x5a, 256);

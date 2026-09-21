@@ -730,7 +730,7 @@ object CodeObject {
         else scanning = false
       }
       val name = String(bytes, valueStart, valueEnd - valueStart, StandardCharsets.US_ASCII)
-      Target.either(name.toLowerCase).leftMap(message =>
+      Target.either(name.toLowerCase(java.util.Locale.ROOT)).leftMap(message =>
         CodeObjectError.Unsupported(message.refineEither[MinLength[1] & NoNul].getOrElse(
           "unsupported AMDGPU target"
         ))

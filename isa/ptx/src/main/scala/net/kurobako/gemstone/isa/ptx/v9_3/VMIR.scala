@@ -323,7 +323,7 @@ private[v9_3] object VMIR {
         left: Value,
         right: Value,
         width: FloatWidth
-    ) extends Instruction(s"${operation.toString.toLowerCase}.f$width")
+    ) extends Instruction(s"${operation.toString.toLowerCase(java.util.Locale.ROOT)}.f$width")
 
     case FloatBinaryPacked(
         operation: FloatOperation,
@@ -331,7 +331,9 @@ private[v9_3] object VMIR {
         left: Value,
         right: Value,
         bf16: Boolean
-    ) extends Instruction(s"${operation.toString.toLowerCase}.${if (bf16) "bf16x2" else "f16x2"}")
+    ) extends Instruction(
+          s"${operation.toString.toLowerCase(java.util.Locale.ROOT)}.${if (bf16) "bf16x2" else "f16x2"}"
+        )
 
     case FloatUnary(operation: FloatUnaryOperation, destination: RegisterName, source: Value, width: FloatWidth)
         extends Instruction(operation match {
@@ -414,7 +416,7 @@ private[v9_3] object VMIR {
         predicate: RegisterName,
         memberMask: Value,
         operation: VoteOperation
-    ) extends Instruction(s"vote.sync.${operation.toString.toLowerCase}.pred")
+    ) extends Instruction(s"vote.sync.${operation.toString.toLowerCase(java.util.Locale.ROOT)}.pred")
 
     case BitFieldExtract(
         destination: RegisterName,
@@ -553,7 +555,7 @@ private[v9_3] object VMIR {
         destination: RegisterName,
         left: RegisterName,
         right: RegisterName
-    ) extends Instruction(s"${operation.toString.toLowerCase}.pred")
+    ) extends Instruction(s"${operation.toString.toLowerCase(java.util.Locale.ROOT)}.pred")
 
     case Branch(target: Pc) extends Instruction("bra")
 
@@ -564,7 +566,7 @@ private[v9_3] object VMIR {
         id: Int :| Positive0,
         predicate: RegisterName,
         operation: PredicateOperation
-    ) extends Instruction(s"bar.red.${operation.toString.toLowerCase}.pred")
+    ) extends Instruction(s"bar.red.${operation.toString.toLowerCase(java.util.Locale.ROOT)}.pred")
 
     case AtomicAdd(destination: RegisterName, address: Value, source: Value, width: BitWidth, global: Boolean)
         extends Instruction(s"atom.${if (global) "global" else "shared"}.add.u$width")

@@ -1,7 +1,8 @@
 package net.kurobako.gemstone.server.recording
 
 import net.kurobako.gemstone.rpc.ExecutionRPC
-import net.kurobako.gemstone.server.transport.{ControlProtocol, RPCPort}
+import net.kurobako.gemstone.server.transport.ServerControl
+import net.kurobako.gemstone.server.transport.Transport.*
 
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
@@ -44,9 +45,9 @@ final class RPCReplaySuite extends munit.FunSuite {
         } catch { case _: SocketException if stopping.get() => () }
     )
     acceptor.start()
-    def endpoint: RPCReplay.Endpoint = {
+    def endpoint: RPCReplay.Target = {
       val port = RPCPort.either(server.getLocalPort).fold(message => fail(message), value => value)
-      RPCReplay.Endpoint(port, () => close())
+      RPCReplay.Target(port, () => close())
     }
     private def serve(socket: Socket): Unit = {
       val input = DataInputStream(socket.getInputStream); val output = DataOutputStream(socket.getOutputStream)
@@ -54,24 +55,24 @@ final class RPCReplaySuite extends munit.FunSuite {
       var active = true
       while (active) {
         val magic = input.readInt()
-        if (magic == ControlProtocol.Magic) {
+        if (magic == ServerControl.Magic) {
           input.readInt() match {
-            case ControlProtocol.RegisterClient => output.writeLong(registered.incrementAndGet().toLong + 100L)
-            case ControlProtocol.ReleaseClient  =>
+            case ServerControl.RegisterClient => output.writeLong(registered.incrementAndGet().toLong + 100L)
+            case ServerControl.ReleaseClient  =>
               input.readLong(); released.incrementAndGet()
               output.writeInt(0)
             case value => throw IOException(s"bad control operation $value")
           }
           output.flush(); active = false
         } else {
-          assertEquals(magic, RPCFrames.ExecutionRequest)
+          assertEquals(magic, ExecutionRPC.RequestMagic)
           val header = ExecutionRPC.RequestHeaderBytes
           val prefix = Array.ofDim[Byte](header); ByteBuffer.wrap(prefix).putInt(magic)
           input.readFully(prefix, 4, header - 4)
-          val extra = RPCFrames.integer(prefix, ExecutionRPC.RequestPayloadSizeOffset)
+          val extra = RPCJournal.Frames.integer(prefix, ExecutionRPC.RequestPayloadSizeOffset)
           assert(extra >= 0 && extra <= 4096)
           val frame  = java.util.Arrays.copyOf(prefix, header + extra); input.readFully(frame, header, extra)
-          val client = ByteBuffer.wrap(frame).getLong(RPCFrames.ClientOffset)
+          val client = ByteBuffer.wrap(frame).getLong(ExecutionRPC.RequestClientOffset)
           assert(client != 23L); clients.add(client)
           handle(frame, input, output); output.flush()
         }
@@ -98,8 +99,8 @@ final class RPCReplaySuite extends munit.FunSuite {
       val arrivals = CountDownLatch(2)
       val peer     = Peer { (request, _, out) =>
         assertEquals(
-          RPCFrames.normalized(RPCJournal.Kind.Request, request, 4096).toSeq,
-          RPCFrames.normalized(RPCJournal.Kind.Request, execution(session = 77), 4096).toSeq
+          RPCJournal.Frames.normalized(RPCJournal.Kind.Request, request, 4096).toSeq,
+          RPCJournal.Frames.normalized(RPCJournal.Kind.Request, execution(session = 77), 4096).toSeq
         )
         arrivals.countDown(); val arrived = arrivals.await(2, TimeUnit.SECONDS); assert(arrived); out.write(response())
       }
@@ -172,7 +173,7 @@ final class RPCReplaySuite extends munit.FunSuite {
         val e = intercept[IOException](RPCReplay.run(
           RPCReplay.Options(file, schema, 3000),
           _ =>
-            RPCReplay.Endpoint(peer.endpoint.port, () => { closed.set(true); peer.close() })
+            RPCReplay.Target(peer.endpoint.port, () => { closed.set(true); peer.close() })
         ))
         assert(e.getMessage.contains("frame differs"), e.getMessage); assert(closed.get()); peer.verify()
       }

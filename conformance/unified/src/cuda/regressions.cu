@@ -1,7 +1,8 @@
-#include "support.hpp"
+#include <fmt/format.h>
+#include "test_support.hpp"
 
 #define UNIFIED_API_THRUST_DEVICE_FUNCTIONS 1
-#include "api_thrust.hpp"
+#include "backend_thrust.hpp"
 #undef UNIFIED_API_THRUST_DEVICE_FUNCTIONS
 
 #include <cmath>
@@ -64,7 +65,7 @@ template <uint32_t BlockSize> __global__ void clover_divergent_barrier(double *o
 TEST_CASE("regressions/miniapp/cloverleaf/cuda-divergent-barrier-id", "[unified][regression]") {
   constexpr uint32_t block_size = 256;
 
-  unified::runtime::Cleanup cleanup;
+  unified::test_runtime::Cleanup cleanup;
   double *output = nullptr;
   check(cudaMalloc(reinterpret_cast<void **>(&output), sizeof(double)), "Clover divergent barrier allocation");
   cleanup.add([=] { cudaFree(output); });
@@ -73,7 +74,7 @@ TEST_CASE("regressions/miniapp/cloverleaf/cuda-divergent-barrier-id", "[unified]
   check(cudaDeviceSynchronize(), "Clover divergent barrier synchronize");
   double actual = 0.0;
   check(cudaMemcpy(&actual, output, sizeof(actual), cudaMemcpyDeviceToHost), "Clover divergent barrier download");
-  if (actual != 6.0) throw std::runtime_error("Clover divergent barrier mismatch: expected 6, got " + std::to_string(actual));
+  if (actual != 6.0) throw std::runtime_error(fmt::format("Clover divergent barrier mismatch: expected 6, got {}", actual));
 }
 
 template <uint32_t BlockSize> __global__ void clover_style_reduction(const double *input, double *output, size_t size) {
@@ -93,7 +94,7 @@ TEST_CASE("regressions/miniapp/cloverleaf/cuda-shared-reduction", "[unified][reg
   std::iota(host_input.begin(), host_input.end(), 1.0);
   const double expected = std::accumulate(host_input.begin(), host_input.end(), 0.0);
 
-  unified::runtime::Cleanup cleanup;
+  unified::test_runtime::Cleanup cleanup;
   double *input = nullptr;
   double *output = nullptr;
   check(cudaMalloc(reinterpret_cast<void **>(&input), host_input.size() * sizeof(double)), "Clover-style reduction input allocation");
@@ -110,7 +111,7 @@ TEST_CASE("regressions/miniapp/cloverleaf/cuda-shared-reduction", "[unified][reg
   check(cudaMemcpy(partials.data(), output, partials.size() * sizeof(double), cudaMemcpyDeviceToHost), "Clover-style reduction download");
   const double actual = std::accumulate(partials.begin(), partials.end(), 0.0);
   if (!std::isfinite(actual) || std::abs(actual - expected) > 1.0e-10 * expected)
-    throw std::runtime_error("Clover-style reduction mismatch: expected " + std::to_string(expected) + ", got " + std::to_string(actual));
+    throw std::runtime_error(fmt::format("Clover-style reduction mismatch: expected {}, got {}", expected, actual));
 }
 
 } // namespace cuda_regressions

@@ -4,7 +4,7 @@ import net.kurobako.gemstone.rpc.ExecutionProtocol.ExecutionFailure
 import net.kurobako.gemstone.rpc.ExecutionRPC
 import net.kurobako.gemstone.rpc.ExecutionRPC.Operation
 import net.kurobako.gemstone.rpc.Wire
-import net.kurobako.gemstone.server.transport.{ClientId, RPCPort}
+import net.kurobako.gemstone.server.transport.Transport.*
 
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
@@ -12,7 +12,7 @@ import io.github.iltotore.iron.constraint.all.*
 import java.io.{DataInputStream, DataOutputStream, IOException}
 import java.net.Socket
 
-private[gemstone] final class ExecutionRPCTestClient(
+private final class ExecutionRPCTestClient(
     port: RPCPort,
     client: ClientId,
     process: Long = 42L,

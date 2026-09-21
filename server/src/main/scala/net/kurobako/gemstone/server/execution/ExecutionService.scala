@@ -1,6 +1,6 @@
 package net.kurobako.gemstone.server.execution
 
-import net.kurobako.gemstone.Vec
+import net.kurobako.gemstone.{NoNul, Vec}
 import net.kurobako.gemstone.Vec.*
 import net.kurobako.gemstone.binary.ByteRange
 import net.kurobako.gemstone.binary.LittleEndian
@@ -15,6 +15,7 @@ import net.kurobako.gemstone.vm.{
   KernelTask,
   Memory,
   MemoryRegion,
+  ObservationContext,
   Scheduler,
   TaskControl,
   TaskLimits
@@ -27,12 +28,10 @@ import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.locks.ReentrantLock
 import scala.annotation.tailrec
 import scala.collection.mutable
-import scala.concurrent.ExecutionContext
 
 /** Process-neutral program and memory receiver shared by every native API facade. */
-private[server] final class ExecutionService(
-    backends: BackendCatalog,
-    schedule: Runnable => Unit = runnable => ExecutionContext.global.execute(runnable),
+final class ExecutionService(
+    backends: List[RuntimeBackend],
     taskLimits: TaskLimits = TaskLimits.Default,
     scheduler: Scheduler = Scheduler.Sequential
 ) extends AutoCloseable {
@@ -61,7 +60,7 @@ private[server] final class ExecutionService(
   )
   private final case class State(
       allocations: Map[AllocationId, RemoteAllocation],
-      programs: Map[ProgramId, RuntimeProgram],
+      programs: Map[ProgramId, RuntimeBackend.Program],
       completions: Map[CompletionId, CompletionRecord],
       nextAllocation: AllocationId,
       nextProgram: ProgramId,
@@ -75,10 +74,9 @@ private[server] final class ExecutionService(
   private val stateChanged = stateLock.newCondition()
   private val dirtyChunks  =
     mutable.HashMap.empty[CompletionId, mutable.HashMap[AllocationId, mutable.LongMap[Unit]]]
-  private val pendingExecutions    = mutable.Queue.empty[(CompletionId, RuntimeProgram, KernelTask, TaskControl)]
+  private val pendingExecutions = mutable.Queue.empty[(CompletionId, RuntimeBackend.Program, KernelTask, TaskControl)]
   private val programLifecycleLock = ReentrantLock()
   private val observer             = CompletionObserver()
-  private val sessions             = mutable.Map.empty[ProgramEncoding, BackendSession]
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private var executionWorkerScheduled = false
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
@@ -151,7 +149,7 @@ private[server] final class ExecutionService(
     }
   }
 
-  def load(encoding: ProgramEncoding, image: Vec[Byte]): Either[ExecutionFailure, ProgramId] = {
+  def load(encoding: String, image: Vec[Byte]): Either[ExecutionFailure, ProgramId] = {
     // Reserve the identity under the state lock, but do not hold that lock
     // while decoding/preparing a potentially large code object. HSA memory
     // and AQL connections share this service; keeping the old lock
@@ -169,11 +167,7 @@ private[server] final class ExecutionService(
       case Left(error) => Left(error)
       case Right(id)   =>
         val loaded = programLifecycleLock.withLock {
-          for {
-            backend <- backends.backend(encoding)
-            session = sessions.getOrElseUpdate(encoding, backend.open(MachineServices(observer, scheduler)))
-            program <- session.load(image)
-          } yield program
+          backendFor(encoding).flatMap(backend => backend.load(RuntimeBackend.Services(observer, scheduler), image))
         }.left.map(runtimeFailure(_))
         loaded match {
           case Left(error)    => Left(error)
@@ -358,30 +352,31 @@ private[server] final class ExecutionService(
         case Right(_)    =>
           val id           = current.nextCompletion
           val cancellation = TaskControl.Cancellation.Source()
-          val control   = TaskControl.forScheduler(taskLimits, cancellation, TaskToken(id.value).observation, scheduler)
-          val loaded    = current.programs(program)
-          val addressed = current.allocations.view.collect {
+          val control      = TaskControl.forScheduler(taskLimits, cancellation, ObservationContext(id.value), scheduler)
+          val loaded       = current.programs(program)
+          val addressed    = current.allocations.view.collect {
             case (allocation, value) if value.address.nonEmpty => allocation
           }.toSet
-          observer.register(TaskToken(id.value))(event => observe(id, event)).left.map(runtimeFailure(_)).map { _ =>
-            state.set(
-              current.copy(
-                completions = current.completions.updated(
-                  id,
-                  CompletionRecord(
-                    CompletionStatus.Pending,
-                    program,
-                    addressed ++ referencedAllocations(task) ++ boundAllocations.getOrElse(program, Set.empty),
-                    Vec.empty,
-                    Vec.empty,
-                    cancellation
-                  )
-                ),
-                nextCompletion = current.nextCompletion.next
+          observer.register(ObservationContext(id.value))(event => observe(id, event)).left.map(runtimeFailure(_)).map {
+            _ =>
+              state.set(
+                current.copy(
+                  completions = current.completions.updated(
+                    id,
+                    CompletionRecord(
+                      CompletionStatus.Pending,
+                      program,
+                      addressed ++ referencedAllocations(task) ++ boundAllocations.getOrElse(program, Set.empty),
+                      Vec.empty,
+                      Vec.empty,
+                      cancellation
+                    )
+                  ),
+                  nextCompletion = current.nextCompletion.next
+                )
               )
-            )
-            dirtyChunks.update(id, mutable.HashMap.empty)
-            (id, loaded, task, control)
+              dirtyChunks.update(id, mutable.HashMap.empty)
+              (id, loaded, task, control)
           }
       }
     }
@@ -395,7 +390,7 @@ private[server] final class ExecutionService(
         }
       }
       if (startWorker)
-        try schedule(() => runPendingExecutions())
+        try scheduler.schedule(() => runPendingExecutions())
         catch {
           case scala.util.control.NonFatal(error) => failPendingExecutions(
               ExecutionFailure.Failed(
@@ -408,39 +403,40 @@ private[server] final class ExecutionService(
   }
 
   private def runPendingExecutions(): Unit = {
-    def dequeueLocked(): Option[(CompletionId, RuntimeProgram, KernelTask, TaskControl)] = {
+    def dequeueLocked(): Option[(CompletionId, RuntimeBackend.Program, KernelTask, TaskControl)] = {
       val value = pendingExecutions.dequeueFirst(_ => true)
       if (value.isEmpty) executionWorkerScheduled = false
       value
     }
-    @tailrec def loop(next: Option[(CompletionId, RuntimeProgram, KernelTask, TaskControl)]): Unit = next match {
-      case None                               => ()
-      case Some((id, program, task, control)) =>
-        val status =
-          try
-            programLifecycleLock.withLock {
-              program.execute(task, completionMemory(id), control)
-            }
-              .fold(error => CompletionStatus.Failed(runtimeFailure(error)), _ => CompletionStatus.Succeeded)
-          catch {
-            case scala.util.control.NonFatal(error) =>
-              CompletionStatus.Failed(
-                ExecutionFailure.Failed(
-                  s"program executor failed: ${Option(error.getMessage).getOrElse(error.getClass.getName)}"
+    @tailrec def loop(next: Option[(CompletionId, RuntimeBackend.Program, KernelTask, TaskControl)]): Unit =
+      next match {
+        case None                               => ()
+        case Some((id, program, task, control)) =>
+          val status =
+            try
+              programLifecycleLock.withLock {
+                program.execute(task, completionMemory(id), control)
+              }
+                .fold(error => CompletionStatus.Failed(runtimeFailure(error)), _ => CompletionStatus.Succeeded)
+            catch {
+              case scala.util.control.NonFatal(error) =>
+                CompletionStatus.Failed(
+                  ExecutionFailure.Failed(
+                    s"program executor failed: ${Option(error.getMessage).getOrElse(error.getClass.getName)}"
+                  )
                 )
-              )
+            }
+          val following = stateLock.withLock {
+            val current = state.get()
+            current.completions.get(id).foreach { record =>
+              state.set(current.copy(completions = current.completions.updated(id, record.copy(status = status))))
+              observer.remove(ObservationContext(id.value))
+              stateChanged.signalAll()
+            }
+            dequeueLocked()
           }
-        val following = stateLock.withLock {
-          val current = state.get()
-          current.completions.get(id).foreach { record =>
-            state.set(current.copy(completions = current.completions.updated(id, record.copy(status = status))))
-            observer.remove(TaskToken(id.value))
-            stateChanged.signalAll()
-          }
-          dequeueLocked()
-        }
-        loop(following)
-    }
+          loop(following)
+      }
     loop(stateLock.withLock(dequeueLocked()))
     cleanupClosedSession()
   }
@@ -448,7 +444,7 @@ private[server] final class ExecutionService(
   private def failPendingExecutions(error: ExecutionFailure): Unit = {
     stateLock.withLock {
       val ids = pendingExecutions.map(_._1).toSet
-      ids.foreach(id => observer.remove(TaskToken(id.value)))
+      ids.foreach(id => observer.remove(ObservationContext(id.value)))
       pendingExecutions.clear()
       executionWorkerScheduled = false
       val current = state.get()
@@ -466,7 +462,7 @@ private[server] final class ExecutionService(
         closed = true
         state.get().completions.values.view.foreach(_.cancellation.cancel())
         val cancelled = pendingExecutions.map(_._1).toSet
-        cancelled.foreach(id => observer.remove(TaskToken(id.value)))
+        cancelled.foreach(id => observer.remove(ObservationContext(id.value)))
         pendingExecutions.clear()
         val current = state.get()
         state.set(current.copy(completions = current.completions.map { case (id, record) =>
@@ -493,13 +489,7 @@ private[server] final class ExecutionService(
         Some(current.programs.values.toVector)
       }
     }
-    programs.foreach { loaded =>
-      programLifecycleLock.withLock {
-        loaded.foreach(_.close())
-        sessions.values.foreach(_.close())
-        sessions.clear()
-      }
-    }
+    programs.foreach(loaded => programLifecycleLock.withLock(loaded.foreach(_.close())))
   }
 
   def completion(id: CompletionId): Either[ExecutionFailure, CompletionStatus] =
@@ -882,17 +872,19 @@ private[server] final class ExecutionService(
       }
     }
 
-  private def program(id: ProgramId): Either[ExecutionFailure, RuntimeProgram] =
+  private def program(id: ProgramId): Either[ExecutionFailure, RuntimeBackend.Program] =
     state.get().programs.get(id).toRight(ExecutionFailure.NotFound(s"program ${id.value} is not loaded"))
 
-  private def runtimeFailure(error: RuntimeError): ExecutionFailure = error match {
-    case RuntimeError.NotFound(detail)    => ExecutionFailure.NotFound(detail)
-    case RuntimeError.Unsupported(detail) => ExecutionFailure.Unsupported(detail)
-    case RuntimeError.UnknownEncoding(_)  => ExecutionFailure.Unsupported(error.message)
-    case RuntimeError.Decode(detail)      => ExecutionFailure.InvalidRequest(detail)
-    case RuntimeError.Load(detail)        => ExecutionFailure.InvalidRequest(detail)
-    case RuntimeError.Lifecycle(detail)   => ExecutionFailure.Failed(detail)
-    case RuntimeError.Execution(fault)    => faultFailure(fault)
+  private def backendFor(encoding: String): Either[RuntimeBackend.Error, RuntimeBackend] =
+    backends.find(_.encoding == encoding)
+      .toRight(RuntimeBackend.Error.Unsupported(s"unknown program encoding: $encoding"))
+
+  private def runtimeFailure(error: RuntimeBackend.Error): ExecutionFailure = error match {
+    case RuntimeBackend.Error.Invalid(detail)     => ExecutionFailure.InvalidRequest(detail)
+    case RuntimeBackend.Error.NotFound(detail)    => ExecutionFailure.NotFound(detail)
+    case RuntimeBackend.Error.Unsupported(detail) => ExecutionFailure.Unsupported(detail)
+    case RuntimeBackend.Error.Failed(detail)      => ExecutionFailure.Failed(detail)
+    case RuntimeBackend.Error.Execution(fault)    => faultFailure(fault)
   }
 
   private def faultFailure(fault: Fault): ExecutionFailure = fault match {
@@ -996,4 +988,32 @@ private[server] final class ExecutionService(
       .toRight(ExecutionFailure.InvalidRequest(
         s"byte range $offset + $size exceeds allocation size $length"
       ))
+}
+
+object ExecutionService {
+  val MaxInstructionsEnvironment: String :| (MinLength[1] & NoNul) = "GEMSTONE_EXECUTION_MAX_INSTRUCTIONS"
+  val QuantumEnvironment: String :| (MinLength[1] & NoNul)         = "GEMSTONE_EXECUTION_QUANTUM"
+
+  def limits(environment: Map[String, String]): Either[String, TaskLimits] = {
+    val maximum = environment.get(MaxInstructionsEnvironment) match {
+      case None        => Right(TaskLimits.Default.maxInstructions)
+      case Some(value) => value.toLongOption
+          .toRight(s"$MaxInstructionsEnvironment must be a positive integer: $value")
+          .flatMap(_.refineEither[Positive].left.map(_ =>
+            s"$MaxInstructionsEnvironment must be positive: $value"
+          ))
+    }
+    val quantum = environment.get(QuantumEnvironment) match {
+      case None        => Right(TaskLimits.Default.quantum)
+      case Some(value) => value.toIntOption
+          .toRight(s"$QuantumEnvironment must be a positive integer: $value")
+          .flatMap(_.refineEither[Positive].left.map(_ =>
+            s"$QuantumEnvironment must be positive: $value"
+          ))
+    }
+    for {
+      maxInstructions <- maximum
+      quantumValue    <- quantum
+    } yield TaskLimits(maxInstructions, quantumValue)
+  }
 }

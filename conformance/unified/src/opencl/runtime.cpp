@@ -1,4 +1,5 @@
-#include "support.hpp"
+#include <fmt/format.h>
+#include "test_support.hpp"
 
 #define CL_TARGET_OPENCL_VERSION 120
 #include <cstddef>
@@ -17,12 +18,12 @@
 namespace {
 void check(cl_int status, const char *operation) {
   {
-    INFO(std::string(operation) + " returned " + std::to_string(status));
+    INFO(fmt::format("{} returned {}", operation, status));
     REQUIRE((status == CL_SUCCESS));
   }
 }
 void execute(bool binary_roundtrip) {
-  unified::runtime::Cleanup cleanup;
+  unified::test_runtime::Cleanup cleanup;
   const auto device = reinterpret_cast<cl_device_id>(static_cast<uintptr_t>(conformance::device_selection().native_handle));
   cl_int status = 0;
   auto context = clCreateContext(nullptr, 1, &device, nullptr, nullptr, &status);
@@ -74,7 +75,7 @@ void execute(bool binary_roundtrip) {
   check(status, "kernel");
   cleanup.add([=] { clReleaseKernel(kernel); });
   constexpr size_t size = 128, local = 32;
-  auto values = unified::runtime::input(size);
+  auto values = unified::test_runtime::input(size);
   std::vector<int32_t> output(size, 0);
   auto source_buffer = clCreateBuffer(context, CL_MEM_READ_ONLY, size * sizeof(int32_t), nullptr, &status);
   check(status, "input buffer");
@@ -94,7 +95,7 @@ void execute(bool binary_roundtrip) {
   cleanup.add([=] { clReleaseEvent(downloaded); });
   check(clWaitForEvents(1, &downloaded), "completion");
   for (size_t i = 0; i < size; ++i) {
-    INFO("local-memory/barrier result mismatch at " + std::to_string(i));
+    INFO(fmt::format("local-memory/barrier result mismatch at {}", i));
     REQUIRE((output[i] == values[(i / local) * local + (i + 1) % local] + static_cast<int32_t>(i / local)));
   }
 }

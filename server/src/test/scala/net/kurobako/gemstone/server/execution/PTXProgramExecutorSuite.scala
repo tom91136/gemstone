@@ -41,7 +41,7 @@ final class PTXProgramExecutorSuite extends munit.FunSuite {
          |  ret;
          |}
          |""".stripMargin
-    Using.resource(ExecutionService(GemstoneBackendCatalog.default, _.run())) { service =>
+    Using.resource(ExecutionService(RuntimeBackend.defaults)) { service =>
       val allocation = service.registerAllocation(16L, AllocationKind.Shared).toOption.get
       val output     = service.registerAllocation(4L, AllocationKind.Shared).toOption.get
       val program    =

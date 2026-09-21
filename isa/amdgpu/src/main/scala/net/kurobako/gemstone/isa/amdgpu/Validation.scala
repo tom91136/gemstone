@@ -42,7 +42,7 @@ object Validation {
         Vec.nonEmpty(Issue.UnsupportedInstruction(instruction.opcode, target))
       )
     else {
-      val formats = definitions.map(_.format.value.toUpperCase).distinct
+      val formats = definitions.map(_.format.value.toUpperCase(java.util.Locale.ROOT)).distinct
       if (formats.contains("SOPP")) validateSOPP(instruction, target, definitions)
       else unsupported(
         s"operand constraints are not normalized for ${formats.sorted.mkString(",")}"

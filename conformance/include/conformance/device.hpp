@@ -24,10 +24,14 @@ struct DeviceSelection {
   std::map<std::string, std::string> environment;
   uint64_t native_handle = 0;
 };
+struct DeviceProbeResult {
+  std::string device;
+  std::map<std::string, std::string> environment;
+};
 const DeviceSelection &device_selection();
 PhysicalDevice physical_device();
 
-inline PhysicalDevice pci_device(uint32_t domain, uint8_t bus, uint8_t device, uint8_t function) {
+inline PhysicalDevice make_pci_device(uint32_t domain, uint8_t bus, uint8_t device, uint8_t function) {
   PhysicalDevice result{PhysicalDeviceScheme::pci, {}};
   result.value[0] = static_cast<uint8_t>(domain >> 24);
   result.value[1] = static_cast<uint8_t>(domain >> 16);
@@ -39,13 +43,13 @@ inline PhysicalDevice pci_device(uint32_t domain, uint8_t bus, uint8_t device, u
   return result;
 }
 
-inline PhysicalDevice uuid_device(const uint8_t *uuid) {
+inline PhysicalDevice make_uuid_device(const uint8_t *uuid) {
   PhysicalDevice result{PhysicalDeviceScheme::uuid, {}};
   std::memcpy(result.value, uuid, sizeof(result.value));
   return result;
 }
 
-inline PhysicalDevice registry_device(std::string_view identity) {
+inline PhysicalDevice make_registry_device(std::string_view identity) {
   // Two seeded FNV-1a lanes give opaque platform identifiers a stable local
   // lock key without introducing a hashing dependency into staged projects.
   uint64_t lanes[]{14695981039346656037ull, 7809847782465536322ull};

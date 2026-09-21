@@ -2,7 +2,7 @@
 #include <catch2/generators/catch_generators_range.hpp>
 
 #include "reference_async.hpp"
-#include "template_async.hpp"
+#include "async_cases.hpp"
 
 #define DECLARE_REFERENCE_PORTABLE_ASYNC(name, check)                                                                                      \
   TEMPLATE_TEST_CASE("reference portable async/" name, "[unit][async]", int32_t, float) {                                                  \

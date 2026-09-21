@@ -1,4 +1,4 @@
-# Generated from pinned LLVM MC/AMDGPU checks. Do not edit.
+# Generated from pinned LLVM MC/AMDGPU checks. Regenerate with: sbt codegen
 source-files=770
 source-encoding-checks=379260
 source-diagnostic-checks=114008
