@@ -1454,6 +1454,10 @@ lazy val conformance = project.in(file("conformance"))
         "GEMSTONE_EXECUTION_PARALLELISM",
         math.max(1, math.min(64, cores - jobs - 2))
       )
+      val serverHeap = sys.env.getOrElse(
+        "GEMSTONE_CONFORMANCE_SERVER_HEAP",
+        s"${math.max(8L, math.min(32L, jobs.toLong * 6L))}g"
+      )
       val classpath = (server.jvm(scala3Version) / Runtime / fullClasspath).value
         .map(entry => s"${converter.toPath(entry.data)}")
         .mkString(sys.props("path.separator"))
@@ -1462,7 +1466,7 @@ lazy val conformance = project.in(file("conformance"))
       val serverCommand = Vector(
         s"$java",
         "-Xms512m",
-        s"-Xmx${sys.env.getOrElse("GEMSTONE_CONFORMANCE_SERVER_HEAP", "8g")}",
+        s"-Xmx$serverHeap",
         "-cp",
         classpath,
         s"$rootPackage.server.cli.GemstoneCLI"

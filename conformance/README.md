@@ -109,7 +109,8 @@ build/executable/bin/conformance run \
 
 Pass backend or target names before `--launcher` to narrow a run. `CONFORMANCE_JOBS` controls CTest parallelism.
 For `sbt conformance/emulate`, the default is at most four concurrent tests, with the server worker pool sized from the
-remaining CPUs; `CONFORMANCE_JOBS` and `GEMSTONE_EXECUTION_PARALLELISM` override these defaults.
+remaining CPUs and its maximum heap scaled to the test count (8–32 GiB). `CONFORMANCE_JOBS`,
+`GEMSTONE_EXECUTION_PARALLELISM`, and `GEMSTONE_CONFORMANCE_SERVER_HEAP` override these defaults.
 `workloads/compact.toml` and `workloads/full.toml` define the available workload sizes.
 
 ## Unit tests
