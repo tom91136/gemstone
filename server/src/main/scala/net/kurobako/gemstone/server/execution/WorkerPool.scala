@@ -11,7 +11,11 @@ import java.util.concurrent.locks.ReentrantLock
 import scala.collection.mutable
 import scala.util.control.NonFatal
 
-/** One fixed CPU pool. Jobs rotate after each workgroup, and nested dispatch callers help the same queue. */
+/**
+ * One fixed CPU pool. Jobs rotate after each chunk, and nested dispatch callers help the same queue. A launch only
+ * stays on the calling thread when it is too small to amortise queue traffic; claiming a range per dequeue keeps that
+ * threshold low.
+ */
 final class WorkerPool(
     val parallelism: Int :| Positive,
     minGroups: Long = 16L,
@@ -19,6 +23,7 @@ final class WorkerPool(
 ) extends Scheduler with AutoCloseable {
   private final class Job(
       val count: Long :| Positive0,
+      val grain: Int,
       val task: Long :| Positive0 => Either[Fault, Unit]
   ) {
     @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
@@ -31,11 +36,12 @@ final class WorkerPool(
     @volatile var finished                    = count == 0L
     val observed: Option[mutable.Set[String]] = Option.when(trace)(mutable.Set.empty)
   }
-  private val trace     = sys.env.contains("GEMSTONE_PERF_TRACE")
-  private val lock      = ReentrantLock()
-  private val available = lock.newCondition()
-  private val queue     = mutable.ArrayDeque.empty[Job]
-  private val inWorker  = ThreadLocal.withInitial[Boolean](() => false)
+  private val trace        = sys.env.contains("GEMSTONE_PERF_TRACE")
+  private val lock         = ReentrantLock()
+  private val workReady    = lock.newCondition()
+  private val jobComplete  = lock.newCondition()
+  private val queue        = mutable.ArrayDeque.empty[Job]
+  private val inWorker     = ThreadLocal.withInitial[Boolean](() => false)
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   @volatile private var closed = false
   private val threads          = Array.tabulate(parallelism) { index =>
@@ -45,39 +51,61 @@ final class WorkerPool(
     thread
   }
 
+  /** Roughly four claims per worker keeps the queue touched a bounded number of times without starving a worker. */
+  private def grainFor(count: Long): Int = {
+    val perWorker = parallelism.toLong * 4L
+    val grain     = if (count <= perWorker) 1L else (count - 1L) / perWorker + 1L
+    math.max(1L, math.min(count, math.min(grain, Int.MaxValue.toLong))).toInt
+  }
+
   private def enqueue(
       count: Long :| Positive0,
       task: Long :| Positive0 => Either[Fault, Unit]
   ): Job = lock.withLock {
     if (closed) throw java.util.concurrent.RejectedExecutionException("execution pool is closed")
-    val job = Job(count, task)
-    if (count > 0L) queue.append(job)
-    available.signalAll()
+    val job = Job(count, grainFor(count), task)
+    if (count > 0L) {
+      queue.append(job)
+      workReady.signal()
+    }
     job
   }
 
-  private def take(until: Option[Job]): Option[(Job, Long)] = lock.withLock {
-    while (!closed && queue.isEmpty && until.forall(!_.finished)) available.await()
+  private def take(until: Option[Job]): Option[(Job, Long, Int)] = lock.withLock {
+    while (!closed && queue.isEmpty && until.forall(!_.finished)) workReady.await()
     if (closed || until.exists(_.finished)) None
     else {
       val job   = queue.removeHead()
-      val index = job.next
-      job.next += 1L
+      val start = job.next
+      val end   = math.min(job.count, start + job.grain.toLong)
+      job.next = end
       job.active += 1
       job.observed.foreach(_ += Thread.currentThread().getName)
-      if (job.next < job.count) queue.append(job)
-      Some(job -> index)
+      if (job.next < job.count) {
+        queue.append(job)
+        workReady.signal()
+      }
+      Some((job, start, (end - start).toInt))
     }
   }
 
-  private def execute(work: (Job, Long)): Unit = {
-    val (job, index) = work
-    val result       = try job.task(index.refineUnsafe[Positive0])
-    catch {
-      case NonFatal(error) =>
-        val detail = Option(error.getMessage).filter(_.nonEmpty).getOrElse(error.getClass.getName)
-        Left(Fault.Backend(detail))
-    }
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+  private def execute(work: (Job, Long, Int)): Unit = {
+    val (job, start, length) = work
+    val result                =
+      try {
+        var offset                       = 0
+        var outcome: Either[Fault, Unit] = Right(())
+        while (offset < length && outcome.isRight) {
+          outcome = job.task((start + offset.toLong).refineUnsafe[Positive0])
+          offset += 1
+        }
+        outcome
+      } catch {
+        case NonFatal(error) =>
+          val detail = Option(error.getMessage).filter(_.nonEmpty).getOrElse(error.getClass.getName)
+          Left(Fault.Backend(detail))
+      }
     lock.withLock {
       job.active -= 1
       result.left.toOption.foreach { error =>
@@ -85,8 +113,11 @@ final class WorkerPool(
         queue.filterInPlace(_ ne job)
         job.next = job.count
       }
-      if (job.active == 0 && job.next == job.count) job.finished = true
-      available.signalAll()
+      if (job.active == 0 && job.next == job.count) {
+        job.finished = true
+        jobComplete.signalAll()
+        workReady.signalAll()
+      }
     }
   }
 
@@ -102,7 +133,7 @@ final class WorkerPool(
     if (inWorker.get()) {
       while (!job.finished && !closed) take(Some(job)).foreach(execute(_))
     } else lock.withLock {
-      while (!job.finished && !closed) available.await()
+      while (!job.finished && !closed) jobComplete.await()
     }
     if (!job.finished) Left(Fault.Backend("execution pool closed before the job completed"))
     else job.failure.toLeft(())
@@ -131,7 +162,12 @@ final class WorkerPool(
   }
 
   override def close(): Unit = {
-    lock.withLock { closed = true; queue.clear(); available.signalAll() }
+    lock.withLock {
+      closed = true
+      queue.clear()
+      workReady.signalAll()
+      jobComplete.signalAll()
+    }
     threads.foreach(_.interrupt())
     threads.view.filterNot(_ eq Thread.currentThread()).foreach(_.join())
   }
@@ -158,8 +194,8 @@ object WorkerPool {
       throw IllegalArgumentException(s"$EnvironmentName=$configured exceeds host bound $available")
     WorkerPool(
       configured,
-      minGroups = configured.toLong * 4L,
-      minWorkItems = 64L
+      minGroups = configured.toLong,
+      minWorkItems = 32L
     )
   }
 

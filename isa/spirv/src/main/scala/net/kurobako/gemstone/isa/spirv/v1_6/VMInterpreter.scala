@@ -267,10 +267,8 @@ private[v1_6] object VMInterpreter {
       case Left(message) => return Left(Fault.InvalidTask(message))
       case Right(value)  => value
     }
-    // A large number of one-invocation groups is common in oneDPL. For those
-    // launches, queueing work-group tasks costs more than the interpreter work
-    // itself. Parallelize either genuinely large workgroups or a sufficiently
-    // large number of groups; the pool still enforces the global worker cap.
+    // The scheduler parallelizes launches large enough to amortise queue traffic and claims a range of groups per
+    // dequeue, so queue overhead stays bounded while medium grids leave the calling thread.
     // Positive launch volumes imply the scheduler's non-negative task-count requirement.
     val taskCount: Long :| Positive0 = groupCount.refineUnsafe[Positive0]
     val workItems: Long :| Positive0 = totalLocal.toLong.refineUnsafe[Positive0]

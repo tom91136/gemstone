@@ -1474,10 +1474,10 @@ lazy val conformance = project.in(file("conformance"))
       val converter       = fileConverter.value
       val log             = streams.value.log
       val cores           = sys.runtime.availableProcessors()
-      val jobs            = positiveEnvironmentInt("CONFORMANCE_JOBS", math.max(1, math.min(4, cores / 4)))
+      val jobs            = positiveEnvironmentInt("CONFORMANCE_JOBS", math.max(1, math.min(8, cores / 4)))
       val workers         = positiveEnvironmentInt(
         "GEMSTONE_EXECUTION_PARALLELISM",
-        math.max(1, math.min(64, cores - jobs - 2))
+        math.max(1, math.min(64, cores - 2))
       )
       val serverHeap = sys.env.getOrElse(
         "GEMSTONE_CONFORMANCE_SERVER_HEAP",

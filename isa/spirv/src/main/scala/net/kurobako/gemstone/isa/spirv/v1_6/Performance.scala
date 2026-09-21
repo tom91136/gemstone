@@ -22,7 +22,10 @@ object Performance {
 
   final case class Observation(snapshot: Snapshot) extends Event
 
-  /** Per-task execution measurements emitted through the VM observer. */
+  /**
+   * Per-task execution measurements emitted through the VM observer. Group-local counters are written by one worker
+   * thread, so only the cross-thread merge and snapshot take the lock.
+   */
   private[v1_6] final class Metrics {
     private val lock = ReentrantLock()
     @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
@@ -45,22 +48,18 @@ object Performance {
     private def saturatedAdd(left: Long, right: Long): Long =
       if (Long.MaxValue - left < right) Long.MaxValue else left + right
 
-    private[v1_6] def recordDispatch(collective: Boolean): Unit = lock.withLock {
+    private[v1_6] def recordDispatch(collective: Boolean): Unit = {
       dispatchCount = saturatedAdd(dispatchCount, 1L)
       if (collective) collectiveDispatchCount = saturatedAdd(collectiveDispatchCount, 1L)
     }
 
-    private[v1_6] def recordInvocation(): Unit = lock.withLock {
-      invocationCount = saturatedAdd(invocationCount, 1L)
-    }
-    private[v1_6] def recordInstruction(): Unit = lock.withLock {
-      instructionCount = saturatedAdd(instructionCount, 1L)
-    }
+    private[v1_6] def recordInvocation(): Unit = invocationCount = saturatedAdd(invocationCount, 1L)
+    private[v1_6] def recordInstruction(): Unit = instructionCount = saturatedAdd(instructionCount, 1L)
 
     private[v1_6] def recordInvocationValues(
         denseSlots: Int,
         bytesPerSlot: Int
-    ): Unit = lock.withLock {
+    ): Unit = {
       require(denseSlots >= 0 && bytesPerSlot >= 0, "metric dimensions must be non-negative")
       invocationValueInstanceCount = saturatedAdd(invocationValueInstanceCount, 1L)
       denseValueSlotCount = saturatedAdd(denseValueSlotCount, denseSlots.toLong)
@@ -68,7 +67,7 @@ object Performance {
       estimatedDenseValueByteCount = saturatedAdd(estimatedDenseValueByteCount, estimatedBytes)
     }
 
-    private[v1_6] def recordElapsed(nanos: Long): Unit = lock.withLock {
+    private[v1_6] def recordElapsed(nanos: Long): Unit = {
       require(nanos >= 0L, "elapsed time must be non-negative")
       dispatchElapsedNanos = saturatedAdd(dispatchElapsedNanos, nanos)
     }
