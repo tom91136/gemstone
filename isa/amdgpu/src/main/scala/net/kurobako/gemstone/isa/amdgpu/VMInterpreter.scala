@@ -2638,6 +2638,21 @@ private[amdgpu] object VMInterpreter {
                 val b = right.toInt
                 val c = addend.toInt
                 math.max(math.min(a, b), math.min(math.max(a, b), c)).toLong
+              case VectorTernaryOperation.Median3U32 =>
+                val a = Bits.low32(left)
+                val b = Bits.low32(right)
+                val c = Bits.low32(addend)
+                math.max(math.min(a, b), math.min(math.max(a, b), c))
+              case VectorTernaryOperation.Median3I16 =>
+                val a = Bits.signExtend(Bits.low16(left), BitWidth(16))
+                val b = Bits.signExtend(Bits.low16(right), BitWidth(16))
+                val c = Bits.signExtend(Bits.low16(addend), BitWidth(16))
+                Bits.low16(math.max(math.min(a, b), math.min(math.max(a, b), c)))
+              case VectorTernaryOperation.Median3U16 =>
+                val a = Bits.low16(left)
+                val b = Bits.low16(right)
+                val c = Bits.low16(addend)
+                Bits.low16(math.max(math.min(a, b), math.min(math.max(a, b), c)))
               case VectorTernaryOperation.Maximum3I16 => Bits.low16(math.max(
                   math.max(
                     Bits.signExtend(Bits.low16(left), BitWidth(16)),

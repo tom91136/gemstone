@@ -340,6 +340,7 @@ private[v9_3] object VMCompiler {
 
     def registerNames(operand: Operand): collection.View[RegisterName] = operand match {
       case Operand.Register(name, _)    => Vector(name).view
+      case Operand.Symbol(name)         => Vector(RegisterName(name.value)).view
       case Operand.VectorLiteral(items) => items.view.flatMap(registerNames(_))
       case Operand.Parenthesized(items) => items.view.flatMap(registerNames(_))
       case Operand.Qualified(base, _)   => registerNames(base)
@@ -356,6 +357,8 @@ private[v9_3] object VMCompiler {
 
     def renameOperand(operand: Operand, names: Map[RegisterName, RegisterName]): Operand = operand match {
       case Operand.Register(name, part)  => Operand.Register(names.getOrElse(name, name), part)
+      case Operand.Symbol(name) if names.contains(RegisterName(name.value)) =>
+        Operand.Register(names(RegisterName(name.value)), None)
       case Operand.VectorLiteral(items)  => Operand.VectorLiteral(items.map(renameOperand(_, names)))
       case Operand.Parenthesized(items)  => Operand.Parenthesized(items.map(renameOperand(_, names)))
       case Operand.Address(items)        => Operand.Address(items.map(renameOperand(_, names)))

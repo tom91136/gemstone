@@ -25,6 +25,22 @@ final class AMDGPUArithmeticSuite extends munit.FunSuite with CodeObjectTestSupp
     assert(math.abs(VMInterpreter.trigF32(VectorConvertOperation.CosineF32, 0.25f)) < 1.0e-6f)
   }
 
+  test("gfx1030 VOP3 signed 16-bit median of three lowers") {
+    // rocThrust's block merge sort emits this instruction; rejecting it failed
+    // every i8 sort dispatch with hipErrorLaunchFailure.
+    val decoded = VMCompiler.decodeInstruction(
+      Vec[Byte](0x05, 0x00, 0x58, 0xd7.toByte, 0x06, 0x0b, 0x4a, 0x05),
+      Target("gfx1030")
+    )
+    assert(
+      decoded.exists {
+        case Instruction.VTernary(VectorTernaryOperation.Median3I16, 5, _, _, _) => true
+        case _                                                                   => false
+      },
+      decoded.toString
+    )
+  }
+
   test("gfx900 packed-half FMA decoding preserves low and high operand selection") {
     assertEquals(
       VMCompiler.decodeInstruction(

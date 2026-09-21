@@ -133,7 +133,8 @@ private[amdgpu] object VMIR {
 
   private[amdgpu] enum VectorTernaryOperation {
     case Add3U32, Or3B32, Xor3B32
-    case Maximum3I32, Maximum3U32, Minimum3I32, Minimum3F32, Minimum3U32, Median3I32
+    case Maximum3I32, Maximum3U32, Minimum3I32, Minimum3F32, Minimum3U32
+    case Median3I16, Median3I32, Median3U16, Median3U32
     case Maximum3I16, Maximum3U16, Minimum3I16, Minimum3U16
     case MultiplyAddU16, FusedMultiplyAddF32, FusedMultiplyAddF16, DivisionFusedMultiplyAddF32
     case MultiplyAddLegacyU16, MultiplyAddU24, MultiplyAddI24

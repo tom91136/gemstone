@@ -142,6 +142,38 @@ final class InterpreterSuite extends munit.FunSuite {
     )
   }
 
+  test("scoped bare registers carry values between instructions in the same block") {
+    // CUB's adjacent-difference kernel declares a block-scoped byte register and
+    // reads it back through a conversion. Treating that bare name as a symbol
+    // silently zeroed the staged value.
+    val source = """
+      |.version 8.0
+      |.target sm_80
+      |.address_size 64
+      |.visible .entry scoped_register(.param .u64 output) {
+      |  .reg .b32 %r<4>;
+      |  .reg .b64 %rd<4>;
+      |  ld.param.u64 %rd1, [output];
+      |  mov.u32 %r1, 200;
+      |  st.global.u8 [%rd1+4], %r1;
+      |  { .reg .u8 datum; ld.ca.u8 datum, [%rd1+4]; cvt.u32.u8 %r2, datum;}
+      |  st.global.u32 [%rd1], %r2;
+      |  ret;
+      |}
+      |""".stripMargin
+    val kernel = VMCompiler.compile(source).fold(error => fail(error.message), value => value)
+    val memory = ArrayCheckedMemory.allocate(16)
+    val base   = memory.allocation.start
+    val result = VMInterpreter.execute(
+      kernel,
+      geometry(1, 1),
+      Map(ParameterName("output") -> Argument(base.value)),
+      memory
+    )
+    assert(result.isRight, result.toString)
+    assertEquals(memory.readInt32(base), Right(200))
+  }
+
   test("lowers shared symbols as addresses") {
     val source = """
       |.version 8.0

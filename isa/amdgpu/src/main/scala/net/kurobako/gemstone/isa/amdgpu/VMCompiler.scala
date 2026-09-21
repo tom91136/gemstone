@@ -309,7 +309,10 @@ private[amdgpu] object VMCompiler {
     case VMin3I32      => Some(VectorTernaryOperation.Minimum3I32)
     case VMin3F32      => Some(VectorTernaryOperation.Minimum3F32)
     case VMin3U32      => Some(VectorTernaryOperation.Minimum3U32)
+    case VMed3I16      => Some(VectorTernaryOperation.Median3I16)
     case VMed3I32      => Some(VectorTernaryOperation.Median3I32)
+    case VMed3U16      => Some(VectorTernaryOperation.Median3U16)
+    case VMed3U32      => Some(VectorTernaryOperation.Median3U32)
     case VMax3I16      => Some(VectorTernaryOperation.Maximum3I16)
     case VMax3U16      => Some(VectorTernaryOperation.Maximum3U16)
     case VMin3I16      => Some(VectorTernaryOperation.Minimum3I16)
@@ -1553,8 +1556,9 @@ private[amdgpu] object VMCompiler {
             negateHigh = Bits.unsignedIntField(word, 8, IntFieldWidth(3)),
             clamp = clamp
           ))
-        case VAdd3U32 | VOr3B32 | VXor3B32 | VFmaF16 | VDivFmasF32 | VMadLegacyU16 | VMadU16 | VMadU32U24 | VAlignbitB32 | VBfiB32 | VMed3I32 | VMin3F32 |
-            VMax3I16 | VMax3U16 | VMin3I16 | VMin3U16 |
+        case VAdd3U32 | VOr3B32 | VXor3B32 | VFmaF16 | VDivFmasF32 | VMadLegacyU16 | VMadU16 | VMadU32U24 | VAlignbitB32 | VBfiB32 |
+             VMed3I16 | VMed3I32 | VMed3U16 | VMed3U32 | VMin3F32 |
+             VMax3I16 | VMax3U16 | VMin3I16 | VMin3U16 |
             VMax3I32 | VMax3U32 | VMin3I32 | VMin3U32 |
             VAndOrB32 | VBfeI32 | VBfeU32 | VXadU32 | VMadI32I24 | VAddLshlU32 | VLshlAddU32 | VLshlOrB32 | VPermB32 =>
           vectorTernaryOperation(opcode)
