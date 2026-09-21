@@ -229,8 +229,7 @@ bool readBytes(const std::string &path, std::vector<uint8_t> *bytes) {
 
 } // namespace
 
-bool compileSource(const std::string &source, const std::string &options, std::vector<uint8_t> &il, std::string &log,
-                   std::vector<uint8_t> *bitcodeOutput) {
+bool compileSourceToBitcode(const std::string &source, const std::string &options, std::vector<uint8_t> &bitcode, std::string &log) {
   std::vector<std::string> optionArguments;
   std::string optionError;
   if (!splitOptions(options, optionArguments, &optionError)) {
@@ -243,8 +242,7 @@ bool compileSource(const std::string &source, const std::string &options, std::v
     return false;
   }
   const std::string input = directory.file("source.cl");
-  const std::string bitcode = directory.file("source.bc");
-  const std::string output = directory.file("source.spv");
+  const std::string output = directory.file("source.bc");
   // The installed LLVM-to-SPIR-V converter rejects legal OpenCL swizzles when
   // the frontend narrows an otherwise unused vector lane (for example, a
   // char8 .even expression becomes an invalid LLVM <7 x i8>). Volatile global
@@ -259,7 +257,7 @@ bool compileSource(const std::string &source, const std::string &options, std::v
   if (success) {
     std::vector<std::string> command = {compilerPath(), "-x",     "cl",         "-cl-std=CL1.2",  "-D__OPENCL_VERSION__=120",
                                         "-target",      "spir64", "-emit-llvm", "-fsigned-zeros", "-c",
-                                        input,          "-o",     bitcode};
+                                        input,          "-o",     output};
     static constexpr const char *unsupportedFeatures[] = {"__opencl_c_program_scope_global_variables",
                                                           "__opencl_c_3d_image_writes",
                                                           "__opencl_c_atomic_order_acq_rel",
@@ -297,15 +295,32 @@ bool compileSource(const std::string &source, const std::string &options, std::v
     diagnostic = "cannot write temporary OpenCL source";
   }
   if (success) {
-    if (bitcodeOutput) {
-      success = readBytes(bitcode, bitcodeOutput) && !bitcodeOutput->empty();
-      if (!success) diagnostic += "cannot read generated LLVM bitcode";
-    }
+    success = readBytes(output, &bitcode) && !bitcode.empty();
+    if (!success) diagnostic += "cannot read generated LLVM bitcode";
   }
+  log = diagnostic;
+  return success;
+}
+
+bool compileSource(const std::string &source, const std::string &options, std::vector<uint8_t> &il, std::string &log,
+                   std::vector<uint8_t> *bitcodeOutput) {
+  std::vector<uint8_t> bitcode;
+  if (!compileSourceToBitcode(source, options, bitcode, log)) return false;
+  const TemporaryDirectory directory("/tmp/gemstone-opencl-spirv-XXXXXX");
+  if (!directory) {
+    log += "cannot create temporary directory for SPIR-V conversion";
+    return false;
+  }
+  const std::string input = directory.file("source.bc");
+  const std::string output = directory.file("source.spv");
+  bool success = writeBytes(input, bitcode.data(), bitcode.size());
+  std::string diagnostic;
   if (success) {
-    const ProcessResult conversion = runProcess({spirvConverterPath(), bitcode, "-o", output});
-    if (!conversion.output.empty()) diagnostic += conversion.output;
+    const ProcessResult conversion = runProcess({spirvConverterPath(), input, "-o", output});
+    diagnostic = conversion.output;
     success = conversion.status == 0;
+  } else {
+    diagnostic = "cannot write generated LLVM bitcode";
   }
   if (success) {
     std::ifstream stream(output, std::ios::binary);
@@ -318,7 +333,8 @@ bool compileSource(const std::string &source, const std::string &options, std::v
       if (!success) diagnostic += "generated SPIR-V is empty or too large";
     }
   }
-  log = diagnostic;
+  if (!diagnostic.empty()) log += diagnostic;
+  if (success && bitcodeOutput) *bitcodeOutput = std::move(bitcode);
   return success;
 }
 

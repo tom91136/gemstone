@@ -136,7 +136,7 @@ object Compress {
     val raw = path"$name"
     require(!raw.isAbsolute, s"absolute archive path is not permitted: $name")
     require(
-      raw.iterator().asScala.forall(segment => s"$segment" != "." && s"$segment" != ".."),
+      raw.asScala.view.forall(segment => s"$segment" != "." && s"$segment" != ".."),
       s"archive traversal is not permitted: $name"
     )
     raw.normalize

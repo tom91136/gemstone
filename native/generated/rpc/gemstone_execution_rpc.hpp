@@ -18,7 +18,7 @@ inline constexpr uint32_t ResponseMagic = UINT32_C(0x474d4632);
 inline constexpr uint32_t MaximumPayload = 134217728U;
 inline constexpr uint32_t MaximumElements = 16384U;
 inline constexpr uint32_t MaximumTextBytes = 8192U;
-inline constexpr uint64_t SchemaFingerprint = 0x670ea7f0f40f0c98ULL;
+inline constexpr uint64_t SchemaFingerprint = 0xc38b40ee5e26b972ULL;
 inline constexpr size_t RequestFingerprintOffset = 4U;
 inline constexpr size_t RequestClientOffset = 12U;
 inline constexpr size_t RequestSessionHighOffset = 20U;
@@ -57,9 +57,6 @@ inline constexpr uint64_t AllocationKindDevice = 0x550c809331279417ULL;
 inline constexpr uint64_t AllocationKindManaged = 0xe3e753f7a49fdebaULL;
 inline constexpr uint64_t AllocationKindShared = 0x3cca1c4bb4e27b28ULL;
 inline constexpr uint64_t AllocationKindHost = 0x1502c13a23427453ULL;
-inline constexpr uint64_t ProgramFormatPTXText = 0xa4e4cfa7abdce105ULL;
-inline constexpr uint64_t ProgramFormatHSACodeObjectBinary = 0x29940a6758879b45ULL;
-inline constexpr uint64_t ProgramFormatSPIRVBinary = 0x4c09a9dc85a02f49ULL;
 inline constexpr uint64_t KernelParameterKindScalar = 0x8e8237265871dac9ULL;
 inline constexpr uint64_t KernelParameterKindAllocation = 0x003f04bd0f952e6bULL;
 inline constexpr uint64_t KernelParameterKindLocal = 0xf746e4b741bcb38cULL;
@@ -99,12 +96,6 @@ struct GuestAddress { int64_t value{}; };
 struct LongPositive0 { int64_t value{}; };
 
 struct IntPositive0 { int32_t value{}; };
-
-enum class ProgramFormat : uint64_t {
-  PTXText = 0xa4e4cfa7abdce105ULL,
-  HSACodeObjectBinary = 0x29940a6758879b45ULL,
-  SPIRVBinary = 0x4c09a9dc85a02f49ULL
-};
 
 struct ProgramId { int64_t value{}; };
 
@@ -287,7 +278,7 @@ struct ReadAllocation {
 };
 
 struct LoadProgram {
-  ProgramFormat format{};
+  std::string encoding{};
   std::vector<uint8_t> image{};
 };
 

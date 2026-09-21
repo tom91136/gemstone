@@ -1,12 +1,14 @@
 package net.kurobako.gemstone.isa.spirv.v1_6
+import net.kurobako.gemstone.isa.*
+import net.kurobako.gemstone.vm.*
+import net.kurobako.gemstone.vm.LaunchGeometry.{Coordinates, Dimensions, GlobalDimensions}
 
 import net.kurobako.gemstone.Vec
 import net.kurobako.gemstone.binary.{ByteRange, FloatingPointWidth, IEEE754, LittleEndian, ScalarByteWidth}
-import net.kurobako.gemstone.execution.*
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 
-final class PrecisionLayoutSuite extends munit.FunSuite {
+final class PrecisionLayoutSuite extends munit.FunSuite with ExecutionTestSupport {
   private def o(kind: String, values: Int*): Operand = Operand(
     SPIRVOperandKind.either(kind).fold(message => fail(message), valid => valid),
     Vec.from(values.map(Word(_))).refineEither[MinLength[1]]
@@ -25,28 +27,29 @@ final class PrecisionLayoutSuite extends munit.FunSuite {
     )
   }
   private val entry      = Operand(SPIRVOperandKind("LiteralString"), Vec.nonEmpty(Word(0x6b)))
-  private val allocation = AllocationId(1)
-  private final class Memory(size: Int) extends ExecutionMemory {
+  private val allocation = MemoryRegion(1)
+  private final class Memory(size: Int) extends net.kurobako.gemstone.vm.Memory {
     val bytes                                                                       = Array.ofDim[Byte](size)
-    def read(id: AllocationId, offset: Long :| Positive0, length: Int :| Positive0) = {
+    def read(id: MemoryRegion, offset: Long :| Positive0, length: Int :| Positive0) = {
       assert(id == allocation && ByteRange.contains(size, offset, length))
       Right(Vec.from(bytes.slice(offset.toInt, offset.toInt + length)))
     }
-    def write(id: AllocationId, offset: Long :| Positive0, value: Vec[Byte]) = {
+    def write(id: MemoryRegion, offset: Long :| Positive0, value: Vec[Byte]) = {
       assert(id == allocation && ByteRange.contains(size, offset, value.size))
       val _ = value.copyToArray(bytes, offset.toInt, value.size); Right(())
     }
-    def recordPointerRelocation(value: PointerRelocation): Unit = ()
   }
-  private def run(instructions: Vec[Instruction], args: Vec[KernelArgument], memory: Memory): Unit = {
+  private def run(instructions: Vec[Instruction], args: Vec[KernelTask.Argument], memory: Memory): Unit = {
     val profile = Vec.from(Seq(4, 6, 7, 9, 10, 11).map(value => Instruction.Capability(o("Capability", value)))) :+
       Instruction.MemoryModel(o("AddressingModel", 2), o("MemoryModel", 2))
     val module   = Module(Header(ISA.version, Word(0), Word(64), Word(0)), profile ++ instructions, Endianness.Little)
     val dispatch =
-      KernelDispatch.validated(ProgramId(1), KernelName("k"), Dimensions.One, Dimensions.One, args).toOption.get
+      KernelTask.validated(KernelName("k"), Dimensions.One, Dimensions.One, args).toOption.get
     assertEquals(
-      Interpreter.run(
-        Interpreter.prepare(module, Validation.Environment.OpenCLCompute).fold(error => fail(error.message), value => value),
+      executeLoaded(
+        VMCompiler.compile(module, Validation.Environment.OpenCLCompute)
+          .map(VMLoadedProgram(_))
+          .fold(error => fail(error.message), value => value),
         dispatch,
         memory
       ),
@@ -112,8 +115,8 @@ final class PrecisionLayoutSuite extends munit.FunSuite {
           Instruction.FunctionEnd()
         )
       val args =
-        (if (byValue) Vec[KernelArgument](KernelArgument.Scalar(Vec.from(expected.take(size))))
-         else Vec.empty[KernelArgument]) :+ KernelArgument.Allocation(allocation, 0)
+        (if (byValue) Vec[KernelTask.Argument](KernelTask.Argument.Scalar(Vec.from(expected.take(size))))
+         else Vec.empty[KernelTask.Argument]) :+ KernelTask.Argument.Memory(allocation, 0)
       val memory = Memory(expected.length)
       run(instructions, args, memory)
       assertEquals(memory.bytes.toSeq, expected.toSeq)
@@ -143,7 +146,7 @@ final class PrecisionLayoutSuite extends munit.FunSuite {
         Instruction.FunctionEnd()
       )
       val memory = Memory(2)
-      run(instructions, Vec(KernelArgument.Allocation(allocation, 0)), memory)
+      run(instructions, Vec(KernelTask.Argument.Memory(allocation, 0)), memory)
       assertEquals(LittleEndian.decode(memory.bytes, 0, ScalarByteWidth(2)), expected)
     }
 }

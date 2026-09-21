@@ -1,4 +1,7 @@
 package net.kurobako.gemstone.isa.spirv.v1_6
+import net.kurobako.gemstone.isa.*
+import net.kurobako.gemstone.vm.*
+import net.kurobako.gemstone.vm.LaunchGeometry.{Coordinates, Dimensions, GlobalDimensions}
 
 import net.kurobako.gemstone.Vec
 
@@ -6,24 +9,34 @@ import net.kurobako.gemstone.binary.ByteRange
 import net.kurobako.gemstone.binary.LittleEndian
 import net.kurobako.gemstone.binary.ScalarByteWidth
 import net.kurobako.gemstone.concurrent.withLock
-import net.kurobako.gemstone.execution.ExecutionFailure
-import net.kurobako.gemstone.execution.ExecutionControl
-import net.kurobako.gemstone.execution.ExecutionLimits
-import net.kurobako.gemstone.execution.ExecutionMemory
-import net.kurobako.gemstone.execution.AllocationId
-import net.kurobako.gemstone.execution.Dimensions
-import net.kurobako.gemstone.execution.KernelArgument
-import net.kurobako.gemstone.execution.KernelDispatch
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
-import net.kurobako.gemstone.execution.PointerRelocation
-import net.kurobako.gemstone.execution.ProgramId
 import net.kurobako.gemstone.memory.MemoryValueByteWidth
 
 import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.locks.ReentrantLock
 
 private trait ExecutionTestSupport { self: munit.FunSuite =>
+  protected final def loadUnchecked(module: Module): Either[Fault, VMLoadedProgram] =
+    VMCompiler.compileUnchecked(module).map(VMLoadedProgram(_))
+
+  protected final def executeUnchecked(
+      module: Module,
+      task: KernelTask,
+      memory: Memory
+  ): Either[Fault, Unit] =
+    loadUnchecked(module).flatMap(executeLoaded(_, task, memory))
+
+  protected final def executeLoaded(
+      program: VMLoadedProgram,
+      task: KernelTask,
+      memory: Memory,
+      control: TaskControl = TaskControl.default,
+      scheduler: Scheduler = Scheduler.Sequential,
+      observer: Observer[Event] = Observer.discard
+  ): Either[Fault, Unit] =
+    VMInterpreter.execute(program, task, memory, control, scheduler, observer)
+
   protected final def testDimensions(
       x: Int :| Positive,
       y: Int :| Positive = 1,
@@ -31,46 +44,43 @@ private trait ExecutionTestSupport { self: munit.FunSuite =>
   ): Dimensions = Dimensions(x, y, z)
 
   protected final class ArrayMemory(
-      expectedId: AllocationId,
+      expectedId: MemoryRegion,
       size: Int,
-      relocation: PointerRelocation => Unit = _ => (),
       written: (Long, Int) => Unit = (_, _) => ()
-  ) extends ExecutionMemory {
+  ) extends Memory {
     private val content    = AtomicReference(Vec.fill(size)(0.toByte))
     private val atomicLock = ReentrantLock()
 
     def bytes: Vec[Byte] = content.get()
 
     override def read(
-        id: AllocationId,
+        id: MemoryRegion,
         offset: Long :| Positive0,
         size: Int :| Positive0
-    ): Either[ExecutionFailure, Vec[Byte]] =
+    ): Either[Fault, Vec[Byte]] =
       checked(id, offset, size).map(start => content.get().slice(start, start + size))
 
     override def write(
-        id: AllocationId,
+        id: MemoryRegion,
         offset: Long :| Positive0,
         bytes: Vec[Byte]
-    ): Either[ExecutionFailure, Unit] =
+    ): Either[Fault, Unit] =
       // Collection sizes are non-negative by construction.
       checked(id, offset, bytes.size.refineUnsafe[Positive0]) match {
         case Left(error)  => Left(error)
         case Right(start) =>
           written(offset, bytes.size)
           content.updateAndGet(current =>
-            Vec.from(current.take(start).iterator ++ bytes.iterator ++ current.drop(start + bytes.size))
+            Vec.from(current.take(start).view ++ bytes.view ++ current.drop(start + bytes.size))
           )
           Right(())
       }
 
-    override def recordPointerRelocation(value: PointerRelocation): Unit = relocation(value)
-
     override def atomicModifyValue(
-        id: AllocationId,
+        id: MemoryRegion,
         offset: Long :| Positive0,
         size: MemoryValueByteWidth
-    )(update: Long => Long): Either[ExecutionFailure, Long] = atomicLock.withLock {
+    )(update: Long => Long): Either[Fault, Long] = atomicLock.withLock {
       checked(id, offset, size.nonNegative) match {
         case Left(error)  => Left(error)
         case Right(start) =>
@@ -80,21 +90,21 @@ private trait ExecutionTestSupport { self: munit.FunSuite =>
           val replacement = LittleEndian.toVec(update(previous), scalarWidth)
           written(offset, replacement.size)
           content.set(
-            Vec.from(current.take(start).iterator ++ replacement.iterator ++ current.drop(start + replacement.size))
+            Vec.from(current.take(start).view ++ replacement.view ++ current.drop(start + replacement.size))
           )
           Right(previous)
       }
     }
 
     private def checked(
-        id: AllocationId,
+        id: MemoryRegion,
         offset: Long :| Positive0,
         length: Int :| Positive0
-    ): Either[ExecutionFailure, Int :| Positive0] =
+    ): Either[Fault, Int :| Positive0] =
       Either.cond(
         id == expectedId && ByteRange.contains(size, offset, length.toLong),
         offset.toInt.refineUnsafe[Positive0],
-        ExecutionFailure.InvalidRequest(s"invalid test memory access at $offset + $length")
+        Fault.InvalidTask(s"invalid test memory access at $offset + $length")
       )
   }
 

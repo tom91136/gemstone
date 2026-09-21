@@ -2,14 +2,15 @@ package net.kurobako.gemstone.isa.ptx.v9_3
 
 import Program.*
 
-import VirtualMachine.*
+import VMIR.*
 
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 
 import net.kurobako.gemstone.Vec
-import net.kurobako.gemstone.execution.*
 import net.kurobako.gemstone.memory.*
+import net.kurobako.gemstone.vm.LaunchGeometry
+import net.kurobako.gemstone.vm.LaunchGeometry.Dimensions
 
 import scala.collection.mutable
 
@@ -103,13 +104,12 @@ final class WideDescriptorSuite extends munit.FunSuite {
         st.global.f64 [%rd4+32], %fd;
         ret;
       }"""
-    val kernel = ISA.compile(source).fold(error => fail(error.message), value => value)
-    val result = VirtualMachine.execute(
+    val kernel = VMCompiler.compile(source).fold(error => fail(error.message), value => value)
+    val result = VMInterpreter.execute(
       kernel,
       geometry,
       Map(ParameterName("memory") -> Argument(memory.base.value)),
-      memory,
-      captureTrace = false
+      memory
     )
     assert(result.isRight, result.toString)
     (0 until 3).foreach { group =>
@@ -135,19 +135,14 @@ final class WideDescriptorSuite extends munit.FunSuite {
         st.relaxed.gpu.v2.u64 [%rd0], {%rd1, %rd2};
         ret;
       }"""
-    val kernel = ISA.compile(source).fold(error => fail(error.message), value => value)
-    val result = VirtualMachine.execute(
+    val kernel = VMCompiler.compile(source).fold(error => fail(error.message), value => value)
+    val result = VMInterpreter.execute(
       kernel,
       geometry,
       Map(ParameterName("memory") -> Argument(memory.base.value)),
-      memory,
-      captureTrace = true
+      memory
     )
     assert(result.isRight, result.toString)
-    val writes = result.toOption.get.trace.events.collect {
-      case event: Trace.Event.OutputWrite => event
-    }
-    assertEquals(writes.size, 6, "tracing retains both vector elements for every group")
     assert(memory.observed.nonEmpty)
     assert(
       memory.observed.forall(value => value == (100L -> partial) || value == (101L -> inclusive)),

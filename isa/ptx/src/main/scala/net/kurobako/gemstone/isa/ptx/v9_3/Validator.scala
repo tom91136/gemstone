@@ -77,7 +77,7 @@ object Validator {
           ValidationOutcome.Rejected(
             Vec.nonEmpty(Issue.InvalidModifiers(
               instruction.opcode,
-              s"unsupported modifier set: ${modifiers.iterator.map(_.value).toArray.sorted.mkString(".")}"
+              s"unsupported modifier set: ${modifiers.view.map(_.value).toArray.sorted.mkString(".")}"
             ))
           )
         else {
@@ -129,7 +129,7 @@ object Validator {
       case Statement.Instruction(value)         => Vec(value)
       case Statement.Block(body)                => collectInstructions(body)
       case Statement.Entry(_, _, _, body)       => collectInstructions(body)
-      case Statement.Function(_, _, _, _, body) => body.iterator.flatMap(collectInstructions(_)).toVec
+      case Statement.Function(_, _, _, _, body) => body.view.flatMap(collectInstructions(_)).toVec
       case _                                    => Vec.empty[Instruction]
     }
 }

@@ -1,37 +1,6 @@
 package net.kurobako.gemstone.binary
 
 import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
-
-private[gemstone] type FloatingPointWidth = FloatingPointWidth.T
-private[gemstone] object FloatingPointWidth extends RefinedType[Int, In[(16, 32, 64)]] {
-  extension (width: FloatingPointWidth) {
-
-    /** Every supported IEEE-754 interchange width is also a valid scalar bit width. */
-    @SuppressWarnings(Array("scalafix:GemstoneNoAssume"))
-    def bitWidth: BitWidth = BitWidth.assume(width.value)
-
-    /** Every supported IEEE-754 interchange width is byte-aligned and at most eight bytes wide. */
-    @SuppressWarnings(Array("scalafix:GemstoneNoAssume"))
-    def scalarByteWidth: ScalarByteWidth = ScalarByteWidth.assume(width.value / 8)
-  }
-}
-
-private[gemstone] type Binary16 = Binary16.T
-private[gemstone] object Binary16 extends RefinedType[Long, Interval.Closed[0L, 65535L]] {
-  def fromLow(value: Long :| Interval.Closed[0L, 65535L]): Binary16 = Binary16(value)
-
-  @SuppressWarnings(Array("scalafix:GemstoneNoAssume"))
-  def low(value: Long): Binary16 = this.assume(value & Bits.Mask16)
-}
-
-private[gemstone] type Binary32 = Binary32.T
-private[gemstone] object Binary32 extends RefinedType[Long, Interval.Closed[0L, 4294967295L]] {
-  def fromLow(value: Long :| Interval.Closed[0L, 4294967295L]): Binary32 = Binary32(value)
-
-  @SuppressWarnings(Array("scalafix:GemstoneNoAssume"))
-  def low(value: Long): Binary32 = this.assume(value & Bits.Mask32)
-}
 
 /** Raw IEEE-754 interchange encodings used by ISA registers and memory. */
 private[gemstone] object IEEE754 {

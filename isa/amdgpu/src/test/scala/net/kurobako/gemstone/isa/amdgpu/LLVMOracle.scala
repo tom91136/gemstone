@@ -60,7 +60,7 @@ object LLVMOracle {
       case ((_, pending, cases, diagnostics), s"// SOURCE: $source") =>
         (Some(source), pending, cases, diagnostics)
       case ((Some(source), Some(assembly), cases, diagnostics), s"// ENCODING: [$encoded]") =>
-        val bytes = encoded.split(',').iterator.map(_.trim).filter(_.nonEmpty)
+        val bytes = encoded.split(',').view.map(_.trim).filter(_.nonEmpty)
           .map(value => Integer.parseInt(value.drop(2), 16).toByte).toVec
         (Some(source), None, cases :+ OracleCase(target, assembly, bytes, source), diagnostics)
       case ((Some(source), Some(assembly), cases, diagnostics), s"// ERROR: $message") =>

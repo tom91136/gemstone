@@ -1,8 +1,8 @@
 package net.kurobako.gemstone.rpc
 
 import net.kurobako.gemstone.{NoNul, Vec}
-import net.kurobako.gemstone.execution.*
 import net.kurobako.gemstone.memory.{AllocationKind, GuestAddress}
+import net.kurobako.gemstone.rpc.ExecutionProtocol.*
 import net.kurobako.gemstone.rpc.Wire.Codec
 
 import io.github.iltotore.iron.*
@@ -60,7 +60,7 @@ object ExecutionRPC {
         extends Operation[Unit]
     case ReadAllocation(allocation: AllocationId, offset: Long :| Positive0, size: Int :| Positive0)
         extends Operation[Vec[Byte]]
-    case LoadProgram(format: ProgramFormat, image: Vec[Byte])
+    case LoadProgram(encoding: String, image: Vec[Byte])
         extends Operation[ProgramId]
     case UnloadProgram(program: ProgramId)
         extends Operation[Unit]

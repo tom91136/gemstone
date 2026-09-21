@@ -7,7 +7,8 @@ import cats.syntax.all.*
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 
-object ISA {
+object ISA extends net.kurobako.gemstone.isa.Decoder[Vec[Byte], Module] {
+  override type Error = DecodeError
   enum DecodeError {
     case Binary(error: net.kurobako.gemstone.isa.spirv.v1_6.Binary.BinaryError)
     case Instruction(error: ModuleDecodeError)
@@ -18,8 +19,8 @@ object ISA {
     }
   }
 
-  val version: SPIRVVersion             = Instruction.version
-  val instructions: Vec[InstructionDef] = Instruction.definitions
+  val version: SPIRVVersion                     = Instruction.version
+  val instructions: Vec[Instruction.Definition] = Instruction.definitions
 
   def decode(module: RawModule): Either[ModuleDecodeError, Module] =
     module.instructions.zipWithIndex
@@ -30,7 +31,7 @@ object ISA {
       }
       .map(Module(module.header, _, module.endianness))
 
-  def decode(bytes: Vec[Byte]): Either[DecodeError, Module] = for {
+  override def decode(bytes: Vec[Byte]): Either[DecodeError, Module] = for {
     raw    <- Binary.decode(bytes).leftMap(DecodeError.Binary(_))
     module <- decode(raw).leftMap(DecodeError.Instruction(_))
   } yield module

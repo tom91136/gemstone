@@ -2,21 +2,26 @@ package net.kurobako.gemstone.isa.ptx.v9_3
 
 import Program.*
 
-import VirtualMachine.*
+import VMIR.*
+import VMExecution.*
 
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 
 import net.kurobako.gemstone.Vec
 
-import net.kurobako.gemstone.execution.*
 import net.kurobako.gemstone.memory.AddressMemory
+import net.kurobako.gemstone.vm.LaunchGeometry
+import net.kurobako.gemstone.vm.LaunchGeometry.Coordinates
+import net.kurobako.gemstone.vm.Scheduler
+import net.kurobako.gemstone.vm.TaskControl
 
+import java.util.concurrent.atomic.AtomicReference
 import scala.collection.mutable
 
 private[v9_3] object VMInterpreter {
 
-  private final case class Cohort(pc: Pc, lanes: LaneMask)
+  private final case class Cohort(pc: Pc, lanes: VMLaneMask)
   private final case class BarrierReduction(
       destination: RegisterName,
       predicate: RegisterName,
@@ -25,7 +30,7 @@ private[v9_3] object VMInterpreter {
   )
   private final case class Waiting(cohort: Cohort, key: WaitKey, reduction: Option[BarrierReduction] = None)
 
-  // The dispatch loop carries trace state and exits immediately on execution faults.
+  // The dispatch loop exits immediately on execution faults.
   @SuppressWarnings(
     Array("scalafix:DisableSyntax.var", "scalafix:DisableSyntax.return", "scalafix:GemstoneNoAssume")
   )
@@ -34,27 +39,25 @@ private[v9_3] object VMInterpreter {
       geometry: LaunchGeometry,
       arguments: Map[ParameterName, Argument],
       memory: AddressMemory,
-      control: ExecutionControl = ExecutionControl.default,
-      captureTrace: Boolean = true,
+      control: TaskControl = TaskControl.default,
+      scheduler: Scheduler = Scheduler.Sequential,
       initialParameterBuffers: Map[Long, Array[Byte]] = Map.empty,
       blockIndices: Option[Vec[Int]] = None
-  ): Either[Error, Result] = {
+  ): Either[ExecutionFault, Unit] = {
     val laneCount = geometry.groupSize.volumeInt match {
-      case Left(message) => return Left(Error(message))
+      case Left(message) => return Left(ExecutionFault.InvalidState(message))
       case Right(value)  => value
     }
     val groupCount = geometry.groupCount.volumeInt match {
-      case Left(message) => return Left(Error(message))
+      case Left(message) => return Left(ExecutionFault.InvalidState(message))
       case Right(value)  => value
     }
-    val allLanes = LaneMask.all(laneCount) match {
-      case Left(fault)  => return Left(Error(fault.message))
+    val allLanes = VMLaneMask.all(laneCount) match {
+      case Left(fault)  => return Left(fault)
       case Right(value) => value
     }
-    var trace                                                  = Trace.empty
-    var step                                                   = 0L
-    def liveLanes(group: Coordinates): Either[Error, LaneMask] = {
-      var live                    = LaneMask.Empty
+    def liveLanes(group: Coordinates): Either[ExecutionFault, VMLaneMask] = {
+      var live                    = VMLaneMask.Empty
       var failure: Option[String] = None
       allLanes.foreachLane { lane =>
         if (failure.isEmpty)
@@ -65,23 +68,23 @@ private[v9_3] object VMInterpreter {
                 case Left(message) => failure = Some(message)
                 case Right(global) =>
                   if (geometry.containsGlobal(global))
-                    live = live.union(LaneMask.one(lane).fold(_ => LaneMask.Empty, value => value))
+                    live = live.union(VMLaneMask.one(lane).fold(_ => VMLaneMask.Empty, value => value))
               }
           }
       }
       failure match {
         case Some(message) =>
-          Left(Error(s"PTX geometry failure: $message"))
+          Left(ExecutionFault.InvalidState(s"PTX geometry failure: $message"))
         case None => Right(live)
       }
     }
-    def runBlock(block: Int): Either[Error, Unit] =
+    def runBlock(block: Int): Either[ExecutionFault, Unit] =
       if (block < 0 || block >= groupCount)
-        Left(Error(s"selected PTX block is outside the launch: $block"))
+        Left(ExecutionFault.InvalidState(s"selected PTX block is outside the launch: $block"))
       else
         geometry.groupCoordinates(block.toLong) match {
           case Left(message) =>
-            Left(Error(s"PTX geometry failure: $message"))
+            Left(ExecutionFault.InvalidState(s"PTX geometry failure: $message"))
           case Right(group) =>
             liveLanes(group) match {
               case Left(error) => Left(error)
@@ -95,38 +98,30 @@ private[v9_3] object VMInterpreter {
                   arguments,
                   memory,
                   control,
-                  captureTrace,
-                  trace,
-                  step,
+                  scheduler,
                   initialParameterBuffers
-                ) match {
-                  case Left(fault)                  => Left(Error(fault.message))
-                  case Right((nextTrace, nextStep)) =>
-                    if (captureTrace) {
-                      trace = nextTrace
-                      step = nextStep
-                    }
-                    Right(())
-                }
+                )
             }
         }
     val selectedCount                  = blockIndices.fold(groupCount)(_.size)
     def selectedBlock(index: Int): Int = blockIndices.fold(index)(_(index))
     val selectedTasks                  = selectedCount.toLong.assume[Positive0]
     val workItems                      = laneCount.toLong.assume[Positive0]
-    val parallelBlocks                 = !captureTrace && control.parallelism.shouldParallel(selectedTasks, workItems)
-    control.parallelism.forEach(selectedTasks, parallel = parallelBlocks) { index =>
-      runBlock(selectedBlock(index.toInt)).left.map(error =>
-        ExecutionFailure.Failed(error.message)
-      )
+    val parallelBlocks                 = scheduler.shouldParallel(selectedTasks, workItems)
+    val executionFailure               = AtomicReference(Option.empty[ExecutionFault])
+    scheduler.forEach(selectedTasks, parallel = parallelBlocks) { index =>
+      runBlock(selectedBlock(index.toInt)).left.map { error =>
+        val _ = executionFailure.compareAndSet(None, Some(error))
+        error.toFault
+      }
     } match {
-      case Left(error) => return Left(Error(error.message))
+      case Left(error) => return Left(executionFailure.get().getOrElse(ExecutionFault.fromControl(error)))
       case Right(())   => ()
     }
-    Right(Result(trace))
+    Right(())
   }
 
-  // Cohort, barrier and trace state model the SIMT machine directly; early exits preserve the first fault.
+  // Cohort and barrier state model the SIMT machine directly; early exits preserve the first fault.
   @SuppressWarnings(
     Array(
       "scalafix:DisableSyntax.var",
@@ -139,15 +134,13 @@ private[v9_3] object VMInterpreter {
       block: Int,
       group: Coordinates,
       geometry: LaunchGeometry,
-      initialLive: LaneMask,
+      initialLive: VMLaneMask,
       arguments: Map[ParameterName, Argument],
       memory: AddressMemory,
-      control: ExecutionControl,
-      captureTrace: Boolean,
-      initialTrace: Trace,
-      initialStep: Long,
+      control: TaskControl,
+      scheduler: Scheduler,
       initialParameterBuffers: Map[Long, Array[Byte]]
-  ): Either[ExecutionFault, (Trace, Long)] = {
+  ): Either[ExecutionFault, Unit] = {
     import VMSemantics.*
 
     val laneCount =
@@ -159,14 +152,12 @@ private[v9_3] object VMInterpreter {
         state.bindParameterBuffer(parameter.name, Vec.toArray(argument.bytes))
       )
     }
-    val ready                                  = mutable.ArrayBuffer.empty[Cohort]
-    val waiting                                = mutable.ArrayBuffer.empty[Waiting]
-    val barrierMasks                           = mutable.Map.empty[WaitKey, LaneMask]
-    val warpBarrierMasks                       = mutable.Map.empty[WaitKey, Long]
-    val effects                                = Effects[VMStateWrite]
-    var trace                                  = initialTrace
-    var traceStep                              = initialStep
-    def enqueue(pc: Pc, lanes: LaneMask): Unit =
+    val ready                                    = mutable.ArrayBuffer.empty[Cohort]
+    val waiting                                  = mutable.ArrayBuffer.empty[Waiting]
+    val barrierMasks                             = mutable.Map.empty[WaitKey, VMLaneMask]
+    val warpBarrierMasks                         = mutable.Map.empty[WaitKey, Long]
+    val effects                                  = VMStateEffects()
+    def enqueue(pc: Pc, lanes: VMLaneMask): Unit =
       if (lanes.nonEmpty) {
         val existing = ready.indexWhere(_.pc == pc)
         if (existing < 0) ready += Cohort(pc, lanes)
@@ -175,25 +166,36 @@ private[v9_3] object VMInterpreter {
 
     enqueue(Pc.Entry, state.live)
 
-    def warpMemberMask(instruction: ExecutableInstruction): Option[Value] = instruction match {
-      case ExecutableInstruction.ShuffleDown(_, _, _, _, _, memberMask, _)  => Some(memberMask)
-      case ExecutableInstruction.ShuffleUp(_, _, _, _, _, memberMask, _)    => Some(memberMask)
-      case ExecutableInstruction.ShuffleIndex(_, _, _, _, _, memberMask, _) => Some(memberMask)
-      case ExecutableInstruction.ShuffleBfly(_, _, _, _, _, memberMask, _)  => Some(memberMask)
-      case ExecutableInstruction.VoteBallot(_, _, memberMask)               => Some(memberMask)
-      case ExecutableInstruction.VotePredicate(_, _, memberMask, _)         => Some(memberMask)
-      case ExecutableInstruction.WarpReduce(_, _, memberMask, _, _)         => Some(memberMask)
-      case _                                                                => None
+    def warpMemberMask(instruction: VMIR.Instruction): Option[Value] = instruction match {
+      case VMIR.Instruction.ShuffleDown(_, _, _, _, _, memberMask, _)  => Some(memberMask)
+      case VMIR.Instruction.ShuffleUp(_, _, _, _, _, memberMask, _)    => Some(memberMask)
+      case VMIR.Instruction.ShuffleIndex(_, _, _, _, _, memberMask, _) => Some(memberMask)
+      case VMIR.Instruction.ShuffleBfly(_, _, _, _, _, memberMask, _)  => Some(memberMask)
+      case VMIR.Instruction.VoteBallot(_, _, memberMask)               => Some(memberMask)
+      case VMIR.Instruction.VotePredicate(_, _, memberMask, _)         => Some(memberMask)
+      case VMIR.Instruction.WarpReduce(_, _, memberMask, _, _)         => Some(memberMask)
+      case _                                                           => None
     }
 
     def synchronizeWarpInstruction(
         executable: PredicatedInstruction,
         cohort: Cohort
-    ): Either[ExecutionFault, (LaneMask, LaneMask)] = warpMemberMask(executable.instruction) match {
-      case None             => Right(cohort.lanes -> LaneMask.Empty)
+    ): Either[ExecutionFault, (VMLaneMask, VMLaneMask)] = warpMemberMask(executable.instruction) match {
+      case None             => Right(cohort.lanes -> VMLaneMask.Empty)
       case Some(memberMask) =>
-        val context =
-          VMExecutionContext(kernel, block, group, geometry, state, cohort.pc, cohort.lanes, arguments, memory, control)
+        val context = VMExecutionContext(
+          kernel,
+          block,
+          group,
+          geometry,
+          state,
+          cohort.pc,
+          cohort.lanes,
+          arguments,
+          memory,
+          control,
+          scheduler
+        )
         val masks                           = mutable.Map.empty[Int, Long]
         var failure: Option[ExecutionFault] = None
         cohort.lanes.foreachLane { lane =>
@@ -207,8 +209,8 @@ private[v9_3] object VMInterpreter {
         failure match {
           case Some(fault) => Left(fault)
           case None        =>
-            var runnable = LaneMask.Empty
-            var delayed  = LaneMask.Empty
+            var runnable = VMLaneMask.Empty
+            var delayed  = VMLaneMask.Empty
             masks.foreach { case (lane, maskValue) =>
               val warpBase = lane & ~31
               val present  = cohort.lanes.filterLanes(candidate => (candidate & ~31) == warpBase)
@@ -217,16 +219,17 @@ private[v9_3] object VMInterpreter {
                 ((maskValue & 0xffffffffL) & (1L << (candidate & 31))) != 0L
               }
               if (expected.subtract(present).nonEmpty)
-                delayed = delayed.union(LaneMask.one(lane).fold(_ => LaneMask.Empty, value => value))
-              else runnable = runnable.union(LaneMask.one(lane).fold(_ => LaneMask.Empty, value => value))
+                delayed = delayed.union(VMLaneMask.one(lane).fold(_ => VMLaneMask.Empty, value => value))
+              else runnable = runnable.union(VMLaneMask.one(lane).fold(_ => VMLaneMask.Empty, value => value))
             }
             Right(runnable -> delayed)
         }
     }
-    def advance(pc: Pc, lanes: LaneMask): Either[ExecutionFault, Unit] = pc.next.map(next => enqueue(next, lanes))
+    def advance(pc: Pc, lanes: VMLaneMask): Either[ExecutionFault, Unit] =
+      pc.next.toRight(ExecutionFault.InvalidProgram("program counter overflow")).map(next => enqueue(next, lanes))
 
     def releaseBarrier(key: WaitKey): Either[ExecutionFault, Unit] = {
-      val arrived  = barrierMasks.getOrElse(key, LaneMask.Empty)
+      val arrived  = barrierMasks.getOrElse(key, VMLaneMask.Empty)
       val expected = key.scope match {
         case WaitScope.Workgroup => state.live
         case WaitScope.Warp      =>
@@ -243,7 +246,7 @@ private[v9_3] object VMInterpreter {
         waiting.filterInPlace(_.key != key)
         val _ = barrierMasks.remove(key)
         val _ = warpBarrierMasks.remove(key)
-        released.iterator.flatMap(_.reduction).take(1).foreach { reduction =>
+        released.view.flatMap(_.reduction).take(1).foreach { reduction =>
           var reduced: Either[ExecutionFault, Boolean] = Right(reduction.operation match {
             case PredicateOperation.And => true
             case PredicateOperation.Or  => false
@@ -287,8 +290,11 @@ private[v9_3] object VMInterpreter {
       }
       var cohort     = ready.remove(0)
       val executable = kernel.program.at(cohort.pc) match {
-        case Left(fault)  => return Left(fault)
-        case Right(value) => value
+        case None =>
+          return Left(ExecutionFault.InvalidProgram(
+            s"program counter ${cohort.pc.value} is outside a ${kernel.program.size}-instruction program"
+          ))
+        case Some(value) => value
       }
       if (warpMemberMask(executable.instruction).nonEmpty) {
         var readyIndex = 0
@@ -331,24 +337,20 @@ private[v9_3] object VMInterpreter {
           case Some(fault) => return Left(fault)
           case None        => ()
         }
-        val skipped = if (executable.predication.isEmpty) LaneMask.Empty else cohort.lanes.subtract(active)
-        if (captureTrace)
-          cohort.lanes.foreachLane { lane =>
-            trace = trace
-              .append(Trace.Event.SchedulerDecision(traceStep, block, lane))
-              .append(Trace.Event.Instruction(
-                traceStep + 1L,
-                kernel.name,
-                block,
-                lane,
-                cohort.pc,
-                executable.opcode
-              ))
-            traceStep += 2L
-          }
-
-        val context =
-          VMExecutionContext(kernel, block, group, geometry, state, cohort.pc, active, arguments, memory, control)
+        val skipped = if (executable.predication.isEmpty) VMLaneMask.Empty else cohort.lanes.subtract(active)
+        val context = VMExecutionContext(
+          kernel,
+          block,
+          group,
+          geometry,
+          state,
+          cohort.pc,
+          active,
+          arguments,
+          memory,
+          control,
+          scheduler
+        )
 
         effects.clear()
         val outcome =
@@ -359,34 +361,13 @@ private[v9_3] object VMInterpreter {
             return Left(fault)
           case Right(Step.Trap(fault)) => return Left(fault)
           case Right(control)          =>
-            val writes = if (captureTrace) effects.snapshot else Vec.empty[VMStateWrite]
             effects.commit(
               VMStateEffects.validateWrite(memory, cohort.pc),
               VMStateEffects.applyWrite(state, memory)
             ) match {
               case Left(fault) =>
                 return Left(fault)
-              case Right(()) =>
-                if (captureTrace)
-                  writes.foreach {
-                    case VMStateWrite.MemoryVector(lane, address, width, values) =>
-                      values.zipWithIndex.foreach { case (value, index) =>
-                        trace = trace.append(Trace.Event.OutputWrite(
-                          traceStep,
-                          block,
-                          lane,
-                          address.offset(index.toLong * (width.value / 8)),
-                          value.toInt
-                        ))
-                        traceStep += 1L
-                      }
-                    case VMStateWrite.Memory(lane, address, _, value) =>
-                      trace = trace.append(
-                        Trace.Event.OutputWrite(traceStep, block, lane, address, value.toInt)
-                      )
-                      traceStep += 1L
-                    case _ => ()
-                  }
+              case Right(()) => ()
             }
             control match {
               case Step.Advance =>
@@ -412,17 +393,17 @@ private[v9_3] object VMInterpreter {
                   case Right(())   => ()
                 }
                 val reduction = executable.instruction match {
-                  case ExecutableInstruction.BarrierReduce(destination, _, predicate, operation) =>
+                  case VMIR.Instruction.BarrierReduce(destination, _, predicate, operation) =>
                     Some(BarrierReduction(destination, predicate, operation, cohort.pc))
                   case _ => None
                 }
                 key.scope match {
                   case WaitScope.Warp =>
-                    val lanesByWarp = mutable.Map.empty[Int, LaneMask]
+                    val lanesByWarp = mutable.Map.empty[Int, VMLaneMask]
                     active.foreachLane { lane =>
                       val warpBase = lane & ~31
-                      lanesByWarp(warpBase) = lanesByWarp.getOrElse(warpBase, LaneMask.Empty).union(
-                        LaneMask.one(lane).fold(fault => throw IllegalStateException(fault.message), value => value)
+                      lanesByWarp(warpBase) = lanesByWarp.getOrElse(warpBase, VMLaneMask.Empty).union(
+                        VMLaneMask.one(lane).fold(fault => throw IllegalStateException(fault.message), value => value)
                       )
                     }
                     val warps     = Vec.from(lanesByWarp).sortBy(_._1)
@@ -432,7 +413,7 @@ private[v9_3] object VMInterpreter {
                       val warpKey               = WaitKey(WaitScope.Warp, warpBase.toLong, key.phase)
                       waiting += Waiting(cohort.copy(lanes = warpLanes), warpKey, reduction)
                       warpBarrierMasks(warpKey) = key.id
-                      barrierMasks(warpKey) = barrierMasks.getOrElse(warpKey, LaneMask.Empty).union(warpLanes)
+                      barrierMasks(warpKey) = barrierMasks.getOrElse(warpKey, VMLaneMask.Empty).union(warpLanes)
                       releaseBarrier(warpKey) match {
                         case Left(fault) => return Left(fault)
                         case Right(())   => ()
@@ -441,7 +422,7 @@ private[v9_3] object VMInterpreter {
                     }
                   case _ =>
                     waiting += Waiting(cohort.copy(lanes = active), key, reduction)
-                    barrierMasks(key) = barrierMasks.getOrElse(key, LaneMask.Empty).union(active)
+                    barrierMasks(key) = barrierMasks.getOrElse(key, VMLaneMask.Empty).union(active)
                     releaseBarrier(key) match {
                       case Left(fault) => return Left(fault)
                       case Right(())   => ()
@@ -467,7 +448,7 @@ private[v9_3] object VMInterpreter {
         }
       }
     }
-    Right(trace -> traceStep)
+    Right(())
   }
 
 }

@@ -1,10 +1,13 @@
 package net.kurobako.gemstone.server.transport
 
-import net.kurobako.gemstone.execution.*
+import net.kurobako.gemstone.isa.KernelName as ISAKernelName
 import net.kurobako.gemstone.rpc.ExecutionRPC
 import net.kurobako.gemstone.rpc.ExecutionRPC.Operation
+import net.kurobako.gemstone.rpc.ExecutionProtocol.*
 import net.kurobako.gemstone.rpc.Wire
 import net.kurobako.gemstone.server.execution.ExecutionService
+import net.kurobako.gemstone.server.execution.ProgramEncoding
+import net.kurobako.gemstone.vm.{KernelTask, LaunchGeometry, MemoryRegion}
 
 import cats.syntax.all.*
 
@@ -113,8 +116,11 @@ private[server] object ExecutionRPCProtocol {
       encode(request, service.write(allocation, offset, bytes))
     case request @ Operation.ReadAllocation(allocation, offset, size) =>
       encode(request, service.read(allocation, offset, size))
-    case request @ Operation.LoadProgram(format, image) =>
-      encode(request, service.load(format, image))
+    case request @ Operation.LoadProgram(encoding, image) =>
+      val loaded = ProgramEncoding.from(encoding)
+        .leftMap(ExecutionFailure.InvalidRequest(_))
+        .flatMap(service.load(_, image))
+      encode(request, loaded)
     case request @ Operation.UnloadProgram(program) =>
       encode(request, service.unload(program))
     case request @ Operation.DescribeProgram(program) =>
@@ -140,22 +146,35 @@ private[server] object ExecutionRPCProtocol {
           arguments,
           pointerRelocations
         ) =>
-      val created = KernelDispatch.validated(
-        program = program,
-        kernelName = kernelName,
-        groupSize = groupSize,
-        groupCount = groupCount,
-        arguments = arguments,
-        globalSize = Some(globalSize),
+      val created = KernelTask.validated(
+        kernelName = ISAKernelName(kernelName.value),
+        groupSize = LaunchGeometry.Dimensions(groupSize.x, groupSize.y, groupSize.z),
+        groupCount = LaunchGeometry.Dimensions(groupCount.x, groupCount.y, groupCount.z),
+        arguments = arguments.map {
+          case KernelArgument.Scalar(bytes)          => KernelTask.Argument.Scalar(bytes)
+          case KernelArgument.Allocation(id, offset) => KernelTask.Argument.Memory(MemoryRegion(id.value), offset)
+          case KernelArgument.Local(size)            => KernelTask.Argument.Local(size)
+        },
+        globalSize = Some(LaunchGeometry.GlobalDimensions(globalSize.x, globalSize.y, globalSize.z)),
         privateSegmentBytes = privateSegmentBytes,
         groupSegmentBytes = groupSegmentBytes,
-        pointerRelocations = pointerRelocations,
+        pointerRelocations = pointerRelocations.map { relocation =>
+          KernelTask.PointerRelocation(
+            relocation.source match {
+              case RelocationSource.Allocation(id)  => KernelTask.RelocationSource.Memory(MemoryRegion(id.value))
+              case RelocationSource.Argument(index) => KernelTask.RelocationSource.Argument(index)
+            },
+            relocation.sourceOffset,
+            MemoryRegion(relocation.target.value),
+            relocation.targetOffset
+          )
+        },
         workDim = workDim,
-        globalOffset = globalOffset
+        globalOffset = LaunchGeometry.Coordinates(globalOffset.x, globalOffset.y, globalOffset.z)
       ).leftMap(message => ExecutionFailure.InvalidRequest(message))
       val result = created match {
-        case Left(error)     => Left(error)
-        case Right(dispatch) => service.launch(dispatch)
+        case Left(error) => Left(error)
+        case Right(task) => service.launch(program, task)
       }
       encode(request, result)
     case request @ Operation.QueryCompletion(completion) =>

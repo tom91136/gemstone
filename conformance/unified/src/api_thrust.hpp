@@ -645,6 +645,9 @@ public:
   template <class T> std::vector<T> unique(const std::vector<T> &input) {
     thrust::device_vector<T> output(input.begin(), input.end());
     const auto end = thrust::unique(output.begin(), output.end());
+#if defined(__HIPCC__)
+    thrust_algorithm_detail::check_legacy(hipDeviceSynchronize(), "rocThrust unique synchronize");
+#endif
     output.resize(static_cast<size_t>(end - output.begin()));
     return host(output);
   }

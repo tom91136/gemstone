@@ -2,8 +2,10 @@ package net.kurobako.gemstone.server.execution
 
 import net.kurobako.gemstone.Vec
 import net.kurobako.gemstone.binary.{LittleEndian, ScalarByteWidth}
-import net.kurobako.gemstone.execution.*
+import net.kurobako.gemstone.isa.KernelName as ISAKernelName
 import net.kurobako.gemstone.memory.AllocationKind
+import net.kurobako.gemstone.rpc.ExecutionProtocol.CompletionStatus
+import net.kurobako.gemstone.vm.{KernelTask, LaunchGeometry, MemoryRegion}
 
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
@@ -39,23 +41,23 @@ final class PTXProgramExecutorSuite extends munit.FunSuite {
          |  ret;
          |}
          |""".stripMargin
-    Using.resource(ExecutionService(GemstoneProgramRegistry(), _.run())) { service =>
+    Using.resource(ExecutionService(GemstoneBackendCatalog.default, _.run())) { service =>
       val allocation = service.registerAllocation(16L, AllocationKind.Shared).toOption.get
       val output     = service.registerAllocation(4L, AllocationKind.Shared).toOption.get
-      val program  = service.load(ProgramFormat.PTXText, Vec.from(source.getBytes(StandardCharsets.UTF_8))).toOption.get
-      val dispatch = KernelDispatch.validated(
-        program,
-        KernelName("aliases"),
-        Dimensions.One,
-        Dimensions.One,
+      val program    =
+        service.load(PTXRuntimeBackend.encoding, Vec.from(source.getBytes(StandardCharsets.UTF_8))).toOption.get
+      val task = KernelTask.validated(
+        ISAKernelName("aliases"),
+        LaunchGeometry.Dimensions.One,
+        LaunchGeometry.Dimensions.One,
         Vec(
-          KernelArgument.Allocation(allocation, 4L),
-          KernelArgument.Allocation(allocation, 4L),
-          KernelArgument.Allocation(output, 0L)
+          KernelTask.Argument.Memory(MemoryRegion(allocation.value), 4L),
+          KernelTask.Argument.Memory(MemoryRegion(allocation.value), 4L),
+          KernelTask.Argument.Memory(MemoryRegion(output.value), 0L)
         )
       ).toOption.get
 
-      val completion = service.launch(dispatch).toOption.get
+      val completion = service.launch(program, task).toOption.get
       assertEquals(service.completion(completion), Right(CompletionStatus.Succeeded))
       assertEquals(
         service.read(output, 0L, 4).map(bytes => LittleEndian.decode(bytes, 0, ScalarByteWidth(4))),

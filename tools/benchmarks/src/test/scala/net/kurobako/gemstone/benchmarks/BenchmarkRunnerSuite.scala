@@ -15,12 +15,12 @@ final class BenchmarkRunnerSuite extends munit.FunSuite {
 
   test("runner options are typed and leave case arguments intact") {
     val options = BenchmarkRunner.parse(
-      BenchmarkName("memory-boundary"),
+      BenchmarkName("ptx-execution"),
       Vector("--warmup", "2", "--samples", "3", "--", "--iterations", "17")
     )
     assertEquals(
       options,
-      BenchmarkOptions(2, 3, BenchmarkInvocation(BenchmarkName("memory-boundary"), Vector("--iterations", "17")))
+      BenchmarkOptions(2, 3, BenchmarkInvocation(BenchmarkName("ptx-execution"), Vector("--iterations", "17")))
     )
     assertEquals(BenchmarkRunner.result(options, 1, 99L)("schema").str, "gemstone-benchmark-v1")
   }

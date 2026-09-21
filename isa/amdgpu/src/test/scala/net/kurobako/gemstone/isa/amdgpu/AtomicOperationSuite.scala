@@ -8,7 +8,9 @@ import io.github.iltotore.iron.constraint.all.*
 import net.kurobako.gemstone.Vec
 import net.kurobako.gemstone.binary.{ByteRange, LittleEndian, ScalarByteWidth}
 import net.kurobako.gemstone.concurrent.withLock
-import net.kurobako.gemstone.execution.*
+import net.kurobako.gemstone.isa.*
+import net.kurobako.gemstone.vm.*
+import net.kurobako.gemstone.vm.LaunchGeometry.Dimensions
 import net.kurobako.gemstone.memory.MemoryValueByteWidth
 
 import java.util.concurrent.locks.ReentrantLock
@@ -17,35 +19,35 @@ import java.util.concurrent.locks.ReentrantLock
   * original value is at least its limit.
   */
 final class AtomicOperationSuite extends munit.FunSuite with CodeObjectTestSupport {
-  private val allocation = AllocationId(1)
-  private final class Memory(groups: Int, old: Long) extends ExecutionMemory {
-    val bytes        = Array.ofDim[Byte](16 + groups * 8)
-    private val lock = ReentrantLock()
+  private val allocation = MemoryRegion(1)
+  private final class Memory(groups: Int, old: Long) extends net.kurobako.gemstone.vm.Memory with TestAddressSpace {
+    val bytes                                                          = Array.ofDim[Byte](16 + groups * 8)
+    private val lock                                                   = ReentrantLock()
+    override protected val regionSizes: Iterable[(MemoryRegion, Long)] = Seq(allocation -> bytes.length.toLong)
     LittleEndian.write(old, bytes, 0, ScalarByteWidth(8))
-    def read(id: AllocationId, offset: Long :| Positive0, size: Int :| Positive0) =
+    def read(id: MemoryRegion, offset: Long :| Positive0, size: Int :| Positive0) =
       Either.cond(
         id == allocation && ByteRange.contains(bytes.length, offset, size),
         Vec.from(bytes.slice(offset.toInt, offset.toInt + size)),
-        ExecutionFailure.InvalidRequest("test read bounds")
+        Fault.InvalidTask("test read bounds")
       )
-    def write(id: AllocationId, offset: Long :| Positive0, value: Vec[Byte]) = {
+    def write(id: MemoryRegion, offset: Long :| Positive0, value: Vec[Byte]) = {
       assert(id == allocation && ByteRange.contains(bytes.length, offset, value.size))
       val _ = value.copyToArray(bytes, offset.toInt, value.size); Right(())
     }
     override def atomicModifyValue(
-        id: AllocationId,
+        id: MemoryRegion,
         offset: Long :| Positive0,
         size: MemoryValueByteWidth
-    )(update: Long => Long): Either[ExecutionFailure, Long] = lock.withLock {
+    )(update: Long => Long): Either[Fault, Long] = lock.withLock {
       val scalarWidth = size.scalarByteWidth
       if (id == allocation && ByteRange.contains(bytes.length, offset, size.value)) {
         val arrayOffset = offset.toInt
         val previous    = LittleEndian.decode(bytes, arrayOffset, scalarWidth)
         LittleEndian.write(update(previous), bytes, arrayOffset, scalarWidth)
         Right(previous)
-      } else Left(ExecutionFailure.InvalidRequest("test atomic bounds"))
+      } else Left(Fault.InvalidTask("test atomic bounds"))
     }
-    def recordPointerRelocation(value: PointerRelocation): Unit = ()
   }
   for {
     op        <- Seq("add", "cas", "flatcas", "inc")
@@ -64,15 +66,14 @@ final class AtomicOperationSuite extends munit.FunSuite with CodeObjectTestSuppo
     val operand  = if (op == "inc") 10L else if (scenario == "same-operands") 7L else 9L
     val code     = AtomicOperationCode.bytes(op, width, returning)
     val kernel   = CodeObjectKernel("atomic", Target("gfx1030"), 24, 0, 0, 0x80, 0x08, code)
-    val dispatch = KernelDispatch.validated(
-      ProgramId(1),
+    val dispatch = KernelTask.validated(
       KernelName("atomic"),
       Dimensions.One,
       testDimensions(groups),
       Vec(
-        KernelArgument.Allocation(allocation, 0),
-        KernelArgument.Scalar(LittleEndian.toVec(operand, ScalarByteWidth(8))),
-        KernelArgument.Scalar(LittleEndian.toVec(7, ScalarByteWidth(8)))
+        KernelTask.Argument.Memory(allocation, 0),
+        KernelTask.Argument.Scalar(LittleEndian.toVec(operand, ScalarByteWidth(8))),
+        KernelTask.Argument.Scalar(LittleEndian.toVec(7, ScalarByteWidth(8)))
       )
     ).toOption.get
     val memory   = Memory(groups, old)
@@ -82,11 +83,11 @@ final class AtomicOperationSuite extends munit.FunSuite with CodeObjectTestSuppo
       else if (previous == 7L) operand else previous
     }
     assertEquals(
-      DispatchInterpreter.execute(
-        DispatchInterpreter.prepare(kernel).toOption.get,
+      executeKernel(
+        VMCompiler.compile(kernel).toOption.get,
         dispatch,
         memory,
-        ExecutionControl.default
+        TaskControl.default
       ),
       Right(())
     )

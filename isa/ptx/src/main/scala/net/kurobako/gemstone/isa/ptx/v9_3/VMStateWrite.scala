@@ -1,12 +1,12 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
 import Program.*
-import VirtualMachine.*
+import VMIR.*
 
 import net.kurobako.gemstone.Vec
 import net.kurobako.gemstone.memory.GuestAddress
 
-private[v9_3] enum VMStateWrite extends Write {
+private[v9_3] enum VMStateWrite {
   case Register(lane: Int, name: RegisterName, value: Long)
   case Carry(lane: Int, value: Boolean)
   case FunctionRegister(lane: Int, name: RegisterName, value: FunctionName)

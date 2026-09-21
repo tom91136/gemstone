@@ -1,23 +1,15 @@
 package net.kurobako.gemstone.isa.spirv.v1_6
+import net.kurobako.gemstone.isa.*
+import net.kurobako.gemstone.vm.*
+import net.kurobako.gemstone.vm.LaunchGeometry.{Coordinates, Dimensions, GlobalDimensions}
 
 import net.kurobako.gemstone.Vec
 
 import net.kurobako.gemstone.binary.ByteRange
 import net.kurobako.gemstone.binary.LittleEndian
 import net.kurobako.gemstone.binary.ScalarByteWidth
-import net.kurobako.gemstone.execution.ExecutionFailure
-import net.kurobako.gemstone.execution.ExecutionControl
-import net.kurobako.gemstone.execution.ExecutionLimits
-import net.kurobako.gemstone.execution.ExecutionMemory
-import net.kurobako.gemstone.execution.AllocationId
-import net.kurobako.gemstone.execution.Dimensions
-import net.kurobako.gemstone.execution.KernelArgument
-import net.kurobako.gemstone.execution.KernelDispatch
-import net.kurobako.gemstone.execution.KernelName
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
-import net.kurobako.gemstone.execution.PointerRelocation
-import net.kurobako.gemstone.execution.ProgramId
 
 import java.util.concurrent.atomic.AtomicReference
 final class ExecutionControlFlowSuite extends munit.FunSuite with ExecutionTestSupport {
@@ -62,23 +54,22 @@ final class ExecutionControlFlowSuite extends munit.FunSuite with ExecutionTestS
       ),
       Endianness.Little
     )
-    val allocation = AllocationId(21L)
+    val allocation = MemoryRegion(21L)
     val memory     = ArrayMemory(allocation, 4)
-    val dispatch   = KernelDispatch
+    val dispatch   = KernelTask
       .validated(
-        ProgramId(21L),
         KernelName("call"),
         Dimensions.One,
         Dimensions.One,
         Vec(
-          KernelArgument.Allocation(allocation, 0L),
-          KernelArgument.Scalar(LittleEndian.toVec(41L, ScalarByteWidth(4)))
+          KernelTask.Argument.Memory(allocation, 0L),
+          KernelTask.Argument.Scalar(LittleEndian.toVec(41L, ScalarByteWidth(4)))
         )
       )
       .toOption
       .get
 
-    assertEquals(Interpreter.runUnchecked(module, dispatch, memory), Right(()))
+    assertEquals(executeUnchecked(module, dispatch, memory), Right(()))
     assertEquals(memory.bytes, LittleEndian.toVec(42L, ScalarByteWidth(4)))
   }
 
@@ -114,24 +105,23 @@ final class ExecutionControlFlowSuite extends munit.FunSuite with ExecutionTestS
       ),
       Endianness.Little
     )
-    val allocation = AllocationId(22L)
+    val allocation = MemoryRegion(22L)
     val memory     = ArrayMemory(allocation, 8)
-    val dispatch   = KernelDispatch
+    val dispatch   = KernelTask
       .validated(
-        ProgramId(22L),
         KernelName("hypot"),
         Dimensions.One,
         Dimensions.One,
         Vec(
-          KernelArgument.Allocation(allocation, 0L),
-          KernelArgument.Scalar(LittleEndian.toVec(java.lang.Double.doubleToRawLongBits(3.0), ScalarByteWidth(8))),
-          KernelArgument.Scalar(LittleEndian.toVec(java.lang.Double.doubleToRawLongBits(4.0), ScalarByteWidth(8)))
+          KernelTask.Argument.Memory(allocation, 0L),
+          KernelTask.Argument.Scalar(LittleEndian.toVec(java.lang.Double.doubleToRawLongBits(3.0), ScalarByteWidth(8))),
+          KernelTask.Argument.Scalar(LittleEndian.toVec(java.lang.Double.doubleToRawLongBits(4.0), ScalarByteWidth(8)))
         )
       )
       .toOption
       .get
 
-    assertEquals(Interpreter.runUnchecked(module, dispatch, memory), Right(()))
+    assertEquals(executeUnchecked(module, dispatch, memory), Right(()))
     assertEquals(memory.bytes, LittleEndian.toVec(java.lang.Double.doubleToRawLongBits(5.0), ScalarByteWidth(8)))
   }
 
@@ -165,23 +155,25 @@ final class ExecutionControlFlowSuite extends munit.FunSuite with ExecutionTestS
       ),
       Endianness.Little
     )
-    val allocation = AllocationId(23L)
+    val allocation = MemoryRegion(23L)
     val memory     = ArrayMemory(allocation, 4)
-    val dispatch   = KernelDispatch
+    val dispatch   = KernelTask
       .validated(
-        ProgramId(23L),
         KernelName("native_recip"),
         Dimensions.One,
         Dimensions.One,
         Vec(
-          KernelArgument.Allocation(allocation, 0L),
-          KernelArgument.Scalar(LittleEndian.toVec(java.lang.Float.floatToRawIntBits(4.0f).toLong, ScalarByteWidth(4)))
+          KernelTask.Argument.Memory(allocation, 0L),
+          KernelTask.Argument.Scalar(LittleEndian.toVec(
+            java.lang.Float.floatToRawIntBits(4.0f).toLong,
+            ScalarByteWidth(4)
+          ))
         )
       )
       .toOption
       .get
 
-    assertEquals(Interpreter.runUnchecked(module, dispatch, memory), Right(()))
+    assertEquals(executeUnchecked(module, dispatch, memory), Right(()))
     assertEquals(memory.bytes, LittleEndian.toVec(java.lang.Float.floatToRawIntBits(0.25f).toLong, ScalarByteWidth(4)))
   }
 
@@ -215,24 +207,26 @@ final class ExecutionControlFlowSuite extends munit.FunSuite with ExecutionTestS
       ),
       Endianness.Little
     )
-    val allocation = AllocationId(24L)
+    val allocation = MemoryRegion(24L)
     val memory     = ArrayMemory(allocation, 4)
-    val dispatch   = KernelDispatch
+    val dispatch   = KernelTask
       .validated(
-        ProgramId(24L),
         KernelName("native_sin"),
         Dimensions.One,
         Dimensions.One,
         Vec(
-          KernelArgument.Allocation(allocation, 0L),
-          KernelArgument.Scalar(LittleEndian.toVec(java.lang.Float.floatToRawIntBits(0.5f).toLong, ScalarByteWidth(4)))
+          KernelTask.Argument.Memory(allocation, 0L),
+          KernelTask.Argument.Scalar(LittleEndian.toVec(
+            java.lang.Float.floatToRawIntBits(0.5f).toLong,
+            ScalarByteWidth(4)
+          ))
         )
       )
       .toOption
       .get
 
-    assertEquals(Interpreter.runUnchecked(module, dispatch, memory), Right(()))
-    val actual = java.lang.Float.intBitsToFloat(LittleEndian.decode(memory.bytes, 0, ScalarByteWidth(4)).toInt)
+    assertEquals(executeUnchecked(module, dispatch, memory), Right(()))
+    val actual = java.lang.Float.intBitsToFloat(LittleEndian.decodeInt32(memory.bytes, 0))
     assert(math.abs(actual - 0.47942555f) < 1.0e-6f)
   }
 
@@ -266,24 +260,26 @@ final class ExecutionControlFlowSuite extends munit.FunSuite with ExecutionTestS
       ),
       Endianness.Little
     )
-    val allocation = AllocationId(25L)
+    val allocation = MemoryRegion(25L)
     val memory     = ArrayMemory(allocation, 4)
-    val dispatch   = KernelDispatch
+    val dispatch   = KernelTask
       .validated(
-        ProgramId(25L),
         KernelName("native_cos"),
         Dimensions.One,
         Dimensions.One,
         Vec(
-          KernelArgument.Allocation(allocation, 0L),
-          KernelArgument.Scalar(LittleEndian.toVec(java.lang.Float.floatToRawIntBits(0.5f).toLong, ScalarByteWidth(4)))
+          KernelTask.Argument.Memory(allocation, 0L),
+          KernelTask.Argument.Scalar(LittleEndian.toVec(
+            java.lang.Float.floatToRawIntBits(0.5f).toLong,
+            ScalarByteWidth(4)
+          ))
         )
       )
       .toOption
       .get
 
-    assertEquals(Interpreter.runUnchecked(module, dispatch, memory), Right(()))
-    val actual = java.lang.Float.intBitsToFloat(LittleEndian.decode(memory.bytes, 0, ScalarByteWidth(4)).toInt)
+    assertEquals(executeUnchecked(module, dispatch, memory), Right(()))
+    val actual = java.lang.Float.intBitsToFloat(LittleEndian.decodeInt32(memory.bytes, 0))
     assert(math.abs(actual - 0.87758255f) < 1.0e-6f)
   }
 
@@ -336,24 +332,23 @@ final class ExecutionControlFlowSuite extends munit.FunSuite with ExecutionTestS
       ),
       Endianness.Little
     )
-    val allocation = AllocationId(2L)
+    val allocation = MemoryRegion(2L)
     val memory     = ArrayMemory(allocation, 36)
-    val dispatch   = KernelDispatch
+    val dispatch   = KernelTask
       .validated(
-        ProgramId(2L),
         KernelName("sequence"),
         Dimensions.One,
         Dimensions.One,
         Vec(
-          KernelArgument.Allocation(allocation, 4L),
-          KernelArgument.Scalar(LittleEndian.toVec(8L, ScalarByteWidth(4)))
+          KernelTask.Argument.Memory(allocation, 4L),
+          KernelTask.Argument.Scalar(LittleEndian.toVec(8L, ScalarByteWidth(4)))
         )
       )
       .toOption
       .get
 
     val decoded = ISA.decode(ISA.encode(module).toOption.get).toOption.get
-    assertEquals(Interpreter.runUnchecked(decoded, dispatch, memory), Right(()))
+    assertEquals(executeUnchecked(decoded, dispatch, memory), Right(()))
     assertEquals(memory.bytes.take(4), Vec.fill(4)(0.toByte))
     assertEquals(memory.bytes.drop(4), Vec.from((0L until 8L).flatMap(LittleEndian.toVec(_, ScalarByteWidth(4)))))
   }
@@ -395,20 +390,19 @@ final class ExecutionControlFlowSuite extends munit.FunSuite with ExecutionTestS
       Instruction.FunctionEnd()
     )
     val module     = Module(Header(ISA.version, Word(0), Word(20), Word(0)), instructions, Endianness.Little)
-    val allocation = AllocationId(3L)
+    val allocation = MemoryRegion(3L)
     val memory     = ArrayMemory(allocation, 4)
-    val dispatch   = KernelDispatch
+    val dispatch   = KernelTask
       .validated(
-        ProgramId(3L),
         KernelName("lifetime"),
         Dimensions.One,
         Dimensions.One,
-        Vec(KernelArgument.Allocation(allocation, 0L))
+        Vec(KernelTask.Argument.Memory(allocation, 0L))
       )
       .toOption
       .get
 
-    assertEquals(Interpreter.runUnchecked(module, dispatch, memory), Right(()))
+    assertEquals(executeUnchecked(module, dispatch, memory), Right(()))
     assertEquals(memory.bytes, LittleEndian.toVec(0x12345678L, ScalarByteWidth(4)))
 
     val malformed = module.copy(instructions =
@@ -417,8 +411,8 @@ final class ExecutionControlFlowSuite extends munit.FunSuite with ExecutionTestS
         Instruction.LifetimeStart(bytePointer, operand("LiteralInteger", 4, 0))
       )
     )
-    Interpreter.runUnchecked(malformed, dispatch, memory) match {
-      case Left(ExecutionFailure.InvalidRequest(message)) =>
+    executeUnchecked(malformed, dispatch, memory) match {
+      case Left(Fault.InvalidTask(message)) =>
         assertEquals(message, "OpLifetimeStart size must contain one word, found 2")
       case result => fail(s"expected typed malformed lifetime marker failure, found $result")
     }

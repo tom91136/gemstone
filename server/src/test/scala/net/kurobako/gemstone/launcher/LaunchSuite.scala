@@ -38,8 +38,17 @@ final class LaunchSuite extends munit.FunSuite {
       .fold(help => fail(s"$help"), value => value)
 
     assertEquals(parsed.apis, Set(ComputeAPI.HIP, ComputeAPI.HSA))
+    assertEquals(parsed.serverPort, None)
     assertEquals(parsed.executable.value, "application")
     assertEquals(parsed.arguments.map(argument => s"$argument").toVector, Vector("argument"))
+  }
+
+  test("launcher accepts a shared server port") {
+    val parsed = Command("run", "test launcher options")(GemstoneLauncher.options)
+      .parse(Seq("--server-port", "43123", "--", "application"))
+      .fold(help => fail(s"$help"), value => value)
+
+    assertEquals(parsed.serverPort, Some(RPCPort(43123)))
   }
 
   test("all selected APIs coexist in one environment") {

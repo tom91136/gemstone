@@ -1,7 +1,7 @@
 package net.kurobako.gemstone.server
 
 import net.kurobako.gemstone.NoNul
-import net.kurobako.gemstone.execution.ExecutionLimits
+import net.kurobako.gemstone.vm.TaskLimits
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 import java.nio.file.Files
@@ -25,7 +25,7 @@ final class CUDACrossWorkgroupSuite extends munit.FunSuite {
       assert(Files.isRegularFile(runtime), s"CUDA runtime is missing: $runtime")
       assert(Files.isExecutable(client), s"CUDA test executable is missing: $client")
       Using.resource(GemstoneRPCServer.start(
-        ExecutionLimits(1000000, 32),
+        TaskLimits(1000000, 32),
         Map("GEMSTONE_EXECUTION_PARALLELISM" -> workers.toString)
       )) { server =>
         val result = NativeTestProcess.run(

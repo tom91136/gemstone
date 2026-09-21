@@ -1,0 +1,25 @@
+package net.kurobako.gemstone.vm
+
+import net.kurobako.gemstone.Vec
+
+import io.github.iltotore.iron.*
+import io.github.iltotore.iron.constraint.all.*
+
+trait Event
+
+object Event {
+  final case class Print(format: String, arguments: Vec[PrintArgument]) extends Event
+  final case class PointerRelocation(
+      source: MemoryRegion,
+      sourceOffset: Long :| Positive0,
+      target: MemoryRegion,
+      targetOffset: Long :| Positive0
+  ) extends Event
+
+  enum PrintArgument {
+    case Integer(bits: Vec[Long], width: Int, isSigned: Boolean)
+    case Floating(bits: Vec[Long], width: Int)
+    case Pointer(address: Long)
+    case Text(value: String)
+  }
+}

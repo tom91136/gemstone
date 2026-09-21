@@ -2,6 +2,7 @@ package net.kurobako.gemstone.isa.amdgpu
 
 import net.kurobako.gemstone.Vec
 import net.kurobako.gemstone.Vec.*
+import Program.*
 
 import cats.data.Chain
 import cats.parse.Parser as P
@@ -12,13 +13,17 @@ import io.github.iltotore.iron.constraint.all.*
 import scala.annotation.tailrec
 import scala.util.Try
 
-object Parser {
+object Parser extends net.kurobako.gemstone.isa.Decoder[String, Program] {
+  override type Error = ParseError
+
   private def parseError(line: Int, column: Int, message: String): ParseError =
     ParseError(
       line.refineUnsafe[Positive],
       column.refineUnsafe[Positive],
       message
     )
+
+  override def decode(source: String): Either[ParseError, Program] = parse(source)
 
   def parse(source: String): Either[ParseError, Program] =
     source.linesIterator.zipWithIndex.toVec
@@ -62,7 +67,7 @@ object Parser {
     val opcodeText = if (opcodeEnd < 0) text else text.take(opcodeEnd)
     if (opcodeName.parseAll(opcodeText).isLeft) Left(parseError(line, 1, s"invalid AMDGPU opcode '$opcodeText'"))
     else {
-      val opcode = normalizeOpcode(opcodeText)
+      val opcode = Opcode.normalize(opcodeText)
       val tail   = if (opcodeEnd < 0) "" else text.drop(opcodeEnd).trim
       splitTopLevel(tail, ',', line).flatMap { commaParts =>
         commaParts
@@ -75,11 +80,12 @@ object Parser {
               )
           })
           .flatMap { case (operands, modifiers) =>
-            Instruction.decode(opcode, Vec.from(operands.iterator), Vec.from(modifiers.iterator)).leftMap {
-              case InstructionDecodeError.UnknownOpcode(value) => parseError(line, 1, s"unknown AMDGPU opcode '$value'")
-              case InstructionDecodeError.InvalidOperandCount(value, expected, actual) =>
+            Instruction.decode(opcode, Vec.from(operands.toVector.view), Vec.from(modifiers.toVector.view)).leftMap {
+              case Instruction.DecodeError.UnknownOpcode(value) =>
+                parseError(line, 1, s"unknown AMDGPU opcode '$value'")
+              case Instruction.DecodeError.InvalidOperandCount(value, expected, actual) =>
                 parseError(line, 1, s"$value expects ${expected.mkString(" or ")} operands, found $actual")
-              case InstructionDecodeError.AmbiguousForms(value, definitions) =>
+              case Instruction.DecodeError.AmbiguousForms(value, definitions) =>
                 parseError(line, 1, s"$value ambiguously matched ${definitions.mkString(", ")}")
             }
           }
@@ -97,7 +103,7 @@ object Parser {
         case Some(modifier)        => Right(Right(modifier))
         case None if wordIndex > 0 =>
           val name = if (isIdentifier(word)) word.toLowerCase else word
-          AMDGPUModifierName.either(name)
+          ModifierName.either(name)
             .leftMap(_ => parseError(line, instruction.indexOf(word) + 1, s"invalid modifier '$word'"))
             .map(value => Right(Modifier(value)))
         case None => parseOperand(word, line, instruction.indexOf(word) + 1).map(Left(_))
@@ -157,11 +163,11 @@ object Parser {
   private def parseModifier(text: String): Option[Modifier] = {
     val colon = topLevelColon(text)
     if (colon > 0 && colon < text.length - 1 && isIdentifier(text.take(colon)))
-      AMDGPUModifierValue.either(text.drop(colon + 1)).toOption.map(value =>
-        Modifier(AMDGPUModifierName.applyUnsafe(text.take(colon).toLowerCase), Some(value))
+      ModifierValue.either(text.drop(colon + 1)).toOption.map(value =>
+        Modifier(ModifierName.applyUnsafe(text.take(colon).toLowerCase), Some(value))
       )
     else if (KnownFlagModifiers.contains(text.toLowerCase))
-      Some(Modifier(AMDGPUModifierName.applyUnsafe(text.toLowerCase)))
+      Some(Modifier(ModifierName.applyUnsafe(text.toLowerCase)))
     else None
   }
 
@@ -172,7 +178,7 @@ object Parser {
         val last = text.drop(start).trim
         if (round != 0 || square != 0) Left(parseError(line, text.length, "unclosed delimiter"))
         else if (last.isEmpty) Left(parseError(line, text.length, "empty operand"))
-        else Right(Vec.from(result.append(last).iterator))
+        else Right(Vec.from(result.append(last).toVector.view))
       } else {
         val (nextRound, nextSquare) = text(index) match {
           case '(' => round + 1 -> square
@@ -217,7 +223,7 @@ object Parser {
       else loop(index + 1, if (completedAt.nonEmpty) None else nextStart, nextRound, nextSquare, nextResult)
     }
 
-    Vec.from(loop(0, None, 0, 0, Chain.empty).iterator)
+    Vec.from(loop(0, None, 0, 0, Chain.empty).toVector.view)
   }
 
   private def stripComment(source: String): String = {

@@ -4,7 +4,9 @@ import net.kurobako.gemstone.{PlatformTime, Vec}
 import net.kurobako.gemstone.benchmarks.BenchmarkArguments
 import net.kurobako.gemstone.benchmarks.BenchmarkName
 import net.kurobako.gemstone.benchmarks.PlatformMetrics
-import net.kurobako.gemstone.execution.*
+import net.kurobako.gemstone.isa.KernelName
+import net.kurobako.gemstone.memory.GuestAddress
+import net.kurobako.gemstone.vm.*
 
 import cats.syntax.all.*
 import com.monovore.decline.Opts
@@ -33,22 +35,28 @@ object PTXProgramLifecycleBenchmark {
       recording: Option[Path]
   )
 
-  private object EmptyMemory extends ExecutionMemory {
+  private val machine = VirtualMachine(Observer.discard, Scheduler.Sequential)
+
+  private object EmptyMemory extends Memory with AddressSpace {
     override def read(
-        id: AllocationId,
+        region: MemoryRegion,
         offset: Long :| Positive0,
         size: Int :| Positive0
-    ): Either[ExecutionFailure, Vec[Byte]] =
-      Left(ExecutionFailure.Unsupported("benchmark kernel attempted a memory read"))
+    ): Either[Fault, Vec[Byte]] =
+      Left(Fault.Unsupported("benchmark kernel attempted a memory read"))
 
     override def write(
-        id: AllocationId,
+        region: MemoryRegion,
         offset: Long :| Positive0,
         bytes: Vec[Byte]
-    ): Either[ExecutionFailure, Unit] =
-      Left(ExecutionFailure.Unsupported("benchmark kernel attempted a memory write"))
+    ): Either[Fault, Unit] =
+      Left(Fault.Unsupported("benchmark kernel attempted a memory write"))
 
-    override def recordPointerRelocation(relocation: PointerRelocation): Unit = ()
+    override def address(region: MemoryRegion, offset: Long :| Positive0): Either[Fault, GuestAddress] =
+      Left(Fault.Unsupported("benchmark kernel attempted address translation"))
+
+    override def locate(address: GuestAddress, size: Int :| Positive0): Either[Fault, AddressSpace.Location] =
+      Left(Fault.Unsupported("benchmark kernel attempted address lookup"))
   }
 
   private val name    = BenchmarkName("ptx-program-lifecycle")
@@ -75,9 +83,7 @@ object PTXProgramLifecycleBenchmark {
   def run(arguments: Array[String]): Unit = {
     val parsed = BenchmarkArguments.parse(name, arguments.toSeq, options)
     val source = parsed.source.fold(generatedSource(parsed.entries, parsed.instructions))(Files.readString(_))
-    val images = Vector.tabulate(parsed.images)(index =>
-      Vec.from(s"$source\n// lifecycle benchmark image $index\n".getBytes(StandardCharsets.UTF_8))
-    )
+    val images = Vector.tabulate(parsed.images)(index => s"$source\n// lifecycle benchmark image $index\n")
 
     Using.resource(PlatformMetrics.startRecording(parsed.recording)) { _ =>
       val allocatedBefore = PlatformMetrics.allocatedBytes
@@ -88,28 +94,28 @@ object PTXProgramLifecycleBenchmark {
           var total     = 0L
           while (iteration < parsed.iterations) {
             val program = decode(images(iteration % images.size))
-            total += program.catalog.fold(error => throw IllegalStateException(error.message), _.kernels.size.toLong)
+            total += machine.symbols(program)
+              .fold(error => throw IllegalStateException(error.message), _.kernels.size.toLong)
             iteration += 1
           }
           total
         case Operation.Launch =>
           val program  = decode(images.head)
-          val metadata = program.kernel(parsed.kernel)
+          val metadata = machine.kernel(program, parsed.kernel)
             .fold(error => throw IllegalArgumentException(error.message), value => value)
           if (metadata.explicitParameterCount != 0)
             throw IllegalArgumentException(
               s"benchmark launch kernel '${parsed.kernel.value}' has ${metadata.explicitParameterCount} parameters"
             )
-          val dispatch = KernelDispatch.validated(
-            program = ProgramId(1),
+          val task = KernelTask.validated(
             kernelName = parsed.kernel,
-            groupSize = Dimensions.One,
-            groupCount = Dimensions.One,
+            groupSize = LaunchGeometry.Dimensions.One,
+            groupCount = LaunchGeometry.Dimensions.One,
             arguments = Vec.empty
           ).fold(error => throw IllegalArgumentException(error), value => value)
           var iteration = 0
           while (iteration < parsed.iterations) {
-            program.launch(dispatch, EmptyMemory, ExecutionControl.default)
+            machine.execute(program, task, EmptyMemory, TaskControl.default)
               .fold(error => throw IllegalStateException(error.message), _ => ())
             iteration += 1
           }
@@ -131,8 +137,10 @@ object PTXProgramLifecycleBenchmark {
     }
   }
 
-  private def decode(image: Vec[Byte]): ProgramInstance =
-    ModuleDecoder.decode(image).fold(error => throw IllegalArgumentException(error.message), value => value)
+  private def decode(source: String): machine.LoadedProgram = {
+    val program = Parser.decode(source).fold(error => throw IllegalArgumentException(error.message), identity)
+    machine.load(program).fold(error => throw IllegalArgumentException(error.message), identity)
+  }
 
   private def generatedSource(entries: Int :| Positive, instructions: Int :| Positive0): String = {
     val body =

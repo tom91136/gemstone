@@ -1,8 +1,8 @@
 package net.kurobako.gemstone.server.execution
 
-import net.kurobako.gemstone.execution.*
 import net.kurobako.gemstone.concurrent.withLock
 import net.kurobako.gemstone.PlatformTime
+import net.kurobako.gemstone.vm.{Fault, Scheduler}
 
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
@@ -16,17 +16,17 @@ private[server] final class InterpreterScheduler private[server] (
     val parallelism: Int :| Positive,
     minGroups: Long = 16L,
     minWorkItems: Long = 64L
-) extends ExecutionParallelism with AutoCloseable {
+) extends Scheduler with AutoCloseable {
   private final class Job(
       val count: Long :| Positive0,
-      val task: Long :| Positive0 => Either[ExecutionFailure, Unit]
+      val task: Long :| Positive0 => Either[Fault, Unit]
   ) {
     @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
     var next = 0L
     @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
     var active = 0
     @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-    var failure: Option[ExecutionFailure] = None
+    var failure: Option[Fault] = None
     @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
     @volatile var finished                    = count == 0L
     val observed: Option[mutable.Set[String]] = Option.when(trace)(mutable.Set.empty)
@@ -47,7 +47,7 @@ private[server] final class InterpreterScheduler private[server] (
 
   private def enqueue(
       count: Long :| Positive0,
-      task: Long :| Positive0 => Either[ExecutionFailure, Unit]
+      task: Long :| Positive0 => Either[Fault, Unit]
   ): Job = lock.withLock {
     if (closed) throw java.util.concurrent.RejectedExecutionException("execution pool is closed")
     val job = Job(count, task)
@@ -76,7 +76,7 @@ private[server] final class InterpreterScheduler private[server] (
     catch {
       case NonFatal(error) =>
         val detail = Option(error.getMessage).filter(_.nonEmpty).getOrElse(error.getClass.getName)
-        Left(ExecutionFailure.Failed(detail))
+        Left(Fault.Backend(detail))
     }
     lock.withLock {
       job.active -= 1
@@ -98,13 +98,13 @@ private[server] final class InterpreterScheduler private[server] (
     finally inWorker.remove()
   }
 
-  private def await(job: Job): Either[ExecutionFailure, Unit] = {
+  private def await(job: Job): Either[Fault, Unit] = {
     if (inWorker.get()) {
       while (!job.finished && !closed) take(Some(job)).foreach(execute(_))
     } else lock.withLock {
       while (!job.finished && !closed) available.await()
     }
-    if (!job.finished) Left(ExecutionFailure.Failed("execution pool closed before the job completed"))
+    if (!job.finished) Left(Fault.Backend("execution pool closed before the job completed"))
     else job.failure.toLeft(())
   }
 
@@ -127,8 +127,8 @@ private[server] final class InterpreterScheduler private[server] (
     parallelism > 1 && taskCount > 1L && (taskCount >= minGroups || workItemsPerTask >= minWorkItems)
 
   override def parallelFor(taskCount: Long :| Positive0)(
-      task: Long :| Positive0 => Either[ExecutionFailure, Unit]
-  ): Either[ExecutionFailure, Unit] = {
+      task: Long :| Positive0 => Either[Fault, Unit]
+  ): Either[Fault, Unit] = {
     val started = if (trace) PlatformTime.monotonicNanos else 0L
     val job     = enqueue(taskCount, task)
     val result  = await(job)
@@ -144,7 +144,7 @@ private[server] final class InterpreterScheduler private[server] (
   override def close(): Unit = {
     lock.withLock { closed = true; queue.clear(); available.signalAll() }
     threads.foreach(_.interrupt())
-    threads.iterator.filterNot(_ eq Thread.currentThread()).foreach(_.join())
+    threads.view.filterNot(_ eq Thread.currentThread()).foreach(_.join())
   }
 }
 

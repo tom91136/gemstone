@@ -6,6 +6,7 @@ import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 
 import java.util.concurrent.locks.ReentrantLock
+import scala.jdk.CollectionConverters.*
 import scala.collection.mutable
 import scala.util.Try
 
@@ -64,13 +65,10 @@ private[gemstone] final class LRUCache[K, V] private (
       val computed = Try(compute).toEither
       entry.complete(computed)
       lock.withLock {
-        val _        = mutableInFlight.remove(key)
-        val _        = mutableEntries.put(key, entry)
-        val iterator = mutableEntries.entrySet().iterator()
-        while (mutableEntries.size() > capacity && iterator.hasNext) {
-          val _ = iterator.next()
-          iterator.remove()
-        }
+        val _ = mutableInFlight.remove(key)
+        val _ = mutableEntries.put(key, entry)
+        while (mutableEntries.size() > capacity)
+          mutableEntries.keySet().asScala.headOption.foreach(oldest => mutableEntries.remove(oldest))
       }
       computed.fold(error => throw error, value => Some(value))
     } else {

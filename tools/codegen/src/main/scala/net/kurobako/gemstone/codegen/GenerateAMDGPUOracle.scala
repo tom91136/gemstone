@@ -102,13 +102,13 @@ object GenerateAMDGPUOracle {
     val root   = references.resolve("llvm/llvm/test/MC/AMDGPU")
     if (!Files.isDirectory(root)) throw IllegalArgumentException(s"missing LLVM AMDGPU tests: $root")
     val files = Using.resource(Files.walk(root)) { stream =>
-      stream.iterator().asScala.filter(path => Files.isRegularFile(path) && path.toString.endsWith(".s")).toVector
+      stream.toList.asScala.view.filter(path => Files.isRegularFile(path) && path.toString.endsWith(".s")).toVector
         .sortBy(_.toString)
     }
 
     val corpus      = extract(root, files)
-    val positives   = corpus.positives.iterator.toVector.sorted(using goldenOrdering)
-    val diagnostics = corpus.diagnostics.iterator.toVector.sorted(using diagnosticOrdering)
+    val positives   = corpus.positives.toVector.sorted(using goldenOrdering)
+    val diagnostics = corpus.diagnostics.toVector.sorted(using diagnosticOrdering)
     if (positives.size < 10000)
       throw IllegalStateException(s"expected at least 10,000 exact-target encoding cases, found ${positives.size}")
     if (diagnostics.size < 1000)
@@ -224,13 +224,13 @@ object GenerateAMDGPUOracle {
     values.foldLeft((Set.empty[K], Chain.empty[A])) { case ((seen, selected), value) =>
       val current = key(value)
       if (seen(current)) (seen, selected) else (seen + current, selected.append(value))
-    }._2.iterator.toVector
+    }._2.toVector
 
   private def firstByMany[A, K](values: Vector[A])(keys: A => Vector[K]): Vector[A] =
     values.foldLeft((Set.empty[K], Chain.empty[A])) { case ((seen, selected), value) =>
       val novel = keys(value).filterNot(seen)
       if (novel.isEmpty) (seen, selected) else (seen ++ novel, selected.append(value))
-    }._2.iterator.toVector
+    }._2.toVector
 
   private def evenly[A](values: Vector[A], limit: Int): Vector[A] =
     if (values.size <= limit) values
@@ -413,7 +413,7 @@ object GenerateAMDGPUOracle {
   private def containsFileCheckExpression(value: String): Boolean = value.contains("{{") || value.contains("[[")
 
   private def parseBytes(value: String): Option[Vector[EncodedByte]] = {
-    val fields = value.split(',').iterator.map(_.trim).filter(_.nonEmpty).toVector
+    val fields = value.split(',').view.map(_.trim).filter(_.nonEmpty).toVector
     Option.when(
       fields.forall(field =>
         field.length >= 3 && field.length <= 4 && field.take(2).equalsIgnoreCase("0x") &&

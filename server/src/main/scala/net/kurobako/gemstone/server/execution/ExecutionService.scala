@@ -5,9 +5,20 @@ import net.kurobako.gemstone.Vec.*
 import net.kurobako.gemstone.binary.ByteRange
 import net.kurobako.gemstone.binary.LittleEndian
 import net.kurobako.gemstone.concurrent.withLock
-import net.kurobako.gemstone.execution.*
 import net.kurobako.gemstone.memory.{AllocationKind, GuestAddress, MemoryValueByteWidth}
 import net.kurobako.gemstone.rpc.ExecutionRPC
+import net.kurobako.gemstone.rpc.ExecutionProtocol.*
+import net.kurobako.gemstone.vm.{
+  AddressSpace,
+  Event,
+  Fault,
+  KernelTask,
+  Memory,
+  MemoryRegion,
+  Scheduler,
+  TaskControl,
+  TaskLimits
+}
 
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
@@ -20,23 +31,25 @@ import scala.concurrent.ExecutionContext
 
 /** Process-neutral program and memory receiver shared by every native API facade. */
 private[server] final class ExecutionService(
-    executor: ProgramExecutor,
+    backends: BackendCatalog,
     schedule: Runnable => Unit = runnable => ExecutionContext.global.execute(runnable),
-    executionLimits: ExecutionLimits = ExecutionLimits.Default,
-    parallelism: ExecutionParallelism = ExecutionParallelism.Sequential
+    taskLimits: TaskLimits = TaskLimits.Default,
+    scheduler: Scheduler = Scheduler.Sequential
 ) extends AutoCloseable {
-  private val DirtyChunkSize = 64L * 1024L
+  private val DirtyChunkSize         = 64L * 1024L
+  private val SyntheticAddressBase   = 0x400000000000L
+  private val SyntheticAddressStride = 0x100000000L
 
   /** Mutable byte storage is deliberately confined behind this service's state lock. Allocation traffic is the
     * simulator's hot data path; rebuilding a multi-megabyte immutable collection for every mirrored chunk creates
-    * unbounded GC latency. Neither the array nor a mutable view crosses the ExecutionMemory boundary.
+    * unbounded GC latency. Neither the array nor a mutable view crosses the VM memory boundary.
     */
   private final case class RemoteAllocation(
       kind: AllocationKind,
       bytes: Array[Byte],
       address: Option[GuestAddress] = None
   ) {
-    val size: Long :| Positive = bytes.length.toLong.refineUnsafe[Positive]
+    val size: Int :| Positive = bytes.length.refineUnsafe[Positive]
   }
   private final case class CompletionRecord(
       status: CompletionStatus,
@@ -44,16 +57,11 @@ private[server] final class ExecutionService(
       allocations: Set[AllocationId],
       pointerRelocations: Vec[PointerRelocation],
       prints: Vec[PrintEvent],
-      allocationAddresses: Vec[AllocationAddress],
-      control: ExecutionControl
+      cancellation: TaskControl.Cancellation.Source
   )
-
-  private final class CompletionOutput(completion: CompletionId) extends ExecutionOutput {
-    override def print(event: PrintEvent): Either[ExecutionFailure, Unit] = recordPrint(completion, event)
-  }
   private final case class State(
       allocations: Map[AllocationId, RemoteAllocation],
-      programs: Set[ProgramId],
+      programs: Map[ProgramId, RuntimeProgram],
       completions: Map[CompletionId, CompletionRecord],
       nextAllocation: AllocationId,
       nextProgram: ProgramId,
@@ -61,14 +69,16 @@ private[server] final class ExecutionService(
   )
 
   private val state = AtomicReference(
-    State(Map.empty, Set.empty, Map.empty, AllocationId(1L), ProgramId(1L), CompletionId(1L))
+    State(Map.empty, Map.empty, Map.empty, AllocationId(1L), ProgramId(1L), CompletionId(1L))
   )
   private val stateLock    = ReentrantLock()
   private val stateChanged = stateLock.newCondition()
   private val dirtyChunks  =
     mutable.HashMap.empty[CompletionId, mutable.HashMap[AllocationId, mutable.LongMap[Unit]]]
-  private val pendingExecutions    = mutable.Queue.empty[(CompletionId, KernelDispatch, ExecutionControl)]
+  private val pendingExecutions    = mutable.Queue.empty[(CompletionId, RuntimeProgram, KernelTask, TaskControl)]
   private val programLifecycleLock = ReentrantLock()
+  private val observer             = CompletionObserver()
+  private val sessions             = mutable.Map.empty[ProgramEncoding, BackendSession]
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private var executionWorkerScheduled = false
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
@@ -105,14 +115,14 @@ private[server] final class ExecutionService(
       else current.allocations.get(id) match {
         case None             => Left(ExecutionFailure.NotFound(s"allocation ${id.value} is not registered"))
         case Some(allocation) =>
-          val size = allocation.size
+          val size = allocation.size.toLong
           if (address.value <= 0 || address.value > Long.MaxValue - size)
             Left(ExecutionFailure.InvalidRequest("allocation address alias has an invalid or overflowing range"))
           else if (allocation.address.contains(address)) Right(())
           else if (allocation.address.nonEmpty)
             Left(ExecutionFailure.InvalidRequest("allocation address alias cannot be remapped"))
           else if (
-            current.allocations.valuesIterator.exists(other =>
+            current.allocations.values.view.exists(other =>
               other.address.exists(base =>
                 address.value < base.value + other.bytes.length && base.value < address.value + size
               )
@@ -131,9 +141,9 @@ private[server] final class ExecutionService(
     val current = state.get()
     if (!current.allocations.contains(id))
       Left(ExecutionFailure.NotFound(s"allocation ${id.value} is not registered"))
-    else if (boundAllocations.valuesIterator.exists(_.contains(id)))
+    else if (boundAllocations.values.view.exists(_.contains(id)))
       Left(ExecutionFailure.InvalidRequest(s"allocation ${id.value} is retained by a program global"))
-    else if (current.completions.valuesIterator.exists(_.allocations.contains(id)))
+    else if (current.completions.values.view.exists(_.allocations.contains(id)))
       Left(ExecutionFailure.InvalidRequest(s"allocation ${id.value} is retained by completion"))
     else {
       state.set(current.copy(allocations = current.allocations.removed(id)))
@@ -141,7 +151,7 @@ private[server] final class ExecutionService(
     }
   }
 
-  def load(format: ProgramFormat, image: Vec[Byte]): Either[ExecutionFailure, ProgramId] = {
+  def load(encoding: ProgramEncoding, image: Vec[Byte]): Either[ExecutionFailure, ProgramId] = {
     // Reserve the identity under the state lock, but do not hold that lock
     // while decoding/preparing a potentially large code object. HSA memory
     // and AQL connections share this service; keeping the old lock
@@ -158,21 +168,28 @@ private[server] final class ExecutionService(
     reserved match {
       case Left(error) => Left(error)
       case Right(id)   =>
-        programLifecycleLock.withLock(executor.load(id, format, image)) match {
-          case Left(error) => Left(error)
-          case Right(_)    =>
+        val loaded = programLifecycleLock.withLock {
+          for {
+            backend <- backends.backend(encoding)
+            session = sessions.getOrElseUpdate(encoding, backend.open(MachineServices(observer, scheduler)))
+            program <- session.load(image)
+          } yield program
+        }.left.map(runtimeFailure(_))
+        loaded match {
+          case Left(error)    => Left(error)
+          case Right(program) =>
             val accepted = stateLock.withLock {
               if (closed) Left(ExecutionFailure.Failed("execution session is closed"))
               else {
                 val current = state.get()
-                state.set(current.copy(programs = current.programs + id))
+                state.set(current.copy(programs = current.programs.updated(id, program)))
                 Right(())
               }
             }
             accepted match {
               case Right(_)    => Right(id)
               case Left(error) =>
-                val _ = programLifecycleLock.withLock(executor.unload(id))
+                programLifecycleLock.withLock(program.close())
                 Left(error)
             }
         }
@@ -191,43 +208,39 @@ private[server] final class ExecutionService(
       else if (bindingPrograms.contains(id))
         Left(ExecutionFailure.InvalidRequest(s"program ${id.value} has a global binding in progress"))
       else if (
-        current.completions.valuesIterator.exists(record =>
+        current.completions.values.view.exists(record =>
           record.program == id && record.status == CompletionStatus.Pending
         )
       )
         Left(ExecutionFailure.InvalidRequest(s"program ${id.value} is retained by pending execution"))
       else {
-        state.set(current.copy(programs = current.programs - id))
-        Right(())
+        val program = current.programs(id)
+        state.set(current.copy(programs = current.programs.removed(id)))
+        Right(program)
       }
     }
     reserved match {
-      case Left(error) => Left(error)
-      case Right(_)    =>
-        val result = programLifecycleLock.withLock(executor.unload(id))
-        result match {
-          case Right(_) => stateLock.withLock { val _ = boundAllocations.remove(id) }
-          case Left(_)  =>
-            stateLock.withLock {
-              val current = state.get()
-              state.set(current.copy(programs = current.programs + id))
-            }
-            // If close raced this failed unload, make the restored program visible
-            // to close cleanup and retry it through the same serialized path.
-            cleanupClosedSession()
-        }
-        result
+      case Left(error)    => Left(error)
+      case Right(program) =>
+        programLifecycleLock.withLock(program.close())
+        stateLock.withLock { val _ = boundAllocations.remove(id) }
+        Right(())
     }
   }
 
   def kernel(id: ProgramId, name: KernelName): Either[ExecutionFailure, KernelMetadata] =
-    executor.kernel(id, name)
+    program(id).flatMap(_.kernel(net.kurobako.gemstone.isa.KernelName(name.value)).left.map(runtimeFailure(_)))
+      .map(toWireKernel(_))
 
   def catalog(id: ProgramId): Either[ExecutionFailure, ProgramCatalog] =
-    executor.catalog(id)
+    program(id).flatMap(_.symbols.left.map(runtimeFailure(_))).map(toWireCatalog(_))
 
   def global(id: ProgramId, name: GlobalName): Either[ExecutionFailure, ProgramGlobal] =
-    executor.global(id, name)
+    program(id).flatMap { loaded =>
+      loaded.globals.toRight(ExecutionFailure.Unsupported("program global metadata is unavailable"))
+        .flatMap(_.image(net.kurobako.gemstone.isa.GlobalName(name.value)).left.map(runtimeFailure(_)))
+        .flatMap(image => ProgramGlobal.validated(image.size, image.initial).left.map(ExecutionFailure.Failed(_)))
+    }
 
   /** Bind outside the state lock while reserving program/allocation ownership across backend preparation. */
   def bindGlobal(
@@ -242,15 +255,13 @@ private[server] final class ExecutionService(
         if (closed) Left(ExecutionFailure.Failed("execution session is closed"))
         else if (!current.programs.contains(id))
           Left(ExecutionFailure.NotFound(s"program ${id.value} is not loaded"))
-        else if (
-          current.completions.valuesIterator.exists(r => r.program == id && r.status == CompletionStatus.Pending)
-        )
+        else if (current.completions.values.view.exists(r => r.program == id && r.status == CompletionStatus.Pending))
           Left(ExecutionFailure.InvalidRequest("cannot bind globals during pending execution"))
         else current.allocations.get(allocation) match {
           case None =>
             Left(ExecutionFailure.NotFound(s"allocation ${allocation.value} is not registered"))
           case Some(value) =>
-            val allocationSize = value.size
+            val allocationSize = value.size.toLong.refineUnsafe[Positive]
             if (offset > allocationSize)
               Left(ExecutionFailure.InvalidRequest("global binding offset exceeds allocation"))
             else {
@@ -264,7 +275,16 @@ private[server] final class ExecutionService(
       reserved match {
         case Left(error)             => Left(error)
         case Right((size, previous)) =>
-          val attempted = try executor.bindGlobal(id, name, allocation, offset, size, BindingMemory)
+          val attempted = try program(id).flatMap { loaded =>
+              loaded.globals.toRight(ExecutionFailure.Unsupported("program globals cannot be bound"))
+                .flatMap(_.bind(
+                  net.kurobako.gemstone.isa.GlobalName(name.value),
+                  MemoryRegion(allocation.value),
+                  offset,
+                  size,
+                  BindingMemory
+                ).left.map(runtimeFailure(_)))
+            }
           catch {
             case scala.util.control.NonFatal(error) => Left(ExecutionFailure.Failed(error.toString))
           }
@@ -282,23 +302,19 @@ private[server] final class ExecutionService(
     result
   }
 
-  private object BindingMemory extends ExecutionMemory {
-    override def allocationAddresses: Vec[AllocationAddress] = stateLock.withLock {
-      Vec.from(state.get().allocations.iterator.collect {
-        case (id, allocation) if allocation.bytes.nonEmpty =>
-          AllocationAddress(id, allocation.size, allocation.address)
-      })
-    }
-
-    override def read(id: AllocationId, offset: Long :| Positive0, size: Int :| Positive0) =
-      ExecutionService.this.read(id, offset, size)
-    override def write(id: AllocationId, offset: Long :| Positive0, bytes: Vec[Byte]) =
-      ExecutionService.this.write(id, offset, bytes)
-    override def atomicModifyValue(id: AllocationId, offset: Long :| Positive0, size: MemoryValueByteWidth)(
+  private object BindingMemory extends Memory with AddressSpace {
+    override def read(region: MemoryRegion, offset: Long :| Positive0, size: Int :| Positive0) =
+      ExecutionService.this.read(allocationId(region), offset, size).left.map(memoryFault(_))
+    override def write(region: MemoryRegion, offset: Long :| Positive0, bytes: Vec[Byte]) =
+      ExecutionService.this.write(allocationId(region), offset, bytes).left.map(memoryFault(_))
+    override def atomicModifyValue(region: MemoryRegion, offset: Long :| Positive0, size: MemoryValueByteWidth)(
         update: Long => Long
-    ): Either[ExecutionFailure, Long] =
-      ExecutionService.this.atomicModifyValue(id, offset, size)(update)
-    override def recordPointerRelocation(relocation: PointerRelocation): Unit = ()
+    ): Either[Fault, Long] =
+      ExecutionService.this.atomicModifyValue(allocationId(region), offset, size)(update).left.map(memoryFault(_))
+    override def address(region: MemoryRegion, offset: Long :| Positive0): Either[Fault, GuestAddress] =
+      regionAddress(region, offset)
+    override def locate(address: GuestAddress, size: Int :| Positive0): Either[Fault, AddressSpace.Location] =
+      locateAddress(address, size)
   }
 
   def writeGlobal(
@@ -316,66 +332,62 @@ private[server] final class ExecutionService(
     }
     accepted match {
       case Left(error) => Left(error)
-      case Right(_)    => programLifecycleLock.withLock(executor.writeGlobal(id, name, offset, bytes))
+      case Right(_)    => programLifecycleLock.withLock {
+          program(id).flatMap { loaded =>
+            loaded.globals.toRight(ExecutionFailure.Unsupported("program globals are not writable"))
+              .flatMap(_.write(
+                net.kurobako.gemstone.isa.GlobalName(name.value),
+                offset,
+                bytes
+              ).left.map(runtimeFailure(_)))
+          }
+        }
     }
   }
 
-  def launch(dispatch: KernelDispatch): Either[ExecutionFailure, CompletionId] = {
+  def launch(program: ProgramId, task: KernelTask): Either[ExecutionFailure, CompletionId] = {
     val accepted = stateLock.withLock {
       val current = state.get()
       if (closed) Left(ExecutionFailure.Failed("execution session is closed"))
-      else if (!current.programs.contains(dispatch.program))
-        Left(ExecutionFailure.NotFound(s"program ${dispatch.program.value} is not loaded"))
-      else if (bindingPrograms.contains(dispatch.program))
+      else if (!current.programs.contains(program))
+        Left(ExecutionFailure.NotFound(s"program ${program.value} is not loaded"))
+      else if (bindingPrograms.contains(program))
         Left(ExecutionFailure.InvalidRequest("program global binding is in progress"))
-      else validateDispatch(dispatch, current) match {
+      else validateTask(task, current) match {
         case Left(error) => Left(error)
         case Right(_)    =>
-          val addresses = if (current.allocations.valuesIterator.exists(_.address.nonEmpty))
-            Vec.from(current.allocations.iterator.collect {
-              case (id, allocation) if allocation.bytes.nonEmpty =>
-                AllocationAddress(id, allocation.size, allocation.address)
-            })
-          else Vec.empty[AllocationAddress]
-          val id      = current.nextCompletion
-          val control = ExecutionControl(
-            executionLimits,
-            CancellationToken.Source(),
-            parallelism,
-            CompletionOutput(id)
-          )
-          state.set(
-            current.copy(
-              completions = current.completions.updated(
-                id,
-                CompletionRecord(
-                  CompletionStatus.Pending,
-                  dispatch.program,
-                  addresses.iterator.filter(_.address.nonEmpty).map(_.allocation).toSet ++
-                    boundAllocations.getOrElse(dispatch.program, Set.empty) ++
-                    dispatch.arguments.collect { case KernelArgument.Allocation(allocation, _) => allocation }.toSet ++
-                    dispatch.pointerRelocations.foldLeft(Set.empty[AllocationId]) { (allocations, relocation) =>
-                      relocation.source match {
-                        case RelocationSource.Allocation(source) => allocations + relocation.target + source
-                        case RelocationSource.Argument(_)        => allocations + relocation.target
-                      }
-                    },
-                  Vec.empty,
-                  Vec.empty,
-                  addresses,
-                  control
-                )
-              ),
-              nextCompletion = current.nextCompletion.next
+          val id           = current.nextCompletion
+          val cancellation = TaskControl.Cancellation.Source()
+          val control   = TaskControl.forScheduler(taskLimits, cancellation, TaskToken(id.value).observation, scheduler)
+          val loaded    = current.programs(program)
+          val addressed = current.allocations.view.collect {
+            case (allocation, value) if value.address.nonEmpty => allocation
+          }.toSet
+          observer.register(TaskToken(id.value))(event => observe(id, event)).left.map(runtimeFailure(_)).map { _ =>
+            state.set(
+              current.copy(
+                completions = current.completions.updated(
+                  id,
+                  CompletionRecord(
+                    CompletionStatus.Pending,
+                    program,
+                    addressed ++ referencedAllocations(task) ++ boundAllocations.getOrElse(program, Set.empty),
+                    Vec.empty,
+                    Vec.empty,
+                    cancellation
+                  )
+                ),
+                nextCompletion = current.nextCompletion.next
+              )
             )
-          )
-          dirtyChunks.update(id, mutable.HashMap.empty)
-          Right(id -> control)
+            dirtyChunks.update(id, mutable.HashMap.empty)
+            (id, loaded, task, control)
+          }
       }
     }
-    accepted.foreach { case (id, control) =>
+    accepted.foreach { case (id, loaded, task, control) =>
       val startWorker = stateLock.withLock {
-        pendingExecutions.enqueue((id, dispatch, control))
+        pendingExecutions.enqueue((id, loaded, task, control))
         if (executionWorkerScheduled) false
         else {
           executionWorkerScheduled = true
@@ -396,20 +408,20 @@ private[server] final class ExecutionService(
   }
 
   private def runPendingExecutions(): Unit = {
-    def dequeueLocked(): Option[(CompletionId, KernelDispatch, ExecutionControl)] = {
+    def dequeueLocked(): Option[(CompletionId, RuntimeProgram, KernelTask, TaskControl)] = {
       val value = pendingExecutions.dequeueFirst(_ => true)
       if (value.isEmpty) executionWorkerScheduled = false
       value
     }
-    @tailrec def loop(next: Option[(CompletionId, KernelDispatch, ExecutionControl)]): Unit = next match {
-      case None                          => ()
-      case Some((id, dispatch, control)) =>
+    @tailrec def loop(next: Option[(CompletionId, RuntimeProgram, KernelTask, TaskControl)]): Unit = next match {
+      case None                               => ()
+      case Some((id, program, task, control)) =>
         val status =
           try
             programLifecycleLock.withLock {
-              executor.launch(dispatch, completionMemory(id), control)
+              program.execute(task, completionMemory(id), control)
             }
-              .fold(error => CompletionStatus.Failed(error), _ => CompletionStatus.Succeeded)
+              .fold(error => CompletionStatus.Failed(runtimeFailure(error)), _ => CompletionStatus.Succeeded)
           catch {
             case scala.util.control.NonFatal(error) =>
               CompletionStatus.Failed(
@@ -422,6 +434,7 @@ private[server] final class ExecutionService(
           val current = state.get()
           current.completions.get(id).foreach { record =>
             state.set(current.copy(completions = current.completions.updated(id, record.copy(status = status))))
+            observer.remove(TaskToken(id.value))
             stateChanged.signalAll()
           }
           dequeueLocked()
@@ -435,6 +448,7 @@ private[server] final class ExecutionService(
   private def failPendingExecutions(error: ExecutionFailure): Unit = {
     stateLock.withLock {
       val ids = pendingExecutions.map(_._1).toSet
+      ids.foreach(id => observer.remove(TaskToken(id.value)))
       pendingExecutions.clear()
       executionWorkerScheduled = false
       val current = state.get()
@@ -450,8 +464,9 @@ private[server] final class ExecutionService(
     stateLock.withLock {
       if (!closed) {
         closed = true
-        state.get().completions.valuesIterator.foreach(_.control.cancel())
+        state.get().completions.values.view.foreach(_.cancellation.cancel())
         val cancelled = pendingExecutions.map(_._1).toSet
+        cancelled.foreach(id => observer.remove(TaskToken(id.value)))
         pendingExecutions.clear()
         val current = state.get()
         state.set(current.copy(completions = current.completions.map { case (id, record) =>
@@ -469,21 +484,22 @@ private[server] final class ExecutionService(
 
   private def cleanupClosedSession(): Unit = {
     val programs = stateLock.withLock {
-      if (!closed || executionWorkerScheduled || bindingPrograms.nonEmpty) Set.empty[ProgramId]
+      if (!closed || executionWorkerScheduled || bindingPrograms.nonEmpty) None
       else {
         val current = state.get()
-        state.set(current.copy(allocations = Map.empty, programs = Set.empty, completions = Map.empty))
+        state.set(current.copy(allocations = Map.empty, programs = Map.empty, completions = Map.empty))
         dirtyChunks.clear()
         boundAllocations.clear()
-        current.programs
+        Some(current.programs.values.toVector)
       }
     }
-    if (programs.nonEmpty)
+    programs.foreach { loaded =>
       programLifecycleLock.withLock {
-        programs.foreach { id =>
-          val _ = executor.unload(id)
-        }
+        loaded.foreach(_.close())
+        sessions.values.foreach(_.close())
+        sessions.clear()
       }
+    }
   }
 
   def completion(id: CompletionId): Either[ExecutionFailure, CompletionStatus] =
@@ -519,19 +535,19 @@ private[server] final class ExecutionService(
         Left(ExecutionFailure.InvalidRequest(s"completion ${id.value} is still pending"))
       case Some(CompletionStatus.Failed(error)) => Left(error)
       case Some(CompletionStatus.Succeeded)     =>
-        val ranges = dirtyChunks.get(id).iterator
-          .flatMap(_.iterator)
+        val ranges = dirtyChunks.get(id).toList.view
+          .flatMap(_.view)
           .toArray
           .sortBy(_._1.value)
-          .iterator
+          .view
           .flatMap { case (allocationId, chunks) =>
             val allocationSize = current.allocations(allocationId).size
-            chunks.keysIterator.toArray.sorted.iterator.map { chunk =>
+            chunks.keys.toArray.sorted.view.map { chunk =>
               val offset = chunk * DirtyChunkSize
               DirtyRange(
                 allocationId,
                 offset.refineUnsafe[Positive0],
-                math.min(DirtyChunkSize, allocationSize - offset).toInt.refineUnsafe[Positive]
+                math.min(DirtyChunkSize, allocationSize.toLong - offset).toInt.refineUnsafe[Positive]
               )
             }
           }
@@ -625,47 +641,59 @@ private[server] final class ExecutionService(
   )(update: Long => Long): Either[ExecutionFailure, Long] =
     atomicModifyValue(id, offset, size, None)(update)
 
-  private final class CompletionMemory(completion: CompletionId) extends ExecutionMemory {
-    override def allocationAddresses: Vec[AllocationAddress] =
-      state.get().completions.get(completion).fold(Vec.empty[AllocationAddress])(_.allocationAddresses)
-
+  private final class CompletionMemory(completion: CompletionId) extends Memory with AddressSpace {
     override def read(
-        id: AllocationId,
+        region: MemoryRegion,
         offset: Long :| Positive0,
         size: Int :| Positive0
-    ): Either[ExecutionFailure, Vec[Byte]] =
-      ExecutionService.this.read(id, offset, size)
+    ): Either[Fault, Vec[Byte]] =
+      ExecutionService.this.read(allocationId(region), offset, size).left.map(memoryFault(_))
 
     override def readValue(
-        id: AllocationId,
+        region: MemoryRegion,
         offset: Long :| Positive0,
         size: MemoryValueByteWidth
-    ): Either[ExecutionFailure, Long] =
-      ExecutionService.this.readValue(id, offset, size)
+    ): Either[Fault, Long] =
+      ExecutionService.this.readValue(allocationId(region), offset, size).left.map(memoryFault(_))
 
     override def write(
-        id: AllocationId,
+        region: MemoryRegion,
         offset: Long :| Positive0,
         bytes: Vec[Byte]
-    ): Either[ExecutionFailure, Unit] = ExecutionService.this.write(id, offset, bytes, Some(completion))
+    ): Either[Fault, Unit] =
+      ExecutionService.this.write(allocationId(region), offset, bytes, Some(completion)).left.map(memoryFault(_))
 
     override def writeValue(
-        id: AllocationId,
+        region: MemoryRegion,
         offset: Long :| Positive0,
         value: Long,
         size: MemoryValueByteWidth
-    ): Either[ExecutionFailure, Unit] = ExecutionService.this.writeValue(id, offset, value, size, Some(completion))
+    ): Either[Fault, Unit] = ExecutionService.this.writeValue(
+      allocationId(region),
+      offset,
+      value,
+      size,
+      Some(completion)
+    ).left.map(memoryFault(_))
 
-    override def atomicModifyValue(id: AllocationId, offset: Long :| Positive0, size: MemoryValueByteWidth)(
+    override def atomicModifyValue(region: MemoryRegion, offset: Long :| Positive0, size: MemoryValueByteWidth)(
         update: Long => Long
-    ): Either[ExecutionFailure, Long] =
-      ExecutionService.this.atomicModifyValue(id, offset, size, Some(completion))(update)
+    ): Either[Fault, Long] =
+      ExecutionService.this.atomicModifyValue(
+        allocationId(region),
+        offset,
+        size,
+        Some(completion)
+      )(update).left.map(memoryFault(_))
 
-    override def recordPointerRelocation(relocation: PointerRelocation): Unit =
-      ExecutionService.this.recordPointerRelocation(completion, relocation)
+    override def address(region: MemoryRegion, offset: Long :| Positive0): Either[Fault, GuestAddress] =
+      regionAddress(region, offset)
+
+    override def locate(address: GuestAddress, size: Int :| Positive0): Either[Fault, AddressSpace.Location] =
+      locateAddress(address, size)
   }
 
-  private def completionMemory(completion: CompletionId): ExecutionMemory = CompletionMemory(completion)
+  private def completionMemory(completion: CompletionId): Memory = CompletionMemory(completion)
 
   private def recordPointerRelocation(completion: CompletionId, relocation: PointerRelocation): Unit =
     stateLock.withLock {
@@ -794,47 +822,169 @@ private[server] final class ExecutionService(
     }
   }
 
-  private def validateDispatch(dispatch: KernelDispatch, current: State): Either[ExecutionFailure, Unit] =
-    dispatch.arguments.collectFirst {
-      case KernelArgument.Allocation(id, _) if !current.allocations.contains(id) =>
+  private def validateTask(task: KernelTask, current: State): Either[ExecutionFailure, Unit] =
+    task.arguments.collectFirst {
+      case KernelTask.Argument.Memory(region, _) if !current.allocations.contains(allocationId(region)) =>
+        val id = allocationId(region)
         ExecutionFailure.NotFound(s"kernel argument refers to unregistered allocation ${id.value}")
-      case KernelArgument.Allocation(id, offset) if offset > current.allocations(id).bytes.length.toLong =>
+      case KernelTask.Argument.Memory(region, offset)
+          if offset > current.allocations(allocationId(region)).bytes.length.toLong =>
+        val id = allocationId(region)
         ExecutionFailure.InvalidRequest(
           s"kernel argument offset $offset is outside allocation ${id.value}"
         )
     }.toLeft(()).flatMap { _ =>
-      dispatch.pointerRelocations.collectFirst {
-        case PointerRelocation(RelocationSource.Allocation(source), sourceOffset, target, targetOffset)
-            if !current.allocations.contains(source) =>
+      task.pointerRelocations.collectFirst {
+        case KernelTask.PointerRelocation(KernelTask.RelocationSource.Memory(region), _, _, _)
+            if !current.allocations.contains(allocationId(region)) =>
+          val source = allocationId(region)
           ExecutionFailure.NotFound(
             s"pointer relocation refers to unregistered source allocation ${source.value}"
           )
-        case PointerRelocation(_, _, target, _)
-            if !current.allocations.contains(target) =>
+        case KernelTask.PointerRelocation(_, _, target, _)
+            if !current.allocations.contains(allocationId(target)) =>
+          val id = allocationId(target)
           ExecutionFailure.NotFound(
-            s"pointer relocation refers to unregistered target allocation ${target.value}"
+            s"pointer relocation refers to unregistered target allocation ${id.value}"
           )
-        case PointerRelocation(RelocationSource.Allocation(source), sourceOffset, _, _)
-            if sourceOffset > current.allocations(source).bytes.length.toLong - 8L =>
+        case KernelTask.PointerRelocation(KernelTask.RelocationSource.Memory(region), sourceOffset, _, _)
+            if sourceOffset > current.allocations(allocationId(region)).bytes.length.toLong - 8L =>
+          val source = allocationId(region)
           ExecutionFailure.InvalidRequest(
             s"pointer relocation source offset $sourceOffset exceeds allocation ${source.value}"
           )
-        case PointerRelocation(_, _, target, targetOffset)
-            if targetOffset > current.allocations(target).bytes.length.toLong =>
+        case KernelTask.PointerRelocation(_, _, target, targetOffset)
+            if targetOffset > current.allocations(allocationId(target)).bytes.length.toLong =>
+          val id = allocationId(target)
           ExecutionFailure.InvalidRequest(
-            s"pointer relocation target offset $targetOffset exceeds allocation ${target.value}"
+            s"pointer relocation target offset $targetOffset exceeds allocation ${id.value}"
           )
-        case PointerRelocation(RelocationSource.Argument(index), sourceOffset, _, _)
+        case KernelTask.PointerRelocation(KernelTask.RelocationSource.Argument(index), sourceOffset, _, _)
             if sourceOffset >
-              (dispatch.arguments(index) match {
-                case KernelArgument.Scalar(bytes) => bytes.length.toLong - 8L
-                case _                            => -1L
+              (task.arguments(index) match {
+                case KernelTask.Argument.Scalar(bytes) => bytes.length.toLong - 8L
+                case _                                 => -1L
               }) =>
           ExecutionFailure.InvalidRequest(
             s"pointer relocation source offset $sourceOffset exceeds argument $index"
           )
       }.toLeft(())
     }
+
+  private def referencedAllocations(task: KernelTask): Set[AllocationId] =
+    task.arguments.collect {
+      case KernelTask.Argument.Memory(region, _) => allocationId(region)
+    }.toSet ++ task.pointerRelocations.foldLeft(Set.empty[AllocationId]) { (allocations, relocation) =>
+      val withTarget = allocations + allocationId(relocation.target)
+      relocation.source match {
+        case KernelTask.RelocationSource.Memory(region) => withTarget + allocationId(region)
+        case KernelTask.RelocationSource.Argument(_)    => withTarget
+      }
+    }
+
+  private def program(id: ProgramId): Either[ExecutionFailure, RuntimeProgram] =
+    state.get().programs.get(id).toRight(ExecutionFailure.NotFound(s"program ${id.value} is not loaded"))
+
+  private def runtimeFailure(error: RuntimeError): ExecutionFailure = error match {
+    case RuntimeError.NotFound(detail)    => ExecutionFailure.NotFound(detail)
+    case RuntimeError.Unsupported(detail) => ExecutionFailure.Unsupported(detail)
+    case RuntimeError.UnknownEncoding(_)  => ExecutionFailure.Unsupported(error.message)
+    case RuntimeError.Decode(detail)      => ExecutionFailure.InvalidRequest(detail)
+    case RuntimeError.Load(detail)        => ExecutionFailure.InvalidRequest(detail)
+    case RuntimeError.Lifecycle(detail)   => ExecutionFailure.Failed(detail)
+    case RuntimeError.Execution(fault)    => faultFailure(fault)
+  }
+
+  private def faultFailure(fault: Fault): ExecutionFailure = fault match {
+    case Fault.InvalidTask(detail) => ExecutionFailure.InvalidRequest(detail)
+    case Fault.Unsupported(detail) => ExecutionFailure.Unsupported(detail)
+    case _                         => ExecutionFailure.Failed(fault.message)
+  }
+
+  private def memoryFault(error: ExecutionFailure): Fault = Fault.Memory(error.message)
+
+  private def allocationId(region: MemoryRegion): AllocationId =
+    AllocationId.either(region.value).fold(message => throw IllegalStateException(message), identity)
+
+  private def regionAddress(region: MemoryRegion, offset: Long :| Positive0): Either[Fault, GuestAddress] =
+    state.get().allocations.get(allocationId(region)).toRight(Fault.Memory(s"memory region ${region.value} is absent"))
+      .map(allocation => allocation.address.getOrElse(syntheticAddress(allocationId(region))).offset(offset))
+
+  private def locateAddress(address: GuestAddress, size: Int :| Positive0): Either[Fault, AddressSpace.Location] =
+    state.get().allocations.view.collectFirst(Function.unlift { case (id, allocation) =>
+      Some(allocation.address.getOrElse(syntheticAddress(id))).flatMap { base =>
+        val relative = address.value - base.value
+        Option.when(
+          java.lang.Long.compareUnsigned(address.value, base.value) >= 0 &&
+            size <= allocation.size && relative <= allocation.size.toLong - size.toLong
+        )(AddressSpace.Location(MemoryRegion(id.value), relative.refineUnsafe[Positive0]))
+      }
+    }).toRight(Fault.Memory(s"address ${address.value} is not bound"))
+
+  private def syntheticAddress(id: AllocationId): GuestAddress =
+    GuestAddress(SyntheticAddressBase + (id.value - 1L) * SyntheticAddressStride)
+
+  private def observe(completion: CompletionId, event: Event): Either[net.kurobako.gemstone.vm.Observer.Error, Unit] =
+    event match {
+      case Event.Print(format, arguments) =>
+        recordPrint(
+          completion,
+          PrintEvent(
+            format,
+            arguments.map {
+              case Event.PrintArgument.Integer(bits, width, signed) => PrintArgument.Integer(bits, width, signed)
+              case Event.PrintArgument.Floating(bits, width)        => PrintArgument.Floating(bits, width)
+              case Event.PrintArgument.Pointer(address)             => PrintArgument.Pointer(address)
+              case Event.PrintArgument.Text(value)                  => PrintArgument.Text(value)
+            }
+          )
+        ).left.map(error => net.kurobako.gemstone.vm.Observer.Error(error.message))
+      case Event.PointerRelocation(source, sourceOffset, target, targetOffset) =>
+        recordPointerRelocation(
+          completion,
+          PointerRelocation(
+            RelocationSource.Allocation(allocationId(source)),
+            sourceOffset,
+            allocationId(target),
+            targetOffset
+          )
+        )
+        Right(())
+      case _ => Right(())
+    }
+
+  private def toWireKernel(metadata: net.kurobako.gemstone.isa.KernelMetadata): KernelMetadata =
+    KernelMetadata.validated(
+      metadata.argumentBlockSize,
+      metadata.explicitParameterCount,
+      metadata.parameters.map { parameter =>
+        KernelParameterMetadata(
+          parameter.width,
+          parameter.offset,
+          parameter.kind match {
+            case net.kurobako.gemstone.isa.KernelMetadata.ParameterKind.Scalar => KernelParameterKind.Scalar
+            case net.kurobako.gemstone.isa.KernelMetadata.ParameterKind.Memory => KernelParameterKind.Allocation
+            case net.kurobako.gemstone.isa.KernelMetadata.ParameterKind.Local  => KernelParameterKind.Local
+          },
+          parameter.containsPointers
+        )
+      }
+    ).fold(message => throw IllegalStateException(message), identity)
+
+  private def toWireCatalog(symbols: net.kurobako.gemstone.isa.ProgramSymbols): ProgramCatalog =
+    ProgramCatalog(
+      symbols.kernels.map(kernel =>
+        ProgramKernel(KernelName(kernel.name.value), LinkageName(kernel.linkageName.value))
+      ),
+      symbols.globals.map { global =>
+        ProgramGlobalMetadata.validated(
+          GlobalName(global.name.value),
+          global.virtualAddress,
+          global.size,
+          global.pointerOffsets
+        ).fold(message => throw IllegalStateException(message), identity)
+      }
+    )
 
   private def checkedRange(
       length: Int,

@@ -1,11 +1,13 @@
 package net.kurobako.gemstone.isa.spirv.v1_6
+import net.kurobako.gemstone.isa.*
+import net.kurobako.gemstone.vm.*
+import net.kurobako.gemstone.vm.LaunchGeometry.{Coordinates, Dimensions, GlobalDimensions}
 
 import net.kurobako.gemstone.concurrent.withLock
 
 import net.kurobako.gemstone.{PlatformTime, Vec}
 import net.kurobako.gemstone.binary.LittleEndian
 import net.kurobako.gemstone.binary.ScalarByteWidth
-import net.kurobako.gemstone.execution.*
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 import java.util.concurrent.atomic.AtomicReference
@@ -178,7 +180,7 @@ private[v1_6] object CrossWorkgroupFixture {
   // Mutable turns and membership model deterministic interleaving in this final scheduler fixture.
   // Mutable scheduler state and fail-fast return are deliberate in this deterministic concurrency fixture.
   @SuppressWarnings(Array("scalafix:DisableSyntax.var", "scalafix:DisableSyntax.return"))
-  final class Interleaving(val parallelism: Int :| Positive = 4) extends ExecutionParallelism with CancellationToken {
+  final class Interleaving(val parallelism: Int :| Positive = 4) extends Scheduler with TaskControl.Cancellation {
     val calls                   = java.util.concurrent.atomic.AtomicInteger(0)
     private val lock            = ReentrantLock()
     private val changed         = lock.newCondition()
@@ -210,15 +212,15 @@ private[v1_6] object CrossWorkgroupFixture {
     }
     override def shouldParallel(tasks: Long :| Positive0, workItems: Long :| Positive0): Boolean = tasks > 1L
     // Stop the deterministic schedule at the first worker failure.
-    override def parallelFor(tasks: Long :| Positive0)(task: (Long :| Positive0) => Either[ExecutionFailure, Unit])
-        : Either[ExecutionFailure, Unit] = {
+    override def parallelFor(tasks: Long :| Positive0)(task: (Long :| Positive0) => Either[Fault, Unit])
+        : Either[Fault, Unit] = {
       calls.incrementAndGet()
       var first = 0L
       while (first < tasks) {
         val count = math.min(parallelism.toLong, tasks - first).toInt
         live = Array.fill(count)(true); entered = Array.fill(count)(false); turn = 0
         deadline = PlatformTime.monotonicNanos + 10_000_000_000L
-        val failure = AtomicReference(Option.empty[ExecutionFailure])
+        val failure = AtomicReference(Option.empty[Fault])
         val base    = first
         val threads = Array.tabulate(count) { index =>
           Thread(
@@ -231,7 +233,7 @@ private[v1_6] object CrossWorkgroupFixture {
                   val detail =
                     s"cross-workgroup worker failed: ${Option(error.getMessage).getOrElse(error.getClass.getName)}"
 
-                  failure.set(Some(ExecutionFailure.Failed(detail)))
+                  failure.set(Some(Fault.Backend(detail)))
               } finally lock.withLock { live(index) = false; if (turn == index) advance(); slot.remove() }
             },
             s"spirv-test-group-${base + index}"

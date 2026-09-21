@@ -1,5 +1,7 @@
 package net.kurobako.gemstone.isa.amdgpu
 
+import Program.*
+
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 
@@ -12,7 +14,7 @@ final class InstructionSuite extends munit.FunSuite {
     Instruction.definitions.foreach { definition =>
       definition.decoder.operandCounts.foreach { operandCount =>
         val operands = operandsFor(operandCount)
-        val modifier = Modifier(AMDGPUModifierName("test"), Some(AMDGPUModifierValue("value")))
+        val modifier = Modifier(ModifierName("test"), Some(ModifierValue("value")))
         val decoded  = definition.decoder(operands, Vec(modifier))
         assertEquals(decoded.size, 1, s"${definition.toString}: ambiguous or missing form")
         val instruction = decoded.head
@@ -37,10 +39,10 @@ final class InstructionSuite extends munit.FunSuite {
   test("unknown opcodes and bad operand counts cannot inhabit the AST") {
     assertEquals(
       Instruction.decode("gemstone_unknown", Vec.empty),
-      Left(InstructionDecodeError.UnknownOpcode("gemstone_unknown"))
+      Left(Instruction.DecodeError.UnknownOpcode("gemstone_unknown"))
     )
     Instruction.decode("s_branch", Vec.empty) match {
-      case Left(InstructionDecodeError.InvalidOperandCount("s_branch", Vec(1), 0)) => ()
+      case Left(Instruction.DecodeError.InvalidOperandCount("s_branch", Vec(1), 0)) => ()
       case other => fail(s"expected an exact arity error, found $other")
     }
   }

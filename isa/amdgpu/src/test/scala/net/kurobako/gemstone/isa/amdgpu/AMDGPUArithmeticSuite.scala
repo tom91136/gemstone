@@ -1,7 +1,7 @@
 package net.kurobako.gemstone.isa.amdgpu
 
 import CodeObject.*
-import ExecutableInstruction.*
+import VMIR.*
 
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
@@ -10,7 +10,9 @@ import net.kurobako.gemstone.Vec
 import net.kurobako.gemstone.binary.{Bits, ByteRange}
 import net.kurobako.gemstone.binary.IEEE754
 import net.kurobako.gemstone.binary.LittleEndian
-import net.kurobako.gemstone.execution.*
+import net.kurobako.gemstone.isa.*
+import net.kurobako.gemstone.vm.*
+import net.kurobako.gemstone.vm.LaunchGeometry.Dimensions
 
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -19,18 +21,18 @@ import java.util.concurrent.Executors
 
 final class AMDGPUArithmeticSuite extends munit.FunSuite with CodeObjectTestSupport {
   test("AMDGPU f32 trigonometry consumes turns") {
-    assert(math.abs(DispatchInterpreter.trigF32("v_sin_f32", 0.25f) - 1.0f) < 1.0e-6f)
-    assert(math.abs(DispatchInterpreter.trigF32("v_cos_f32", 0.25f)) < 1.0e-6f)
+    assert(math.abs(VMInterpreter.trigF32(VectorConvertOperation.SineF32, 0.25f) - 1.0f) < 1.0e-6f)
+    assert(math.abs(VMInterpreter.trigF32(VectorConvertOperation.CosineF32, 0.25f)) < 1.0e-6f)
   }
 
   test("gfx900 packed-half FMA decoding preserves low and high operand selection") {
     assertEquals(
-      DispatchInterpreter.decodeInstruction(
+      VMCompiler.decodeInstruction(
         Vec[Byte](0x00, 0x40, 0x8e.toByte, 0xd3.toByte, 0x02, 0x09, 0x02, 0x0c),
         Target("gfx900")
       ),
       Right(
-        DecodedInstruction.VPackedFmaF16(
+        Instruction.VPackedFmaF16(
           0,
           InstructionSource.VectorRegister(2),
           InstructionSource.VectorRegister(4),
@@ -47,12 +49,12 @@ final class AMDGPUArithmeticSuite extends munit.FunSuite with CodeObjectTestSupp
 
   test("gfx1036 VOP3P packed-half FMA decodes all three sources") {
     assertEquals(
-      DispatchInterpreter.decodeInstruction(
+      VMCompiler.decodeInstruction(
         Vec[Byte](0x05, 0x40, 0x0e, 0xcc.toByte, 0x01, 0x05, 0x0e, 0x1c),
         Target("gfx1036")
       ),
       Right(
-        DecodedInstruction.VPackedFmaF16(
+        Instruction.VPackedFmaF16(
           5,
           InstructionSource.VectorRegister(1),
           InstructionSource.VectorRegister(2),
@@ -69,12 +71,12 @@ final class AMDGPUArithmeticSuite extends munit.FunSuite with CodeObjectTestSupp
 
   test("gfx1036 VOP3P mixed FMA decodes source selection and destination half") {
     assertEquals(
-      DispatchInterpreter.decodeInstruction(
+      VMCompiler.decodeInstruction(
         Vec[Byte](0x05, 0x00, 0x21, 0xcc.toByte, 0x01, 0x05, 0x0e, 0x00),
         Target("gfx1036")
       ),
       Right(
-        DecodedInstruction.VFmaMixF16(
+        Instruction.VFmaMixF16(
           5,
           InstructionSource.VectorRegister(1),
           InstructionSource.VectorRegister(2),
@@ -92,12 +94,12 @@ final class AMDGPUArithmeticSuite extends munit.FunSuite with CodeObjectTestSupp
 
   test("gfx1036 VOP3P unsigned byte dot product decodes all three sources") {
     assertEquals(
-      DispatchInterpreter.decodeInstruction(
+      VMCompiler.decodeInstruction(
         Vec[Byte](0x05, 0x40, 0x17, 0xcc.toByte, 0x01, 0x05, 0x0e, 0x18),
         Target("gfx1036")
       ),
       Right(
-        DecodedInstruction.VDot4U32U8(
+        Instruction.VDot4U32U8(
           5,
           InstructionSource.VectorRegister(1),
           InstructionSource.VectorRegister(2),
@@ -109,13 +111,13 @@ final class AMDGPUArithmeticSuite extends munit.FunSuite with CodeObjectTestSupp
 
   test("gfx1036 VOP3 FMAC uses the destination as the accumulator") {
     assertEquals(
-      DispatchInterpreter.decodeInstruction(
+      VMCompiler.decodeInstruction(
         Vec[Byte](0x05, 0x00, 0x2b, 0xd5.toByte, 0x01, 0x05, 0x02, 0x00),
         Target("gfx1036")
       ),
       Right(
-        DecodedInstruction.VBinary(
-          "v_mac_f32",
+        Instruction.VBinary(
+          VectorBinaryOperation.MultiplyAccumulateF32,
           5,
           InstructionSource.VectorRegister(1),
           InstructionSource.VectorRegister(2),
@@ -133,27 +135,27 @@ final class AMDGPUArithmeticSuite extends munit.FunSuite with CodeObjectTestSupp
     val addend        = IEEE754.floatToBinary32(-onePlusTwoUlp)
 
     assertEquals(
-      DispatchInterpreter.fmaF32("v_fma_f32", left.value, right.value, addend.value),
+      VMInterpreter.fmaF32(VectorMadF32Operation.FusedMultiplyAdd, left.value, right.value, addend.value),
       IEEE754.floatToBinary32(Math.scalb(1.0f, -46))
     )
     assertEquals(
-      DispatchInterpreter.fmaF32("v_mad_f32", left.value, right.value, addend.value),
+      VMInterpreter.fmaF32(VectorMadF32Operation.MultiplyAdd, left.value, right.value, addend.value),
       IEEE754.floatToBinary32(0.0f)
     )
     assertEquals(
-      DispatchInterpreter.fmaF32("v_fmaak_f32", left.value, right.value, addend.value),
+      VMInterpreter.fmaF32(VectorMadF32Operation.MultiplyAdd, left.value, right.value, addend.value),
       IEEE754.floatToBinary32(0.0f)
     )
   }
 
   test("gfx1030 division fixup preserves folded absolute-value modifiers") {
     assertEquals(
-      DispatchInterpreter.decodeInstruction(
+      VMCompiler.decodeInstruction(
         Vec[Byte](0x18, 0x04, 0x60, 0xd5.toByte, 0x18, 0x25, 0x02, 0x04),
         Target("gfx1030")
       ),
       Right(
-        DecodedInstruction.VDivFixupF64(
+        Instruction.VDivFixupF64(
           24,
           InstructionSource.VectorRegister(24),
           InstructionSource.VectorRegister(18),
@@ -167,12 +169,12 @@ final class AMDGPUArithmeticSuite extends munit.FunSuite with CodeObjectTestSupp
 
   test("gfx1030 f64 FMA preserves folded absolute-value modifiers") {
     assertEquals(
-      DispatchInterpreter.decodeInstruction(
+      VMCompiler.decodeInstruction(
         Vec[Byte](0x1a, 0x02, 0x4c, 0xd5.toByte, 0x0a, 0x35, 0x72, 0x04),
         Target("gfx1030")
       ),
       Right(
-        DecodedInstruction.VMadF64(
+        Instruction.VMadF64(
           26,
           InstructionSource.VectorRegister(10),
           InstructionSource.VectorRegister(26),
@@ -189,19 +191,19 @@ final class AMDGPUArithmeticSuite extends munit.FunSuite with CodeObjectTestSupp
   }
 
   test("FFBH counts leading zeros and returns all ones for zero") {
-    assertEquals(DispatchInterpreter.firstBitHigh32(0x80000000L), 0L)
-    assertEquals(DispatchInterpreter.firstBitHigh32(0x00000001L), 31L)
-    assertEquals(DispatchInterpreter.firstBitHigh32(0L), 0xffffffffL)
+    assertEquals(VMInterpreter.firstBitHigh32(0x80000000L), 0L)
+    assertEquals(VMInterpreter.firstBitHigh32(0x00000001L), 31L)
+    assertEquals(VMInterpreter.firstBitHigh32(0L), 0xffffffffL)
   }
 
   test("gfx1036 VOP3P mixed f32 FMA decodes all three sources") {
     assertEquals(
-      DispatchInterpreter.decodeInstruction(
+      VMCompiler.decodeInstruction(
         Vec[Byte](0x05, 0x00, 0x20, 0xcc.toByte, 0x01, 0x05, 0x0e, 0x00),
         Target("gfx1036")
       ),
       Right(
-        DecodedInstruction.VFmaMixF32(
+        Instruction.VFmaMixF32(
           5,
           InstructionSource.VectorRegister(1),
           InstructionSource.VectorRegister(2),
@@ -218,12 +220,12 @@ final class AMDGPUArithmeticSuite extends munit.FunSuite with CodeObjectTestSupp
 
   test("gfx1036 VOP2 dot2c f32-f16 accumulates into the destination") {
     assertEquals(
-      DispatchInterpreter.decodeInstruction(
+      VMCompiler.decodeInstruction(
         Vec[Byte](0x01, 0x05, 0x0a, 0x04),
         Target("gfx1036")
       ),
       Right(
-        DecodedInstruction.VDot2F32F16(
+        Instruction.VDot2F32F16(
           5,
           InstructionSource.VectorRegister(1),
           InstructionSource.VectorRegister(2),
@@ -237,7 +239,7 @@ final class AMDGPUArithmeticSuite extends munit.FunSuite with CodeObjectTestSupp
     def packed(low: Float, high: Float): Long =
       Bits.low16(IEEE754.floatToBinary16(low).value) | (Bits.low16(IEEE754.floatToBinary16(high).value) << 16)
 
-    val result = DispatchInterpreter.dot2F32F16(
+    val result = VMInterpreter.dot2F32F16(
       packed(1.0f, 2.0f),
       packed(3.0f, 4.0f),
       IEEE754.floatToBinary32(5.0f).value,
@@ -251,7 +253,7 @@ final class AMDGPUArithmeticSuite extends munit.FunSuite with CodeObjectTestSupp
       Bits.low16(IEEE754.floatToBinary16(low).value) | (Bits.low16(IEEE754.floatToBinary16(high).value) << 16)
 
     assertEquals(
-      DispatchInterpreter.packedFmaF16(
+      VMInterpreter.packedFmaF16(
         packed(2.0f, 3.0f),
         packed(4.0f, 5.0f),
         packed(6.0f, 7.0f),
@@ -264,7 +266,7 @@ final class AMDGPUArithmeticSuite extends munit.FunSuite with CodeObjectTestSupp
       packed(14.0f, 19.0f)
     )
     assertEquals(
-      DispatchInterpreter.packedFmaF16(
+      VMInterpreter.packedFmaF16(
         packed(2.0f, 3.0f),
         packed(4.0f, 5.0f),
         packed(6.0f, 7.0f),
@@ -290,15 +292,15 @@ final class AMDGPUArithmeticSuite extends munit.FunSuite with CodeObjectTestSupp
       Vec.empty,
       codeAddress = 0x1000L
     )
-    val allocation = AllocationId(1L)
+    val allocation = MemoryRegion(1L)
     assertEquals(
-      DispatchInterpreter.effectiveKernargSize(
+      VMInterpreter.effectiveKernargSize(
         kernel,
-        Vec(KernelArgument.Allocation(allocation, 0L), KernelArgument.Scalar(Vec.fill(12)(0.toByte)))
+        Vec(KernelTask.Argument.Memory(allocation, 0L), KernelTask.Argument.Scalar(Vec.fill(12)(0.toByte)))
       ),
       Right(20)
     )
-    assertEquals(DispatchInterpreter.effectiveKernargSize(kernel.copy(codeAddress = 0L), Vec.empty), Right(0))
+    assertEquals(VMInterpreter.effectiveKernargSize(kernel.copy(codeAddress = 0L), Vec.empty), Right(0))
   }
 
   test("function aliases resolve deterministically and reject conflicting call semantics") {
@@ -320,114 +322,64 @@ final class AMDGPUArithmeticSuite extends munit.FunSuite with CodeObjectTestSupp
     )
   }
 
-  test("packed executable instructions retain typed VMove construction and extraction") {
-    val scalar   = ExecutableInstruction.VMove.pack(7, InstructionSource.Scalar(23))
-    val vector   = ExecutableInstruction.VMove.pack(8, InstructionSource.VectorRegister(42))
-    val constant = ExecutableInstruction.VMove.pack(9, InstructionSource.Constant(0xdeadbeefL))
-
-    assertEquals(scalar.flatMap(ExecutableInstruction.VMove.unapply), Some(7 -> InstructionSource.Scalar(23)))
-    assertEquals(vector.flatMap(ExecutableInstruction.VMove.unapply), Some(8 -> InstructionSource.VectorRegister(42)))
-    assertEquals(
-      constant.flatMap(ExecutableInstruction.VMove.unapply),
-      Some(9 -> InstructionSource.Constant(0xdeadbeefL))
-    )
-    assertEquals(ExecutableInstruction.VMove.unapply(ExecutableInstruction.Fallback), None)
-  }
-
-  test("packed executable memory and binary instructions retain typed construction and extraction") {
-    val load   = ExecutableInstruction.GlobalLoad.pack(7, 8, Some(10), 4, 16)
-    val store  = ExecutableInstruction.GlobalStore.pack(8, None, 7, 8, 24)
-    val binary = ExecutableInstruction.VBinary(
-      "v_max_f16",
-      9,
-      InstructionSource.VectorRegister(7),
-      InstructionSource.Scalar(12),
-      clamp = false
-    )
-
-    assertEquals(load.flatMap(ExecutableInstruction.GlobalLoad.unapply), Some((7, 8, Some(10), 4, 16)))
-    assertEquals(store.flatMap(ExecutableInstruction.GlobalStore.unapply), Some((8, None, 7, 8, 24)))
-    assertEquals(
-      ExecutableInstruction.VBinary.unapply(binary),
-      Some(("v_max_f16", 9, InstructionSource.VectorRegister(7), InstructionSource.Scalar(12), false))
-    )
-  }
-
-  test("packed executable memory instructions fall back when their offset is not representable") {
-    val negative = ExecutableInstruction(
-      DecodedInstruction.GlobalLoad(7, 8, None, 4, -1)
-    )
-    val tooLarge = ExecutableInstruction(
-      DecodedInstruction.GlobalStore(8, None, 7, 4, 0x2000)
-    )
-
-    assertEquals(ExecutableInstruction.tag(negative), ExecutableInstruction.FallbackTag)
-    assertEquals(ExecutableInstruction.tag(tooLarge), ExecutableInstruction.FallbackTag)
-  }
-
-  test("gfx900 single-offset DS instructions retain all 16 offset bits") {
-    assertEquals(DispatchInterpreter.singleDSOffset(0xd83e0200L), 512)
-    assertEquals(DispatchInterpreter.singleDSOffset(0xd8781e00L), 7680)
-  }
-
   test("AMDGPU LDS capacity includes fixed and dynamic group segments") {
-    assertEquals(DispatchInterpreter.effectiveGroupSegmentSize(8, 568), 576)
+    assertEquals(VMInterpreter.effectiveGroupSegmentSize(8, 568), 576)
     intercept[ArithmeticException] {
-      DispatchInterpreter.effectiveGroupSegmentSize(Int.MaxValue, 1)
+      VMInterpreter.effectiveGroupSegmentSize(Int.MaxValue, 1)
     }
   }
 
   test("gfx900 V_PERM_B32 selectors address the second source before the first") {
     assertEquals(
-      DispatchInterpreter.permuteBytes(0xa3a2a1a0L, 0xb3b2b1b0L, 0x05040100L),
+      VMInterpreter.permuteBytes(0xa3a2a1a0L, 0xb3b2b1b0L, 0x05040100L),
       0xa1a0b1b0L
     )
   }
 
   test("gfx900 V_PERM_B32 high selectors produce zero bytes") {
     assertEquals(
-      DispatchInterpreter.permuteBytes(0xa3a2a1a0L, 0xb3b2b1b0L, 0x0c0c0001L),
+      VMInterpreter.permuteBytes(0xa3a2a1a0L, 0xb3b2b1b0L, 0x0c0c0001L),
       0x0000b0b1L
     )
   }
 
   test("gfx900 scalar unsigned multiply returns the high 32 bits") {
-    assertEquals(DispatchInterpreter.unsignedMultiplyHigh32(0xffffffffL, 0xffffffffL), 0xfffffffeL)
-    assertEquals(DispatchInterpreter.unsignedMultiplyHigh32(0x12345678L, 0x100000000L), 0L)
+    assertEquals(VMInterpreter.unsignedMultiplyHigh32(0xffffffffL, 0xffffffffL), 0xfffffffeL)
+    assertEquals(VMInterpreter.unsignedMultiplyHigh32(0x12345678L, 0x100000000L), 0L)
   }
 
   test("gfx900 signed multiply returns the high 32 bits") {
-    assertEquals(DispatchInterpreter.signedMultiplyHigh32(0x7fffffffL, 0x7fffffffL), 0x3fffffffL)
-    assertEquals(DispatchInterpreter.signedMultiplyHigh32(0x80000000L, 1L), 0xffffffffL)
-    assertEquals(DispatchInterpreter.signedMultiplyHigh32(0x80000000L, 0x80000000L), 0x40000000L)
+    assertEquals(VMInterpreter.signedMultiplyHigh32(0x7fffffffL, 0x7fffffffL), 0x3fffffffL)
+    assertEquals(VMInterpreter.signedMultiplyHigh32(0x80000000L, 1L), 0xffffffffL)
+    assertEquals(VMInterpreter.signedMultiplyHigh32(0x80000000L, 0x80000000L), 0x40000000L)
   }
 
   test("gfx900 vector unsigned 24-bit multiply-high returns the high 32 bits") {
-    assertEquals(DispatchInterpreter.unsignedMultiplyHigh24(0xffffffL, 0xffffffL), 0xffffL)
-    assertEquals(DispatchInterpreter.unsignedMultiplyHigh24(0x1000000L, 0xffffffL), 0L)
+    assertEquals(VMInterpreter.unsignedMultiplyHigh24(0xffffffL, 0xffffffL), 0xffffL)
+    assertEquals(VMInterpreter.unsignedMultiplyHigh24(0x1000000L, 0xffffffL), 0L)
   }
 
   test("gfx900 vector signed 24-bit multiply-high sign-extends operands") {
-    assertEquals(DispatchInterpreter.signedMultiplyHigh24(0x7fffffL, 0x7fffffL), 0x3fffL)
-    assertEquals(DispatchInterpreter.signedMultiplyHigh24(0x800000L, 1L), 0xffffffffL)
-    assertEquals(DispatchInterpreter.signedMultiplyHigh24(0x800000L, 0x800000L), 0x4000L)
+    assertEquals(VMInterpreter.signedMultiplyHigh24(0x7fffffL, 0x7fffffL), 0x3fffL)
+    assertEquals(VMInterpreter.signedMultiplyHigh24(0x800000L, 1L), 0xffffffffL)
+    assertEquals(VMInterpreter.signedMultiplyHigh24(0x800000L, 0x800000L), 0x4000L)
   }
 
   test("gfx900 ANDN2_SAVEEXEC uses source AND NOT old EXEC") {
-    assertEquals(DispatchInterpreter.andn2SaveExecMask(0x0f0fL, 0x3333L), 0x3030L)
+    assertEquals(VMInterpreter.andn2SaveExecMask(0x0f0fL, 0x3333L), 0x3030L)
     assertEquals(
-      DispatchInterpreter.andn2SaveExecMask(0xf000000000000000L, 0x3000000000000000L),
+      VMInterpreter.andn2SaveExecMask(0xf000000000000000L, 0x3000000000000000L),
       0L
     )
   }
 
   test("gfx900 signed first-bit-high counts leading sign bits") {
-    assertEquals(DispatchInterpreter.signedFirstBitHigh32(0L), 0xffffffffL)
-    assertEquals(DispatchInterpreter.signedFirstBitHigh32(0xffffffffL), 0xffffffffL)
-    assertEquals(DispatchInterpreter.signedFirstBitHigh32(1L), 31L)
-    assertEquals(DispatchInterpreter.signedFirstBitHigh32(0x40000000L), 1L)
-    assertEquals(DispatchInterpreter.signedFirstBitHigh32(0x80000000L), 1L)
-    assertEquals(DispatchInterpreter.signedFirstBitHigh32(0xfffffffeL), 31L)
+    assertEquals(VMInterpreter.signedFirstBitHigh32(0L), 0xffffffffL)
+    assertEquals(VMInterpreter.signedFirstBitHigh32(0xffffffffL), 0xffffffffL)
+    assertEquals(VMInterpreter.signedFirstBitHigh32(1L), 31L)
+    assertEquals(VMInterpreter.signedFirstBitHigh32(0x40000000L), 1L)
+    assertEquals(VMInterpreter.signedFirstBitHigh32(0x80000000L), 1L)
+    assertEquals(VMInterpreter.signedFirstBitHigh32(0xfffffffeL), 31L)
   }
 
 }

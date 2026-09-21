@@ -29,6 +29,7 @@ std::string withoutLibraryOption(const std::string &options);
 bool expandFilesystemIncludes(const std::string &source, const std::string &options, std::string &expanded, std::string &error,
                               unsigned depth = 0);
 
+bool compileSourceToBitcode(const std::string &source, const std::string &options, std::vector<uint8_t> &bitcode, std::string &log);
 bool compileSource(const std::string &source, const std::string &options, std::vector<uint8_t> &il, std::string &log,
                    std::vector<uint8_t> *bitcodeOutput = nullptr);
 bool reverseSpirv(const std::vector<uint8_t> &il, std::vector<uint8_t> &bitcode, std::string &log);

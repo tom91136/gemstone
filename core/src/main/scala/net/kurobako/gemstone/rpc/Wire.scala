@@ -173,6 +173,19 @@ object Wire {
       }
     }
 
+    /** Existential adapter for heterogeneous derived-codec tables. */
+    private[rpc] final def erased: Codec[Any] = {
+      val underlying = this
+      Codec.instance(
+        shape,
+        (writer, value) =>
+          value match {
+            case typed: A @unchecked => underlying.write(writer, typed)
+          },
+        reader => underlying.read(reader)
+      )
+    }
+
   }
 
   trait Protocol[F[_]] {
@@ -285,12 +298,15 @@ object Wire {
       override def encodePayload[A](
           value: F[A],
           limits: Limits
-      ): Either[String, (Long, Array[Byte])] = {
-        val sumCase = cases(value.asInstanceOf[scala.reflect.Enum].ordinal)
-        val writer  = Writer(limits)
-        sumCase.codec.write(writer, value)
-        writer.result().map(sumCase.id -> _)
-      }
+      ): Either[String, (Long, Array[Byte])] =
+        value match {
+          case enumValue: scala.reflect.Enum =>
+            val sumCase = cases(enumValue.ordinal)
+            val writer  = Writer(limits)
+            sumCase.codec.write(writer, value)
+            writer.result().map(sumCase.id -> _)
+          case _ => Left(s"$name protocol value is not an enum case")
+        }
 
       override def decodePayload(
           id: Long,
@@ -336,10 +352,10 @@ object Wire {
     ): ProtocolCase[F] = ProtocolCase(
       name,
       id,
-      codec.asInstanceOf[Codec[Any]],
+      codec.erased,
       reply,
       reader =>
-        codec.read(reader).map(decoded => DecodedValue[F, A](decoded.asInstanceOf[F[A]]))
+        codec.read(reader).map { case decoded: F[A] @unchecked => DecodedValue[F, A](decoded) }
     )
   }
 
@@ -439,6 +455,8 @@ object Wire {
         readValue: Reader => Either[String, A]
     ): Codec[A] = CodecImpl(valueShape, writeValue, readValue)
 
+    private def erase[A](codec: Codec[A]): Codec[Any] = codec.erased
+
     def validated[A](underlying: Codec[A])(
         validate: A => Either[String, A]
     ): Codec[A] =
@@ -493,17 +511,18 @@ object Wire {
       refinedString[MinLength[Minimum]](Vector(Constraint.MinimumLength(minimum.value)))(using runtime)
 
     inline given refinedType[A](using mirror: RefinedType.Mirror[A]): Codec[A] = {
-      val base        = summonInline[Codec[mirror.BaseType]].asInstanceOf[Codec[Any]]
+      val base        = erase(summonInline[Codec[mirror.BaseType]])
       val constraints = summonInline[ConstraintShape[mirror.BaseType, mirror.ConstraintType]]
       instance(
         Shape.Alias(refinedTypeName[A], base.shape, constraints.values),
         (writer, value) => base.write(writer, value),
         reader =>
-          base.read(reader).flatMap(value =>
-            mirror.ops.either(value.asInstanceOf[mirror.BaseType])
-              .left.map(message => s"invalid refined value: $message")
-              .map(_.asInstanceOf[A])
-          )
+          base.read(reader).flatMap {
+            case value: mirror.BaseType @unchecked =>
+              mirror.ops.either(value)
+                .left.map(message => s"invalid refined value: $message")
+                .map { case refined: A @unchecked => refined }
+          }
       )
     }
 
@@ -601,19 +620,20 @@ object Wire {
       val name   = constValue[mirror.MirroredLabel].toString
       instance(
         Shape.Product(name, labels.zip(codecs.map(_.shape)).map { case (label, codec) => Field(label, codec) }),
-        (writer, value) => {
-          val product = value.asInstanceOf[Product]
-          codecs.indices.foreach { index =>
-            codecs(index).asInstanceOf[Codec[Any]].write(writer, product.productElement(index))
-          }
-        },
+        (writer, value) =>
+          value match {
+            case product: Product => codecs.indices.foreach { index =>
+                codecs(index).erased.write(writer, product.productElement(index))
+              }
+            case _ => writer.reject(s"$name value is not a product")
+          },
         reader => {
           val mutableValues = Array.ofDim[Any](codecs.length)
           @scala.annotation.tailrec
           def loop(index: Int): Either[String, A] =
             if (index == codecs.length) Right(mirror.fromProduct(Tuple.fromArray(mutableValues)))
             else
-              codecs(index).asInstanceOf[Codec[Any]].read(reader) match {
+              codecs(index).erased.read(reader) match {
                 case Left(error)  => Left(error)
                 case Right(value) =>
                   mutableValues(index) = value
@@ -700,7 +720,7 @@ object Wire {
           reader.readLong().flatMap { id =>
             cases.find(_._2 == id)
               .toRight(s"unknown $name message ID: ${java.lang.Long.toUnsignedString(id, 16)}")
-              .flatMap(_._3.read(reader).map(_.asInstanceOf[A]))
+              .flatMap(_._3.read(reader).map { case value: A @unchecked => value })
           }
       )
     }
@@ -724,7 +744,7 @@ object Wire {
             case Shape.Product(value, _) => value
             case value                   => throw IllegalArgumentException(s"sum case is not a product: $value")
           }
-          (name, hash64(s"$sumName.$name"), codec.asInstanceOf[Codec[Any]]) +: casesOf[tail](sumName)
+          (name, hash64(s"$sumName.$name"), codec.erased) +: casesOf[tail](sumName)
       }
   }
 

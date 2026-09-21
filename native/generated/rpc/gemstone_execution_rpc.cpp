@@ -88,11 +88,6 @@ template <> struct Codec<IntPositive0> {
   static bool read(Reader &reader, IntPositive0 &value) { return Codec<int32_t>::read(reader, value.value) && ((value.value >= 0)); }
 };
 
-template <> struct Codec<ProgramFormat> {
-  static void write(Writer &writer, ProgramFormat value) { writer.u64(static_cast<uint64_t>(value)); }
-  static bool read(Reader &reader, ProgramFormat &value) { uint64_t id = 0; if (!reader.u64(id)) return false; switch (id) { case 0xa4e4cfa7abdce105ULL: value = ProgramFormat::PTXText; return true; case 0x29940a6758879b45ULL: value = ProgramFormat::HSACodeObjectBinary; return true; case 0x4c09a9dc85a02f49ULL: value = ProgramFormat::SPIRVBinary; return true; default: return false; } }
-};
-
 template <> struct Codec<ProgramId> {
   static void write(Writer &writer, const ProgramId &value) { if (!((value.value > 0))) { writer.invalidate(); return; } Codec<int64_t>::write(writer, value.value); }
   static bool read(Reader &reader, ProgramId &value) { return Codec<int64_t>::read(reader, value.value) && ((value.value > 0)); }
@@ -321,7 +316,7 @@ Result<std::vector<uint8_t>> Client::call(const ReadAllocation &request) {
 }
 
 Result<ProgramId> Client::call(const LoadProgram &request) {
-  return implementation_->call<ProgramId>(operation::LoadProgram, [&](Writer &writer) { Codec<ProgramFormat>::write(writer, request.format); Codec<std::vector<uint8_t>>::write(writer, request.image); });
+  return implementation_->call<ProgramId>(operation::LoadProgram, [&](Writer &writer) { Codec<std::string>::write(writer, request.encoding); Codec<std::vector<uint8_t>>::write(writer, request.image); });
 }
 
 Result<Unit> Client::call(const UnloadProgram &request) {

@@ -4,11 +4,10 @@ import CodeObject.*
 
 import net.kurobako.gemstone.Vec
 import net.kurobako.gemstone.binary.ByteRange
-import net.kurobako.gemstone.execution.KernelMetadata
-import net.kurobako.gemstone.execution.KernelName
-import net.kurobako.gemstone.execution.KernelParameterKind
-import net.kurobako.gemstone.execution.KernelParameterMetadata
-import net.kurobako.gemstone.execution.LinkageName
+import net.kurobako.gemstone.binary.LittleEndian
+import net.kurobako.gemstone.isa.KernelMetadata
+import net.kurobako.gemstone.isa.KernelName
+import net.kurobako.gemstone.isa.LinkageName
 
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
@@ -113,7 +112,7 @@ object CodeObjectMetadata {
 
   private final case class ParameterFields(offset: Option[Int], width: Option[Int], valueKind: Option[String])
 
-  private def decodeParameter(reader: Reader): Either[CodeObjectError, (KernelParameterMetadata, Boolean)] =
+  private def decodeParameter(reader: Reader): Either[CodeObjectError, (KernelMetadata.Parameter, Boolean)] =
     reader.mapSize.flatMap { count =>
       (0 until count).foldLeft[Either[CodeObjectError, ParameterFields]](
         Right(ParameterFields(None, None, None))
@@ -142,10 +141,10 @@ object CodeObjectMetadata {
                 (),
                 CodeObjectError.Invalid("AMDGPU pointer kernarg is not 64 bits")
               )
-            } yield KernelParameterMetadata(
+            } yield KernelMetadata.Parameter(
               refinedWidth,
               refinedOffset,
-              if (allocation) KernelParameterKind.Allocation else KernelParameterKind.Scalar,
+              if (allocation) KernelMetadata.ParameterKind.Memory else KernelMetadata.ParameterKind.Scalar,
               containsPointers = !allocation
             ) -> valueKind.startsWith("hidden_")
           case _ => Left(CodeObjectError.Invalid("invalid AMDGPU kernel argument metadata"))
@@ -157,7 +156,7 @@ object CodeObjectMetadata {
       name: Option[String],
       symbol: Option[String],
       argumentBlockSize: Option[Int],
-      parameters: Option[Vec[(KernelParameterMetadata, Boolean)]]
+      parameters: Option[Vec[(KernelMetadata.Parameter, Boolean)]]
   )
 
   private def decodeKernel(reader: Reader): Either[CodeObjectError, KernelManifest] =
@@ -172,7 +171,7 @@ object CodeObjectMetadata {
             case ".kernarg_segment_size" => reader.uint32.map(value => fields.copy(argumentBlockSize = Some(value)))
             case ".args"                 =>
               reader.arraySize.flatMap { parameterCount =>
-                (0 until parameterCount).foldLeft[Either[CodeObjectError, Vec[(KernelParameterMetadata, Boolean)]]](
+                (0 until parameterCount).foldLeft[Either[CodeObjectError, Vec[(KernelMetadata.Parameter, Boolean)]]](
                   Right(Vec.empty)
                 )((parameters, _) => parameters.flatMap(values => decodeParameter(reader).map(values.appended)))
                   .map(value => fields.copy(parameters = Some(value)))
@@ -211,7 +210,7 @@ object CodeObjectMetadata {
               refinedSymbol <- LinkageName.either(symbol).left.map(_ =>
                 CodeObjectError.Invalid("AMDGPU kernel symbol must be non-empty and contain no NUL")
               )
-              metadata <- KernelMetadata.validated(0, 0, Vec.empty[KernelParameterMetadata])
+              metadata <- KernelMetadata.validated(0, 0, Vec.empty[KernelMetadata.Parameter])
                 .left.map { detail =>
                   val raw: String = detail
                   CodeObjectError.Invalid(raw)
@@ -247,7 +246,7 @@ object CodeObjectMetadata {
   private def alignFour(value: Long): Long = Math.addExact(value, 3L) & ~3L
 
   private def littleInt(bytes: Array[Byte], offset: Int): Int =
-    ByteBuffer.wrap(bytes, offset, 4).order(ByteOrder.LITTLE_ENDIAN).getInt()
+    LittleEndian.decodeInt32(bytes, offset)
 
   /** Cursor mutation is confined to this single-pass MessagePack reader. */
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
@@ -261,8 +260,8 @@ object CodeObjectMetadata {
       val size =
         if ((tag & 0xe0) == 0xa0) Right(tag & 0x1f)
         else tag match {
-          case 0xd9 => readUnsigned(1, "truncated str8 size").map(_.toInt)
-          case 0xda => readUnsigned(2, "truncated str16 size").map(_.toInt)
+          case 0xd9 => readUnsignedInt(1, "truncated str8 size")
+          case 0xda => readUnsignedInt(2, "truncated str16 size")
           case 0xdb => readUnsigned(4, "truncated str32 size").flatMap(value =>
               Either.cond(
                 value <= Int.MaxValue,
@@ -285,8 +284,8 @@ object CodeObjectMetadata {
 
     def uint32: Either[CodeObjectError, Int] = readByte("truncated MessagePack integer").flatMap {
       case tag if tag <= 0x7f => Right(tag)
-      case 0xcc               => readUnsigned(1, "truncated uint8").map(_.toInt)
-      case 0xcd               => readUnsigned(2, "truncated uint16").map(_.toInt)
+      case 0xcc               => readUnsignedInt(1, "truncated uint8")
+      case 0xcd               => readUnsignedInt(2, "truncated uint16")
       case 0xce               => readUnsigned(4, "truncated uint32").flatMap(unsignedInt(_))
       case 0xcf               => readUnsigned(8, "truncated uint64").flatMap(unsignedInt(_))
       case _                  => Left(CodeObjectError.Invalid("AMDGPU metadata integer is negative or malformed"))
@@ -312,9 +311,9 @@ object CodeObjectMetadata {
                 case 0xd9        => readUnsigned(1, "truncated str8 size").flatMap(skipLength(_))
                 case 0xda        => readUnsigned(2, "truncated str16 size").flatMap(skipLength(_))
                 case 0xdb        => readUnsigned(4, "truncated str32 size").flatMap(skipLength(_))
-                case 0xdc        => readUnsigned(2, "truncated array16 size").map(_.toInt)
+                case 0xdc        => readUnsignedInt(2, "truncated array16 size")
                 case 0xdd        => readUnsigned(4, "truncated array32 size").flatMap(containerCount(_, 1))
-                case 0xde        => readUnsigned(2, "truncated map16 size").map(value => value.toInt * 2)
+                case 0xde        => readUnsignedInt(2, "truncated map16 size").map(_ * 2)
                 case 0xdf        => readUnsigned(4, "truncated map32 size").flatMap(containerCount(_, 2))
                 case _           => Left(CodeObjectError.Invalid("unsupported MessagePack type in AMDGPU metadata"))
               }
@@ -354,6 +353,9 @@ object CodeObjectMetadata {
         Right(result)
       }
 
+    private def readUnsignedInt(length: Int, error: String): Either[CodeObjectError, Int] =
+      readUnsigned(length, error).flatMap(unsignedInt(_))
+
     private def skipBytes(length: Int): Either[CodeObjectError, Unit] =
       if (length > remaining) Left(CodeObjectError.Invalid("truncated MessagePack value"))
       else { cursor += length; Right(()) }
@@ -381,9 +383,9 @@ object CodeObjectMetadata {
         val count =
           if (array && (tag & 0xf0) == 0x90) Right(tag & 0x0f)
           else if (!array && (tag & 0xf0) == 0x80) Right(tag & 0x0f)
-          else if (array && tag == 0xdc) readUnsigned(2, "truncated array16 size").map(_.toInt)
+          else if (array && tag == 0xdc) readUnsignedInt(2, "truncated array16 size")
           else if (array && tag == 0xdd) readUnsigned(4, "truncated array32 size").flatMap(containerCount(_, 1))
-          else if (!array && tag == 0xde) readUnsigned(2, "truncated map16 size").map(_.toInt)
+          else if (!array && tag == 0xde) readUnsignedInt(2, "truncated map16 size")
           else if (!array && tag == 0xdf) readUnsigned(4, "truncated map32 size").flatMap(containerCount(_, 1))
           else Left(CodeObjectError.Invalid(
             if (array) "AMDGPU metadata value is not an array" else "AMDGPU metadata value is not a map"

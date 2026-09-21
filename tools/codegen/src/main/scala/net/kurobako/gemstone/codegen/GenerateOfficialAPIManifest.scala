@@ -232,7 +232,7 @@ object GenerateOfficialAPIManifest {
 
   private def findParent(root: Path, name: String): Path =
     Using.resource(Files.walk(root)) { stream =>
-      stream.iterator().asScala.find(path => Files.isRegularFile(path) && path.getFileName.toString == name)
+      stream.toList.asScala.view.find(path => Files.isRegularFile(path) && path.getFileName.toString == name)
         .map(_.getParent)
         .getOrElse(throw IllegalArgumentException(s"$name is absent below $root"))
     }

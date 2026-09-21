@@ -11,6 +11,7 @@ import java.net.{InetAddress, ServerSocket, Socket, SocketException}
 import java.nio.ByteBuffer
 import java.util.concurrent.{CountDownLatch, TimeUnit}
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger, AtomicReference}
+import scala.jdk.CollectionConverters.*
 import scala.util.Using
 
 final class RPCReplaySuite extends munit.FunSuite {
@@ -80,10 +81,9 @@ final class RPCReplaySuite extends munit.FunSuite {
     override def close(): Unit =
       if (stopping.compareAndSet(false, true)) {
         server.close()
-        val iterator = sockets.iterator(); while (iterator.hasNext) iterator.next().close()
+        sockets.asScala.view.foreach(_.close())
         acceptor.join(4000)
-        val workers = threads.iterator();
-        while (workers.hasNext) { val thread = workers.next(); thread.join(4000); assert(!thread.isAlive) }
+        threads.asScala.view.foreach { thread => thread.join(4000); assert(!thread.isAlive) }
         assert(!acceptor.isAlive)
       }
   }

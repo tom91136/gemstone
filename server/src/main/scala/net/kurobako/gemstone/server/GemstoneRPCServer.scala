@@ -1,12 +1,12 @@
 package net.kurobako.gemstone.server
 
-import net.kurobako.gemstone.execution.ProgramExecutor
-import net.kurobako.gemstone.execution.ExecutionLimits
 import net.kurobako.gemstone.concurrent.withLock
 import net.kurobako.gemstone.rpc.ExecutionRPC
+import net.kurobako.gemstone.rpc.ExecutionProtocol.ExecutionFailure
 import net.kurobako.gemstone.server.execution.*
 import net.kurobako.gemstone.server.recording.*
 import net.kurobako.gemstone.server.transport.{ClientId, ControlProtocol, ExecutionRPCProtocol, RPCPort}
+import net.kurobako.gemstone.vm.TaskLimits
 
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
@@ -46,8 +46,8 @@ private[gemstone] object GemstoneRPCServer {
   }
 
   private[server] final class ExecutionSessions(
-      executor: () => ProgramExecutor,
-      executionLimits: ExecutionLimits,
+      backends: BackendCatalog,
+      taskLimits: TaskLimits,
       executionPool: InterpreterScheduler
   ) extends AutoCloseable {
     private val entries = AtomicReference(Map.empty[ExecutionRPCProtocol.SessionId, ExecutionSessionEntry])
@@ -63,8 +63,8 @@ private[gemstone] object GemstoneRPCServer {
     }
 
     private def acquire(session: ExecutionRPCProtocol.SessionId)
-        : Either[net.kurobako.gemstone.execution.ExecutionFailure, ExecutionSessionEntry] = lock.withLock {
-      if (closed.get()) Left(net.kurobako.gemstone.execution.ExecutionFailure.Failed("client session is closed"))
+        : Either[ExecutionFailure, ExecutionSessionEntry] = lock.withLock {
+      if (closed.get()) Left(ExecutionFailure.Failed("client session is closed"))
       else {
         val current = entries.get()
         Right(current.get(session) match {
@@ -78,10 +78,10 @@ private[gemstone] object GemstoneRPCServer {
             entry
           case None =>
             val service = ExecutionService(
-              executor(),
+              backends,
               schedule = executionPool.schedule,
-              executionLimits = executionLimits,
-              parallelism = executionPool
+              taskLimits = taskLimits,
+              scheduler = executionPool
             )
             val entry = ExecutionSessionEntry(service, 1)
             entries.set(current.updated(session, entry))
@@ -108,13 +108,13 @@ private[gemstone] object GemstoneRPCServer {
         extends ExecutionRPCProtocol.SessionConnection {
       private val active = AtomicReference(Option.empty[ExecutionRPCProtocol.SessionId])
       private def entry(session: ExecutionRPCProtocol.SessionId)
-          : Either[net.kurobako.gemstone.execution.ExecutionFailure, ExecutionSessionEntry] =
+          : Either[ExecutionFailure, ExecutionSessionEntry] =
         active.get() match {
           case Some(current) if current == session =>
             entries.get().get(
               session
-            ).toRight(net.kurobako.gemstone.execution.ExecutionFailure.NotFound("process session was closed"))
-          case Some(_) => Left(net.kurobako.gemstone.execution.ExecutionFailure.InvalidRequest(
+            ).toRight(ExecutionFailure.NotFound("process session was closed"))
+          case Some(_) => Left(ExecutionFailure.InvalidRequest(
               "a connection cannot change process identity"
             ))
           case None =>
@@ -135,13 +135,13 @@ private[gemstone] object GemstoneRPCServer {
   }
 
   private final class ClientRegistry(
-      executor: () => ProgramExecutor,
-      limits: ExecutionLimits,
+      backends: BackendCatalog,
+      limits: TaskLimits,
       pool: InterpreterScheduler,
       rootUsage: UsageCounter,
       journal: Option[RPCJournal.Writer]
   ) {
-    val root                               = Client(RootClient, ExecutionSessions(executor, limits, pool), rootUsage)
+    val root                               = Client(RootClient, ExecutionSessions(backends, limits, pool), rootUsage)
     private val clients                    = ConcurrentHashMap[java.lang.Long, Client]()
     private val next                       = AtomicLong(RootClient.value + 1L)
     def find(id: ClientId): Option[Client] =
@@ -149,7 +149,7 @@ private[gemstone] object GemstoneRPCServer {
     def register(): ClientId = {
       val id = ClientId.either(next.getAndIncrement())
         .fold(message => throw IllegalStateException(s"invalid client identity: $message"), value => value)
-      clients.put(id.value, Client(id, ExecutionSessions(executor, limits, pool), UsageCounter()))
+      clients.put(id.value, Client(id, ExecutionSessions(backends, limits, pool), UsageCounter()))
       id
     }
     def usage(id: ClientId): ServerUsage = find(id).fold(ServerUsage(0L))(_.usage.snapshot)
@@ -216,35 +216,32 @@ private[gemstone] object GemstoneRPCServer {
   }
 
   def start(): RunningServer =
-    startWith(() => GemstoneProgramRegistry(), configuredExecutionLimits(sys.env), SocketTimeoutMillis)
+    startWith(GemstoneBackendCatalog.default, configuredExecutionLimits(sys.env), SocketTimeoutMillis)
 
   /** Start the default server with an explicit per-dispatch execution profile. */
-  def start(executionLimits: ExecutionLimits): RunningServer =
-    startWith(() => GemstoneProgramRegistry(), executionLimits, SocketTimeoutMillis)
+  def start(taskLimits: TaskLimits): RunningServer =
+    startWith(GemstoneBackendCatalog.default, taskLimits, SocketTimeoutMillis)
 
   /** Use the launcher's effective environment for the pool as well as its execution limits. */
-  def start(executionLimits: ExecutionLimits, environment: Map[String, String]): RunningServer =
-    startWith(() => GemstoneProgramRegistry(), executionLimits, SocketTimeoutMillis, environment)
-
-  private[server] def start(executor: ProgramExecutor): RunningServer =
-    startWith(() => executor, ExecutionLimits.Default, SocketTimeoutMillis)
+  def start(taskLimits: TaskLimits, environment: Map[String, String]): RunningServer =
+    startWith(GemstoneBackendCatalog.default, taskLimits, SocketTimeoutMillis, environment)
 
   private[server] def start(
-      executor: ProgramExecutor,
-      executionLimits: ExecutionLimits
+      backends: BackendCatalog,
+      taskLimits: TaskLimits
   ): RunningServer =
-    startWith(() => executor, executionLimits, SocketTimeoutMillis)
+    startWith(backends, taskLimits, SocketTimeoutMillis)
 
   private[server] def start(
-      executor: ProgramExecutor,
-      executionLimits: ExecutionLimits,
+      backends: BackendCatalog,
+      taskLimits: TaskLimits,
       socketTimeoutMillis: Int :| Positive
   ): RunningServer =
-    startWith(() => executor, executionLimits, socketTimeoutMillis)
+    startWith(backends, taskLimits, socketTimeoutMillis)
 
   private def startWith(
-      executor: () => ProgramExecutor,
-      executionLimits: ExecutionLimits,
+      backends: BackendCatalog,
+      taskLimits: TaskLimits,
       socketTimeoutMillis: Int :| Positive,
       environment: Map[String, String] = sys.env
   ): RunningServer = {
@@ -254,8 +251,8 @@ private[gemstone] object GemstoneRPCServer {
         case None       => None
         case Some(path) =>
           val profile = RPCJournal.ExecutionProfile(
-            executionLimits.maxInstructions,
-            executionLimits.quantum,
+            taskLimits.maxInstructions,
+            taskLimits.quantum,
             executionPool.parallelism
           )
           val protocolIdentity = RPCJournal.ProtocolIdentity.either(ExecutionRPC.Identity)
@@ -281,7 +278,7 @@ private[gemstone] object GemstoneRPCServer {
     try {
       val connections = ClientConnections()
       val usage       = UsageCounter()
-      val clients     = ClientRegistry(executor, executionLimits, executionPool, usage, journal)
+      val clients     = ClientRegistry(backends, taskLimits, executionPool, usage, journal)
       server.bind(InetSocketAddress(InetAddress.getByName("127.0.0.1"), 0))
       val acceptThread = Thread(
         () => acceptConnections(server, clients, connections, socketTimeoutMillis, journal),
@@ -310,7 +307,7 @@ private[gemstone] object GemstoneRPCServer {
     }
   }
 
-  private def configuredExecutionLimits(environment: Map[String, String]): ExecutionLimits =
+  private def configuredExecutionLimits(environment: Map[String, String]): TaskLimits =
     ExecutionConfiguration.limits(environment).fold(message => throw IllegalArgumentException(message), value => value)
 
   private def acceptConnections(

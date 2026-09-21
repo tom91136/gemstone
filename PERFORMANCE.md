@@ -23,7 +23,7 @@ measurements, not release thresholds; compare like-for-like runs on the same mac
   immediately preceding JFR run (12.1%). Compared with the original 703-second recording, collection-growth samples
   fell from 14,533 to 4,997 and full-image hashing samples from 13,697 to 4,637. The original recording used a
   different run context, so its raw wall-clock duration is not a strict before/after benchmark.
-- `Parser` is the cursor-based PTX parser used by `ModuleDecoder` and the public parsing entry point. On the
+- `Parser` is the cursor-based PTX parser used by `VMLoadedProgram` and the public parsing entry point. On the
   377,535-byte, 256-entry/64-instruction fixture, cold decode fell from roughly 62.5 ms and 466 MB to 7.7--11.0 ms
   and 38 MB.
 - Concurrent unit instruction-budget reservations use `AtomicLong.getAndIncrement`; batched costs and the
@@ -59,13 +59,13 @@ measurements, not release thresholds; compare like-for-like runs on the same mac
   loaders, rather than weakening cache equality.
 - SPIR-V still performs one atomic budget update per concurrent instruction. Leasing could reduce contention further,
   but a correct design must neither overshoot the limit nor reject while another worker holds unused credits. The
-  simple batching variants fail that contract and remain rejected until there is a bounded reclamation design.
+  simple batching variants violate that invariant and remain rejected until there is a bounded reclamation design.
 - AMDGPU and SPIR-V interpreter loops dominate their respective routes. Further gains belong in opcode-specific
   execution benchmarks and should remain confined to proven hot paths.
-- The current AMDGPU vector-copy fixture takes roughly 1.20--1.26 ms and allocates 1.24 MB per 64-workgroup dispatch.
-  Its JFR profile attributes 55.7% of CPU samples to `stepDecoded`; the packed move, binary and global-memory paths are
-  already active, while setup/control operations still fall back. Extending the packed representation needs opcode
-  coverage from real HIP/HSA recordings; blindly packing more of the very large decoded match is deferred.
+- The recorded AMDGPU vector-copy fixture took roughly 1.20--1.26 ms and allocated 1.24 MB per 64-workgroup dispatch.
+  Its JFR profile attributed 55.7% of CPU samples to instruction execution. The former partial packed/fallback model
+  has since been removed in favour of one canonical `VMIR.Instruction`; future optimization should begin from fresh
+  measurements of that representation rather than recreate a second instruction hierarchy.
 
 ## Full-profile diagnostic (2026-09-17)
 
@@ -96,23 +96,23 @@ profile.
   for OpenCL and 3.01/2.99 TiB for the two SYCL routes, about 17.6/13.2/12.4 GiB per second; short-lived threads missed
   between statistics samples make these conservative. Prioritize an allocation benchmark around
   `resumeInvocation`, then replace measured hot-path maps/options/boxed runtime values with reusable dense or
-  primitive state while preserving the current instruction-limit contract.
+  primitive state while preserving the current instruction-limit semantics.
 - CUDA splits CPU between expected emulation (`executeFast`, 22.14%) and avoidable preparation: cursor lookup plus
   tokenization is 20.53%, full-image hashing plus byte-array equality is 14.03%, and input reads plus iterable copies
   are 12.40%. The 1,400 young pauses total 269 seconds (192 ms average, 1.61 seconds maximum), and post-GC live data
   reaches 78.50 GiB before falling to 7.93 GiB at shutdown. Stable program identity/digests across the RPC/load
   boundary remain the highest-value structural fix; independently benchmark token lookup/tokenization and bound
   concurrent prepared-program retention before changing parser semantics or cache equality.
-- HIP and HIP-HSA confirm that `stepDecoded` is the main emulator cost (19.06% and 21.07%). Hash/fold work contributes
+- HIP and HIP-HSA confirm that the AMDGPU instruction loop is the main emulator cost (19.06% and 21.07%). Hash/fold work contributes
   roughly 20.22% and 17.70% of CPU samples. Allocation pressure is dominated by `copyAs`, byte `copyOfRange`, byte
   array construction and `copyOf` (59.73% on HIP and 55.03% on HIP-HSA), with socket reads adding 14.01% and 16.99%.
-  Trace the RPC-to-code-object ownership path and benchmark removal or coalescing of proven redundant copies; do not
+  Measure the RPC-to-code-object ownership path and benchmark removal or coalescing of proven redundant copies; do not
   weaken the session-private mutable-global isolation of cached code objects.
 - The server creates one platform `gemstone-rpc-*` thread per short-lived connection: 10,512 starts on CUDA, 18,597
   on HIP, 18,743 on HIP-HSA, 10,741 on SYCL-OpenCL and 9,179 on SYCL-Level Zero, while peak live-thread counts remain
   only 72--104. This is secondary because thread operations do not lead CPU/allocation tables, but a bounded or
   virtual connection-handler experiment is justified if an isolated connection-churn benchmark shows a gain.
 - The emulator and clients saturate the host: average machine CPU is 76% for CUDA, 88--92% for AMDGPU and 94--95%
-  for the SYCL routes; JVM CPU alone is about 51%, 27--36% and 71%, respectively. `executeFast`, `stepDecoded` and
+  for the SYCL routes; JVM CPU alone is about 51%, 27--36% and 71%, respectively. `executeFast`, the AMDGPU instruction loop and
   `resumeInvocation` therefore represent real software-emulation work, and stress/BLAS cases plus 32-way client
   contention are workload costs rather than evidence that scheduler parallelism should simply be increased.

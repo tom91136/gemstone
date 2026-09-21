@@ -4,7 +4,9 @@ import net.kurobako.gemstone.Vec
 import net.kurobako.gemstone.binary.{Bits, ByteRange, ScalarByteWidth}
 import net.kurobako.gemstone.binary.IEEE754
 import net.kurobako.gemstone.binary.LittleEndian
-import net.kurobako.gemstone.execution.*
+import net.kurobako.gemstone.memory.GuestAddress
+import net.kurobako.gemstone.vm.*
+import net.kurobako.gemstone.vm.LaunchGeometry.Dimensions
 
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
@@ -16,6 +18,48 @@ import java.util.concurrent.Executors
 import scala.collection.mutable
 
 private trait CodeObjectTestSupport { self: munit.FunSuite =>
+  protected final def compileKernel(kernel: CodeObject.CodeObjectKernel): VMIR.Kernel =
+    VMCompiler.compile(kernel).fold(error => fail(error.message), identity)
+
+  protected final def executeKernel(
+      kernel: VMIR.Kernel,
+      task: KernelTask,
+      memory: Memory & AddressSpace,
+      control: TaskControl = TaskControl.default,
+      scheduler: Scheduler = Scheduler.Sequential
+  ): Either[Fault, Unit] =
+    VMInterpreter.execute(kernel, task, memory, memory, control, scheduler, Vec.empty)
+
+  protected trait TestAddressSpace extends AddressSpace { self: Memory =>
+    protected def regionSizes: Iterable[(MemoryRegion, Long)]
+
+    protected def regionAddress(region: MemoryRegion): GuestAddress =
+      GuestAddress(0x400000000000L + (region.value - 1L) * 0x000100000000L)
+
+    final override def address(
+        region: MemoryRegion,
+        offset: Long :| Positive0
+    ): Either[Fault, GuestAddress] =
+      regionSizes.find(_._1 == region).toRight(Fault.Memory("test allocation")).flatMap { case (_, size) =>
+        Either.cond(
+          offset <= size,
+          GuestAddress(regionAddress(region).value + offset),
+          Fault.InvalidTask("test address range")
+        )
+      }
+
+    final override def locate(
+        address: GuestAddress,
+        size: Int :| Positive0
+    ): Either[Fault, AddressSpace.Location] =
+      regionSizes.view.collectFirst(Function.unlift { case (region, regionSize) =>
+        val relative = address.value - regionAddress(region).value
+        Option.when(relative >= 0L && relative <= regionSize - size.toLong)(
+          AddressSpace.Location(region, relative.refineUnsafe[Positive0])
+        )
+      }).toRight(Fault.Memory("test address"))
+  }
+
   protected final def testDimensions(x: Int, y: Int = 1, z: Int = 1): Dimensions =
     Dimensions(
       x.refineEither[Positive].fold(message => throw IllegalArgumentException(message), value => value),
@@ -24,47 +68,49 @@ private trait CodeObjectTestSupport { self: munit.FunSuite =>
     )
 
   // Mutable allocations are confined to this final in-memory execution fixture.
-  protected final class TestMemory extends ExecutionMemory {
-    private val allocations = mutable.Map.empty[AllocationId, Array[Byte]]
+  protected final class TestMemory extends Memory with TestAddressSpace {
+    private val allocations = mutable.Map.empty[MemoryRegion, Array[Byte]]
 
-    def allocate(id: AllocationId, size: Int): Unit = allocations(id) = Array.ofDim[Byte](size)
+    override protected def regionSizes: Iterable[(MemoryRegion, Long)] =
+      allocations.view.mapValues(_.length.toLong)
 
-    def putInt(id: AllocationId, offset: Int :| Positive0, value: Int): Unit =
+    def allocate(id: MemoryRegion, size: Int): Unit = allocations(id) = Array.ofDim[Byte](size)
+
+    def putInt(id: MemoryRegion, offset: Int :| Positive0, value: Int): Unit =
       LittleEndian.write(value.toLong, allocations(id), offset, ScalarByteWidth(4))
 
-    def getInt(id: AllocationId, offset: Int :| Positive0): Int =
-      LittleEndian.decode(allocations(id), offset, ScalarByteWidth(4)).toInt
+    def getInt(id: MemoryRegion, offset: Int :| Positive0): Int =
+      LittleEndian.decodeInt32(allocations(id), offset)
 
     override def read(
-        id: AllocationId,
+        id: MemoryRegion,
         offset: Long :| Positive0,
         size: Int :| Positive0
-    ): Either[ExecutionFailure, Vec[Byte]] =
-      allocations.get(id).toRight(ExecutionFailure.NotFound("test allocation")).flatMap { bytes =>
+    ): Either[Fault, Vec[Byte]] =
+      allocations.get(id).toRight(Fault.Memory("test allocation")).flatMap { bytes =>
         Either.cond(
           ByteRange.contains(bytes.length, offset, size.toLong),
           Vec.unsafeFromArray(java.util.Arrays.copyOfRange(bytes, offset.toInt, offset.toInt + size)),
-          ExecutionFailure.InvalidRequest("test read range")
+          Fault.InvalidTask("test read range")
         )
       }
 
     override def write(
-        id: AllocationId,
+        id: MemoryRegion,
         offset: Long :| Positive0,
         bytes: Vec[Byte]
-    ): Either[ExecutionFailure, Unit] =
-      allocations.get(id).toRight(ExecutionFailure.NotFound("test allocation")).flatMap { destination =>
+    ): Either[Fault, Unit] =
+      allocations.get(id).toRight(Fault.Memory("test allocation")).flatMap { destination =>
         Either.cond(
           ByteRange.contains(destination.length, offset, bytes.length.toLong), {
             val copied = bytes.copyToArray(destination, offset.toInt, bytes.length)
             assertEquals(copied, bytes.length)
             ()
           },
-          ExecutionFailure.InvalidRequest("test write range")
+          Fault.InvalidTask("test write range")
         )
       }
 
-    override def recordPointerRelocation(relocation: PointerRelocation): Unit = ()
   }
 
   protected def minimalCodeObject(globalPointer: Boolean = false): Array[Byte] = {

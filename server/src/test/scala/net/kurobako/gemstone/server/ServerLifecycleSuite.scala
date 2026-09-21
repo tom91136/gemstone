@@ -1,21 +1,19 @@
 package net.kurobako.gemstone.server
 
-import net.kurobako.gemstone.execution.ExecutionLimits
-import net.kurobako.gemstone.server.execution.{GemstoneProgramRegistry, InterpreterScheduler}
+import net.kurobako.gemstone.server.execution.{GemstoneBackendCatalog, InterpreterScheduler}
 import net.kurobako.gemstone.server.transport.ExecutionRPCProtocol
+import net.kurobako.gemstone.vm.TaskLimits
 import java.net.Socket
 import java.util.concurrent.{CountDownLatch, TimeUnit}
-import java.util.concurrent.atomic.AtomicInteger
 import scala.util.Using
 
 final class ServerLifecycleSuite extends munit.FunSuite {
   test("closed client sessions reject a connection whose first acquisition was delayed") {
-    val created = AtomicInteger()
     Using.Manager { use =>
       val pool     = use(InterpreterScheduler.fromEnvironment(Map("GEMSTONE_EXECUTION_PARALLELISM" -> "1")))
       val sessions = use(GemstoneRPCServer.ExecutionSessions(
-        () => { created.incrementAndGet(); GemstoneProgramRegistry() },
-        ExecutionLimits.Default,
+        GemstoneBackendCatalog.default,
+        TaskLimits.Default,
         pool
       ))
       val existing = use(sessions.connection())
@@ -24,7 +22,6 @@ final class ServerLifecycleSuite extends munit.FunSuite {
       sessions.close()
       assert(existing.service(ExecutionRPCProtocol.SessionId(1, 1)).isLeft)
       assert(delayed.service(ExecutionRPCProtocol.SessionId(2, 1)).isLeft)
-      assertEquals(created.get(), 1)
     }.get
   }
 

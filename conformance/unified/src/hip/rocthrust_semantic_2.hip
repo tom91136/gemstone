@@ -12,7 +12,7 @@ using namespace unified::rocthrust_support;
 using TestType = int32_t;
 
 // ---------------------------------------------------------------------------
-// The device-side random contract of rocThrust's `testing/random`, decomposed
+// The device-side random semantics of rocThrust's `testing/random`, decomposed
 // into one case per engine characteristic and one per distribution
 // characteristic so a single regression names the exact instantiation.
 // ---------------------------------------------------------------------------
@@ -254,10 +254,10 @@ TEST_CASE("algorithms/roc-thrust-semantic/discard-iterator/i32/n11", "[unified][
 }
 
 TEST_CASE("algorithms/roc-thrust-semantic/generate-const-iterators/i32/n11", "[unified][rocthrust][compact]") {
-  // The upstream contract is a compile-time negative check
+  // The upstream requirement is a compile-time negative check
   // (ASSERT_STATIC_ASSERT that generate over const iterators rejects), so there
   // is no device-side or host-side value a runtime case could verify here.
-  SKIP("generate-const-iterators: upstream contract is a compile-time negative "
+  SKIP("generate-const-iterators: upstream requirement is a compile-time negative "
        "check");
 }
 
@@ -460,7 +460,7 @@ TEST_CASE("algorithms/roc-thrust-semantic/advance-distance/i32/n11", "[unified][
 }
 
 // ---------------------------------------------------------------------------
-// rocThrust `testing/out_of_memory_recovery.cu` port.  The upstream contract
+// rocThrust `testing/out_of_memory_recovery.cu` port.  The upstream test
 // assumes a real allocation-failure path integrated through HIP and the
 // preceding device_vector destructors running during the failed helper
 // allocation; under the emulator no deterministic allocation failure can be

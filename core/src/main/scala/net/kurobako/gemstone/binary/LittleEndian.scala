@@ -3,19 +3,6 @@ package net.kurobako.gemstone.binary
 import net.kurobako.gemstone.Vec
 
 import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
-
-private[gemstone] type ScalarByteWidth = ScalarByteWidth.T
-private[gemstone] object ScalarByteWidth extends RefinedType[Int, Interval.Closed[0, 8]] {
-  given (Interval.Closed[0, 8] ==> Positive0) = Implication()
-
-  @SuppressWarnings(Array("scalafix:GemstoneNoAssume"))
-  def fromPositive(width: Int :| Interval.Closed[1, 8]): ScalarByteWidth = ScalarByteWidth.assume(width)
-
-  extension (width: ScalarByteWidth) {
-    def nonNegative: Int :| Positive0 = width.value
-  }
-}
 
 private[gemstone] object LittleEndian {
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
@@ -38,6 +25,18 @@ private[gemstone] object LittleEndian {
     requireRange(bytes.length, offset, size)
     decode(size)(index => bytes(offset + index))
   }
+
+  def decodeInt32(bytes: Array[Byte], offset: Int): Int =
+    decode(bytes, offset, ScalarByteWidth(4)).toInt
+
+  def decodeInt32(bytes: Vec[Byte], offset: Int): Int =
+    decode(bytes, offset, ScalarByteWidth(4)).toInt
+
+  def decodeUnsignedInt16(bytes: Array[Byte], offset: Int): Int =
+    decode(bytes, offset, ScalarByteWidth(2)).toInt
+
+  def decodeUnsignedInt16(bytes: Vec[Byte], offset: Int): Int =
+    decode(bytes, offset, ScalarByteWidth(2)).toInt
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   inline def write(value: Long, size: ScalarByteWidth)(inline writeByte: (Int, Byte) => Unit): Unit = {

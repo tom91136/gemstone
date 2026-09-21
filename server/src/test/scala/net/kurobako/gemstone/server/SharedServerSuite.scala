@@ -1,7 +1,7 @@
 package net.kurobako.gemstone.server
 
 import net.kurobako.gemstone.Vec
-import net.kurobako.gemstone.execution.{AllocationId, ExecutionFailure}
+import net.kurobako.gemstone.rpc.ExecutionProtocol.{AllocationId, ExecutionFailure}
 import net.kurobako.gemstone.memory.AllocationKind
 import net.kurobako.gemstone.rpc.ExecutionRPC.Operation
 import net.kurobako.gemstone.server.transport.{ClientId, ControlProtocol, RPCPort}

@@ -1,8 +1,8 @@
 package net.kurobako.gemstone.apispec
 
-import net.kurobako.gemstone.abi.CValue
+import net.kurobako.gemstone.abi.ABI.CValue
 import net.kurobako.gemstone.levelzero.LevelZero
-import net.kurobako.gemstone.levelzero.ze_init_flags_t
+import net.kurobako.gemstone.levelzero.LevelZero.ze_init_flags_t
 
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*

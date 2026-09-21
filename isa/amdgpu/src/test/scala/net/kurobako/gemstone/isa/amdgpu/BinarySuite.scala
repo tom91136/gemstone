@@ -1,5 +1,7 @@
 package net.kurobako.gemstone.isa.amdgpu
 
+import Program.*
+
 import net.kurobako.gemstone.Vec
 
 final class BinarySuite extends munit.FunSuite {
@@ -9,7 +11,7 @@ final class BinarySuite extends munit.FunSuite {
     val encoded     = Binary.encodeSOPP(instruction, target)
     assert(encoded.exists(_.sameElements(Seq(0x34, 0x12, 0x80, 0xbf).map(_.toByte))))
     val decoded = encoded.flatMap(bytes => Binary.decodeSOPP(bytes, target))
-    assertEquals(decoded.map(ISA.Printer.render), Right("s_nop 4660"))
+    assertEquals(decoded.map(Printer.render), Right("s_nop 4660"))
   }
 
   test("reject a non-SOPP instruction instead of guessing an encoding") {

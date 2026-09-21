@@ -4,7 +4,7 @@ import Program.*
 
 import net.kurobako.gemstone.NoNul
 import net.kurobako.gemstone.Vec
-import net.kurobako.gemstone.execution.KernelName
+import net.kurobako.gemstone.isa.KernelName
 
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
@@ -15,8 +15,9 @@ import scala.util.control.NoStackTrace
 /** Allocation-conscious PTX parser used by program loading. The combinator parser remains the readable grammar and
   * reference implementation; this cursor parser deliberately keeps its tokens and mutable cursor private.
   */
-object Parser {
-  private type Name = String :| (MinLength[1] & NoNul)
+object Parser extends net.kurobako.gemstone.isa.Decoder[String, Program] {
+  override type Error = ParseError
+  private type Name   = String :| (MinLength[1] & NoNul)
 
   private final case class Token(text: String, offset: Int, line: Int, column: Int, quoted: Boolean = false)
 
@@ -41,6 +42,8 @@ object Parser {
           ))
       }
   }
+
+  override def decode(source: String): Either[ParseError, Program] = parse(source)
 
   def parseStatement(source: String): Either[ParseError, Statement] =
     parse(source).flatMap {

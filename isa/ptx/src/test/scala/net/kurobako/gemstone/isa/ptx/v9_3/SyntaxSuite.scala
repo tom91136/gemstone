@@ -3,7 +3,6 @@ package net.kurobako.gemstone.isa.ptx.v9_3
 import Program.*
 
 import ISA.*
-import VirtualMachine.*
 
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
@@ -68,8 +67,8 @@ final class SyntaxSuite extends munit.FunSuite {
         assertEquals(predicate.negated, false)
         assertEquals(instruction.opcode.value, "ld.global.nc")
         assertEquals(modifiers.map(_.name.value).toSeq, Seq("L1::evict_last", "v2", "f64"))
-        assert(destination.isInstanceOf[Operand.VectorLiteral])
-        assert(address.isInstanceOf[Operand.Address])
+        assert(Operand.isVectorLiteral(destination))
+        assert(Operand.isAddress(address))
       case other => fail(s"unexpected statement: $other")
     }
   }

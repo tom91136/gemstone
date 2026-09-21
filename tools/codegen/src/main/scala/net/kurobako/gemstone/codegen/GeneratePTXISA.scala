@@ -285,7 +285,7 @@ object GeneratePTXISA {
 
   private def syntaxFragments(block: String): Vector[String] = {
     def flush(fragments: Vector[String], current: String): (Vector[String], String) =
-      (fragments ++ current.split(';').iterator.map(_.trim).filter(_.nonEmpty)) -> ""
+      (fragments ++ current.split(';').view.map(_.trim).filter(_.nonEmpty)) -> ""
     val (fragments, current) = block.linesIterator.foldLeft((Vector.empty[String], "")) {
       case ((fragments, current), rawLine) =>
         val line       = stripComment(rawLine)
@@ -539,15 +539,15 @@ object GeneratePTXISA {
         case "CpAsyncBulkTensorGroup" =>
           s"Instruction.CpAsyncBulkTensorGroup(operands(0), operands(1), operands.lift(2), $remainingModifiers, pred)"
         case "Call" =>
-          s"if (operands.size >= 2 && operands(0).isInstanceOf[Operand.Parenthesized]) Instruction.Call(Some(operands(0)), operands(1), operands.lift(2), operands.lift(3), $remainingModifiers, pred) else Instruction.Call(None, operands(0), operands.lift(1), operands.lift(2), $remainingModifiers, pred)"
+          s"if (operands.size >= 2 && Operand.isParenthesized(operands(0))) Instruction.Call(Some(operands(0)), operands(1), operands.lift(2), operands.lift(3), $remainingModifiers, pred) else Instruction.Call(None, operands(0), operands.lift(1), operands.lift(2), $remainingModifiers, pred)"
         case "MbarrierTestWait" =>
           s"if (operands.size == 3) Instruction.MbarrierTestWait(operands(0), None, operands(1), operands(2), $remainingModifiers, pred) else Instruction.MbarrierTestWait(operands(0), Some(operands(1)), operands(2), operands(3), $remainingModifiers, pred)"
         case "MbarrierTryWait" =>
-          s"if (operands.size == 3) Instruction.MbarrierTryWait(operands(0), None, operands(1), operands(2), None, $remainingModifiers, pred) else if (operands.size == 4 && !operands(0).isInstanceOf[Operand.WithPredicate]) Instruction.MbarrierTryWait(operands(0), None, operands(1), operands(2), Some(operands(3)), $remainingModifiers, pred) else Instruction.MbarrierTryWait(operands(0), Some(operands(1)), operands(2), operands(3), operands.lift(4), $remainingModifiers, pred)"
+          s"if (operands.size == 3) Instruction.MbarrierTryWait(operands(0), None, operands(1), operands(2), None, $remainingModifiers, pred) else if (operands.size == 4 && !Operand.isWithPredicate(operands(0))) Instruction.MbarrierTryWait(operands(0), None, operands(1), operands(2), Some(operands(3)), $remainingModifiers, pred) else Instruction.MbarrierTryWait(operands(0), Some(operands(1)), operands(2), operands(3), operands.lift(4), $remainingModifiers, pred)"
         case "Tcgen05Mma" =>
-          s"if (operands.size == 5) Instruction.Tcgen05Mma(operands(0), operands(1), operands(2), operands(3), None, None, None, operands(4), None, $remainingModifiers, pred) else if (operands(4).isInstanceOf[Operand.Address]) Instruction.Tcgen05Mma(operands(0), operands(1), operands(2), operands(3), Some(operands(4)), Some(operands(5)), None, operands(6), None, $remainingModifiers, pred) else Instruction.Tcgen05Mma(operands(0), operands(1), operands(2), operands(3), None, None, Some(operands(4)), operands(5), operands.lift(6), $remainingModifiers, pred)"
+          s"if (operands.size == 5) Instruction.Tcgen05Mma(operands(0), operands(1), operands(2), operands(3), None, None, None, operands(4), None, $remainingModifiers, pred) else if (Operand.isAddress(operands(4))) Instruction.Tcgen05Mma(operands(0), operands(1), operands(2), operands(3), Some(operands(4)), Some(operands(5)), None, operands(6), None, $remainingModifiers, pred) else Instruction.Tcgen05Mma(operands(0), operands(1), operands(2), operands(3), None, None, Some(operands(4)), operands(5), operands.lift(6), $remainingModifiers, pred)"
         case "Tcgen05MmaSp" =>
-          s"if (operands.size == 6) Instruction.Tcgen05MmaSp(operands(0), operands(1), operands(2), operands(3), operands(4), None, None, None, operands(5), None, $remainingModifiers, pred) else if (operands(5).isInstanceOf[Operand.Address]) Instruction.Tcgen05MmaSp(operands(0), operands(1), operands(2), operands(3), operands(4), Some(operands(5)), Some(operands(6)), None, operands(7), None, $remainingModifiers, pred) else Instruction.Tcgen05MmaSp(operands(0), operands(1), operands(2), operands(3), operands(4), None, None, Some(operands(5)), operands(6), operands.lift(7), $remainingModifiers, pred)"
+          s"if (operands.size == 6) Instruction.Tcgen05MmaSp(operands(0), operands(1), operands(2), operands(3), operands(4), None, None, None, operands(5), None, $remainingModifiers, pred) else if (Operand.isAddress(operands(5))) Instruction.Tcgen05MmaSp(operands(0), operands(1), operands(2), operands(3), operands(4), Some(operands(5)), Some(operands(6)), None, operands(7), None, $remainingModifiers, pred) else Instruction.Tcgen05MmaSp(operands(0), operands(1), operands(2), operands(3), operands(4), None, None, Some(operands(5)), operands(6), operands.lift(7), $remainingModifiers, pred)"
         case _ => defaultConstructor
       }
       val invalidOperands =

@@ -28,7 +28,7 @@ final class DynamicAddressMemory(
     if (initial.length > size.value)
       Left(MemoryError.AllocationInitializerTooLarge(size, initial.length))
     else state.lock.withLock {
-      val byteCount       = size.value.toInt
+      val byteCount       = size.value
       val span            = (byteCount.toLong + 255L) & -256L
       val start           = state.mutableNextAddress
       val mutableContents = Array.ofDim[Byte](byteCount)
@@ -56,7 +56,7 @@ final class DynamicAddressMemory(
   override def readInt32(address: GuestAddress): Either[MemoryError, Int] =
     state.lock.withLock {
       dynamicRange(address, 4).map { case (bytes, offset) =>
-        Right(LittleEndian.decode(bytes, offset, ScalarByteWidth(4)).toInt)
+        Right(LittleEndian.decodeInt32(bytes, offset))
       }
         .orElse(
           Option.when(overlapsDynamic(address, 4))(

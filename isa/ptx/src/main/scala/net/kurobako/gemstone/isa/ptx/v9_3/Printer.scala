@@ -5,7 +5,7 @@ import Program.*
 import net.kurobako.gemstone.Vec
 
 /** Deterministic canonical printer. Parsing its output must reproduce the same syntax tree. */
-object Printer {
+object Printer extends net.kurobako.gemstone.isa.Printer[Program] {
   def render(operand: Operand): String = operand match {
     case Operand.Immediate(raw)             => raw.value
     case Operand.Register(name, None)       => name.value
@@ -93,7 +93,7 @@ object Printer {
 
   def render(statements: Vec[Statement]): String = statements.map(render(_)).mkString("\n")
 
-  def render(program: Program): String = render(program.statements)
+  override def render(program: Program): String = render(program.statements)
 
   private def renderBody(body: Vec[Statement]): String =
     if (body.isEmpty) "{}" else body.map(render(_)).mkString("{ ", " ", " }")

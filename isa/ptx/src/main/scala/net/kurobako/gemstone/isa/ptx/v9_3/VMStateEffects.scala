@@ -2,7 +2,8 @@ package net.kurobako.gemstone.isa.ptx.v9_3
 
 import Program.*
 
-import VirtualMachine.*
+import VMIR.*
+import VMExecution.*
 
 import net.kurobako.gemstone.binary.Binary32
 import net.kurobako.gemstone.binary.Bits
@@ -15,7 +16,42 @@ import cats.syntax.all.*
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 
-/** The write contract shared by block execution and device-function calls. */
+import scala.collection.mutable
+
+private[v9_3] final class VMStateEffects {
+  private val pending = mutable.ArrayBuffer.empty[VMStateWrite]
+
+  def stage(write: VMStateWrite): Unit = pending += write
+  def isEmpty: Boolean                 = pending.isEmpty
+  def size: Int                        = pending.size
+  def clear(): Unit                    = pending.clear()
+
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var", "scalafix:DisableSyntax.return"))
+  def commit(
+      validate: VMStateWrite => Either[ExecutionFault, Unit],
+      applyWrite: VMStateWrite => Unit
+  ): Either[ExecutionFault, Unit] = {
+    var index = 0
+    while (index < pending.size) {
+      validate(pending(index)) match {
+        case Left(fault) =>
+          pending.clear()
+          return Left(fault)
+        case Right(()) => ()
+      }
+      index += 1
+    }
+    index = 0
+    while (index < pending.size) {
+      applyWrite(pending(index))
+      index += 1
+    }
+    pending.clear()
+    Right(())
+  }
+}
+
+/** The write semantics shared by block execution and device-function calls. */
 private object VMStateEffects {
 
   private inline def byteCount(width: BitWidth) = Bits.byteCount(width.asByteAlignedBitWidth)
@@ -106,8 +142,8 @@ private object VMStateEffects {
       val previous = memory.atomicModifyLittleEndian(address, floatMemoryByteCount(width)) { current =>
         if (width.value == 32)
           IEEE754.floatToBinary32(
-            IEEE754.binary32ToFloat(Binary32.low(current & 0xffffffffL)) +
-              IEEE754.binary32ToFloat(Binary32.low(value & 0xffffffffL))
+            IEEE754.binary32ToFloat(Binary32.low(current)) +
+              IEEE754.binary32ToFloat(Binary32.low(value))
           ).value
         else IEEE754.doubleToBinary64(IEEE754.binary64ToDouble(current) + IEEE754.binary64ToDouble(value))
       }.fold(error => throw IllegalStateException(error.message), value => value)

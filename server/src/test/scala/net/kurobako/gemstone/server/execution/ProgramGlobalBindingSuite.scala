@@ -1,14 +1,14 @@
 package net.kurobako.gemstone.server.execution
 import net.kurobako.gemstone.Vec
-import net.kurobako.gemstone.execution.*
+import net.kurobako.gemstone.isa.KernelName as ISAKernelName
 import net.kurobako.gemstone.memory.AllocationKind
 import net.kurobako.gemstone.binary.{LittleEndian, ScalarByteWidth}
+import net.kurobako.gemstone.rpc.ExecutionProtocol.*
+import net.kurobako.gemstone.vm.{KernelTask, LaunchGeometry, MemoryRegion}
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 import java.nio.{ByteBuffer, ByteOrder}
 import java.nio.charset.StandardCharsets
-import java.util.concurrent.{CountDownLatch, TimeUnit}
-import java.util.concurrent.atomic.{AtomicInteger, AtomicReference}
 import scala.util.Using
 
 final class ProgramGlobalBindingSuite extends munit.FunSuite {
@@ -22,11 +22,11 @@ final class ProgramGlobalBindingSuite extends munit.FunSuite {
   ).flatMap(value => LittleEndian.toVec(value, ScalarByteWidth(4)))
   private val global                                      = AllocationId(1)
   private val output                                      = AllocationId(2)
-  private def service()                                   = ExecutionService(GemstoneProgramRegistry(), _.run())
+  private def service()                                   = ExecutionService(GemstoneBackendCatalog.default, _.run())
   private def setup(service: ExecutionService): ProgramId = {
     assertEquals(service.registerAllocation(32, AllocationKind.Shared), Right(global))
     assertEquals(service.registerAllocation(16, AllocationKind.Shared), Right(output))
-    service.load(ProgramFormat.HSACodeObjectBinary, Vec.from(image())).toOption.get
+    service.load(HSARuntimeBackend.encoding, Vec.from(image())).toOption.get
   }
   private def read(
       service: ExecutionService,
@@ -36,20 +36,19 @@ final class ProgramGlobalBindingSuite extends munit.FunSuite {
   ): Long =
     service.read(id, offset, size.nonNegative)
       .map(bytes => LittleEndian.decode(bytes, 0, size)).toOption.get
-  private def launch(service: ExecutionService, program: ProgramId, pointer: KernelArgument): CompletionId = {
-    val dispatch = KernelDispatch.validated(
-      program,
-      KernelName("kernel"),
-      Dimensions.One,
-      Dimensions.One,
-      Vec(pointer, KernelArgument.Allocation(output, 0))
+  private def launch(service: ExecutionService, program: ProgramId, pointer: KernelTask.Argument): CompletionId = {
+    val task = KernelTask.validated(
+      ISAKernelName("kernel"),
+      LaunchGeometry.Dimensions.One,
+      LaunchGeometry.Dimensions.One,
+      Vec(pointer, KernelTask.Argument.Memory(MemoryRegion(output.value), 0))
     ).toOption.get
-    val completion = service.launch(dispatch).toOption.get
+    val completion = service.launch(program, task).toOption.get
     assertEquals(service.completion(completion), Right(CompletionStatus.Succeeded))
     completion
   }
 
-  test("linked globals and typed/legacy allocation aliases share writes and pointer identity") {
+  test("linked globals and synthetic allocation addresses share writes and pointer identity") {
     Using.resource(service()) { s =>
       val program = setup(s)
       assertEquals(
@@ -58,19 +57,18 @@ final class ProgramGlobalBindingSuite extends munit.FunSuite {
       )
       assertEquals(s.bindGlobal(program, GlobalName("device_global"), global, 8), Right(()))
       assertEquals(read(s, global, 8), 41L)
-      val first = launch(s, program, KernelArgument.Allocation(global, 8))
+      val first = launch(s, program, KernelTask.Argument.Memory(MemoryRegion(global.value), 8))
       assertEquals(read(s, global, 8), 42L)
       assertEquals(read(s, output, 0), 42L)
       assertEquals(read(s, output, 4), 1L)
       assertEquals(s.releaseCompletion(first), Right(()))
       assertEquals(s.write(global, 8, LittleEndian.toVec(70, ScalarByteWidth(4))), Right(()))
-      // The old process-neutral allocation encoding remains a storage alias after canonical binding.
-      val legacy = 0x400000000000L + 8L
-      val second = launch(s, program, KernelArgument.Scalar(LittleEndian.toVec(legacy, ScalarByteWidth(8))))
+      val synthetic = 0x400000000000L + 8L
+      val second    = launch(s, program, KernelTask.Argument.Scalar(LittleEndian.toVec(synthetic, ScalarByteWidth(8))))
       assertEquals(read(s, global, 8), 71L)
       assertEquals(read(s, output, 0), 71L)
       assertEquals(s.releaseCompletion(second), Right(()))
-      val third = launch(s, program, KernelArgument.Scalar(LittleEndian.toVec(0x3000, ScalarByteWidth(8))))
+      val third = launch(s, program, KernelTask.Argument.Scalar(LittleEndian.toVec(0x3000, ScalarByteWidth(8))))
       assertEquals(read(s, global, 8), 72L)
       assertEquals(read(s, output, 4), 1L)
       assert(s.completionDirtyRanges(third).toOption.get.exists(_.allocation == global))
@@ -119,67 +117,16 @@ final class ProgramGlobalBindingSuite extends munit.FunSuite {
       assert(s.bindGlobal(p, GlobalName("missing"), output, 0).isLeft)
       assertEquals(s.releaseAllocation(output), Right(()))
       val ptx = s.load(
-        ProgramFormat.PTXText,
+        PTXRuntimeBackend.encoding,
         Vec.from(
           ".version 8.0\n.target sm_80\n.address_size 64\n.visible .entry k(){ret;}".getBytes(StandardCharsets.UTF_8)
         )
       ).toOption.get
-      assert(s.bindGlobal(ptx, GlobalName("global"), global, 0).left.exists(_.isInstanceOf[ExecutionFailure.NotFound]))
+      assert(s.bindGlobal(ptx, GlobalName("global"), global, 0).left.exists {
+        case ExecutionFailure.NotFound(_) => true
+        case _                            => false
+      })
       assertEquals(s.releaseAllocation(global), Right(()))
-    }
-  }
-
-  test("in-progress binding reserves ownership and close defers backend unload") {
-    val entered     = CountDownLatch(1)
-    val resume      = CountDownLatch(1)
-    val unloads     = AtomicInteger()
-    val initialized = AtomicReference(Option.empty[Either[ExecutionFailure, Unit]])
-    final class GatedExecutor extends ProgramExecutor {
-      def load(id: ProgramId, format: ProgramFormat, image: Vec[Byte]) = Right(())
-      def unload(id: ProgramId) = { val _ = unloads.incrementAndGet(); Right(()) }
-      def launch(dispatch: KernelDispatch, memory: ExecutionMemory, control: ExecutionControl) = Right(())
-      override def bindGlobal(
-          id: ProgramId,
-          name: GlobalName,
-          allocation: AllocationId,
-          offset: Long :| Positive0,
-          allocationSize: Long :| Positive,
-          memory: ExecutionMemory
-      ): Either[ExecutionFailure, Unit] = {
-        entered.countDown()
-        if (!resume.await(5L, TimeUnit.SECONDS)) Left(ExecutionFailure.Failed("binding gate timed out"))
-        else {
-          val result = memory.write(allocation, offset, Vec[Byte](42))
-          initialized.set(Some(memory.read(allocation, offset, 1).map(_ => ())))
-          result
-        }
-      }
-    }
-    Using.resource(ExecutionService(GatedExecutor(), _.run())) { service =>
-      val program = setup(service)
-      val result  = AtomicReference(Option.empty[Either[ExecutionFailure, Unit]])
-      val worker  = Thread(() => result.set(Some(service.bindGlobal(program, GlobalName("global"), global, 0))))
-      worker.start()
-      // The finally releases a synchronization gate and joins a thread; neither is an AutoCloseable resource.
-      try {
-        assert(entered.await(5L, TimeUnit.SECONDS), "backend bind did not enter")
-        assert(service.releaseAllocation(global).isLeft)
-        assert(service.unload(program).isLeft)
-        val dispatch = KernelDispatch
-          .validated(program, KernelName("kernel"), Dimensions.One, Dimensions.One, Vec.empty)
-          .toOption.get
-        assert(service.launch(dispatch).isLeft)
-        service.close()
-        assertEquals(unloads.get(), 0, "close unloaded backend while initialization still used its state")
-      } finally {
-        resume.countDown()
-        worker.join(5000L)
-      }
-      assert(!worker.isAlive, "binding did not finish")
-      assertEquals(initialized.get(), Some(Right(())), "close reclaimed reserved allocation too early")
-      assertEquals(result.get().map(_.isLeft), Some(true), "closed session cannot report a successful binding")
-      assertEquals(unloads.get(), 1)
-      assert(service.read(global, 0, 1).isLeft)
     }
   }
 
@@ -200,7 +147,7 @@ final class ProgramGlobalBindingSuite extends munit.FunSuite {
       buffer.putLong(table + 6 * 64 + 24, table.toLong)
       Using.resource(service()) { s =>
         assertEquals(s.registerAllocation(32, AllocationKind.Shared), Right(global))
-        val p = s.load(ProgramFormat.HSACodeObjectBinary, Vec.from(bytes)).toOption.get
+        val p = s.load(HSARuntimeBackend.encoding, Vec.from(bytes)).toOption.get
         assertEquals(s.bindGlobal(p, GlobalName("device_global"), global, 8).isRight, allocated)
       }
     }

@@ -6,8 +6,9 @@ import net.kurobako.gemstone.benchmarks.BenchmarkName
 import net.kurobako.gemstone.benchmarks.PlatformMetrics
 import net.kurobako.gemstone.binary.LittleEndian
 import net.kurobako.gemstone.binary.ScalarByteWidth
-import net.kurobako.gemstone.execution.*
 import net.kurobako.gemstone.isa.spirv.v1_6.*
+import net.kurobako.gemstone.isa.KernelName
+import net.kurobako.gemstone.vm.{Fault, KernelTask, LaunchGeometry, Memory, MemoryRegion, Observer, TaskControl}
 
 import cats.syntax.all.*
 import com.monovore.decline.Opts
@@ -28,22 +29,20 @@ object SPIRVExecutionBenchmark {
       recording: Option[Path]
   )
 
-  private object EmptyMemory extends ExecutionMemory {
+  private object EmptyMemory extends Memory {
     override def read(
-        id: AllocationId,
+        region: MemoryRegion,
         offset: Long :| Positive0,
         size: Int :| Positive0
-    ): Either[ExecutionFailure, Vec[Byte]] =
-      Left(ExecutionFailure.Unsupported("benchmark kernel attempted a memory read"))
+    ): Either[Fault, Vec[Byte]] =
+      Left(Fault.Unsupported("benchmark kernel attempted a memory read"))
 
     override def write(
-        id: AllocationId,
+        region: MemoryRegion,
         offset: Long :| Positive0,
         bytes: Vec[Byte]
-    ): Either[ExecutionFailure, Unit] =
-      Left(ExecutionFailure.Unsupported("benchmark kernel attempted a memory write"))
-
-    override def recordPointerRelocation(relocation: PointerRelocation): Unit = ()
+    ): Either[Fault, Unit] =
+      Left(Fault.Unsupported("benchmark kernel attempted a memory write"))
   }
 
   private val name    = BenchmarkName("spirv-execution")
@@ -54,7 +53,7 @@ object SPIRVExecutionBenchmark {
       .validate("groups must be positive")(_ > 0).map(_.refineUnsafe[Positive]),
     Opts.option[Int]("instructions", help = "Integer additions per invocation").withDefault(64)
       .validate("instructions must be positive")(_ > 0).map(_.refineUnsafe[Positive]),
-    Opts.option[Int]("parallelism", help = "Interpreter worker count")
+    Opts.option[Int]("parallelism", help = "VMInterpreter worker count")
       .withDefault(sys.runtime.availableProcessors())
       .validate("parallelism must be positive")(_ > 0).map(_.refineUnsafe[Positive]),
     Opts.option[String]("recording", help = "JFR output path").map(Path.of(_)).orNone
@@ -62,14 +61,12 @@ object SPIRVExecutionBenchmark {
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   def run(arguments: Array[String]): Unit = {
-    val parsed  = BenchmarkArguments.parse(name, arguments.toSeq, options)
-    val program = Interpreter.prepareUnchecked(module(parsed.instructions))
-      .fold(error => throw IllegalArgumentException(error.message), value => value)
-    val dispatch = KernelDispatch.validated(
-      program = ProgramId(1),
+    val parsed = BenchmarkArguments.parse(name, arguments.toSeq, options)
+    val source = module(parsed.instructions)
+    val task   = KernelTask.validated(
       kernelName = KernelName("arithmetic"),
-      groupSize = Dimensions.One,
-      groupCount = Dimensions(parsed.groups, 1, 1),
+      groupSize = LaunchGeometry.Dimensions.One,
+      groupCount = LaunchGeometry.Dimensions(parsed.groups, 1, 1),
       arguments = Vec.empty
     ).fold(error => throw IllegalArgumentException(error), value => value)
 
@@ -77,12 +74,14 @@ object SPIRVExecutionBenchmark {
       InterpreterScheduler(parsed.parallelism, minGroups = 1L, minWorkItems = 1L),
       PlatformMetrics.startRecording(parsed.recording)
     ) { (scheduler, _) =>
+      val machine         = VirtualMachine(Validation.Environment.OpenCLCompute, Observer.discard, scheduler)
+      val program         = machine.load(source).fold(error => throw IllegalArgumentException(error.message), identity)
       val allocatedBefore = PlatformMetrics.allocatedBytes
       val started         = PlatformTime.monotonicNanos
       var iteration       = 0
       while (iteration < parsed.iterations) {
-        val control = ExecutionControl(parallelism = scheduler)
-        Interpreter.run(program, dispatch, EmptyMemory, control)
+        val control = TaskControl.forScheduler(scheduler = scheduler)
+        machine.execute(program, task, EmptyMemory, control)
           .fold(error => throw IllegalStateException(error.message), _ => ())
         iteration += 1
       }

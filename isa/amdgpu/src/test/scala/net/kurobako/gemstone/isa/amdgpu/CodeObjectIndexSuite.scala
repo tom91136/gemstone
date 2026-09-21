@@ -7,7 +7,9 @@ import net.kurobako.gemstone.Vec
 import net.kurobako.gemstone.binary.{Bits, ByteRange, ScalarByteWidth}
 import net.kurobako.gemstone.binary.IEEE754
 import net.kurobako.gemstone.binary.LittleEndian
-import net.kurobako.gemstone.execution.*
+import net.kurobako.gemstone.isa.*
+import net.kurobako.gemstone.vm.*
+import net.kurobako.gemstone.vm.LaunchGeometry.Dimensions
 
 import java.nio.ByteBuffer
 import java.nio.ByteOrder

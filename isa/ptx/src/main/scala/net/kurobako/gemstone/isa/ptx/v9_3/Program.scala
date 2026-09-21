@@ -2,12 +2,12 @@ package net.kurobako.gemstone.isa.ptx.v9_3
 
 import net.kurobako.gemstone.NoNul
 import net.kurobako.gemstone.Vec
-import net.kurobako.gemstone.execution.KernelName
+import net.kurobako.gemstone.isa.KernelName
 
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 
-final case class Program(statements: Vec[Program.Statement])
+final case class Program(statements: Vec[Program.Statement]) extends net.kurobako.gemstone.isa.Program
 
 object Program {
 
@@ -63,6 +63,28 @@ object Program {
     case Subtract(left: Operand, right: Operand)
     case WithPredicate(base: Operand, predicate: Operand)
     case Negate(operand: Operand)
+  }
+
+  object Operand {
+    def isAddress(operand: Operand): Boolean = operand match {
+      case Address(_) => true
+      case _          => false
+    }
+
+    def isParenthesized(operand: Operand): Boolean = operand match {
+      case Parenthesized(_) => true
+      case _                => false
+    }
+
+    def isVectorLiteral(operand: Operand): Boolean = operand match {
+      case VectorLiteral(_) => true
+      case _                => false
+    }
+
+    def isWithPredicate(operand: Operand): Boolean = operand match {
+      case WithPredicate(_, _) => true
+      case _                   => false
+    }
   }
 
   final case class Predication(negated: Boolean, operand: Operand)

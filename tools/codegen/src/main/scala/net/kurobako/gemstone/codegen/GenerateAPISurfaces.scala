@@ -122,7 +122,7 @@ object GenerateAPISurfaces {
       }
       if (conflicts.nonEmpty)
         throw IllegalArgumentException(s"conflicting callback typedefs: ${conflicts.toVector.sorted.mkString(", ")}")
-      val callbackTypedefs: Map[String, String] = typedefs.iterator.map { case (name, definitions) =>
+      val callbackTypedefs: Map[String, String] = typedefs.view.map { case (name, definitions) =>
         (name: String) -> (definitions.head.cType.value: String)
       }.toMap
       val renderedFunctions = functions.filterNot(function => target.excludedFunctions(function.name.value))
@@ -192,7 +192,7 @@ object GenerateAPISurfaces {
     val (aliases, declarations) = rendered.run(Aliases.empty).value
     val aliasLines              = aliases.entries.filterNot(entry => target.excludedTypes(entry._1)).sortBy(_._1).map {
       case (name, definition) =>
-        s"type ${identifier(name)} = $definition"
+        s"  type ${identifier(name)} = $definition"
     }
     val versionLines = target.versions.map { case (name, value) =>
       s"  val $name: String :| (MinLength[1] & NoNul) = ${literal(value)}"
@@ -203,17 +203,19 @@ object GenerateAPISurfaces {
         |import io.github.iltotore.iron.*
         |import io.github.iltotore.iron.constraint.all.*
         |import net.kurobako.gemstone.NoNul
-        |import net.kurobako.gemstone.abi.*
+        |import net.kurobako.gemstone.abi.ABI.*
         |
+        |object ${target.traitName} {
         |${aliasLines.mkString("\n")}
+        |
+        |${versionLines.mkString("\n")}
+        |  val FunctionCount: Int :| Positive = $surfaceSize
+        |}
+        |
+        |import ${target.traitName}.*
         |
         |trait ${target.traitName} {
         |${declarations.mkString("\n")}
-        |}
-        |
-        |object ${target.traitName} {
-        |${versionLines.mkString("\n")}
-        |  val FunctionCount: Int :| Positive = $surfaceSize
         |}
         |""".stripMargin
   }

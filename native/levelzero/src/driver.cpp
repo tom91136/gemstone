@@ -1122,7 +1122,7 @@ ze_result_t launchRpc(const KernelLaunch &kernel, const ze_group_count_t &groups
   }
 
   // A command-list worker must not invent a kernel-duration limit. User-facing
-  // event/fence/queue synchronization owns the Level Zero timeout contract;
+  // event/fence/queue synchronization owns the Level Zero timeout semantics;
   // each RPC exchange still retains its independent transport-progress timeout.
   gemstone::execution::CompletionResult result;
   std::string completionError;
@@ -1200,7 +1200,7 @@ ze_result_t ZE_APICALL listLaunch(ze_command_list_handle_t handle, ze_kernel_han
 }
 
 // UMF uses the reported allocation page size as its minimum slab alignment.
-// Keep the allocator and zeMemGetAllocProperties contract in agreement.
+// Keep the allocator and zeMemGetAllocProperties behaviour in agreement.
 constexpr size_t AllocationPageSize = 4096U;
 
 void *alignedAllocate(size_t size, size_t alignment) {
@@ -1442,7 +1442,7 @@ ze_result_t ZE_APICALL moduleCreate(ze_context_handle_t contextHandle, ze_device
       if (log) *log = reinterpret_cast<ze_module_build_log_handle_t>(new BuildLog("SPIR-V module is too large"));
       return ZE_RESULT_ERROR_MODULE_BUILD_FAILURE;
     }
-    auto loaded = state.client->call(LoadProgram{ProgramFormat::SPIRVBinary, std::vector<uint8_t>(image, image + size)});
+    auto loaded = state.client->call(LoadProgram{"spirv-binary", std::vector<uint8_t>(image, image + size)});
     if (!loaded) {
       rememberRemoteError(state, remoteError(state));
       if (log) *log = reinterpret_cast<ze_module_build_log_handle_t>(new BuildLog(state.error));

@@ -4,110 +4,117 @@ package net.kurobako.gemstone.hsa
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 import net.kurobako.gemstone.NoNul
-import net.kurobako.gemstone.abi.*
+import net.kurobako.gemstone.abi.ABI.*
 
-type hsa_access_permission_t = CValue["hsa_access_permission_t"]
-type hsa_agent_info_t = CValue["hsa_agent_info_t"]
-type hsa_agent_t = CValue["hsa_agent_t"]
-type hsa_amd_agent_memory_pool_info_t = CValue["hsa_amd_agent_memory_pool_info_t"]
-type hsa_amd_ais_file_handle_t = CValue["hsa_amd_ais_file_handle_t"]
-type hsa_amd_coherency_type_t = CValue["hsa_amd_coherency_type_t"]
-type hsa_amd_copy_direction_t = CValue["hsa_amd_copy_direction_t"]
-type hsa_amd_deallocation_callback_t =
-  CallbackTypedef["hsa_amd_deallocation_callback_t", (OpaquePointer, OpaquePointer), Unit]
-type hsa_amd_event_t = CValue["hsa_amd_event_t"]
-type hsa_amd_image_descriptor_t = CValue["hsa_amd_image_descriptor_t"]
-type hsa_amd_ipc_memory_t = CValue["hsa_amd_ipc_memory_t"]
-type hsa_amd_ipc_signal_t = CValue["hsa_amd_ipc_signal_t"]
-type hsa_amd_memory_access_desc_t = CValue["hsa_amd_memory_access_desc_t"]
-type hsa_amd_memory_pool_info_t = CValue["hsa_amd_memory_pool_info_t"]
-type hsa_amd_memory_pool_t = CValue["hsa_amd_memory_pool_t"]
-type hsa_amd_memory_type_t = CValue["hsa_amd_memory_type_t"]
-type hsa_amd_pointer_info_t = CValue["hsa_amd_pointer_info_t"]
-type hsa_amd_profiling_async_copy_time_t = CValue["hsa_amd_profiling_async_copy_time_t"]
-type hsa_amd_profiling_dispatch_time_t = CValue["hsa_amd_profiling_dispatch_time_t"]
-type hsa_amd_queue_priority_t = CValue["hsa_amd_queue_priority_t"]
-type hsa_amd_sdma_engine_id_t = CValue["hsa_amd_sdma_engine_id_t"]
-type hsa_amd_signal_handler = CallbackTypedef["hsa_amd_signal_handler", (hsa_signal_value_t, OpaquePointer), Boolean]
-type hsa_amd_svm_attribute_pair_t = CValue["hsa_amd_svm_attribute_pair_t"]
-type hsa_amd_system_event_callback_t = CallbackTypedef[
-  "hsa_amd_system_event_callback_t",
-  (Pointer[hsa_amd_event_t, Read, Opaque], OpaquePointer),
-  hsa_status_t
-]
-type hsa_amd_vmem_alloc_handle_t = CValue["hsa_amd_vmem_alloc_handle_t"]
-type hsa_cache_info_t = CValue["hsa_cache_info_t"]
-type hsa_cache_t = CValue["hsa_cache_t"]
-type hsa_callback_data_t = CValue["hsa_callback_data_t"]
-type hsa_code_object_info_t = CValue["hsa_code_object_info_t"]
-type hsa_code_object_reader_t = CValue["hsa_code_object_reader_t"]
-type hsa_code_object_t = CValue["hsa_code_object_t"]
-type hsa_code_symbol_info_t = CValue["hsa_code_symbol_info_t"]
-type hsa_code_symbol_t = CValue["hsa_code_symbol_t"]
-type hsa_default_float_rounding_mode_t = CValue["hsa_default_float_rounding_mode_t"]
-type hsa_dim3_t = CValue["hsa_dim3_t"]
-type hsa_executable_info_t = CValue["hsa_executable_info_t"]
-type hsa_executable_state_t = CValue["hsa_executable_state_t"]
-type hsa_executable_symbol_info_t = CValue["hsa_executable_symbol_info_t"]
-type hsa_executable_symbol_t = CValue["hsa_executable_symbol_t"]
-type hsa_executable_t = CValue["hsa_executable_t"]
-type hsa_ext_image_data_info_t = CValue["hsa_ext_image_data_info_t"]
-type hsa_ext_image_data_layout_t = CValue["hsa_ext_image_data_layout_t"]
-type hsa_ext_image_descriptor_t = CValue["hsa_ext_image_descriptor_t"]
-type hsa_ext_image_format_t = CValue["hsa_ext_image_format_t"]
-type hsa_ext_image_geometry_t = CValue["hsa_ext_image_geometry_t"]
-type hsa_ext_image_region_t = CValue["hsa_ext_image_region_t"]
-type hsa_ext_image_t = CValue["hsa_ext_image_t"]
-type hsa_ext_sampler_descriptor_t = CValue["hsa_ext_sampler_descriptor_t"]
-type hsa_ext_sampler_descriptor_v2_t = CValue["hsa_ext_sampler_descriptor_v2_t"]
-type hsa_ext_sampler_t = CValue["hsa_ext_sampler_t"]
-type hsa_file_t = CValue["hsa_file_t"]
-type hsa_flush_mode_t = CValue["hsa_flush_mode_t"]
-type hsa_fp_type_t = CValue["hsa_fp_type_t"]
-type hsa_isa_info_t = CValue["hsa_isa_info_t"]
-type hsa_isa_t = CValue["hsa_isa_t"]
-type hsa_loaded_code_object_t = CValue["hsa_loaded_code_object_t"]
-type hsa_pitched_ptr_t = CValue["hsa_pitched_ptr_t"]
-type hsa_profile_t = CValue["hsa_profile_t"]
-type hsa_queue_info_attribute_t = CValue["hsa_queue_info_attribute_t"]
-type hsa_queue_t = CValue["hsa_queue_t"]
-type hsa_queue_type32_t = CValue["hsa_queue_type32_t"]
-type hsa_region_info_t = CValue["hsa_region_info_t"]
-type hsa_region_t = CValue["hsa_region_t"]
-type hsa_round_method_t = CValue["hsa_round_method_t"]
-type hsa_signal_condition_t = CValue["hsa_signal_condition_t"]
-type hsa_signal_group_t = CValue["hsa_signal_group_t"]
-type hsa_signal_t = CValue["hsa_signal_t"]
-type hsa_signal_value_t = CValue["hsa_signal_value_t"]
-type hsa_status_t = CValue["hsa_status_t"]
-type hsa_system_info_t = CValue["hsa_system_info_t"]
-type hsa_ven_amd_pcs_configuration_t = CValue["hsa_ven_amd_pcs_configuration_t"]
-type hsa_ven_amd_pcs_data_copy_callback_t =
-  CallbackTypedef["hsa_ven_amd_pcs_data_copy_callback_t", (OpaquePointer, size_t, OpaquePointer), hsa_status_t]
-type hsa_ven_amd_pcs_data_ready_callback_t = CallbackTypedef[
-  "hsa_ven_amd_pcs_data_ready_callback_t",
-  (OpaquePointer, size_t, size_t, hsa_ven_amd_pcs_data_copy_callback_t, OpaquePointer),
-  Unit
-]
-type hsa_ven_amd_pcs_iterate_configuration_callback_t = CallbackTypedef[
-  "hsa_ven_amd_pcs_iterate_configuration_callback_t",
-  (Pointer[hsa_ven_amd_pcs_configuration_t, Read, Opaque], OpaquePointer),
-  hsa_status_t
-]
-type hsa_ven_amd_pcs_method_kind_t = CValue["hsa_ven_amd_pcs_method_kind_t"]
-type hsa_ven_amd_pcs_t = CValue["hsa_ven_amd_pcs_t"]
-type hsa_ven_amd_pcs_units_t = CValue["hsa_ven_amd_pcs_units_t"]
-type hsa_wait_state_t = CValue["hsa_wait_state_t"]
-type hsa_wavefront_info_t = CValue["hsa_wavefront_info_t"]
-type hsa_wavefront_t = CValue["hsa_wavefront_t"]
-type int32_t = CValue["int32_t"]
-type int64_t = CValue["int64_t"]
-type size_t = CValue["size_t"]
-type uint16_t = CValue["uint16_t"]
-type uint32_t = CValue["uint32_t"]
-type uint64_t = CValue["uint64_t"]
-type uint8_t = CValue["uint8_t"]
-type volatile_hsa_signal_value_t = CValue["volatile hsa_signal_value_t"]
+object HSA {
+  type hsa_access_permission_t = CValue["hsa_access_permission_t"]
+  type hsa_agent_info_t = CValue["hsa_agent_info_t"]
+  type hsa_agent_t = CValue["hsa_agent_t"]
+  type hsa_amd_agent_memory_pool_info_t = CValue["hsa_amd_agent_memory_pool_info_t"]
+  type hsa_amd_ais_file_handle_t = CValue["hsa_amd_ais_file_handle_t"]
+  type hsa_amd_coherency_type_t = CValue["hsa_amd_coherency_type_t"]
+  type hsa_amd_copy_direction_t = CValue["hsa_amd_copy_direction_t"]
+  type hsa_amd_deallocation_callback_t =
+    CallbackTypedef["hsa_amd_deallocation_callback_t", (OpaquePointer, OpaquePointer), Unit]
+  type hsa_amd_event_t = CValue["hsa_amd_event_t"]
+  type hsa_amd_image_descriptor_t = CValue["hsa_amd_image_descriptor_t"]
+  type hsa_amd_ipc_memory_t = CValue["hsa_amd_ipc_memory_t"]
+  type hsa_amd_ipc_signal_t = CValue["hsa_amd_ipc_signal_t"]
+  type hsa_amd_memory_access_desc_t = CValue["hsa_amd_memory_access_desc_t"]
+  type hsa_amd_memory_pool_info_t = CValue["hsa_amd_memory_pool_info_t"]
+  type hsa_amd_memory_pool_t = CValue["hsa_amd_memory_pool_t"]
+  type hsa_amd_memory_type_t = CValue["hsa_amd_memory_type_t"]
+  type hsa_amd_pointer_info_t = CValue["hsa_amd_pointer_info_t"]
+  type hsa_amd_profiling_async_copy_time_t = CValue["hsa_amd_profiling_async_copy_time_t"]
+  type hsa_amd_profiling_dispatch_time_t = CValue["hsa_amd_profiling_dispatch_time_t"]
+  type hsa_amd_queue_priority_t = CValue["hsa_amd_queue_priority_t"]
+  type hsa_amd_sdma_engine_id_t = CValue["hsa_amd_sdma_engine_id_t"]
+  type hsa_amd_signal_handler = CallbackTypedef["hsa_amd_signal_handler", (hsa_signal_value_t, OpaquePointer), Boolean]
+  type hsa_amd_svm_attribute_pair_t = CValue["hsa_amd_svm_attribute_pair_t"]
+  type hsa_amd_system_event_callback_t = CallbackTypedef[
+    "hsa_amd_system_event_callback_t",
+    (Pointer[hsa_amd_event_t, Read, Opaque], OpaquePointer),
+    hsa_status_t
+  ]
+  type hsa_amd_vmem_alloc_handle_t = CValue["hsa_amd_vmem_alloc_handle_t"]
+  type hsa_cache_info_t = CValue["hsa_cache_info_t"]
+  type hsa_cache_t = CValue["hsa_cache_t"]
+  type hsa_callback_data_t = CValue["hsa_callback_data_t"]
+  type hsa_code_object_info_t = CValue["hsa_code_object_info_t"]
+  type hsa_code_object_reader_t = CValue["hsa_code_object_reader_t"]
+  type hsa_code_object_t = CValue["hsa_code_object_t"]
+  type hsa_code_symbol_info_t = CValue["hsa_code_symbol_info_t"]
+  type hsa_code_symbol_t = CValue["hsa_code_symbol_t"]
+  type hsa_default_float_rounding_mode_t = CValue["hsa_default_float_rounding_mode_t"]
+  type hsa_dim3_t = CValue["hsa_dim3_t"]
+  type hsa_executable_info_t = CValue["hsa_executable_info_t"]
+  type hsa_executable_state_t = CValue["hsa_executable_state_t"]
+  type hsa_executable_symbol_info_t = CValue["hsa_executable_symbol_info_t"]
+  type hsa_executable_symbol_t = CValue["hsa_executable_symbol_t"]
+  type hsa_executable_t = CValue["hsa_executable_t"]
+  type hsa_ext_image_data_info_t = CValue["hsa_ext_image_data_info_t"]
+  type hsa_ext_image_data_layout_t = CValue["hsa_ext_image_data_layout_t"]
+  type hsa_ext_image_descriptor_t = CValue["hsa_ext_image_descriptor_t"]
+  type hsa_ext_image_format_t = CValue["hsa_ext_image_format_t"]
+  type hsa_ext_image_geometry_t = CValue["hsa_ext_image_geometry_t"]
+  type hsa_ext_image_region_t = CValue["hsa_ext_image_region_t"]
+  type hsa_ext_image_t = CValue["hsa_ext_image_t"]
+  type hsa_ext_sampler_descriptor_t = CValue["hsa_ext_sampler_descriptor_t"]
+  type hsa_ext_sampler_descriptor_v2_t = CValue["hsa_ext_sampler_descriptor_v2_t"]
+  type hsa_ext_sampler_t = CValue["hsa_ext_sampler_t"]
+  type hsa_file_t = CValue["hsa_file_t"]
+  type hsa_flush_mode_t = CValue["hsa_flush_mode_t"]
+  type hsa_fp_type_t = CValue["hsa_fp_type_t"]
+  type hsa_isa_info_t = CValue["hsa_isa_info_t"]
+  type hsa_isa_t = CValue["hsa_isa_t"]
+  type hsa_loaded_code_object_t = CValue["hsa_loaded_code_object_t"]
+  type hsa_pitched_ptr_t = CValue["hsa_pitched_ptr_t"]
+  type hsa_profile_t = CValue["hsa_profile_t"]
+  type hsa_queue_info_attribute_t = CValue["hsa_queue_info_attribute_t"]
+  type hsa_queue_t = CValue["hsa_queue_t"]
+  type hsa_queue_type32_t = CValue["hsa_queue_type32_t"]
+  type hsa_region_info_t = CValue["hsa_region_info_t"]
+  type hsa_region_t = CValue["hsa_region_t"]
+  type hsa_round_method_t = CValue["hsa_round_method_t"]
+  type hsa_signal_condition_t = CValue["hsa_signal_condition_t"]
+  type hsa_signal_group_t = CValue["hsa_signal_group_t"]
+  type hsa_signal_t = CValue["hsa_signal_t"]
+  type hsa_signal_value_t = CValue["hsa_signal_value_t"]
+  type hsa_status_t = CValue["hsa_status_t"]
+  type hsa_system_info_t = CValue["hsa_system_info_t"]
+  type hsa_ven_amd_pcs_configuration_t = CValue["hsa_ven_amd_pcs_configuration_t"]
+  type hsa_ven_amd_pcs_data_copy_callback_t =
+    CallbackTypedef["hsa_ven_amd_pcs_data_copy_callback_t", (OpaquePointer, size_t, OpaquePointer), hsa_status_t]
+  type hsa_ven_amd_pcs_data_ready_callback_t = CallbackTypedef[
+    "hsa_ven_amd_pcs_data_ready_callback_t",
+    (OpaquePointer, size_t, size_t, hsa_ven_amd_pcs_data_copy_callback_t, OpaquePointer),
+    Unit
+  ]
+  type hsa_ven_amd_pcs_iterate_configuration_callback_t = CallbackTypedef[
+    "hsa_ven_amd_pcs_iterate_configuration_callback_t",
+    (Pointer[hsa_ven_amd_pcs_configuration_t, Read, Opaque], OpaquePointer),
+    hsa_status_t
+  ]
+  type hsa_ven_amd_pcs_method_kind_t = CValue["hsa_ven_amd_pcs_method_kind_t"]
+  type hsa_ven_amd_pcs_t = CValue["hsa_ven_amd_pcs_t"]
+  type hsa_ven_amd_pcs_units_t = CValue["hsa_ven_amd_pcs_units_t"]
+  type hsa_wait_state_t = CValue["hsa_wait_state_t"]
+  type hsa_wavefront_info_t = CValue["hsa_wavefront_info_t"]
+  type hsa_wavefront_t = CValue["hsa_wavefront_t"]
+  type int32_t = CValue["int32_t"]
+  type int64_t = CValue["int64_t"]
+  type size_t = CValue["size_t"]
+  type uint16_t = CValue["uint16_t"]
+  type uint32_t = CValue["uint32_t"]
+  type uint64_t = CValue["uint64_t"]
+  type uint8_t = CValue["uint8_t"]
+  type volatile_hsa_signal_value_t = CValue["volatile hsa_signal_value_t"]
+
+  val HeaderVersion: String :| (MinLength[1] & NoNul) = "7.1.1"
+  val FunctionCount: Int :| Positive = 254
+}
+
+import HSA.*
 
 trait HSA {
   def hsa_agent_extension_supported(
@@ -1092,9 +1099,4 @@ trait HSA {
       attribute: hsa_wavefront_info_t,
       value: OpaquePointer
   ): hsa_status_t = unsupported
-}
-
-object HSA {
-  val HeaderVersion: String :| (MinLength[1] & NoNul) = "7.1.1"
-  val FunctionCount: Int :| Positive = 254
 }

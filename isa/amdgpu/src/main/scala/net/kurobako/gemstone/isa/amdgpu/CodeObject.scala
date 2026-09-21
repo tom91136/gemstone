@@ -13,7 +13,7 @@ import net.kurobako.gemstone.binary.ByteRange
 import net.kurobako.gemstone.binary.LittleEndian
 import net.kurobako.gemstone.binary.ScalarByteWidth
 import net.kurobako.gemstone.concurrent.withLock
-import net.kurobako.gemstone.execution.GlobalName
+import net.kurobako.gemstone.isa.GlobalName
 import net.kurobako.gemstone.memory.GuestAddress
 
 import cats.syntax.either.*
@@ -24,10 +24,18 @@ import java.nio.ByteOrder
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.locks.ReentrantLock
-import scala.collection.mutable
 
 /** Strict, dependency-free ELF boundary for AMDGPU code objects. */
 object CodeObject {
+  final case class Program private[CodeObject] (image: Vec[Byte]) extends net.kurobako.gemstone.isa.Program
+
+  object Decoder extends net.kurobako.gemstone.isa.Decoder[Vec[Byte], Program] {
+    override type Error = CodeObjectError
+
+    override def decode(image: Vec[Byte]): Either[CodeObjectError, Program] =
+      validateHeader(image).map(_ => Program(image))
+  }
+
   enum CodeObjectError {
     case Invalid(detail: String)
     case Unsupported(detail: String)
@@ -122,19 +130,19 @@ object CodeObject {
       textSection.offset + textSection.size
     )
     private lazy val readOnly = readOnlySection.fold(0L -> Array.emptyByteArray) { section =>
-      globalSections.iterator.collectFirst {
+      globalSections.view.collectFirst {
         case (index, candidate) if candidate == section => candidate.address -> globalImages(index)
       }.getOrElse(section.address -> Array.emptyByteArray)
     }
     private lazy val globalImages: Map[Int, Array[Byte]] = {
-      val images = globalSections.iterator.map { case (index, section) =>
+      val images = globalSections.view.map { case (index, section) =>
         val image =
           if (section.sectionType == 8) Array.ofDim[Byte](section.size)
           else java.util.Arrays.copyOfRange(bytes, section.offset, section.offset + section.size)
         index -> image
       }.toMap
       globalRelocations.foreach { case (address, value) =>
-        globalSections.iterator.collectFirst {
+        globalSections.view.collectFirst {
           case (index, section)
               if address >= section.address && address - section.address <= section.size.toLong - 8L =>
             LittleEndian.write(
@@ -148,7 +156,7 @@ object CodeObject {
       images
     }
     private lazy val globalRegions: Array[(Long, Array[Byte])] =
-      globalSections.keysIterator.toArray.sorted.map { index =>
+      globalSections.keys.view.toArray.sorted.map { index =>
         val section = globalSections(index)
         section.address -> globalImages(index)
       }
@@ -181,7 +189,7 @@ object CodeObject {
     val kernelNames: Set[String] = records.keySet
 
     val globals: Vec[CodeObjectGlobal] = Vec.from(
-      globalSymbols.iterator.map { case (name, symbol) =>
+      globalSymbols.view.map { case (name, symbol) =>
         val pointerOffsets = globalRelocations.collect {
           case (address, _) if address >= symbol.value && address - symbol.value <= symbol.size.toLong - 8L =>
             (address - symbol.value).toInt
@@ -366,20 +374,20 @@ object CodeObject {
       descriptors <- descriptorIndex(symbols)
       textSection <- sections.zip(names).collectFirst { case (section, ".text") => section }
         .toRight(CodeObjectError.Invalid("AMDGPU code object has no .text section"))
-      functionTargets <- symbols.iterator
+      functionTargets <- symbols.view
         .filter(candidate => candidate.kind == 2 && candidate.section > 0 && candidate.size > 0)
         .toVec
         .groupMap(_.value)(_.name)
-        .iterator
+        .view
         .map { case (address, aliases) => selectFunctionTarget(aliases).map(address -> _) }
         .toVec
         .sequence
         .map(_.toMap)
-      functionSizes = symbols.iterator
+      functionSizes = symbols.view
         .filter(symbol => symbol.kind == 2 && symbol.section > 0 && symbol.size > 0)
         .toVec
         .groupMap(_.value)(_.size)
-        .iterator
+        .view
         .map { case (address, sizes) => address -> sizes.max }
         .toMap
       readOnlySection <- sections.zip(names).find { case (_, name) => name == ".rodata" }.map(_._1) match {
@@ -387,7 +395,7 @@ object CodeObject {
           Left(CodeObjectError.Invalid("AMDGPU .rodata section is not file-backed"))
         case section => Right(section)
       }
-      records <- symbols.iterator
+      records <- symbols.view
         // Device-library helpers such as __ockl_* are emitted as local
         // functions in HIP code objects, but only actual dispatchable kernels
         // have the ABI descriptor required to prepare an AQL launch.
@@ -406,7 +414,7 @@ object CodeObject {
             if name == ".rodata" || name == ".data" || name == ".bss" || name == ".got" ||
               ((section.flags & 2L) != 0 && (section.sectionType == 1 || section.sectionType == 8)) => index -> section
       }.toMap
-      globalSymbols <- symbols.iterator.filter { symbol =>
+      globalSymbols <- symbols.view.filter { symbol =>
         symbol.kind == 1 && globalSections.contains(symbol.section)
       }.toVec.traverse { symbol =>
         GlobalName.either(symbol.name)
@@ -436,7 +444,7 @@ object CodeObject {
 
   def decode(image: Vec[Byte]): Either[CodeObjectError, Map[String, CodeObjectKernel]] =
     index(image).flatMap { indexed =>
-      indexed.kernelNames.iterator.map(name => indexed.kernel(name).map(name -> _)).toVec.sequence.map(_.toMap)
+      indexed.kernelNames.view.map(name => indexed.kernel(name).map(name -> _)).toVec.sequence.map(_.toMap)
     }
 
   private[amdgpu] def inferredFunctionSize(
@@ -444,14 +452,14 @@ object CodeObject {
       sectionEnd: Long,
       followingValues: Iterable[Long]
   ): Option[Int] = {
-    val end = followingValues.iterator.filter(candidate => candidate > value && candidate <= sectionEnd).minOption
+    val end = followingValues.view.filter(candidate => candidate > value && candidate <= sectionEnd).minOption
       .getOrElse(sectionEnd)
     val size = end - value
     Option.when(value >= 0 && sectionEnd >= value && size > 0 && size <= Int.MaxValue)(size.toInt)
   }
 
   private def inferFunctionSizes(symbols: Vec[Symbol], sections: Vec[Section]): Vec[Symbol] = {
-    val functionValuesBySection = symbols.iterator.filter(symbol => symbol.kind == 2 && symbol.section > 0)
+    val functionValuesBySection = symbols.view.filter(symbol => symbol.kind == 2 && symbol.section > 0)
       .toVec
       .groupMap(_.section)(_.value)
     symbols.map { symbol =>
@@ -533,7 +541,7 @@ object CodeObject {
   private def readGlobalRelocations(bytes: Array[Byte], sections: Vec[Section]): Vec[(Long, Long)] = {
     val buffer  = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
     val builder = Vec.newBuilder[(Long, Long)]
-    sections.iterator.filter(section => section.sectionType == RelocationSection).foreach { section =>
+    sections.view.filter(section => section.sectionType == RelocationSection).foreach { section =>
       val stride = math.max(24, section.entrySize)
       var index  = 0
       while (index + stride <= section.size) {
@@ -602,25 +610,18 @@ object CodeObject {
         } yield symbols
       }
 
-  // Fail fast while building the transient uniqueness index.
-  @SuppressWarnings(
-    Array(
-      "scalafix:DisableSyntax.return"
-    )
-  )
-  private def descriptorIndex(symbols: Vec[Symbol]): Either[CodeObjectError, Map[String, Symbol]] = {
-    val descriptors = mutable.HashMap.empty[String, Symbol]
-    val iterator    = symbols.iterator.filter(symbol => symbol.kind == 1 && symbol.name.endsWith(".kd"))
-    while (iterator.hasNext) {
-      val symbol = iterator.next()
-      if (descriptors.contains(symbol.name))
-        return Left(CodeObjectError.Invalid(
-          s"duplicate AMDGPU kernel descriptor symbol ${symbol.name}"
-        ))
-      descriptors.update(symbol.name, symbol)
-    }
-    Right(descriptors.toMap)
-  }
+  private def descriptorIndex(symbols: Vec[Symbol]): Either[CodeObjectError, Map[String, Symbol]] =
+    symbols.view
+      .filter(symbol => symbol.kind == 1 && symbol.name.endsWith(".kd"))
+      .foldLeft[Either[CodeObjectError, Map[String, Symbol]]](Right(Map.empty)) {
+        case (error @ Left(_), _)         => error
+        case (Right(descriptors), symbol) =>
+          Either.cond(
+            !descriptors.contains(symbol.name),
+            descriptors.updated(symbol.name, symbol),
+            CodeObjectError.Invalid(s"duplicate AMDGPU kernel descriptor symbol ${symbol.name}")
+          )
+      }
 
   private def kernelRecord(
       bytes: Array[Byte],
@@ -761,10 +762,10 @@ object CodeObject {
     )
 
   private def littleShort(bytes: Array[Byte], offset: Int): Int =
-    LittleEndian.decode(bytes, offset, ScalarByteWidth(2)).toInt
+    LittleEndian.decodeUnsignedInt16(bytes, offset)
 
   private def littleInt(bytes: Array[Byte], offset: Int): Int =
-    LittleEndian.decode(bytes, offset, ScalarByteWidth(4)).toInt
+    LittleEndian.decodeInt32(bytes, offset)
 
   private def littleLong(bytes: Array[Byte], offset: Int): Long =
     LittleEndian.decode(bytes, offset, ScalarByteWidth(8))

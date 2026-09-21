@@ -12,13 +12,13 @@ using namespace unified::rocthrust_support;
 using TestType = int32_t;
 
 // ---------------------------------------------------------------------------
-// The device-side random contract of rocThrust's `testing/random`, decomposed
+// The device-side random semantics of rocThrust's `testing/random`, decomposed
 // into one case per engine characteristic and one per distribution
 // characteristic so a single regression names the exact instantiation.
 // ---------------------------------------------------------------------------
 
 inline constexpr size_t random_draws = 10000;
-// Exact sequence validation keeps the upstream 10,000th-value contract. Range
+// Exact sequence validation keeps the upstream 10,000th-value requirement. Range
 // and equality properties need a representative sample, not 70 separate
 // 10,000-step device loops in every emulator run.
 inline constexpr size_t random_property_draws = 256;

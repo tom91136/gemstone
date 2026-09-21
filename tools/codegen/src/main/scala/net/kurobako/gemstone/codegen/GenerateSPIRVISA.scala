@@ -157,51 +157,51 @@ object GenerateSPIRVISA {
         |import io.github.iltotore.iron.*
         |import io.github.iltotore.iron.constraint.all.*
         |
-        |type Decoder = RawInstruction => Either[InstructionDecodeError, Instruction]
-        |
-        |enum InstructionDef(
-        |    val opcode: SPIRVOpcode,
-        |    val opcodeNumber: SPIRVOpcodeNumber,
-        |    decode: InstructionDef => Decoder,
-        |    val meta: Metadata
-        |) {
-        |${definitions.mkString("\n")}
-        |
-        |  final lazy val decoder: Decoder = decode(this)
-        |}
-        |
-        |enum Instruction(val definition: InstructionDef, operandValues: Operand*) {
+        |enum Instruction(val definition: Instruction.Definition, operandValues: Operand*) {
         |${cases.mkString("\n")}
         |
         |  final val operands: Vec[Operand] = operandValues.toVec
         |  final def opcode: SPIRVOpcode = definition.opcode
         |  final def opcodeNumber: SPIRVOpcodeNumber = definition.opcodeNumber
-        |  final def decoder: Decoder = definition.decoder
+        |  final def decoder: Instruction.Decoder = definition.decoder
         |  final def meta: Metadata = definition.meta
         |}
         |
         |object Instruction {
+        |  type Decoder = RawInstruction => Either[InstructionDecodeError, Instruction]
+        |
+        |  enum Definition(
+        |      val opcode: SPIRVOpcode,
+        |      val opcodeNumber: SPIRVOpcodeNumber,
+        |      decode: Definition => Decoder,
+        |      val meta: Metadata
+        |  ) {
+        |${definitions.mkString("\n")}
+        |
+        |    final lazy val decoder: Decoder = decode(this)
+        |  }
+        |
         |  val version: SPIRVVersion = SPIRVVersion(
         |    ${grammar.major}.assume[Interval.Closed[0, 255]],
         |    ${grammar.minor}.assume[Interval.Closed[0, 255]]
         |  )
         |  val grammarRevision: Int :| Positive0 = ${grammar.revision}.assume[Positive0]
-        |  val definitions: Vec[InstructionDef] = InstructionDef.values.toVec
+        |  val definitions: Vec[Definition] = Definition.values.toVec
         |
         |${kindChunks.mkString("\n\n")}
         |
         |  private val operandKinds: Map[SPIRVOperandKind, OperandKindInfo] =
-        |    $kindExpression.iterator.map(value => value.kind -> value).toMap
+        |    $kindExpression.view.map(value => value.kind -> value).toMap
         |
-        |  private val byNumber: Map[SPIRVOpcodeNumber, Vec[InstructionDef]] =
+        |  private val byNumber: Map[SPIRVOpcodeNumber, Vec[Definition]] =
         |    definitions.groupMap(_.opcodeNumber)(value => value)
-        |  private val byOpcode: Map[SPIRVOpcode, Vec[InstructionDef]] =
+        |  private val byOpcode: Map[SPIRVOpcode, Vec[Definition]] =
         |    definitions.groupMap(_.opcode)(value => value)
         |
-        |  def definitionsFor(opcodeNumber: SPIRVOpcodeNumber): Vec[InstructionDef] =
-        |    byNumber.getOrElse(opcodeNumber, Vec.empty[InstructionDef])
-        |  def definitionsFor(opcode: SPIRVOpcode): Vec[InstructionDef] =
-        |    byOpcode.getOrElse(opcode, Vec.empty[InstructionDef])
+        |  def definitionsFor(opcodeNumber: SPIRVOpcodeNumber): Vec[Definition] =
+        |    byNumber.getOrElse(opcodeNumber, Vec.empty[Definition])
+        |  def definitionsFor(opcode: SPIRVOpcode): Vec[Definition] =
+        |    byOpcode.getOrElse(opcode, Vec.empty[Definition])
         |
         |  def decode(raw: RawInstruction): Either[InstructionDecodeError, Instruction] = {
         |    val candidates = definitionsFor(raw.opcodeNumber)
@@ -231,11 +231,11 @@ object GenerateSPIRVISA {
         |  def encode(instruction: Instruction): RawInstruction =
         |    RawInstruction(instruction.definition.opcodeNumber, instruction.operands.flatMap(_.words))
         |
-        |  def minimumOperandWords(definition: InstructionDef): Vec[Word] =
+        |  def minimumOperandWords(definition: Definition): Vec[Word] =
         |    OperandDecoder.minimumWords(definition.meta.operands, operandKinds)
         |
         |  private[${packageVersion.value}] def decodeDefinition(
-        |      definition: InstructionDef,
+        |      definition: Definition,
         |      raw: RawInstruction,
         |      construct: DecodedOperands => Instruction
         |  ): Either[InstructionDecodeError, Instruction] =
@@ -243,7 +243,7 @@ object GenerateSPIRVISA {
         |      Left(InstructionDecodeError.DecoderOpcodeMismatch(definition.opcodeNumber, raw.opcodeNumber))
         |    else
         |      OperandDecoder
-        |        .decode(definition.opcode, raw.operandWords, definition.meta.operands, operandKinds)
+        |        .decode(definition, raw.operandWords, definition.meta.operands, operandKinds)
         |        .map(construct)
         |}
         |""".stripMargin
@@ -254,13 +254,13 @@ object GenerateSPIRVISA {
     val parameter = if (fields.isEmpty) "_" else "values"
     val decoder   =
       s"definition => raw => Instruction.decodeDefinition(definition, raw, $parameter => ${construct(entry, fields)})"
-    s"  case $caseName extends InstructionDef(SPIRVOpcode.assume(\"${escape(entry.name)}\"), " +
+    s"    case $caseName extends Definition(SPIRVOpcode.assume(\"${escape(entry.name)}\"), " +
       s"SPIRVOpcodeNumber.assume(${entry.opcode}), $decoder, ${renderMetadata(entry, fields)})"
   }
 
   private def renderCase(entry: Entry, fields: Vector[Field]): String = {
     val caseName = normalizeCase(entry.name.stripPrefix("Op"))
-    if (fields.isEmpty) s"  case $caseName() extends Instruction(InstructionDef.$caseName)"
+    if (fields.isEmpty) s"  case $caseName() extends Instruction(Instruction.Definition.$caseName)"
     else {
       val parameters = fields.map { field =>
         val fieldType = field.operand.quantifier match {
@@ -272,7 +272,7 @@ object GenerateSPIRVISA {
       }.mkString(", ")
       if (fields.forall(_.operand.quantifier.isEmpty)) {
         val operands = fields.map(_.name).mkString(", ")
-        s"  case $caseName($parameters) extends Instruction(InstructionDef.$caseName, $operands)"
+        s"  case $caseName($parameters) extends Instruction(Instruction.Definition.$caseName, $operands)"
       } else {
         def flush(parts: Vector[String], required: Vector[String]): Vector[String] =
           if (required.isEmpty) parts else parts :+ required.mkString("Vec(", ", ", ")")
@@ -287,7 +287,7 @@ object GenerateSPIRVISA {
             }
         }
         val operands = flush(parts, required).mkString(" ++ ")
-        s"  case $caseName($parameters) extends Instruction(InstructionDef.$caseName, ($operands)*)"
+        s"  case $caseName($parameters) extends Instruction(Instruction.Definition.$caseName, ($operands)*)"
       }
     }
   }

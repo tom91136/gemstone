@@ -30,7 +30,7 @@ private[codegen] object AMDGPUMetadataCatalogFormat {
   )
 
   final case class Catalog(metadata: Vector[Vector[Encoding]]) {
-    val encodingCount: Int = metadata.iterator.map(_.size).sum
+    val encodingCount: Int = metadata.view.map(_.size).sum
   }
 
   final case class Encoded(payload: String, metadataCount: Int, encodingCount: Int)
@@ -38,17 +38,17 @@ private[codegen] object AMDGPUMetadataCatalogFormat {
   private val Magic = 0x474d4301
 
   def encode(catalog: Catalog): Encoded = {
-    val strings = catalog.metadata.iterator
-      .flatMap(_.iterator)
+    val strings = catalog.metadata.view
+      .flatMap(_.view)
       .flatMap { encoding =>
-        Iterator(encoding.family, encoding.target, encoding.format, encoding.source) ++
-          encoding.functionalGroup.iterator ++
-          encoding.operands.iterator.flatMap(operand => operand.field.iterator ++ Iterator(operand.kind))
+        Vector(encoding.family, encoding.target, encoding.format, encoding.source).view ++
+          encoding.functionalGroup.toList.view ++
+          encoding.operands.view.flatMap(operand => operand.field.toList.view ++ Vector(operand.kind))
       }
       .toVector
       .distinct
     val stringIds = strings.zipWithIndex.toMap
-    val schemas   = catalog.metadata.iterator.flatMap(_.iterator.map(_.operands)).toVector.distinct
+    val schemas   = catalog.metadata.view.flatMap(_.view.map(_.operands)).toVector.distinct
     val schemaIds = schemas.zipWithIndex.toMap
     val bytes     = Using.resource(ByteArrayOutputStream()) { buffer =>
       Using.resource(DataOutputStream(buffer)) { output =>

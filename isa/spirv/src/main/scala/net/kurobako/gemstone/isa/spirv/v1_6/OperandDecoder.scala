@@ -1,6 +1,7 @@
 package net.kurobako.gemstone.isa.spirv.v1_6
 
 import net.kurobako.gemstone.Vec
+import net.kurobako.gemstone.binary.{BitWidth, Bits}
 
 import cats.data.Chain
 import io.github.iltotore.iron.*
@@ -14,15 +15,15 @@ private[v1_6] object OperandDecoder {
   }
 
   def decode(
-      opcode: SPIRVOpcode,
+      definition: Instruction.Definition,
       words: Vec[Word],
       shapes: Vec[OperandShape],
       kinds: Map[SPIRVOperandKind, OperandKindInfo]
   ): Either[InstructionDecodeError, DecodedOperands] =
-    decodeShapes(opcode, words, shapes, kinds, 0, 0, Chain.empty)
-      .map(fields => DecodedOperands(Vec.from(fields.iterator))) match {
-      case right @ Right(_)                          => right
-      case Left(error) if opcode.value == "OpSwitch" =>
+    decodeShapes(definition.opcode, words, shapes, kinds, 0, 0, Chain.empty)
+      .map(fields => DecodedOperands(Vec.from(fields.toVector.view))) match {
+      case right @ Right(_)                                           => right
+      case Left(error) if definition == Instruction.Definition.Switch =>
         // OpSwitch literals have the width of their selector.  The core
         // grammar represents the common 32-bit form as a pair, but a 64-bit
         // selector uses two literal words followed by the target label.  The
@@ -40,7 +41,7 @@ private[v1_6] object OperandDecoder {
   ): Either[InstructionDecodeError, DecodedOperands] =
     if (words.size < 2 || (words.size - 2) % 3 != 0)
       Left(InstructionDecodeError.InvalidOperandCount(
-        SPIRVOpcode("OpSwitch"),
+        Instruction.Definition.Switch.opcode,
         "literal/label pairs are not 64-bit aligned"
       ))
     else {
@@ -93,7 +94,7 @@ private[v1_6] object OperandDecoder {
               kinds,
               index + 1,
               next,
-              fields.append(Vec.from(operands.iterator))
+              fields.append(Vec.from(operands.toVector.view))
             )
           }
       }
@@ -163,7 +164,7 @@ private[v1_6] object OperandDecoder {
       offset: Int
   ): Either[InstructionDecodeError, (Operand, Int)] =
     words.indexWhere(
-      word => (0 until 4).exists(byte => ((word.bits >>> (byte * 8)) & 0xff) == 0),
+      word => (0 until 4).exists(byte => Bits.unsignedField(word.toUnsigned, byte * 8, BitWidth(8)) == 0L),
       offset
     ) match {
       case -1  => Left(InstructionDecodeError.UnterminatedString(opcode))

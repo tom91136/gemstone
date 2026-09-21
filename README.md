@@ -36,8 +36,8 @@ libraries. Building GPU conformance artifacts additionally requires a container 
 | `sbt conformance/test` | Build and run the conformance unit tests. |
 | `sbt conformance/format` | Format the conformance C and C++ sources. |
 | `sbt conformance/lint` | Check conformance formatting and code style. |
-| `sbt 'conformance/run --machine <machine>'` | Run existing conformance artifacts directly. |
-| `sbt 'conformance/emulate --machine <machine>'` | Run existing conformance artifacts through the emulator. |
+| `sbt 'conformance/run --machine <machine> --workload <compact\|full>'` | Run the selected workload directly against existing conformance artifacts. |
+| `sbt 'conformance/emulate --machine <machine> --workload <compact\|full>'` | Run the selected workload through the emulator. |
 | `sbt clean` | Remove sbt, native, and conformance build outputs. |
 
 Use normal sbt scoping for focused work, for example `sbt ptx/test`, `sbt server/test`, or
@@ -55,8 +55,9 @@ sbt 'gemstoneRun [--apis hip,hsa,cuda,opencl,levelzero] -- <command> [argument .
 
 The APIs are independently selectable and may coexist. Linux defaults to `hsa,cuda,opencl,levelzero`, allowing a
 vendor HIP runtime to use Gemstone HSA naturally; other platforms default to `hip,cuda,opencl,levelzero`. SYCL runtime
-selection remains the application's responsibility through its OpenCL and Level Zero adapters. The launcher owns the
-RPC server for the lifetime of the child process.
+selection remains the application's responsibility through its OpenCL and Level Zero adapters. By default the launcher
+owns an RPC server for the lifetime of the child process; `--server-port` instead registers the child with an existing
+shared server.
 
 The server and journal tools are also directly available:
 
@@ -86,7 +87,9 @@ The run tasks build the generic conformance executable and launch existing artif
 
 ```console
 sbt 'conformance/run --machine <machine> --workload compact'
+sbt 'conformance/run --machine <machine> --workload full'
 sbt 'conformance/emulate --machine <machine> --workload compact'
+sbt 'conformance/emulate --machine <machine> --workload full'
 ```
 
 Pass a backend or target name to narrow the run. `--workload compact|full` selects a runtime workload catalogue; all
@@ -102,13 +105,16 @@ The standalone equivalents are:
 ```console
 target/conformance/executable/bin/conformance run --profiles conformance/profiles --artifacts target/conformance/artifacts \
   --machine <machine> --workload full --output target/conformance/direct --ctest ctest
+# Start this in a separate terminal and read the published port.
+gemstone serve --port-file target/conformance-server.port
 target/conformance/executable/bin/conformance run --profiles conformance/profiles --artifacts target/conformance/artifacts \
   --machine <machine> --workload full --output target/conformance/emulated --ctest ctest --isolated-launcher \
-  --launcher -- gemstone run --apis hsa,cuda,opencl,levelzero
+  --launcher -- gemstone run --server-port <port-from-file> --apis hsa,cuda,opencl,levelzero
 ```
 
-`CONFORMANCE_JOBS` controls CTest parallelism for isolated launcher runs. `GEMSTONE_CONFORMANCE_SERVER_HEAP` sets the launcher JVM heap and
-defaults to 4 GB. See [conformance/README.md](conformance/README.md) for artifact builds, profiles, workloads, and layout.
+The sbt emulation task owns one shared server and gives each test process an isolated server client. `CONFORMANCE_JOBS`
+controls CTest parallelism. `GEMSTONE_CONFORMANCE_SERVER_HEAP` sets the shared server heap and defaults to 8 GB. See
+[conformance/README.md](conformance/README.md) for artifact builds, profiles, workloads, and layout.
 
 ## Benchmarks
 

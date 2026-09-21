@@ -3,7 +3,6 @@ package net.kurobako.gemstone.isa.ptx.v9_3
 import Program.*
 
 import ISA.*
-import VirtualMachine.*
 
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
@@ -33,12 +32,18 @@ final class ValidationSuite extends munit.FunSuite {
   test("instruction introduction and minimum SM are enforced") {
     val value = instruction("clmad.lo.u64 %rd0, %rd1, %rd2, %rd3;")
     Validator.validate(value, Version(9, 2), Target(100)) match {
-      case ValidationOutcome.Rejected(errors) => assert(errors.exists(_.isInstanceOf[Validator.Issue.VersionTooOld]))
-      case other                              => fail(s"expected version rejection, found $other")
+      case ValidationOutcome.Rejected(errors) => assert(errors.exists {
+          case Validator.Issue.VersionTooOld(_, _, _) => true
+          case _                                      => false
+        })
+      case other => fail(s"expected version rejection, found $other")
     }
     Validator.validate(value, Version(9, 3), Target(70)) match {
-      case ValidationOutcome.Rejected(errors) => assert(errors.exists(_.isInstanceOf[Validator.Issue.TargetTooOld]))
-      case other                              => fail(s"expected target rejection, found $other")
+      case ValidationOutcome.Rejected(errors) => assert(errors.exists {
+          case Validator.Issue.TargetTooOld(_, _, _) => true
+          case _                                     => false
+        })
+      case other => fail(s"expected target rejection, found $other")
     }
     assertEquals(Validator.validate(value, Version(9, 3), Target(80)), ValidationOutcome.Accepted)
   }

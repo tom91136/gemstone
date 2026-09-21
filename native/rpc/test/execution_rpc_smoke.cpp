@@ -23,7 +23,7 @@ TEST_CASE("execution RPC end-to-end smoke test", "[rpc][integration]") {
   if (std::getenv("GEMSTONE_EXECUTION_HOLD_ALLOCATION") != nullptr) std::this_thread::sleep_for(std::chrono::milliseconds(750));
   REQUIRE((memoryClient->call(WriteAllocation{allocation, 0, {1, 2, 3, 4}})));
 
-  auto programResult = executionClient->call(LoadProgram{ProgramFormat::SPIRVBinary, {3, 2, 35, 7}});
+  auto programResult = executionClient->call(LoadProgram{"spirv-binary", {3, 2, 35, 7}});
   REQUIRE((programResult));
   const auto program = programResult.value();
   auto catalog = executionClient->call(DescribeProgram{program});

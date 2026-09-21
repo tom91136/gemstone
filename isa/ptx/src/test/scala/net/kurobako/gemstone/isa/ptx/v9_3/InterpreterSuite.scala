@@ -2,32 +2,35 @@ package net.kurobako.gemstone.isa.ptx.v9_3
 
 import Program.*
 
-import VirtualMachine.*
+import VMIR.*
+import VMExecution.*
 
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 
 import net.kurobako.gemstone.Vec
 
-import net.kurobako.gemstone.execution.*
+import net.kurobako.gemstone.isa.KernelName
 import net.kurobako.gemstone.memory.ArrayCheckedMemory
 import net.kurobako.gemstone.memory.GuestAddress
 import net.kurobako.gemstone.memory.MemoryValueByteWidth
+import net.kurobako.gemstone.vm.{Fault, LaunchGeometry, Scheduler, TaskControl, TaskLimits}
+import net.kurobako.gemstone.vm.LaunchGeometry.Dimensions
 
 final class InterpreterSuite extends munit.FunSuite {
   test("atomics in device callees remain correct across parallel blocks") {
     val parallelCalls = java.util.concurrent.atomic.AtomicInteger(0)
-    final class RecordingParallelism extends ExecutionParallelism {
+    final class RecordingScheduler extends Scheduler {
       override val parallelism: Int :| Positive                                                    = 4
       override def shouldParallel(tasks: Long :| Positive0, workItems: Long :| Positive0): Boolean = tasks > 1L
       override def parallelFor(
           tasks: Long :| Positive0
-      )(task: Long :| Positive0 => Either[ExecutionFailure, Unit]) = {
+      )(task: Long :| Positive0 => Either[Fault, Unit]) = {
         parallelCalls.incrementAndGet()
-        ExecutionParallelism.Sequential.parallelFor(tasks)(task)
+        Scheduler.Sequential.parallelFor(tasks)(task)
       }
     }
-    val source  = """.version 8.0
+    val source    = """.version 8.0
       .target sm_80
       .address_size 64
       .func increment(.param .u64 pointer) {
@@ -46,16 +49,17 @@ final class InterpreterSuite extends munit.FunSuite {
         }
         ret;
       }"""
-    val kernel  = ISA.compile(source).fold(error => fail(error.toString), value => value)
-    val memory  = ArrayCheckedMemory.allocate(4)
-    val control = ExecutionControl(parallelism = RecordingParallelism())
-    val result  = VirtualMachine.execute(
+    val kernel    = VMCompiler.compile(source).fold(error => fail(error.toString), value => value)
+    val memory    = ArrayCheckedMemory.allocate(4)
+    val scheduler = RecordingScheduler()
+    val control   = TaskControl.forScheduler(scheduler = scheduler)
+    val result    = VMInterpreter.execute(
       kernel,
       geometry(4, 1),
       Map(ParameterName("output") -> Argument(memory.allocation.start.value)),
       memory,
       control,
-      captureTrace = false
+      scheduler
     )
     assert(result.isRight, result.toString)
     assertEquals(memory.readInt32(memory.allocation.start), Right(4))
@@ -95,7 +99,7 @@ final class InterpreterSuite extends munit.FunSuite {
     |""".stripMargin
 
   test("parse and deterministically execute integer vector addition") {
-    val kernel = ISA.compile(vectorAdd).toOption.get
+    val kernel = VMCompiler.compile(vectorAdd).toOption.get
     assertEquals(kernel.name, KernelName("vector_add"))
     assertEquals(
       kernel.parameters.toSeq,
@@ -136,10 +140,6 @@ final class InterpreterSuite extends munit.FunSuite {
       values.indices.map(index => memory.readInt32(output.offset(index.toLong * 4L)).toOption.get).toSeq,
       Seq(11, 22, 33, 44)
     )
-    assertEquals(
-      result.trace.events.collect { case event: Trace.Event.OutputWrite => event.value }.toSeq,
-      Seq(11, 22, 33, 44)
-    )
   }
 
   test("lowers shared symbols as addresses") {
@@ -156,19 +156,19 @@ final class InterpreterSuite extends munit.FunSuite {
       |  ret;
       |}
       |""".stripMargin
-    val kernel = ISA.compile(source).fold(error => fail(error.message), value => value)
+    val kernel = VMCompiler.compile(source).fold(error => fail(error.message), value => value)
     assertEquals(kernel.sharedSymbols.keySet, Set(SymbolName("first"), SymbolName("second")))
     assertNotEquals(kernel.sharedSymbols(SymbolName("first")), kernel.sharedSymbols(SymbolName("second")))
     assert(
       kernel.instructions.exists {
-        case ExecutableInstruction.Move(_, Value.Symbol(name), _) if name == SymbolName("first") => true
-        case _                                                                                   => false
+        case VMIR.Instruction.Move(_, Value.Symbol(name), _) if name == SymbolName("first") => true
+        case _                                                                              => false
       }
     )
     assert(
       kernel.instructions.exists {
-        case ExecutableInstruction.Move(_, Value.Symbol(name), _) if name == SymbolName("second") => true
-        case _                                                                                    => false
+        case VMIR.Instruction.Move(_, Value.Symbol(name), _) if name == SymbolName("second") => true
+        case _                                                                               => false
       }
     )
   }
@@ -193,9 +193,9 @@ final class InterpreterSuite extends munit.FunSuite {
       |  ret;
       |}
       |""".stripMargin
-    val kernel = ISA.compile(source).fold(error => fail(error.message), value => value)
+    val kernel = VMCompiler.compile(source).fold(error => fail(error.message), value => value)
     val memory = ArrayCheckedMemory.allocate(4, provenance = "generic-shared")
-    val result = VirtualMachine.execute(
+    val result = VMInterpreter.execute(
       kernel,
       geometry(1, 1),
       Map(ParameterName("output") -> Argument(memory.allocation.start.value)),
@@ -234,9 +234,9 @@ final class InterpreterSuite extends munit.FunSuite {
       |  ret;
       |}
       |""".stripMargin
-    val kernel = ISA.compile(source).fold(error => fail(error.message), value => value)
+    val kernel = VMCompiler.compile(source).fold(error => fail(error.message), value => value)
     val memory = ArrayCheckedMemory.allocate(32, provenance = "integer-division")
-    val result = VirtualMachine.execute(
+    val result = VMInterpreter.execute(
       kernel,
       geometry(1, 1),
       Map(
@@ -286,9 +286,9 @@ final class InterpreterSuite extends munit.FunSuite {
       |  ret;
       |}
       |""".stripMargin
-    val kernel = ISA.compile(source).fold(error => fail(error.message), value => value)
+    val kernel = VMCompiler.compile(source).fold(error => fail(error.message), value => value)
     val memory = ArrayCheckedMemory.allocate(16, provenance = "divergent-barrier")
-    val result = VirtualMachine.execute(
+    val result = VMInterpreter.execute(
       kernel,
       geometry(1, 4),
       Map(ParameterName("output") -> Argument(memory.allocation.start.value)),
@@ -332,9 +332,9 @@ final class InterpreterSuite extends munit.FunSuite {
       |  ret;
       |}
       |""".stripMargin
-    val kernel = ISA.compile(source).fold(error => fail(error.message), value => value)
+    val kernel = VMCompiler.compile(source).fold(error => fail(error.message), value => value)
     val memory = ArrayCheckedMemory.allocate(8, provenance = "divergent-workgroup-barrier-id")
-    val result = VirtualMachine.execute(
+    val result = VMInterpreter.execute(
       kernel,
       geometry(1, 256),
       Map(ParameterName("output") -> Argument(memory.allocation.start.value)),
@@ -376,9 +376,9 @@ final class InterpreterSuite extends munit.FunSuite {
       |  ret;
       |}
       |""".stripMargin
-    val kernel = ISA.compile(source).fold(error => fail(error.message), value => value)
+    val kernel = VMCompiler.compile(source).fold(error => fail(error.message), value => value)
     val memory = ArrayCheckedMemory.allocate(16, provenance = "divergent-warp-barrier")
-    val result = VirtualMachine.execute(
+    val result = VMInterpreter.execute(
       kernel,
       geometry(1, 4),
       Map(ParameterName("output") -> Argument(memory.allocation.start.value)),
@@ -411,9 +411,9 @@ final class InterpreterSuite extends munit.FunSuite {
       |  ret;
       |}
       |""".stripMargin
-    val kernel = ISA.compile(source).fold(error => fail(error.message), value => value)
+    val kernel = VMCompiler.compile(source).fold(error => fail(error.message), value => value)
     val memory = ArrayCheckedMemory.allocate(16, provenance = "sync-warp-shuffle")
-    val result = VirtualMachine.execute(
+    val result = VMInterpreter.execute(
       kernel,
       geometry(1, 4),
       Map(ParameterName("output") -> Argument(memory.allocation.start.value)),
@@ -440,9 +440,9 @@ final class InterpreterSuite extends munit.FunSuite {
       |  ret;
       |}
       |""".stripMargin
-    val kernel = ISA.compile(source).fold(error => fail(error.message), value => value)
+    val kernel = VMCompiler.compile(source).fold(error => fail(error.message), value => value)
     val memory = ArrayCheckedMemory.allocate(8, provenance = "64-bit-warp-shuffle")
-    val result = VirtualMachine.execute(
+    val result = VMInterpreter.execute(
       kernel,
       geometry(1, 4),
       Map(ParameterName("output") -> Argument(memory.allocation.start.value)),
@@ -475,9 +475,9 @@ final class InterpreterSuite extends munit.FunSuite {
       |  ret;
       |}
       |""".stripMargin
-    val kernel = ISA.compile(source).fold(error => fail(error.message), value => value)
+    val kernel = VMCompiler.compile(source).fold(error => fail(error.message), value => value)
     val memory = ArrayCheckedMemory.allocate(8, provenance = "inline-warp-shuffle-registers")
-    val result = VirtualMachine.execute(
+    val result = VMInterpreter.execute(
       kernel,
       geometry(1, 2),
       Map(ParameterName("output") -> Argument(memory.allocation.start.value)),
@@ -519,17 +519,16 @@ final class InterpreterSuite extends munit.FunSuite {
       |  ret;
       |}
       |""".stripMargin
-    val kernel     = ISA.compile(source).fold(error => fail(error.message), value => value)
+    val kernel     = VMCompiler.compile(source).fold(error => fail(error.message), value => value)
     val groupSize  = Dimensions(2, 2, 1)
     val groupCount = Dimensions(2, 2, 1)
     val launch     = LaunchGeometry.forLaunch(groupSize, groupCount).toOption.get
     val memory     = ArrayCheckedMemory.allocate(16 * 4, provenance = "ptx-3d-coordinates")
-    val result     = VirtualMachine.execute(
+    val result     = VMInterpreter.execute(
       kernel,
       launch,
       Map(ParameterName("output") -> Argument(memory.allocation.start.value)),
-      memory,
-      captureTrace = false
+      memory
     )
 
     assert(result.isRight, result.left.toOption.map(_.message).getOrElse(""))
@@ -548,28 +547,28 @@ final class InterpreterSuite extends munit.FunSuite {
       |  bra again;
       |}
       |""".stripMargin
-    val kernel = ISA.compile(source).fold(error => fail(error.message), value => value)
-    val result = VirtualMachine.execute(
+    val kernel = VMCompiler.compile(source).fold(error => fail(error.message), value => value)
+    val result = VMInterpreter.execute(
       kernel,
       geometry(1, 1),
       Map.empty,
       ArrayCheckedMemory.allocate(4),
-      ExecutionControl(ExecutionLimits(maxInstructions = 8L, quantum = 2))
+      TaskControl.forScheduler(TaskLimits(maxInstructions = 8L, quantum = 2))
     )
     assert(result.left.exists(_.message.contains("instruction budget of 8")))
   }
 
   test("execution observes cancellation before fetching an instruction") {
-    val kernel       = ISA.compile(vectorAdd).fold(error => fail(error.message), value => value)
-    val cancellation = CancellationToken.Source()
+    val kernel       = VMCompiler.compile(vectorAdd).fold(error => fail(error.message), value => value)
+    val cancellation = TaskControl.Cancellation.Source()
     cancellation.cancel()
-    val result = VirtualMachine.execute(
+    val result = VMInterpreter.execute(
       kernel,
       geometry(1, 1),
       Map.empty,
       ArrayCheckedMemory.allocate(4),
-      control = ExecutionControl(cancellation = cancellation)
+      control = TaskControl.forScheduler(cancellation = cancellation)
     )
-    assertEquals(result, Left(VirtualMachine.Error("execution was cancelled")))
+    assertEquals(result, Left(ExecutionFault.Cancelled))
   }
 }

@@ -4,9 +4,7 @@ import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 
 import net.kurobako.gemstone.Vec
-import net.kurobako.gemstone.execution.KernelParameterKind
-import net.kurobako.gemstone.execution.KernelName
-import net.kurobako.gemstone.execution.LinkageName
+import net.kurobako.gemstone.isa.{KernelMetadata, KernelName, LinkageName}
 
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -27,9 +25,9 @@ final class CodeObjectMetadataSuite extends munit.FunSuite {
         (parameter.offset, parameter.width, parameter.kind, parameter.containsPointers)
       ),
       Vec(
-        (0, 8, KernelParameterKind.Allocation, false),
-        (8, 8, KernelParameterKind.Allocation, false),
-        (16, 4, KernelParameterKind.Scalar, true)
+        (0, 8, KernelMetadata.ParameterKind.Memory, false),
+        (8, 8, KernelMetadata.ParameterKind.Memory, false),
+        (16, 4, KernelMetadata.ParameterKind.Scalar, true)
       )
     )
   }
@@ -114,5 +112,5 @@ final class CodeObjectMetadataSuite extends munit.FunSuite {
     if (value < 128) Array(value.toByte)
     else Array(0xce.toByte, (value >>> 24).toByte, (value >>> 16).toByte, (value >>> 8).toByte, value.toByte)
 
-  private def concat(parts: Array[Byte]*): Array[Byte] = parts.iterator.flatten.toArray
+  private def concat(parts: Array[Byte]*): Array[Byte] = parts.view.flatten.toArray
 }

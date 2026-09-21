@@ -1,5 +1,7 @@
 package net.kurobako.gemstone.abi
 
+import ABI.*
+
 import net.kurobako.gemstone.Vec
 
 import io.github.iltotore.iron.*
@@ -37,7 +39,7 @@ final class ABISuite extends munit.FunSuite {
     assert(Pointer.output[Int, Fixed[2]](3).isLeft)
     assert(
       typeCheckErrors("""
-        import net.kurobako.gemstone.abi.*
+        import net.kurobako.gemstone.abi.ABI.*
         Pointer.output[Int, Fixed[0]](0)
       """).nonEmpty
     )
@@ -53,7 +55,7 @@ final class ABISuite extends munit.FunSuite {
 
   test("opaque pointers cannot be dereferenced") {
     val errors = typeCheckErrors("""
-      import net.kurobako.gemstone.abi.*
+      import net.kurobako.gemstone.abi.ABI.*
       def readOpaque(pointer: OpaquePointer): Either[PointerError, CVoid] = pointer.read()
     """)
     assert(errors.exists(_.message.contains("CanDereference")))
@@ -61,8 +63,8 @@ final class ABISuite extends munit.FunSuite {
 
   test("nullable is a nominal and explicit ABI value") {
     val pointer = Pointer.input[Int, One](Vec(7)).fold(error => fail(error.message), value => value)
-    val missing: Nullable[net.kurobako.gemstone.abi.In[Int]] = Nullable.Null
-    val present: Nullable[net.kurobako.gemstone.abi.In[Int]] = Nullable.NonNull(pointer)
+    val missing: Nullable[ABI.In[Int]] = Nullable.Null
+    val present: Nullable[ABI.In[Int]] = Nullable.NonNull(pointer)
     assertEquals(missing.toOption, None)
     assertEquals(present.toOption.map(_.read()), Some(Right(7)))
   }
@@ -82,7 +84,7 @@ final class ABISuite extends munit.FunSuite {
     assertEquals(flags.bytes.toSeq, Seq[Byte](3, 0, 0, 0))
 
     val errors = typeCheckErrors("""
-      import net.kurobako.gemstone.abi.*
+      import net.kurobako.gemstone.abi.ABI.*
       val flags: CValue["ze_init_flags_t"] = CValue.fromUnsignedLong["other_flags_t"](1L, 4)
     """)
     assert(errors.nonEmpty)

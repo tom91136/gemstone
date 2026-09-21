@@ -1816,7 +1816,7 @@ extern "C" hsa_status_t hsa_executable_load_agent_code_object(hsa_executable_t e
 
   traceLoader("load", executable_handle.handle, reader_value->bytes.size());
 
-  auto loadedProgram = runtime.client->call(LoadProgram{ProgramFormat::HSACodeObjectBinary, reader_value->bytes});
+  auto loadedProgram = runtime.client->call(LoadProgram{"hsa-code-object", reader_value->bytes});
   if (!loadedProgram) return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
   const uint64_t program_id = static_cast<uint64_t>(loadedProgram.value().value);
   struct LoadedProgramGuard {

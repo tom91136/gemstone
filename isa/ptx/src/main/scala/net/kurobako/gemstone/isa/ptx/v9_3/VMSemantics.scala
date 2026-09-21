@@ -2,7 +2,8 @@ package net.kurobako.gemstone.isa.ptx.v9_3
 
 import Program.*
 
-import VirtualMachine.*
+import VMIR.*
+import VMExecution.*
 
 import net.kurobako.gemstone.Vec
 
@@ -15,7 +16,9 @@ import net.kurobako.gemstone.binary.FloatingPointWidth
 import net.kurobako.gemstone.binary.IEEE754
 import net.kurobako.gemstone.binary.LittleEndian
 import net.kurobako.gemstone.binary.ScalarByteWidth
-import net.kurobako.gemstone.execution.*
+import net.kurobako.gemstone.isa.KernelName
+import net.kurobako.gemstone.vm.LaunchGeometry
+import net.kurobako.gemstone.vm.LaunchGeometry.Dimensions
 import net.kurobako.gemstone.memory.DeviceAllocationByteSize
 import net.kurobako.gemstone.memory.GuestAddress
 import net.kurobako.gemstone.memory.DeviceAllocationMemory
@@ -62,7 +65,7 @@ private object VMSemantics {
     MemoryValueByteWidth.assume(byteCount(width).value)
 
   private def stageResult(
-      effects: Effects[VMStateWrite],
+      effects: VMStateEffects,
       result: Either[ExecutionFault, VMStateWrite]
   ): Either[ExecutionFault, Unit] =
     result match {
@@ -73,7 +76,7 @@ private object VMSemantics {
     }
 
   private def stageResults(
-      effects: Effects[VMStateWrite],
+      effects: VMStateEffects,
       result: Either[ExecutionFault, Vec[VMStateWrite]]
   ): Either[ExecutionFault, Unit] =
     result match {
@@ -83,13 +86,13 @@ private object VMSemantics {
         Right(())
     }
 
-  extension (instruction: ExecutableInstruction) {
+  extension (instruction: VMIR.Instruction) {
     // A PTX instruction updates per-lane machine state; staged mutable maps avoid allocating immutable copies.
     @SuppressWarnings(Array("scalafix:DisableSyntax.var", "scalafix:GemstoneNoAssume"))
-    def execute(context: VMExecutionContext, effects: Effects[VMStateWrite]): Either[ExecutionFault, Step] =
+    def execute(context: VMExecutionContext, effects: VMStateEffects): Either[ExecutionFault, Step] =
       if (executeFast(instruction, context)) Right(Step.Advance)
       else instruction match {
-        case ExecutableInstruction.LoadParameter(destinations, parameter, offset, elementWidth, signed) =>
+        case VMIR.Instruction.LoadParameter(destinations, parameter, offset, elementWidth, signed) =>
           forEveryLane(context) { lane =>
             val elementBytes = byteCount(elementWidth)
             context.state.parameters(lane).get(parameter) match {
@@ -126,7 +129,7 @@ private object VMSemantics {
                 }
             }
           }.map(_ => Step.Advance)
-        case ExecutableInstruction.LoadParameterIndirect(destination, address, width, signed) =>
+        case VMIR.Instruction.LoadParameterIndirect(destination, address, width, signed) =>
           forEveryLane(context) { lane =>
             val write = context.read(lane, address).flatMap { rawAddress =>
               context.state.readParameterBuffer(rawAddress, byteCount(width)) match {
@@ -163,7 +166,7 @@ private object VMSemantics {
             }
             stageResult(effects, write)
           }.map(_ => Step.Advance)
-        case ExecutableInstruction.LoadParameterIndirectVector(destinations, address, width, signed) =>
+        case VMIR.Instruction.LoadParameterIndirectVector(destinations, address, width, signed) =>
           forEveryLane(context) { lane =>
             val writes = context.read(lane, address).flatMap { rawAddress =>
               destinations.zipWithIndex.traverse { case (destination, index) =>
@@ -203,7 +206,7 @@ private object VMSemantics {
             }
             stageResults(effects, writes)
           }.map(_ => Step.Advance)
-        case ExecutableInstruction.StoreParameter(parameter, offset, source, elementWidth) =>
+        case VMIR.Instruction.StoreParameter(parameter, offset, source, elementWidth) =>
           forEveryLane(context) { lane =>
             context.read(lane, source) match {
               case Left(fault)  => Left(fault)
@@ -229,7 +232,7 @@ private object VMSemantics {
                 Right(())
             }
           }.map(_ => Step.Advance)
-        case ExecutableInstruction.Move(destination, source, width) =>
+        case VMIR.Instruction.Move(destination, source, width) =>
           source match {
             case Value.Function(name) =>
               forEveryLane(context) { lane =>
@@ -246,14 +249,14 @@ private object VMSemantics {
                 )
               }.map(_ => Step.Advance)
           }
-        case ExecutableInstruction.MovePredicate(destination, source) =>
+        case VMIR.Instruction.MovePredicate(destination, source) =>
           forEveryLane(context) { lane =>
             stageResult(
               effects,
               context.read(lane, source).map(value => VMStateWrite.Predicate(lane, destination, value != 0L))
             )
           }.map(_ => Step.Advance)
-        case ExecutableInstruction.MoveSplit(destinations, source, partWidth) =>
+        case VMIR.Instruction.MoveSplit(destinations, source, partWidth) =>
           forEveryLane(context) { lane =>
             val writes = context.read(lane, source).map { value =>
               destinations.zipWithIndex.collect {
@@ -265,7 +268,7 @@ private object VMSemantics {
             }
             stageResults(effects, writes)
           }.map(_ => Step.Advance)
-        case ExecutableInstruction.MoveCombine(destination, sources, partWidth) =>
+        case VMIR.Instruction.MoveCombine(destination, sources, partWidth) =>
           forEveryLane(context) { lane =>
             val write = for {
               low  <- context.read(lane, sources(0))
@@ -283,26 +286,14 @@ private object VMSemantics {
             }
             stageResult(effects, write)
           }.map(_ => Step.Advance)
-        case ExecutableInstruction.IntegerUnary(operation, destination, source, width) =>
+        case VMIR.Instruction.IntegerUnary(operation, destination, source, width) =>
           forEveryLane(context) { lane =>
-            val write = context.read(lane, source).map { value =>
-              val result = operation match {
-                case IntegerUnaryOperation.Negate          => -value
-                case IntegerUnaryOperation.Absolute        => Math.abs(signExtend(truncate(value, width), width))
-                case IntegerUnaryOperation.BitwiseNot      => ~value
-                case IntegerUnaryOperation.PopulationCount =>
-                  bitCount(value, width).toLong
-                case IntegerUnaryOperation.LeadingZeroCount =>
-                  if (width.value == 32) Integer.numberOfLeadingZeros((value & 0xffffffffL).toInt).toLong
-                  else java.lang.Long.numberOfLeadingZeros(value).toLong
-                case IntegerUnaryOperation.BitReverse =>
-                  reverseBits(value, width)
-              }
-              VMStateWrite.Register(lane, destination, truncate(result, width))
-            }
+            val write = context.read(lane, source).map(value =>
+              VMStateWrite.Register(lane, destination, integerUnaryResult(operation, value, width))
+            )
             stageResult(effects, write)
           }.map(_ => Step.Advance)
-        case ExecutableInstruction.BitFind(destination, source, width, signed, shiftAmount) =>
+        case VMIR.Instruction.BitFind(destination, source, width, signed, shiftAmount) =>
           forEveryLane(context) { lane =>
             stageResult(
               effects,
@@ -315,7 +306,7 @@ private object VMSemantics {
               }
             )
           }.map(_ => Step.Advance)
-        case ExecutableInstruction.DotProduct4(destination, left, right, addend, leftSigned, rightSigned) =>
+        case VMIR.Instruction.DotProduct4(destination, left, right, addend, leftSigned, rightSigned) =>
           forEveryLane(context) { lane =>
             val write = for {
               leftValue   <- context.read(lane, left)
@@ -328,7 +319,7 @@ private object VMSemantics {
             )
             stageResult(effects, write)
           }.map(_ => Step.Advance)
-        case ExecutableInstruction.IntegerAddWithCarry(destination, left, right, width, carryIn, carryOut) =>
+        case VMIR.Instruction.IntegerAddWithCarry(destination, left, right, width, carryIn, carryOut) =>
           forEveryLane(context) { lane =>
             val writes = for {
               leftValue  <- context.read(lane, left)
@@ -342,7 +333,7 @@ private object VMSemantics {
             }
             stageResults(effects, writes)
           }.map(_ => Step.Advance)
-        case ExecutableInstruction.IntegerSubWithBorrow(destination, left, right, width, borrowIn, borrowOut) =>
+        case VMIR.Instruction.IntegerSubWithBorrow(destination, left, right, width, borrowIn, borrowOut) =>
           forEveryLane(context) { lane =>
             val writes = for {
               leftValue  <- context.read(lane, left)
@@ -356,50 +347,19 @@ private object VMSemantics {
             }
             stageResults(effects, writes)
           }.map(_ => Step.Advance)
-        case ExecutableInstruction.IntegerBinary(operation, destination, left, right, width) =>
+        case VMIR.Instruction.IntegerBinary(operation, destination, left, right, width) =>
           forEveryLane(context) { lane =>
             val write = for {
               leftValue  <- context.read(lane, left)
               rightValue <- context.read(lane, right)
-            } yield {
-              val result = operation match {
-                case IntegerOperation.Add                    => leftValue + rightValue
-                case IntegerOperation.Subtract               => leftValue - rightValue
-                case IntegerOperation.BitwiseOr              => leftValue | rightValue
-                case IntegerOperation.BitwiseAnd             => leftValue & rightValue
-                case IntegerOperation.BitwiseXor             => leftValue ^ rightValue
-                case IntegerOperation.MultiplyLow            => leftValue * rightValue
-                case IntegerOperation.MultiplyHigh(signed)   => multiplyHigh(leftValue, rightValue, width, signed)
-                case IntegerOperation.Divide(signed)         => divideInteger(leftValue, rightValue, width, signed)
-                case IntegerOperation.Remainder(signed)      => remainderInteger(leftValue, rightValue, width, signed)
-                case IntegerOperation.MultiplyWideUnsigned16 =>
-                  (leftValue & 0xffffL) * (rightValue & 0xffffL)
-                case IntegerOperation.MultiplyWideUnsigned32 =>
-                  low32(leftValue) * low32(rightValue)
-                case IntegerOperation.MultiplyWideSigned32 => leftValue.toInt.toLong * rightValue.toInt.toLong
-                case IntegerOperation.Minimum(signed)      =>
-                  if (signed) Math.min(signExtend(leftValue, width), signExtend(rightValue, width))
-                  else if (width.value == 64) {
-                    if (java.lang.Long.compareUnsigned(leftValue, rightValue) <= 0) leftValue else rightValue
-                  } else Math.min(truncate(leftValue, width), truncate(rightValue, width))
-                case IntegerOperation.Maximum(signed) =>
-                  if (signed) Math.max(signExtend(leftValue, width), signExtend(rightValue, width))
-                  else if (width.value == 64) {
-                    if (java.lang.Long.compareUnsigned(leftValue, rightValue) >= 0) leftValue else rightValue
-                  } else Math.max(truncate(leftValue, width), truncate(rightValue, width))
-                case IntegerOperation.ShiftLeft         => leftValue << (rightValue & (width.value - 1).toLong).toInt
-                case IntegerOperation.ShiftRightLogical =>
-                  if (width.value == 32) ((leftValue & 0xffffffffL) >>> (rightValue & 31L).toInt).toLong
-                  else (leftValue >>> (rightValue & 63L).toInt).toLong
-                case IntegerOperation.ShiftRightArithmetic =>
-                  if (width.value == 32) (leftValue.toInt >> (rightValue & 31L).toInt).toLong
-                  else (leftValue >> (rightValue & 63L).toInt).toLong
-              }
-              VMStateWrite.Register(lane, destination, truncate(result, width))
-            }
+            } yield VMStateWrite.Register(
+              lane,
+              destination,
+              integerBinaryResult(operation, leftValue, rightValue, width)
+            )
             stageResult(effects, write)
           }.map(_ => Step.Advance)
-        case ExecutableInstruction.Convert(destination, source, sourceType, destinationType, rounding) =>
+        case VMIR.Instruction.Convert(destination, source, sourceType, destinationType, rounding) =>
           forEveryLane(context) { lane =>
             stageResult(
               effects,
@@ -412,7 +372,7 @@ private object VMSemantics {
               }
             )
           }.map(_ => Step.Advance)
-        case ExecutableInstruction.MultiplyAdd(destination, left, right, addend, operation) =>
+        case VMIR.Instruction.MultiplyAdd(destination, left, right, addend, operation) =>
           forEveryLane(context) { lane =>
             val writes = for {
               leftValue   <- context.read(lane, left)
@@ -429,60 +389,15 @@ private object VMSemantics {
             }
             stageResults(effects, writes)
           }.map(_ => Step.Advance)
-        case ExecutableInstruction.FloatBinary(operation, destination, left, right, width) =>
+        case VMIR.Instruction.FloatBinary(operation, destination, left, right, width) =>
           forEveryLane(context) { lane =>
             val write = for {
               leftBits  <- context.read(lane, left)
               rightBits <- context.read(lane, right)
-            } yield {
-              val result =
-                if (width.value == 16) {
-                  val leftValue  = IEEE754.binary16ToFloat(Binary16.low(leftBits & 0xffffL))
-                  val rightValue = IEEE754.binary16ToFloat(Binary16.low(rightBits & 0xffffL))
-                  val value      = operation match {
-                    case FloatOperation.Add      => leftValue + rightValue
-                    case FloatOperation.Subtract => leftValue - rightValue
-                    case FloatOperation.Multiply => leftValue * rightValue
-                    case FloatOperation.Divide   => leftValue / rightValue
-                    case FloatOperation.Minimum  => Math.min(leftValue, rightValue)
-                    case FloatOperation.Maximum  => Math.max(leftValue, rightValue)
-                    case FloatOperation.CopySign => Math.copySign(rightValue, leftValue)
-                  }
-                  IEEE754.floatToBinary16(value).value
-                } else if (width.value == 32) {
-                  val leftValue  = IEEE754.binary32ToFloat(Binary32.low(leftBits & 0xffffffffL))
-                  val rightValue = IEEE754.binary32ToFloat(Binary32.low(rightBits & 0xffffffffL))
-                  val value      = operation match {
-                    case FloatOperation.Add      => leftValue + rightValue
-                    case FloatOperation.Subtract => leftValue - rightValue
-                    case FloatOperation.Multiply => leftValue * rightValue
-                    case FloatOperation.Divide   => leftValue / rightValue
-                    case FloatOperation.Minimum  => Math.min(leftValue, rightValue)
-                    case FloatOperation.Maximum  => Math.max(leftValue, rightValue)
-                    // PTX's operand order is copysign(a, b) = sign(a) * abs(b).
-                    // This is the reverse of java.lang.Math.copySign's argument order.
-                    case FloatOperation.CopySign => Math.copySign(rightValue, leftValue)
-                  }
-                  IEEE754.floatToBinary32(value).value
-                } else {
-                  val leftValue  = IEEE754.binary64ToDouble(leftBits)
-                  val rightValue = IEEE754.binary64ToDouble(rightBits)
-                  val value      = operation match {
-                    case FloatOperation.Add      => leftValue + rightValue
-                    case FloatOperation.Subtract => leftValue - rightValue
-                    case FloatOperation.Multiply => leftValue * rightValue
-                    case FloatOperation.Divide   => leftValue / rightValue
-                    case FloatOperation.Minimum  => Math.min(leftValue, rightValue)
-                    case FloatOperation.Maximum  => Math.max(leftValue, rightValue)
-                    case FloatOperation.CopySign => Math.copySign(rightValue, leftValue)
-                  }
-                  IEEE754.doubleToBinary64(value)
-                }
-              VMStateWrite.Register(lane, destination, result)
-            }
+            } yield VMStateWrite.Register(lane, destination, floatBinaryBits(operation, leftBits, rightBits, width))
             stageResult(effects, write)
           }.map(_ => Step.Advance)
-        case ExecutableInstruction.FloatBinaryPacked(operation, destination, left, right, bf16) =>
+        case VMIR.Instruction.FloatBinaryPacked(operation, destination, left, right, bf16) =>
           forEveryLane(context) { lane =>
             val write = for {
               leftBits  <- context.read(lane, left)
@@ -494,7 +409,7 @@ private object VMSemantics {
             )
             stageResult(effects, write)
           }.map(_ => Step.Advance)
-        case ExecutableInstruction.FloatUnary(operation, destination, source, width) =>
+        case VMIR.Instruction.FloatUnary(operation, destination, source, width) =>
           forEveryLane(context) { lane =>
             stageResult(
               effects,
@@ -503,40 +418,20 @@ private object VMSemantics {
               )
             )
           }.map(_ => Step.Advance)
-        case ExecutableInstruction.FusedMultiplyAdd(destination, left, right, addend, width) =>
+        case VMIR.Instruction.FusedMultiplyAdd(destination, left, right, addend, width) =>
           forEveryLane(context) { lane =>
             val write = for {
               leftBits   <- context.read(lane, left)
               rightBits  <- context.read(lane, right)
               addendBits <- context.read(lane, addend)
-            } yield {
-              val result = if (width.value == 16) {
-                val value = Math.fma(
-                  IEEE754.binary16ToFloat(Binary16.low(leftBits & 0xffffL)),
-                  IEEE754.binary16ToFloat(Binary16.low(rightBits & 0xffffL)),
-                  IEEE754.binary16ToFloat(Binary16.low(addendBits & 0xffffL))
-                )
-                IEEE754.floatToBinary16(value).value
-              } else if (width.value == 32) {
-                val value = Math.fma(
-                  IEEE754.binary32ToFloat(Binary32.low(leftBits & 0xffffffffL)),
-                  IEEE754.binary32ToFloat(Binary32.low(rightBits & 0xffffffffL)),
-                  IEEE754.binary32ToFloat(Binary32.low(addendBits & 0xffffffffL))
-                )
-                IEEE754.floatToBinary32(value).value
-              } else {
-                val value = Math.fma(
-                  IEEE754.binary64ToDouble(leftBits),
-                  IEEE754.binary64ToDouble(rightBits),
-                  IEEE754.binary64ToDouble(addendBits)
-                )
-                IEEE754.doubleToBinary64(value)
-              }
-              VMStateWrite.Register(lane, destination, result)
-            }
+            } yield VMStateWrite.Register(
+              lane,
+              destination,
+              fusedMultiplyAddBits(leftBits, rightBits, addendBits, width)
+            )
             stageResult(effects, write)
           }.map(_ => Step.Advance)
-        case ExecutableInstruction.FusedMultiplyAddPacked(destination, left, right, addend, bf16) =>
+        case VMIR.Instruction.FusedMultiplyAddPacked(destination, left, right, addend, bf16) =>
           forEveryLane(context) { lane =>
             val write = for {
               leftBits   <- context.read(lane, left)
@@ -549,7 +444,7 @@ private object VMSemantics {
             )
             stageResult(effects, write)
           }.map(_ => Step.Advance)
-        case ExecutableInstruction.FusedMultiplyAddBf16(destination, left, right, addend) =>
+        case VMIR.Instruction.FusedMultiplyAddBf16(destination, left, right, addend) =>
           forEveryLane(context) { lane =>
             val write = for {
               leftBits   <- context.read(lane, left)
@@ -562,7 +457,7 @@ private object VMSemantics {
             )
             stageResult(effects, write)
           }.map(_ => Step.Advance)
-        case ExecutableInstruction.ShuffleDown(destination, validity, source, delta, clamp, _, width) =>
+        case VMIR.Instruction.ShuffleDown(destination, validity, source, delta, clamp, _, width) =>
           forEveryLane(context) { lane =>
             val writes = for {
               deltaValue <- context.read(lane, delta)
@@ -586,7 +481,7 @@ private object VMSemantics {
             )
             stageResults(effects, writes)
           }.map(_ => Step.Advance)
-        case ExecutableInstruction.ShuffleUp(destination, validity, source, delta, clamp, _, width) =>
+        case VMIR.Instruction.ShuffleUp(destination, validity, source, delta, clamp, _, width) =>
           forEveryLane(context) { lane =>
             val writes = for {
               deltaValue <- context.read(lane, delta)
@@ -609,7 +504,7 @@ private object VMSemantics {
             )
             stageResults(effects, writes)
           }.map(_ => Step.Advance)
-        case ExecutableInstruction.ShuffleIndex(destination, validity, source, index, clamp, _, width) =>
+        case VMIR.Instruction.ShuffleIndex(destination, validity, source, index, clamp, _, width) =>
           forEveryLane(context) { lane =>
             val writes = for {
               indexValue <- context.read(lane, index)
@@ -630,7 +525,7 @@ private object VMSemantics {
             )
             stageResults(effects, writes)
           }.map(_ => Step.Advance)
-        case ExecutableInstruction.ShuffleBfly(destination, validity, source, index, clamp, _, width) =>
+        case VMIR.Instruction.ShuffleBfly(destination, validity, source, index, clamp, _, width) =>
           forEveryLane(context) { lane =>
             val writes = for {
               indexValue <- context.read(lane, index)
@@ -653,7 +548,7 @@ private object VMSemantics {
             )
             stageResults(effects, writes)
           }.map(_ => Step.Advance)
-        case ExecutableInstruction.VoteBallot(destination, predicate, memberMask) =>
+        case VMIR.Instruction.VoteBallot(destination, predicate, memberMask) =>
           forEveryLane(context) { lane =>
             val write = context.read(lane, memberMask).flatMap { maskValue =>
               val warpBase = lane & ~31
@@ -676,7 +571,7 @@ private object VMSemantics {
             }
             stageResult(effects, write)
           }.map(_ => Step.Advance)
-        case ExecutableInstruction.VotePredicate(destination, predicate, memberMask, operation) =>
+        case VMIR.Instruction.VotePredicate(destination, predicate, memberMask, operation) =>
           forEveryLane(context) { lane =>
             val write = context.read(lane, memberMask).flatMap { maskValue =>
               val warpBase = lane & ~31
@@ -704,7 +599,7 @@ private object VMSemantics {
             }
             stageResult(effects, write)
           }.map(_ => Step.Advance)
-        case ExecutableInstruction.BitFieldExtract(destination, source, start, widthValue, width, signed) =>
+        case VMIR.Instruction.BitFieldExtract(destination, source, start, widthValue, width, signed) =>
           forEveryLane(context) { lane =>
             val write = for {
               sourceValue <- context.read(lane, source)
@@ -716,7 +611,7 @@ private object VMSemantics {
             }
             stageResult(effects, write)
           }.map(_ => Step.Advance)
-        case ExecutableInstruction.BitFieldInsert(destination, insertValue, baseValue, bitPosition, bitLength, width) =>
+        case VMIR.Instruction.BitFieldInsert(destination, insertValue, baseValue, bitPosition, bitLength, width) =>
           forEveryLane(context) { lane =>
             val write = for {
               insert <- context.read(lane, insertValue)
@@ -726,7 +621,7 @@ private object VMSemantics {
             } yield VMStateWrite.Register(lane, destination, insertBits(insert, base, start, count, width))
             stageResult(effects, write)
           }.map(_ => Step.Advance)
-        case ExecutableInstruction.BitMask(destination, start, widthValue, mode) =>
+        case VMIR.Instruction.BitMask(destination, start, widthValue, mode) =>
           forEveryLane(context) { lane =>
             val write = for {
               startValue <- context.read(lane, start)
@@ -738,7 +633,7 @@ private object VMSemantics {
             )
             stageResult(effects, write)
           }.map(_ => Step.Advance)
-        case ExecutableInstruction.BytePermute(destination, left, right, control, mode) =>
+        case VMIR.Instruction.BytePermute(destination, left, right, control, mode) =>
           forEveryLane(context) { lane =>
             val write = for {
               leftValue    <- context.read(lane, left)
@@ -751,7 +646,7 @@ private object VMSemantics {
             )
             stageResult(effects, write)
           }.map(_ => Step.Advance)
-        case ExecutableInstruction.Select(destination, whenTrue, whenFalse, predicate, width) =>
+        case VMIR.Instruction.Select(destination, whenTrue, whenFalse, predicate, width) =>
           forEveryLane(context) { lane =>
             val write = for {
               trueValue  <- context.read(lane, whenTrue)
@@ -766,7 +661,7 @@ private object VMSemantics {
             )
             stageResult(effects, write)
           }.map(_ => Step.Advance)
-        case ExecutableInstruction.LoadGlobal(destination, address, width, signed) =>
+        case VMIR.Instruction.LoadGlobal(destination, address, width, signed) =>
           forEveryLane(context) { lane =>
             val write = context.read(lane, address).flatMap { rawAddress =>
               context.state.readParameterBuffer(rawAddress, byteCount(width)) match {
@@ -791,7 +686,7 @@ private object VMSemantics {
             }
             stageResult(effects, write)
           }.map(_ => Step.Advance)
-        case ExecutableInstruction.LoadGeneric(destination, address, width, signed) =>
+        case VMIR.Instruction.LoadGeneric(destination, address, width, signed) =>
           forEveryLane(context) { lane =>
             val write = context.read(lane, address).flatMap { rawAddress =>
               context.state.readParameterBuffer(rawAddress, byteCount(width)) match {
@@ -831,7 +726,7 @@ private object VMSemantics {
             }
             stageResult(effects, write)
           }.map(_ => Step.Advance)
-        case ExecutableInstruction.DiscardGlobalLoad(address, width) =>
+        case VMIR.Instruction.DiscardGlobalLoad(address, width) =>
           forEveryLane(context) { lane =>
             context.read(lane, address).flatMap { rawAddress =>
               if (context.state.readParameterBuffer(rawAddress, byteCount(width)).nonEmpty) Right(())
@@ -846,7 +741,7 @@ private object VMSemantics {
                   .map(_ => ())
             }
           }.map(_ => Step.Advance)
-        case ExecutableInstruction.LoadGlobalVector(destinations, address, width, signed) =>
+        case VMIR.Instruction.LoadGlobalVector(destinations, address, width, signed) =>
           forEveryLane(context) { lane =>
             val writes = context.read(lane, address).flatMap { rawAddress =>
               if (coherentGlobalVector(context, rawAddress, destinations.size, width))
@@ -873,7 +768,7 @@ private object VMSemantics {
             }
             stageResults(effects, writes)
           }.map(_ => Step.Advance)
-        case ExecutableInstruction.LoadGenericVector(destinations, address, width, signed) =>
+        case VMIR.Instruction.LoadGenericVector(destinations, address, width, signed) =>
           forEveryLane(context) { lane =>
             val writes = context.read(lane, address).flatMap { rawAddress =>
               if (coherentGlobalVector(context, rawAddress, destinations.size, width))
@@ -918,7 +813,7 @@ private object VMSemantics {
             }
             stageResults(effects, writes)
           }.map(_ => Step.Advance)
-        case ExecutableInstruction.StoreGlobal(address, source, width) =>
+        case VMIR.Instruction.StoreGlobal(address, source, width) =>
           forEveryLane(context) { lane =>
             val write = for {
               rawAddress <- context.read(lane, address)
@@ -929,7 +824,7 @@ private object VMSemantics {
               else VMStateWrite.Memory(lane, GuestAddress(rawAddress), width, value)
             stageResult(effects, write)
           }.map(_ => Step.Advance)
-        case ExecutableInstruction.StoreGeneric(address, source, width) =>
+        case VMIR.Instruction.StoreGeneric(address, source, width) =>
           forEveryLane(context) { lane =>
             val write = for {
               rawAddress <- context.read(lane, address)
@@ -942,7 +837,7 @@ private object VMSemantics {
               else VMStateWrite.Memory(lane, GuestAddress(rawAddress), width, value)
             stageResult(effects, write)
           }.map(_ => Step.Advance)
-        case ExecutableInstruction.StoreGlobalVector(address, sources, width) =>
+        case VMIR.Instruction.StoreGlobalVector(address, sources, width) =>
           forEveryLane(context) { lane =>
             val writes = context.read(lane, address).flatMap { rawAddress =>
               if (coherentGlobalVector(context, rawAddress, sources.size, width))
@@ -960,7 +855,7 @@ private object VMSemantics {
             }
             stageResults(effects, writes)
           }.map(_ => Step.Advance)
-        case ExecutableInstruction.StoreGenericVector(address, sources, width) =>
+        case VMIR.Instruction.StoreGenericVector(address, sources, width) =>
           forEveryLane(context) { lane =>
             val writes = context.read(lane, address).flatMap { rawAddress =>
               if (coherentGlobalVector(context, rawAddress, sources.size, width))
@@ -979,7 +874,7 @@ private object VMSemantics {
             }
             stageResults(effects, writes)
           }.map(_ => Step.Advance)
-        case ExecutableInstruction.LoadShared(destination, address, width, signed) =>
+        case VMIR.Instruction.LoadShared(destination, address, width, signed) =>
           forEveryLane(context) { lane =>
             stageResult(
               effects,
@@ -992,7 +887,7 @@ private object VMSemantics {
               )
             )
           }.map(_ => Step.Advance)
-        case ExecutableInstruction.LoadSharedVector(destinations, address, width, signed) =>
+        case VMIR.Instruction.LoadSharedVector(destinations, address, width, signed) =>
           forEveryLane(context) { lane =>
             val writes = context.read(lane, address).map { rawAddress =>
               destinations.zipWithIndex.map { case (destination, index) =>
@@ -1009,7 +904,7 @@ private object VMSemantics {
             }
             stageResults(effects, writes)
           }.map(_ => Step.Advance)
-        case ExecutableInstruction.LoadLocal(destination, address, width, signed) =>
+        case VMIR.Instruction.LoadLocal(destination, address, width, signed) =>
           forEveryLane(context) { lane =>
             stageResult(
               effects,
@@ -1022,7 +917,7 @@ private object VMSemantics {
               )
             )
           }.map(_ => Step.Advance)
-        case ExecutableInstruction.LoadLocalVector(destinations, address, width, signed) =>
+        case VMIR.Instruction.LoadLocalVector(destinations, address, width, signed) =>
           forEveryLane(context) { lane =>
             val writes = context.read(lane, address).map { rawAddress =>
               destinations.zipWithIndex.map { case (destination, index) =>
@@ -1039,7 +934,7 @@ private object VMSemantics {
             }
             stageResults(effects, writes)
           }.map(_ => Step.Advance)
-        case ExecutableInstruction.StoreShared(address, source, width) =>
+        case VMIR.Instruction.StoreShared(address, source, width) =>
           forEveryLane(context) { lane =>
             val write = for {
               rawAddress <- context.read(lane, address)
@@ -1047,7 +942,7 @@ private object VMSemantics {
             } yield VMStateWrite.Shared(lane, rawAddress, width, value)
             stageResult(effects, write)
           }.map(_ => Step.Advance)
-        case ExecutableInstruction.StoreSharedVector(address, sources, width) =>
+        case VMIR.Instruction.StoreSharedVector(address, sources, width) =>
           forEveryLane(context) { lane =>
             val writes = context.read(lane, address).flatMap { rawAddress =>
               sources.zipWithIndex.traverse { case (source, index) =>
@@ -1063,7 +958,7 @@ private object VMSemantics {
             }
             stageResults(effects, writes)
           }.map(_ => Step.Advance)
-        case ExecutableInstruction.StoreLocal(address, source, width) =>
+        case VMIR.Instruction.StoreLocal(address, source, width) =>
           forEveryLane(context) { lane =>
             val write = for {
               rawAddress <- context.read(lane, address)
@@ -1071,7 +966,7 @@ private object VMSemantics {
             } yield VMStateWrite.Local(lane, rawAddress, width, value)
             stageResult(effects, write)
           }.map(_ => Step.Advance)
-        case ExecutableInstruction.StoreLocalVector(address, sources, width) =>
+        case VMIR.Instruction.StoreLocalVector(address, sources, width) =>
           forEveryLane(context) { lane =>
             val writes = context.read(lane, address).flatMap { rawAddress =>
               sources.zipWithIndex.traverse { case (source, index) =>
@@ -1087,7 +982,7 @@ private object VMSemantics {
             }
             stageResults(effects, writes)
           }.map(_ => Step.Advance)
-        case ExecutableInstruction.AsyncCopy(destination, source, size) =>
+        case VMIR.Instruction.AsyncCopy(destination, source, size) =>
           forEveryLane(context) { lane =>
             val writes = for {
               destinationAddress <- context.read(lane, destination)
@@ -1113,8 +1008,8 @@ private object VMSemantics {
             } yield pending
             stageResults(effects, writes)
           }.map(_ => Step.Advance)
-        case ExecutableInstruction.AsyncCommit | ExecutableInstruction.AsyncWait                 => Right(Step.Advance)
-        case ExecutableInstruction.WarpReduce(destination, source, memberMask, operation, width) =>
+        case VMIR.Instruction.AsyncCommit | VMIR.Instruction.AsyncWait                      => Right(Step.Advance)
+        case VMIR.Instruction.WarpReduce(destination, source, memberMask, operation, width) =>
           val values                          = mutable.Map.empty[Int, Long]
           val masks                           = mutable.Map.empty[Int, Long]
           var failure: Option[ExecutionFault] = None
@@ -1136,7 +1031,7 @@ private object VMSemantics {
               context.active.foreachLane { lane =>
                 val warpBase = lane & ~31
                 val mask     = masks.getOrElse(lane, 0L)
-                val members  = Vec.toVec(values.iterator.collect {
+                val members  = Vec.toVec(values.view.collect {
                   case (candidate, value)
                       if (candidate & ~31) == warpBase && (mask & (1L << (candidate & 31))) != 0L => value
                 })
@@ -1165,7 +1060,7 @@ private object VMSemantics {
               }
               failure.toLeft(Step.Advance)
           }
-        case ExecutableInstruction.AtomicAdd(destination, address, source, width, global) =>
+        case VMIR.Instruction.AtomicAdd(destination, address, source, width, global) =>
           forEveryLane(context) { lane =>
             val write = for {
               rawAddress  <- context.read(lane, address)
@@ -1182,7 +1077,7 @@ private object VMSemantics {
               else VMStateWrite.AtomicSharedAdd(lane, destination, rawAddress, width, sourceValue)
             stageResult(effects, write)
           }.map(_ => Step.Advance)
-        case ExecutableInstruction.AtomicMin(destination, address, source, width, global) =>
+        case VMIR.Instruction.AtomicMin(destination, address, source, width, global) =>
           forEveryLane(context) { lane =>
             val write = for {
               rawAddress  <- context.read(lane, address)
@@ -1199,7 +1094,7 @@ private object VMSemantics {
               else VMStateWrite.AtomicSharedMin(lane, destination, rawAddress, width, sourceValue)
             stageResult(effects, write)
           }.map(_ => Step.Advance)
-        case ExecutableInstruction.AtomicAddFloat(destination, address, source, width) =>
+        case VMIR.Instruction.AtomicAddFloat(destination, address, source, width) =>
           forEveryLane(context) { lane =>
             val write = for {
               rawAddress  <- context.read(lane, address)
@@ -1213,7 +1108,7 @@ private object VMSemantics {
             )
             stageResult(effects, write)
           }.map(_ => Step.Advance)
-        case ExecutableInstruction.SetPredicate(destination, comparison, kind, left, right, width) =>
+        case VMIR.Instruction.SetPredicate(destination, comparison, kind, left, right, width) =>
           forEveryLane(context) { lane =>
             val write = for {
               leftValue  <- context.read(lane, left)
@@ -1221,7 +1116,7 @@ private object VMSemantics {
             } yield VMStateWrite.Predicate(lane, destination, compare(leftValue, rightValue, comparison, kind, width))
             stageResult(effects, write)
           }.map(_ => Step.Advance)
-        case ExecutableInstruction.PredicateCompare(destination, comparison, left, right) =>
+        case VMIR.Instruction.PredicateCompare(destination, comparison, left, right) =>
           forEveryLane(context) { lane =>
             val write = for {
               leftValue <- context.state.predicates(lane).get(left).toRight(
@@ -1237,7 +1132,7 @@ private object VMSemantics {
             )
             stageResult(effects, write)
           }.map(_ => Step.Advance)
-        case ExecutableInstruction.PredicateUnary(destination, source) =>
+        case VMIR.Instruction.PredicateUnary(destination, source) =>
           forEveryLane(context) { lane =>
             stageResult(
               effects,
@@ -1246,7 +1141,7 @@ private object VMSemantics {
               ).map(value => VMStateWrite.Predicate(lane, destination, !value))
             )
           }.map(_ => Step.Advance)
-        case ExecutableInstruction.PredicateBinary(operation, destination, left, right) =>
+        case VMIR.Instruction.PredicateBinary(operation, destination, left, right) =>
           forEveryLane(context) { lane =>
             val write = for {
               leftValue <- context.state.predicates(lane).get(left).toRight(
@@ -1266,14 +1161,14 @@ private object VMSemantics {
             )
             stageResult(effects, write)
           }.map(_ => Step.Advance)
-        case ExecutableInstruction.Branch(target)  => Right(Step.Jump(target))
-        case ExecutableInstruction.BarrierSync(id) =>
+        case VMIR.Instruction.Branch(target)  => Right(Step.Jump(target))
+        case VMIR.Instruction.BarrierSync(id) =>
           // A workgroup barrier is identified by its hardware barrier slot, not
           // by the static PC at which a divergent cohort happens to arrive.
           Right(Step.Suspend(WaitKey(WaitScope.Workgroup, id.toLong, 0L)))
-        case ExecutableInstruction.BarrierReduce(_, id, _, _) =>
+        case VMIR.Instruction.BarrierReduce(_, id, _, _) =>
           Right(Step.Suspend(WaitKey(WaitScope.Workgroup, id.toLong, 0L)))
-        case ExecutableInstruction.WarpBarrier(memberMask) =>
+        case VMIR.Instruction.WarpBarrier(memberMask) =>
           var firstLane = -1
           context.active.foreachLane { lane => if (firstLane < 0) firstLane = lane }
           context.read(firstLane, memberMask) match {
@@ -1293,9 +1188,9 @@ private object VMSemantics {
               else
                 Right(Step.Suspend(WaitKey(WaitScope.Warp, memberMaskValue, context.pc.value.toLong)))
           }
-        case ExecutableInstruction.MemoryBarrier                              => Right(Step.Advance)
-        case ExecutableInstruction.Prefetch                                   => Right(Step.Advance)
-        case ExecutableInstruction.Call(function, returnParameter, parameter) =>
+        case VMIR.Instruction.MemoryBarrier                              => Right(Step.Advance)
+        case VMIR.Instruction.Prefetch                                   => Right(Step.Advance)
+        case VMIR.Instruction.Call(function, returnParameter, parameter) =>
           forEveryLane(context) { lane =>
             context.functionName(lane, function) match {
               case Left(fault) => Left(fault)
@@ -1311,9 +1206,9 @@ private object VMSemantics {
                 }
             }
           }.map(_ => Step.Advance)
-        case ExecutableInstruction.Trap =>
+        case VMIR.Instruction.Trap =>
           Left(ExecutionFault.ArchitecturalTrap("ptx", 0L, context.pc))
-        case ExecutableInstruction.Return => Right(Step.Exit(context.active))
+        case VMIR.Instruction.Return => Right(Step.Exit(context.active))
       }
   }
 
@@ -1404,13 +1299,13 @@ private object VMSemantics {
     * instruction. Reads still happen before the destination is changed, matching the staged path's aliasing rule.
     */
   private def executeFast(
-      instruction: ExecutableInstruction,
+      instruction: VMIR.Instruction,
       context: VMExecutionContext
   ): Boolean = instruction match {
-    case ExecutableInstruction.Move(destination, Value.Function(function), _) =>
+    case VMIR.Instruction.Move(destination, Value.Function(function), _) =>
       context.active.foreachLane(lane => context.state.functionRegisters(lane)(destination) = function)
       true
-    case ExecutableInstruction.Move(destination, source, width) =>
+    case VMIR.Instruction.Move(destination, source, width) =>
       val destinationIndex = VMRegisterFile.index(destination)
       context.active.foreachLane(lane =>
         writeRegister(
@@ -1421,7 +1316,7 @@ private object VMSemantics {
         )
       )
       true
-    case ExecutableInstruction.MovePredicate(destination, source) =>
+    case VMIR.Instruction.MovePredicate(destination, source) =>
       val destinationIndex = VMPredicateFile.index(destination)
       context.active.foreachLane(lane =>
         writePredicate(
@@ -1432,7 +1327,7 @@ private object VMSemantics {
         )
       )
       true
-    case ExecutableInstruction.MoveSplit(destinations, source, partWidth) =>
+    case VMIR.Instruction.MoveSplit(destinations, source, partWidth) =>
       val lowIndex  = if (destinations(0).value == "_") -1 else VMRegisterFile.index(destinations(0))
       val highIndex = if (destinations(1).value == "_") -1 else VMRegisterFile.index(destinations(1))
       context.active.foreachLane { lane =>
@@ -1448,7 +1343,7 @@ private object VMSemantics {
           )
       }
       true
-    case ExecutableInstruction.MoveCombine(destination, sources, partWidth) =>
+    case VMIR.Instruction.MoveCombine(destination, sources, partWidth) =>
       val destinationIndex = VMRegisterFile.index(destination)
       val combinedWidth    = partWidth.combined
       context.active.foreachLane { lane =>
@@ -1462,25 +1357,18 @@ private object VMSemantics {
         )
       }
       true
-    case ExecutableInstruction.IntegerUnary(operation, destination, source, width) =>
+    case VMIR.Instruction.IntegerUnary(operation, destination, source, width) =>
       val destinationIndex = VMRegisterFile.index(destination)
       context.active.foreachLane { lane =>
-        val value  = readFast(context, lane, source)
-        val result = operation match {
-          case IntegerUnaryOperation.Negate          => -value
-          case IntegerUnaryOperation.Absolute        => Math.abs(signExtend(truncate(value, width), width))
-          case IntegerUnaryOperation.BitwiseNot      => ~value
-          case IntegerUnaryOperation.PopulationCount =>
-            bitCount(value, width).toLong
-          case IntegerUnaryOperation.LeadingZeroCount =>
-            if (width.value == 32) Integer.numberOfLeadingZeros((value & 0xffffffffL).toInt).toLong
-            else java.lang.Long.numberOfLeadingZeros(value).toLong
-          case IntegerUnaryOperation.BitReverse => reverseBits(value, width)
-        }
-        writeRegister(context.state.registers(lane), destination, destinationIndex, truncate(result, width))
+        writeRegister(
+          context.state.registers(lane),
+          destination,
+          destinationIndex,
+          integerUnaryResult(operation, readFast(context, lane, source), width)
+        )
       }
       true
-    case ExecutableInstruction.BitFind(destination, source, width, signed, shiftAmount) =>
+    case VMIR.Instruction.BitFind(destination, source, width, signed, shiftAmount) =>
       val destinationIndex = VMRegisterFile.index(destination)
       context.active.foreachLane { lane =>
         writeRegister(
@@ -1491,7 +1379,7 @@ private object VMSemantics {
         )
       }
       true
-    case ExecutableInstruction.DotProduct4(destination, left, right, addend, leftSigned, rightSigned) =>
+    case VMIR.Instruction.DotProduct4(destination, left, right, addend, leftSigned, rightSigned) =>
       val destinationIndex = VMRegisterFile.index(destination)
       context.active.foreachLane { lane =>
         writeRegister(
@@ -1508,7 +1396,7 @@ private object VMSemantics {
         )
       }
       true
-    case ExecutableInstruction.IntegerAddWithCarry(destination, left, right, width, carryIn, carryOut) =>
+    case VMIR.Instruction.IntegerAddWithCarry(destination, left, right, width, carryIn, carryOut) =>
       val destinationIndex = VMRegisterFile.index(destination)
       context.active.foreachLane { lane =>
         val (result, nextCarry) = integerAddWithCarry(
@@ -1522,7 +1410,7 @@ private object VMSemantics {
         if (carryOut) context.state.carry(lane) = nextCarry
       }
       true
-    case ExecutableInstruction.IntegerSubWithBorrow(destination, left, right, width, borrowIn, borrowOut) =>
+    case VMIR.Instruction.IntegerSubWithBorrow(destination, left, right, width, borrowIn, borrowOut) =>
       val destinationIndex = VMRegisterFile.index(destination)
       context.active.foreachLane { lane =>
         val (result, nextBorrow) = integerSubWithBorrow(
@@ -1536,47 +1424,20 @@ private object VMSemantics {
         if (borrowOut) context.state.carry(lane) = nextBorrow
       }
       true
-    case ExecutableInstruction.IntegerBinary(operation, destination, left, right, width) =>
+    case VMIR.Instruction.IntegerBinary(operation, destination, left, right, width) =>
       val destinationIndex = VMRegisterFile.index(destination)
       context.active.foreachLane { lane =>
         val leftValue  = readFast(context, lane, left)
         val rightValue = readFast(context, lane, right)
-        val result     = operation match {
-          case IntegerOperation.Add                    => leftValue + rightValue
-          case IntegerOperation.Subtract               => leftValue - rightValue
-          case IntegerOperation.BitwiseOr              => leftValue | rightValue
-          case IntegerOperation.BitwiseAnd             => leftValue & rightValue
-          case IntegerOperation.BitwiseXor             => leftValue ^ rightValue
-          case IntegerOperation.MultiplyLow            => leftValue * rightValue
-          case IntegerOperation.MultiplyHigh(signed)   => multiplyHigh(leftValue, rightValue, width, signed)
-          case IntegerOperation.Divide(signed)         => divideInteger(leftValue, rightValue, width, signed)
-          case IntegerOperation.Remainder(signed)      => remainderInteger(leftValue, rightValue, width, signed)
-          case IntegerOperation.MultiplyWideUnsigned16 =>
-            (leftValue & 0xffffL) * (rightValue & 0xffffL)
-          case IntegerOperation.MultiplyWideUnsigned32 => low32(leftValue) * low32(rightValue)
-          case IntegerOperation.MultiplyWideSigned32   => leftValue.toInt.toLong * rightValue.toInt.toLong
-          case IntegerOperation.Minimum(signed)        =>
-            if (signed) Math.min(signExtend(leftValue, width), signExtend(rightValue, width))
-            else if (width.value == 64) {
-              if (java.lang.Long.compareUnsigned(leftValue, rightValue) <= 0) leftValue else rightValue
-            } else Math.min(truncate(leftValue, width), truncate(rightValue, width))
-          case IntegerOperation.Maximum(signed) =>
-            if (signed) Math.max(signExtend(leftValue, width), signExtend(rightValue, width))
-            else if (width.value == 64) {
-              if (java.lang.Long.compareUnsigned(leftValue, rightValue) >= 0) leftValue else rightValue
-            } else Math.max(truncate(leftValue, width), truncate(rightValue, width))
-          case IntegerOperation.ShiftLeft         => leftValue << (rightValue & (width.value - 1).toLong).toInt
-          case IntegerOperation.ShiftRightLogical =>
-            if (width.value == 32) (leftValue & 0xffffffffL) >>> (rightValue & 31L).toInt
-            else leftValue >>> (rightValue & 63L).toInt
-          case IntegerOperation.ShiftRightArithmetic =>
-            if (width.value == 32) (leftValue.toInt >> (rightValue & 31L).toInt).toLong
-            else leftValue >> (rightValue & 63L).toInt
-        }
-        writeRegister(context.state.registers(lane), destination, destinationIndex, truncate(result, width))
+        writeRegister(
+          context.state.registers(lane),
+          destination,
+          destinationIndex,
+          integerBinaryResult(operation, leftValue, rightValue, width)
+        )
       }
       true
-    case ExecutableInstruction.Convert(destination, source, sourceType, destinationType, rounding) =>
+    case VMIR.Instruction.Convert(destination, source, sourceType, destinationType, rounding) =>
       val destinationIndex = VMRegisterFile.index(destination)
       context.active.foreachLane(lane =>
         writeRegister(
@@ -1587,7 +1448,7 @@ private object VMSemantics {
         )
       )
       true
-    case ExecutableInstruction.MultiplyAdd(destination, left, right, addend, operation) =>
+    case VMIR.Instruction.MultiplyAdd(destination, left, right, addend, operation) =>
       val destinationIndex = VMRegisterFile.index(destination)
       context.active.foreachLane { lane =>
         val (result, carry) = integerMultiplyAdd(
@@ -1605,7 +1466,7 @@ private object VMSemantics {
         }
       }
       true
-    case ExecutableInstruction.BitFieldInsert(destination, insertValue, baseValue, bitPosition, bitLength, width) =>
+    case VMIR.Instruction.BitFieldInsert(destination, insertValue, baseValue, bitPosition, bitLength, width) =>
       val destinationIndex = VMRegisterFile.index(destination)
       context.active.foreachLane { lane =>
         writeRegister(
@@ -1622,7 +1483,7 @@ private object VMSemantics {
         )
       }
       true
-    case ExecutableInstruction.BitMask(destination, start, widthValue, mode) =>
+    case VMIR.Instruction.BitMask(destination, start, widthValue, mode) =>
       val destinationIndex = VMRegisterFile.index(destination)
       context.active.foreachLane { lane =>
         writeRegister(
@@ -1633,7 +1494,7 @@ private object VMSemantics {
         )
       }
       true
-    case ExecutableInstruction.BytePermute(destination, left, right, control, mode) =>
+    case VMIR.Instruction.BytePermute(destination, left, right, control, mode) =>
       val destinationIndex = VMRegisterFile.index(destination)
       context.active.foreachLane { lane =>
         writeRegister(
@@ -1649,56 +1510,16 @@ private object VMSemantics {
         )
       }
       true
-    case ExecutableInstruction.FloatBinary(operation, destination, left, right, width) =>
+    case VMIR.Instruction.FloatBinary(operation, destination, left, right, width) =>
       val destinationIndex = VMRegisterFile.index(destination)
       context.active.foreachLane { lane =>
         val leftBits  = readFast(context, lane, left)
         val rightBits = readFast(context, lane, right)
-        val result    = if (width.value == 16) {
-          val leftValue  = IEEE754.binary16ToFloat(Binary16.low(leftBits & 0xffffL))
-          val rightValue = IEEE754.binary16ToFloat(Binary16.low(rightBits & 0xffffL))
-          val value      = operation match {
-            case FloatOperation.Add      => leftValue + rightValue
-            case FloatOperation.Subtract => leftValue - rightValue
-            case FloatOperation.Multiply => leftValue * rightValue
-            case FloatOperation.Divide   => leftValue / rightValue
-            case FloatOperation.Minimum  => Math.min(leftValue, rightValue)
-            case FloatOperation.Maximum  => Math.max(leftValue, rightValue)
-            case FloatOperation.CopySign => Math.copySign(rightValue, leftValue)
-          }
-          IEEE754.floatToBinary16(value).value
-        } else if (width.value == 32) {
-          val leftValue  = IEEE754.binary32ToFloat(Binary32.low(leftBits & 0xffffffffL))
-          val rightValue = IEEE754.binary32ToFloat(Binary32.low(rightBits & 0xffffffffL))
-          val value      = operation match {
-            case FloatOperation.Add      => leftValue + rightValue
-            case FloatOperation.Subtract => leftValue - rightValue
-            case FloatOperation.Multiply => leftValue * rightValue
-            case FloatOperation.Divide   => leftValue / rightValue
-            case FloatOperation.Minimum  => Math.min(leftValue, rightValue)
-            case FloatOperation.Maximum  => Math.max(leftValue, rightValue)
-            case FloatOperation.CopySign => Math.copySign(rightValue, leftValue)
-          }
-          IEEE754.floatToBinary32(value).value
-        } else {
-          val value = operation match {
-            case FloatOperation.Add      => IEEE754.binary64ToDouble(leftBits) + IEEE754.binary64ToDouble(rightBits)
-            case FloatOperation.Subtract => IEEE754.binary64ToDouble(leftBits) - IEEE754.binary64ToDouble(rightBits)
-            case FloatOperation.Multiply => IEEE754.binary64ToDouble(leftBits) * IEEE754.binary64ToDouble(rightBits)
-            case FloatOperation.Divide   => IEEE754.binary64ToDouble(leftBits) / IEEE754.binary64ToDouble(rightBits)
-            case FloatOperation.Minimum  =>
-              Math.min(IEEE754.binary64ToDouble(leftBits), IEEE754.binary64ToDouble(rightBits))
-            case FloatOperation.Maximum =>
-              Math.max(IEEE754.binary64ToDouble(leftBits), IEEE754.binary64ToDouble(rightBits))
-            case FloatOperation.CopySign =>
-              Math.copySign(IEEE754.binary64ToDouble(rightBits), IEEE754.binary64ToDouble(leftBits))
-          }
-          IEEE754.doubleToBinary64(value)
-        }
+        val result    = floatBinaryBits(operation, leftBits, rightBits, width)
         writeRegister(context.state.registers(lane), destination, destinationIndex, result)
       }
       true
-    case ExecutableInstruction.FloatBinaryPacked(operation, destination, left, right, bf16) =>
+    case VMIR.Instruction.FloatBinaryPacked(operation, destination, left, right, bf16) =>
       val destinationIndex = VMRegisterFile.index(destination)
       context.active.foreachLane { lane =>
         writeRegister(
@@ -1709,7 +1530,7 @@ private object VMSemantics {
         )
       }
       true
-    case ExecutableInstruction.FloatUnary(operation, destination, source, width) =>
+    case VMIR.Instruction.FloatUnary(operation, destination, source, width) =>
       val destinationIndex = VMRegisterFile.index(destination)
       context.active.foreachLane { lane =>
         val sourceValue = readFast(context, lane, source)
@@ -1717,40 +1538,17 @@ private object VMSemantics {
         writeRegister(context.state.registers(lane), destination, destinationIndex, result)
       }
       true
-    case ExecutableInstruction.FusedMultiplyAdd(destination, left, right, addend, width) =>
+    case VMIR.Instruction.FusedMultiplyAdd(destination, left, right, addend, width) =>
       val destinationIndex = VMRegisterFile.index(destination)
       context.active.foreachLane { lane =>
         val leftBits   = readFast(context, lane, left)
         val rightBits  = readFast(context, lane, right)
         val addendBits = readFast(context, lane, addend)
-        val result     = if (width.value == 16)
-          IEEE754.floatToBinary16(
-            Math.fma(
-              IEEE754.binary16ToFloat(Binary16.low(leftBits & 0xffffL)),
-              IEEE754.binary16ToFloat(Binary16.low(rightBits & 0xffffL)),
-              IEEE754.binary16ToFloat(Binary16.low(addendBits & 0xffffL))
-            )
-          ).value
-        else if (width.value == 32)
-          IEEE754.floatToBinary32(
-            Math.fma(
-              IEEE754.binary32ToFloat(Binary32.low(leftBits & 0xffffffffL)),
-              IEEE754.binary32ToFloat(Binary32.low(rightBits & 0xffffffffL)),
-              IEEE754.binary32ToFloat(Binary32.low(addendBits & 0xffffffffL))
-            )
-          ).value
-        else
-          IEEE754.doubleToBinary64(
-            Math.fma(
-              IEEE754.binary64ToDouble(leftBits),
-              IEEE754.binary64ToDouble(rightBits),
-              IEEE754.binary64ToDouble(addendBits)
-            )
-          )
+        val result     = fusedMultiplyAddBits(leftBits, rightBits, addendBits, width)
         writeRegister(context.state.registers(lane), destination, destinationIndex, result)
       }
       true
-    case ExecutableInstruction.FusedMultiplyAddPacked(destination, left, right, addend, bf16) =>
+    case VMIR.Instruction.FusedMultiplyAddPacked(destination, left, right, addend, bf16) =>
       val destinationIndex = VMRegisterFile.index(destination)
       context.active.foreachLane { lane =>
         writeRegister(
@@ -1766,7 +1564,7 @@ private object VMSemantics {
         )
       }
       true
-    case ExecutableInstruction.FusedMultiplyAddBf16(destination, left, right, addend) =>
+    case VMIR.Instruction.FusedMultiplyAddBf16(destination, left, right, addend) =>
       val destinationIndex = VMRegisterFile.index(destination)
       context.active.foreachLane { lane =>
         writeRegister(
@@ -1781,7 +1579,7 @@ private object VMSemantics {
         )
       }
       true
-    case ExecutableInstruction.SetPredicate(destination, comparison, kind, left, right, width) =>
+    case VMIR.Instruction.SetPredicate(destination, comparison, kind, left, right, width) =>
       val destinationIndex = VMPredicateFile.index(destination)
       context.active.foreachLane { lane =>
         val value = compare(
@@ -1794,7 +1592,7 @@ private object VMSemantics {
         writePredicate(context.state.predicates(lane), destination, destinationIndex, value)
       }
       true
-    case ExecutableInstruction.PredicateCompare(destination, comparison, left, right) =>
+    case VMIR.Instruction.PredicateCompare(destination, comparison, left, right) =>
       val destinationIndex = VMPredicateFile.index(destination)
       val leftIndex        = VMPredicateFile.index(left)
       val rightIndex       = VMPredicateFile.index(right)
@@ -1809,7 +1607,7 @@ private object VMSemantics {
         )
       }
       true
-    case ExecutableInstruction.PredicateUnary(destination, source) =>
+    case VMIR.Instruction.PredicateUnary(destination, source) =>
       val destinationIndex = VMPredicateFile.index(destination)
       val sourceIndex      = VMPredicateFile.index(source)
       context.active.foreachLane { lane =>
@@ -1821,7 +1619,7 @@ private object VMSemantics {
         )
       }
       true
-    case ExecutableInstruction.PredicateBinary(operation, destination, left, right) =>
+    case VMIR.Instruction.PredicateBinary(operation, destination, left, right) =>
       val destinationIndex = VMPredicateFile.index(destination)
       val leftIndex        = VMPredicateFile.index(left)
       val rightIndex       = VMPredicateFile.index(right)
@@ -1840,7 +1638,7 @@ private object VMSemantics {
         )
       }
       true
-    case ExecutableInstruction.Select(destination, whenTrue, whenFalse, predicate, width) =>
+    case VMIR.Instruction.Select(destination, whenTrue, whenFalse, predicate, width) =>
       val destinationIndex = VMRegisterFile.index(destination)
       val predicateIndex   = VMPredicateFile.index(predicate)
       context.active.foreachLane { lane =>
@@ -1915,7 +1713,7 @@ private object VMSemantics {
       case "malloc" =>
         context.memory match {
           case memory: DeviceAllocationMemory =>
-            val allocation = DeviceAllocationByteSize.either(parameter(0)) match {
+            val allocation = DeviceAllocationByteSize.fromLong(parameter(0)) match {
               case Left(message) =>
                 Left(ExecutionFault.InvalidState(s"invalid malloc size: $message"))
               case Right(size) =>
@@ -2016,9 +1814,9 @@ private object VMSemantics {
               geometry.leftMap(error => ExecutionFault.InvalidState(error)) match {
                 case Left(fault)  => Left(fault)
                 case Right(value) =>
-                  VirtualMachine.execute(
+                  VMInterpreter.execute(
                     Kernel(
-                      KernelName(function.name.value),
+                      net.kurobako.gemstone.isa.KernelName(function.name.value),
                       function.parameters.zip(function.parameterWidths).map { case (name, width) =>
                         KernelParameter(name, width)
                       },
@@ -2031,9 +1829,10 @@ private object VMSemantics {
                     childArguments.toMap,
                     context.memory,
                     context.control,
-                    captureTrace = false,
-                    initialParameterBuffers = context.state.parameterBuffers.toMap
-                  ).leftMap(error => ExecutionFault.InvalidState(error.message))
+                    context.scheduler,
+                    context.state.parameterBuffers.toMap,
+                    None
+                  )
               }
           }
       } match {
@@ -2087,7 +1886,7 @@ private object VMSemantics {
       parameters: Vec[ParameterName],
       returnParameters: Vec[ParameterName]
   ): Either[ExecutionFault, Unit] = {
-    val oneLane = LaneMask.all(1).toOption.getOrElse(LaneMask.Empty)
+    val oneLane = VMLaneMask.all(1).toOption.getOrElse(VMLaneMask.Empty)
     val state   = VMState(1, oneLane)
     val input   = if (parameters.size != function.parameters.size) {
       Left(ExecutionFault.InvalidState(
@@ -2115,7 +1914,7 @@ private object VMSemantics {
       case Right(())   =>
         var pc      = Pc.Entry
         var running = true
-        val effects = Effects[VMStateWrite]
+        val effects = VMStateEffects()
         while (running && pc.value < function.program.instructions.length) {
           caller.control.checkpoint() match {
             case Left(fault) => return Left(ExecutionFault.fromControl(fault))
@@ -2127,7 +1926,7 @@ private object VMSemantics {
             case Some(predicate) =>
               state.predicates(0).get(predicate.name) match {
                 case Some(value) if value != predicate.negated => oneLane
-                case Some(_)                                   => LaneMask.Empty
+                case Some(_)                                   => VMLaneMask.Empty
                 case None => return Left(ExecutionFault.UndefinedRegister(predicate.name, pc, 0))
               }
           }
@@ -2141,7 +1940,8 @@ private object VMSemantics {
             active,
             Map.empty,
             caller.memory,
-            caller.control
+            caller.control,
+            caller.scheduler
           )
           effects.clear()
           val outcome =
@@ -2160,8 +1960,8 @@ private object VMSemantics {
               step match {
                 case Step.Advance =>
                   pc.next match {
-                    case Right(next) => pc = next
-                    case Left(_)     => return Left(ExecutionFault.InvalidProgram("function pc overflow"))
+                    case Some(next) => pc = next
+                    case None       => return Left(ExecutionFault.InvalidProgram("function pc overflow"))
                   }
                 case Step.Exit(_)        => running = false
                 case Step.Jump(target)   => pc = target
@@ -2214,6 +2014,133 @@ private object VMSemantics {
     java.lang.Long.compareUnsigned(address, 0x10000000L) >= 0 &&
       java.lang.Long.compareUnsigned(address, 0x40000000L) < 0
 
+  private def integerUnaryResult(operation: IntegerUnaryOperation, value: Long, width: BitWidth): Long = {
+    val result = operation match {
+      case IntegerUnaryOperation.Negate           => -value
+      case IntegerUnaryOperation.Absolute         => Math.abs(signExtend(truncate(value, width), width))
+      case IntegerUnaryOperation.BitwiseNot       => ~value
+      case IntegerUnaryOperation.PopulationCount  => bitCount(value, width).toLong
+      case IntegerUnaryOperation.LeadingZeroCount =>
+        if (width.value == 32) Integer.numberOfLeadingZeros(Bits.signed32(value)).toLong
+        else java.lang.Long.numberOfLeadingZeros(value).toLong
+      case IntegerUnaryOperation.BitReverse => reverseBits(value, width)
+    }
+    truncate(result, width)
+  }
+
+  private def integerBinaryResult(
+      operation: IntegerOperation,
+      left: Long,
+      right: Long,
+      width: BitWidth
+  ): Long = {
+    val result = operation match {
+      case IntegerOperation.Add                    => left + right
+      case IntegerOperation.Subtract               => left - right
+      case IntegerOperation.BitwiseOr              => left | right
+      case IntegerOperation.BitwiseAnd             => left & right
+      case IntegerOperation.BitwiseXor             => left ^ right
+      case IntegerOperation.MultiplyLow            => left * right
+      case IntegerOperation.MultiplyHigh(signed)   => multiplyHigh(left, right, width, signed)
+      case IntegerOperation.Divide(signed)         => divideInteger(left, right, width, signed)
+      case IntegerOperation.Remainder(signed)      => remainderInteger(left, right, width, signed)
+      case IntegerOperation.MultiplyWideUnsigned16 => Bits.low16(left) * Bits.low16(right)
+      case IntegerOperation.MultiplyWideUnsigned32 => low32(left) * low32(right)
+      case IntegerOperation.MultiplyWideSigned32   => left.toInt.toLong * right.toInt.toLong
+      case IntegerOperation.Minimum(signed)        =>
+        if (signed) Math.min(signExtend(left, width), signExtend(right, width))
+        else if (width.value == 64) {
+          if (java.lang.Long.compareUnsigned(left, right) <= 0) left else right
+        } else Math.min(truncate(left, width), truncate(right, width))
+      case IntegerOperation.Maximum(signed) =>
+        if (signed) Math.max(signExtend(left, width), signExtend(right, width))
+        else if (width.value == 64) {
+          if (java.lang.Long.compareUnsigned(left, right) >= 0) left else right
+        } else Math.max(truncate(left, width), truncate(right, width))
+      case IntegerOperation.ShiftLeft         => left << (right & (width.value - 1).toLong).toInt
+      case IntegerOperation.ShiftRightLogical =>
+        if (width.value == 32) Bits.low32(left) >>> (right & 31L).toInt
+        else left >>> (right & 63L).toInt
+      case IntegerOperation.ShiftRightArithmetic =>
+        if (width.value == 32) (left.toInt >> (right & 31L).toInt).toLong
+        else left >> (right & 63L).toInt
+    }
+    truncate(result, width)
+  }
+
+  private def floatBinaryBits(
+      operation: FloatOperation,
+      leftBits: Long,
+      rightBits: Long,
+      width: FloatWidth
+  ): Long =
+    if (width.value == 16) {
+      val left   = IEEE754.binary16ToFloat(Binary16.low(leftBits))
+      val right  = IEEE754.binary16ToFloat(Binary16.low(rightBits))
+      val result = operation match {
+        case FloatOperation.Add      => left + right
+        case FloatOperation.Subtract => left - right
+        case FloatOperation.Multiply => left * right
+        case FloatOperation.Divide   => left / right
+        case FloatOperation.Minimum  => Math.min(left, right)
+        case FloatOperation.Maximum  => Math.max(left, right)
+        case FloatOperation.CopySign => Math.copySign(right, left)
+      }
+      IEEE754.floatToBinary16(result).value
+    } else if (width.value == 32) {
+      val left   = IEEE754.binary32ToFloat(Binary32.low(leftBits))
+      val right  = IEEE754.binary32ToFloat(Binary32.low(rightBits))
+      val result = operation match {
+        case FloatOperation.Add      => left + right
+        case FloatOperation.Subtract => left - right
+        case FloatOperation.Multiply => left * right
+        case FloatOperation.Divide   => left / right
+        case FloatOperation.Minimum  => Math.min(left, right)
+        case FloatOperation.Maximum  => Math.max(left, right)
+        case FloatOperation.CopySign => Math.copySign(right, left)
+      }
+      IEEE754.floatToBinary32(result).value
+    } else {
+      val left   = IEEE754.binary64ToDouble(leftBits)
+      val right  = IEEE754.binary64ToDouble(rightBits)
+      val result = operation match {
+        case FloatOperation.Add      => left + right
+        case FloatOperation.Subtract => left - right
+        case FloatOperation.Multiply => left * right
+        case FloatOperation.Divide   => left / right
+        case FloatOperation.Minimum  => Math.min(left, right)
+        case FloatOperation.Maximum  => Math.max(left, right)
+        case FloatOperation.CopySign => Math.copySign(right, left)
+      }
+      IEEE754.doubleToBinary64(result)
+    }
+
+  private def fusedMultiplyAddBits(leftBits: Long, rightBits: Long, addendBits: Long, width: FloatWidth): Long =
+    if (width.value == 16)
+      IEEE754.floatToBinary16(
+        Math.fma(
+          IEEE754.binary16ToFloat(Binary16.low(leftBits)),
+          IEEE754.binary16ToFloat(Binary16.low(rightBits)),
+          IEEE754.binary16ToFloat(Binary16.low(addendBits))
+        )
+      ).value
+    else if (width.value == 32)
+      IEEE754.floatToBinary32(
+        Math.fma(
+          IEEE754.binary32ToFloat(Binary32.low(leftBits)),
+          IEEE754.binary32ToFloat(Binary32.low(rightBits)),
+          IEEE754.binary32ToFloat(Binary32.low(addendBits))
+        )
+      ).value
+    else
+      IEEE754.doubleToBinary64(
+        Math.fma(
+          IEEE754.binary64ToDouble(leftBits),
+          IEEE754.binary64ToDouble(rightBits),
+          IEEE754.binary64ToDouble(addendBits)
+        )
+      )
+
   // Sign-bit operations return before the floating conversion path.
   @SuppressWarnings(Array("scalafix:DisableSyntax.return"))
   private def floatUnaryBits(operation: FloatUnaryOperation, bits: Long, width: FloatWidth): Long =
@@ -2239,7 +2166,7 @@ private object VMSemantics {
           IEEE754.floatToBinary16(result).value
       }
     } else if (width.value == 32) {
-      val value  = IEEE754.binary32ToFloat(Binary32.low(bits & 0xffffffffL))
+      val value  = IEEE754.binary32ToFloat(Binary32.low(bits))
       val result = operation match {
         case FloatUnaryOperation.Negate               => return bits ^ (1L << 31)
         case FloatUnaryOperation.Absolute             => Math.abs(value)
@@ -2272,8 +2199,8 @@ private object VMSemantics {
 
   private def packedFloatValue(bits: Long, bf16: Boolean): Float =
     if (bf16)
-      IEEE754.binary32ToFloat(Binary32.low((truncate(bits, BitWidth(16)) << 16) & 0xffffffffL))
-    else IEEE754.binary16ToFloat(Binary16.low(bits & 0xffffL))
+      IEEE754.binary32ToFloat(Binary32.low(truncate(bits, BitWidth(16)) << 16))
+    else IEEE754.binary16ToFloat(Binary16.low(bits))
 
   private def packedFloatBits(value: Float, bf16: Boolean): Long =
     if (bf16) bfloat16FromFloat(value, Some(ConversionRounding.RN)) else IEEE754.floatToBinary16(value).value
@@ -2319,9 +2246,9 @@ private object VMSemantics {
   private def bf16FmaBits(left: Long, right: Long, addend: Long): Long =
     bfloat16FromFloat(
       Math.fma(
-        IEEE754.binary32ToFloat(Binary32.low((truncate(left, BitWidth(16)) << 16) & 0xffffffffL)),
-        IEEE754.binary32ToFloat(Binary32.low((truncate(right, BitWidth(16)) << 16) & 0xffffffffL)),
-        IEEE754.binary32ToFloat(Binary32.low((truncate(addend, BitWidth(16)) << 16) & 0xffffffffL))
+        IEEE754.binary32ToFloat(Binary32.low(truncate(left, BitWidth(16)) << 16)),
+        IEEE754.binary32ToFloat(Binary32.low(truncate(right, BitWidth(16)) << 16)),
+        IEEE754.binary32ToFloat(Binary32.low(truncate(addend, BitWidth(16)) << 16))
       ),
       Some(ConversionRounding.RN)
     )
@@ -2534,10 +2461,10 @@ private object VMSemantics {
     val (order, unordered) =
       if (kind == 'f' || kind == 'b') {
         val leftFloat =
-          if (kind == 'b') IEEE754.binary32ToFloat(Binary32.low((leftValue << 16) & 0xffffffffL)).toDouble
+          if (kind == 'b') IEEE754.binary32ToFloat(Binary32.low(leftValue << 16)).toDouble
           else IEEE754.toDouble(leftValue, FloatingPointWidth.applyUnsafe(width.value))
         val rightFloat =
-          if (kind == 'b') IEEE754.binary32ToFloat(Binary32.low((rightValue << 16) & 0xffffffffL)).toDouble
+          if (kind == 'b') IEEE754.binary32ToFloat(Binary32.low(rightValue << 16)).toDouble
           else IEEE754.toDouble(rightValue, FloatingPointWidth.applyUnsafe(width.value))
         val order = if (leftFloat < rightFloat) -1 else if (leftFloat > rightFloat) 1 else 0
         order -> (leftFloat.isNaN || rightFloat.isNaN)

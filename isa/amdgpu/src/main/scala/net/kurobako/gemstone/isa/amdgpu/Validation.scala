@@ -3,6 +3,8 @@ package net.kurobako.gemstone.isa.amdgpu
 import net.kurobako.gemstone.Vec
 import net.kurobako.gemstone.Vec.*
 import net.kurobako.gemstone.isa.ValidationOutcome
+import Metadata.*
+import Program.*
 
 import io.github.iltotore.iron.*
 
@@ -12,8 +14,8 @@ import io.github.iltotore.iron.*
 object Validation {
   enum Issue {
     case WrongFamily(target: Target, expected: Family)
-    case UnsupportedInstruction(opcode: AMDGPUOpcode, target: Target)
-    case InvalidInstruction(opcode: AMDGPUOpcode, message: String)
+    case UnsupportedInstruction(opcode: Opcode, target: Target)
+    case InvalidInstruction(opcode: Opcode, message: String)
     case Incomplete(detail: String)
   }
 

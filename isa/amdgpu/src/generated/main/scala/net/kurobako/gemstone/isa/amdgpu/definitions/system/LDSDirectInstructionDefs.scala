@@ -3,18 +3,20 @@
 package net.kurobako.gemstone.isa.amdgpu
 
 import net.kurobako.gemstone.Vec
+import Instruction.*
+import Program.*
 
 private[amdgpu] object LDSDirectInstructionDefs {
-  case object LdsDirectLoad extends InstructionDef(
-        AMDGPUOpcode.assume("lds_direct_load"),
+  case object LdsDirectLoad extends Definition(
+        Opcode.assume("lds_direct_load"),
         decoder(form(1)((operands, mods) => Instruction.LdsDirectLoad(operands(0), mods))),
         825
       )
-  case object LdsParamLoad extends InstructionDef(
-        AMDGPUOpcode.assume("lds_param_load"),
+  case object LdsParamLoad extends Definition(
+        Opcode.assume("lds_param_load"),
         decoder(form(2)((operands, mods) => Instruction.LdsParamLoad(operands(0), operands(1), mods))),
         826
       )
 
-  val definitions: Vec[InstructionDef] = Vec(LdsDirectLoad, LdsParamLoad)
+  val definitions: Vec[Definition] = Vec(LdsDirectLoad, LdsParamLoad)
 }

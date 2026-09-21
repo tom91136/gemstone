@@ -2,8 +2,12 @@ package net.kurobako.gemstone.isa.amdgpu
 
 import net.kurobako.gemstone.Vec
 import net.kurobako.gemstone.binary.Bits
+import net.kurobako.gemstone.binary.IntFieldWidth
 import net.kurobako.gemstone.binary.LittleEndian
 import net.kurobako.gemstone.binary.ScalarByteWidth
+import EncodingConstants.*
+import Metadata.*
+import Program.*
 
 import cats.syntax.all.*
 
@@ -13,10 +17,10 @@ import cats.syntax.all.*
 object Binary {
   enum CodecError {
     case WrongFamily(target: Target, expected: Family)
-    case UnsupportedInstruction(opcode: AMDGPUOpcode, target: Target)
-    case UnsupportedFormat(opcode: AMDGPUOpcode, target: Target, formats: Vec[String])
-    case UnsupportedOperandSyntax(opcode: AMDGPUOpcode, target: Target, operands: Vec[Operand])
-    case AmbiguousInstruction(opcode: AMDGPUOpcode, target: Target)
+    case UnsupportedInstruction(opcode: Opcode, target: Target)
+    case UnsupportedFormat(opcode: Opcode, target: Target, formats: Vec[String])
+    case UnsupportedOperandSyntax(opcode: Opcode, target: Target, operands: Vec[Operand])
+    case AmbiguousInstruction(opcode: Opcode, target: Target)
     case InvalidOperand(message: String)
     case InvalidEncoding(message: String)
   }
@@ -36,7 +40,10 @@ object Binary {
         encodeSOPP(instruction, target).leftMap {
           case CodecError.InvalidOperand(_)
               if instruction.mods.nonEmpty ||
-                instruction.operands.exists(!_.isInstanceOf[Operand.IntegerLiteral]) =>
+                instruction.operands.exists {
+                  case Operand.IntegerLiteral(_, _) => false
+                  case _                            => true
+                } =>
             CodecError.UnsupportedOperandSyntax(instruction.opcode, target, instruction.operands)
           case error => error
         }
@@ -75,7 +82,7 @@ object Binary {
       if ((word & SOPPMask) != SOPPEncodingPrefix)
         Left(CodecError.InvalidEncoding(f"not a SOPP word: 0x$word%08x"))
       else {
-        val opcode  = ((word >>> SOPPOpcodeShift) & 0x7fL).toInt
+        val opcode  = Bits.unsignedIntField(word, SOPPOpcodeShift, IntFieldWidth(7))
         val matches = Instruction.definitions.filter(definition =>
           encodingsFor(definition, target).exists(info => info.format.value == "SOPP" && info.opcode == opcode)
         )
@@ -96,9 +103,15 @@ object Binary {
                 if (!matches.exists(_.decoder.operandCounts.contains(0)) || value != 0)
                   Vec(Operand.IntegerLiteral(value, 10))
                 else Vec.empty[Operand]
-              Instruction.decode(definition.opcode.value, operands).leftMap(error =>
-                CodecError.InvalidEncoding(s"generated instruction decoder rejected ${definition.opcode}: $error")
-              )
+              definition.decode(operands, Vec.empty) match {
+                case Vec(instruction) => Right(instruction)
+                case Vec()            => Left(CodecError.InvalidEncoding(
+                    s"generated instruction decoder rejected ${definition.opcode}: expected ${definition.decoder.operandCounts.mkString(" or ")} operands, found ${operands.size}"
+                  ))
+                case _ => Left(CodecError.InvalidEncoding(
+                    s"generated instruction decoder produced ambiguous ${definition.opcode} forms"
+                  ))
+              }
             }
       }
     }

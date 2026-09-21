@@ -2,12 +2,10 @@ package net.kurobako.gemstone.isa.ptx.v9_3
 
 import Program.*
 
-import VirtualMachine.*
-
 import net.kurobako.gemstone.Vec
 import net.kurobako.gemstone.isa.ValidationOutcome
 
-import cats.syntax.all.*
+import cats.syntax.either.*
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 
@@ -48,18 +46,6 @@ object ISA {
     }
   }
 
-  enum CompileError {
-    case Syntax(error: ParseError)
-    case MissingEntry
-    case Lowering(error: net.kurobako.gemstone.isa.ptx.v9_3.Lowering.LoweringError)
-
-    def message: String = this match {
-      case Syntax(error)   => error.message
-      case MissingEntry    => "missing .entry declaration"
-      case Lowering(error) => error.message
-    }
-  }
-
   val version: Version                          = Instruction.version
   val instructions: Vec[Instruction.Definition] = Instruction.definitions
 
@@ -70,15 +56,4 @@ object ISA {
   def validate(program: Program, target: Target): ValidationOutcome[Validator.Issue] =
     Validator.validate(program, version, target)
 
-  def lower(entry: Statement.Entry): Either[Lowering.LoweringError, Kernel] = Lowering.lower(entry)
-
-  def compile(source: String): Either[CompileError, Kernel] =
-    parse(source).leftMap(CompileError.Syntax(_)).flatMap { program =>
-      program.statements.collectFirst { case entry: Statement.Entry => entry }
-        .toRight(CompileError.MissingEntry)
-        .flatMap(entry =>
-          Lowering.lower(entry, program.statements.collect { case function: Statement.Function => function })
-            .leftMap(CompileError.Lowering(_))
-        )
-    }
 }

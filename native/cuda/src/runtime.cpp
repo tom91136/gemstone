@@ -3988,7 +3988,7 @@ int32_t cuModuleLoadData(void **module, const void *image) noexcept {
     auto entry = std::make_unique<Module>();
     entry->context = context;
     const auto *imageBytes = reinterpret_cast<const uint8_t *>(imageText);
-    auto loaded = client->call(LoadProgram{ProgramFormat::PTXText, std::vector<uint8_t>(imageBytes, imageBytes + size)});
+    auto loaded = client->call(LoadProgram{"ptx-text", std::vector<uint8_t>(imageBytes, imageBytes + size)});
     if (!loaded) return CUDA_ERROR_UNKNOWN;
 
     entry->program = static_cast<uint64_t>(loaded.value().value);

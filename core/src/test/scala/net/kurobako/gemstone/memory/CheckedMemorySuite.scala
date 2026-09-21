@@ -32,14 +32,17 @@ final class CheckedMemorySuite extends munit.FunSuite {
     val start  = memory.allocation.start
     memory.free()
 
-    assert(memory.readInt32(start).left.exists(_.isInstanceOf[MemoryError.UseAfterFree]))
+    assert(memory.readInt32(start).left.exists {
+      case MemoryError.UseAfterFree(_, _) => true
+      case _                              => false
+    })
   }
 
   test("dynamic memory resolves ordered allocations before delegating") {
     val delegate = ArrayCheckedMemory.allocate(4, GuestAddress(0x1000L), provenance = "delegate")
     val memory   = DynamicAddressMemory(delegate, DynamicAddressMemory.State(GuestAddress(0x2000L)))
-    val first    = allocate(memory, DeviceAllocationByteSize(4L), Vec[Byte](1, 2, 3, 4))
-    val second   = allocate(memory, DeviceAllocationByteSize(4L), Vec[Byte](5, 6, 7, 8))
+    val first    = allocate(memory, DeviceAllocationByteSize(4), Vec[Byte](1, 2, 3, 4))
+    val second   = allocate(memory, DeviceAllocationByteSize(4), Vec[Byte](5, 6, 7, 8))
 
     assertEquals(memory.readInt32(first), Right(0x04030201))
     assertEquals(memory.readInt32(second), Right(0x08070605))
@@ -60,7 +63,7 @@ final class CheckedMemorySuite extends munit.FunSuite {
     assertEquals(delegate.readInt8(address), Right(0x11.toByte))
     assert(memory.writeLittleEndian(delegate.allocation.start.offset(12L), 0L, quadWord).isLeft)
     assertEquals(memory.readLittleEndian(address, quadWord), Right(value))
-    val allocated = allocate(memory, DeviceAllocationByteSize(8L))
+    val allocated = allocate(memory, DeviceAllocationByteSize(8))
     assertEquals(memory.writeLittleEndian(allocated, value, quadWord), Right(()))
     assertEquals(memory.readLittleEndian(allocated, quadWord), Right(value))
     assertEquals(memory.readLittleEndian(address, quadWord), Right(value))
@@ -89,7 +92,7 @@ final class CheckedMemorySuite extends munit.FunSuite {
       }
     }
     val memory    = DynamicAddressMemory(BulkDelegate())
-    val allocated = allocate(memory, DeviceAllocationByteSize(8L))
+    val allocated = allocate(memory, DeviceAllocationByteSize(8))
     assert(allocated.value != 0L)
     val value = 0x123456789abcdef0L
     assertEquals(memory.writeLittleEndian(backing.allocation.start, value, quadWord), Right(()))
@@ -101,7 +104,7 @@ final class CheckedMemorySuite extends munit.FunSuite {
   test("word accesses crossing dynamic ownership retain per-byte routing and bounds") {
     val backing = ArrayCheckedMemory.allocate(16, GuestAddress(0x1000L))
     val memory  = DynamicAddressMemory(backing, DynamicAddressMemory.State(GuestAddress(0x1004L)))
-    val address = allocate(memory, DeviceAllocationByteSize(4L))
+    val address = allocate(memory, DeviceAllocationByteSize(4))
     val start   = backing.allocation.start.offset(2)
     val value   = 0x8877665544332211L
     assertEquals(memory.writeLittleEndian(start, value, quadWord), Right(()))
@@ -148,7 +151,7 @@ final class CheckedMemorySuite extends munit.FunSuite {
     val delegate = BulkMemory()
     val first    = DynamicAddressMemory(delegate, state)
     val second   = DynamicAddressMemory(delegate, state)
-    val owned    = allocate(first, DeviceAllocationByteSize(16L))
+    val owned    = allocate(first, DeviceAllocationByteSize(16))
     val bytes    = Vec.from((1 to 16).map(_.toByte))
     assertEquals(first.writeBytes(owned, bytes), Right(()))
     assertEquals(second.readBytes(owned, 16), Right(bytes))
@@ -163,7 +166,7 @@ final class CheckedMemorySuite extends munit.FunSuite {
   test("wide mixed overlay ranges preserve per-byte ownership and failed-write contents") {
     val backing = ArrayCheckedMemory.allocate(16, GuestAddress(0x1000L))
     val memory  = DynamicAddressMemory(backing, DynamicAddressMemory.State(GuestAddress(0x1004L)))
-    val owned   = allocate(memory, DeviceAllocationByteSize(4L))
+    val owned   = allocate(memory, DeviceAllocationByteSize(4))
     val bytes   = Vec.from((1 to 16).map(_.toByte))
     assertEquals(memory.writeBytes(backing.allocation.start, bytes), Right(()))
     assertEquals(memory.readBytes(backing.allocation.start, 16), Right(bytes))

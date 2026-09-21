@@ -207,9 +207,13 @@ private:
   }
 
   void loadProgram(int connection, const std::vector<uint8_t> &payload) {
-    REQUIRE((gemstone_test::wire::readBigEndian<uint64_t>(payload.data()) == tag::ProgramFormatSPIRVBinary));
-    REQUIRE((gemstone_test::wire::readBigEndian<uint32_t>(payload.data() + 8) >= 4));
-    REQUIRE((payload[12] == 3 && payload[13] == 2 && payload[14] == 35 && payload[15] == 7));
+    const auto encodingSize = gemstone_test::wire::readBigEndian<uint32_t>(payload.data());
+    REQUIRE((encodingSize == std::string_view{"spirv-binary"}.size()));
+    REQUIRE((std::string_view{reinterpret_cast<const char *>(payload.data() + 4), encodingSize} == "spirv-binary"));
+    const auto imageOffset = 4 + encodingSize;
+    REQUIRE((gemstone_test::wire::readBigEndian<uint32_t>(payload.data() + imageOffset) >= 4));
+    REQUIRE((payload[imageOffset + 4] == 3 && payload[imageOffset + 5] == 2 && payload[imageOffset + 6] == 35
+             && payload[imageOffset + 7] == 7));
     std::vector<uint8_t> response;
     gemstone_test::wire::appendBigEndian<uint64_t>(response, programId);
     respond(connection, response);

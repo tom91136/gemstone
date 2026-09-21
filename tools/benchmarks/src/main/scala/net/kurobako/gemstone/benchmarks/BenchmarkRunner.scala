@@ -5,17 +5,7 @@ import com.monovore.decline.Command
 import com.monovore.decline.Opts
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
-import net.kurobako.gemstone.{NoNul, PlatformTime}
-
-type BenchmarkName = BenchmarkName.T
-object BenchmarkName extends RefinedType[String, MinLength[1] & NoNul]
-
-final case class BenchmarkInvocation(name: BenchmarkName, arguments: Vector[String])
-final case class BenchmarkOptions(
-    warmups: Int :| Positive0,
-    samples: Int :| Positive,
-    invocation: BenchmarkInvocation
-)
+import net.kurobako.gemstone.PlatformTime
 
 object BenchmarkRunner {
   private sealed trait Action

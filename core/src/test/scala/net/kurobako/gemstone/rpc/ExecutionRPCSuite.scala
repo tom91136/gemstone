@@ -1,9 +1,9 @@
 package net.kurobako.gemstone.rpc
 
 import net.kurobako.gemstone.Vec
-import net.kurobako.gemstone.execution.*
 import net.kurobako.gemstone.memory.{AllocationKind, GuestAddress}
 import net.kurobako.gemstone.rpc.ExecutionRPC.Operation
+import net.kurobako.gemstone.rpc.ExecutionProtocol.*
 
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
@@ -20,7 +20,7 @@ final class ExecutionRPCSuite extends munit.FunSuite {
     Operation.ReleaseAllocation(allocation),
     Operation.WriteAllocation(allocation, 4, Vec[Byte](1, 2, 3)),
     Operation.ReadAllocation(allocation, 4, 3),
-    Operation.LoadProgram(ProgramFormat.SPIRVBinary, Vec[Byte](3, 2, 35, 7)),
+    Operation.LoadProgram("spirv-binary", Vec[Byte](3, 2, 35, 7)),
     Operation.UnloadProgram(program),
     Operation.DescribeProgram(program),
     Operation.DescribeKernel(program, KernelName("kernel")),

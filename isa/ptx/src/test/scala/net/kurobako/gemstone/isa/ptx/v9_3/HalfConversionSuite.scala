@@ -2,12 +2,13 @@ package net.kurobako.gemstone.isa.ptx.v9_3
 
 import Program.*
 
-import VirtualMachine.*
+import VMIR.*
 
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
-import net.kurobako.gemstone.execution.*
 import net.kurobako.gemstone.memory.*
+import net.kurobako.gemstone.vm.LaunchGeometry
+import net.kurobako.gemstone.vm.LaunchGeometry.Dimensions
 final class HalfConversionSuite extends munit.FunSuite {
   test("cvt.rn.f16.f64 rounds directly at a half midpoint") {
     val input  = java.lang.Double.doubleToRawLongBits(1 + math.pow(2, -11) + math.pow(2, -25))
@@ -25,14 +26,13 @@ st.global.b16 [%out], %h;
 ret;
 }
 """
-    val kernel = ISA.compile(source).fold(error => fail(error.message), value => value)
+    val kernel = VMCompiler.compile(source).fold(error => fail(error.message), value => value)
     val memory = ArrayCheckedMemory.allocate(2, GuestAddress(0x10000))
-    assert(VirtualMachine.execute(
+    assert(VMInterpreter.execute(
       kernel,
       LaunchGeometry.forLaunch(Dimensions.One, Dimensions.One).toOption.get,
       Map(ParameterName("output") -> Argument(memory.allocation.start.value)),
-      memory,
-      captureTrace = false
+      memory
     ).isRight)
     assertEquals(memory.readLittleEndian(memory.allocation.start, MemoryValueByteWidth(2)), Right(0x3c01L))
   }

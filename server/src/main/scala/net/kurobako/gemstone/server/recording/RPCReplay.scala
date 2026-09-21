@@ -1,11 +1,11 @@
 package net.kurobako.gemstone.server.recording
 
 import net.kurobako.gemstone.PlatformTime
-import net.kurobako.gemstone.execution.CompletionStatus
 import net.kurobako.gemstone.rpc.ExecutionRPC
+import net.kurobako.gemstone.rpc.ExecutionProtocol.CompletionStatus
 import net.kurobako.gemstone.rpc.ExecutionRPC.Operation
 import net.kurobako.gemstone.rpc.Wire
-import net.kurobako.gemstone.server.transport.{ClientId, ControlProtocol, RPCPort}
+import net.kurobako.gemstone.server.transport.{ClientId, RPCPort, ServerControl}
 
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
@@ -89,23 +89,10 @@ private[gemstone] object RPCReplay {
     private def report: Report =
       Report(cursor.refineUnsafe[Positive0], requests.refineUnsafe[Positive0], polls.refineUnsafe[Positive0])
 
-    private def registerClient(): ClientId =
-      Using.resource(connect(endpoint, options.timeoutMillis)) { wire =>
-        wire.output.writeInt(ControlProtocol.Magic)
-        wire.output.writeInt(ControlProtocol.RegisterClient)
-        wire.output.flush()
-        ClientId.either(wire.input.readLong())
-          .fold(message => throw IOException(s"RPC replay: invalid assigned client identity: $message"), value => value)
-      }
+    private def registerClient(): ClientId = ServerControl.register(endpoint.port, options.timeoutMillis)
 
     private def releaseClient(client: ClientId): Unit =
-      Using.resource(connect(endpoint, options.timeoutMillis)) { wire =>
-        wire.output.writeInt(ControlProtocol.Magic)
-        wire.output.writeInt(ControlProtocol.ReleaseClient)
-        wire.output.writeLong(client.value)
-        wire.output.flush()
-        if (wire.input.readInt() != 0) throw IOException("RPC replay: client close was rejected")
-      }
+      ServerControl.release(endpoint.port, client, options.timeoutMillis)
 
     private def assignedClient(client: RPCJournal.RecordedClientId): ClientId = clients.get(client) match {
       case Some(assigned) => assigned
@@ -228,7 +215,7 @@ private[gemstone] object RPCReplay {
         Using.Manager { use =>
           val _ = use(endpoint)
           val _ = use(reader)
-          connections.valuesIterator.foreach { active =>
+          connections.values.view.foreach { active =>
             val _ = use(active.wire)
           }
           connections.clear()

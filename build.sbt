@@ -3,9 +3,11 @@ import sbt.internal.util.MessageOnlyException
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
+import java.util.concurrent.TimeUnit
 import scala.jdk.CollectionConverters.*
 import scala.language.implicitConversions
 import scala.sys.process.{Process, ProcessLogger}
+import scala.util.control.NonFatal
 
 import Paths.{*, given}
 import ExternalProjectPlugin.autoImport.*
@@ -225,7 +227,123 @@ def runConformance(
   require(status == 0, s"conformance run exited with $status")
 }
 
+def awaitGemstoneServerPort(portFile: Path, server: scala.sys.process.Process): Int = {
+  val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30)
+  var port     = Option.empty[Int]
+  while (port.isEmpty && server.isAlive() && System.nanoTime() < deadline) {
+    if (Files.isRegularFile(portFile))
+      port = Files.readString(portFile, StandardCharsets.US_ASCII).trim.toIntOption
+        .filter(value => value >= 1 && value <= 65535)
+    if (port.isEmpty) Thread.sleep(25L)
+  }
+  port.getOrElse {
+    val reason = if (server.isAlive()) "did not publish a port" else s"exited with ${server.exitValue()}"
+    throw MessageOnlyException(s"Gemstone conformance server $reason")
+  }
+}
+
+def withGemstoneServer(
+    root: Path,
+    serverCommand: Seq[String],
+    clientCommand: Seq[String],
+    environment: Seq[(String, String)],
+    log: String => Unit,
+    error: String => Unit
+)(run: Int => Unit): Unit = {
+  val parent = root / "target/conformance"
+  Files.createDirectories(parent)
+  val directory = Files.createTempDirectory(parent, "server-")
+  val portFile  = directory / "port"
+  val server    = try
+    Process(serverCommand ++ Seq("serve", "--port-file", s"$portFile"), root.toFile, environment *)
+      .run(ProcessLogger(log, error))
+  catch {
+    case NonFatal(failure) =>
+      Files.deleteIfExists(portFile)
+      Files.deleteIfExists(directory)
+      throw failure
+  }
+  val shutdownHook = Thread(() => server.destroy(), "gemstone-conformance-server-cleanup")
+  sys.runtime.addShutdownHook(shutdownHook)
+  var port = Option.empty[Int]
+  try {
+    val activePort = awaitGemstoneServerPort(portFile, server)
+    port = Some(activePort)
+    run(activePort)
+  } finally {
+    port match {
+      case Some(activePort) if server.isAlive() =>
+        try {
+          val status = Process(clientCommand ++ Seq("shutdown", "--port", activePort.toString), root.toFile).!
+          if (status != 0) server.destroy()
+        } catch {
+          case NonFatal(failure) =>
+            error(s"cannot stop Gemstone conformance server: ${failure.getMessage}"); server.destroy()
+        }
+      case None if server.isAlive() => server.destroy()
+      case _                        =>
+    }
+    try {
+      val _ = server.exitValue()
+      Files.deleteIfExists(portFile)
+      Files.deleteIfExists(directory)
+    } finally
+      try sys.runtime.removeShutdownHook(shutdownHook)
+      catch { case _: IllegalStateException => () }
+  }
+}
+
 private val nativeSourceExtensions = Set("c", "cc", "cpp", "cxx", "cu", "h", "hh", "hip", "hpp", "hxx")
+
+private val authoredTextExtensions = Set(
+  "c",
+  "cc",
+  "cmake",
+  "conf",
+  "cpp",
+  "cu",
+  "cxx",
+  "h",
+  "hh",
+  "hip",
+  "hpp",
+  "hxx",
+  "java",
+  "json",
+  "kt",
+  "md",
+  "py",
+  "sbt",
+  "scala",
+  "sh",
+  "toml",
+  "txt",
+  "yaml",
+  "yml"
+)
+
+private val authoredTextFileNames = Set(".clang-format", ".scalafix.conf", ".scalafmt.conf", "CMakeLists.txt")
+
+def authoredTextFiles(root: Path): Vector[Path] = {
+  val ignoredSegments = Set(".bloop", ".git", ".metals", "licenses", "target")
+  root.descendants("*").iterator
+    .filter(_.isFile)
+    .filter { path =>
+      val relative  = root.relativize(path.absolute)
+      val segments  = relative.iterator.asScala.map(name => s"$name").toVector
+      val name      = path.fileName
+      val dot       = name.lastIndexOf('.')
+      val extension = Option.when(dot >= 0)(name.substring(dot + 1).toLowerCase)
+      !segments.exists(ignoredSegments) &&
+      name != "PLAN.md" &&
+      name != "CLEAN_UP_PLAN.md" &&
+      !name.toUpperCase.startsWith("LICENSE") &&
+      !name.toUpperCase.startsWith("LICENCE") &&
+      (authoredTextFileNames(name) || extension.exists(authoredTextExtensions))
+    }
+    .toVector
+    .sortBy(path => s"$path")
+}
 
 def nativeSourceFiles(roots: Seq[Path]): Vector[Path] =
   roots.iterator
@@ -454,6 +572,7 @@ lazy val nativeSourceDirectories =
   settingKey[Seq[Path]]("C and C++ source trees governed by the native codestyle checks.")
 lazy val nativeFormatCheck     = taskKey[Unit]("Verify hand-written C and C++ sources are clang-formatted.")
 lazy val nativeCodestyleCheck  = taskKey[Unit]("Verify project-specific C and C++ source conventions.")
+lazy val terminologyCheck      = taskKey[Unit]("Verify repository-authored sources use precise terminology.")
 lazy val nativeArtifact        = taskKey[Path]("Built native runtime directory.")
 lazy val conformanceExecutable = taskKey[Path]("Built native conformance executable.")
 lazy val gemstoneRun           = inputKey[Unit]("Build Gemstone and run a command through selected compute APIs.")
@@ -1329,38 +1448,65 @@ lazy val conformance = project.in(file("conformance"))
       val nativeDirectory = (native / nativeArtifact).value.absolute
       val converter       = fileConverter.value
       val log             = streams.value.log
-      val classpath       = (server.jvm(scala3Version) / Runtime / fullClasspath).value
+      val cores           = sys.runtime.availableProcessors()
+      val jobs            = positiveEnvironmentInt("CONFORMANCE_JOBS", math.max(1, math.min(4, cores / 4)))
+      val workers         = positiveEnvironmentInt(
+        "GEMSTONE_EXECUTION_PARALLELISM",
+        math.max(1, math.min(64, cores - jobs - 2))
+      )
+      val classpath = (server.jvm(scala3Version) / Runtime / fullClasspath).value
         .map(entry => s"${converter.toPath(entry.data)}")
         .mkString(sys.props("path.separator"))
       val java = path"${sys.props("java.home")}" / "bin" /
         (if (sys.props("os.name").toLowerCase.contains("windows")) "java.exe" else "java")
-      val launcher = Vector(
+      val serverCommand = Vector(
         s"$java",
         "-Xms512m",
         s"-Xmx${sys.env.getOrElse("GEMSTONE_CONFORMANCE_SERVER_HEAP", "8g")}",
         "-cp",
         classpath,
-        s"$rootPackage.server.cli.GemstoneCLI",
-        "run"
+        s"$rootPackage.server.cli.GemstoneCLI"
       )
-      runConformance(
+      val clientCommand = Vector(
+        s"$java",
+        "-Xms32m",
+        "-Xmx256m",
+        "-XX:+UseSerialGC",
+        "-XX:ActiveProcessorCount=1",
+        "-cp",
+        classpath,
+        s"$rootPackage.server.cli.GemstoneCLI"
+      )
+      val environment = Seq(
+        "CONFORMANCE_JOBS"                    -> jobs.toString,
+        "GEMSTONE_EXECUTION_PARALLELISM"      -> workers.toString,
+        "GEMSTONE_NATIVE_DIRECTORY"           -> s"$nativeDirectory",
+        "GEMSTONE_EXECUTION_MAX_INSTRUCTIONS" -> sys.env.getOrElse(
+          "GEMSTONE_EXECUTION_MAX_INSTRUCTIONS",
+          "1000000000"
+        )
+      )
+      withGemstoneServer(
         root = root,
-        artifacts = root / "target/conformance/artifacts",
-        executable = conformanceExecutable.value,
-        ctest = nonEmptyCommand("CTEST", (Global / ctestExecutable).value),
-        arguments = arguments :+ "--isolated-launcher",
-        output = root / "target/conformance/emulated",
-        launcher = launcher,
-        environment = Seq(
-          "GEMSTONE_NATIVE_DIRECTORY"           -> s"$nativeDirectory",
-          "GEMSTONE_EXECUTION_MAX_INSTRUCTIONS" -> sys.env.getOrElse(
-            "GEMSTONE_EXECUTION_MAX_INSTRUCTIONS",
-            "1000000000"
-          )
-        ),
+        serverCommand = serverCommand,
+        clientCommand = clientCommand,
+        environment = environment,
         log = log.info,
         error = log.error
-      )
+      ) { port =>
+        runConformance(
+          root = root,
+          artifacts = root / "target/conformance/artifacts",
+          executable = conformanceExecutable.value,
+          ctest = nonEmptyCommand("CTEST", (Global / ctestExecutable).value),
+          arguments = arguments :+ "--isolated-launcher",
+          output = root / "target/conformance/emulated",
+          launcher = clientCommand ++ Seq("run", "--server-port", port.toString),
+          environment = environment,
+          log = log.info,
+          error = log.error
+        )
+      }
     },
     cleanFiles := Seq((LocalRootProject / baseDirectory).value.toPath / "target/conformance")
   )
@@ -1378,8 +1524,24 @@ lazy val gemstone = project.in(file("."))
   .dependsOn(codestyleRules % ScalafixConfig)
   .settings(
     commonSettings,
-    name                  := "gemstone",
-    publish / skip        := true,
+    name             := "gemstone",
+    publish / skip   := true,
+    terminologyCheck := Def.uncached {
+      val root       = baseDirectory.value.toPath.absolute
+      val stem       = "con" + "tract"
+      val lowerWord  = raw"\b${stem}s?\b"
+      val camelWord  = s"${stem.capitalize}s?(?=\\z|[^a-z])"
+      val upperWord  = s"${stem.toUpperCase}s?(?=\\z|[^A-Z])"
+      val prohibited = s"(?:$lowerWord|$camelWord|$upperWord)".r
+      val violations = authoredTextFiles(root).flatMap { source =>
+        Files.readAllLines(source, StandardCharsets.UTF_8).asScala.iterator.zipWithIndex.collect {
+          case (line, index) if prohibited.findFirstIn(line).nonEmpty =>
+            s"${root.relativize(source)}:${index + 1}: prohibited vague terminology"
+        }
+      }
+      violations.foreach(violation => streams.value.log.error(violation))
+      require(violations.isEmpty, s"found ${violations.size} terminology violations")
+    },
     checkGeneratedSources := {
       val _ = (codegenProject / checkGeneratedAPISources).value
       val _ = (codegenProject / checkGeneratedNativeBindings).value
@@ -1428,5 +1590,5 @@ lazy val gemstone = project.in(file("."))
 
 addCommandAlias(
   "lint",
-  ";checkGeneratedSources;scalafmtCheckAll;scalafixAll --check;native/lint;conformance/lint"
+  ";terminologyCheck;checkGeneratedSources;scalafmtCheckAll;scalafixAll --check;native/lint;conformance/lint"
 )

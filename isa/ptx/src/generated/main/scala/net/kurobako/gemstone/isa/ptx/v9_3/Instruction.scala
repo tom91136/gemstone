@@ -2301,7 +2301,7 @@ object Instruction {
               pred: Option[Predication]
           ) => {
             if (operands.size == 1 || operands.size == 2 || operands.size == 3 || operands.size == 4) Right(if (
-              operands.size >= 2 && operands(0).isInstanceOf[Operand.Parenthesized]
+              operands.size >= 2 && Operand.isParenthesized(operands(0))
             ) Instruction.Call(Some(operands(0)), operands(1), operands.lift(2), operands.lift(3), mods, pred)
             else Instruction.Call(None, operands(0), operands.lift(1), operands.lift(2), mods, pred))
             else Left(Instruction.DecodeError.InvalidOperandCount("call", Vec(1, 2, 3, 4), operands.size))
@@ -8177,7 +8177,7 @@ object Instruction {
           ) => {
             if (operands.size == 3 || operands.size == 4 || operands.size == 5) Right(if (operands.size == 3)
               Instruction.MbarrierTryWait(operands(0), None, operands(1), operands(2), None, mods, pred)
-            else if (operands.size == 4 && !operands(0).isInstanceOf[Operand.WithPredicate])
+            else if (operands.size == 4 && !Operand.isWithPredicate(operands(0)))
               Instruction.MbarrierTryWait(operands(0), None, operands(1), operands(2), Some(operands(3)), mods, pred)
             else Instruction.MbarrierTryWait(
               operands(0),
@@ -13606,7 +13606,7 @@ object Instruction {
                 mods,
                 pred
               )
-            else if (operands(4).isInstanceOf[Operand.Address]) Instruction.Tcgen05Mma(
+            else if (Operand.isAddress(operands(4))) Instruction.Tcgen05Mma(
               operands(0),
               operands(1),
               operands(2),
@@ -13970,7 +13970,7 @@ object Instruction {
                 mods,
                 pred
               )
-            else if (operands(5).isInstanceOf[Operand.Address]) Instruction.Tcgen05MmaSp(
+            else if (Operand.isAddress(operands(5))) Instruction.Tcgen05MmaSp(
               operands(0),
               operands(1),
               operands(2),

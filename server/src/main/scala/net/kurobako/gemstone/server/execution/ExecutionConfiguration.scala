@@ -1,7 +1,7 @@
 package net.kurobako.gemstone.server.execution
 
 import net.kurobako.gemstone.NoNul
-import net.kurobako.gemstone.execution.ExecutionLimits
+import net.kurobako.gemstone.vm.TaskLimits
 
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
@@ -11,9 +11,9 @@ private[gemstone] object ExecutionConfiguration {
   val MaxInstructionsEnvironment: String :| (MinLength[1] & NoNul) = "GEMSTONE_EXECUTION_MAX_INSTRUCTIONS"
   val QuantumEnvironment: String :| (MinLength[1] & NoNul)         = "GEMSTONE_EXECUTION_QUANTUM"
 
-  def limits(environment: Map[String, String]): Either[String, ExecutionLimits] = {
+  def limits(environment: Map[String, String]): Either[String, TaskLimits] = {
     val maximum = environment.get(MaxInstructionsEnvironment) match {
-      case None        => Right(ExecutionLimits.Default.maxInstructions)
+      case None        => Right(TaskLimits.Default.maxInstructions)
       case Some(value) => value.toLongOption
           .toRight(s"$MaxInstructionsEnvironment must be a positive integer: $value")
           .flatMap(_.refineEither[Positive].left.map(_ =>
@@ -21,7 +21,7 @@ private[gemstone] object ExecutionConfiguration {
           ))
     }
     val quantum = environment.get(QuantumEnvironment) match {
-      case None        => Right(ExecutionLimits.Default.quantum)
+      case None        => Right(TaskLimits.Default.quantum)
       case Some(value) => value.toIntOption
           .toRight(s"$QuantumEnvironment must be a positive integer: $value")
           .flatMap(_.refineEither[Positive].left.map(_ =>
@@ -31,6 +31,6 @@ private[gemstone] object ExecutionConfiguration {
     for {
       maxInstructions <- maximum
       quantumValue    <- quantum
-    } yield ExecutionLimits(maxInstructions, quantumValue)
+    } yield TaskLimits(maxInstructions, quantumValue)
   }
 }

@@ -23,14 +23,14 @@ final class InstructionSuite extends munit.FunSuite {
   }
 
   test("top-level definitions are singleton, complete, and uniquely keyed") {
-    assert(Instruction.definitions.sameElements(InstructionDef.values))
+    assert(Instruction.definitions.sameElements(Instruction.Definition.values))
     assertEquals(Instruction.definitions.map(_.opcodeNumber).distinct.size, Instruction.definitions.size)
     assertEquals(Instruction.definitions.map(_.opcode).distinct.size, Instruction.definitions.size)
   }
 
   test("a per-form decoder rejects a raw instruction for another definition") {
     assertEquals(
-      InstructionDef.Nop.decoder(RawInstruction(SPIRVOpcodeNumber(1), Vec.empty)),
+      Instruction.Definition.Nop.decoder(RawInstruction(SPIRVOpcodeNumber(1), Vec.empty)),
       Left(InstructionDecodeError.DecoderOpcodeMismatch(SPIRVOpcodeNumber(0), SPIRVOpcodeNumber(1)))
     )
   }
@@ -42,7 +42,7 @@ final class InstructionSuite extends munit.FunSuite {
   }
 
   test("a truncated Phi pair is a typed decode error") {
-    val raw = RawInstruction(InstructionDef.Phi.opcodeNumber, Vec(Word(1), Word(2), Word(3)))
+    val raw = RawInstruction(Instruction.Definition.Phi.opcodeNumber, Vec(Word(1), Word(2), Word(3)))
     assertEquals(
       Instruction.decode(raw),
       Left(

@@ -14,7 +14,7 @@ struct TargetCase {
   int minor;
 };
 
-bool targetContract() {
+bool targetSelectionWorks() {
   constexpr std::array cases{
       TargetCase{"sm_75", 7, 5},
       TargetCase{"compute_89", 8, 9},
@@ -33,7 +33,7 @@ bool targetContract() {
     if (variable == variables.front()) setenv("GEMSTONE_CUDA_TARGET_ARCH", "sm_50", 1);
     for (const auto &target : cases) {
       if (setenv(variable.data(), target.value.data(), 1) != 0) {
-        std::fprintf(stderr, "cannot set target contract %s\n", target.value.data());
+        std::fprintf(stderr, "cannot set target case %s\n", target.value.data());
         valid = false;
         continue;
       }
@@ -41,7 +41,7 @@ bool targetContract() {
       int minor = -1;
       const CUresult status = cuDeviceComputeCapability(&major, &minor, 0);
       if (status != CUDA_SUCCESS || major != target.major || minor != target.minor) {
-        std::fprintf(stderr, "target contract %s returned status=%d capability=%d.%d, expected %d.%d\n", target.value.data(),
+        std::fprintf(stderr, "target case %s returned status=%d capability=%d.%d, expected %d.%d\n", target.value.data(),
                      static_cast<int>(status), major, minor, target.major, target.minor);
         valid = false;
       }
@@ -50,7 +50,7 @@ bool targetContract() {
   return valid;
 }
 
-bool driverErrorContract() {
+bool driverErrorQueryWorks() {
   const char *name = nullptr;
   const char *message = nullptr;
   const CUresult nameStatus = cuGetErrorName(CUDA_ERROR_INVALID_VALUE, &name);
@@ -58,12 +58,12 @@ bool driverErrorContract() {
   if (nameStatus == CUDA_SUCCESS && messageStatus == CUDA_SUCCESS && name && message && name == std::string_view{"CUDA_ERROR_INVALID_VALUE"}
       && message[0] != '\0')
     return true;
-  std::fprintf(stderr, "driver error contract returned name=%d message=%d name-value=%p message-value=%p\n", static_cast<int>(nameStatus),
+  std::fprintf(stderr, "driver error query returned name=%d message=%d name-value=%p message-value=%p\n", static_cast<int>(nameStatus),
                static_cast<int>(messageStatus), static_cast<const void *>(name), static_cast<const void *>(message));
   return false;
 }
 
-bool driverEntryPointContract() {
+bool driverEntryPointQueryWorks() {
   struct EntryPoint {
     std::string_view name;
     void *abi;
@@ -117,7 +117,7 @@ TEST_CASE("CUDA facade fails closed without execution service", "[cuda]") {
   unsetenv("GEMSTONE_RPC_PORT");
   const CUresult status = cuInit(0);
   REQUIRE((status == CUDA_ERROR_NOT_INITIALIZED));
-  REQUIRE((targetContract()));
-  REQUIRE((driverErrorContract()));
-  REQUIRE((driverEntryPointContract()));
+  REQUIRE((targetSelectionWorks()));
+  REQUIRE((driverErrorQueryWorks()));
+  REQUIRE((driverEntryPointQueryWorks()));
 }

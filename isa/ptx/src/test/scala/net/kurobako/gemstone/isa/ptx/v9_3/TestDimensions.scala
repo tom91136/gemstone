@@ -1,6 +1,6 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
-import net.kurobako.gemstone.execution.Dimensions
+import net.kurobako.gemstone.vm.LaunchGeometry.Dimensions
 
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*

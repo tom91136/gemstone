@@ -19,12 +19,12 @@ object NoNul {
   ): NoNulConstraint[Implementation] = NoNulConstraint()
 
   given RuntimeConstraint[String, NoNul] =
-    RuntimeConstraint(value => !value.iterator.contains('\u0000'), "Should not contain a NUL character")
+    RuntimeConstraint(value => !value.view.contains('\u0000'), "Should not contain a NUL character")
 
   given minimumLength[Minimum <: Int & Singleton](using
       minimum: ValueOf[Minimum]
   ): RuntimeConstraint[String, MinLength[Minimum] & NoNul] = RuntimeConstraint(
-    value => value.length >= minimum.value && !value.iterator.contains('\u0000'),
+    value => value.length >= minimum.value && !value.view.contains('\u0000'),
     s"Should have a minimum length of ${minimum.value} & Should not contain a NUL character"
   )
 }

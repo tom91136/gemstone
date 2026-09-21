@@ -43,7 +43,7 @@ object GeneratedFiles {
       if (!Files.isDirectory(directory)) Set.empty[Path]
       else {
         Using.resource(Files.walk(directory)) { paths =>
-          paths.iterator().asScala.filter(path => Files.isRegularFile(path) && include(path))
+          paths.toList.asScala.view.filter(path => Files.isRegularFile(path) && include(path))
             .map(_.toAbsolutePath.normalize).toSet
         }
       }
@@ -58,7 +58,7 @@ object GeneratedFiles {
     if (Files.isDirectory(directory)) {
       val normalized = expected.map(_.toAbsolutePath.normalize)
       val unexpected = Using.resource(Files.walk(directory)) { paths =>
-        paths.iterator().asScala.filter(path => Files.isRegularFile(path) && include(path))
+        paths.toList.asScala.view.filter(path => Files.isRegularFile(path) && include(path))
           .map(_.toAbsolutePath.normalize).filterNot(normalized).toVector
       }
       unexpected.foreach(path => Files.delete(path))

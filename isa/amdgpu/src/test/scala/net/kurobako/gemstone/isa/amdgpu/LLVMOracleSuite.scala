@@ -1,5 +1,8 @@
 package net.kurobako.gemstone.isa.amdgpu
 
+import Program.*
+import Metadata.*
+
 import net.kurobako.gemstone.Vec
 import net.kurobako.gemstone.isa.ValidationOutcome
 import Validation.*
@@ -15,7 +18,7 @@ final class LLVMOracleSuite extends munit.FunSuite {
     assert(LLVMOracle.cases.size >= 3000)
     assertEquals((LLVMOracle.targets ++ LLVMOracle.diagnosticTargets).distinct.size, 46)
     assertEquals(
-      LLVMOracle.targets.iterator.map(_.family).toSet,
+      LLVMOracle.targets.view.map(_.family).toSet,
       Family.values.toSet - Family.CDNA5
     )
     // Streaming the large oracle corpus avoids retaining one result per case.
@@ -27,13 +30,13 @@ final class LLVMOracleSuite extends munit.FunSuite {
         case Left(error) if error.message.startsWith("unknown AMDGPU opcode") => recordUnsupported(error, unsupported)
         case Left(error)   => fail(s"${golden.source}: ${golden.target.name}: $error\n${golden.assembly}")
         case Right(parsed) =>
-          val canonical = ISA.Printer.render(parsed)
+          val canonical = Printer.render(parsed)
           val reparsed  = Parser.parse(canonical).fold(
             error => fail(s"${golden.source}: failed to parse canonical output: $error\n$canonical"),
             value => value
           )
           assertEquals(
-            ISA.Printer.render(reparsed),
+            Printer.render(reparsed),
             canonical,
             s"${golden.source}: ${golden.target.name}: ${golden.assembly}"
           )

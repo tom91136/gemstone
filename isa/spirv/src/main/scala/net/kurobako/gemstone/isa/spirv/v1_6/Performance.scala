@@ -4,6 +4,7 @@ import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 
 import net.kurobako.gemstone.concurrent.withLock
+import net.kurobako.gemstone.vm.Event
 
 import java.util.concurrent.locks.ReentrantLock
 
@@ -19,8 +20,10 @@ object Performance {
       elapsedNanos: Long :| Positive0
   )
 
-  /** Opt-in cumulative interpreter metrics. */
-  final class Metrics {
+  final case class Observation(snapshot: Snapshot) extends Event
+
+  /** Per-task execution measurements emitted through the VM observer. */
+  private[v1_6] final class Metrics {
     private val lock = ReentrantLock()
     @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
     private var dispatchCount = 0L

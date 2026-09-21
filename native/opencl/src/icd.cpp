@@ -395,24 +395,25 @@ constexpr uint64_t ProgramBinaryMagic = UINT64_C(0x47454d4f434c4231);
 constexpr size_t ProgramBinaryHeaderSize = 32;
 
 std::vector<uint8_t> programBinary(const _cl_program *program) {
-  if (program->il.empty()) return {};
-  if (program->binaryType == CL_PROGRAM_BINARY_TYPE_NONE) return program->il;
+  const auto &payload = program->binaryType == CL_PROGRAM_BINARY_TYPE_COMPILED_OBJECT ? program->bitcode : program->il;
+  if (payload.empty()) return {};
+  if (program->binaryType == CL_PROGRAM_BINARY_TYPE_NONE) return payload;
 
   const std::string &source = program->buildSource.empty() ? program->source : program->buildSource;
   if (source.size() > std::numeric_limits<uint64_t>::max() - ProgramBinaryHeaderSize
-      || program->il.size() > std::numeric_limits<uint64_t>::max() - ProgramBinaryHeaderSize - source.size())
+      || payload.size() > std::numeric_limits<uint64_t>::max() - ProgramBinaryHeaderSize - source.size())
     return {};
-  const size_t size = ProgramBinaryHeaderSize + source.size() + program->il.size();
+  const size_t size = ProgramBinaryHeaderSize + source.size() + payload.size();
   std::vector<uint8_t> result(size);
   uint32_t type = static_cast<uint32_t>(program->binaryType);
   uint64_t sourceSize = source.size();
-  uint64_t ilSize = program->il.size();
+  uint64_t ilSize = payload.size();
   std::memcpy(result.data(), &ProgramBinaryMagic, sizeof(ProgramBinaryMagic));
   std::memcpy(result.data() + 8, &type, sizeof(type));
   std::memcpy(result.data() + 16, &sourceSize, sizeof(sourceSize));
   std::memcpy(result.data() + 24, &ilSize, sizeof(ilSize));
   if (!source.empty()) std::memcpy(result.data() + ProgramBinaryHeaderSize, source.data(), source.size());
-  std::memcpy(result.data() + ProgramBinaryHeaderSize + source.size(), program->il.data(), program->il.size());
+  std::memcpy(result.data() + ProgramBinaryHeaderSize + source.size(), payload.data(), payload.size());
   return result;
 }
 
@@ -1986,7 +1987,7 @@ cl_int loadProgramIL(_cl_program *program) {
     return CL_OUT_OF_RESOURCES;
   }
   std::lock_guard lock(remoteMutex);
-  auto loaded = state.client->call(LoadProgram{ProgramFormat::SPIRVBinary, program->il});
+  auto loaded = state.client->call(LoadProgram{"spirv-binary", program->il});
   if (!loaded) {
     program->buildLog = remoteError();
     return CL_INVALID_BINARY;
@@ -2075,10 +2076,16 @@ CL_API_ENTRY cl_program CL_API_CALL clCreateProgramWithBinary(cl_context context
   program->context = contextValue;
   program->source = std::move(source);
   program->buildSource = program->source;
-  program->il = std::move(il);
   program->binaryType = binaryType;
   program->buildStatus = CL_BUILD_SUCCESS;
   retain(contextValue);
+  if (binaryType == CL_PROGRAM_BINARY_TYPE_COMPILED_OBJECT) {
+    program->bitcode = std::move(il);
+    if (binaryStatus) binaryStatus[0] = CL_SUCCESS;
+    if (error) *error = CL_SUCCESS;
+    return reinterpret_cast<cl_program>(program);
+  }
+  program->il = std::move(il);
   const auto loaded = loadProgramIL(program);
   if (loaded != CL_SUCCESS) {
     unregisterLiveObject(program);
@@ -2212,6 +2219,8 @@ CL_API_ENTRY cl_int CL_API_CALL clCompileProgram(cl_program value, cl_uint count
                                                  void(CL_CALLBACK *notify)(cl_program, void *), void *user) {
   auto *program = checked(reinterpret_cast<_cl_program *>(value), Kind::Program);
   if (!program) return CL_INVALID_PROGRAM;
+  if (count != 0 && !devices) return CL_INVALID_VALUE;
+  if (count > 1 || (count == 1 && !validDevice(devices[0]))) return CL_INVALID_DEVICE;
   if (inputHeaderCount != 0 && (!inputHeaders || !headerNames)) return CL_INVALID_VALUE;
   if (inputHeaderCount != 0) {
     std::string expanded;
@@ -2232,10 +2241,36 @@ CL_API_ENTRY cl_int CL_API_CALL clCompileProgram(cl_program value, cl_uint count
     }
     program->buildSource = std::move(expanded);
   }
-  const cl_int result = clBuildProgram(value, count, devices, options, nullptr, nullptr);
-  if (result == CL_SUCCESS && program) program->binaryType = CL_PROGRAM_BINARY_TYPE_COMPILED_OBJECT;
-  if (notify && result != CL_INVALID_PROGRAM) notify(value, user);
-  return result;
+  program->buildOptions = !options ? "" : options;
+  const std::string source = program->buildSource.empty() ? program->source : program->buildSource;
+  const bool compilesIL = source.empty() && !program->il.empty();
+  if (program->remoteId != 0) {
+    auto &state = remoteState();
+    if (state.ready) {
+      std::lock_guard lock(remoteMutex);
+      (void)state.client->call(UnloadProgram{ProgramId{static_cast<int64_t>(program->remoteId)}});
+    }
+  }
+  program->remoteId = 0;
+  program->bitcode.clear();
+  program->kernelNames.clear();
+  if (compilesIL) {
+    program->buildStatus = CL_BUILD_SUCCESS;
+    program->binaryType = CL_PROGRAM_BINARY_TYPE_COMPILED_OBJECT;
+    if (notify) notify(value, user);
+    return CL_SUCCESS;
+  }
+  program->il.clear();
+  if (!compileSourceToBitcode(source, program->buildOptions, program->bitcode, program->buildLog)) {
+    program->buildStatus = CL_BUILD_ERROR;
+    program->binaryType = CL_PROGRAM_BINARY_TYPE_NONE;
+    if (notify) notify(value, user);
+    return CL_BUILD_PROGRAM_FAILURE;
+  }
+  program->buildStatus = CL_BUILD_SUCCESS;
+  program->binaryType = CL_PROGRAM_BINARY_TYPE_COMPILED_OBJECT;
+  if (notify) notify(value, user);
+  return CL_SUCCESS;
 }
 CL_API_ENTRY cl_program CL_API_CALL clLinkProgram(cl_context contextValue, cl_uint count, const cl_device_id *devices, const char *options,
                                                   cl_uint inputCount, const cl_program *inputs,

@@ -1,6 +1,6 @@
 package net.kurobako.gemstone.server
 
-import net.kurobako.gemstone.execution.ExecutionFailure
+import net.kurobako.gemstone.rpc.ExecutionProtocol.ExecutionFailure
 import net.kurobako.gemstone.rpc.ExecutionRPC
 import net.kurobako.gemstone.rpc.ExecutionRPC.Operation
 import net.kurobako.gemstone.rpc.Wire

@@ -1,7 +1,7 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
 import Program.*
-import VirtualMachine.*
+import VMIR.*
 
 import net.kurobako.gemstone.binary.Bits.byteCount
 import net.kurobako.gemstone.binary.LittleEndian
@@ -10,7 +10,7 @@ import net.kurobako.gemstone.binary.ScalarByteWidth
 import scala.collection.mutable
 
 /** Mutable storage for one executing PTX block. */
-private[v9_3] final class VMState(val laneCount: Int, initialLive: LaneMask) {
+private[v9_3] final class VMState(val laneCount: Int, initialLive: VMLaneMask) {
   val registers: Array[VMRegisterFile]                                  = Array.fill(laneCount)(VMRegisterFile())
   val functionRegisters: Array[mutable.Map[RegisterName, FunctionName]] =
     Array.fill(laneCount)(mutable.Map.empty[RegisterName, FunctionName])
@@ -29,7 +29,7 @@ private[v9_3] final class VMState(val laneCount: Int, initialLive: LaneMask) {
   private val shared: mutable.Map[Long, Byte]       = mutable.Map.empty
   private val local: Array[mutable.Map[Long, Byte]] = Array.fill(laneCount)(mutable.Map.empty[Long, Byte])
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  var live: LaneMask = initialLive
+  var live: VMLaneMask = initialLive
 
   def readShared(address: Long, width: BitWidth): Long =
     LittleEndian.decode(byteCount(width.asByteAlignedBitWidth))(index =>
@@ -92,7 +92,7 @@ private[v9_3] final class VMState(val laneCount: Int, initialLive: LaneMask) {
     }
 
   def parameterBufferRange(address: Long, size: Int): Option[(Array[Byte], Int)] =
-    parameterBuffers.iterator.collectFirst {
+    parameterBuffers.view.collectFirst {
       case (base, bytes)
           if address >= base && address - base >= 0L && address - base <= bytes.length.toLong - size.toLong =>
         bytes -> (address - base).toInt

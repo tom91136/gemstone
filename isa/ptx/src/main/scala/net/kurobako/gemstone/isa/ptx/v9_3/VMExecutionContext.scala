@@ -1,10 +1,14 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
 import Program.*
-import VirtualMachine.*
+import VMIR.*
+import VMExecution.*
 
-import net.kurobako.gemstone.execution.*
 import net.kurobako.gemstone.memory.AddressMemory
+import net.kurobako.gemstone.vm.LaunchGeometry
+import net.kurobako.gemstone.vm.LaunchGeometry.Coordinates
+import net.kurobako.gemstone.vm.Scheduler
+import net.kurobako.gemstone.vm.TaskControl
 
 private[v9_3] final class VMExecutionContext(
     val kernel: Kernel,
@@ -13,10 +17,11 @@ private[v9_3] final class VMExecutionContext(
     val geometry: LaunchGeometry,
     val state: VMState,
     val pc: Pc,
-    val active: LaneMask,
+    val active: VMLaneMask,
     val arguments: Map[ParameterName, Argument],
     val memory: AddressMemory,
-    val control: ExecutionControl
+    val control: TaskControl,
+    val scheduler: Scheduler
 ) {
   def read(lane: Int, value: Value): Either[ExecutionFault, Long] = value match {
     // A PTX register read after a divergent path is unspecified.  Hardware

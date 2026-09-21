@@ -19,6 +19,12 @@ final class BinarySuite extends munit.FunSuite {
   test("fixed-width bit operations share one validated definition") {
     assertEquals(Bits.mask(BitWidth(13)), 0x1fffL)
     assertEquals(Bits.truncate(0x12345L, BitWidth(16)), 0x2345L)
+    assertEquals(Bits.unsignedField(0x12345L, 4, BitWidth(8)), 0x34L)
+    assertEquals(Bits.signedField(0xf0L, 4, BitWidth(4)), -1L)
+    assertEquals(Bits.unsignedIntField(0x12345L, 4, IntFieldWidth(8)), 0x34)
+    assertEquals(Bits.signedIntField(0xf0L, 4, IntFieldWidth(4)), -1)
+    assert(Bits.isSet(0x40L, 6))
+    assert(!Bits.isSet(0x40L, 5))
     assertEquals(Bits.signExtend(0x1fffL, BitWidth(13)), -1L)
     assertEquals(Bits.byteCount(ByteAlignedBitWidth(64)).value, 8)
   }
@@ -46,8 +52,12 @@ final class BinarySuite extends munit.FunSuite {
 
   test("32-bit words slice and join without sign extension") {
     assertEquals(Bits.unsigned32(-1), Bits.Mask32)
+    assertEquals(Bits.low8(0x12345L), 0x45L)
+    assertEquals(Bits.low8Int(0x12345L), 0x45)
     assertEquals(Bits.low16(0x12345L), 0x2345L)
+    assertEquals(Bits.low16Int(0x12345L), 0x2345)
     assertEquals(Bits.low32(0x123456789abcdef0L), 0x9abcdef0L)
+    assertEquals(Bits.signed32(0x123456789abcdef0L), 0x9abcdef0)
     assertEquals(Bits.high32(0x123456789abcdef0L), 0x12345678L)
     assertEquals(Bits.join32(0x9abcdef0L, 0x12345678L), 0x123456789abcdef0L)
   }
@@ -79,5 +89,11 @@ final class BinarySuite extends munit.FunSuite {
     val _     = intercept[IllegalArgumentException](LittleEndian.decode(bytes, 7, ScalarByteWidth(2)))
     val _     = intercept[IllegalArgumentException](LittleEndian.write(0L, bytes, -1, ScalarByteWidth(1)))
     val _     = intercept[IllegalArgumentException](LittleEndian.write(0L, bytes, 7, ScalarByteWidth(2)))
+  }
+
+  test("little-endian fixed-width integer readers own their narrowing") {
+    val bytes = Array[Byte](0x34, 0x12, 0xef.toByte, 0xcd.toByte, 0xab.toByte, 0x89.toByte)
+    assertEquals(LittleEndian.decodeUnsignedInt16(bytes, 0), 0x1234)
+    assertEquals(LittleEndian.decodeInt32(bytes, 2), 0x89abcdef)
   }
 }

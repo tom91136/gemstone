@@ -2,13 +2,14 @@ package net.kurobako.gemstone.isa.ptx.v9_3
 
 import Program.*
 
-import VirtualMachine.*
+import VMIR.*
 
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 
-import net.kurobako.gemstone.execution.*
 import net.kurobako.gemstone.memory.*
+import net.kurobako.gemstone.vm.LaunchGeometry
+import net.kurobako.gemstone.vm.LaunchGeometry.Dimensions
 
 final class AtomicMinimumSuite extends munit.FunSuite {
   for {
@@ -43,14 +44,13 @@ st.global.u$width [%address], %result;
 ret;
 }
 """
-      val kernel   = ISA.compile(body).fold(error => fail(error.message), value => value)
+      val kernel   = VMCompiler.compile(body).fold(error => fail(error.message), value => value)
       val geometry = LaunchGeometry.forLaunch(Dimensions.One, TestDimensions(groups)).toOption.get
-      val result   = VirtualMachine.execute(
+      val result   = VMInterpreter.execute(
         kernel,
         geometry,
         Map(ParameterName("output") -> Argument(memory.allocation.start.value)),
-        memory,
-        captureTrace = false
+        memory
       )
       assert(result.isRight, result.toString)
       for (group <- 0 until groups)

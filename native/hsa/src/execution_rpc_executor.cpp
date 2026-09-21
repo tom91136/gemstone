@@ -34,9 +34,8 @@ int loadProgram(void *context, const void *image, uint32_t image_size, uint64_t 
   auto &executor = *static_cast<EnvironmentExecutor *>(context);
   if (!program_id || (!image && image_size != 0)) return -1;
   if (gemstone::hsa::traceEnabled("packets")) std::fprintf(stderr, "Gemstone loading HSA code object bytes=%u\n", image_size);
-  auto result = executor.client->call(
-      LoadProgram{ProgramFormat::HSACodeObjectBinary,
-                  std::vector<uint8_t>(static_cast<const uint8_t *>(image), static_cast<const uint8_t *>(image) + image_size)});
+  auto result = executor.client->call(LoadProgram{
+      "hsa-code-object", std::vector<uint8_t>(static_cast<const uint8_t *>(image), static_cast<const uint8_t *>(image) + image_size)});
   ProgramId program{};
   if (accept(executor, std::move(result), &program) != 0) return -1;
   *program_id = static_cast<uint64_t>(program.value);

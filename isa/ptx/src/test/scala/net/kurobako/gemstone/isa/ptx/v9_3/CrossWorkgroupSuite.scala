@@ -2,15 +2,15 @@ package net.kurobako.gemstone.isa.ptx.v9_3
 
 import Program.*
 
-import VirtualMachine.*
+import VMIR.*
 
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 
-import net.kurobako.gemstone.execution.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.binary.ScalarByteWidth
 import net.kurobako.gemstone.concurrent.withLock
+import net.kurobako.gemstone.vm.{Fault, LaunchGeometry, Scheduler, TaskControl, TaskLimits}
 import java.util.concurrent.{Callable, CountDownLatch, Executors, TimeUnit}
 import java.util.concurrent.locks.ReentrantLock
 import scala.util.Using
@@ -20,21 +20,21 @@ final class CrossWorkgroupSuite extends munit.FunSuite {
   private val widths      = Seq(31, 32, 33)
   private val header      = ".version 8.0\n.target sm_80\n.address_size 64\n"
 
-  private final class Workers extends ExecutionParallelism with AutoCloseable {
+  private final class Workers extends Scheduler with AutoCloseable {
     private val executor                                                            = Executors.newFixedThreadPool(4)
     override val parallelism: Int :| Positive                                       = 4
     override def shouldParallel(tasks: Long :| Positive0, lanes: Long :| Positive0) = tasks > 1
     private final class Work(
         index: Long :| Positive0,
-        task: Long :| Positive0 => Either[ExecutionFailure, Unit]
-    ) extends Callable[Either[ExecutionFailure, Unit]] {
+        task: Long :| Positive0 => Either[Fault, Unit]
+    ) extends Callable[Either[Fault, Unit]] {
       override def call() = task(index)
     }
     override def parallelFor(
         tasks: Long :| Positive0
-    )(task: Long :| Positive0 => Either[ExecutionFailure, Unit]) = {
+    )(task: Long :| Positive0 => Either[Fault, Unit]) = {
       val futures = (0L until tasks).map(index => executor.submit(Work(index.refineUnsafe[Positive0], task)))
-      futures.iterator.map(_.get(15, TimeUnit.SECONDS)).collectFirst { case Left(error) => Left(error) }
+      futures.view.map(_.get(15, TimeUnit.SECONDS)).collectFirst { case Left(error) => Left(error) }
         .getOrElse(Right(()))
     }
     override def close(): Unit = {
@@ -93,7 +93,7 @@ final class CrossWorkgroupSuite extends munit.FunSuite {
   }
 
   private def kernel(body: String): Kernel =
-    ISA.compile(header + body).fold(error => fail(error.message), value => value)
+    VMCompiler.compile(header + body).fold(error => fail(error.message), value => value)
   private def geometry(groups: Int, lanes: Int, count: Int): LaunchGeometry =
     LaunchGeometry.forLaunch(
       TestDimensions(lanes),
@@ -107,20 +107,20 @@ final class CrossWorkgroupSuite extends munit.FunSuite {
       count: Int,
       memory: Memory,
       arguments: Map[ParameterName, Argument],
-      workers: ExecutionParallelism
+      workers: Scheduler
   ): Unit = {
-    val result = VirtualMachine.execute(
+    val result = VMInterpreter.execute(
       kernel,
       geometry(groups, lanes, count),
       arguments,
       memory,
-      ExecutionControl(ExecutionLimits(1000000, 32), parallelism = workers),
-      captureTrace = false
+      TaskControl.forScheduler(TaskLimits(1000000, 32), scheduler = workers),
+      workers
     )
     assert(result.isRight, result.toString)
   }
-  private def withWorkers(parallel: Boolean)(body: ExecutionParallelism => Unit): Unit =
-    if (!parallel) body(ExecutionParallelism.Sequential)
+  private def withWorkers(parallel: Boolean)(body: Scheduler => Unit): Unit =
+    if (!parallel) body(Scheduler.Sequential)
     else {
       Using.resource(Workers())(body)
     }

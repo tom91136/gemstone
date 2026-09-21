@@ -1,19 +1,17 @@
 package net.kurobako.gemstone.server.cli
 
 import net.kurobako.gemstone.Vec
-import net.kurobako.gemstone.execution.ExecutionLimits
 import net.kurobako.gemstone.launcher.GemstoneLauncher
 import net.kurobako.gemstone.rpc.ExecutionRPC
 import net.kurobako.gemstone.server.GemstoneRPCServer
 import net.kurobako.gemstone.server.execution.ExecutionConfiguration
 import net.kurobako.gemstone.server.recording.{RPCJournal, RPCReplay}
-import net.kurobako.gemstone.server.transport.{ControlProtocol, RPCPort}
+import net.kurobako.gemstone.server.transport.{RPCPort, ServerControl}
+import net.kurobako.gemstone.vm.TaskLimits
 
 import cats.syntax.all.*
 import com.monovore.decline.{Command, Opts}
 
-import java.io.{DataInputStream, DataOutputStream, IOException}
-import java.net.{InetAddress, InetSocketAddress, Socket}
 import java.nio.charset.StandardCharsets
 import java.nio.file.{Files, Path}
 import java.nio.file.attribute.{PosixFileAttributeView, PosixFilePermissions}
@@ -61,7 +59,7 @@ object GemstoneCLI {
               value => value
             )
           Console.println(RPCReplay.run(RPCReplay.Options(file, protocolIdentity), replayEndpoint(_)))
-        case Action.Shutdown(port)  => shutdown(port)
+        case Action.Shutdown(port)  => ServerControl.shutdown(port)
         case Action.Launch(options) =>
           val status = GemstoneLauncher.run(options)
           if (status != 0) sys.exit(status)
@@ -69,24 +67,13 @@ object GemstoneCLI {
       }
   }
 
-  private def shutdown(port: RPCPort): Unit =
-    Using.resource(Socket()) { socket =>
-      socket.connect(InetSocketAddress(InetAddress.getLoopbackAddress, port.value), 5000)
-      socket.setSoTimeout(5000)
-      val output = DataOutputStream(socket.getOutputStream)
-      output.writeInt(ControlProtocol.Magic)
-      output.writeInt(ControlProtocol.Shutdown)
-      output.flush()
-      if (DataInputStream(socket.getInputStream).readInt() != 0) throw IOException("shutdown failed")
-    }
-
   private def replayEndpoint(header: RPCJournal.Header): RPCReplay.Endpoint = {
     val profile = header.executionProfile.getOrElse(throw IllegalArgumentException("capture has no execution profile"))
     val environment = (sys.env - "GEMSTONE_RECORD").updated(
       "GEMSTONE_EXECUTION_PARALLELISM",
       profile.parallelism.toString
     )
-    val limits  = ExecutionLimits(profile.maxInstructions, profile.quantum)
+    val limits  = TaskLimits(profile.maxInstructions, profile.quantum)
     val running = GemstoneRPCServer.start(limits, environment)
     RPCReplay.Endpoint(running.port, () => running.close())
   }
@@ -99,6 +86,7 @@ object GemstoneCLI {
       portFile.foreach { file =>
         Option(file.getParent).foreach(Files.createDirectories(_))
         Files.writeString(file, s"${running.port.value}\n", StandardCharsets.US_ASCII)
+        restrictToOwner(file)
       }
       endpointFile.foreach { file =>
         Option(file.getParent).foreach(Files.createDirectories(_))

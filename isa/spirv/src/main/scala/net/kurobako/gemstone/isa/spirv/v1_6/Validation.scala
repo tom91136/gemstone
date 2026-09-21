@@ -105,9 +105,9 @@ object Validation {
       (headerIssues ++ facts.issues ++
         issueWhen(!facts.kernelCapability)(Issue.MissingKernelCapability) ++
         issueWhen(requireKernelEntry && !facts.kernelEntry)(Issue.MissingKernelEntryPoint) ++
-        issueWhen(!facts.openCLMemory)(Issue.MissingOpenCLMemoryModel)).iterator
+        issueWhen(!facts.openCLMemory)(Issue.MissingOpenCLMemoryModel)).toVector.view
     )
-    val unsupportedIssues = Vec.from(unsupported.iterator)
+    val unsupportedIssues = Vec.from(unsupported.toVector.view)
     if (invalidIssues.nonEmpty) ValidationOutcome.Rejected(invalidIssues.refineUnsafe[MinLength[1]])
     else if (unsupportedIssues.nonEmpty) ValidationOutcome.Incomplete(unsupportedIssues.refineUnsafe[MinLength[1]])
     else ValidationOutcome.Accepted

@@ -49,7 +49,7 @@ object GenerateExecutionRPC {
     case Wire.Constraint.MinimumLength(minimum) => s"MinimumLength$minimum"
     case Wire.Constraint.NotContains(value)     =>
       val bytes = value.getBytes(StandardCharsets.UTF_8)
-      s"NotContains${bytes.iterator.map(byte => f"${byte & 0xff}%02x").mkString}"
+      s"NotContains${bytes.view.map(byte => f"${byte & 0xff}%02x").mkString}"
   }
   private def numberName(value: Long): String =
     if (value < 0L) s"Negative${value.toString.drop(1)}" else value.toString
@@ -60,7 +60,7 @@ object GenerateExecutionRPC {
 
   private def cppString(value: String): String = {
     val bytes   = value.getBytes(StandardCharsets.UTF_8)
-    val escaped = bytes.iterator.map(byte => f"\\x${byte & 0xff}%02x").mkString
+    val escaped = bytes.view.map(byte => f"\\x${byte & 0xff}%02x").mkString
     s"std::string(\"$escaped\", ${bytes.length}U)"
   }
 
@@ -130,7 +130,7 @@ object GenerateExecutionRPC {
     }
     val _ = register(protocol.failure)
 
-    val named: Vector[Named] = definitions.iterator.map(Named(_, _)).toVector
+    val named: Vector[Named] = definitions.view.map(Named(_, _)).toVector
 
     def cppType(shape: Shape): String = shape match {
       case Shape.UnitValue                   => "Unit"

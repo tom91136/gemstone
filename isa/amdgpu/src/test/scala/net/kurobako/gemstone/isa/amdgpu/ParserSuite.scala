@@ -1,5 +1,7 @@
 package net.kurobako.gemstone.isa.amdgpu
 
+import Program.*
+
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 
@@ -8,9 +10,9 @@ import net.kurobako.gemstone.Vec
 final class ParserSuite extends munit.FunSuite {
   private def roundTrip(source: String): Unit = {
     val first = Parser.parseInstruction(source).fold(error => fail(error.toString), value => value)
-    val text  = ISA.Printer.render(first)
+    val text  = Printer.render(first)
     val next  = Parser.parseInstruction(text).fold(error => fail(error.toString), value => value)
-    assertEquals(ISA.Printer.render(next), text)
+    assertEquals(Printer.render(next), text)
   }
 
   test("parse and canonically print typed operands") {
@@ -20,9 +22,9 @@ final class ParserSuite extends munit.FunSuite {
     assertEquals(instruction.operands.size, 3)
     assertEquals(
       instruction.mods.toSeq,
-      Seq(Modifier(AMDGPUModifierName("e32")), Modifier(AMDGPUModifierName("clamp")))
+      Seq(Modifier(ModifierName("e32")), Modifier(ModifierName("clamp")))
     )
-    assertEquals(ISA.Printer.render(instruction), "v_add_f32 v0, |v1|, -v2 e32 clamp")
+    assertEquals(Printer.render(instruction), "v_add_f32 v0, |v1|, -v2 e32 clamp")
   }
 
   test("parse register ranges, literals, expressions, and named modifiers") {
@@ -35,7 +37,7 @@ final class ParserSuite extends munit.FunSuite {
   test("parse programs without retaining comments") {
     val source = ".text\nentry:\n  s_nop 0 // delay\n  s_endpgm"
     val parsed = Parser.parse(source).fold(error => fail(error.toString), value => value)
-    assertEquals(ISA.Printer.render(parsed), ".text\nentry:\ns_nop 0\ns_endpgm")
+    assertEquals(Printer.render(parsed), ".text\nentry:\ns_nop 0\ns_endpgm")
   }
 
   test("reject malformed delimiters and empty operands") {

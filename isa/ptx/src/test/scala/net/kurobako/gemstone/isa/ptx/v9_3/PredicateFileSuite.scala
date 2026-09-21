@@ -2,8 +2,12 @@ package net.kurobako.gemstone.isa.ptx.v9_3
 
 import Program.*
 
+import VMIR.*
+
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
+
+import net.kurobako.gemstone.vm.LaunchGeometry
 
 final class PredicateFileSuite extends munit.FunSuite {
   test("numbered predicate boundaries retain independent defined and value bits") {
@@ -48,17 +52,16 @@ final class PredicateFileSuite extends munit.FunSuite {
         vote.sync.ballot.b32 %r, %p63, 1;
         ret;
       }"""
-    val kernel   = ISA.compile(source).fold(error => fail(error.message), value => value)
-    val geometry = net.kurobako.gemstone.execution.LaunchGeometry.forLaunch(
-      net.kurobako.gemstone.execution.Dimensions.One,
-      net.kurobako.gemstone.execution.Dimensions.One
+    val kernel   = VMCompiler.compile(source).fold(error => fail(error.message), value => value)
+    val geometry = LaunchGeometry.forLaunch(
+      LaunchGeometry.Dimensions.One,
+      LaunchGeometry.Dimensions.One
     ).toOption.get
-    val result = VirtualMachine.execute(
+    val result = VMInterpreter.execute(
       kernel,
       geometry,
       Map.empty,
-      net.kurobako.gemstone.memory.ArrayCheckedMemory.allocate(0),
-      captureTrace = false
+      net.kurobako.gemstone.memory.ArrayCheckedMemory.allocate(0)
     )
     assert(result.left.toOption.exists(_.message.contains("undefined register %p63")), result.toString)
   }

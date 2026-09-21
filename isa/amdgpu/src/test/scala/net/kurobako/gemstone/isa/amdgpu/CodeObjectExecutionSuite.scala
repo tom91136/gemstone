@@ -1,7 +1,7 @@
 package net.kurobako.gemstone.isa.amdgpu
 
 import CodeObject.*
-import ExecutableInstruction.*
+import VMIR.*
 
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
@@ -10,7 +10,9 @@ import net.kurobako.gemstone.Vec
 import net.kurobako.gemstone.binary.{Bits, ByteRange, ScalarByteWidth}
 import net.kurobako.gemstone.binary.IEEE754
 import net.kurobako.gemstone.binary.LittleEndian
-import net.kurobako.gemstone.execution.*
+import net.kurobako.gemstone.isa.*
+import net.kurobako.gemstone.vm.*
+import net.kurobako.gemstone.vm.LaunchGeometry.Dimensions
 
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -71,15 +73,14 @@ final class CodeObjectExecutionSuite extends munit.FunSuite with CodeObjectTestS
       kernelCodeProperties = 0,
       code
     )
-    val dispatch = KernelDispatch.validated(
-      ProgramId(1L),
+    val dispatch = KernelTask.validated(
       KernelName("vcc_scratch_counter"),
       Dimensions(32, 1, 1),
       Dimensions.One,
       Vec.empty
     ).toOption.get
-    val control = ExecutionControl(ExecutionLimits(maxInstructions = 4096L, quantum = 64))
-    assertEquals(DispatchInterpreter.execute(kernel, dispatch, TestMemory(), control), Right(()))
+    val control = TaskControl.forScheduler(TaskLimits(maxInstructions = 4096L, quantum = 64))
+    assertEquals(executeKernel(compileKernel(kernel), dispatch, TestMemory(), control), Right(()))
   }
 
   test("self-contained linked entries do not decode unrelated unsupported kernels") {
@@ -99,24 +100,23 @@ final class CodeObjectExecutionSuite extends munit.FunSuite with CodeObjectTestS
       text = unsupported ++ end,
       functionSizes = Map(0x1000L -> 4, 0x1004L -> 4)
     )
-    val dispatch = KernelDispatch.validated(
-      ProgramId(1L),
+    val dispatch = KernelTask.validated(
       KernelName("selected"),
       Dimensions.One,
       Dimensions.One,
       Vec.empty
     ).toOption.get
-    assertEquals(DispatchInterpreter.execute(kernel, dispatch, TestMemory()), Right(()))
-    assert(DispatchInterpreter.prepare(kernel.copy(code = unsupported, codeAddress = 0x1000L)).isLeft)
+    assertEquals(executeKernel(compileKernel(kernel), dispatch, TestMemory()), Right(()))
+    assert(VMCompiler.compile(kernel.copy(code = unsupported, codeAddress = 0x1000L)).isLeft)
     val truncated = Vec[Byte](1, 2)
-    assert(DispatchInterpreter.prepare(kernel.copy(
+    assert(VMCompiler.compile(kernel.copy(
       code = truncated,
       text = unsupported ++ truncated,
       functionSizes = Map(0x1000L -> 4, 0x1004L -> 2)
     )).left.exists(_.message.contains("byte 4")))
     // A direct branch leaving the entry must use linked decoding and preserve the target failure.
     val branch = Vec[Byte](0x00, 0x00, 0x82.toByte, 0xbf.toByte)
-    assert(DispatchInterpreter.prepare(kernel.copy(
+    assert(VMCompiler.compile(kernel.copy(
       code = branch,
       codeAddress = 0x1000L,
       text = branch ++ unsupported
@@ -142,26 +142,25 @@ final class CodeObjectExecutionSuite extends munit.FunSuite with CodeObjectTestS
       text = unsupported ++ code,
       functionSizes = Map(0x1000L -> 4, 0x1004L -> code.size)
     )
-    val dispatch = KernelDispatch.validated(
-      ProgramId(1L),
+    val dispatch = KernelTask.validated(
       KernelName("local_jump"),
       Dimensions.One,
       Dimensions.One,
       Vec.empty
     ).toOption.get
-    assertEquals(DispatchInterpreter.execute(kernel, dispatch, TestMemory()), Right(()))
+    assertEquals(executeKernel(compileKernel(kernel), dispatch, TestMemory()), Right(()))
     val crossing = kernel.copy(
       codeAddress = 0xfffffff4L,
       textAddress = 0xfffffff0L,
       functionSizes = Map(0xfffffff0L -> 4, 0xfffffff4L -> code.size)
     )
-    assertEquals(DispatchInterpreter.execute(crossing, dispatch, TestMemory()), Right(()))
+    assertEquals(executeKernel(compileKernel(crossing), dispatch, TestMemory()), Right(()))
     val aliased = words.updated(1, 0x812084ffL).flatMap(word => LittleEndian.toVec(word, ScalarByteWidth(4)))
-    assert(DispatchInterpreter.prepare(kernel.copy(code = aliased, text = unsupported ++ aliased)).isLeft)
+    assert(VMCompiler.compile(kernel.copy(code = aliased, text = unsupported ++ aliased)).isLeft)
 
     // Entry in the middle invalidates the proof even though the instruction bytes still match.
     val intoMiddle = LittleEndian.toVec(0xbf820005L, ScalarByteWidth(4)) ++ code
-    assert(DispatchInterpreter.prepare(kernel.copy(
+    assert(VMCompiler.compile(kernel.copy(
       code = intoMiddle,
       text = unsupported ++ intoMiddle,
       functionSizes = Map(0x1000L -> 4, 0x1004L -> intoMiddle.size)
@@ -170,7 +169,7 @@ final class CodeObjectExecutionSuite extends munit.FunSuite with CodeObjectTestS
     val unknown = Vec[Long](0xbe802024L, 0xbf810000L).flatMap(word =>
       LittleEndian.toVec(word, ScalarByteWidth(4))
     )
-    assert(DispatchInterpreter.prepare(kernel.copy(
+    assert(VMCompiler.compile(kernel.copy(
       code = unknown,
       text = unsupported ++ unknown,
       functionSizes = Map(0x1000L -> 4, 0x1004L -> unknown.size)
@@ -180,8 +179,8 @@ final class CodeObjectExecutionSuite extends munit.FunSuite with CodeObjectTestS
   test("gfx1030 buffer short stores keep their two-byte width") {
     val code = Vec[Byte](0x00, 0x10, 0x68, 0xe0.toByte, 0x01, 0x00, 0x01, 0x80.toByte)
     assertEquals(
-      DispatchInterpreter.decodeInstruction(code, Target("gfx1030")),
-      Right(DecodedInstruction.BufferStore(Some(1), 4, None, 0, 2, 0))
+      VMCompiler.decodeInstruction(code, Target("gfx1030")),
+      Right(Instruction.BufferStore(Some(1), 4, None, 0, 2, 0))
     )
     // Point the buffer descriptor at allocation 1 and store v0's low half at byte offset 1.
     val words = Vec[Long](0xbe840380L, 0xbe8503ffL, 0x00004000L, 0xbe860388L, 0xbe870380L,
@@ -197,18 +196,17 @@ final class CodeObjectExecutionSuite extends munit.FunSuite with CodeObjectTestS
       words.flatMap(word => LittleEndian.toVec(word, ScalarByteWidth(4)))
     )
     val memory     = TestMemory()
-    val allocation = AllocationId(1L)
+    val allocation = MemoryRegion(1L)
     memory.allocate(allocation, 8)
     memory.putInt(allocation, 0, 0xa5a5a5a5)
     memory.putInt(allocation, 4, 0xa5a5a5a5)
-    val dispatch = KernelDispatch.validated(
-      ProgramId(1L),
+    val dispatch = KernelTask.validated(
       KernelName("store_short"),
       Dimensions.One,
       Dimensions.One,
       Vec.empty
     ).toOption.get
-    assertEquals(DispatchInterpreter.execute(kernel, dispatch, memory), Right(()))
+    assertEquals(executeKernel(compileKernel(kernel), dispatch, memory), Right(()))
     assertEquals(memory.getInt(allocation, 0), 0xa55678a5)
     assertEquals(memory.getInt(allocation, 4), 0xa5a5a5a5)
     memory.putInt(allocation, 0, 0xa5a5a5a5)
@@ -217,7 +215,7 @@ final class CodeObjectExecutionSuite extends munit.FunSuite with CodeObjectTestS
         LittleEndian.toVec(word, ScalarByteWidth(4))
       )
     )
-    assertEquals(DispatchInterpreter.execute(high, dispatch, memory), Right(()))
+    assertEquals(executeKernel(compileKernel(high), dispatch, memory), Right(()))
     assertEquals(memory.getInt(allocation, 0), 0xa51234a5)
     assertEquals(memory.getInt(allocation, 4), 0xa5a5a5a5)
   }
@@ -284,8 +282,7 @@ final class CodeObjectExecutionSuite extends munit.FunSuite with CodeObjectTestS
       text = code,
       functionSizes = Map(0x1000L -> 20, 0x1018L -> 16)
     )
-    val dispatch = KernelDispatch.validated(
-      ProgramId(1L),
+    val dispatch = KernelTask.validated(
       KernelName("linked_call"),
       Dimensions.One,
       Dimensions.One,
@@ -293,14 +290,14 @@ final class CodeObjectExecutionSuite extends munit.FunSuite with CodeObjectTestS
     ).toOption.get
 
     assertEquals(
-      DispatchInterpreter.decodeInstruction(code.take(8), Target("gfx900")),
-      Right(DecodedInstruction.SMove(4, InstructionSource.Literal(0x1018L)))
+      VMCompiler.decodeInstruction(code.take(8), Target("gfx900")),
+      Right(Instruction.SMove(4, InstructionSource.Literal(0x1018L)))
     )
     assertEquals(
-      DispatchInterpreter.decodeInstruction(code.drop(8).take(4), Target("gfx900")),
-      Right(DecodedInstruction.SMove(5, InstructionSource.Constant(0L)))
+      VMCompiler.decodeInstruction(code.drop(8).take(4), Target("gfx900")),
+      Right(Instruction.SMove(5, InstructionSource.Constant(0L)))
     )
-    assertEquals(DispatchInterpreter.execute(kernel, dispatch, TestMemory()), Right(()))
+    assertEquals(executeKernel(compileKernel(kernel), dispatch, TestMemory()), Right(()))
   }
 
   test("gfx900 executes the official ROCr vector-copy kernel subset") {
@@ -317,9 +314,9 @@ final class CodeObjectExecutionSuite extends munit.FunSuite with CodeObjectTestS
     val target = Target("gfx900")
     val kernel = CodeObjectKernel("vector_copy", target, 80, 0, 0, 0x80, 0x0b, code)
     val memory = TestMemory()
-    val input  = AllocationId(1L)
-    val output = AllocationId(2L)
-    val unused = AllocationId(3L)
+    val input  = MemoryRegion(1L)
+    val output = MemoryRegion(2L)
+    val unused = MemoryRegion(3L)
     memory.allocate(input, 256)
     memory.allocate(output, 256)
     memory.allocate(unused, 256)
@@ -328,11 +325,11 @@ final class CodeObjectExecutionSuite extends munit.FunSuite with CodeObjectTestS
       memory.putInt(input, (index * 4).refineUnsafe[Positive0], value)
     }
 
-    val zero      = KernelArgument.Scalar(Vec.fill(8)(0.toByte))
+    val zero      = KernelTask.Argument.Scalar(Vec.fill(8)(0.toByte))
     val arguments = Vec(
-      KernelArgument.Allocation(input, 0L),
-      KernelArgument.Allocation(output, 0L),
-      KernelArgument.Allocation(unused, 0L),
+      KernelTask.Argument.Memory(input, 0L),
+      KernelTask.Argument.Memory(output, 0L),
+      KernelTask.Argument.Memory(unused, 0L),
       zero,
       zero,
       zero,
@@ -341,15 +338,14 @@ final class CodeObjectExecutionSuite extends munit.FunSuite with CodeObjectTestS
       zero,
       zero
     )
-    val dispatch = KernelDispatch.validated(
-      ProgramId(1L),
+    val dispatch = KernelTask.validated(
       KernelName("vector_copy"),
       Dimensions(64, 1, 1),
       Dimensions.One,
       arguments
     ).toOption.get
 
-    assertEquals(DispatchInterpreter.execute(kernel, dispatch, memory), Right(()))
+    assertEquals(executeKernel(compileKernel(kernel), dispatch, memory), Right(()))
     assertEquals(
       Array.tabulate(64)(index => memory.getInt(output, (index * 4).refineUnsafe[Positive0])).toSeq,
       expected.toSeq

@@ -26,7 +26,7 @@ using unified::ScalarType;
       CAPTURE(size);                                                                                                                       \
       SECTION("strided") { check<kind>(backend, size); }                                                                                   \
       SECTION("contiguous") { check<kind>(backend, size, 1, 1, "contiguous"); }                                                            \
-      /* Only the two-vector routines share the negative-increment contract. */                                                            \
+      /* Only the two-vector routines share the negative-increment rule. */                                                                \
       const auto increments =                                                                                                              \
           GENERATE(std::pair<int32_t, int32_t>{-2, -3}, std::pair<int32_t, int32_t>{-2, 3}, std::pair<int32_t, int32_t>{2, -3});           \
       CAPTURE(increments.first, increments.second);                                                                                        \
@@ -114,7 +114,7 @@ DECLARE_BLAS_F32_COMPACT_BATCHED_GEMM("gemm_strided_batched")
       CAPTURE(size);                                                                                                                       \
       SECTION("strided") { check<kind>(backend, size); }                                                                                   \
       SECTION("contiguous") { check<kind>(backend, size, 1, 1, "contiguous"); }                                                            \
-      /* Only the two-vector routines share the negative-increment contract. */                                                            \
+      /* Only the two-vector routines share the negative-increment rule. */                                                                \
       const auto increments =                                                                                                              \
           GENERATE(std::pair<int32_t, int32_t>{-2, -3}, std::pair<int32_t, int32_t>{-2, 3}, std::pair<int32_t, int32_t>{2, -3});           \
       CAPTURE(increments.first, increments.second);                                                                                        \
@@ -202,7 +202,7 @@ DECLARE_BLAS_F32_FULL_BATCHED_GEMM("gemm_strided_batched")
       CAPTURE(size);                                                                                                                       \
       SECTION("strided") { check<kind>(backend, size); }                                                                                   \
       SECTION("contiguous") { check<kind>(backend, size, 1, 1, "contiguous"); }                                                            \
-      /* Only the two-vector routines share the negative-increment contract. */                                                            \
+      /* Only the two-vector routines share the negative-increment rule. */                                                                \
       const auto increments =                                                                                                              \
           GENERATE(std::pair<int32_t, int32_t>{-2, -3}, std::pair<int32_t, int32_t>{-2, 3}, std::pair<int32_t, int32_t>{2, -3});           \
       CAPTURE(increments.first, increments.second);                                                                                        \
@@ -290,7 +290,7 @@ DECLARE_BLAS_F64_FULL_BATCHED_GEMM("gemm_strided_batched")
       CAPTURE(size);                                                                                                                       \
       SECTION("strided") { check<kind>(backend, size); }                                                                                   \
       SECTION("contiguous") { check<kind>(backend, size, 1, 1, "contiguous"); }                                                            \
-      /* Only the two-vector routines share the negative-increment contract. */                                                            \
+      /* Only the two-vector routines share the negative-increment rule. */                                                                \
       const auto increments =                                                                                                              \
           GENERATE(std::pair<int32_t, int32_t>{-2, -3}, std::pair<int32_t, int32_t>{-2, 3}, std::pair<int32_t, int32_t>{2, -3});           \
       CAPTURE(increments.first, increments.second);                                                                                        \
@@ -378,7 +378,7 @@ DECLARE_BLAS_F16_FULL_BATCHED_GEMM("gemm_strided_batched")
       CAPTURE(size);                                                                                                                       \
       SECTION("strided") { check<kind>(backend, size); }                                                                                   \
       SECTION("contiguous") { check<kind>(backend, size, 1, 1, "contiguous"); }                                                            \
-      /* Only the two-vector routines share the negative-increment contract. */                                                            \
+      /* Only the two-vector routines share the negative-increment rule. */                                                                \
       const auto increments =                                                                                                              \
           GENERATE(std::pair<int32_t, int32_t>{-2, -3}, std::pair<int32_t, int32_t>{-2, 3}, std::pair<int32_t, int32_t>{2, -3});           \
       CAPTURE(increments.first, increments.second);                                                                                        \

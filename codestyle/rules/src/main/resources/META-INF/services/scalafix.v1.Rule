@@ -5,3 +5,5 @@ fix.GemstoneIronImports
 fix.GemstoneNoAssume
 fix.GemstoneNoExplicitNew
 fix.GemstoneNoIntrinsicLocks
+fix.GemstoneNoIterator
+fix.GemstoneNoTypeCasting

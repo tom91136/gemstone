@@ -59,7 +59,7 @@ template <class Value> inline void check_stable_sort_by_key_large() {
 }
 
 // ---------------------------------------------------------------------------
-// The device-side random contract of rocThrust's `testing/random`, decomposed
+// The device-side random semantics of rocThrust's `testing/random`, decomposed
 // into one case per engine characteristic and one per distribution
 // characteristic so a single regression names the exact instantiation.
 // ---------------------------------------------------------------------------
@@ -168,11 +168,11 @@ template <class Value> inline void check_dereference() {
 }
 
 TEST_CASE("algorithms/roc-thrust-semantic/device-delete/i32/n11", "[unified][rocthrust][compact]") {
-  // The upstream contract asserts that the object destructor runs on the
+  // The upstream test asserts that the object destructor runs on the
   // device after thrust::device_delete; rocThrust keeps that probe
   // commented out behind a KNOWN_FAILURE marker because the destructor is not
   // reliably invoked on this backend, so no direct port can verify more.
-  SKIP("device-delete: the upstream destructor-invocation contract is marked "
+  SKIP("device-delete: the upstream destructor-invocation test is marked "
        "KNOWN_FAILURE on rocThrust");
 }
 
@@ -348,7 +348,7 @@ template <class Number> inline void check_complex_math_transform() {
   // Every component stays strictly positive: the emulator's device complex
   // transcendentals flip the sign of components handled on the negative-side
   // of the reciprocal identity in catrig, which is an upstream red on this
-  // backend rather than a contract this port can verify.
+  // backend rather than a property this port can verify.
   const std::vector<Complex> input{Complex(0.5, 0.25), Complex(1.0, 0.5), Complex(0.75, 1.0), Complex(1.25, 0.5), Complex(2.0, 1.0)};
   const Number tolerance = static_cast<Number>(1e-9);
   const thrust::device_vector<Complex> source(input.begin(), input.end());
@@ -493,7 +493,7 @@ template <class Value> inline void check_reverse_iterator() {
 
 // ---------------------------------------------------------------------------
 // rocThrust `testing/{constant,counting,discard,tabulate_output}_iterator`
-// port. `testing/generate_const_iterators` is a compile-time negative contract
+// port. `testing/generate_const_iterators` is a compile-time negative check
 // (ASSERT_STATIC_ASSERT) and is carried as an explicit skip.
 // ---------------------------------------------------------------------------
 
@@ -537,7 +537,7 @@ template <class Value> inline void check_tabulate_output_iterator() {
 }
 
 // ---------------------------------------------------------------------------
-// rocThrust `testing/out_of_memory_recovery.cu` port.  The upstream contract
+// rocThrust `testing/out_of_memory_recovery.cu` port.  The upstream test
 // assumes a real allocation-failure path integrated through HIP and the
 // preceding device_vector destructors running during the failed helper
 // allocation; under the emulator no deterministic allocation failure can be
@@ -545,7 +545,7 @@ template <class Value> inline void check_tabulate_output_iterator() {
 // ---------------------------------------------------------------------------
 
 TEST_CASE("algorithms/roc-thrust-semantic/out-of-memory-recovery/i32/n11", "[unified][rocthrust][compact]") {
-  SKIP("out-of-memory-recovery: the upstream contract asserts "
+  SKIP("out-of-memory-recovery: the upstream test asserts "
        "allocation-failure recovery; forcing a real "
        "failed device allocation whose failure path still runs the preceding "
        "device_vector destructor is "

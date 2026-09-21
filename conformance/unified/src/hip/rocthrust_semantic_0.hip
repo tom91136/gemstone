@@ -467,7 +467,7 @@ TEST_CASE("algorithms/roc-thrust-semantic/zip-iterator-sort-by-key/i32/n11", "[u
 }
 
 // ---------------------------------------------------------------------------
-// The device-side random contract of rocThrust's `testing/random`, decomposed
+// The device-side random semantics of rocThrust's `testing/random`, decomposed
 // into one case per engine characteristic and one per distribution
 // characteristic so a single regression names the exact instantiation.
 // ---------------------------------------------------------------------------
@@ -503,7 +503,7 @@ TEST_CASE("algorithms/roc-thrust-semantic/zip-iterator-sort-by-key/i32/n11", "[u
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
-// rocThrust `testing/out_of_memory_recovery.cu` port.  The upstream contract
+// rocThrust `testing/out_of_memory_recovery.cu` port.  The upstream test
 // assumes a real allocation-failure path integrated through HIP and the
 // preceding device_vector destructors running during the failed helper
 // allocation; under the emulator no deterministic allocation failure can be

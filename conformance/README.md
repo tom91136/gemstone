@@ -90,8 +90,9 @@ profile skips, takes the physical-device lock, and runs exactly one case in its 
 
 Machine profiles select backends, architectures, devices, environment, and explicit skips. Each invocation selects one
 profile; omit `--machine` to use the profile matching the local short hostname.
-`--isolated-launcher` skips duplicate resolved routes, disables physical-device locks, and gives each serial launcher route
-the machine-wide CTest worker budget.
+`--isolated-launcher` skips duplicate resolved routes and disables physical-device locks because the launcher replaces the
+profile's physical provider. Server ownership remains outside conformance: the sbt emulation task starts one Gemstone
+server, while each launcher invocation registers an isolated client with it.
 
 Run directly or through any compiler-wrapper-style launcher:
 
@@ -107,6 +108,8 @@ build/executable/bin/conformance run \
 ```
 
 Pass backend or target names before `--launcher` to narrow a run. `CONFORMANCE_JOBS` controls CTest parallelism.
+For `sbt conformance/emulate`, the default is at most four concurrent tests, with the server worker pool sized from the
+remaining CPUs; `CONFORMANCE_JOBS` and `GEMSTONE_EXECUTION_PARALLELISM` override these defaults.
 `workloads/compact.toml` and `workloads/full.toml` define the available workload sizes.
 
 ## Unit tests

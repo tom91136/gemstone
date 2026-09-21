@@ -6,24 +6,26 @@ import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 import net.kurobako.gemstone.Vec
 import net.kurobako.gemstone.binary.{LittleEndian, ScalarByteWidth}
-import net.kurobako.gemstone.execution.*
+import net.kurobako.gemstone.isa.*
+import net.kurobako.gemstone.vm.*
+import net.kurobako.gemstone.vm.LaunchGeometry.Dimensions
 
-final class ScalarNotSuite extends munit.FunSuite {
+final class ScalarNotSuite extends munit.FunSuite with CodeObjectTestSupport {
   // AMD Vega ISA SOP1: complement all destination bits, SCC = (result != 0).
   // https://www.amd.com/content/dam/amd/en/documents/radeon-tech-docs/instruction-set-architectures/vega-shader-instruction-set-architecture.pdf
   private val words = Vec[Long](
     0xc00a0100L, 0x00000000L, 0xbf8cc07fL, 0xbf068080L, 0xbe8900ffL, 0x12345678L, 0xbe880504L, 0x850a8081L, 0x7e000280L,
     0x7e020208L, 0x7e040209L, 0xdc748000L, 0x00060100L, 0x7e000288L, 0x7e02020aL, 0xdc708000L, 0x00060100L, 0xbf810000L
   )
-  private val output = AllocationId(1)
-  private final class Memory extends ExecutionMemory {
+  private val output = MemoryRegion(1)
+  private final class Memory extends net.kurobako.gemstone.vm.Memory with TestAddressSpace {
     val bytes                                                                     = Array.ofDim[Byte](16)
-    def read(id: AllocationId, offset: Long :| Positive0, size: Int :| Positive0) =
+    override protected val regionSizes: Iterable[(MemoryRegion, Long)]            = Seq(output -> bytes.length.toLong)
+    def read(id: MemoryRegion, offset: Long :| Positive0, size: Int :| Positive0) =
       Right(Vec.from(bytes.slice(offset.toInt, offset.toInt + size)))
-    def write(id: AllocationId, offset: Long :| Positive0, value: Vec[Byte]) = {
+    def write(id: MemoryRegion, offset: Long :| Positive0, value: Vec[Byte]) = {
       val _ = value.copyToArray(bytes, offset.toInt, value.size); Right(())
     }
-    def recordPointerRelocation(relocation: PointerRelocation): Unit = ()
   }
   test("scalar NOT writes full width and sets or clears SCC independently of its previous value") {
     for {
@@ -38,20 +40,22 @@ final class ScalarNotSuite extends munit.FunSuite {
         .updated(6, instruction)
         .flatMap(value => LittleEndian.toVec(value, ScalarByteWidth(4)))
       val kernel   = CodeObjectKernel("kernel", Target("gfx900"), 16, 0, 0, 0x80, 0x08, code)
-      val dispatch = KernelDispatch.validated(
-        ProgramId(1),
+      val dispatch = KernelTask.validated(
         KernelName("kernel"),
         Dimensions.One,
         Dimensions.One,
-        Vec(KernelArgument.Scalar(LittleEndian.toVec(input, ScalarByteWidth(8))), KernelArgument.Allocation(output, 0))
+        Vec(
+          KernelTask.Argument.Scalar(LittleEndian.toVec(input, ScalarByteWidth(8))),
+          KernelTask.Argument.Memory(output, 0)
+        )
       ).toOption.get
       val memory = Memory()
       assertEquals(
-        DispatchInterpreter.execute(
-          DispatchInterpreter.prepare(kernel).toOption.get,
+        executeKernel(
+          VMCompiler.compile(kernel).toOption.get,
           dispatch,
           memory,
-          ExecutionControl.default
+          TaskControl.default
         ),
         Right(())
       )

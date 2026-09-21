@@ -2,13 +2,14 @@ package net.kurobako.gemstone.isa.ptx.v9_3
 
 import Program.*
 
-import VirtualMachine.*
+import VMIR.*
 
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 
-import net.kurobako.gemstone.execution.*
 import net.kurobako.gemstone.memory.*
+import net.kurobako.gemstone.vm.LaunchGeometry
+import net.kurobako.gemstone.vm.LaunchGeometry.Dimensions
 
 import scala.collection.mutable
 
@@ -43,7 +44,7 @@ final class CoherentVectorSuite extends munit.FunSuite {
 
   test("packed release store publishes the complete scan status and prefix") {
     val memory = InterleavingMemory()
-    val kernel = ISA.compile(""".version 8.0
+    val kernel = VMCompiler.compile(""".version 8.0
       .target sm_80
       .address_size 64
       .visible .entry publish(.param .u64 output) {
@@ -55,12 +56,11 @@ final class CoherentVectorSuite extends munit.FunSuite {
         st.release.gpu.v2.u32 [%rd], {%r0, %r1};
         ret;
       }""").toOption.get
-    assert(VirtualMachine.execute(
+    assert(VMInterpreter.execute(
       kernel,
       geometry,
       Map(ParameterName("output") -> Argument(memory.base.value)),
-      memory,
-      captureTrace = false
+      memory
     ).isRight)
     assert(memory.observed.nonEmpty)
     assert(memory.observed.forall(_ == packed), memory.observed.toString)
@@ -70,7 +70,7 @@ final class CoherentVectorSuite extends munit.FunSuite {
     val memory = InterleavingMemory()
     memory.backing.writeLittleEndian(memory.base, packed, MemoryValueByteWidth(8)).toOption.get
     memory.changeAfterRead = true
-    val kernel = ISA.compile(""".version 8.0
+    val kernel = VMCompiler.compile(""".version 8.0
       .target sm_80
       .address_size 64
       .visible .entry observe(.param .u64 input) {
@@ -82,12 +82,11 @@ final class CoherentVectorSuite extends munit.FunSuite {
         st.global.v2.u32 [%rd], {%r0, %r1};
         ret;
       }""").toOption.get
-    assert(VirtualMachine.execute(
+    assert(VMInterpreter.execute(
       kernel,
       geometry,
       Map(ParameterName("input") -> Argument(memory.base.value)),
-      memory,
-      captureTrace = false
+      memory
     ).isRight)
     assertEquals(memory.backing.readLittleEndian(memory.base.offset(8), MemoryValueByteWidth(8)), Right(packed))
   }

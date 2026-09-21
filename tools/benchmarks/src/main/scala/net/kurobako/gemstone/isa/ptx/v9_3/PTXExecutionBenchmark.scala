@@ -1,14 +1,15 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
 import Program.*
-import VirtualMachine.*
+import VMIR.*
 
 import net.kurobako.gemstone.PlatformTime
 import net.kurobako.gemstone.benchmarks.BenchmarkArguments
 import net.kurobako.gemstone.benchmarks.BenchmarkName
 import net.kurobako.gemstone.benchmarks.PlatformMetrics
-import net.kurobako.gemstone.execution.*
 import net.kurobako.gemstone.memory.ArrayCheckedMemory
+import net.kurobako.gemstone.vm.LaunchGeometry
+import net.kurobako.gemstone.vm.LaunchGeometry.Dimensions
 import cats.syntax.all.*
 import com.monovore.decline.Opts
 import io.github.iltotore.iron.*
@@ -78,7 +79,7 @@ object PTXExecutionBenchmark {
     val lanes: Int :| Positive  = if (mode == GeometryMode.Tiny) 1 else 256
     val groups: Int :| Positive = if (mode == GeometryMode.Tiny) 1 else 16
     val size: Int :| Positive   = (lanes * groups).refineUnsafe[Positive]
-    val kernel   = ISA.compile(source).fold(e => throw IllegalArgumentException(e.message), value => value)
+    val kernel   = VMCompiler.compile(source).fold(e => throw IllegalArgumentException(e.message), value => value)
     val geometry = LaunchGeometry.forLaunch(
       dimensions(lanes),
       dimensions(groups)
@@ -99,7 +100,7 @@ object PTXExecutionBenchmark {
       ParameterName("output")  -> Argument(base.value + size.toLong * 8)
     )
     def execute(): Unit =
-      VirtualMachine.execute(kernel, geometry, parameters, memory, ExecutionControl.default, captureTrace = false)
+      VMInterpreter.execute(kernel, geometry, parameters, memory)
         .fold(e => throw IllegalStateException(e.message), _ => ())
     def verify(): Unit = {
       var n = 0

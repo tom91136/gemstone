@@ -2,7 +2,7 @@ package net.kurobako.gemstone.server.execution
 
 import net.kurobako.gemstone.{NoNul, PlatformTime, Vec}
 import net.kurobako.gemstone.binary.{LittleEndian, ScalarByteWidth}
-import net.kurobako.gemstone.execution.*
+import net.kurobako.gemstone.isa.KernelName as ISAKernelName
 import net.kurobako.gemstone.isa.spirv.v1_6.Endianness
 import net.kurobako.gemstone.isa.spirv.v1_6.Header
 import net.kurobako.gemstone.isa.spirv.v1_6.ISA as SPIRV
@@ -10,8 +10,11 @@ import net.kurobako.gemstone.isa.spirv.v1_6.Instruction
 import net.kurobako.gemstone.isa.spirv.v1_6.Module
 import net.kurobako.gemstone.isa.spirv.v1_6.Operand
 import net.kurobako.gemstone.isa.spirv.v1_6.SPIRVOperandKind
+import net.kurobako.gemstone.isa.spirv.v1_6.Validation
 import net.kurobako.gemstone.isa.spirv.v1_6.Word
 import net.kurobako.gemstone.memory.AllocationKind
+import net.kurobako.gemstone.rpc.ExecutionProtocol.*
+import net.kurobako.gemstone.vm.{Fault, KernelTask, LaunchGeometry, MemoryRegion, Scheduler}
 
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
@@ -20,6 +23,8 @@ import scala.annotation.tailrec
 import scala.util.Using
 
 final class SPIRVProgramExecutorSuite extends munit.FunSuite {
+  private val encoding = SPIRVRuntimeBackend(Validation.Environment.OpenCLCompute).encoding
+
   test("the external SPIR-V load boundary does not treat non-kernel entry points as libraries") {
     val voidType     = operand("IdResult", 1)
     val functionType = operand("IdResult", 2)
@@ -40,13 +45,11 @@ final class SPIRVProgramExecutorSuite extends munit.FunSuite {
       Endianness.Little
     )
 
-    GemstoneProgramRegistry().load(
-      ProgramId(54L),
-      ProgramFormat.SPIRVBinary,
-      SPIRV.encode(module).toOption.get
-    ) match {
-      case Left(ExecutionFailure.InvalidRequest(detail)) => assert(detail.contains("OpEntryPoint Kernel"))
-      case result => fail(s"expected kernel entry-point validation failure, found $result")
+    Using.resource(ExecutionService(GemstoneBackendCatalog.default)) { service =>
+      service.load(encoding, SPIRV.encode(module).toOption.get) match {
+        case Left(ExecutionFailure.InvalidRequest(detail)) => assert(detail.contains("OpEntryPoint Kernel"))
+        case result => fail(s"expected kernel entry-point validation failure, found $result")
+      }
     }
   }
 
@@ -67,15 +70,11 @@ final class SPIRVProgramExecutorSuite extends munit.FunSuite {
       ),
       Endianness.Little
     )
-    val executor = GemstoneProgramRegistry()
-
-    executor.load(
-      ProgramId(55L),
-      ProgramFormat.SPIRVBinary,
-      SPIRV.encode(module).toOption.get
-    ) match {
-      case Left(ExecutionFailure.InvalidRequest(detail)) => assert(detail.contains("OpCapability Kernel"))
-      case result => fail(s"expected OpenCL environment validation failure, found $result")
+    Using.resource(ExecutionService(GemstoneBackendCatalog.default)) { service =>
+      service.load(encoding, SPIRV.encode(module).toOption.get) match {
+        case Left(ExecutionFailure.InvalidRequest(detail)) => assert(detail.contains("OpCapability Kernel"))
+        case result => fail(s"expected OpenCL environment validation failure, found $result")
+      }
     }
   }
 
@@ -107,52 +106,50 @@ final class SPIRVProgramExecutorSuite extends munit.FunSuite {
       Endianness.Little
     )
     val image = SPIRV.encode(module).toOption.get
-    Using.resource(ExecutionService(GemstoneProgramRegistry())) { service =>
+    Using.resource(ExecutionService(GemstoneBackendCatalog.default)) { service =>
       val allocation = service.registerAllocation(4L, AllocationKind.Shared).toOption.get
-      val program    = service.load(ProgramFormat.SPIRVBinary, image).toOption.get
-      val dispatch   = KernelDispatch
+      val program    = service.load(encoding, image).toOption.get
+      val task       = KernelTask
         .validated(
-          program,
-          KernelName("store"),
-          Dimensions.One,
-          Dimensions.One,
+          ISAKernelName("store"),
+          LaunchGeometry.Dimensions.One,
+          LaunchGeometry.Dimensions.One,
           Vec(
-            KernelArgument.Allocation(allocation, 0L),
-            KernelArgument.Scalar(Vec[Byte](0x78, 0x56, 0x34, 0x12))
+            KernelTask.Argument.Memory(MemoryRegion(allocation.value), 0L),
+            KernelTask.Argument.Scalar(Vec[Byte](0x78, 0x56, 0x34, 0x12))
           )
         )
         .toOption
         .get
 
-      val completion = service.launch(dispatch).toOption.get
+      val completion = service.launch(program, task).toOption.get
       assertEquals(awaitCompletion(service, completion), Right(CompletionStatus.Succeeded))
       assertEquals(service.read(allocation, 0L, 4), Right(Vec[Byte](0x78, 0x56, 0x34, 0x12)))
     }
   }
 
   test("multi-workgroup SPIR-V completion publishes every dirty region on repeated queued launches") {
-    import net.kurobako.gemstone.execution.ExecutionParallelism
     import java.util.concurrent.atomic.AtomicReference
     val image = SPIRV.encode(sparseGroupModule).toOption.get
     for {
       groups   <- Vec(1, 2, 3, 5, 9)
       parallel <- Vec(false, true)
     } {
-      final class ParallelGroups extends ExecutionParallelism {
+      final class ParallelGroups extends Scheduler {
         override val parallelism                                                                 = 4
         override def shouldParallel(tasks: Long :| Positive0, items: Long :| Positive0): Boolean = tasks > 1L
         override def parallelFor(tasks: Long :| Positive0)(
-            task: Long :| Positive0 => Either[ExecutionFailure, Unit]
+            task: Long :| Positive0 => Either[Fault, Unit]
         )
-            : Either[ExecutionFailure, Unit] = {
-          val failure = AtomicReference(Option.empty[ExecutionFailure])
+            : Either[Fault, Unit] = {
+          val failure = AtomicReference(Option.empty[Fault])
           (0L until tasks).grouped(4).foreach { batch =>
             val threads = batch.map(index =>
               Thread(() =>
                 try task(index.refineUnsafe[Positive0]).left.foreach(error => failure.set(Some(error)))
                 catch {
                   case error: Throwable =>
-                    failure.set(Some(ExecutionFailure.Failed(error.toString)))
+                    failure.set(Some(Fault.Backend(error.toString)))
                 }
               )
             )
@@ -168,31 +165,30 @@ final class SPIRVProgramExecutorSuite extends munit.FunSuite {
       val schedule = ParallelGroups()
       val queued   = AtomicReference(Option.empty[Runnable])
       Using.resource(ExecutionService(
-        GemstoneProgramRegistry(),
+        GemstoneBackendCatalog.default,
         runnable => assert(queued.compareAndSet(None, Some(runnable))),
-        parallelism = if (parallel) schedule else ExecutionParallelism.Sequential
+        scheduler = if (parallel) schedule else Scheduler.Sequential
       )) { service =>
         val size           = ((groups + 3) * 65536 + 8).refineUnsafe[Positive]
         val allocationSize = size.toLong.refineUnsafe[Positive]
         val allocation     = service.registerAllocation(allocationSize, AllocationKind.Shared).toOption.get
-        val program = service.load(ProgramFormat.SPIRVBinary, image).fold(error => fail(error.message), value => value)
-        val host    = Array.ofDim[Byte](size)
+        val program        = service.load(encoding, image).fold(error => fail(error.message), value => value)
+        val host           = Array.ofDim[Byte](size)
         for (seed <- Vec(3L, 7L)) {
           val before     = service.read(allocation, 0L, size.refineUnsafe[Positive0]).toOption.get
           val groupCount = groups.refineEither[Positive]
-            .fold(message => fail(message), value => Dimensions(value, 1, 1))
-          val dispatch = KernelDispatch.validated(
-            program,
-            KernelName("groups"),
-            Dimensions.One,
+            .fold(message => fail(message), value => LaunchGeometry.Dimensions(value, 1, 1))
+          val task = KernelTask.validated(
+            ISAKernelName("groups"),
+            LaunchGeometry.Dimensions.One,
             groupCount,
             Vec(
-              KernelArgument.Allocation(allocation, 4L),
-              KernelArgument.Scalar(LittleEndian.toVec(seed, ScalarByteWidth(4)))
+              KernelTask.Argument.Memory(MemoryRegion(allocation.value), 4L),
+              KernelTask.Argument.Scalar(LittleEndian.toVec(seed, ScalarByteWidth(4)))
             ),
-            globalOffset = Coordinates(2, 0, 0)
+            globalOffset = LaunchGeometry.Coordinates(2, 0, 0)
           ).toOption.get
-          val completion = service.launch(dispatch).toOption.get
+          val completion = service.launch(program, task).toOption.get
           assertEquals(service.completion(completion), Right(CompletionStatus.Pending))
           assert(service.completionDirtyRanges(completion).isLeft)
           assertEquals(service.read(allocation, 0L, size.refineUnsafe[Positive0]), Right(before))

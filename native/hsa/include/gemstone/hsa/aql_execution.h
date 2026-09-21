@@ -121,7 +121,7 @@ int gemstone_hsa_aql_runtime_describe_kernel(gemstone_hsa_aql_runtime *runtime, 
 
 // Nonzero when install operations replace bootstrap fields with metadata from
 // the execution service. Injected executors without that callback retain the
-// process-local fallback contract.
+// process-local fallback behaviour.
 int gemstone_hsa_aql_runtime_uses_server_kernel_metadata(const gemstone_hsa_aql_runtime *runtime);
 
 int gemstone_hsa_aql_runtime_remove_kernel(gemstone_hsa_aql_runtime *runtime, uint64_t kernel_object);

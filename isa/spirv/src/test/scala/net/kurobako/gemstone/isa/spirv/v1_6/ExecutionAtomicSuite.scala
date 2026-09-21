@@ -1,23 +1,15 @@
 package net.kurobako.gemstone.isa.spirv.v1_6
+import net.kurobako.gemstone.isa.*
+import net.kurobako.gemstone.vm.*
+import net.kurobako.gemstone.vm.LaunchGeometry.{Coordinates, Dimensions, GlobalDimensions}
 
 import net.kurobako.gemstone.Vec
 
 import net.kurobako.gemstone.binary.ByteRange
 import net.kurobako.gemstone.binary.LittleEndian
 import net.kurobako.gemstone.binary.ScalarByteWidth
-import net.kurobako.gemstone.execution.ExecutionFailure
-import net.kurobako.gemstone.execution.ExecutionControl
-import net.kurobako.gemstone.execution.ExecutionLimits
-import net.kurobako.gemstone.execution.ExecutionMemory
-import net.kurobako.gemstone.execution.AllocationId
-import net.kurobako.gemstone.execution.Dimensions
-import net.kurobako.gemstone.execution.KernelArgument
-import net.kurobako.gemstone.execution.KernelDispatch
-import net.kurobako.gemstone.execution.KernelName
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
-import net.kurobako.gemstone.execution.PointerRelocation
-import net.kurobako.gemstone.execution.ProgramId
 
 import java.util.concurrent.atomic.AtomicReference
 final class ExecutionAtomicSuite extends munit.FunSuite with ExecutionTestSupport {
@@ -69,21 +61,20 @@ final class ExecutionAtomicSuite extends munit.FunSuite with ExecutionTestSuppor
       ),
       Endianness.Little
     )
-    val allocation = AllocationId(12L)
+    val allocation = MemoryRegion(12L)
     val memory     = ArrayMemory(allocation, 24)
     assertEquals(memory.write(allocation, 0L, LittleEndian.toVec(10L, ScalarByteWidth(8))), Right(()))
-    val dispatch = KernelDispatch
+    val dispatch = KernelTask
       .validated(
-        ProgramId(12L),
         KernelName("atomics"),
         Dimensions.One,
         Dimensions.One,
-        Vec(KernelArgument.Allocation(allocation, 0L))
+        Vec(KernelTask.Argument.Memory(allocation, 0L))
       )
       .toOption
       .get
 
-    assertEquals(Interpreter.runUnchecked(module, dispatch, memory), Right(()))
+    assertEquals(executeUnchecked(module, dispatch, memory), Right(()))
     assertEquals(
       memory.bytes,
       LittleEndian.toVec(7L, ScalarByteWidth(8)) ++ LittleEndian.toVec(7L, ScalarByteWidth(8)) ++
@@ -129,20 +120,19 @@ final class ExecutionAtomicSuite extends munit.FunSuite with ExecutionTestSuppor
         ),
         Endianness.Little
       )
-      val allocation = AllocationId(120L)
+      val allocation = MemoryRegion(120L)
       val memory     = ArrayMemory(allocation, 8)
       assertEquals(memory.write(allocation, 0L, LittleEndian.toVec(initial, ScalarByteWidth(4))), Right(()))
-      val dispatch = KernelDispatch
+      val dispatch = KernelTask
         .validated(
-          ProgramId(120L),
           KernelName("atomic"),
           Dimensions.One,
           Dimensions.One,
-          Vec(KernelArgument.Allocation(allocation, 0L))
+          Vec(KernelTask.Argument.Memory(allocation, 0L))
         )
         .toOption
         .get
-      assertEquals(Interpreter.runUnchecked(module, dispatch, memory), Right(()))
+      assertEquals(executeUnchecked(module, dispatch, memory), Right(()))
       assertEquals(
         memory.bytes,
         LittleEndian.toVec(updated, ScalarByteWidth(4)) ++ LittleEndian.toVec(initial, ScalarByteWidth(4))
@@ -210,19 +200,18 @@ final class ExecutionAtomicSuite extends munit.FunSuite with ExecutionTestSuppor
       ),
       Endianness.Little
     )
-    val allocation = AllocationId(121L)
+    val allocation = MemoryRegion(121L)
     val memory     = ArrayMemory(allocation, 12)
-    val dispatch   = KernelDispatch
+    val dispatch   = KernelTask
       .validated(
-        ProgramId(121L),
         KernelName("atomic_float"),
         Dimensions.One,
         Dimensions.One,
-        Vec(KernelArgument.Allocation(allocation, 0L))
+        Vec(KernelTask.Argument.Memory(allocation, 0L))
       )
       .toOption
       .get
-    assertEquals(Interpreter.runUnchecked(module, dispatch, memory), Right(()))
+    assertEquals(executeUnchecked(module, dispatch, memory), Right(()))
     assertEquals(
       memory.bytes,
       LittleEndian.toVec(secondBits.toLong, ScalarByteWidth(4)) ++
@@ -270,7 +259,7 @@ final class ExecutionAtomicSuite extends munit.FunSuite with ExecutionTestSuppor
         ),
       Endianness.Little
     )
-    val allocation = AllocationId(200L)
+    val allocation = MemoryRegion(200L)
     val writes     = AtomicReference(Vec.empty[(Long, Int)])
     val memory     = ArrayMemory(
       allocation,
@@ -280,15 +269,14 @@ final class ExecutionAtomicSuite extends munit.FunSuite with ExecutionTestSuppor
         ()
       }
     )
-    val dispatch = KernelDispatch.validated(
-      program = ProgramId(200L),
+    val dispatch = KernelTask.validated(
       kernelName = KernelName("sparse"),
       groupSize = Dimensions.One,
       groupCount = Dimensions.One,
-      arguments = offsets.map(KernelArgument.Allocation(allocation, _)),
+      arguments = offsets.map(KernelTask.Argument.Memory(allocation, _)),
       globalSize = None
     ).toOption.get
-    assertEquals(Interpreter.runUnchecked(module, dispatch, memory), Right(()))
+    assertEquals(executeUnchecked(module, dispatch, memory), Right(()))
     assertEquals(writes.get(), Vec(0L -> 4, 8L -> 4, 62L -> 8, 4094L -> 2, 4096L -> 2, 8191L -> 1, 8192L -> 3))
     val expected = Array.ofDim[Byte](8200)
     offsets.foreach { offset =>
@@ -309,28 +297,28 @@ final class ExecutionAtomicSuite extends munit.FunSuite with ExecutionTestSuppor
       val count = (local * groups - (if (barrier) 0 else 1)).refineEither[Positive]
         .fold(message => fail(message), value => value)
       val offset: Int :| Positive0 = 7
-      val allocation               = AllocationId(300L)
+      val allocation               = MemoryRegion(300L)
       val memory                   = ArrayMemory(allocation, (offset + count + 2) * 4)
-      val prepared = Interpreter.prepareUnchecked(CrossWorkgroupFixture.geometry(barrier, producer)).toOption.get
+      val prepared                 = loadUnchecked(CrossWorkgroupFixture.geometry(barrier, producer)).toOption.get
       for (seed <- Vec(1, 9)) {
-        val schedule = CrossWorkgroupFixture.Interleaving()
-        val control  = if (parallel) ExecutionControl(cancellation = schedule, parallelism = schedule)
-        else ExecutionControl.default
-        val dispatch = KernelDispatch.validated(
-          ProgramId(300L),
+        val schedule  = CrossWorkgroupFixture.Interleaving()
+        val scheduler = if (parallel) schedule else Scheduler.Sequential
+        val control   = if (parallel) TaskControl.forScheduler(cancellation = schedule, scheduler = scheduler)
+        else TaskControl.default
+        val dispatch = KernelTask.validated(
           KernelName("groups"),
           testDimensions(local),
           testDimensions(groups),
           Vec(
-            KernelArgument.Allocation(allocation, 4L),
-            KernelArgument.Scalar(LittleEndian.toVec(seed.toLong, ScalarByteWidth(4))),
-            KernelArgument.Local(4L)
+            KernelTask.Argument.Memory(allocation, 4L),
+            KernelTask.Argument.Scalar(LittleEndian.toVec(seed.toLong, ScalarByteWidth(4))),
+            KernelTask.Argument.Local(4L)
           ),
           globalSize = Some(testDimensions(count).toGlobalDimensions),
-          globalOffset = net.kurobako.gemstone.execution.Coordinates(offset, 0, 0)
+          globalOffset = Coordinates(offset, 0, 0)
         ).toOption.get
         assertEquals(
-          Interpreter.run(prepared, dispatch, memory, control),
+          VMInterpreter.execute(prepared, dispatch, memory, control, scheduler, Observer.discard),
           Right(()),
           s"groups=$groups local=$local parallel=$parallel barrier=$barrier"
         )
@@ -347,32 +335,35 @@ final class ExecutionAtomicSuite extends munit.FunSuite with ExecutionTestSuppor
   }
 
   test("device-scope atomic election publishes a payload across workgroups without waiting for all groups") {
-    val prepared = Interpreter.prepareUnchecked(CrossWorkgroupFixture.publication).toOption.get
+    val prepared = loadUnchecked(CrossWorkgroupFixture.publication).toOption.get
     for {
       groups   <- CrossWorkgroupFixture.groups
       parallel <- Vec(false, true)
     } {
-      val allocation = AllocationId(301L)
+      val allocation = MemoryRegion(301L)
       val memory     = ArrayMemory(allocation, 12 + groups * 8)
       for (seed <- Vec(17L, 91L)) {
         assertEquals(memory.write(allocation, 0L, Vec.fill(12 + groups * 8)(0.toByte)), Right(()))
-        val schedule = CrossWorkgroupFixture.Interleaving()
-        val control  = if (parallel) ExecutionControl(cancellation = schedule, parallelism = schedule)
-        else ExecutionControl.default
-        val dispatch = KernelDispatch.validated(
-          ProgramId(301L),
+        val schedule  = CrossWorkgroupFixture.Interleaving()
+        val scheduler = if (parallel) schedule else Scheduler.Sequential
+        val control   = if (parallel) TaskControl.forScheduler(cancellation = schedule, scheduler = scheduler)
+        else TaskControl.default
+        val dispatch = KernelTask.validated(
           KernelName("publish"),
           Dimensions.One,
           testDimensions(groups),
           Vec(
-            KernelArgument.Allocation(allocation, 12L),
-            KernelArgument.Allocation(allocation, 0L),
-            KernelArgument.Allocation(allocation, 4L),
-            KernelArgument.Allocation(allocation, 8L),
-            KernelArgument.Scalar(LittleEndian.toVec(seed, ScalarByteWidth(4)))
+            KernelTask.Argument.Memory(allocation, 12L),
+            KernelTask.Argument.Memory(allocation, 0L),
+            KernelTask.Argument.Memory(allocation, 4L),
+            KernelTask.Argument.Memory(allocation, 8L),
+            KernelTask.Argument.Scalar(LittleEndian.toVec(seed, ScalarByteWidth(4)))
           )
         ).toOption.get
-        assertEquals(Interpreter.run(prepared, dispatch, memory, control), Right(()))
+        assertEquals(
+          VMInterpreter.execute(prepared, dispatch, memory, control, scheduler, Observer.discard),
+          Right(())
+        )
         val words = memory.bytes.grouped(4).map(x => LittleEndian.decode(x, 0, ScalarByteWidth(4))).toVector
         assertEquals(words.take(3), Vector(groups.toLong, seed, 1L))
         assertEquals(words.drop(3).grouped(2).map(_.head).toVector.sorted, (0L until groups.toLong).toVector)
@@ -388,9 +379,12 @@ final class ExecutionAtomicSuite extends munit.FunSuite with ExecutionTestSuppor
         // A completed producer phase guarantees readiness without requiring
         // simultaneously resident workgroups or a spinning in-kernel observer.
         val observeControl = if (parallel)
-          ExecutionControl(cancellation = schedule, parallelism = schedule)
-        else ExecutionControl.default
-        assertEquals(Interpreter.run(prepared, dispatch, memory, observeControl), Right(()))
+          TaskControl.forScheduler(cancellation = schedule, scheduler = scheduler)
+        else TaskControl.default
+        assertEquals(
+          VMInterpreter.execute(prepared, dispatch, memory, observeControl, scheduler, Observer.discard),
+          Right(())
+        )
         val consumed = memory.bytes.grouped(4).map(x => LittleEndian.decode(x, 0, ScalarByteWidth(4))).toVector
         assertEquals(consumed.take(3), Vector(groups.toLong * 2, seed, 1L))
         assertEquals(

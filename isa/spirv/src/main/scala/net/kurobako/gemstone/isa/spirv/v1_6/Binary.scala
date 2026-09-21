@@ -58,7 +58,7 @@ object Binary {
       offset: Int,
       instructions: Chain[RawInstruction]
   ): Either[BinaryError, Vec[RawInstruction]] =
-    if (offset >= words.size) Right(Vec.from(instructions.iterator))
+    if (offset >= words.size) Right(Vec.from(instructions.toVector.view))
     else {
       val first       = words(offset).bits
       val declared    = first >>> 16
@@ -97,9 +97,9 @@ object Binary {
 
   private def readInt(bytes: Vec[Byte], offset: Int, endianness: Endianness): Int =
     endianness match {
-      case Endianness.Little => LittleEndian.decode(bytes, offset, ScalarByteWidth(4)).toInt
+      case Endianness.Little => LittleEndian.decodeInt32(bytes, offset)
       case Endianness.Big    =>
-        java.lang.Integer.reverseBytes(LittleEndian.decode(bytes, offset, ScalarByteWidth(4)).toInt)
+        java.lang.Integer.reverseBytes(LittleEndian.decodeInt32(bytes, offset))
     }
 
   private def writeInt(value: Int, endianness: Endianness): Vec[Byte] =
