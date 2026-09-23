@@ -90,6 +90,26 @@ cl_icd_dispatch dispatch{};
 _cl_platform_id platform;
 _cl_device_id device;
 
+struct OpenCLIdentity {
+  const char *platformName;
+  const char *deviceName;
+  const char *vendor;
+  cl_uint vendorId;
+};
+
+OpenCLIdentity openclIdentity() {
+  const char *profile = std::getenv("GEMSTONE_OPENCL_PROFILE");
+  if (profile) {
+    if (std::strcmp(profile, "amd") == 0)
+      return {"AMD Accelerated Parallel Processing", "AMD Gemstone GPU", "Advanced Micro Devices, Inc.", 0x1002};
+    if (std::strcmp(profile, "nvidia") == 0) return {"NVIDIA CUDA", "NVIDIA Gemstone GPU", "NVIDIA Corporation", 0x10de};
+    if (std::strcmp(profile, "rusticl-amd") == 0) return {"rusticl", "AMD Gemstone GPU", "Advanced Micro Devices, Inc.", 0x1002};
+    if (std::strcmp(profile, "rusticl-intel") == 0) return {"rusticl", "Intel Gemstone GPU", "Intel(R) Corporation", 0x8086};
+    if (std::strcmp(profile, "rusticl-llvmpipe") == 0) return {"rusticl", "llvmpipe Gemstone GPU", "Mesa", 0x10005};
+  }
+  return {"Intel(R) OpenCL Gemstone Graphics", "Gemstone SPIR-V GPU", "Intel(R) Corporation", 0x8086};
+}
+
 uint64_t nowNanos() {
   return static_cast<uint64_t>(
       std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch()).count());
@@ -1046,13 +1066,13 @@ CL_API_ENTRY cl_int CL_API_CALL clGetPlatformInfo(cl_platform_id value, cl_platf
   switch (name) {
     case CL_PLATFORM_PROFILE: return outputString(size, output, written, "FULL_PROFILE");
     case CL_PLATFORM_VERSION: return outputString(size, output, written, "OpenCL 3.0 Gemstone");
-    case CL_PLATFORM_NAME: return outputString(size, output, written, "Intel(R) OpenCL Gemstone");
-    case CL_PLATFORM_VENDOR: return outputString(size, output, written, "Intel(R) Corporation");
+    case CL_PLATFORM_NAME: return outputString(size, output, written, openclIdentity().platformName);
+    case CL_PLATFORM_VENDOR: return outputString(size, output, written, openclIdentity().vendor);
     case CL_PLATFORM_ICD_SUFFIX_KHR: return outputString(size, output, written, "GEMSTONE");
     case CL_PLATFORM_EXTENSIONS:
       return outputString(size, output, written,
                           "cl_khr_icd cl_khr_il_program cl_khr_byte_addressable_store "
-                          "cl_khr_fp64 cl_khr_pci_bus_info "
+                          "cl_khr_fp16 cl_khr_fp64 cl_khr_pci_bus_info "
                           "cl_khr_global_int32_base_atomics cl_khr_global_int32_extended_atomics "
                           "cl_khr_local_int32_base_atomics cl_khr_local_int32_extended_atomics "
                           "cl_khr_int64_base_atomics cl_khr_int64_extended_atomics "
@@ -1063,6 +1083,7 @@ CL_API_ENTRY cl_int CL_API_CALL clGetPlatformInfo(cl_platform_id value, cl_platf
       static const cl_name_version extensions[] = {{CL_MAKE_VERSION(1, 0, 0), "cl_khr_icd"},
                                                    {CL_MAKE_VERSION(1, 0, 0), "cl_khr_il_program"},
                                                    {CL_MAKE_VERSION(1, 0, 0), "cl_khr_byte_addressable_store"},
+                                                   {CL_MAKE_VERSION(1, 0, 0), "cl_khr_fp16"},
                                                    {CL_MAKE_VERSION(1, 0, 0), "cl_khr_fp64"},
                                                    {CL_MAKE_VERSION(1, 0, 0), "cl_khr_pci_bus_info"},
                                                    {CL_MAKE_VERSION(1, 0, 0), "cl_khr_global_int32_base_atomics"},
@@ -1136,7 +1157,7 @@ CL_API_ENTRY cl_int CL_API_CALL clGetDeviceInfo(cl_device_id value, cl_device_in
       return outputScalar(size, output, written, v);
     }
     case CL_DEVICE_VENDOR_ID: {
-      cl_uint v = 0x8086;
+      cl_uint v = openclIdentity().vendorId;
       return outputScalar(size, output, written, v);
     }
     // Keep the IP version consistent with the Arc device ID advertised below.
@@ -1194,7 +1215,7 @@ CL_API_ENTRY cl_int CL_API_CALL clGetDeviceInfo(cl_device_id value, cl_device_in
       return outputScalar(size, output, written, v);
     }
     case CL_DEVICE_PREFERRED_VECTOR_WIDTH_HALF: {
-      cl_uint v = 0;
+      cl_uint v = 1;
       return outputScalar(size, output, written, v);
     }
     case CL_DEVICE_NATIVE_VECTOR_WIDTH_CHAR:
@@ -1210,7 +1231,7 @@ CL_API_ENTRY cl_int CL_API_CALL clGetDeviceInfo(cl_device_id value, cl_device_in
       return outputScalar(size, output, written, v);
     }
     case CL_DEVICE_NATIVE_VECTOR_WIDTH_HALF: {
-      cl_uint v = 0;
+      cl_uint v = 1;
       return outputScalar(size, output, written, v);
     }
     case CL_DEVICE_MAX_CLOCK_FREQUENCY: {
@@ -1283,6 +1304,7 @@ CL_API_ENTRY cl_int CL_API_CALL clGetDeviceInfo(cl_device_id value, cl_device_in
       return outputScalar(size, output, written, v);
     }
     case CL_DEVICE_SINGLE_FP_CONFIG: return outputScalar(size, output, written, fp);
+    case CL_DEVICE_HALF_FP_CONFIG: return outputScalar(size, output, written, fp);
     case CL_DEVICE_GLOBAL_MEM_CACHE_TYPE: {
       cl_uint v = CL_NONE;
       return outputScalar(size, output, written, v);
@@ -1366,8 +1388,8 @@ CL_API_ENTRY cl_int CL_API_CALL clGetDeviceInfo(cl_device_id value, cl_device_in
       cl_uint v = 0;
       return outputScalar(size, output, written, v);
     }
-    case CL_DEVICE_NAME: return outputString(size, output, written, "Gemstone SPIR-V GPU");
-    case CL_DEVICE_VENDOR: return outputString(size, output, written, "Intel(R) Corporation");
+    case CL_DEVICE_NAME: return outputString(size, output, written, openclIdentity().deviceName);
+    case CL_DEVICE_VENDOR: return outputString(size, output, written, openclIdentity().vendor);
     case CL_DRIVER_VERSION: return outputString(size, output, written, "26.22.38646.6");
     case CL_DEVICE_PROFILE: return outputString(size, output, written, "FULL_PROFILE");
     case CL_DEVICE_VERSION: return outputString(size, output, written, "OpenCL 3.0 Gemstone");
@@ -1375,7 +1397,7 @@ CL_API_ENTRY cl_int CL_API_CALL clGetDeviceInfo(cl_device_id value, cl_device_in
     case CL_DEVICE_EXTENSIONS:
       return outputString(size, output, written,
                           "cl_khr_icd cl_khr_il_program cl_khr_byte_addressable_store "
-                          "cl_khr_fp64 cl_khr_pci_bus_info "
+                          "cl_khr_fp16 cl_khr_fp64 cl_khr_pci_bus_info "
                           "cl_khr_global_int32_base_atomics cl_khr_global_int32_extended_atomics "
                           "cl_khr_local_int32_base_atomics cl_khr_local_int32_extended_atomics "
                           "cl_khr_int64_base_atomics cl_khr_int64_extended_atomics "
@@ -1390,6 +1412,7 @@ CL_API_ENTRY cl_int CL_API_CALL clGetDeviceInfo(cl_device_id value, cl_device_in
       static const cl_name_version extensions[] = {{CL_MAKE_VERSION(1, 0, 0), "cl_khr_icd"},
                                                    {CL_MAKE_VERSION(1, 0, 0), "cl_khr_il_program"},
                                                    {CL_MAKE_VERSION(1, 0, 0), "cl_khr_byte_addressable_store"},
+                                                   {CL_MAKE_VERSION(1, 0, 0), "cl_khr_fp16"},
                                                    {CL_MAKE_VERSION(1, 0, 0), "cl_khr_fp64"},
                                                    {CL_MAKE_VERSION(1, 0, 0), "cl_khr_pci_bus_info"},
                                                    {CL_MAKE_VERSION(1, 0, 0), "cl_khr_global_int32_base_atomics"},

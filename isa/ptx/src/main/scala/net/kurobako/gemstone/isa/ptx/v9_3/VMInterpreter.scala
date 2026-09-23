@@ -100,7 +100,7 @@ private[v9_3] object VMInterpreter {
                   control,
                   scheduler,
                   initialParameterBuffers
-                )
+                ).map(_ => ())
             }
         }
     val selectedCount                  = blockIndices.fold(groupCount)(_.size)
@@ -139,13 +139,14 @@ private[v9_3] object VMInterpreter {
       memory: AddressMemory,
       control: TaskControl,
       scheduler: Scheduler,
-      initialParameterBuffers: Map[Long, Array[Byte]]
-  ): Either[ExecutionFault, Unit] = {
+      initialParameterBuffers: Map[Long, Array[Byte]],
+      initialState: Option[VMState] = None
+  ): Either[ExecutionFault, VMState] = {
     import VMSemantics.*
 
     val laneCount =
       geometry.groupSize.volumeInt.fold(message => throw IllegalArgumentException(message), value => value)
-    val state = VMState(laneCount, initialLive)
+    val state = initialState.getOrElse(VMState(laneCount, initialLive))
     state.importParameterBuffers(initialParameterBuffers)
     kernel.parameters.foreach { parameter =>
       arguments.get(parameter.name).foreach(argument =>
@@ -448,7 +449,61 @@ private[v9_3] object VMInterpreter {
         }
       }
     }
-    Right(())
+    Right(state)
+  }
+
+  @SuppressWarnings(Array("scalafix:DisableSyntax.return"))
+  def executeDeviceFunction(
+      caller: VMExecutionContext,
+      function: DeviceFunction,
+      parameters: Vec[ParameterName],
+      returnParameters: Vec[ParameterName]
+  ): Either[ExecutionFault, Unit] = {
+    if (parameters.size != function.parameters.size)
+      return Left(ExecutionFault.InvalidState(
+        s"device function ${function.name} expects ${function.parameters.size} parameters, found ${parameters.size}"
+      ))
+    if (returnParameters.size != function.returnParameters.size)
+      return Left(ExecutionFault.InvalidState(
+        s"device function ${function.name} returns ${function.returnParameters.size} parameters, found ${returnParameters.size}"
+      ))
+    val laneCount = caller.state.laneCount
+    val state     = VMState(laneCount, caller.active, caller.state.shared)
+    state.importParameterBuffers(caller.state.parameterBuffers.toMap)
+    state.parameterAddresses ++= caller.state.parameterAddresses
+    // Arity is validated above. A call operand whose param-space buffer was
+    // never written holds an undefined value, so it binds as zero.
+    caller.active.foreachLane { lane =>
+      parameters.zip(function.parameters).foreach { case (callerName, functionName) =>
+        state.parameters(lane)(functionName) = caller.state.parameters(lane).getOrElse(callerName, 0L)
+      }
+    }
+    val kernel = caller.kernel.copy(
+      parameters = Vec.empty,
+      program = function.program,
+      sharedSymbols = caller.kernel.sharedSymbols ++ function.sharedSymbols
+    )
+    executeBlock(
+      kernel,
+      caller.block,
+      caller.group,
+      caller.geometry,
+      caller.active,
+      Map.empty,
+      caller.memory,
+      caller.control,
+      caller.scheduler,
+      Map.empty,
+      Some(state)
+    ).map { completed =>
+      caller.active.foreachLane { lane =>
+        returnParameters.zip(function.returnParameters).foreach { case (callerName, functionName) =>
+          completed.parameters(lane).get(functionName).foreach { value =>
+            caller.state.parameters(lane)(callerName) = value
+          }
+        }
+      }
+    }
   }
 
 }

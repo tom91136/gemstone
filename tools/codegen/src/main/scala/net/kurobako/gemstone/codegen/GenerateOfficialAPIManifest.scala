@@ -223,6 +223,15 @@ object GenerateOfficialAPIManifest {
         Identifiers.isUpperCamelAfter(_, "cl"),
         _.startsWith("CL_"),
         Vector("_cl_icd_dispatch")
+      ),
+      Config(
+        "vulkan",
+        "c",
+        Vector("vulkan/vulkan.h"),
+        Vector(root.resolve("khronos/vulkan/include")),
+        Vector.empty,
+        Identifiers.isUpperCamelAfter(_, "vk"),
+        _.startsWith("VK_")
       )
     )
   }

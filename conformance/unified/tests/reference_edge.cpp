@@ -14,12 +14,12 @@
 #include <catch2/generators/catch_generators_adapters.hpp>
 #include <catch2/generators/catch_generators_range.hpp>
 
-#include "reference_async.hpp"
-#include "capability_defaults.hpp"
 #include "algorithm_cases.hpp"
 #include "async_cases.hpp"
 #include "blas_cases.hpp"
+#include "capability_defaults.hpp"
 #include "edge_cases.hpp"
+#include "reference_async.hpp"
 #include "stress_cases.hpp"
 #include <magic_enum/magic_enum.hpp>
 
@@ -63,8 +63,7 @@ public:
     std::vector<size_t> order(keys.size());
     std::iota(order.begin(), order.end(), 0);
     std::stable_sort(order.begin(), order.end(), [&](auto left, auto right) { return keys[left] < keys[right]; });
-    auto [result_keys, result_values] =
-        order ^ map([&](size_t index) { return std::pair{keys[index], payload[index]}; }) ^ unzip();
+    auto [result_keys, result_values] = order ^ map([&](size_t index) { return std::pair{keys[index], payload[index]}; }) ^ unzip();
     return {std::move(result_keys), std::move(result_values)};
   }
 

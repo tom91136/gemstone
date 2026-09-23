@@ -10,7 +10,11 @@ import net.kurobako.gemstone.binary.ScalarByteWidth
 import scala.collection.mutable
 
 /** Mutable storage for one executing PTX block. */
-private[v9_3] final class VMState(val laneCount: Int, initialLive: VMLaneMask) {
+private[v9_3] final class VMState(
+    val laneCount: Int,
+    initialLive: VMLaneMask,
+    val shared: mutable.Map[Long, Byte] = mutable.Map.empty
+) {
   val registers: Array[VMRegisterFile]                                  = Array.fill(laneCount)(VMRegisterFile())
   val functionRegisters: Array[mutable.Map[RegisterName, FunctionName]] =
     Array.fill(laneCount)(mutable.Map.empty[RegisterName, FunctionName])
@@ -26,7 +30,6 @@ private[v9_3] final class VMState(val laneCount: Int, initialLive: VMLaneMask) {
   val parameterAddresses: mutable.Map[SymbolName, Long] = mutable.Map.empty
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private var nextParameterBuffer                   = 0x700000000L
-  private val shared: mutable.Map[Long, Byte]       = mutable.Map.empty
   private val local: Array[mutable.Map[Long, Byte]] = Array.fill(laneCount)(mutable.Map.empty[Long, Byte])
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   var live: VMLaneMask = initialLive

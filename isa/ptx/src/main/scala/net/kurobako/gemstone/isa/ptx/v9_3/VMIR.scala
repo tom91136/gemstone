@@ -78,6 +78,7 @@ private[v9_3] object VMIR {
     case Divide(signed: Boolean)
     case Remainder(signed: Boolean)
     case MultiplyWideUnsigned16
+    case MultiplyWideSigned16
     case MultiplyWideUnsigned32
     case MultiplyWideSigned32
     case Minimum(signed: Boolean)
@@ -198,6 +199,14 @@ private[v9_3] object VMIR {
     case High(operandWidth: BitWidth, resultWidth: BitWidth, carryIn: Boolean, carryOut: Boolean)
   }
 
+  private def atomicBinaryOpcode(operation: IntegerOperation, width: BitWidth): String = operation match {
+    case IntegerOperation.Maximum(false) => s"max.u$width"
+    case IntegerOperation.BitwiseAnd     => s"and.b$width"
+    case IntegerOperation.BitwiseOr      => s"or.b$width"
+    case IntegerOperation.BitwiseXor     => s"xor.b$width"
+    case other                           => s"binary.$other"
+  }
+
   enum Instruction(private val opcodeText: String) {
     final val opcode: Opcode = Opcode.applyUnsafe(opcodeText)
 
@@ -278,6 +287,7 @@ private[v9_3] object VMIR {
             case IntegerOperation.Divide(signed)         => s"div.${if (signed) "s" else "u"}$width"
             case IntegerOperation.Remainder(signed)      => s"rem.${if (signed) "s" else "u"}$width"
             case IntegerOperation.MultiplyWideUnsigned16 => "mul.wide.u16"
+            case IntegerOperation.MultiplyWideSigned16   => "mul.wide.s16"
             case IntegerOperation.MultiplyWideUnsigned32 => "mul.wide.u32"
             case IntegerOperation.MultiplyWideSigned32   => "mul.wide.s32"
             case IntegerOperation.Minimum(signed)        => s"min.${if (signed) "s" else "u"}$width"
@@ -287,6 +297,15 @@ private[v9_3] object VMIR {
             case IntegerOperation.ShiftRightArithmetic   => s"shr.s$width"
           }
         )
+
+    case FunnelShift(
+        destination: RegisterName,
+        low: Value,
+        high: Value,
+        amount: Value,
+        left: Boolean,
+        clamp: Boolean
+    ) extends Instruction(s"shf.${if (left) "l" else "r"}.${if (clamp) "clamp" else "wrap"}.b32")
 
     case IntegerAddWithCarry(
         destination: RegisterName,
@@ -323,7 +342,7 @@ private[v9_3] object VMIR {
         left: Value,
         right: Value,
         width: FloatWidth
-    ) extends Instruction(s"${operation.toString.toLowerCase(java.util.Locale.ROOT)}.f$width")
+    ) extends Instruction(s"${operation.toString.map(_.toLower)}.f$width")
 
     case FloatBinaryPacked(
         operation: FloatOperation,
@@ -332,7 +351,7 @@ private[v9_3] object VMIR {
         right: Value,
         bf16: Boolean
     ) extends Instruction(
-          s"${operation.toString.toLowerCase(java.util.Locale.ROOT)}.${if (bf16) "bf16x2" else "f16x2"}"
+          s"${operation.toString.map(_.toLower)}.${if (bf16) "bf16x2" else "f16x2"}"
         )
 
     case FloatUnary(operation: FloatUnaryOperation, destination: RegisterName, source: Value, width: FloatWidth)
@@ -416,7 +435,7 @@ private[v9_3] object VMIR {
         predicate: RegisterName,
         memberMask: Value,
         operation: VoteOperation
-    ) extends Instruction(s"vote.sync.${operation.toString.toLowerCase(java.util.Locale.ROOT)}.pred")
+    ) extends Instruction(s"vote.sync.${operation.toString.map(_.toLower)}.pred")
 
     case BitFieldExtract(
         destination: RegisterName,
@@ -486,10 +505,10 @@ private[v9_3] object VMIR {
     case StoreGeneric(address: Value, source: Value, width: BitWidth)
         extends Instruction(s"st.generic.u$width")
 
-    case StoreGlobalVector(address: Value, sources: Vec[RegisterName], width: BitWidth)
+    case StoreGlobalVector(address: Value, sources: Vec[Value], width: BitWidth)
         extends Instruction(s"st.global.v${sources.size}.u$width")
 
-    case StoreGenericVector(address: Value, sources: Vec[RegisterName], width: BitWidth)
+    case StoreGenericVector(address: Value, sources: Vec[Value], width: BitWidth)
         extends Instruction(s"st.generic.v${sources.size}.u$width")
 
     case LoadShared(destination: RegisterName, address: Value, width: BitWidth, signed: Boolean)
@@ -507,13 +526,13 @@ private[v9_3] object VMIR {
     case StoreShared(address: Value, source: Value, width: BitWidth)
         extends Instruction(s"st.shared.u$width")
 
-    case StoreSharedVector(address: Value, sources: Vec[RegisterName], width: BitWidth)
+    case StoreSharedVector(address: Value, sources: Vec[Value], width: BitWidth)
         extends Instruction(s"st.shared.v${sources.size}.u$width")
 
     case StoreLocal(address: Value, source: Value, width: BitWidth)
         extends Instruction(s"st.local.u$width")
 
-    case StoreLocalVector(address: Value, sources: Vec[RegisterName], width: BitWidth)
+    case StoreLocalVector(address: Value, sources: Vec[Value], width: BitWidth)
         extends Instruction(s"st.local.v${sources.size}.u$width")
 
     /** Synchronous model of the PTX asynchronous shared-memory copy. The emulator applies the copy at this instruction;
@@ -555,7 +574,7 @@ private[v9_3] object VMIR {
         destination: RegisterName,
         left: RegisterName,
         right: RegisterName
-    ) extends Instruction(s"${operation.toString.toLowerCase(java.util.Locale.ROOT)}.pred")
+    ) extends Instruction(s"${operation.toString.map(_.toLower)}.pred")
 
     case Branch(target: Pc) extends Instruction("bra")
 
@@ -566,13 +585,32 @@ private[v9_3] object VMIR {
         id: Int :| Positive0,
         predicate: RegisterName,
         operation: PredicateOperation
-    ) extends Instruction(s"bar.red.${operation.toString.toLowerCase(java.util.Locale.ROOT)}.pred")
+    ) extends Instruction(s"bar.red.${operation.toString.map(_.toLower)}.pred")
 
-    case AtomicAdd(destination: RegisterName, address: Value, source: Value, width: BitWidth, global: Boolean)
-        extends Instruction(s"atom.${if (global) "global" else "shared"}.add.u$width")
+    case AtomicAdd(destination: RegisterName, address: Value, source: Value, width: BitWidth, global: Option[Boolean])
+        extends Instruction(s"atom.${global.fold("")(if (_) "global." else "shared.")}add.u$width")
 
-    case AtomicMin(destination: RegisterName, address: Value, source: Value, width: BitWidth, global: Boolean)
-        extends Instruction(s"atom.${if (global) "global" else "shared"}.min.u$width")
+    case AtomicExchange(
+        destination: RegisterName,
+        address: Value,
+        source: Value,
+        width: BitWidth,
+        global: Option[Boolean]
+    ) extends Instruction(s"atom.${global.fold("")(if (_) "global." else "shared.")}exch.b$width")
+
+    case AtomicBinary(
+        destination: RegisterName,
+        address: Value,
+        source: Value,
+        width: BitWidth,
+        global: Option[Boolean],
+        operation: IntegerOperation
+    ) extends Instruction(
+          s"atom.${global.fold("")(if (_) "global." else "shared.")}${atomicBinaryOpcode(operation, width)}"
+        )
+
+    case AtomicMin(destination: RegisterName, address: Value, source: Value, width: BitWidth, global: Option[Boolean])
+        extends Instruction(s"atom.${global.fold("")(if (_) "global." else "shared.")}min.u$width")
 
     case AtomicAddFloat(destination: RegisterName, address: Value, source: Value, width: FloatWidth)
         extends Instruction(s"atom.global.add.f$width")
@@ -603,7 +641,7 @@ private[v9_3] object VMIR {
     def opcode: Opcode = instruction.opcode
   }
 
-  final case class KernelParameter(name: ParameterName, widthBytes: Int :| Positive)
+  final case class KernelParameter(name: ParameterName, widthBytes: Int :| Positive, pointer: Boolean = false)
   final case class Argument(bytes: Vec[Byte] :| MinLength[1])
 
   final case class DeviceFunction(

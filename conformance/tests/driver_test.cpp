@@ -10,9 +10,9 @@
 #include <glaze/json.hpp>
 
 #include "conformance/device.hpp"
-#include "environment.hpp"
 
 #include "device_lock.hpp"
+#include "environment.hpp"
 #if !defined(_WIN32)
   #include <csignal>
 
@@ -40,9 +40,9 @@ std::string read(const fs::path &path) {
 }
 std::vector<std::string> list_fixture() {
   return catch_case_names(run_process({fixture.string(), "--list-tests", "--reporter", "json", "--order", "lex", "[fixture]"},
-                                 fixture.parent_path(), base_environment(), 10s, {}, true)
-                         .output,
-                     "fixture");
+                                      fixture.parent_path(), base_environment(), 10s, {}, true)
+                              .output,
+                          "fixture");
 }
 } // namespace
 
@@ -119,13 +119,13 @@ TEST_CASE("execution preserves skips environment and distinct report paths", "[d
   TemporaryDirectory directory;
   const auto names = list_fixture();
   ExecutionConfig config{fixture.parent_path().string(),
-                           directory.path.string(),
-                           conformance::physical_device_key(conformance::make_registry_device("fixture")),
-                           base_environment(),
-                           {},
-                           {},
-                           {"[fixture]"},
-                           false};
+                         directory.path.string(),
+                         conformance::physical_device_key(conformance::make_registry_device("fixture")),
+                         base_environment(),
+                         {},
+                         {},
+                         {"[fixture]"},
+                         false};
   config.environment["EXPECTED_ENVIRONMENT"] = "value with spaces";
   config.environment["PROPAGATED_ENVIRONMENT"] = "value with spaces";
   config.environment["CONFORMANCE_TARGET_ARCHITECTURE"] = "";

@@ -45,7 +45,7 @@ if(BUILD_TESTING)
   gemstone_test_target(gemstone_hip_runtime_test)
   if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
     # Current upstream HIP headers place GNU attributes before extern "C".
-    target_compile_options(gemstone_hip_runtime_test PRIVATE -Wno-attributes -Wno-pedantic)
+    target_compile_options(gemstone_hip_runtime_test PRIVATE -Wno-attributes -Wno-pedantic -Wno-deprecated-declarations)
   endif()
   gemstone_discover_tests(gemstone_hip_runtime_test
     TEST_PREFIX "hip/"

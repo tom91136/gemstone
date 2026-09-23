@@ -8,6 +8,7 @@ enum ComputeAPI(val id: String) {
   case HIP       extends ComputeAPI("hip")
   case HSA       extends ComputeAPI("hsa")
   case OpenCL    extends ComputeAPI("opencl")
+  case Vulkan    extends ComputeAPI("vulkan")
   case LevelZero extends ComputeAPI("levelzero")
 }
 

@@ -2,8 +2,8 @@
 #include <catch2/generators/catch_generators_adapters.hpp>
 #include <catch2/generators/catch_generators_range.hpp>
 
-#include "backend_sycl.hpp"
 #include "algorithm_cases.hpp"
+#include "backend_sycl.hpp"
 
 #define UNIFIED_ALGORITHM_TYPE int8_t
 #define UNIFIED_ALGORITHM_NAME "i8"

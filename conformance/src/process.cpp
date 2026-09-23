@@ -21,10 +21,12 @@
   #include <windows.h>
 #else
   #include <csignal>
+
   #include <fcntl.h>
   #include <poll.h>
-  #include <sys/wait.h>
   #include <unistd.h>
+
+  #include <sys/wait.h>
 
 extern "C" char **environ;
 #endif
@@ -105,13 +107,14 @@ void forward_signal(int32_t signal) {
 }
 class ProcessGroup {
   int32_t pid_;
-  struct sigaction old_term_{}, old_int_{};
+  struct sigaction old_term_ = {};
+  struct sigaction old_int_ = {};
 
 public:
   explicit ProcessGroup(int32_t pid) : pid_(pid) {
     interrupted = 0;
     active_group = pid;
-    struct sigaction action{};
+    struct sigaction action = {};
     action.sa_handler = forward_signal;
     sigemptyset(&action.sa_mask);
     sigaction(SIGTERM, &action, &old_term_);
@@ -158,12 +161,14 @@ ProcessResult run_process(const std::vector<std::string> &command, const std::fi
 
   std::vector<char *> arguments;
   arguments.reserve(command.size() + 1);
-  for (const auto &argument : command) arguments.push_back(const_cast<char *>(argument.c_str()));
+  for (const auto &argument : command)
+    arguments.push_back(const_cast<char *>(argument.c_str()));
   arguments.push_back(nullptr);
 
   std::vector<std::string> environment_storage;
   environment_storage.reserve(environment.size());
-  for (const auto &[key, value] : environment) environment_storage.push_back(key + "=" + value);
+  for (const auto &[key, value] : environment)
+    environment_storage.push_back(key + "=" + value);
 
   std::string output, error_output;
   LineSink stdout_sink(capture_output ? nullptr : &std::cout, prefix, capture_output ? &output : nullptr);
@@ -203,8 +208,8 @@ ProcessResult run_process(const std::vector<std::string> &command, const std::fi
   startup.hStdError = error_write;
   PROCESS_INFORMATION information{};
   if (!CreateProcessW(nullptr, command_line.data(), nullptr, nullptr, TRUE, CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT,
-                      environment_block.empty() ? nullptr : environment_block.data(),
-                      working.empty() ? nullptr : widen(working).c_str(), &startup, &information)) {
+                      environment_block.empty() ? nullptr : environment_block.data(), working.empty() ? nullptr : widen(working).c_str(),
+                      &startup, &information)) {
     CloseHandle(output_read);
     CloseHandle(output_write);
     CloseHandle(error_read);
@@ -306,7 +311,8 @@ ProcessResult run_process(const std::vector<std::string> &command, const std::fi
     if (::chdir(working.c_str()) != 0) std::_Exit(127);
     std::vector<char *> environment_pointers;
     environment_pointers.reserve(environment_storage.size() + 1);
-    for (auto &entry : environment_storage) environment_pointers.push_back(entry.data());
+    for (auto &entry : environment_storage)
+      environment_pointers.push_back(entry.data());
     environment_pointers.push_back(nullptr);
     environ = environment_pointers.data();
     ::execvp(arguments.front(), arguments.data());

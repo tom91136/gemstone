@@ -89,8 +89,8 @@ bool copyFields(uint32_t kernarg_size, const gemstone_hsa_kernarg_field *fields,
   for (uint32_t index = 0; index < field_count; ++index) {
     const auto &field = fields[index];
     const uint64_t end = static_cast<uint64_t>(field.offset) + field.size;
-    if ((field.kind != GEMSTONE_HSA_ARGUMENT_SCALAR && field.kind != GEMSTONE_HSA_ARGUMENT_ALLOCATION) || field.size == 0
-        || end > kernarg_size || (field.kind == GEMSTONE_HSA_ARGUMENT_ALLOCATION && field.size != sizeof(uint64_t)))
+    if ((field.kind != GEMSTONE_HSA_ARGUMENT_SCALAR && field.kind != GEMSTONE_HSA_ARGUMENT_ALLOCATION) || field.contains_pointers > 1
+        || field.size == 0 || end > kernarg_size || (field.kind == GEMSTONE_HSA_ARGUMENT_ALLOCATION && field.size != sizeof(uint64_t)))
       return false;
     copied.push_back(field);
   }
@@ -196,7 +196,7 @@ bool resolveArguments(gemstone_hsa_aql_runtime &runtime, const KernelBinding &bi
   for (const auto &field : binding.fields) {
     if (field.offset < covered) return false;
     append_scalar(covered, field.offset - covered);
-    if (field.kind == GEMSTONE_HSA_ARGUMENT_SCALAR) {
+    if (field.kind == GEMSTONE_HSA_ARGUMENT_SCALAR && field.contains_pointers != 0) {
       // AMDGPU metadata exposes C++ functors as opaque by-value fields. Split
       // naturally aligned pointer words that resolve to registered allocations
       // into typed arguments, retaining all surrounding bytes as scalar data.
@@ -221,7 +221,7 @@ bool resolveArguments(gemstone_hsa_aql_runtime &runtime, const KernelBinding &bi
         scalar_start = cursor;
       }
       append_scalar(field.offset + scalar_start, field.size - scalar_start);
-    } else {
+    } else if (field.kind == GEMSTONE_HSA_ARGUMENT_ALLOCATION) {
       const auto pointer = readNative<uint64_t>(kernarg, field.offset);
       // LLVM's OpenMP AMDGPU plugin prepends a kernel-launch-environment
       // pointer to every target kernel.  For kernels without reductions it
@@ -246,6 +246,8 @@ bool resolveArguments(gemstone_hsa_aql_runtime &runtime, const KernelBinding &bi
       gemstone_hsa_argument allocation{};
       if (!resolveAllocation(runtime, pointer, allocation)) return false;
       arguments.push_back(allocation);
+    } else {
+      append_scalar(field.offset, field.size);
     }
     covered = field.offset + field.size;
   }

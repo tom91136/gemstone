@@ -19,7 +19,7 @@ final class LaunchSuite extends munit.FunSuite {
 
   test("API lists are comma-separated sets") {
     def apis(value: String) = parse("--apis", value, "--", "application").map(_.apis)
-    assertEquals(apis("hip,hsa,cuda,opencl,levelzero"), Right(ComputeAPI.values.toSet))
+    assertEquals(apis("hip,hsa,cuda,opencl,vulkan,levelzero"), Right(ComputeAPI.values.toSet))
     assert(apis("sycl").isLeft)
     assert(apis("cuda,").isLeft)
   }
@@ -61,12 +61,25 @@ final class LaunchSuite extends munit.FunSuite {
       environment.set("LD_PRELOAD"),
       s"${layout.library(ComputeAPI.CUDA)}:${layout.library(ComputeAPI.HIP)}:${layout.library(ComputeAPI.HSA)}:${layout.library(ComputeAPI.OpenCL)}:/existing.so"
     )
-    assertEquals(environment.set("LD_LIBRARY_PATH"), s"$root:/vendor/lib")
+    assertEquals(environment.set("LD_LIBRARY_PATH"), s"$root:${root.resolve("vulkan")}:/vendor/lib")
     assertEquals(environment.set("OCL_ICD_FILENAMES"), s"${layout.library(ComputeAPI.OpenCL)}")
+    assertEquals(environment.set("OCL_ICD_VENDORS"), s"${layout.library(ComputeAPI.OpenCL)}")
     assertEquals(environment.set("ZE_ENABLE_ALT_DRIVERS"), s"${layout.library(ComputeAPI.LevelZero)}")
     assertEquals(environment.set("GEMSTONE_RPC_PORT"), s"${port.value}")
     assertEquals(environment.set("GEMSTONE_RPC_CLIENT"), s"${client.value}")
     assert(environment.unset("CONFORMANCE_DEVICE"))
+  }
+
+  test("Vulkan loader directory is absent when Vulkan is not selected") {
+    val environment = Launcher.plan(
+      Set(ComputeAPI.CUDA),
+      layout,
+      port,
+      client,
+      Map.empty
+    ).fold(error => fail(error), value => value)
+    assertEquals(environment.set("LD_LIBRARY_PATH"), s"$root")
+    assert(!environment.set("LD_LIBRARY_PATH").contains(s"${root.resolve("vulkan")}"))
   }
 
   test("HIP and HSA are independently selectable") {

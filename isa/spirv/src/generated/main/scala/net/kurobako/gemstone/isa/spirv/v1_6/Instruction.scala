@@ -114,8 +114,8 @@ enum Instruction(val definition: Instruction.Definition, operandValues: Operand*
       extends Instruction(Instruction.Definition.SpecConstant, resultType, dest, value)
   case SpecConstantComposite(resultType: Operand, dest: Operand, constituents: Vec[Operand])
       extends Instruction(Instruction.Definition.SpecConstantComposite, (Vec(resultType, dest) ++ constituents)*)
-  case SpecConstantOp(resultType: Operand, dest: Operand, instructionOpcode: Operand)
-      extends Instruction(Instruction.Definition.SpecConstantOp, resultType, dest, instructionOpcode)
+  case SpecConstantOp(resultType: Operand, dest: Operand, instructionOpcode: Operand, srcs: Vec[Operand])
+      extends Instruction(Instruction.Definition.SpecConstantOp, (Vec(resultType, dest, instructionOpcode) ++ srcs)*)
   case Function(resultType: Operand, dest: Operand, functionControl: Operand, functionType: Operand)
       extends Instruction(Instruction.Definition.Function, resultType, dest, functionControl, functionType)
   case FunctionParameter(resultType: Operand, dest: Operand)
@@ -6903,7 +6903,13 @@ object Instruction {
               Instruction.decodeDefinition(
                 definition,
                 raw,
-                values => Instruction.SpecConstantOp(values.required(0), values.required(1), values.required(2))
+                values =>
+                  Instruction.SpecConstantOp(
+                    values.required(0),
+                    values.required(1),
+                    values.required(2),
+                    values.repeated(3)
+                  )
               ),
           Metadata(
             "Constant-Creation".assume[MinLength[1] & NoNul],
@@ -6924,6 +6930,11 @@ object Instruction {
                 SPIRVOperandKind.assume("LiteralSpecConstantOpInteger"),
                 "instructionOpcode".assume[MinLength[1] & NoNul],
                 OperandQuantifier.One
+              ),
+              OperandShape(
+                SPIRVOperandKind.assume("LiteralInteger"),
+                "srcs".assume[MinLength[1] & NoNul],
+                OperandQuantifier.Repeated
               )
             )
           )

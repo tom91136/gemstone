@@ -82,6 +82,14 @@ private object VMStateEffects {
         memory.validateRange(address, byteCount(width).value.refineUnsafe[Positive0]).leftMap(error =>
           ExecutionFault.Memory(s"pc ${pc.value}, lane $lane: ${error.message}")
         )
+      case VMStateWrite.AtomicMemoryExchange(lane, _, address, width, _) =>
+        memory.validateRange(address, byteCount(width).value.refineUnsafe[Positive0]).leftMap(error =>
+          ExecutionFault.Memory(s"pc ${pc.value}, lane $lane: ${error.message}")
+        )
+      case VMStateWrite.AtomicMemoryBinary(lane, _, address, width, _, _) =>
+        memory.validateRange(address, byteCount(width).value.refineUnsafe[Positive0]).leftMap(error =>
+          ExecutionFault.Memory(s"pc ${pc.value}, lane $lane: ${error.message}")
+        )
       case VMStateWrite.AtomicMemoryMin(lane, _, address, width, _) =>
         memory.validateRange(address, byteCount(width).value.refineUnsafe[Positive0]).leftMap(error =>
           ExecutionFault.Memory(s"pc ${pc.value}, lane $lane: ${error.message}")
@@ -119,6 +127,14 @@ private object VMStateEffects {
       val previous = state.readShared(address, width)
       state.registers(lane)(destination) = Bits.truncate(previous, width.asBitWidth)
       state.writeShared(address, width, previous + value)
+    case VMStateWrite.AtomicSharedExchange(lane, destination, address, width, value) =>
+      val previous = state.readShared(address, width)
+      state.registers(lane)(destination) = Bits.truncate(previous, width.asBitWidth)
+      state.writeShared(address, width, value)
+    case VMStateWrite.AtomicSharedBinary(lane, destination, address, width, value, operation) =>
+      val previous = state.readShared(address, width)
+      state.registers(lane)(destination) = Bits.truncate(previous, width.asBitWidth)
+      state.writeShared(address, width, atomicBinaryResult(operation, previous, value, width))
     case VMStateWrite.AtomicSharedMin(lane, destination, address, width, value) =>
       val previous = state.readShared(address, width)
       state.registers(lane)(destination) = Bits.truncate(previous, width.asBitWidth)
@@ -131,6 +147,17 @@ private object VMStateEffects {
         error => throw IllegalStateException(error.message),
         value => value
       )
+      state.registers(lane)(destination) = Bits.truncate(previous, width.asBitWidth)
+    case VMStateWrite.AtomicMemoryExchange(lane, destination, address, width, value) =>
+      val previous = memory.atomicModifyLittleEndian(address, memoryByteCount(width))(_ => value).fold(
+        error => throw IllegalStateException(error.message),
+        value => value
+      )
+      state.registers(lane)(destination) = Bits.truncate(previous, width.asBitWidth)
+    case VMStateWrite.AtomicMemoryBinary(lane, destination, address, width, value, operation) =>
+      val previous = memory.atomicModifyLittleEndian(address, memoryByteCount(width)) { current =>
+        atomicBinaryResult(operation, current, value, width)
+      }.fold(error => throw IllegalStateException(error.message), value => value)
       state.registers(lane)(destination) = Bits.truncate(previous, width.asBitWidth)
     case VMStateWrite.AtomicMemoryMin(lane, destination, address, width, value) =>
       val mask     = if (width.value >= 64) -1L else (1L << width.value) - 1L
@@ -148,6 +175,20 @@ private object VMStateEffects {
         else IEEE754.doubleToBinary64(IEEE754.binary64ToDouble(current) + IEEE754.binary64ToDouble(value))
       }.fold(error => throw IllegalStateException(error.message), value => value)
       state.registers(lane)(destination) = Bits.truncate(previous, width.asBitWidth)
+  }
+
+  private def atomicBinaryResult(operation: IntegerOperation, current: Long, value: Long, width: BitWidth): Long = {
+    val left   = Bits.truncate(current, width.asBitWidth)
+    val right  = Bits.truncate(value, width.asBitWidth)
+    val result = operation match {
+      case IntegerOperation.Maximum(false) =>
+        if (java.lang.Long.compareUnsigned(left, right) >= 0) left else right
+      case IntegerOperation.BitwiseAnd => left & right
+      case IntegerOperation.BitwiseOr  => left | right
+      case IntegerOperation.BitwiseXor => left ^ right
+      case other                       => throw IllegalStateException(s"unsupported atomic operation $other")
+    }
+    Bits.truncate(result, width.asBitWidth)
   }
 
 }

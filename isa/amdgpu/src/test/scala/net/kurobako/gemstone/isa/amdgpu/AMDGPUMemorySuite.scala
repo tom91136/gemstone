@@ -19,6 +19,26 @@ import java.nio.charset.StandardCharsets
 import java.util.concurrent.Executors
 
 final class AMDGPUMemorySuite extends munit.FunSuite with CodeObjectTestSupport {
+  test("gfx1030 MUBUF byte store decodes its resource and offset") {
+    assertEquals(
+      VMCompiler.decodeInstruction(
+        Vec[Byte](0x07, 0x00, 0x60, 0xe0.toByte, 0x00, 0x02, 0x00, 0x80.toByte),
+        Target("gfx1030")
+      ),
+      Right(Instruction.BufferStore(None, 0, None, 2, 1, 7))
+    )
+  }
+
+  test("gfx1030 MUBUF unsigned byte load decodes its resource and offset") {
+    assertEquals(
+      VMCompiler.decodeInstruction(
+        Vec[Byte](0x07, 0x00, 0x20, 0xe0.toByte, 0x00, 0x02, 0x00, 0x80.toByte),
+        Target("gfx1030")
+      ),
+      Right(Instruction.BufferLoad(2, None, 0, None, 1, 7))
+    )
+  }
+
   test("gfx900 DS decoding keeps the opcode separate from the full 16-bit offset") {
     assertEquals(
       VMCompiler.decodeInstruction(

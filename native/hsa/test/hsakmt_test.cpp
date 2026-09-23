@@ -194,9 +194,9 @@ int describe_kernel(void *, uint64_t, const char *name, uint32_t *kernarg_size, 
                     uint32_t *field_count, uint32_t *explicit_argument_count) {
   if (!name || !kernarg_size || !field_count || !explicit_argument_count) return -1;
   const std::array<gemstone_hsa_kernarg_field, 3> layout{{
-      {GEMSTONE_HSA_ARGUMENT_ALLOCATION, 0, 8},
-      {GEMSTONE_HSA_ARGUMENT_ALLOCATION, 8, 8},
-      {GEMSTONE_HSA_ARGUMENT_SCALAR, 16, 4},
+      {GEMSTONE_HSA_ARGUMENT_ALLOCATION, 0, 8, 0},
+      {GEMSTONE_HSA_ARGUMENT_ALLOCATION, 8, 8, 0},
+      {GEMSTONE_HSA_ARGUMENT_SCALAR, 16, 4, 0},
   }};
   *kernarg_size = 20;
   *field_count = static_cast<uint32_t>(layout.size());
@@ -263,9 +263,9 @@ void bootstrap_memory_events_and_direct_queue() {
   const auto code_object = gemstone::hsa::test::codeObjectFixture();
   const gemstone_hsakmt_test_loaded_kernel loaded{UINT64_C(0x123400), "add", 20};
   const std::array<gemstone_hsa_kernarg_field, 3> internal_fields{{
-      {GEMSTONE_HSA_ARGUMENT_ALLOCATION, 0, 8},
-      {GEMSTONE_HSA_ARGUMENT_ALLOCATION, 8, 8},
-      {GEMSTONE_HSA_ARGUMENT_SCALAR, 16, 4},
+      {GEMSTONE_HSA_ARGUMENT_ALLOCATION, 0, 8, 0},
+      {GEMSTONE_HSA_ARGUMENT_ALLOCATION, 8, 8, 0},
+      {GEMSTONE_HSA_ARGUMENT_SCALAR, 16, 4, 0},
   }};
   REQUIRE((gemstone_hsakmt_test_install_internal_kernel(code_object.data(), code_object.size(), UINT64_C(0x123300), "gfx900",
                                                         "internal_add", 20, 0, 0, 0x80, 0x8, internal_fields.data(), internal_fields.size())

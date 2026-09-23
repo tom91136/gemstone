@@ -93,44 +93,79 @@ private[v1_6] object VMInterpreter {
   def kernelNames(program: Program): Vec[KernelName] =
     Vec.from(program.entryPoints.keys.toSeq.sortBy(_.value))
 
-  def kernelMetadata(program: Program, name: KernelName): Either[Fault, KernelMetadata] = {
-    val compiled = program
-    compiled.entryPoints.get(name).toRight(
-      Fault.InvalidTask(s"SPIR-V entry point $name does not exist")
-    ).flatMap { functionId =>
-      compiled.functions.get(functionId).toRight(
-        Fault.InvalidTask(s"SPIR-V entry point $name has no function body")
-      ).flatMap { function =>
-        function.parameters.foldLeft[Either[Fault, (Vec[KernelMetadata.Parameter], Int)]](
-          Right((Vec.empty[KernelMetadata.Parameter], 0))
-        ) { case (result, (parameterId, parameterType)) =>
-          result.flatMap { case (parameters, currentOffset) =>
-            parameterMetadata(compiled, parameterId, parameterType).flatMap { parameter =>
-              val offset = alignUp(currentOffset, math.min(8, typeAlignment(compiled, parameterType)))
-              offset.refineEither[Positive0]
-                .leftMap(_ =>
-                  Fault.InvalidTask(s"negative SPIR-V parameter offset $offset")
-                )
-                .map(refinedOffset =>
-                  parameters.appended(parameter.copy(offset = refinedOffset)) -> Math.addExact(offset, parameter.width)
-                )
+  def kernelMetadata(program: Program, name: KernelName): Either[Fault, KernelMetadata] =
+    if (program.vulkanEntries.contains(name)) vulkanKernelMetadata(program, name)
+    else {
+      val compiled = program
+      compiled.entryPoints.get(name).toRight(
+        Fault.InvalidTask(s"SPIR-V entry point $name does not exist")
+      ).flatMap { functionId =>
+        compiled.functions.get(functionId).toRight(
+          Fault.InvalidTask(s"SPIR-V entry point $name has no function body")
+        ).flatMap { function =>
+          function.parameters.foldLeft[Either[Fault, (Vec[KernelMetadata.Parameter], Int)]](
+            Right((Vec.empty[KernelMetadata.Parameter], 0))
+          ) { case (result, (parameterId, parameterType)) =>
+            result.flatMap { case (parameters, currentOffset) =>
+              parameterMetadata(compiled, parameterId, parameterType).flatMap { parameter =>
+                val offset = alignUp(currentOffset, math.min(8, typeAlignment(compiled, parameterType)))
+                offset.refineEither[Positive0]
+                  .leftMap(_ =>
+                    Fault.InvalidTask(s"negative SPIR-V parameter offset $offset")
+                  )
+                  .map(refinedOffset =>
+                    parameters.appended(parameter.copy(offset =
+                      refinedOffset
+                    )) -> Math.addExact(offset, parameter.width)
+                  )
+              }
             }
+          }.flatMap { case (parameters, size) =>
+            for {
+              refinedSize <- size.refineEither[Positive0]
+                .leftMap(_ =>
+                  Fault.InvalidTask(s"negative SPIR-V argument block size $size")
+                )
+              parameterCount <- parameters.size.refineEither[Positive0]
+                .leftMap(_ => Fault.InvalidTask("negative SPIR-V parameter count"))
+              metadata <- KernelMetadata.validated(refinedSize, parameterCount, parameters)
+                .leftMap(detail => Fault.InvalidTask(detail))
+            } yield metadata
           }
-        }.flatMap { case (parameters, size) =>
-          for {
-            refinedSize <- size.refineEither[Positive0]
-              .leftMap(_ =>
-                Fault.InvalidTask(s"negative SPIR-V argument block size $size")
-              )
-            parameterCount <- parameters.size.refineEither[Positive0]
-              .leftMap(_ => Fault.InvalidTask("negative SPIR-V parameter count"))
-            metadata <- KernelMetadata.validated(refinedSize, parameterCount, parameters)
-              .leftMap(detail => Fault.InvalidTask(detail))
-          } yield metadata
         }
       }
     }
+
+  private[v1_6] def descriptorVariables(program: Program, name: KernelName): Vec[Int] = {
+    val declared = program.ir.entryPointInterfaces.getOrElse(name, Set.empty)
+    val scoped   = program.descriptorBindings.filter { case (variable, _) => declared.contains(variable) }
+    // Before SPIR-V 1.4, descriptor globals were not required in OpEntryPoint's
+    // interface. Retain compatibility with those modules when none are listed.
+    val bindings = if (scoped.nonEmpty) scoped else program.descriptorBindings
+    Vec.from(bindings.toSeq.sortBy { case (variable, (set, binding)) =>
+      (set, binding, variable)
+    }.map(_._1))
   }
+
+  private def vulkanKernelMetadata(program: Program, name: KernelName): Either[Fault, KernelMetadata] =
+    program.entryPoints.get(name).flatMap(program.functions.get) match {
+      case None    => Left(Fault.InvalidTask(s"SPIR-V entry point $name has no function body"))
+      case Some(_) =>
+        val descriptors = descriptorVariables(program, name)
+        val parameters  = descriptors.indices.map(index =>
+          KernelMetadata.Parameter(
+            8.refineUnsafe[Positive],
+            (index * 8).refineUnsafe[Positive0],
+            KernelMetadata.ParameterKind.Memory,
+            containsPointers = false
+          )
+        )
+        KernelMetadata.validated(
+          (descriptors.size * 8).refineUnsafe[Positive0],
+          descriptors.size.refineUnsafe[Positive0],
+          Vec.from(parameters)
+        ).leftMap(detail => Fault.InvalidTask(detail))
+    }
 
   private def parameterMetadata(
       program: Program,
@@ -221,10 +256,15 @@ private[v1_6] object VMInterpreter {
         )
       ).flatMap { function =>
         Either.cond(
-          function.parameters.size == dispatch.arguments.size,
+          (if (program.vulkanEntries.contains(dispatch.kernelName))
+             descriptorVariables(program, dispatch.kernelName).size
+           else function.parameters.size) == dispatch.arguments.size,
           (),
           Fault.InvalidTask(
-            s"SPIR-V entry point ${dispatch.kernelName.value} expects ${function.parameters.size} arguments, " +
+            s"SPIR-V entry point ${dispatch.kernelName.value} expects ${
+                if (program.vulkanEntries.contains(dispatch.kernelName)) descriptorVariables(program, dispatch.kernelName).size
+                else function.parameters.size
+              } arguments, " +
               s"received ${dispatch.arguments.size}"
           )
         ).flatMap(_ => executeDispatch(program, function, dispatch, memory, control, scheduler, observer, metrics))
@@ -250,9 +290,34 @@ private[v1_6] object VMInterpreter {
       observer: Observer[Event],
       metrics: Performance.Metrics
   ): Either[Fault, Unit] = {
-    val globalValues = materializeGlobals(program, storageClass => storageClass != 4 && storageClass != 6) match {
+    val initialGlobals = materializeGlobals(program, storageClass => storageClass != 4 && storageClass != 6) match {
       case Left(error)  => return Left(error)
       case Right(value) => value
+    }
+    val globalValues = if (!program.vulkanEntries.contains(dispatch.kernelName)) initialGlobals
+    else {
+      descriptorVariables(
+        program,
+        dispatch.kernelName
+      ).zip(dispatch.arguments).foldLeft[Either[Fault, Map[Int, RuntimeValue]]](Right(initialGlobals)) {
+        case (result, (variable, KernelTask.Argument.Memory(allocation, offset))) => result.flatMap { values =>
+            program.globals.get(variable).toRight(Fault.InvalidTask(s"SPIR-V descriptor %$variable has no variable"))
+              .map { global =>
+                val pointee = pointerPointee(program, global.pointerType)
+                values.updated(
+                  variable,
+                  RuntimeValue.Address(
+                    global.pointerType,
+                    Pointer(Region.External(allocation), offset, pointee, global.storageClass)
+                  )
+                )
+              }
+          }
+        case (_, (variable, _)) => Left(Fault.InvalidTask(s"SPIR-V descriptor %$variable requires a memory argument"))
+      } match {
+        case Left(error)  => return Left(error)
+        case Right(value) => value
+      }
     }
     val groupSize  = dispatch.geometry.groupSize
     val totalLocal = groupSize.volumeInt match {
@@ -5512,6 +5577,12 @@ private[v1_6] object VMInterpreter {
     program.extendedInstructionSets.get(setId).map(_.value) match {
       case None =>
         Left(Fault.InvalidTask(s"OpExtInst references undefined import %$setId"))
+      case Some("GLSL.std.450") if opcode == 4 || opcode == 13 || opcode == 14 || opcode == 31 =>
+        glslUnaryFloating(program, values, resultType, destination, opcode, sources)
+      case Some("GLSL.std.450") if opcode == 26 =>
+        if (sources.size != 2)
+          Left(Fault.InvalidTask("GLSL.std.450 Pow expects two operands"))
+        else openCLPow(program, values, resultType, destination, sources(0), sources(1))
       case Some("OpenCL.std") if opcode == 13 =>
         if (sources.size != 2)
           Left(Fault.InvalidTask(
@@ -5551,12 +5622,13 @@ private[v1_6] object VMInterpreter {
             case (_, None) => Left(undefined(sources(1)))
             case _         => Left(Fault.InvalidTask("OpenCL.std copysign operands are not floating-point"))
           }
-      case Some("OpenCL.std") if opcode == 42 =>
+      case Some("OpenCL.std") if opcode == 26 || opcode == 42 =>
+        val name = if (opcode == 26) "fma" else "mad"
         if (sources.size != 3)
           Left(Fault.InvalidTask(
-            s"OpenCL.std mad expects 3 operands, received ${sources.size}"
+            s"OpenCL.std $name expects 3 operands, received ${sources.size}"
           ))
-        else openCLMad(program, values, resultType, destination, sources(0), sources(1), sources(2))
+        else openCLMad(program, values, resultType, destination, sources(0), sources(1), sources(2), opcode == 26)
       case Some("OpenCL.std") if opcode == 43 =>
         if (sources.size != 2)
           Left(Fault.InvalidTask(
@@ -5880,6 +5952,48 @@ private[v1_6] object VMInterpreter {
         ))
     }
   }
+
+  private def glslUnaryFloating(
+      program: Program,
+      values: InvocationValues,
+      resultType: Operand,
+      destination: Operand,
+      opcode: Int,
+      sources: Vec[Operand]
+  ): Either[Fault, Unit] =
+    if (sources.size != 1) Left(Fault.InvalidTask(s"GLSL.std.450 opcode $opcode expects one operand"))
+    else values.get(id(sources.head)) match {
+      case Some(RuntimeValue.Bits(sourceType, lanes)) =>
+        (floatingShape(program, sourceType), floatingShape(program, id(resultType))) match {
+          case (Some((sourceWidth, sourceLanes)), Some((resultWidth, resultLanes)))
+              if sourceWidth == resultWidth && sourceLanes == resultLanes =>
+            val result = lanes.map { raw =>
+              if (opcode == 4) resultWidth.value match {
+                case 16 => raw & 0x7fffL
+                case 32 => raw & 0x7fffffffL
+                case 64 => raw & 0x7fffffffffffffffL
+              }
+              else {
+                val value    = floatingToDouble(sourceWidth, raw)
+                val computed = opcode match {
+                  case 13 => Math.sin(value)
+                  case 14 => Math.cos(value)
+                  case 31 => Math.sqrt(value)
+                }
+                resultWidth.value match {
+                  case 16 => IEEE754.floatToBinary16(computed.toFloat).value
+                  case 32 => IEEE754.floatToBinary32(computed.toFloat).value
+                  case 64 => IEEE754.doubleToBinary64(computed)
+                }
+              }
+            }
+            values.update(id(destination), RuntimeValue.Bits(id(resultType), result))
+            Right(())
+          case _ => Left(Fault.InvalidTask("GLSL.std.450 unary floating types do not match"))
+        }
+      case Some(_) => Left(Fault.InvalidTask("GLSL.std.450 unary operand is not floating-point"))
+      case None    => Left(undefined(sources.head))
+    }
 
   private def floatingToDouble(width: FloatingPointWidth, bits: Long): Double = width.value match {
     case 16 => IEEE754.binary16ToFloat(Binary16.low(bits)).toDouble
@@ -6396,7 +6510,8 @@ private[v1_6] object VMInterpreter {
       destination: Operand,
       left: Operand,
       right: Operand,
-      addend: Operand
+      addend: Operand,
+      fused: Boolean
   ): Either[Fault, Unit] =
     (values.get(id(left)), values.get(id(right)), values.get(id(addend))) match {
       case (
@@ -6420,23 +6535,25 @@ private[v1_6] object VMInterpreter {
                 lanes == rightLanesCount && lanes == addendLanesCount && lanes == resultLanes &&
                 leftLanes.length == lanes && rightLanes.length == lanes && addendLanes.length == lanes =>
             val result = Array.tabulate(lanes) { index =>
-              floatingAddBits(
-                width,
-                floatingMultiplyBits(width, leftLanes(index), rightLanes(index)),
-                addendLanes(index)
-              )
+              if (fused) floatingFmaBits(width, leftLanes(index), rightLanes(index), addendLanes(index))
+              else
+                floatingAddBits(
+                  width,
+                  floatingMultiplyBits(width, leftLanes(index), rightLanes(index)),
+                  addendLanes(index)
+                )
             }
             values.update(id(destination), RuntimeValue.Bits(id(resultType), result))
             Right(())
           case _ =>
             Left(Fault.InvalidTask(
-              "OpenCL.std mad requires matching floating-point types"
+              s"OpenCL.std ${if (fused) "fma" else "mad"} requires matching floating-point types"
             ))
         }
       case (None, _, _) => Left(undefined(left))
       case (_, None, _) => Left(undefined(right))
       case (_, _, None) => Left(undefined(addend))
-      case _            => Left(Fault.InvalidTask("OpenCL.std mad operands are not floating-point"))
+      case _ => Left(Fault.InvalidTask(s"OpenCL.std ${if (fused) "fma" else "mad"} operands are not floating-point"))
     }
 
   // Sin/cos writes paired results through one indexed component loop.
@@ -9010,6 +9127,30 @@ private[v1_6] object VMInterpreter {
     case 64 =>
       IEEE754.doubleToBinary64(IEEE754.binary64ToDouble(left) * IEEE754.binary64ToDouble(right))
   }
+
+  private def floatingFmaBits(width: FloatingPointWidth, left: Long, right: Long, addend: Long): Long =
+    width.value match {
+      case 16 =>
+        IEEE754.floatToBinary16(
+          Math.fma(
+            IEEE754.binary16ToFloat(Binary16.low(left)).toDouble,
+            IEEE754.binary16ToFloat(Binary16.low(right)).toDouble,
+            IEEE754.binary16ToFloat(Binary16.low(addend)).toDouble
+          ).toFloat
+        ).value
+      case 32 =>
+        IEEE754.floatToBinary32(
+          Math.fma(
+            IEEE754.binary32ToFloat(Binary32.low(left)),
+            IEEE754.binary32ToFloat(Binary32.low(right)),
+            IEEE754.binary32ToFloat(Binary32.low(addend))
+          )
+        ).value
+      case 64 =>
+        IEEE754.doubleToBinary64(
+          Math.fma(IEEE754.binary64ToDouble(left), IEEE754.binary64ToDouble(right), IEEE754.binary64ToDouble(addend))
+        )
+    }
 
   private[v1_6] def floatingMinimumBits(
       width: FloatingPointWidth,

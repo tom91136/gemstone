@@ -220,6 +220,104 @@ final class CodeObjectExecutionSuite extends munit.FunSuite with CodeObjectTestS
     assertEquals(memory.getInt(allocation, 4), 0xa5a5a5a5)
   }
 
+  test("gfx1030 scratch buffer scalar offsets use wave-interleaved addresses") {
+    // LLVM uses a 0x20080 scalar scratch offset for private byte 4100 on a
+    // wave32 target. The instruction's immediate offset remains per-lane.
+    val words = Vec[Long](
+      0xbe8403ffL, 0x00020080L, 0x7e0002ffL, 0x12345678L,
+      0xe0700000L, 0x04000000L, 0x7e0002ffL, 0x0fedcba9L,
+      0xe0700004L, 0x04000000L, 0xe0300000L, 0x04000100L,
+      0xe0300004L, 0x04000200L,
+      0xbf8c3f70L, 0xbe800380L, 0xbe8103ffL, 0x00004000L,
+      0xbe820388L, 0xbe830380L, 0xe0700000L, 0x80000100L,
+      0xe0700004L, 0x80000200L,
+      0xbf810000L
+    )
+    val kernel = CodeObjectKernel(
+      "scratch_swizzle",
+      Target("gfx1030"),
+      0,
+      0,
+      4752,
+      0,
+      1,
+      words.flatMap(word => LittleEndian.toVec(word, ScalarByteWidth(4)))
+    )
+    val memory     = TestMemory()
+    val allocation = MemoryRegion(1L)
+    memory.allocate(allocation, 8)
+    val dispatch = KernelTask.validated(
+      KernelName("scratch_swizzle"),
+      Dimensions.One,
+      Dimensions.One,
+      Vec.empty
+    ).toOption.get
+    assertEquals(executeKernel(compileKernel(kernel), dispatch, memory), Right(()))
+    assertEquals(memory.getInt(allocation, 0), 0x12345678)
+    assertEquals(memory.getInt(allocation, 4), 0x0fedcba9)
+  }
+
+  test("gfx1030 VOP3 frexp mantissa applies the absolute source modifier") {
+    // The optimized Polyregion math kernel emits v_frexp_mant_f32_e64 with |src|.
+    // Start with -6.0f so dropping the modifier changes the stored result.
+    val words = Vec[Long](
+      0x7e0002ffL, 0xc0c00000L, 0xd5c00101L, 0x00000100L,
+      0xbe800380L, 0xbe8103ffL, 0x00004000L, 0xbe820388L,
+      0xbe830380L, 0xe0700000L, 0x80000100L, 0xbf810000L
+    )
+    val kernel = CodeObjectKernel(
+      "frexp_mantissa_modified",
+      Target("gfx1030"),
+      0,
+      0,
+      0,
+      0,
+      0,
+      words.flatMap(word => LittleEndian.toVec(word, ScalarByteWidth(4)))
+    )
+    val memory     = TestMemory()
+    val allocation = MemoryRegion(1L)
+    memory.allocate(allocation, 8)
+    val dispatch = KernelTask.validated(
+      KernelName("frexp_mantissa_modified"),
+      Dimensions.One,
+      Dimensions.One,
+      Vec.empty
+    ).toOption.get
+    assertEquals(executeKernel(compileKernel(kernel), dispatch, memory), Right(()))
+    assertEquals(memory.getInt(allocation, 0), java.lang.Float.floatToRawIntBits(0.75f))
+  }
+
+  test("gfx1030 VOP3 f32 to f64 conversion applies the absolute source modifier") {
+    val words = Vec[Long](
+      0x7e0002ffL, 0xc0c00000L, 0xd5900102L, 0x00000100L,
+      0xbe800380L, 0xbe8103ffL, 0x00004000L, 0xbe820388L,
+      0xbe830380L, 0xe0740000L, 0x80000200L, 0xbf810000L
+    )
+    val kernel = CodeObjectKernel(
+      "f64_from_f32_modified",
+      Target("gfx1030"),
+      0,
+      0,
+      0,
+      0,
+      0,
+      words.flatMap(word => LittleEndian.toVec(word, ScalarByteWidth(4)))
+    )
+    val memory     = TestMemory()
+    val allocation = MemoryRegion(1L)
+    memory.allocate(allocation, 8)
+    val dispatch = KernelTask.validated(
+      KernelName("f64_from_f32_modified"),
+      Dimensions.One,
+      Dimensions.One,
+      Vec.empty
+    ).toOption.get
+    assertEquals(executeKernel(compileKernel(kernel), dispatch, memory), Right(()))
+    assertEquals(memory.getInt(allocation, 0), 0)
+    assertEquals(memory.getInt(allocation, 4), 0x40180000)
+  }
+
   test("gfx900 transfers control through a linked device-function call and return") {
     // s_mov_b32 s4, 0x1018; s_mov_b32 s5, 0; s_swappc s[2:3], s[4:5]
     // calls the second text function. It writes s0 and returns through the

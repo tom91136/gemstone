@@ -8,11 +8,11 @@
 #include <string_view>
 
 #include <aspartame/all.hpp>
-#include <fmt/format.h>
-#include <fmt/ranges.h>
 #include <glaze/toml.hpp>
 
 #include "environment.hpp"
+#include <fmt/format.h>
+#include <fmt/ranges.h>
 
 #if defined(_WIN32)
   #define WIN32_LEAN_AND_MEAN
@@ -115,7 +115,8 @@ Profile load(const std::filesystem::path &file) {
   std::string buffer;
   Profile profile;
   if (const auto error = glz::read_file_toml(profile, file.string(), buffer); error)
-    throw std::invalid_argument(fmt::format("cannot load conformance machine profile {}:\n{}", file.string(), glz::format_error(error, buffer)));
+    throw std::invalid_argument(
+        fmt::format("cannot load conformance machine profile {}:\n{}", file.string(), glz::format_error(error, buffer)));
   return profile;
 }
 
@@ -181,12 +182,11 @@ std::vector<ResolvedTarget> resolve_targets(const Profile &profile, const std::v
   }
 
   const auto all = selectors.empty() || selectors == std::vector<std::string>{"all"};
-  return profile.targets
-         | filter([&](const ProfileTarget &target) {
-             if (all) return true;
-             const auto id = target_id(target);
-             return std::ranges::find(selectors, target.backend) != selectors.end() || std::ranges::find(selectors, id) != selectors.end();
-           })
+  return profile.targets | filter([&](const ProfileTarget &target) {
+           if (all) return true;
+           const auto id = target_id(target);
+           return std::ranges::find(selectors, target.backend) != selectors.end() || std::ranges::find(selectors, id) != selectors.end();
+         })
          | map([&](const ProfileTarget &target) {
              const auto id = target_id(target);
              ResolvedTarget planned{id, target.backend, target.architecture, profile.environment, target.deviceLock};

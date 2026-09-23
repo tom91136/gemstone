@@ -2,6 +2,8 @@
 #include <algorithm>
 #include <array>
 #include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <string>
 
 #include <stdint.h>
@@ -11,6 +13,79 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "../../rpc/test/rpc_fixture.hpp"
+
+namespace {
+struct ScopedEnv {
+  const char *name;
+  ScopedEnv(const char *name, const char *value) : name(name) { REQUIRE((setenv(name, value, 1) == 0)); }
+  ~ScopedEnv() { (void)unsetenv(name); }
+};
+} // namespace
+
+TEST_CASE("OpenCL virtual profile advertises the selected Polyregion device", "[opencl]") {
+  const ScopedEnv profile("GEMSTONE_OPENCL_PROFILE", "rusticl-amd");
+  cl_platform_id platform = nullptr;
+  cl_device_id device = nullptr;
+  REQUIRE((clGetPlatformIDs(1, &platform, nullptr) == CL_SUCCESS));
+  REQUIRE((clGetDeviceIDs(platform, CL_DEVICE_TYPE_GPU, 1, &device, nullptr) == CL_SUCCESS));
+  std::array<char, 128> platformName{};
+  std::array<char, 128> deviceName{};
+  REQUIRE((clGetPlatformInfo(platform, CL_PLATFORM_NAME, platformName.size(), platformName.data(), nullptr) == CL_SUCCESS));
+  REQUIRE((clGetDeviceInfo(device, CL_DEVICE_NAME, deviceName.size(), deviceName.data(), nullptr) == CL_SUCCESS));
+  REQUIRE((std::string(platformName.data()) == "rusticl"));
+  REQUIRE((std::string(deviceName.data()).find("AMD") != std::string::npos));
+  cl_uint vendorId = 0;
+  REQUIRE((clGetDeviceInfo(device, CL_DEVICE_VENDOR_ID, sizeof(vendorId), &vendorId, nullptr) == CL_SUCCESS));
+  REQUIRE((vendorId == 0x1002));
+}
+
+TEST_CASE("OpenCL device exposes half precision arithmetic", "[opencl]") {
+  cl_platform_id platform = nullptr;
+  cl_device_id device = nullptr;
+  REQUIRE((clGetPlatformIDs(1, &platform, nullptr) == CL_SUCCESS));
+  REQUIRE((clGetDeviceIDs(platform, CL_DEVICE_TYPE_GPU, 1, &device, nullptr) == CL_SUCCESS));
+  std::array<char, 2048> extensions{};
+  REQUIRE((clGetDeviceInfo(device, CL_DEVICE_EXTENSIONS, extensions.size(), extensions.data(), nullptr) == CL_SUCCESS));
+  REQUIRE((std::string(extensions.data()).find("cl_khr_fp16") != std::string::npos));
+  cl_device_fp_config halfConfig = 0;
+  REQUIRE((clGetDeviceInfo(device, CL_DEVICE_HALF_FP_CONFIG, sizeof(halfConfig), &halfConfig, nullptr) == CL_SUCCESS));
+  REQUIRE(((halfConfig & (CL_FP_ROUND_TO_NEAREST | CL_FP_INF_NAN)) == (CL_FP_ROUND_TO_NEAREST | CL_FP_INF_NAN)));
+  cl_uint vectorWidth = 0;
+  REQUIRE((clGetDeviceInfo(device, CL_DEVICE_PREFERRED_VECTOR_WIDTH_HALF, sizeof(vectorWidth), &vectorWidth, nullptr) == CL_SUCCESS));
+  REQUIRE((vectorWidth > 0));
+}
+
+TEST_CASE("OpenCL generated source converts to SPIR-V", "[opencl]") {
+  gemstone_test::RpcFixture server;
+  const auto port = std::to_string(server.port());
+  REQUIRE((setenv("GEMSTONE_RPC_PORT", port.c_str(), 1) == 0));
+  REQUIRE((setenv("GEMSTONE_RPC_CLIENT", "42", 1) == 0));
+  cl_platform_id platform = nullptr;
+  cl_device_id device = nullptr;
+  REQUIRE((clGetPlatformIDs(1, &platform, nullptr) == CL_SUCCESS));
+  REQUIRE((clGetDeviceIDs(platform, CL_DEVICE_TYPE_GPU, 1, &device, nullptr) == CL_SUCCESS));
+  cl_int error = CL_SUCCESS;
+  cl_context context = clCreateContext(nullptr, 1, &device, nullptr, nullptr, &error);
+  REQUIRE((context && error == CL_SUCCESS));
+  for (const char *fixture : {"subgroup_bool_compare.cl", "control_break_in_cond.cl"}) {
+    const auto sourcePath = std::filesystem::path(GEMSTONE_OPENCL_TEST_SOURCE_DIR) / fixture;
+    std::ifstream sourceFile(sourcePath);
+    REQUIRE(sourceFile.good());
+    const std::string source(std::istreambuf_iterator<char>{sourceFile}, {});
+    const char *sourceText = source.c_str();
+    cl_program program = clCreateProgramWithSource(context, 1, &sourceText, nullptr, &error);
+    REQUIRE((program && error == CL_SUCCESS));
+    const cl_int build = clBuildProgram(program, 1, &device, nullptr, nullptr, nullptr);
+    size_t logSize = 0;
+    REQUIRE((clGetProgramBuildInfo(program, device, CL_PROGRAM_BUILD_LOG, 0, nullptr, &logSize) == CL_SUCCESS));
+    std::string log(logSize, '\0');
+    REQUIRE((clGetProgramBuildInfo(program, device, CL_PROGRAM_BUILD_LOG, log.size(), log.data(), nullptr) == CL_SUCCESS));
+    INFO(fixture << ": " << log);
+    REQUIRE((build == CL_SUCCESS));
+    REQUIRE((clReleaseProgram(program) == CL_SUCCESS));
+  }
+  REQUIRE((clReleaseContext(context) == CL_SUCCESS));
+}
 
 TEST_CASE("OpenCL facade launch and memory smoke test", "[opencl]") {
   gemstone_test::RpcFixture server;
@@ -23,6 +98,11 @@ TEST_CASE("OpenCL facade launch and memory smoke test", "[opencl]") {
   cl_uint platformCount = 0;
   REQUIRE((clGetPlatformIDs(1, &platform, &platformCount) == CL_SUCCESS));
   REQUIRE((platform && platformCount == 1));
+  std::array<char, 128> platformName{};
+  REQUIRE((clGetPlatformInfo(platform, CL_PLATFORM_NAME, platformName.size(), platformName.data(), nullptr) == CL_SUCCESS));
+  REQUIRE((std::string(platformName.data()).find("Intel") == 0));
+  REQUIRE((std::string(platformName.data()).find("Graphics") != std::string::npos));
+  REQUIRE((std::string(platformName.data()).find("Gemstone") != std::string::npos));
 
   // The Khronos loader discovers an ICD through this extension lookup, not only dlsym.
   using GetPlatforms = cl_int(CL_API_CALL *)(cl_uint, cl_platform_id *, cl_uint *);

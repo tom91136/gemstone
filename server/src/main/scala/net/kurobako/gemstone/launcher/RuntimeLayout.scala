@@ -11,6 +11,7 @@ final case class RuntimeLayout(directory: Path) {
       case ComputeAPI.HIP       => "amdhip64.dll"
       case ComputeAPI.HSA       => "hsa-runtime64.dll"
       case ComputeAPI.OpenCL    => "OpenCL_gemstone.dll"
+      case ComputeAPI.Vulkan    => "vulkan/vulkan.dll"
       case ComputeAPI.LevelZero => "ze_gemstone.dll"
     }
     else api match {
@@ -18,6 +19,7 @@ final case class RuntimeLayout(directory: Path) {
       case ComputeAPI.HIP       => "libamdhip64.so.7"
       case ComputeAPI.HSA       => "libhsa-runtime64.so.1"
       case ComputeAPI.OpenCL    => "libOpenCL_gemstone.so.1"
+      case ComputeAPI.Vulkan    => "vulkan/libvulkan.so.1"
       case ComputeAPI.LevelZero => "libze_gemstone.so.1"
     }
   )

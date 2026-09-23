@@ -661,7 +661,7 @@ object GeneratePTXISA {
         |
         |  val definitions: Vec[Definition] = Definition.values.toVec
         |
-        |  private def normalizeOpcode(value: String): String = value.toLowerCase(java.util.Locale.ROOT)
+        |  private def normalizeOpcode(value: String): String = value.map(_.toLower)
         |
         |  private lazy val DefinitionsByMnemonic: Map[String, Vec[Definition]] =
         |    definitions.groupMap(_.opcode.value.takeWhile(_ != '.'))(value => value)

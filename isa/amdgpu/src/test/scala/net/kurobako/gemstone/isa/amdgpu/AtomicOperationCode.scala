@@ -38,6 +38,29 @@ private[amdgpu] object AtomicOperationCode {
     ("inc", 64, true) ->
       "000204f4000000fa000308f4080000fa7fc08cbfff02007e78563412ff02027e103254768002047e0c02087e0d020a7e0e020c7e0f020e7e008071dd02040800703f8cbf0202047e830404349004044a008074dc02000800000081bf"
   )
-  def bytes(opcode: String, width: Int, returning: Boolean): Vec[Byte] =
-    Vec.from(images((opcode, width, returning)).grouped(2).map(Integer.parseInt(_, 16).toByte))
+  // Opcode nibbles for the 32-bit flat atomics, keyed by their fixture name.
+  private val flatOpcodeBytes = Map(
+    "flatswap" -> 0xc0,
+    "flatadd"  -> 0xc8,
+    "flatsub"  -> 0xcc,
+    "flatmin"  -> 0xd8,
+    "flatmax"  -> 0xe0,
+    "flatand"  -> 0xe4,
+    "flator"   -> 0xe8,
+    "flatxor"  -> 0xec
+  )
+  // The flat atomic opcode is the fourth word of the encoded instruction. The
+  // flatcas fixture is reused as the base, so splice that word rather than
+  // replacing a byte pair that may recur elsewhere in the stream.
+  private val flatOpcodeHexOffset                                      = 132
+  def bytes(opcode: String, width: Int, returning: Boolean): Vec[Byte] = {
+    val image =
+      if (opcode.startsWith("flat") && opcode != "flatcas") {
+        val source      = images(("flatcas", width, returning))
+        val replacement = if (width == 64) if (returning) "41dd" else "40dd"
+        else f"${flatOpcodeBytes(opcode) + (if (returning) 1 else 0)}%02x" + "dc"
+        source.substring(0, flatOpcodeHexOffset) + replacement + source.substring(flatOpcodeHexOffset + 4)
+      } else images((opcode, width, returning))
+    Vec.from(image.grouped(2).map(Integer.parseInt(_, 16).toByte))
+  }
 }

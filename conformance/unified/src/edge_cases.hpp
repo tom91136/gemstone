@@ -11,10 +11,10 @@
 #include <vector>
 
 #include <catch2/catch_test_macros.hpp>
-#include <fmt/format.h>
 
-#include "test_support.hpp"
 #include "blas_cases.hpp"
+#include "test_support.hpp"
+#include <fmt/format.h>
 
 namespace unified::edge {
 using support::BiasedHash;

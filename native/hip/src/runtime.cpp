@@ -123,6 +123,7 @@ struct FunctionHandle {
 struct State {
   std::mutex lock;
   bool initialized = false;
+  uint32_t primary_context_references = 0;
   bool atexit_registered = false;
   hsa_agent_t gpu{};
   hsa_region_t kernarg_region{};
@@ -532,9 +533,10 @@ hipError_t dispatchKernel(const std::shared_ptr<Kernel> &kernel, dim3 grid, dim3
   const dim3 global = !global_work_items ? dim3(grid.x * block.x, grid.y * block.y, grid.z * block.z) : *global_work_items;
   if (global.x < block.x || global.y < block.y || global.z < block.z) return remember(hipErrorInvalidConfiguration);
   void *kernarg = nullptr;
-  hsa_status_t status = hsa_memory_allocate(state().kernarg_region, kernel->kernarg_size, &kernarg);
+  hsa_status_t status =
+      kernel->kernarg_size == 0 ? HSA_STATUS_SUCCESS : hsa_memory_allocate(state().kernarg_region, kernel->kernarg_size, &kernarg);
   if (status != HSA_STATUS_SUCCESS) return remember(mapHsa(status));
-  std::memset(kernarg, 0, kernel->kernarg_size);
+  if (kernel->kernarg_size != 0) std::memset(kernarg, 0, kernel->kernarg_size);
   if (launch_buffer.data) {
     size_t required = 0;
     for (size_t argument = 0; argument < kernel->explicit_argument_count; ++argument) {
@@ -626,6 +628,19 @@ hipError_t dispatchKernel(const std::shared_ptr<Kernel> &kernel, dim3 grid, dim3
     while (hsa_signal_load_scacquire(completion) == 1)
       std::this_thread::yield();
     if (hsa_signal_load_scacquire(completion) < 0) status = HSA_STATUS_ERROR;
+    // The queue read index advances after the HSA worker mirrors pageable
+    // writes back to host memory. Wait for that handoff before returning to a
+    // caller that may immediately read or free a captured host pointer.
+    if (status == HSA_STATUS_SUCCESS) {
+      const auto deadline = std::chrono::steady_clock::now() + std::chrono::hours(1);
+      while (hsa_queue_load_read_index_scacquire(state().queue) <= index) {
+        if (std::chrono::steady_clock::now() >= deadline) {
+          status = HSA_STATUS_ERROR;
+          break;
+        }
+        std::this_thread::yield();
+      }
+    }
   }
   const hsa_status_t free_status = hsa_memory_free(kernarg);
   const hsa_status_t destroy_status = hsa_signal_destroy(completion);
@@ -709,6 +724,53 @@ extern "C" hipError_t hipGetDevice(int *device) {
 
 extern "C" hipError_t hipSetDevice(int device) { return remember(device == 0 && ensureInitialized() ? hipSuccess : hipErrorInvalidDevice); }
 
+namespace {
+unsigned char primary_context_token;
+thread_local hipCtx_t current_context = nullptr;
+thread_local std::vector<hipCtx_t> context_stack;
+
+hipCtx_t primaryContext() { return reinterpret_cast<hipCtx_t>(&primary_context_token); }
+} // namespace
+
+extern "C" hipError_t hipDevicePrimaryCtxRetain(hipCtx_t *context, hipDevice_t device) {
+  if (!context || device != 0) return remember(hipErrorInvalidValue);
+  if (!ensureInitialized()) return remember(hipErrorNoDevice);
+  auto &runtime = state();
+  std::lock_guard<std::mutex> guard(runtime.lock);
+  if (runtime.primary_context_references == UINT32_MAX) return remember(hipErrorOutOfMemory);
+  ++runtime.primary_context_references;
+  *context = primaryContext();
+  return remember(hipSuccess);
+}
+
+extern "C" hipError_t hipDevicePrimaryCtxRelease(hipDevice_t device) {
+  if (device != 0) return remember(hipErrorInvalidDevice);
+  auto &runtime = state();
+  std::lock_guard<std::mutex> guard(runtime.lock);
+  if (runtime.primary_context_references == 0) return remember(hipErrorInvalidValue);
+  --runtime.primary_context_references;
+  return remember(hipSuccess);
+}
+
+extern "C" hipError_t hipCtxPushCurrent(hipCtx_t context) {
+  if (context != primaryContext()) return remember(hipErrorInvalidContext);
+  try {
+    context_stack.push_back(current_context);
+  } catch (...) {
+    return remember(hipErrorOutOfMemory);
+  }
+  current_context = context;
+  return remember(hipSuccess);
+}
+
+extern "C" hipError_t hipCtxPopCurrent(hipCtx_t *context) {
+  if (!context || context_stack.empty()) return remember(hipErrorInvalidContext);
+  *context = current_context;
+  current_context = context_stack.back();
+  context_stack.pop_back();
+  return remember(hipSuccess);
+}
+
 extern "C" hipError_t hipDeviceGet(hipDevice_t *device, int ordinal) {
   if (!device) return remember(hipErrorInvalidValue);
   if (ordinal != 0 || !ensureInitialized()) return remember(hipErrorInvalidDevice);
@@ -786,6 +848,7 @@ extern "C" hipError_t hipDeviceGetAttribute(int *value, hipDeviceAttribute_t att
     case hipDeviceAttributeMaxGridDimX: *value = std::numeric_limits<int>::max(); break;
     case hipDeviceAttributeMaxGridDimY: *value = std::numeric_limits<int>::max(); break;
     case hipDeviceAttributeMaxGridDimZ: *value = std::numeric_limits<int>::max(); break;
+    case hipDeviceAttributePageableMemoryAccess: *value = std::getenv("GEMSTONE_HSA_SYSTEM_PAGING") ? 1 : 0; break;
     default: *value = 0; break;
   }
   return remember(hipSuccess);
@@ -814,6 +877,68 @@ extern "C" hipError_t hipGetDevicePropertiesR0600(hipDeviceProp_tR0600 *properti
   properties->major = static_cast<int>(version.major);
   properties->minor = static_cast<int>(version.minor);
   properties->multiProcessorCount = 1;
+  properties->pageableMemoryAccess = std::getenv("GEMSTONE_HSA_SYSTEM_PAGING") ? 1 : 0;
+  return remember(hipSuccess);
+}
+
+// The unversioned entry point uses the older 792-byte hipDeviceProp_t ABI.
+// Its field offsets differ from hipDeviceProp_tR0600, so forwarding directly
+// to the versioned implementation would corrupt the caller's properties. The
+// pinned headers alias hipDeviceProp_t to hipDeviceProp_tR0600, so the legacy
+// layout is reproduced here by explicit offset and pinned by the tests.
+namespace legacy_properties {
+constexpr size_t Name = 0;
+constexpr size_t NameSize = 256;
+constexpr size_t TotalGlobalMem = 256;
+constexpr size_t SharedMemPerBlock = 264;
+constexpr size_t RegsPerBlock = 272;
+constexpr size_t WarpSize = 276;
+constexpr size_t MaxThreadsPerBlock = 280;
+constexpr size_t MaxThreadsDim = 284;
+constexpr size_t MaxGridSize = 296;
+constexpr size_t Major = 328;
+constexpr size_t Minor = 332;
+constexpr size_t MultiProcessorCount = 336;
+constexpr size_t Arch = 356;
+constexpr size_t MaxSharedMemoryPerMultiProcessor = 376;
+constexpr size_t GcnArch = 392;
+constexpr size_t ArchName = 396;
+constexpr size_t PageableMemoryAccess = 784;
+constexpr size_t Size = 792;
+static_assert(Name + NameSize <= TotalGlobalMem, "legacy name overlaps totalGlobalMem");
+static_assert(MaxGridSize + 3 * sizeof(int) <= Major, "legacy layout overlap");
+static_assert(MaxSharedMemoryPerMultiProcessor + sizeof(size_t) <= GcnArch, "legacy layout overlap");
+static_assert(PageableMemoryAccess + sizeof(int) <= Size, "legacy layout out of bounds");
+} // namespace legacy_properties
+
+#undef hipGetDeviceProperties
+extern "C" GEMSTONE_PUBLIC_API hipError_t hipGetDeviceProperties(void *properties, int device) {
+  using namespace legacy_properties;
+  if (!properties || device != 0) return remember(hipErrorInvalidValue);
+  if (sizeof(size_t) != 8) return remember(hipErrorNotSupported);
+  auto *bytes = static_cast<unsigned char *>(properties);
+  std::memset(bytes, 0, Size);
+  const std::string target = gemstone::hsa::targetArch();
+  const std::string name = std::string("Gemstone ") + target;
+  std::strncpy(reinterpret_cast<char *>(bytes + Name), name.c_str(), NameSize - 1);
+  std::strncpy(reinterpret_cast<char *>(bytes + ArchName), target.c_str(), 255);
+  const auto write = [bytes](size_t offset, auto value) { std::memcpy(bytes + offset, &value, sizeof(value)); };
+  write(TotalGlobalMem, size_t(1) << 30U);
+  write(SharedMemPerBlock, size_t(64) * 1024U);
+  write(WarpSize, int(64));
+  write(MaxThreadsPerBlock, int(MaxBlockThreads));
+  for (size_t axis = 0; axis < 3; ++axis) {
+    write(MaxThreadsDim + axis * sizeof(int), int(MaxBlockThreads));
+    write(MaxGridSize + axis * sizeof(int), int(MaxGridDimension));
+  }
+  const auto version = gemstone::hsa::targetVersion(target.c_str());
+  write(Major, int(version.major));
+  write(Minor, int(version.minor));
+  write(MultiProcessorCount, int(1));
+  write(Arch, uint32_t((1U << 5) | (1U << 7))); // global int64 atomics and doubles
+  write(MaxSharedMemoryPerMultiProcessor, size_t(64) * 1024U);
+  write(GcnArch, int(std::atoi(target.c_str() + 3)));
+  write(PageableMemoryAccess, int(std::getenv("GEMSTONE_HSA_SYSTEM_PAGING") ? 1 : 0));
   return remember(hipSuccess);
 }
 
@@ -948,6 +1073,15 @@ extern "C" hipError_t hipMemcpyDtoH(void *destination, hipDeviceptr_t source, si
 }
 extern "C" hipError_t hipMemcpyDtoD(hipDeviceptr_t destination, hipDeviceptr_t source, size_t size) {
   return hipMemcpy(reinterpret_cast<void *>(destination), reinterpret_cast<const void *>(source), size, hipMemcpyDeviceToDevice);
+}
+extern "C" hipError_t hipMemcpyHtoDAsync(hipDeviceptr_t destination, const void *source, size_t size, hipStream_t stream) {
+  return validStream(stream) ? hipMemcpyHtoD(destination, source, size) : remember(hipErrorInvalidResourceHandle);
+}
+extern "C" hipError_t hipMemcpyDtoHAsync(void *destination, hipDeviceptr_t source, size_t size, hipStream_t stream) {
+  return validStream(stream) ? hipMemcpyDtoH(destination, source, size) : remember(hipErrorInvalidResourceHandle);
+}
+extern "C" hipError_t hipMemcpyDtoDAsync(hipDeviceptr_t destination, hipDeviceptr_t source, size_t size, hipStream_t stream) {
+  return validStream(stream) ? hipMemcpyDtoD(destination, source, size) : remember(hipErrorInvalidResourceHandle);
 }
 
 extern "C" hipError_t hipMallocManaged(void **pointer, size_t size, unsigned int) {
@@ -1128,6 +1262,17 @@ extern "C" hipError_t hipStreamQuery(hipStream_t stream) {
   if (stream == hipStreamLegacy || stream == hipStreamPerThread) return remember(hipErrorInvalidResourceHandle);
   std::lock_guard<std::mutex> guard(state().lock);
   return remember(!stream || state().streams.count(stream) == 1 ? hipSuccess : hipErrorInvalidResourceHandle);
+}
+extern "C" hipError_t hipStreamAddCallback(hipStream_t stream, hipStreamCallback_t callback, void *data, unsigned int flags) {
+  if (!callback || flags != 0) return remember(hipErrorInvalidValue);
+  if (!validStream(stream)) return remember(hipErrorInvalidResourceHandle);
+  // Kernel launches and copies complete before returning in this facade.
+  try {
+    callback(stream, hipSuccess, data);
+    return remember(hipSuccess);
+  } catch (...) {
+    return remember(hipErrorUnknown);
+  }
 }
 extern "C" hipError_t hipStreamWaitEvent(hipStream_t stream, hipEvent_t event, unsigned int) {
   std::lock_guard<std::mutex> guard(state().lock);

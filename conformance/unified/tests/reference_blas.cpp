@@ -13,12 +13,12 @@
 #include <catch2/generators/catch_generators_adapters.hpp>
 #include <catch2/generators/catch_generators_range.hpp>
 
-#include "reference_async.hpp"
-#include "capability_defaults.hpp"
 #include "algorithm_cases.hpp"
 #include "async_cases.hpp"
 #include "blas_cases.hpp"
+#include "capability_defaults.hpp"
 #include "edge_cases.hpp"
+#include "reference_async.hpp"
 #include "stress_cases.hpp"
 #include <magic_enum/magic_enum.hpp>
 

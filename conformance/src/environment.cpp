@@ -20,8 +20,9 @@ using namespace aspartame;
 std::map<std::string, std::string> base_environment() {
   std::map<std::string, std::string> result;
   for (const auto *name : {"HOME", "USER", "LOGNAME", "TMPDIR", "TMP", "TEMP", "LANG", "LC_ALL", "SystemRoot", "WINDIR", "COMSPEC",
-                           "DISPLAY", "WAYLAND_DISPLAY", "XDG_RUNTIME_DIR"})
+                           "DISPLAY", "WAYLAND_DISPLAY", "XDG_RUNTIME_DIR"}) {
     if (const auto *value = std::getenv(name)) result[name] = value;
+  }
   // Gemstone's explicit launcher configuration must survive the clean runtime environment.
 #if defined(_WIN32)
   auto *block = GetEnvironmentStringsA();
@@ -74,11 +75,9 @@ void prepare_runtime_environment(std::map<std::string, std::string> &environment
     if (std::filesystem::is_directory(support / "lib")) {
       const std::vector<std::filesystem::directory_entry> entries{std::filesystem::directory_iterator(support / "lib"),
                                                                   std::filesystem::directory_iterator{}};
-      adapters = entries
-                 | filter([](const std::filesystem::directory_entry &entry) {
-                     return entry.is_regular_file()
-                            && entry.path().filename().string().starts_with("libur_adapter_level_zero.so");
-                   })
+      adapters = entries | filter([](const std::filesystem::directory_entry &entry) {
+                   return entry.is_regular_file() && entry.path().filename().string().starts_with("libur_adapter_level_zero.so");
+                 })
                  | map([](const std::filesystem::directory_entry &entry) { return entry.path(); }) | to_vector();
     }
     std::sort(adapters.begin(), adapters.end());

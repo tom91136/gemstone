@@ -15,9 +15,9 @@
 #include <utility>
 #include <vector>
 
-#include <fmt/format.h>
-
 #include <catch2/matchers/catch_matchers_templated.hpp>
+
+#include <fmt/format.h>
 
 #if defined(__CUDACC__) || defined(__HIPCC__)
   #define UNIFIED_HOST_DEVICE __host__ __device__

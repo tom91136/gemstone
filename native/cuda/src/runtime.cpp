@@ -209,6 +209,7 @@ int32_t managedUnregisterRemote(uint64_t pointer) noexcept;
 extern thread_local void *currentContext;
 void *activeContext();
 int32_t managedSynchronizeFromDevice();
+bool systemPagingEnabled() noexcept;
 thread_local void *contextStack[64];
 thread_local size_t contextStackSize = 0;
 
@@ -1642,7 +1643,7 @@ extern "C" int32_t cudaDeviceGetAttribute(int32_t *value, int32_t attribute, int
     case 85: *value = 0; break;
     case 86: *value = 0; break;
     case 87: *value = 32; break;
-    case 88: *value = 0; break;
+    case 88: *value = systemPagingEnabled() ? 1 : 0; break;
     case 89: *value = 1; break;
     case 90: *value = 1; break;
     case 91: *value = 1; break;
@@ -2696,10 +2697,9 @@ extern "C" int32_t cuMemsetD8Async_ptsz(uint64_t destination, uint8_t value, siz
 
 namespace {
 
-int32_t streamSynchronize(void *stream) {
-  (void)stream;
-  return cuCtxSynchronize();
-}
+int32_t synchronizeStreamCallbacks(void *stream) noexcept;
+
+int32_t streamSynchronize(void *stream) { return synchronizeStreamCallbacks(stream); }
 
 int32_t streamQuery(void *stream) {
   (void)stream;
@@ -3588,15 +3588,7 @@ struct Module {
 struct Function {
   Module *module{};
   std::string name;
-  std::vector<uint32_t> widths;
-};
-
-struct Callback {
-  void *context{};
-  void *stream{};
-  HostCallback host{};
-  StreamCallback streamCallback{};
-  void *userData{};
+  std::vector<KernelParameterMetadata> parameters;
 };
 
 struct Allocation {
@@ -3608,7 +3600,6 @@ std::mutex stateMutex;
 std::unique_ptr<Client> client;
 std::vector<std::unique_ptr<Module>> modules;
 std::vector<std::unique_ptr<Function>> functions;
-std::vector<std::unique_ptr<Callback>> callbacks;
 std::vector<Allocation> allocations;
 std::atomic<uint64_t> nextContext{1};
 uint64_t nextDeviceAddress = UINT64_C(0x0000400000000000);
@@ -3687,6 +3678,177 @@ bool readAllocation(uint64_t id, uint64_t offset, void *bytes, size_t size) noex
   } catch (...) {
     return false;
   }
+}
+
+bool systemPagingEnabled() noexcept { return std::getenv("GEMSTONE_CUDA_SYSTEM_PAGING") != nullptr; }
+
+struct HostPagingLease {
+  uint64_t base = 0;
+  size_t size = 0;
+  uint64_t id = 0;
+  bool writable = false;
+  std::vector<uint8_t> original;
+
+  ~HostPagingLease() {
+    if (id) (void)releaseAllocation(id);
+  }
+
+  bool applyDeviceChanges() const {
+    std::vector<uint8_t> device(size);
+    if (!readAllocation(id, 0, device.data(), size)) return false;
+    auto *host = reinterpret_cast<uint8_t *>(base);
+    for (size_t index = 0; index < size; ++index)
+      if (device[index] != original[index]) {
+        if (!writable) return false;
+        host[index] = device[index];
+      }
+    return true;
+  }
+};
+
+std::unique_ptr<HostPagingLease> mapHostAddress(uint64_t pointer, bool skipExecutable = false) {
+  const bool trace = std::getenv("GEMSTONE_CUDA_PAGING_TRACE") != nullptr;
+  auto *maps = std::fopen("/proc/self/maps", "r");
+  if (!maps) return nullptr;
+  uint64_t base = 0;
+  size_t size = 0;
+  bool writable = false;
+  char line[1024];
+  while (std::fgets(line, sizeof(line), maps)) {
+    unsigned long long begin = 0, end = 0;
+    char permissions[5] = {};
+    if (std::sscanf(line, "%llx-%llx %4s", &begin, &end, permissions) != 3) continue;
+    if (pointer >= begin && pointer < end && permissions[0] == 'r' && (!skipExecutable || permissions[2] != 'x')
+        && end - begin <= size_t(64) * 1024 * 1024) {
+      base = begin;
+      size = static_cast<size_t>(end - begin);
+      writable = permissions[1] == 'w';
+      break;
+    }
+  }
+  std::fclose(maps);
+  if (!base || !size) return nullptr;
+  uint64_t end = base + size;
+  {
+    std::lock_guard lock(pointerMutex);
+    for (const auto &tracked : pointers) {
+      const auto tracked_end = tracked.base + tracked.size;
+      if (tracked_end <= pointer && tracked_end > base) base = tracked_end;
+      if (tracked.base > pointer && tracked.base < end) end = tracked.base;
+    }
+  }
+  if (end <= base || pointer < base || pointer >= end) return nullptr;
+  size = static_cast<size_t>(end - base);
+  uint64_t id = 0;
+  if (!registerAllocation(size, AllocationKind::Host, id)) {
+    if (trace)
+      std::fprintf(stderr, "Gemstone CUDA host map register failed pointer=%p base=%p size=%zu\n", reinterpret_cast<void *>(pointer),
+                   reinterpret_cast<void *>(base), size);
+    return nullptr;
+  }
+  if (!registerAddress(id, base)) {
+    if (trace)
+      std::fprintf(stderr, "Gemstone CUDA host map alias failed pointer=%p base=%p size=%zu\n", reinterpret_cast<void *>(pointer),
+                   reinterpret_cast<void *>(base), size);
+    (void)releaseAllocation(id);
+    return nullptr;
+  }
+  if (trace)
+    std::fprintf(stderr, "Gemstone CUDA host map pointer=%p base=%p size=%zu writable=%d id=%llu\n", reinterpret_cast<void *>(pointer),
+                 reinterpret_cast<void *>(base), size, writable ? 1 : 0, static_cast<unsigned long long>(id));
+  auto lease = std::make_unique<HostPagingLease>();
+  lease->base = base;
+  lease->size = size;
+  lease->id = id;
+  lease->writable = writable;
+  lease->original.assign(reinterpret_cast<const uint8_t *>(base), reinterpret_cast<const uint8_t *>(base) + size);
+  if (!writeAllocation(id, 0, lease->original.data(), size)) return nullptr;
+  return lease;
+}
+
+void mapMainExecutable(std::vector<std::unique_ptr<HostPagingLease>> &pages) {
+  char executable[4096] = {};
+  const auto length = readlink("/proc/self/exe", executable, sizeof(executable) - 1);
+  if (length <= 0) return;
+  executable[length] = '\0';
+  auto *maps = std::fopen("/proc/self/maps", "r");
+  if (!maps) return;
+  char line[8192];
+  uint64_t preceding_executable_end = 0;
+  while (std::fgets(line, sizeof(line), maps) && pages.size() < 96) {
+    unsigned long long begin = 0, end = 0;
+    char permissions[5] = {};
+    if (std::sscanf(line, "%llx-%llx %4s", &begin, &end, permissions) != 3 || permissions[0] != 'r') continue;
+    const bool executable_segment = std::strstr(line, executable) != nullptr;
+    const bool adjacent_data = preceding_executable_end == begin && !std::strchr(line, '/') && !std::strchr(line, '[');
+    if (!executable_segment && !adjacent_data) {
+      preceding_executable_end = 0;
+      continue;
+    }
+    preceding_executable_end = end;
+    if (std::any_of(pages.begin(), pages.end(), [begin](const auto &page) { return page->base == begin; })) continue;
+    auto page = mapHostAddress(begin);
+    if (page) pages.push_back(std::move(page));
+  }
+  std::fclose(maps);
+}
+
+void mapWritableAnonymous(std::vector<std::unique_ptr<HostPagingLease>> &pages) {
+  auto *maps = std::fopen("/proc/self/maps", "r");
+  if (!maps) return;
+  char line[8192];
+  while (std::fgets(line, sizeof(line), maps) && pages.size() < 128) {
+    unsigned long long begin = 0, end = 0;
+    char permissions[5] = {};
+    if (std::sscanf(line, "%llx-%llx %4s", &begin, &end, permissions) != 3 || permissions[0] != 'r' || permissions[1] != 'w'
+        || permissions[2] == 'x' || end - begin > size_t(1) * 1024 * 1024
+        || (std::strchr(line, '/') && !std::strstr(line, "[heap]") && !std::strstr(line, "[stack]")))
+      continue;
+    if (std::any_of(pages.begin(), pages.end(),
+                    [begin](const auto &page) { return begin >= page->base && begin - page->base < page->size; }))
+      continue;
+    auto page = mapHostAddress(begin);
+    if (page) pages.push_back(std::move(page));
+  }
+  std::fclose(maps);
+}
+
+std::optional<PointerBinding> mapReachableHostAddress(uint64_t pointer, std::vector<std::unique_ptr<HostPagingLease>> &pages) {
+  const auto findPage = [&pages](uint64_t address) -> HostPagingLease * {
+    const auto found = std::find_if(pages.begin(), pages.end(),
+                                    [address](const auto &page) { return address >= page->base && address - page->base < page->size; });
+    return found == pages.end() ? nullptr : found->get();
+  };
+  HostPagingLease *root = findPage(pointer);
+  if (!root) {
+    auto page = mapHostAddress(pointer);
+    if (!page) return std::nullopt;
+    root = page.get();
+    pages.push_back(std::move(page));
+  }
+  mapMainExecutable(pages);
+  mapWritableAnonymous(pages);
+  std::vector<uint64_t> pending{pointer};
+  for (size_t current = 0; current < pending.size() && current < 128; ++current) {
+    const auto address = pending[current];
+    const auto *page = findPage(address);
+    if (!page) continue;
+    const size_t start = static_cast<size_t>(address - page->base);
+    const size_t length = std::min<size_t>(16384, page->size - start);
+    for (size_t offset = 0; offset + sizeof(uint64_t) <= length && pages.size() < 128; offset += sizeof(uint64_t)) {
+      uint64_t candidate = 0;
+      std::memcpy(&candidate, page->original.data() + start + offset, sizeof(candidate));
+      if (candidate < 4096 || findPage(candidate) || pointerBinding(candidate)) continue;
+      auto next = mapHostAddress(candidate, true);
+      if (next) {
+        pages.push_back(std::move(next));
+        pending.push_back(candidate);
+      }
+    }
+  }
+  if (std::getenv("GEMSTONE_CUDA_PAGING_TRACE"))
+    std::fprintf(stderr, "Gemstone CUDA host graph root=%p maps=%zu\n", reinterpret_cast<void *>(pointer), pages.size());
+  return PointerBinding{root->id, pointer - root->base, root->size - (pointer - root->base)};
 }
 
 Module *findModule(void *handle) {
@@ -3774,28 +3936,11 @@ GEMSTONE_PUBLIC_API int32_t cuCtxCreate_v4(void **context, void *parameters, uin
 
 namespace {
 
-int32_t drainCallbacks(void *context) noexcept {
-  try {
-    for (;;) {
-      std::unique_ptr<Callback> callback;
-      {
-        const std::lock_guard lock(stateMutex);
-        const auto entry =
-            std::find_if(callbacks.begin(), callbacks.end(), [context](const auto &candidate) { return candidate->context == context; });
-        if (entry == callbacks.end()) return CUDA_SUCCESS;
-        callback = std::move(*entry);
-        callbacks.erase(entry);
-      }
-      try {
-        if (callback->host) callback->host(callback->userData);
-        else callback->streamCallback(callback->stream, CUDA_SUCCESS, callback->userData);
-      } catch (...) {
-        return CUDA_ERROR_UNKNOWN;
-      }
-    }
-  } catch (...) {
-    return CUDA_ERROR_UNKNOWN;
-  }
+int32_t synchronizeStreamCallbacks(void *stream) noexcept {
+  (void)stream;
+  void *context = activeContext();
+  if (!contextIsLive(context)) return 201;
+  return managedSynchronizeFromDevice();
 }
 
 } // namespace
@@ -3804,16 +3949,14 @@ extern "C" {
 
 int32_t cuCtxDestroy_v2(void *context) noexcept {
   if (!contextIsLive(context)) return 201;
-  const int32_t status = drainCallbacks(context);
-  if (status == CUDA_SUCCESS) untrackContext(context);
-  return status;
+  untrackContext(context);
+  return CUDA_SUCCESS;
 }
 
 int32_t cuCtxSynchronize() noexcept {
   void *context = activeContext();
   if (!contextIsLive(context)) return 201;
-  const int32_t status = managedSynchronizeFromDevice();
-  return status == CUDA_SUCCESS ? drainCallbacks(context) : status;
+  return managedSynchronizeFromDevice();
 }
 
 } // extern "C"
@@ -3822,13 +3965,12 @@ namespace {
 
 int32_t enqueueCallback(void *stream, HostCallback host, StreamCallback streamCallback, void *userData) noexcept {
   void *context = activeContext();
-  if (!contextIsLive(context) || stream || (!host && !streamCallback)) return CUDA_ERROR_INVALID_VALUE;
-
-  auto entry = std::unique_ptr<Callback>(new (std::nothrow) Callback{context, stream, host, streamCallback, userData});
-  if (!entry) return CUDA_ERROR_UNKNOWN;
+  if (!contextIsLive(context) || (!host && !streamCallback)) return CUDA_ERROR_INVALID_VALUE;
   try {
-    const std::lock_guard lock(stateMutex);
-    callbacks.push_back(std::move(entry));
+    // Device work is completed by each emulated launch/copy before this call.
+    // Report that completion now so callers waiting on callbacks can progress.
+    if (host) host(userData);
+    else streamCallback(stream, CUDA_SUCCESS, userData);
     return CUDA_SUCCESS;
   } catch (...) {
     return CUDA_ERROR_UNKNOWN;
@@ -3999,6 +4141,21 @@ int32_t cuModuleLoadData(void **module, const void *image) noexcept {
       const std::lock_guard lock(stateMutex);
       modules.push_back(std::move(entry));
     }
+    // Compiler-generated tables can be referenced by kernels without a host
+    // cuModuleGetGlobal call. Bind every declared global before any launch.
+    auto catalog = client->call(DescribeProgram{ProgramId{static_cast<int64_t>(loadedProgram)}});
+    if (!catalog) {
+      (void)cuModuleUnload(handle);
+      return CUDA_ERROR_UNKNOWN;
+    }
+    for (const auto &symbol : catalog.value().globals) {
+      uint64_t address = 0;
+      const int32_t status = cuModuleGetGlobal_v2(&address, nullptr, handle, symbol.name.value.c_str());
+      if (status != CUDA_SUCCESS) {
+        (void)cuModuleUnload(handle);
+        return status;
+      }
+    }
     *module = handle;
     return CUDA_SUCCESS;
   } catch (...) {
@@ -4033,9 +4190,9 @@ int32_t cuModuleGetFunction(void **function, void *module, const char *name) noe
     auto entry = std::make_unique<Function>();
     entry->module = owner;
     entry->name = name;
-    entry->widths.reserve(described.value().parameters.size());
+    entry->parameters.reserve(described.value().parameters.size());
     for (const auto &parameter : described.value().parameters)
-      entry->widths.push_back(static_cast<uint32_t>(parameter.width.value));
+      entry->parameters.push_back(parameter);
 
     auto *handle = entry.get();
     {
@@ -4165,29 +4322,35 @@ int32_t cuLaunchKernel(void *function, uint32_t grid_x, uint32_t grid_y, uint32_
       return CUDA_ERROR_INVALID_VALUE;
 
     Function *entry = findFunction(function);
-    if (!entry || (!entry->widths.empty() && !kernel_params)) return CUDA_ERROR_INVALID_VALUE;
+    if (!entry || (!entry->parameters.empty() && !kernel_params)) return CUDA_ERROR_INVALID_VALUE;
     int32_t status = managedSynchronizeToDevice();
     if (status != CUDA_SUCCESS) return status;
 
     std::vector<gemstone::execution::KernelArgument> arguments;
-    arguments.reserve(entry->widths.size());
+    arguments.reserve(entry->parameters.size());
     std::vector<PointerRelocation> relocations;
-    for (size_t index = 0; index < entry->widths.size(); ++index) {
+    std::vector<std::unique_ptr<HostPagingLease>> hostPages;
+    for (size_t index = 0; index < entry->parameters.size(); ++index) {
+      const auto &parameter = entry->parameters[index];
+      const auto width = static_cast<uint32_t>(parameter.width.value);
       if (!kernel_params[index]) {
         status = CUDA_ERROR_INVALID_VALUE;
         break;
       }
       uint64_t pointer = 0;
-      if (entry->widths[index] == sizeof(pointer)) std::memcpy(&pointer, kernel_params[index], sizeof(pointer));
-      const auto binding = pointerBinding(pointer);
-      if (entry->widths[index] == sizeof(pointer) && binding) {
+      if (parameter.kind == KernelParameterKind::Allocation && width == sizeof(pointer))
+        std::memcpy(&pointer, kernel_params[index], sizeof(pointer));
+      auto binding = parameter.kind == KernelParameterKind::Allocation ? pointerBinding(pointer) : std::nullopt;
+      if (!binding && parameter.kind == KernelParameterKind::Allocation && width == sizeof(pointer) && systemPagingEnabled())
+        binding = mapReachableHostAddress(pointer, hostPages);
+      if (width == sizeof(pointer) && binding) {
         arguments.emplace_back(
             KernelArgumentAllocation{AllocationId{static_cast<int64_t>(binding->allocation)}, static_cast<int64_t>(binding->offset)});
       } else {
         const auto *bytes = static_cast<const uint8_t *>(kernel_params[index]);
-        arguments.emplace_back(KernelArgumentScalar{std::vector<uint8_t>(bytes, bytes + entry->widths[index])});
-        if (entry->widths[index] >= sizeof(uint64_t)) {
-          for (size_t offset = 0; offset <= entry->widths[index] - sizeof(uint64_t); offset += sizeof(uint32_t)) {
+        arguments.emplace_back(KernelArgumentScalar{std::vector<uint8_t>(bytes, bytes + width)});
+        if (parameter.containsPointers && width >= sizeof(uint64_t)) {
+          for (size_t offset = 0; offset <= width - sizeof(uint64_t); offset += sizeof(uint32_t)) {
             const auto candidate = readNative<uint64_t>(bytes, offset);
             const auto target = pointerRelocationBinding(candidate);
             if (target) {
@@ -4217,12 +4380,37 @@ int32_t cuLaunchKernel(void *function, uint32_t grid_x, uint32_t grid_y, uint32_
     }
     if (status == CUDA_SUCCESS && !client->call(AwaitCompletion{completion})) {
       if (std::getenv("GEMSTONE_TRACE")) std::fprintf(stderr, "Gemstone CUDA execution failed: %s\n", client->error().c_str());
+      if (std::getenv("GEMSTONE_CUDA_PAGING_TRACE")) {
+        const auto error = client->error();
+        const char *address_text = std::strstr(error.c_str(), ": 0x");
+        if (address_text) {
+          const auto address = std::strtoull(address_text + 2, nullptr, 16);
+          if (auto *maps = std::fopen("/proc/self/maps", "r")) {
+            char line[8192];
+            while (std::fgets(line, sizeof(line), maps)) {
+              unsigned long long begin = 0, end = 0;
+              if (std::sscanf(line, "%llx-%llx", &begin, &end) == 2 && address >= begin && address < end) {
+                std::fprintf(stderr, "Gemstone CUDA missing host mapping: %s", line);
+                break;
+              }
+            }
+            std::fclose(maps);
+          }
+        }
+      }
       status = 700;
     }
     if (launched_completion) {
       const bool released = static_cast<bool>(client->call(ReleaseCompletion{completion}));
       launched_completion = false;
       if (!released) status = 700;
+    }
+    if (status == CUDA_SUCCESS) {
+      for (const auto &page : hostPages)
+        if (!page->applyDeviceChanges()) {
+          status = 700;
+          break;
+        }
     }
     if (status == CUDA_SUCCESS) {
       markManagedDeviceDirty();

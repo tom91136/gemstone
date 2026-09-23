@@ -255,9 +255,22 @@ bool compileSourceToBitcode(const std::string &source, const std::string &option
   bool success = writeFile(input, compilerSource);
   std::string diagnostic;
   if (success) {
-    std::vector<std::string> command = {compilerPath(), "-x",     "cl",         "-cl-std=CL1.2",  "-D__OPENCL_VERSION__=120",
-                                        "-target",      "spir64", "-emit-llvm", "-fsigned-zeros", "-c",
-                                        input,          "-o",     output};
+    // LLVM's SLP pass can pack four scalar boolean comparisons into i4,
+    // which the installed LLVM-to-SPIR-V converter cannot represent.
+    std::vector<std::string> command = {compilerPath(),
+                                        "-x",
+                                        "cl",
+                                        "-cl-std=CL1.2",
+                                        "-D__OPENCL_VERSION__=120",
+                                        "-target",
+                                        "spir64",
+                                        "-emit-llvm",
+                                        "-fsigned-zeros",
+                                        "-fno-slp-vectorize",
+                                        "-c",
+                                        input,
+                                        "-o",
+                                        output};
     static constexpr const char *unsupportedFeatures[] = {"__opencl_c_program_scope_global_variables",
                                                           "__opencl_c_3d_image_writes",
                                                           "__opencl_c_atomic_order_acq_rel",
@@ -311,26 +324,45 @@ bool compileSource(const std::string &source, const std::string &options, std::v
     log += "cannot create temporary directory for SPIR-V conversion";
     return false;
   }
-  const std::string input = directory.file("source.bc");
-  const std::string output = directory.file("source.spv");
-  bool success = writeBytes(input, bitcode.data(), bitcode.size());
   std::string diagnostic;
-  if (success) {
+  const auto convert = [&](const std::vector<uint8_t> &candidate, const std::string &suffix) {
+    const std::string input = directory.file("source" + suffix + ".bc");
+    const std::string output = directory.file("source" + suffix + ".spv");
+    if (!writeBytes(input, candidate.data(), candidate.size())) {
+      diagnostic = "cannot write generated LLVM bitcode";
+      return false;
+    }
     const ProcessResult conversion = runProcess({spirvConverterPath(), input, "-o", output});
     diagnostic = conversion.output;
-    success = conversion.status == 0;
-  } else {
-    diagnostic = "cannot write generated LLVM bitcode";
-  }
-  if (success) {
-    std::ifstream stream(output, std::ios::binary);
-    if (!stream) {
-      success = false;
+    if (conversion.status != 0) return false;
+    if (!readBytes(output, &il)) {
       diagnostic += "cannot read generated SPIR-V";
+      return false;
+    }
+    if (il.empty() || il.size() > std::numeric_limits<uint32_t>::max()) {
+      diagnostic += "generated SPIR-V is empty or too large";
+      return false;
+    }
+    return true;
+  };
+  bool success = convert(bitcode, "");
+  if (!success && diagnostic.find("InvalidBitWidth:") != std::string::npos) {
+    // Optimized LLVM IR can contain unusual integer widths (for example i33
+    // from a closed-form loop sum) that the converter rejects. Preserve the
+    // optimized path for ordinary programs and retry this converter failure.
+    const std::string firstDiagnostic = diagnostic;
+    std::vector<uint8_t> unoptimized;
+    std::string fallbackLog;
+    if (compileSourceToBitcode(source, options + " -O0", unoptimized, fallbackLog)) {
+      success = convert(unoptimized, "-o0");
+      if (success) {
+        bitcode = std::move(unoptimized);
+        diagnostic.clear();
+      } else {
+        diagnostic = firstDiagnostic + "\n-O0 fallback: " + diagnostic;
+      }
     } else {
-      il.assign(std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>());
-      success = !il.empty() && il.size() <= std::numeric_limits<uint32_t>::max();
-      if (!success) diagnostic += "generated SPIR-V is empty or too large";
+      diagnostic = firstDiagnostic + "\n-O0 fallback compilation: " + fallbackLog;
     }
   }
   if (!diagnostic.empty()) log += diagnostic;

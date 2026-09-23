@@ -6,7 +6,7 @@ include_guard(GLOBAL)
 #   [SOURCE <dir>] [ARTIFACTS <dir>] [DEPENDENCIES <dir>] [WORK <dir>]
 #   [NETWORK <mode>] [CPU_SHARES <n>] [IDENTITY <flags>]
 #   COMMAND <argv...>)
-# Produces the argv list for `run --rm` with the fixed mount contract used by
+# Produces the argv list for `run --rm` with the stable mount layout used by
 # the artifact scripts: source at /source/conformance, output at /output, the
 # dependency cache at /conformance-deps, and the persistent build tree at /work.
 function(conformance_container_command output)

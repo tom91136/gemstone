@@ -55,11 +55,11 @@
 #include <thrust/uninitialized_fill.h>
 #include <thrust/unique.h>
 
-#include <fmt/format.h>
-#include "capability_defaults.hpp"
 #include "algorithm_cases.hpp"
 #include "async_cases.hpp"
+#include "capability_defaults.hpp"
 #include "edge_cases.hpp"
+#include <fmt/format.h>
 
 #if defined(__HIPCC__)
   #include <hip/hip_runtime.h>
@@ -1403,7 +1403,7 @@ template <bool Indirect> void device_function() {
 #endif
 
 #if defined(__HIPCC__) && defined(UNIFIED_API_ROCTHRUST)
-#include "rocthrust_support.hpp"
+  #include "rocthrust_support.hpp"
 #endif
 
 namespace unified::backend {

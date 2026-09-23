@@ -67,7 +67,8 @@ private[v9_3] final class VMLoadedProgram private (
           net.kurobako.gemstone.isa.KernelMetadata.Parameter(
             parameter.widthBytes,
             offset,
-            net.kurobako.gemstone.isa.KernelMetadata.ParameterKind.Scalar,
+            if (parameter.pointer) net.kurobako.gemstone.isa.KernelMetadata.ParameterKind.Memory
+            else net.kurobako.gemstone.isa.KernelMetadata.ParameterKind.Scalar,
             containsPointers = false
           )
         }

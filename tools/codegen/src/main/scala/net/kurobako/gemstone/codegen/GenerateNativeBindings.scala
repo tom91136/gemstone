@@ -55,7 +55,8 @@ object GenerateNativeBindings {
         "#include <CL/cl_ext.h>",
         "#include <CL/cl_gl.h>"
       )
-    )
+    ),
+    Platform("vulkan", Vector("vulkan"), Vector("#include <vulkan/vulkan.h>"))
   )
 
   private val command =

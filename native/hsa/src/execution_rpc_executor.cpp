@@ -82,7 +82,8 @@ int describeKernel(void *context, uint64_t program_id, const char *name, uint32_
                       : parameter.kind == KernelParameterKind::Scalar   ? GEMSTONE_HSA_ARGUMENT_SCALAR
                                                                         : gemstone_hsa_argument_kind{};
     if (kind == gemstone_hsa_argument_kind{}) return -1;
-    fields[index] = {kind, static_cast<uint32_t>(parameter.offset.value), static_cast<uint32_t>(parameter.width.value)};
+    fields[index] = {kind, static_cast<uint32_t>(parameter.offset.value), static_cast<uint32_t>(parameter.width.value),
+                     parameter.containsPointers ? 1U : 0U};
   }
   return 0;
 }

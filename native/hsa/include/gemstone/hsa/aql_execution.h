@@ -33,6 +33,7 @@ typedef struct gemstone_hsa_kernarg_field {
   gemstone_hsa_argument_kind kind;
   uint32_t offset;
   uint32_t size;
+  uint32_t contains_pointers;
 } gemstone_hsa_kernarg_field;
 
 typedef struct gemstone_hsa_kernel_binding {

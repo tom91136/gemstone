@@ -33,9 +33,10 @@ final class CUDACrossWorkgroupSuite extends munit.FunSuite {
           directory,
           Environment(
             Map(
-              "GEMSTONE_RPC_PORT"          -> server.port.value.toString,
-              "GEMSTONE_RPC_CLIENT"        -> server.client.value.toString,
-              "GEMSTONE_CUDA_TEST_LIBRARY" -> runtime.toString
+              "GEMSTONE_RPC_PORT"           -> server.port.value.toString,
+              "GEMSTONE_RPC_CLIENT"         -> server.client.value.toString,
+              "GEMSTONE_CUDA_TEST_LIBRARY"  -> runtime.toString,
+              "GEMSTONE_CUDA_SYSTEM_PAGING" -> "1"
             ),
             Set.empty
           ),

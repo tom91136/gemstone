@@ -325,7 +325,11 @@ private[v9_3] object VMCompiler {
             return invalid(
               s"kernel parameter ${parameter.name} is too wide: $totalWidth bytes"
             )
-          result += KernelParameter(parameter.name, totalWidth.toInt.refineUnsafe[Positive])
+          val pointer = parameter.qualifiers.exists {
+            case DeclarationQualifier.Attribute(name) => name.value == "ptr"
+            case _                                    => false
+          }
+          result += KernelParameter(parameter.name, totalWidth.toInt.refineUnsafe[Positive], pointer)
       }
       index += 1
     }
@@ -356,7 +360,7 @@ private[v9_3] object VMCompiler {
       }).distinct
 
     def renameOperand(operand: Operand, names: Map[RegisterName, RegisterName]): Operand = operand match {
-      case Operand.Register(name, part)  => Operand.Register(names.getOrElse(name, name), part)
+      case Operand.Register(name, part) => Operand.Register(names.getOrElse(name, name), part)
       case Operand.Symbol(name) if names.contains(RegisterName(name.value)) =>
         Operand.Register(names(RegisterName(name.value)), None)
       case Operand.VectorLiteral(items)  => Operand.VectorLiteral(items.map(renameOperand(_, names)))
@@ -728,6 +732,18 @@ private[v9_3] object VMCompiler {
           rightValue,
           BitWidth(32)
         )
+      case Instruction.Mul(destination, left, right, _, _) if instruction.qualifiedOpcode == "mul.wide.s16" =>
+        for {
+          destinationName <- registerName(destination)
+          leftValue       <- value(left)
+          rightValue      <- value(right)
+        } yield VMIR.Instruction.IntegerBinary(
+          IntegerOperation.MultiplyWideSigned16,
+          destinationName,
+          leftValue,
+          rightValue,
+          BitWidth(32)
+        )
       case Instruction.Div(destination, left, right, modifiers, _)
           if instruction.qualifiedOpcode.endsWith(".f16") ||
             instruction.qualifiedOpcode.endsWith(".f32") ||
@@ -834,6 +850,21 @@ private[v9_3] object VMCompiler {
           left,
           right
         ))
+      case Instruction.Shf(destination, low, high, amount, _, _)
+          if instruction.qualifiedOpcode.startsWith("shf.") && instruction.qualifiedOpcode.endsWith(".b32") =>
+        for {
+          destinationName <- registerName(destination)
+          lowValue        <- value(low)
+          highValue       <- value(high)
+          amountValue     <- value(amount)
+        } yield VMIR.Instruction.FunnelShift(
+          destinationName,
+          lowValue,
+          highValue,
+          amountValue,
+          instruction.qualifiedOpcode.startsWith("shf.l."),
+          instruction.qualifiedOpcode.contains(".clamp.")
+        )
       case Instruction.ShflSync(destination, source, delta, clamp, memberMask, modifiers, _)
           if Set("shfl.sync.down.b32", "shfl.sync.down.b64").contains(instruction.qualifiedOpcode) =>
         for {
@@ -1407,7 +1438,7 @@ private[v9_3] object VMCompiler {
             Operand.isVectorLiteral(source) =>
         for {
           addressValue <- addressValue(address)
-          sourceNames  <- registerNames(source)
+          sourceNames  <- vectorValues(source)
           width        <- integerWidth(modifiers)
         } yield VMIR.Instruction.StoreGenericVector(addressValue, sourceNames, width)
       case Instruction.St(address, source, None, modifiers, _)
@@ -1450,7 +1481,7 @@ private[v9_3] object VMCompiler {
             Operand.isVectorLiteral(source) =>
         for {
           addressValue <- addressValue(address)
-          sourceNames  <- registerNames(source)
+          sourceNames  <- vectorValues(source)
           width        <- integerWidth(modifiers)
         } yield VMIR.Instruction.StoreSharedVector(addressValue, sourceNames, width)
       case Instruction.St(address, source, None, modifiers, _)
@@ -1490,7 +1521,7 @@ private[v9_3] object VMCompiler {
             Operand.isVectorLiteral(source) =>
         for {
           addressValue <- addressValue(address)
-          sourceNames  <- registerNames(source)
+          sourceNames  <- vectorValues(source)
           width        <- integerWidth(modifiers)
         } yield VMIR.Instruction.StoreLocalVector(addressValue, sourceNames, width)
       case Instruction.St(address, source, None, modifiers, _)
@@ -1528,36 +1559,88 @@ private[v9_3] object VMCompiler {
             else invalid(s"unsupported redux.sync operation ${instruction.qualifiedOpcode}")
         } yield VMIR.Instruction.WarpReduce(destinationName, sourceValue, memberMaskValue, operation, width)
       case Instruction.Atom(destination, address, source, None, _, _)
-          if Set("atom.global.add.u32", "atom.global.add.u64")(instruction.qualifiedOpcode) =>
+          if instruction.qualifiedOpcode.matches(
+            "atom\\.(global\\.|shared\\.)?(max\\.u|and\\.b|or\\.b|xor\\.b)(32|64)"
+          ) =>
         for {
           destinationName <- registerName(destination)
           addressValue    <- addressValue(address)
           sourceValue     <- value(source)
-          width = if (instruction.qualifiedOpcode.endsWith(".u64")) BitWidth(64) else BitWidth(32)
-        } yield VMIR.Instruction.AtomicAdd(destinationName, addressValue, sourceValue, width, global = true)
+          width  = if (instruction.qualifiedOpcode.endsWith("64")) BitWidth(64) else BitWidth(32)
+          global =
+            if (instruction.qualifiedOpcode.startsWith("atom.global.")) Some(true)
+            else if (instruction.qualifiedOpcode.startsWith("atom.shared.")) Some(false)
+            else None
+          operation =
+            if (instruction.qualifiedOpcode.contains(".max.")) IntegerOperation.Maximum(false)
+            else if (instruction.qualifiedOpcode.contains(".and.")) IntegerOperation.BitwiseAnd
+            else if (instruction.qualifiedOpcode.contains(".or.")) IntegerOperation.BitwiseOr
+            else IntegerOperation.BitwiseXor
+        } yield VMIR.Instruction.AtomicBinary(destinationName, addressValue, sourceValue, width, global, operation)
       case Instruction.Atom(destination, address, source, None, _, _)
-          if Set("atom.shared.add.u32", "atom.shared.add.u64")(instruction.qualifiedOpcode) =>
+          if Set(
+            "atom.exch.b32",
+            "atom.exch.b64",
+            "atom.global.exch.b32",
+            "atom.global.exch.b64",
+            "atom.shared.exch.b32",
+            "atom.shared.exch.b64"
+          )(instruction.qualifiedOpcode) =>
         for {
           destinationName <- registerName(destination)
           addressValue    <- addressValue(address)
           sourceValue     <- value(source)
-          width = if (instruction.qualifiedOpcode.endsWith(".u64")) BitWidth(64) else BitWidth(32)
-        } yield VMIR.Instruction.AtomicAdd(destinationName, addressValue, sourceValue, width, global = false)
+          width  = if (instruction.qualifiedOpcode.endsWith(".b64")) BitWidth(64) else BitWidth(32)
+          global =
+            if (instruction.qualifiedOpcode.startsWith("atom.global.")) Some(true)
+            else if (instruction.qualifiedOpcode.startsWith("atom.shared.")) Some(false)
+            else None
+        } yield VMIR.Instruction.AtomicExchange(destinationName, addressValue, sourceValue, width, global)
       case Instruction.Atom(destination, address, source, None, _, _)
-          if Set("atom.shared.min.u32", "atom.shared.min.u64", "atom.global.min.u32", "atom.global.min.u64")(
+          if Set(
+            "atom.add.u32",
+            "atom.add.u64",
+            "atom.global.add.u32",
+            "atom.global.add.u64",
+            "atom.shared.add.u32",
+            "atom.shared.add.u64"
+          )(instruction.qualifiedOpcode) =>
+        for {
+          destinationName <- registerName(destination)
+          addressValue    <- addressValue(address)
+          sourceValue     <- value(source)
+          width  = if (instruction.qualifiedOpcode.endsWith(".u64")) BitWidth(64) else BitWidth(32)
+          global =
+            if (instruction.qualifiedOpcode.startsWith("atom.global.")) Some(true)
+            else if (instruction.qualifiedOpcode.startsWith("atom.shared.")) Some(false)
+            else None
+        } yield VMIR.Instruction.AtomicAdd(destinationName, addressValue, sourceValue, width, global)
+      case Instruction.Atom(destination, address, source, None, _, _)
+          if Set(
+            "atom.min.u32",
+            "atom.min.u64",
+            "atom.shared.min.u32",
+            "atom.shared.min.u64",
+            "atom.global.min.u32",
+            "atom.global.min.u64"
+          )(
             instruction.qualifiedOpcode
           ) =>
         for {
           destinationName <- registerName(destination)
           addressValue    <- addressValue(address)
           sourceValue     <- value(source)
-          width = if (instruction.qualifiedOpcode.endsWith(".u64")) BitWidth(64) else BitWidth(32)
+          width  = if (instruction.qualifiedOpcode.endsWith(".u64")) BitWidth(64) else BitWidth(32)
+          global =
+            if (instruction.qualifiedOpcode.startsWith("atom.global.")) Some(true)
+            else if (instruction.qualifiedOpcode.startsWith("atom.shared.")) Some(false)
+            else None
         } yield VMIR.Instruction.AtomicMin(
           destinationName,
           addressValue,
           sourceValue,
           width,
-          global = instruction.qualifiedOpcode.startsWith("atom.global.")
+          global = global
         )
       case Instruction.Atom(destination, address, source, None, _, _)
           if instruction.qualifiedOpcode == "atom.global.add.f32" ||

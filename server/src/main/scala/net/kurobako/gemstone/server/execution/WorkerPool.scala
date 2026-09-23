@@ -11,11 +11,10 @@ import java.util.concurrent.locks.ReentrantLock
 import scala.collection.mutable
 import scala.util.control.NonFatal
 
-/**
- * One fixed CPU pool. Jobs rotate after each chunk, and nested dispatch callers help the same queue. A launch only
- * stays on the calling thread when it is too small to amortise queue traffic; claiming a range per dequeue keeps that
- * threshold low.
- */
+/** One fixed CPU pool. Jobs rotate after each chunk, and nested dispatch callers help the same queue. A launch only
+  * stays on the calling thread when it is too small to amortise queue traffic; claiming a range per dequeue keeps that
+  * threshold low.
+  */
 final class WorkerPool(
     val parallelism: Int :| Positive,
     minGroups: Long = 16L,
@@ -36,12 +35,12 @@ final class WorkerPool(
     @volatile var finished                    = count == 0L
     val observed: Option[mutable.Set[String]] = Option.when(trace)(mutable.Set.empty)
   }
-  private val trace        = sys.env.contains("GEMSTONE_PERF_TRACE")
-  private val lock         = ReentrantLock()
-  private val workReady    = lock.newCondition()
-  private val jobComplete  = lock.newCondition()
-  private val queue        = mutable.ArrayDeque.empty[Job]
-  private val inWorker     = ThreadLocal.withInitial[Boolean](() => false)
+  private val trace       = sys.env.contains("GEMSTONE_PERF_TRACE")
+  private val lock        = ReentrantLock()
+  private val workReady   = lock.newCondition()
+  private val jobComplete = lock.newCondition()
+  private val queue       = mutable.ArrayDeque.empty[Job]
+  private val inWorker    = ThreadLocal.withInitial[Boolean](() => false)
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   @volatile private var closed = false
   private val threads          = Array.tabulate(parallelism) { index =>
@@ -92,7 +91,7 @@ final class WorkerPool(
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private def execute(work: (Job, Long, Int)): Unit = {
     val (job, start, length) = work
-    val result                =
+    val result               =
       try {
         var offset                       = 0
         var outcome: Either[Fault, Unit] = Right(())

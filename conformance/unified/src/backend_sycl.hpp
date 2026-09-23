@@ -19,8 +19,8 @@
 #include <oneapi/dpl/numeric>
 #include <sycl/sycl.hpp>
 
-#include "capability_defaults.hpp"
 #include "algorithm_cases.hpp"
+#include "capability_defaults.hpp"
 #include "edge_cases.hpp"
 
 namespace unified::backend::sycl_support {

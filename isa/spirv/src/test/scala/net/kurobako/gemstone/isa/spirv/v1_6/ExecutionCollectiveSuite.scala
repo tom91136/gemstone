@@ -14,6 +14,23 @@ import io.github.iltotore.iron.constraint.all.*
 
 import java.util.concurrent.atomic.AtomicReference
 final class ExecutionCollectiveSuite extends munit.FunSuite with ExecutionTestSupport {
+  test("out-of-range pointer arithmetic can be converted to an integer without dereferencing") {
+    val allocation = MemoryRegion(124L)
+    val memory     = VMMemory.MemoryState(
+      ArrayMemory(allocation, 8),
+      Vec.empty,
+      (_, _) => Right(()),
+      ObservationContext.Unscoped
+    )
+    val pointer = VMMemory.Pointer(VMMemory.Region.External(allocation), -1L, 0, 5)
+    val address = memory.pointerInteger(pointer).toOption.get
+    assert(address != 0L)
+    assertEquals(memory.pointerInteger(pointer), Right(address))
+    assert(memory.pointerInteger(pointer.copy(offset = -2L)).toOption.get != address)
+    assertEquals(memory.integerPointer(address, 0, 5), Right(pointer))
+    assert(memory.read(pointer, 1.refineUnsafe[Positive0]).isLeft)
+  }
+
   test("floating minimum and maximum preserve IEEE signed zero") {
     assertEquals(VMInterpreter.floatingMinimumBits(FloatingPointWidth(16), 0x0000L, 0x8000L), 0x8000L)
     assertEquals(VMInterpreter.floatingMaximumBits(FloatingPointWidth(16), 0x0000L, 0x8000L), 0x0000L)

@@ -47,7 +47,8 @@ inline size_t select_device(const std::vector<std::string> &descriptions) {
         fmt::format("device selector '{}' matched no devices; discovered: {}", configured, fmt::join(descriptions, ", ")));
   std::vector<std::string> matched;
   matched.reserve(matches.size());
-  for (const auto index : matches) matched.push_back(descriptions[index]);
+  for (const auto index : matches)
+    matched.push_back(descriptions[index]);
   throw std::runtime_error(fmt::format("device selector '{}' is ambiguous; matched: {}", configured, fmt::join(matched, ", ")));
 }
 

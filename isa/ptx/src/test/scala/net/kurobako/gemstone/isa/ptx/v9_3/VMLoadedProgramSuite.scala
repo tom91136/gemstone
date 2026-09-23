@@ -39,4 +39,17 @@ final class VMLoadedProgramSuite extends munit.FunSuite {
       ).fold(message => fail(message), value => value)
     assertEquals(actual, expected)
   }
+
+  test("exposes PTX pointer parameters as allocations") {
+    val source =
+      ".version 8.0\n.target sm_80\n.address_size 64\n" +
+        ".visible .entry pointer(.param .u64 .ptr .global output, .param .u64 bits) { ret; }\n"
+    val program  = Parser.decode(source).fold(error => fail(error.message), value => value)
+    val loaded   = machine.load(program).fold(error => fail(error.message), value => value)
+    val metadata = machine.kernel(loaded, KernelName("pointer")).fold(error => fail(error.message), identity)
+    assertEquals(
+      metadata.parameters.map(_.kind),
+      Vec(KernelMetadata.ParameterKind.Memory, KernelMetadata.ParameterKind.Scalar)
+    )
+  }
 }

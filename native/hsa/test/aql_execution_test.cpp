@@ -91,7 +91,7 @@ int describe_kernel(void *context, uint64_t program, const char *name, uint32_t 
   *explicit_argument_count = 1;
   if (capacity == 0) return 0;
   REQUIRE((capacity >= 1 && fields));
-  fields[0] = {GEMSTONE_HSA_ARGUMENT_ALLOCATION, 0, 8};
+  fields[0] = {GEMSTONE_HSA_ARGUMENT_ALLOCATION, 0, 8, 0};
   return 0;
 }
 
@@ -383,8 +383,8 @@ void execution_queue_dispatches_and_completes() {
   // The four bytes between fields and the four trailing bytes are ABI-significant
   // padding. They must cross RPC verbatim even though metadata does not name them.
   const std::array<gemstone_hsa_kernarg_field, 2> fields{{
-      {GEMSTONE_HSA_ARGUMENT_SCALAR, 0, 12},
-      {GEMSTONE_HSA_ARGUMENT_SCALAR, 16, 4},
+      {GEMSTONE_HSA_ARGUMENT_SCALAR, 0, 12, 1},
+      {GEMSTONE_HSA_ARGUMENT_SCALAR, 16, 4, 0},
   }};
   const std::array<uint8_t, 4> image{{0x7f, 'E', 'L', 'F'}};
   REQUIRE(
@@ -486,7 +486,7 @@ void one_code_object_binds_multiple_kernel_objects() {
   auto *runtime = gemstone_hsa_aql_runtime_create(&executor_ops, &signal_ops);
   REQUIRE((runtime));
   const std::array<uint8_t, 4> image{{0x7f, 'E', 'L', 'F'}};
-  const std::array<gemstone_hsa_kernarg_field, 1> fields{{{GEMSTONE_HSA_ARGUMENT_SCALAR, 0, 4}}};
+  const std::array<gemstone_hsa_kernarg_field, 1> fields{{{GEMSTONE_HSA_ARGUMENT_SCALAR, 0, 4, 0}}};
   const std::array<gemstone_hsa_kernel_binding, 2> bindings{{
       {41, "first", 4, fields.data(), fields.size(), fields.size()},
       {42, "second", 4, fields.data(), fields.size(), fields.size()},
@@ -523,7 +523,7 @@ void server_metadata_replaces_the_process_local_launch_layout() {
   REQUIRE((runtime));
 
   const std::array<uint8_t, 4> image{{0x7f, 'E', 'L', 'F'}};
-  const std::array<gemstone_hsa_kernarg_field, 1> local_fields{{{GEMSTONE_HSA_ARGUMENT_SCALAR, 0, 4}}};
+  const std::array<gemstone_hsa_kernarg_field, 1> local_fields{{{GEMSTONE_HSA_ARGUMENT_SCALAR, 0, 4, 0}}};
   const std::array<gemstone_hsa_kernel_binding, 1> bindings{{
       {41, "server_kernel", 4, local_fields.data(), local_fields.size(), local_fields.size()},
   }};
@@ -575,8 +575,8 @@ void openmp_kernel_environment_sentinel_preserves_abi_without_pointer_resolution
   std::memcpy(kernarg.data(), &sentinel, sizeof(sentinel));
   std::memcpy(kernarg.data() + 8, &scalar, sizeof(scalar));
   const std::array<gemstone_hsa_kernarg_field, 2> fields{{
-      {GEMSTONE_HSA_ARGUMENT_ALLOCATION, 0, 8},
-      {GEMSTONE_HSA_ARGUMENT_SCALAR, 8, 8},
+      {GEMSTONE_HSA_ARGUMENT_ALLOCATION, 0, 8, 0},
+      {GEMSTONE_HSA_ARGUMENT_SCALAR, 8, 8, 0},
   }};
   const std::array<uint8_t, 4> image{{0x7f, 'E', 'L', 'F'}};
   REQUIRE((gemstone_hsa_aql_runtime_register_allocation(runtime, reinterpret_cast<uint64_t>(kernarg.data()), kernarg.size(), 100) == 0));

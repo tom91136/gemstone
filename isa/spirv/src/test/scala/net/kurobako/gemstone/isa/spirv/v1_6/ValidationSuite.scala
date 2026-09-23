@@ -24,6 +24,25 @@ final class ValidationSuite extends munit.FunSuite {
     assertEquals(Validation.validate(module, Validation.Environment.OpenCLCompute), ValidationOutcome.Accepted)
   }
 
+  test("Vulkan compute environment accepts Shader GLCompute with Logical GLSL450 memory") {
+    val module = Module(
+      Header(ISA.version, Word(0), Word(10), Word(0)),
+      Vec(
+        Instruction.Capability(operand("Capability", 1)),
+        Instruction.MemoryModel(operand("AddressingModel", 0), operand("MemoryModel", 1)),
+        Instruction.EntryPoint(
+          operand("ExecutionModel", 5),
+          operand("IdRef", 1),
+          operand("LiteralString", 0),
+          Vec.empty
+        )
+      ),
+      Endianness.Little
+    )
+    assertEquals(Validation.validate(module, Validation.Environment.VulkanCompute), ValidationOutcome.Accepted)
+    assert(Validation.validate(module, Validation.Environment.OpenCLCompute) != ValidationOutcome.Accepted)
+  }
+
   test("non-compute module fails closed") {
     val module = Module(Header(ISA.version, Word(0), Word(1), Word(0)), Vec.empty, Endianness.Little)
     Validation.validate(module, Validation.Environment.OpenCLCompute) match {

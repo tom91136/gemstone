@@ -8,6 +8,7 @@ option(GEMSTONE_ENABLE_CUDA "Build the CUDA facade" ON)
 option(GEMSTONE_ENABLE_HSA "Build the HSA and KMT facades" ON)
 option(GEMSTONE_ENABLE_HIP "Build the HIP facade" ON)
 option(GEMSTONE_ENABLE_OPENCL "Build the OpenCL facade" ON)
+option(GEMSTONE_ENABLE_VULKAN "Build the Vulkan compute facade" ON)
 option(GEMSTONE_ENABLE_LEVEL_ZERO "Build the Level Zero facade" ON)
 
 if(GEMSTONE_ENABLE_CUDA OR GEMSTONE_ENABLE_HSA OR GEMSTONE_ENABLE_HIP OR
@@ -170,6 +171,12 @@ endif()
 if(GEMSTONE_ENABLE_OPENCL)
   add_subdirectory(opencl)
   list(APPEND _gemstone_install_targets gemstone_opencl)
+endif()
+if(GEMSTONE_ENABLE_VULKAN)
+  add_subdirectory(vulkan)
+  install(TARGETS gemstone_vulkan
+    LIBRARY DESTINATION lib/vulkan
+    RUNTIME DESTINATION lib/vulkan)
 endif()
 if(GEMSTONE_ENABLE_LEVEL_ZERO)
   add_subdirectory(levelzero)

@@ -1,5 +1,5 @@
-#include <fmt/format.h>
 #include "test_support.hpp"
+#include <fmt/format.h>
 
 #define UNIFIED_API_THRUST_DEVICE_FUNCTIONS 1
 #include "backend_thrust.hpp"

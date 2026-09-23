@@ -6,6 +6,10 @@
 #include <string>
 #include <vector>
 
+#if !defined(_WIN32)
+  #include <dlfcn.h>
+#endif
+
 #include <catch2/catch_test_macros.hpp>
 #include <hip/hip_ext.h>
 #include <hip/hip_runtime_api.h>
@@ -17,6 +21,88 @@
 #include "../../rpc/test/rpc_fixture.hpp"
 
 namespace {
+#if !defined(_WIN32)
+
+TEST_CASE("HIP legacy device properties symbol", "[hip]") {
+  using LegacyProperties = hipError_t (*)(void *, int);
+  const auto query = reinterpret_cast<LegacyProperties>(dlsym(RTLD_DEFAULT, "hipGetDeviceProperties"));
+  REQUIRE((query != nullptr));
+  REQUIRE((setenv("GEMSTONE_AMDGPU_TARGET", "gfx1036", 1) == 0));
+  std::array<unsigned char, 792> properties{};
+  REQUIRE((query(properties.data(), 0) == hipSuccess));
+  auto word = [&](size_t offset) {
+    int value = 0;
+    std::memcpy(&value, properties.data() + offset, sizeof(value));
+    return value;
+  };
+  REQUIRE((std::strcmp(reinterpret_cast<const char *>(properties.data()), "Gemstone gfx1036") == 0));
+  REQUIRE((word(276) == 64));      // warpSize in the unversioned HIP ABI
+  REQUIRE((word(336) == 1));       // multiProcessorCount
+  REQUIRE((word(392) == 1036));    // gcnArch
+  REQUIRE((word(356) & (1 << 7))); // arch.hasDoubles
+  REQUIRE((word(356) & (1 << 5))); // arch.hasGlobalInt64Atomics
+  REQUIRE((setenv("GEMSTONE_HSA_SYSTEM_PAGING", "1", 1) == 0));
+  REQUIRE((query(properties.data(), 0) == hipSuccess));
+  REQUIRE((word(784) == 1)); // pageableMemoryAccess in Polyregion's 792-byte ABI
+  hipDeviceProp_tR0600 current{};
+  REQUIRE((hipGetDevicePropertiesR0600(&current, 0) == hipSuccess));
+  REQUIRE((current.pageableMemoryAccess == 1));
+  REQUIRE((unsetenv("GEMSTONE_HSA_SYSTEM_PAGING") == 0));
+  REQUIRE((unsetenv("GEMSTONE_AMDGPU_TARGET") == 0));
+}
+#endif
+
+TEST_CASE("HIP primary context can be pushed", "[hip]") {
+  gemstone_test::RpcFixture fixture;
+  const auto port = std::to_string(fixture.port());
+  REQUIRE((setenv("GEMSTONE_RPC_PORT", port.c_str(), 1) == 0));
+  REQUIRE((setenv("GEMSTONE_RPC_CLIENT", "42", 1) == 0));
+  REQUIRE((hipInit(0) == hipSuccess));
+  hipCtx_t context = nullptr;
+  REQUIRE((hipDevicePrimaryCtxRetain(&context, 0) == hipSuccess));
+  REQUIRE((context != nullptr));
+  REQUIRE((hipCtxPushCurrent(context) == hipSuccess));
+  hipCtx_t popped = nullptr;
+  REQUIRE((hipCtxPopCurrent(&popped) == hipSuccess));
+  REQUIRE((popped == context));
+  REQUIRE((hipDevicePrimaryCtxRelease(0) == hipSuccess));
+}
+
+TEST_CASE("HIP stream callback reports completed work", "[hip]") {
+  hipStream_t stream = nullptr;
+  REQUIRE((hipStreamCreate(&stream) == hipSuccess));
+  int calls = 0;
+  REQUIRE(
+      (hipStreamAddCallback(
+           stream, [](hipStream_t, hipError_t status, void *data) { *static_cast<int *>(data) = status == hipSuccess ? 1 : -1; }, &calls, 0)
+       == hipSuccess));
+  REQUIRE((calls == 1));
+  REQUIRE((hipStreamDestroy(stream) == hipSuccess));
+}
+
+TEST_CASE("HIP driver-style asynchronous copies use the stream", "[hip]") {
+  gemstone_test::RpcFixture fixture;
+  const auto port = std::to_string(fixture.port());
+  REQUIRE((setenv("GEMSTONE_RPC_PORT", port.c_str(), 1) == 0));
+  REQUIRE((setenv("GEMSTONE_RPC_CLIENT", "42", 1) == 0));
+  void *first = nullptr;
+  void *second = nullptr;
+  REQUIRE((hipMalloc(&first, sizeof(uint32_t)) == hipSuccess));
+  REQUIRE((hipMalloc(&second, sizeof(uint32_t)) == hipSuccess));
+  hipStream_t stream = nullptr;
+  REQUIRE((hipStreamCreate(&stream) == hipSuccess));
+  uint32_t input = 42;
+  uint32_t output = 0;
+  REQUIRE((hipMemcpyHtoDAsync(reinterpret_cast<hipDeviceptr_t>(first), &input, sizeof(input), stream) == hipSuccess));
+  REQUIRE((hipMemcpyDtoDAsync(reinterpret_cast<hipDeviceptr_t>(second), reinterpret_cast<hipDeviceptr_t>(first), sizeof(input), stream)
+           == hipSuccess));
+  REQUIRE((hipMemcpyDtoHAsync(&output, reinterpret_cast<hipDeviceptr_t>(second), sizeof(output), stream) == hipSuccess));
+  REQUIRE((output == input));
+  REQUIRE((hipStreamDestroy(stream) == hipSuccess));
+  REQUIRE((hipFree(second) == hipSuccess));
+  REQUIRE((hipFree(first) == hipSuccess));
+}
+
 struct LaunchShape {
   dim3 global, requested, local, groups;
   bool extended;
@@ -246,6 +332,23 @@ void crossWorkgroupLaunchAndCopyback() {
   REQUIRE((fixture.launches() == 90));
   asymmetricAndBoundaryLaunches(fixture, function);
   REQUIRE((fixture.launches() == 112));
+  // HIP advertises pageable host access to Polyregion. A stream wait must
+  // expose writes to an ordinary host allocation before it returns.
+  REQUIRE((setenv("GEMSTONE_HSA_SYSTEM_PAGING", "1", 1) == 0));
+  for (uint32_t seed = 1; seed <= 32; ++seed) {
+    std::array<uint32_t, 4> host{0, 0, 0, 0};
+    auto *output = host.data();
+    void *arguments[] = {&output, &seed};
+    fixture.expect({4, 1, 4, 0, seed});
+    fixture.expectTrailingArguments(implicitArguments(dim3{4, 1, 1}, dim3{4, 1, 1}));
+    REQUIRE((hipModuleLaunchKernel(function, 1, 1, 1, 4, 1, 1, 0, nullptr, arguments, nullptr) == hipSuccess));
+    REQUIRE((hipStreamSynchronize(nullptr) == hipSuccess));
+    for (uint32_t index = 0; index < host.size(); ++index)
+      REQUIRE((host[index] == seed + index));
+    fixture.check();
+  }
+  REQUIRE((unsetenv("GEMSTONE_HSA_SYSTEM_PAGING") == 0));
+  REQUIRE((fixture.launches() == 144));
   REQUIRE((hipModuleUnload(module) == hipSuccess));
   fixture.check();
 }

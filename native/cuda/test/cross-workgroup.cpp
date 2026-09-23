@@ -1,6 +1,7 @@
 #include <array>
 #include <cstdio>
 #include <cstdlib>
+#include <memory>
 #include <stdexcept>
 #include <string>
 
@@ -18,6 +19,15 @@ constexpr char Source[] = ".version 8.0\n"
                           ".target sm_80\n"
                           ".address_size 64\n"
                           ".global .align 4 .u32 metadata_probe[4];\n"
+                          ".global .align 4 .b8 switch_table[4] = {42, 0, 0, 0};\n"
+                          ".visible .entry read_switch(.param .u64 output) {\n"
+                          "    .reg .u64 %rd<3>; .reg .u32 %r0;\n"
+                          "    ld.param.u64 %rd0, [output];\n"
+                          "    mov.b64 %rd1, switch_table;\n"
+                          "    ld.global.nc.b32 %r0, [%rd1];\n"
+                          "    st.global.u32 [%rd0], %r0;\n"
+                          "    ret;\n"
+                          "  }\n"
                           ".visible .entry compact(\n"
                           "    .param .u64 descriptors, .param .u64 output, .param .u32 count) {\n"
                           "    .reg .pred %p<4>;\n"
@@ -171,14 +181,21 @@ void run() {
   CUfunction compact = nullptr;
   CUfunction count = nullptr;
   CUfunction publish = nullptr;
+  CUfunction readSwitch = nullptr;
   check(contextCreate(&context, 0, 0));
   check(moduleLoadData(&module, Source));
   check(moduleGetFunction(&compact, module, "compact"));
   check(moduleGetFunction(&count, module, "count"));
   check(moduleGetFunction(&publish, module, "publish"));
+  check(moduleGetFunction(&readSwitch, module, "read_switch"));
   CUdeviceptr memory = 0;
   std::array<uint32_t, 1024> host{};
   check(memoryAllocate(&memory, sizeof(host)));
+  std::array<void *, 1> switchArguments{&memory};
+  check(launch(readSwitch, 1, 1, 1, 1, 1, 1, 0, nullptr, switchArguments.data(), nullptr));
+  uint32_t switchValue = 0;
+  check(copyDeviceToHost(&switchValue, memory, sizeof(switchValue)));
+  REQUIRE((switchValue == 42));
   unsigned memoryType = 99;
   unsigned managed = 99;
   CUdeviceptr pointerValue = 0;
@@ -318,6 +335,123 @@ void run() {
   std::printf("CUDA cross-workgroup: %u checked launches, groups 1/2/3/5/9, lanes 31/32/33/64/65\n", launches);
 }
 
+void runStreamCallbacks() {
+  // Every emulated launch and copy completes before it returns, so a callback
+  // registered on an idle stream runs immediately rather than on synchronize.
+  const char *configuredPath = std::getenv("GEMSTONE_CUDA_TEST_LIBRARY");
+  const SharedLibrary library{configuredPath ? configuredPath : "libcuda.so.1"};
+  const auto init = library.load<CUresult (*)(unsigned)>("cuInit");
+  const auto contextCreate = library.load<CUresult (*)(CUcontext *, unsigned, CUdevice)>("cuCtxCreate_v2");
+  const auto contextDestroy = library.load<CUresult (*)(CUcontext)>("cuCtxDestroy_v2");
+  const auto streamCreate = library.load<CUresult (*)(CUstream *, unsigned)>("cuStreamCreate");
+  const auto streamDestroy = library.load<CUresult (*)(CUstream)>("cuStreamDestroy_v2");
+  const auto streamSynchronize = library.load<CUresult (*)(CUstream)>("cuStreamSynchronize");
+  const auto streamAddCallback = library.load<CUresult (*)(CUstream, CUstreamCallback, void *, unsigned)>("cuStreamAddCallback");
+
+  check(init(0));
+  CUcontext context = nullptr;
+  check(contextCreate(&context, 0, 0));
+  CUstream first = nullptr;
+  CUstream second = nullptr;
+  check(streamCreate(&first, 0));
+  check(streamCreate(&second, 0));
+  struct Observed {
+    CUstream expected;
+    int calls = 0;
+    bool valid = true;
+  } observed{first};
+  check(streamAddCallback(
+      first,
+      [](CUstream stream, CUresult status, void *data) {
+        auto &value = *static_cast<Observed *>(data);
+        ++value.calls;
+        value.valid = value.valid && stream == value.expected && status == CUDA_SUCCESS;
+      },
+      &observed, 0));
+  REQUIRE((observed.calls == 1));
+  check(streamSynchronize(second));
+  REQUIRE((observed.calls == 1));
+  check(streamSynchronize(first));
+  REQUIRE((observed.calls == 1));
+  REQUIRE(observed.valid);
+  check(streamDestroy(second));
+  check(streamDestroy(first));
+  check(contextDestroy(context));
+}
+
+void runSystemPaging() {
+  constexpr char kernel[] = ".version 8.0\n"
+                            ".target sm_80\n"
+                            ".address_size 64\n"
+                            ".visible .entry increment_host(.param .u64 .ptr .global ptr) {\n"
+                            "  .reg .u64 %rd; .reg .u32 %r<2>;\n"
+                            "  ld.param.u64 %rd, [ptr];\n"
+                            "  ld.global.u32 %r0, [%rd];\n"
+                            "  add.u32 %r1, %r0, 1;\n"
+                            "  st.global.u32 [%rd], %r1;\n"
+                            "  ret;\n"
+                            "}\n"
+                            ".visible .entry increment_indirect(.param .u64 .ptr .global root) {\n"
+                            "  .reg .u64 %rd<2>; .reg .u32 %r<2>;\n"
+                            "  ld.param.u64 %rd0, [root];\n"
+                            "  ld.global.u64 %rd1, [%rd0];\n"
+                            "  ld.global.u32 %r0, [%rd1];\n"
+                            "  add.u32 %r1, %r0, 1;\n"
+                            "  st.global.u32 [%rd1], %r1;\n"
+                            "  ret;\n"
+                            "}\n";
+  const char *configuredPath = std::getenv("GEMSTONE_CUDA_TEST_LIBRARY");
+  const SharedLibrary library{configuredPath ? configuredPath : "libcuda.so.1"};
+  const auto init = library.load<CUresult (*)(unsigned)>("cuInit");
+  const auto attribute = library.load<CUresult (*)(int *, CUdevice_attribute, CUdevice)>("cuDeviceGetAttribute");
+  const auto contextCreate = library.load<CUresult (*)(CUcontext *, unsigned, CUdevice)>("cuCtxCreate_v2");
+  const auto contextDestroy = library.load<CUresult (*)(CUcontext)>("cuCtxDestroy_v2");
+  const auto moduleLoad = library.load<CUresult (*)(CUmodule *, const void *)>("cuModuleLoadData");
+  const auto moduleGetFunction = library.load<CUresult (*)(CUfunction *, CUmodule, const char *)>("cuModuleGetFunction");
+  const auto moduleUnload = library.load<CUresult (*)(CUmodule)>("cuModuleUnload");
+  const auto managedAllocate = library.load<CUresult (*)(CUdeviceptr *, size_t, unsigned)>("cuMemAllocManaged");
+  const auto memoryFree = library.load<CUresult (*)(CUdeviceptr)>("cuMemFree_v2");
+  const auto launch =
+      library
+          .load<CUresult (*)(CUfunction, unsigned, unsigned, unsigned, unsigned, unsigned, unsigned, unsigned, CUstream, void **, void **)>(
+              "cuLaunchKernel");
+  check(init(0));
+  int pageable = 0;
+  check(attribute(&pageable, CU_DEVICE_ATTRIBUTE_PAGEABLE_MEMORY_ACCESS, 0));
+  REQUIRE((pageable == 1));
+  CUcontext context = nullptr;
+  check(contextCreate(&context, 0, 0));
+  CUmodule module = nullptr;
+  check(moduleLoad(&module, kernel));
+  CUfunction function = nullptr;
+  check(moduleGetFunction(&function, module, "increment_host"));
+  unsigned value = 41;
+  CUdeviceptr pointer = devicePointer(&value);
+  void *arguments[] = {&pointer};
+  check(launch(function, 1, 1, 1, 1, 1, 1, 0, nullptr, arguments, nullptr));
+  REQUIRE((value == 42));
+  check(moduleGetFunction(&function, module, "increment_indirect"));
+  auto target = std::make_unique<unsigned>(20);
+  CUdeviceptr indirect = devicePointer(target.get());
+  pointer = devicePointer(&indirect);
+  check(launch(function, 1, 1, 1, 1, 1, 1, 0, nullptr, arguments, nullptr));
+  REQUIRE((*target == 21));
+  CUdeviceptr managed = 0;
+  check(managedAllocate(&managed, sizeof(unsigned), CU_MEM_ATTACH_GLOBAL));
+  auto heap = std::make_unique<unsigned>(30);
+  pointer = devicePointer(heap.get());
+  check(moduleGetFunction(&function, module, "increment_host"));
+  check(launch(function, 1, 1, 1, 1, 1, 1, 0, nullptr, arguments, nullptr));
+  REQUIRE((*heap == 31));
+  check(memoryFree(managed));
+  check(moduleUnload(module));
+  check(contextDestroy(context));
+}
+
 } // namespace
 
 TEST_CASE("CUDA cross-workgroup execution", "[cuda][integration]") { run(); }
+
+TEST_CASE("CUDA callbacks run once at registration", "[cuda][integration]") { runStreamCallbacks(); }
+
+TEST_CASE("CUDA system paging reaches a plain host pointer", "[cuda][integration]") { runSystemPaging(); }

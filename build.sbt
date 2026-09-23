@@ -42,6 +42,7 @@ lazy val hsaVersion           = rocmVersion
 lazy val amdXMLVersion        = "2026_08_06"
 lazy val openCLHeadersVersion = "2026.05.29"
 lazy val levelZeroVersion     = "1.33.1"
+lazy val vulkanHeadersVersion = "v1.4.341"
 lazy val spirvHeadersVersion  = "vulkan-sdk-1.4.357.0"
 lazy val spirvToolsVersion    = "vulkan-sdk-1.4.357.0"
 lazy val ptxISAVersion        = "9.3"
@@ -142,6 +143,12 @@ lazy val referenceArtifacts = Vector(
     url =
       s"https://github.com/oneapi-src/level-zero/archive/refs/tags/v$levelZeroVersion.zip",
     expectedSha256 = "9f6872a84106bdb686131c231396eca67631e1c47081ef50e2fe0b815aca6eb0"
+  ),
+  Fetch.Request(
+    id = "vulkan-headers",
+    fileName = s"Vulkan-Headers-$vulkanHeadersVersion.zip",
+    url = s"https://github.com/KhronosGroup/Vulkan-Headers/archive/refs/tags/$vulkanHeadersVersion.zip",
+    expectedSha256 = "c3b074a30b5bce4cf32a41d234fa559ff458513b7314d69cd0b336a01b53bb78"
   ),
   Fetch.Request(
     id = "spirv-headers",
@@ -368,7 +375,8 @@ lazy val apiReferenceBundle = ReferenceBundles.Bundle(
     "amd-hip",
     "amd-hsa",
     "opencl-headers",
-    "level-zero"
+    "level-zero",
+    "vulkan-headers"
   ),
   populate = (cached, stage) => {
     Compress.extractDebXz(
@@ -431,6 +439,12 @@ lazy val apiReferenceBundle = ReferenceBundles.Bundle(
       select = relative =>
         relative == path"LICENSE" || relative.startsWith("include") || relative.startsWith("doc")
     )
+    Compress.extractZipRoot(
+      archive = cached("vulkan-headers"),
+      destination = stage / "khronos/vulkan",
+      archiveRoot = s"Vulkan-Headers-${vulkanHeadersVersion.stripPrefix("v")}",
+      select = relative => relative == path"LICENSE.md" || relative.startsWith("include/vulkan")
+    )
   },
   verify = output => {
     require(
@@ -445,6 +459,7 @@ lazy val apiReferenceBundle = ReferenceBundles.Bundle(
     require((output / "amd/hsa/runtime/hsa-runtime/inc/hsa.h").isFile, "HSA core header is absent")
     require((output / "khronos/opencl/CL/cl.h").isFile, "OpenCL headers are absent")
     require((output / "oneapi/level-zero/include/ze_api.h").isFile, "Level Zero header is absent")
+    require((output / "khronos/vulkan/include/vulkan/vulkan.h").isFile, "Vulkan header is absent")
   }
 )
 
@@ -560,9 +575,11 @@ lazy val generateAMDGPUSources =
   taskKey[Seq[Path]]("Update checked-in AMDGPU sources and oracle fixtures.")
 lazy val checkGeneratedAMDGPU = taskKey[Unit]("Verify checked-in generated AMDGPU sources and fixtures are current.")
 lazy val generateAPISources   =
-  taskKey[Seq[Path]]("Bootstrap checked-in CUDA, HIP, HSA, Level Zero, and OpenCL API surfaces.")
+  taskKey[Seq[Path]]("Bootstrap checked-in CUDA, HIP, HSA, Level Zero, OpenCL, and Vulkan API surfaces.")
 lazy val generateSPIRVSources =
   taskKey[Seq[Path]]("Update checked-in SPIR-V sources and reference tests.")
+lazy val generateSPIRVFixtures =
+  taskKey[Seq[File]]("Assemble readable SPIR-V test fixtures into managed resources.")
 lazy val checkGeneratedSPIRV      = taskKey[Unit]("Verify checked-in generated SPIR-V sources and tests are current.")
 lazy val checkGeneratedSources    = taskKey[Unit]("Verify every checked-in generated source and fixture is current.")
 lazy val codegen                  = taskKey[Unit]("Update and format every checked-in generated source and fixture.")
@@ -783,7 +800,8 @@ lazy val codegenProject = Project("codegen", file("tools/codegen"))
           hipVersion,
           hsaVersion,
           levelZeroVersion,
-          openCLHeadersVersion
+          openCLHeadersVersion,
+          vulkanHeadersVersion
         ),
         streams.value.log
       ).get
@@ -806,7 +824,8 @@ lazy val codegenProject = Project("codegen", file("tools/codegen"))
           hipVersion,
           hsaVersion,
           levelZeroVersion,
-          openCLHeadersVersion
+          openCLHeadersVersion,
+          vulkanHeadersVersion
         ),
         streams.value.log
       ).get
@@ -1205,6 +1224,29 @@ lazy val spirv = projectMatrix
 
       "org.scalameta" %% "munit" % munitVersion % Test
     ),
+    generateSPIRVFixtures := Def.uncached {
+      val source    = (Test / sourceDirectory).value.toPath / "fixtures"
+      val output    = (Test / resourceManaged).value.toPath
+      val assembler = nonEmptyCommand("SPIRV_AS", sys.env.getOrElse("SPIRV_AS", "spirv-as"))
+      val fixtures = Seq(
+        ("glcompute-dot-double", "spv1.3"),
+        ("glcompute-fma", "spv1.3"),
+        ("glcompute-pow", "spv1.5"),
+        ("glcompute-sin", "spv1.3")
+      )
+      Files.createDirectories(output)
+      fixtures.map { case (name, environment) =>
+        val input  = source / s"$name.spvasm"
+        val result = output / s"$name.spv"
+        val exit   = Process(Seq(assembler, "--target-env", environment, s"$input", "-o", s"$result")).!
+        if (exit != 0)
+          throw MessageOnlyException(
+            s"failed to assemble $input; install SPIRV-Tools or set SPIRV_AS to spirv-as"
+          )
+        result.toFile
+      }
+    },
+    Test / resourceGenerators += generateSPIRVFixtures.taskValue,
     generateSPIRVSources := Def.uncached {
       val converter  = fileConverter.value
       val references = (codegenProject / prepareSPIRVReferences).value
@@ -1262,7 +1304,10 @@ lazy val spirv = projectMatrix
     }
   )
   .jvmPlatform(scalaVersions = Seq(scala3Version))
-  .nativePlatform(scalaVersions = Seq(scala3Version))
+  .nativePlatform(
+    scalaVersions = Seq(scala3Version),
+    settings = Seq(Test / nativeConfig ~= (_.withEmbedResources(true)))
+  )
 
 lazy val server = projectMatrix
   .in(file("server"))
@@ -1295,7 +1340,8 @@ lazy val server = projectMatrix
   .nativePlatform(
     scalaVersions = Seq(scala3Version),
     settings = Seq(
-      Compile / nativeConfig ~= (_.withMode(scala.scalanative.build.Mode.releaseFast)),
+      Compile / nativeConfig ~= (_.withMode(scala.scalanative.build.Mode.releaseFast).withEmbedResources(true)),
+      Test / nativeConfig ~= (_.withEmbedResources(true)),
       Test / envVars += (
         "GEMSTONE_NATIVE_TEST_DIRECTORY" -> s"${(native / nativeArtifact).value}"
       )

@@ -13,15 +13,15 @@
 #include <tuple>
 
 #include <aspartame/all.hpp>
-#include <fmt/format.h>
 #include <glaze/json.hpp>
 #include <glaze/toml.hpp>
 
 #include "conformance/device.hpp"
-#include "environment.hpp"
-#include "suite_policy.hpp"
 
 #include "device_lock.hpp"
+#include "environment.hpp"
+#include "suite_policy.hpp"
+#include <fmt/format.h>
 
 namespace conformance::driver {
 using namespace aspartame;
@@ -135,7 +135,7 @@ ArtifactMetadata validate_artifact(const fs::path &artifact, const conformance::
   return metadata;
 }
 fs::path support_directory(const RunOptions &configuration, const conformance::profile::ResolvedTarget &target,
-                      const ArtifactMetadata &metadata) {
+                           const ArtifactMetadata &metadata) {
   if (target.architecture) return configuration.artifacts / target.backend / (metadata.support.empty() ? "support" : metadata.support);
   return artifact_directory(configuration, target);
 }
@@ -231,13 +231,13 @@ void apply_device_probe(ExecutionConfig &configuration, const DeviceProbeResult 
   configuration.environment["CONFORMANCE_PHYSICAL_DEVICE"] = probe.device;
 }
 DeviceProbeResult probe_device(const RunOptions &configuration, const fs::path &artifact,
-                         const std::map<std::string, std::string> &environment, const std::string &id) {
+                               const std::map<std::string, std::string> &environment, const std::string &id) {
   auto probe = artifact / "conformance-device";
 #ifdef _WIN32
   probe += ".exe";
 #endif
-  const auto result = run_process(launched(configuration.launcher, {probe.string()}), artifact, environment, 2min,
-                                  fmt::format("[{} device] ", id), true);
+  const auto result =
+      run_process(launched(configuration.launcher, {probe.string()}), artifact, environment, 2min, fmt::format("[{} device] ", id), true);
   if (result.status != 0)
     throw std::runtime_error("device probe failed for " + id + " (including runtime/selector verification): " + result.error);
   DeviceProbeResult parsed;
@@ -246,7 +246,7 @@ DeviceProbeResult probe_device(const RunOptions &configuration, const fs::path &
   return parsed;
 }
 std::vector<ScheduledCase> discover_cases(const RunOptions &configuration, const Workload &workload, const fs::path &artifact,
-                           const std::map<std::string, std::string> &environment, const std::string &id) {
+                                          const std::map<std::string, std::string> &environment, const std::string &id) {
   std::vector<ScheduledCase> tests;
   for (const auto &program : test_programs(artifact)) {
     if (std::ranges::find(workload.exclude_programs, program.name) != workload.exclude_programs.end()) continue;
@@ -254,8 +254,7 @@ std::vector<ScheduledCase> discover_cases(const RunOptions &configuration, const
     command.insert(command.end(), workload.specs.begin(), workload.specs.end());
     const auto listing = run_process(launched(configuration.launcher, std::move(command)), artifact, environment, 10min,
                                      fmt::format("[{}/{} discovery] ", id, program.name), true);
-    if (listing.status != 0)
-      throw std::runtime_error(fmt::format("Catch discovery failed for {}/{}: {}", id, program.name, listing.error));
+    if (listing.status != 0) throw std::runtime_error(fmt::format("Catch discovery failed for {}/{}: {}", id, program.name, listing.error));
     auto names = catch_case_names(listing.output, program.name);
     if (names.size() > UINT32_MAX) throw std::runtime_error("Catch inventory is too large");
     const auto count = static_cast<uint32_t>(names.size());
@@ -271,7 +270,7 @@ std::vector<ScheduledCase> discover_cases(const RunOptions &configuration, const
   return tests;
 }
 TargetExecution prepare_target(const RunOptions &configuration, const Workload &workload, const profile::ResolvedTarget &target,
-                              const fs::path &run_directory) {
+                               const fs::path &run_directory) {
   const auto artifact = artifact_directory(configuration, target);
   const auto metadata = validate_artifact(artifact, target);
   const auto support = support_directory(configuration, target, metadata);
@@ -286,13 +285,13 @@ TargetExecution prepare_target(const RunOptions &configuration, const Workload &
   const auto reports = run_directory / target.id;
   fs::create_directories(reports);
   ExecutionConfig exec{artifact.string(),
-                         reports.string(),
-                         {},
-                         environment,
-                         configuration.launcher,
-                         configuration.isolated_launcher ? std::vector<std::string>{} : configured_skips(environment),
-                         workload.specs,
-                         target.deviceLock && !configuration.isolated_launcher};
+                       reports.string(),
+                       {},
+                       environment,
+                       configuration.launcher,
+                       configuration.isolated_launcher ? std::vector<std::string>{} : configured_skips(environment),
+                       workload.specs,
+                       target.deviceLock && !configuration.isolated_launcher};
   apply_device_probe(exec, probe_device(configuration, artifact, environment, target.id));
   // Re-probe with the exact child environment: selection must survive visibility remapping.
   const auto verified = probe_device(configuration, artifact, exec.environment, target.id);

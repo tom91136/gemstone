@@ -58,6 +58,7 @@ private[amdgpu] object VMCompiler {
     case SAddI32       => Some(ScalarBinaryOperation.AddI32)
     case SSubI32       => Some(ScalarBinaryOperation.SubtractI32)
     case SLshlB32      => Some(ScalarBinaryOperation.ShiftLeft32)
+    case SLshl2AddU32  => Some(ScalarBinaryOperation.ShiftLeftTwoAndAddU32)
     case SAshrI32      => Some(ScalarBinaryOperation.ShiftRightArithmetic32)
     case SBfeU32       => Some(ScalarBinaryOperation.BitFieldExtractU32)
     case SBfeI32       => Some(ScalarBinaryOperation.BitFieldExtractI32)
@@ -473,7 +474,9 @@ private[amdgpu] object VMCompiler {
     VLdexpF32,
     VLdexpF64,
     VRcpF32,
+    VFrexpMantF32,
     VFrexpMantF64,
+    VCvtF64F32,
     VMaxF64,
     VMaxF64E64,
     VMinF64,
@@ -1352,6 +1355,22 @@ private[amdgpu] object VMCompiler {
             negate = negateA,
             clamp = clamp
           ))
+        case VFrexpMantF32 =>
+          Right(Instruction.VFrexpMantF32Modified(
+            dest = destination,
+            src = srcA,
+            absolute = absoluteA,
+            negate = negateA,
+            clamp = clamp
+          ))
+        case VCvtF64F32 =>
+          Right(Instruction.VCvtF64F32Modified(
+            dest = destination,
+            src = srcA,
+            absolute = absoluteA,
+            negate = negateA,
+            clamp = clamp
+          ))
         case VFrexpMantF64 =>
           Right(Instruction.VUnaryF64Modified(
             dest = destination,
@@ -1430,7 +1449,8 @@ private[amdgpu] object VMCompiler {
           Right(Instruction.VWriteLane(destination, srcA, srcB))
         case VAddU32 | VAddNcU32 | VAddNcU16 | VSubNcU16 | VMulLoU16 | VAshrrevI16 | VAshrrevI32 |
             VLshlrevB32 | VLshrrevB32 | VLshlrevB16 | VLshrrevB16 | VMulLoU32 | VMulHiU32 | VMulHiI32 |
-            VSubU32 | VSubNcU32 | VSubrevU32 | VSubrevNcU32 | VMinI16 | VMinU16 | VMaxI16 | VMaxU16 =>
+            VSubU32 | VSubNcU32 | VSubrevU32 | VSubrevNcU32 | VMinI16 | VMinU16 | VMaxI16 | VMaxU16 |
+            VAndB32 | VOrB32 | VXorB32 =>
           vectorBinaryOperation(opcode)
             .map(operation =>
               Instruction.VBinary(
@@ -1557,8 +1577,8 @@ private[amdgpu] object VMCompiler {
             clamp = clamp
           ))
         case VAdd3U32 | VOr3B32 | VXor3B32 | VFmaF16 | VDivFmasF32 | VMadLegacyU16 | VMadU16 | VMadU32U24 | VAlignbitB32 | VBfiB32 |
-             VMed3I16 | VMed3I32 | VMed3U16 | VMed3U32 | VMin3F32 |
-             VMax3I16 | VMax3U16 | VMin3I16 | VMin3U16 |
+            VMed3I16 | VMed3I32 | VMed3U16 | VMed3U32 | VMin3F32 |
+            VMax3I16 | VMax3U16 | VMin3I16 | VMin3U16 |
             VMax3I32 | VMax3U32 | VMin3I32 | VMin3U32 |
             VAndOrB32 | VBfeI32 | VBfeU32 | VXadU32 | VMadI32I24 | VAddLshlU32 | VLshlAddU32 | VLshlOrB32 | VPermB32 =>
           vectorTernaryOperation(opcode)
@@ -2221,6 +2241,51 @@ private[amdgpu] object VMCompiler {
               offset = memoryOffset,
               returnValue = returnValue
             ))
+          case FlatAtomicSwap | FlatAtomicSwapB32 =>
+            Right(Instruction.GlobalAtomicSwap(
+              dest = destination,
+              address = vectorAddress,
+              scalarAddress = None,
+              src = dataRegister,
+              bytes = 4,
+              offset = memoryOffset,
+              returnValue = returnValue
+            ))
+          case FlatAtomicSwapX2 | FlatAtomicSwapB64 =>
+            Right(Instruction.GlobalAtomicSwap(
+              dest = destination,
+              address = vectorAddress,
+              scalarAddress = None,
+              src = dataRegister,
+              bytes = 8,
+              offset = memoryOffset,
+              returnValue = returnValue
+            ))
+          case atomicOpcode @ (FlatAtomicAdd | FlatAtomicAddU32 | FlatAtomicSub | FlatAtomicSubU32 |
+              FlatAtomicMinU32 | FlatAtomicMaxU32 | FlatAtomicUmin | FlatAtomicUmax |
+              FlatAtomicSmin | FlatAtomicSmax | FlatAtomicAnd | FlatAtomicAndB32 |
+              FlatAtomicOr | FlatAtomicOrB32 | FlatAtomicXor | FlatAtomicXorB32) =>
+            val atomicOperation = atomicOpcode match {
+              case FlatAtomicAdd | FlatAtomicAddU32  => AtomicBinaryOperation.Add
+              case FlatAtomicSub | FlatAtomicSubU32  => AtomicBinaryOperation.Subtract
+              case FlatAtomicMinU32 | FlatAtomicUmin => AtomicBinaryOperation.MinimumUnsigned
+              case FlatAtomicMaxU32 | FlatAtomicUmax => AtomicBinaryOperation.MaximumUnsigned
+              case FlatAtomicSmin                    => AtomicBinaryOperation.MinimumSigned
+              case FlatAtomicSmax                    => AtomicBinaryOperation.MaximumSigned
+              case FlatAtomicAnd | FlatAtomicAndB32  => AtomicBinaryOperation.And
+              case FlatAtomicOr | FlatAtomicOrB32    => AtomicBinaryOperation.Or
+              case _                                 => AtomicBinaryOperation.Xor
+            }
+            Right(Instruction.GlobalAtomicBinary(
+              operation = atomicOperation,
+              dest = destination,
+              address = vectorAddress,
+              scalarAddress = None,
+              src = dataRegister,
+              bytes = 4,
+              offset = memoryOffset,
+              returnValue = returnValue
+            ))
           case FlatAtomicCmpswapX2 =>
             Right(Instruction.GlobalAtomicCompareSwap(
               dest = destination,
@@ -2272,6 +2337,15 @@ private[amdgpu] object VMCompiler {
             bytes = 4,
             offset = immediate
           ))
+        case BufferLoadUbyte =>
+          Right(Instruction.BufferLoad(
+            dest = dataRegister,
+            address = address,
+            resource = resource,
+            scalarOffset = scalarOffset,
+            bytes = 1,
+            offset = immediate
+          ))
         case BufferLoadDwordx2 =>
           Right(Instruction.BufferLoad(
             dest = dataRegister,
@@ -2317,6 +2391,15 @@ private[amdgpu] object VMCompiler {
             scalarOffset = scalarOffset,
             src = dataRegister,
             bytes = 2,
+            offset = immediate
+          ))
+        case BufferStoreByte =>
+          Right(Instruction.BufferStore(
+            address = address,
+            resource = resource,
+            scalarOffset = scalarOffset,
+            src = dataRegister,
+            bytes = 1,
             offset = immediate
           ))
         case BufferStoreShortD16Hi =>

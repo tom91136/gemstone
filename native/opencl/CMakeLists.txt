@@ -48,6 +48,7 @@ if(BUILD_TESTING)
   endfunction()
 
   gemstone_opencl_test(gemstone_opencl_smoke test/opencl_smoke.cpp)
+  target_compile_definitions(gemstone_opencl_smoke PRIVATE GEMSTONE_OPENCL_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/test")
   gemstone_discover_tests(gemstone_opencl_smoke TEST_PREFIX "opencl/" PROPERTIES TIMEOUT 30)
 
   gemstone_opencl_test(gemstone_opencl_bounded_scheduler test/bounded_scheduler.cpp)

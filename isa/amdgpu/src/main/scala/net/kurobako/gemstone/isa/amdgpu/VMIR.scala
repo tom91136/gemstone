@@ -51,7 +51,8 @@ private[amdgpu] object VMIR {
 
   private[amdgpu] enum ScalarBinaryOperation {
     case And32, Or32, MultiplyI32, MultiplyHighU32, MultiplyHighI32, AddI32, SubtractI32
-    case ShiftLeft32, ShiftRightArithmetic32, BitFieldExtractU32, BitFieldExtractI32, ShiftRight32
+    case ShiftLeft32, ShiftLeftTwoAndAddU32, ShiftRightArithmetic32, BitFieldExtractU32, BitFieldExtractI32,
+      ShiftRight32
     case AndNot32, OrNot32, Nor32
     case PackLowLow16, PackLowHigh16, PackHighHigh16, AddU32, AddCarryU32, SubtractU32, SubtractBorrowU32, Xor32
   }
@@ -62,6 +63,10 @@ private[amdgpu] object VMIR {
 
   private[amdgpu] enum ScalarBinary64Operation {
     case And, AndNot, Or, OrNot, Nor, Xor, ShiftLeft, ShiftRight, ShiftRightArithmetic, BitFieldExtractI64
+  }
+
+  private[amdgpu] enum AtomicBinaryOperation {
+    case Add, Subtract, MinimumUnsigned, MaximumUnsigned, MinimumSigned, MaximumSigned, And, Or, Xor
   }
 
   private[amdgpu] enum ScalarCompareOperation {
@@ -257,6 +262,20 @@ private[amdgpu] object VMIR {
         clamp: Boolean
     )
     case VUnaryF32Modified(
+        dest: Int,
+        src: InstructionSource,
+        absolute: Boolean,
+        negate: Boolean,
+        clamp: Boolean
+    )
+    case VFrexpMantF32Modified(
+        dest: Int,
+        src: InstructionSource,
+        absolute: Boolean,
+        negate: Boolean,
+        clamp: Boolean
+    )
+    case VCvtF64F32Modified(
         dest: Int,
         src: InstructionSource,
         absolute: Boolean,
@@ -509,6 +528,25 @@ private[amdgpu] object VMIR {
         offset: Int
     )
     case GlobalAtomicAdd(
+        dest: Int,
+        address: Int,
+        scalarAddress: Option[Int],
+        src: Int,
+        bytes: Int :| Interval.Closed[4, 8],
+        offset: Int,
+        returnValue: Boolean
+    )
+    case GlobalAtomicSwap(
+        dest: Int,
+        address: Int,
+        scalarAddress: Option[Int],
+        src: Int,
+        bytes: Int :| Interval.Closed[4, 8],
+        offset: Int,
+        returnValue: Boolean
+    )
+    case GlobalAtomicBinary(
+        operation: AtomicBinaryOperation,
         dest: Int,
         address: Int,
         scalarAddress: Option[Int],

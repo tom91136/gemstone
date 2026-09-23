@@ -82,6 +82,8 @@ private[v1_6] object VMMemory {
     private val externalVirtualAddresses = mutable.HashMap.empty[MemoryRegion, Long]
     private val internalVirtualAddresses = java.util.IdentityHashMap[Array[Byte], java.lang.Long]()
     private val virtualPointers          = mutable.LongMap.empty[Pointer]
+    private val exceptionalAddresses     = mutable.HashMap.empty[(Region, Long), Long]
+    private val exceptionalPointers      = mutable.LongMap.empty[Pointer]
     private val pointerRelocations: mutable.HashMap[(MemoryRegion, Long), (MemoryRegion, Long)] =
       mutable.HashMap.from(relocations.view.collect {
         case KernelTask.PointerRelocation(
@@ -110,6 +112,8 @@ private[v1_6] object VMMemory {
     }
     @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
     private var nextVirtualAddress = 0x0000100000000000L
+    @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+    private var nextExceptionalAddress = Long.MinValue
 
     /** IdentityHashMap uses null for a missing Java entry; confine it to this interop pattern. */
     @SuppressWarnings(Array("scalafix:DisableSyntax.null", "scalafix:DisableSyntax.return"))
@@ -130,13 +134,19 @@ private[v1_6] object VMMemory {
             .leftMap(_ => Fault.InvalidTask("opaque SPIR-V pointer arithmetic overflow"))
         case Region.Null => return Right(0L)
       }
-      Either.cond(
-        pointer.offset >= 0L && pointer.offset < VirtualAddressSpan,
-        base + pointer.offset,
-        Fault.InvalidTask(
-          s"SPIR-V pointer offset ${pointer.offset} exceeds the virtual region span"
-        )
-      )
+      if (pointer.offset >= 0L && pointer.offset < VirtualAddressSpan) Right(base + pointer.offset)
+      else
+        Right(exceptionalAddresses.getOrElseUpdate(
+          pointer.region -> pointer.offset, {
+            // An out-of-range pointer may be formed and compared without being
+            // dereferenced. Keep its integer identity outside the normal regions.
+            // The mapping lives for the task and is not reclaimed.
+            val address = nextExceptionalAddress
+            nextExceptionalAddress = Math.addExact(nextExceptionalAddress, 1L)
+            exceptionalPointers.update(address, pointer)
+            address
+          }
+        ))
     }
 
     @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
@@ -224,22 +234,32 @@ private[v1_6] object VMMemory {
 
     def integerPointer(address: Long, pointee: Int, storageClass: Int): Either[Fault, Pointer] =
       if (address == 0L) Right(Pointer(Region.Null, 0L, pointee, storageClass))
-      else {
-        val base   = address & ~(VirtualAddressSpan - 1L)
-        val offset = address - base
-        virtualPointers.get(base) match {
-          case Some(origin) if offset >= 0L && offset < VirtualAddressSpan =>
-            Either.cond(
-              storageClass == 8 || storageClass == origin.storageClass,
-              origin.copy(offset = offset, pointee = pointee),
-              Fault.InvalidTask(
-                s"SPIR-V virtual address 0x${java.lang.Long.toHexString(address)} belongs to storage class " +
-                  s"${origin.storageClass}, not $storageClass"
-              )
+      else exceptionalPointers.get(address) match {
+        case Some(origin) =>
+          Either.cond(
+            storageClass == 8 || storageClass == origin.storageClass,
+            origin.copy(pointee = pointee),
+            Fault.InvalidTask(
+              s"SPIR-V virtual address 0x${java.lang.Long.toHexString(address)} belongs to storage class " +
+                s"${origin.storageClass}, not $storageClass"
             )
-          case _ =>
-            Right(Pointer(Region.Opaque(address), 0L, pointee, storageClass))
-        }
+          )
+        case None =>
+          val base   = address & ~(VirtualAddressSpan - 1L)
+          val offset = address - base
+          virtualPointers.get(base) match {
+            case Some(origin) if offset >= 0L && offset < VirtualAddressSpan =>
+              Either.cond(
+                storageClass == 8 || storageClass == origin.storageClass,
+                origin.copy(offset = offset, pointee = pointee),
+                Fault.InvalidTask(
+                  s"SPIR-V virtual address 0x${java.lang.Long.toHexString(address)} belongs to storage class " +
+                    s"${origin.storageClass}, not $storageClass"
+                )
+              )
+            case _ =>
+              Right(Pointer(Region.Opaque(address), 0L, pointee, storageClass))
+          }
       }
 
     private def allocateVirtualAddress(pointer: Pointer): Long = {

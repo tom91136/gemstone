@@ -16,8 +16,8 @@ import net.kurobako.gemstone.vm.TaskControl
 
 import java.util.concurrent.atomic.AtomicBoolean
 
-final class SPIRVRuntimeBackend(environment: Validation.Environment) extends RuntimeBackend {
-  override val encoding: String = "spirv-binary"
+final class SPIRVRuntimeBackend(environment: Validation.Environment, override val encoding: String = "spirv-binary")
+    extends RuntimeBackend {
 
   override def load(
       services: RuntimeBackend.Services,

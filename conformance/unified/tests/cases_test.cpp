@@ -3,8 +3,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-#include "test_support.hpp"
 #include "blas_cases.hpp"
+#include "test_support.hpp"
 
 TEST_CASE("byte reference values remain sorted", "[unit][unified]") {
   const auto values = unified::support::sorted_values<int8_t>(4096, 3);

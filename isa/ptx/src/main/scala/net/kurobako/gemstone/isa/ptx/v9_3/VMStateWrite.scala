@@ -20,6 +20,15 @@ private[v9_3] enum VMStateWrite {
   case Memory(lane: Int, address: GuestAddress, width: BitWidth, value: Long)
   case MemoryVector(lane: Int, address: GuestAddress, width: BitWidth, values: Vec[Long])
   case AtomicSharedAdd(lane: Int, destination: RegisterName, address: Long, width: BitWidth, value: Long)
+  case AtomicSharedExchange(lane: Int, destination: RegisterName, address: Long, width: BitWidth, value: Long)
+  case AtomicSharedBinary(
+      lane: Int,
+      destination: RegisterName,
+      address: Long,
+      width: BitWidth,
+      value: Long,
+      operation: IntegerOperation
+  )
   case AtomicSharedMin(lane: Int, destination: RegisterName, address: Long, width: BitWidth, value: Long)
   case AtomicMemoryAdd(
       lane: Int,
@@ -27,6 +36,21 @@ private[v9_3] enum VMStateWrite {
       address: GuestAddress,
       width: BitWidth,
       value: Long
+  )
+  case AtomicMemoryExchange(
+      lane: Int,
+      destination: RegisterName,
+      address: GuestAddress,
+      width: BitWidth,
+      value: Long
+  )
+  case AtomicMemoryBinary(
+      lane: Int,
+      destination: RegisterName,
+      address: GuestAddress,
+      width: BitWidth,
+      value: Long,
+      operation: IntegerOperation
   )
   case AtomicMemoryMin(
       lane: Int,

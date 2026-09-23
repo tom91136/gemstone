@@ -1,7 +1,7 @@
 # Gemstone
 
 Gemstone executes GPU programs on a checked CPU emulator for GPUless testing and debugging. It implements useful
-subsets of PTX, AMDGPU, and SPIR-V behind native CUDA Driver, HIP, HSA, OpenCL, and Level Zero facades. Unsupported
+subsets of PTX, AMDGPU, and SPIR-V behind native CUDA Driver, HIP, HSA, OpenCL, Vulkan, and Level Zero facades. Unsupported
 behaviour fails explicitly; Gemstone never silently delegates to a physical GPU.
 
 ## Layout
@@ -19,8 +19,8 @@ Generated Scala sources and fixtures are checked in under each module's `src/gen
 
 ## Development
 
-The build requires JDK 25, sbt 2, CMake, Ninja, Clang, a C++ compiler, Python 3, and the LZ4 and Zstandard development
-libraries. Building GPU conformance artifacts additionally requires a container engine.
+The build requires JDK 25, sbt 2, CMake, Ninja, Clang, a C++ compiler, Python 3, SPIR-V Tools, and the LZ4 and Zstandard
+development libraries. Building GPU conformance artifacts additionally requires a container engine.
 
 | Command | Purpose |
 | --- | --- |
@@ -50,7 +50,7 @@ use the local pinned-reference cache.
 `gemstoneRun` builds the native runtime and runs a command with selected Gemstone API implementations:
 
 ```console
-sbt 'gemstoneRun [--apis hip,hsa,cuda,opencl,levelzero] -- <command> [argument ...]'
+sbt 'gemstoneRun [--apis hip,hsa,cuda,opencl,vulkan,levelzero] -- <command> [argument ...]'
 ```
 
 The APIs are independently selectable and may coexist. Linux defaults to `hsa,cuda,opencl,levelzero`, allowing a

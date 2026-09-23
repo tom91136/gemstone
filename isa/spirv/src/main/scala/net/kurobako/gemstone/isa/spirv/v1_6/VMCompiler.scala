@@ -56,6 +56,8 @@ private[v1_6] object VMCompiler {
     val types                   = mutable.HashMap.empty[Int, RuntimeType]
     val constants               = mutable.HashMap.empty[Int, Constant]
     val globals                 = mutable.HashMap.empty[Int, Global]
+    val descriptorSets          = mutable.HashMap.empty[Int, Int]
+    val descriptorSlots         = mutable.HashMap.empty[Int, Int]
     val builtins                = mutable.HashMap.empty[Int, Int]
     val arrayStrides            = mutable.HashMap.empty[Int, Int]
     val memberOffsets           = mutable.HashMap.empty[(Int, Int), Int]
@@ -64,6 +66,8 @@ private[v1_6] object VMCompiler {
     val saturatedConversions    = mutable.HashSet.empty[Int]
     val extendedInstructionSets = mutable.HashMap.empty[Int, InstructionSetName]
     val entryPoints             = mutable.HashMap.empty[KernelName, Int]
+    val entryPointInterfaces    = mutable.HashMap.empty[KernelName, Set[Int]]
+    val vulkanEntries           = mutable.HashSet.empty[KernelName]
     val subgroupSizes           = mutable.HashMap.empty[Int, Int]
     val functions               = mutable.HashMap.empty[Int, Function]
     val functionNames           = mutable.HashMap.empty[Int, FunctionName]
@@ -119,6 +123,9 @@ private[v1_6] object VMCompiler {
               )
           }
           types.update(id(dest), RuntimeType.Array(id(element), count))
+        case Instruction.TypeRuntimeArray(dest, element) =>
+          // A zero count marks an unsized descriptor array; accesses use the external allocation's bounds.
+          types.update(id(dest), RuntimeType.Array(id(element), 0L))
         case Instruction.TypeStruct(dest, members) =>
           types.update(id(dest), RuntimeType.Structure(members.map(id(_))))
         case Instruction.TypePointer(dest, storageClass, dataType) =>
@@ -144,6 +151,28 @@ private[v1_6] object VMCompiler {
             case Left(error)  => return Left(error)
             case Right(value) => constants.update(id(dest), value)
           }
+        case Instruction.SpecConstantOp(resultType, dest, instructionOpcode, srcs) =>
+          val operands = srcs.map(unsigned(_))
+          val result   = unsigned(instructionOpcode) match {
+            case 81L if operands.size == 2 =>
+              constants.get(Math.toIntExact(operands(0))).flatMap {
+                case Constant.Bits(_, lanes) if operands(1) < lanes.size => Some(lanes(operands(1).toInt))
+                case _                                                   => None
+              }
+            case 134L if operands.size == 2 =>
+              for {
+                left  <- constants.get(Math.toIntExact(operands(0))).flatMap(scalarBits(_))
+                right <- constants.get(Math.toIntExact(operands(1))).flatMap(scalarBits(_))
+                if right != 0L
+              } yield java.lang.Long.divideUnsigned(left, right)
+            case _ => None
+          }
+          result match {
+            case Some(value) => constants.update(id(dest), Constant.Bits(id(resultType), Vec(value)))
+            case None        => return Left(Fault.Unsupported(
+                s"SPIR-V specialization constant operation ${unsigned(instructionOpcode)} is unsupported"
+              ))
+          }
         case Instruction.ConstantNull(resultType, dest) =>
           zeroValue(types, resultType, dest, "OpConstantNull") match {
             case Left(error)  => return Left(error)
@@ -161,6 +190,10 @@ private[v1_6] object VMCompiler {
           )
         case Instruction.Decorate(target, decoration) if decoration.words.size >= 2 && unsigned(decoration) == 11L =>
           builtins.update(id(target), decoration.words(1).bits)
+        case Instruction.Decorate(target, decoration) if decoration.words.size >= 2 && unsigned(decoration) == 33L =>
+          descriptorSlots.update(id(target), Math.toIntExact(decoration.words(1).toUnsigned))
+        case Instruction.Decorate(target, decoration) if decoration.words.size >= 2 && unsigned(decoration) == 34L =>
+          descriptorSets.update(id(target), Math.toIntExact(decoration.words(1).toUnsigned))
         case Instruction.Decorate(target, decoration) if decoration.words.size >= 2 && unsigned(decoration) == 6L =>
           arrayStrides.update(id(target), Math.toIntExact(decoration.words(1).toUnsigned))
         case Instruction.Decorate(target, decoration) if unsigned(decoration) == 10L =>
@@ -183,14 +216,19 @@ private[v1_6] object VMCompiler {
               return Left(Fault.InvalidTask("SPIR-V extended instruction-set name is empty"))
             case Right(instructionSetName) => extendedInstructionSets.update(id(dest), instructionSetName)
           }
-        case Instruction.EntryPoint(_, entryPoint, name, _) =>
+        case Instruction.EntryPoint(executionModel, entryPoint, name, interfaces) =>
           val decodedName = literalString(name)
           KernelName.either(decodedName) match {
             case Left(_) =>
               return Left(
                 Fault.InvalidTask(s"invalid SPIR-V entry-point name '$decodedName'")
               )
-            case Right(kernelName) => entryPoints.update(kernelName, id(entryPoint))
+            case Right(kernelName) =>
+              entryPoints.update(kernelName, id(entryPoint))
+              entryPointInterfaces.update(kernelName, interfaces.view.map(id).toSet)
+              if (unsigned(executionModel) == 5L) {
+                val _ = vulkanEntries.add(kernelName)
+              }
           }
         case Instruction.ExecutionMode(entryPoint, mode)
             if unsigned(mode) == 35L && mode.words.size >= 2 =>
@@ -233,6 +271,9 @@ private[v1_6] object VMCompiler {
         types = types.toMap,
         constantData = constants.toMap,
         globals = globals.toMap,
+        descriptorBindings = descriptorSlots.view.flatMap { case (variable, slot) =>
+          descriptorSets.get(variable).map(set => variable -> (set -> slot))
+        }.toMap,
         builtins = builtins.toMap,
         arrayStrides = arrayStrides.toMap,
         memberOffsets = memberOffsets.toMap,
@@ -241,6 +282,8 @@ private[v1_6] object VMCompiler {
         saturatedConversions = saturatedConversions.toSet,
         extendedInstructionSets = extendedInstructionSets.toMap,
         entryPoints = entryPoints.toMap,
+        entryPointInterfaces = entryPointInterfaces.toMap,
+        vulkanEntries = vulkanEntries.toSet,
         subgroupSizes = subgroupSizes.toMap,
         functions = definedFunctions,
         functionNames = definedNames,

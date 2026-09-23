@@ -24,7 +24,8 @@ object GenerateAPISurfaces {
       hip: String,
       hsa: String,
       levelZero: String,
-      openCL: String
+      openCL: String,
+      vulkan: String
   )
   private final case class Aliases(entries: Vector[(String, String)]) {
     def get(name: String): Option[String] = entries.collectFirst { case (`name`, definition) => definition }
@@ -56,8 +57,9 @@ object GenerateAPISurfaces {
     Opts.argument[String]("hip-version"),
     Opts.argument[String]("hsa-version"),
     Opts.argument[String]("level-zero-version"),
-    Opts.argument[String]("opencl-version")
-  ).mapN(Request(_, _, _, _, _, _, _, _)))
+    Opts.argument[String]("opencl-version"),
+    Opts.argument[String]("vulkan-version")
+  ).mapN(Request(_, _, _, _, _, _, _, _, _)))
 
   def main(arguments: Array[String]): Unit = CodegenCommand.run(command, arguments)(generate(_))
 
@@ -65,12 +67,13 @@ object GenerateAPISurfaces {
     val manifest = read[GenerateOfficialAPIManifest.Manifest](
       Files.readString(request.manifest, StandardCharsets.UTF_8)
     )
-    val versions = Vector(request.cuda, request.hip, request.hsa, request.levelZero, request.openCL).map { version =>
-      version.refineEither[MinLength[1] & NoNul].fold(
-        message => throw IllegalArgumentException(s"invalid header version: $message"),
-        value => value
-      )
-    }
+    val versions =
+      Vector(request.cuda, request.hip, request.hsa, request.levelZero, request.openCL, request.vulkan).map { version =>
+        version.refineEither[MinLength[1] & NoNul].fold(
+          message => throw IllegalArgumentException(s"invalid header version: $message"),
+          value => value
+        )
+      }
     val targets = Vector(
       Target(
         Vector("cuda-driver", "cuda-runtime"),
@@ -106,6 +109,13 @@ object GenerateAPISurfaces {
         "OpenCL",
         request.sourceRoot.resolve("net/kurobako/gemstone/opencl/OpenCL.scala"),
         Vector("HeaderVersion" -> versions(4))
+      ),
+      Target(
+        Vector("vulkan"),
+        "net.kurobako.gemstone.vulkan",
+        "Vulkan",
+        request.sourceRoot.resolve("net/kurobako/gemstone/vulkan/Vulkan.scala"),
+        Vector("HeaderVersion" -> versions(5))
       )
     )
     val byName: Map[String, GenerateOfficialAPIManifest.Surface] =

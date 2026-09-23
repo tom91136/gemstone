@@ -1,5 +1,5 @@
-#include <fmt/format.h>
 #include "test_support.hpp"
+#include <fmt/format.h>
 
 // Focused port of the former direct-HSA dispatch sample. SPDX-License-Identifier: Apache-2.0
 #include <chrono>

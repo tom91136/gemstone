@@ -14,12 +14,12 @@
 #include <catch2/generators/catch_generators_adapters.hpp>
 #include <catch2/generators/catch_generators_range.hpp>
 
-#include "reference_async.hpp"
-#include "capability_defaults.hpp"
 #include "algorithm_cases.hpp"
 #include "async_cases.hpp"
 #include "blas_cases.hpp"
+#include "capability_defaults.hpp"
 #include "edge_cases.hpp"
+#include "reference_async.hpp"
 #include "stress_cases.hpp"
 #include <magic_enum/magic_enum.hpp>
 
@@ -479,8 +479,7 @@ private:
     const auto compare = [&](size_t left, size_t right) { return keys[left] < keys[right]; };
     if (stable) std::stable_sort(order.begin(), order.end(), compare);
     else std::sort(order.begin(), order.end(), compare);
-    auto [result_keys, result_values] =
-        order ^ map([&](size_t index) { return std::pair{keys[index], values[index]}; }) ^ unzip();
+    auto [result_keys, result_values] = order ^ map([&](size_t index) { return std::pair{keys[index], values[index]}; }) ^ unzip();
     return {std::move(result_keys), std::move(result_values)};
   }
 };

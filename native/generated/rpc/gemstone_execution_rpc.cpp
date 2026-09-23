@@ -19,7 +19,14 @@
 namespace gemstone::execution {
 namespace {
 
-constexpr int SocketTimeoutSeconds = 300;
+int socketTimeoutSeconds() {
+  constexpr int fallback = 300;
+  const char *raw = std::getenv("GEMSTONE_RPC_TIMEOUT_SECONDS");
+  if (!raw || raw[0] == '\0') return fallback;
+  char *end = nullptr; errno = 0; const long value = std::strtol(raw, &end, 10);
+  return errno == 0 && end && *end == '\0' && value > 0 && value <= std::numeric_limits<int>::max()
+             ? static_cast<int>(value) : fallback;
+}
 
 class Writer {
  public:
@@ -261,7 +268,7 @@ class Client::Impl {
     if (::getaddrinfo("127.0.0.1", port, &hints, &addresses) != 0) { error_ = "cannot resolve the Gemstone RPC endpoint"; return false; }
     int connected = -1; for (auto *address = addresses; address != nullptr; address = address->ai_next) { connected = ::socket(address->ai_family, address->ai_socktype, address->ai_protocol); if (connected < 0) continue; if (::connect(connected, address->ai_addr, address->ai_addrlen) == 0) break; ::close(connected); connected = -1; }
     ::freeaddrinfo(addresses); if (connected < 0) { error_ = "cannot connect to the Gemstone RPC endpoint"; return false; }
-    const timeval timeout{SocketTimeoutSeconds, 0}; const int noDelay = 1;
+    const timeval timeout{socketTimeoutSeconds(), 0}; const int noDelay = 1;
     if (::setsockopt(connected, IPPROTO_TCP, TCP_NODELAY, &noDelay, sizeof(noDelay)) != 0 ||
         ::setsockopt(connected, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) != 0 ||
         ::setsockopt(connected, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout)) != 0) {

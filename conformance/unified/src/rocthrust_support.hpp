@@ -5,11 +5,11 @@
 // the operations below are rocThrust overload/iterator forms, rather than
 // another spelling of the already-covered C++ algorithm semantics.
 
-  #if defined(__CUDACC__) || defined(__HIPCC__)
-    #define UNIFIED_ROCTHRUST_HOST_DEVICE __host__ __device__
-  #else
-    #define UNIFIED_ROCTHRUST_HOST_DEVICE
-  #endif
+#if defined(__CUDACC__) || defined(__HIPCC__)
+  #define UNIFIED_ROCTHRUST_HOST_DEVICE __host__ __device__
+#else
+  #define UNIFIED_ROCTHRUST_HOST_DEVICE
+#endif
 
 namespace unified::rocthrust_support {
 template <class T> using Pair = thrust::pair<T, int32_t>;
@@ -224,4 +224,3 @@ template <class T> inline std::vector<Pair<T>> pair_expected(std::vector<Pair<T>
   return result;
 }
 } // namespace unified::rocthrust_support
-

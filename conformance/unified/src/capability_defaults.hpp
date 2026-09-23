@@ -8,7 +8,9 @@ namespace unified::backend {
 // their device/type and inherit the per-operation predicates, overriding only
 // the operations with a narrower condition.
 template <class Derived> struct AlgorithmCapabilities {
-  template <class T> bool supports_adjacent_difference(size_t) const { return static_cast<const Derived *>(this)->template capability<T>(); }
+  template <class T> bool supports_adjacent_difference(size_t) const {
+    return static_cast<const Derived *>(this)->template capability<T>();
+  }
   template <class T> bool supports_all_of(size_t) const { return static_cast<const Derived *>(this)->template capability<T>(); }
   template <class T> bool supports_any_of(size_t) const { return static_cast<const Derived *>(this)->template capability<T>(); }
   template <class T> bool supports_binary_search(size_t) const { return static_cast<const Derived *>(this)->template capability<T>(); }
@@ -20,7 +22,9 @@ template <class Derived> struct AlgorithmCapabilities {
   template <class T> bool supports_equal(size_t) const { return static_cast<const Derived *>(this)->template capability<T>(); }
   template <class T> bool supports_equal_range(size_t) const { return static_cast<const Derived *>(this)->template capability<T>(); }
   template <class T> bool supports_exclusive_scan(size_t) const { return static_cast<const Derived *>(this)->template capability<T>(); }
-  template <class T> bool supports_exclusive_scan_by_key(size_t) const { return static_cast<const Derived *>(this)->template capability<T>(); }
+  template <class T> bool supports_exclusive_scan_by_key(size_t) const {
+    return static_cast<const Derived *>(this)->template capability<T>();
+  }
   template <class T> bool supports_fill(size_t) const { return static_cast<const Derived *>(this)->template capability<T>(); }
   template <class T> bool supports_find(size_t) const { return static_cast<const Derived *>(this)->template capability<T>(); }
   template <class T> bool supports_find_if(size_t) const { return static_cast<const Derived *>(this)->template capability<T>(); }
@@ -30,11 +34,15 @@ template <class Derived> struct AlgorithmCapabilities {
   template <class T> bool supports_includes(size_t) const { return static_cast<const Derived *>(this)->template capability<T>(); }
   template <class T> bool supports_includes_false(size_t) const { return static_cast<const Derived *>(this)->template capability<T>(); }
   template <class T> bool supports_inclusive_scan(size_t) const { return static_cast<const Derived *>(this)->template capability<T>(); }
-  template <class T> bool supports_inclusive_scan_by_key(size_t) const { return static_cast<const Derived *>(this)->template capability<T>(); }
+  template <class T> bool supports_inclusive_scan_by_key(size_t) const {
+    return static_cast<const Derived *>(this)->template capability<T>();
+  }
   template <class T> bool supports_inner_product(size_t) const { return static_cast<const Derived *>(this)->template capability<T>(); }
   template <class T> bool supports_inplace_merge(size_t) const { return static_cast<const Derived *>(this)->template capability<T>(); }
   template <class T> bool supports_is_partitioned(size_t) const { return static_cast<const Derived *>(this)->template capability<T>(); }
-  template <class T> bool supports_is_partitioned_false(size_t) const { return static_cast<const Derived *>(this)->template capability<T>(); }
+  template <class T> bool supports_is_partitioned_false(size_t) const {
+    return static_cast<const Derived *>(this)->template capability<T>();
+  }
   template <class T> bool supports_is_sorted(size_t) const { return static_cast<const Derived *>(this)->template capability<T>(); }
   template <class T> bool supports_is_sorted_false(size_t) const { return static_cast<const Derived *>(this)->template capability<T>(); }
   template <class T> bool supports_is_sorted_until(size_t) const { return static_cast<const Derived *>(this)->template capability<T>(); }
@@ -64,7 +72,9 @@ template <class Derived> struct AlgorithmCapabilities {
   template <class T> bool supports_scatter(size_t) const { return static_cast<const Derived *>(this)->template capability<T>(); }
   template <class T> bool supports_set_difference(size_t) const { return static_cast<const Derived *>(this)->template capability<T>(); }
   template <class T> bool supports_set_intersection(size_t) const { return static_cast<const Derived *>(this)->template capability<T>(); }
-  template <class T> bool supports_set_symmetric_difference(size_t) const { return static_cast<const Derived *>(this)->template capability<T>(); }
+  template <class T> bool supports_set_symmetric_difference(size_t) const {
+    return static_cast<const Derived *>(this)->template capability<T>();
+  }
   template <class T> bool supports_set_union(size_t) const { return static_cast<const Derived *>(this)->template capability<T>(); }
   template <class T> bool supports_shuffle(size_t) const { return static_cast<const Derived *>(this)->template capability<T>(); }
   template <class T> bool supports_sort(size_t) const { return static_cast<const Derived *>(this)->template capability<T>(); }
@@ -75,8 +85,12 @@ template <class Derived> struct AlgorithmCapabilities {
   template <class T> bool supports_stable_sort_by_key(size_t) const { return static_cast<const Derived *>(this)->template capability<T>(); }
   template <class T> bool supports_swap_ranges(size_t) const { return static_cast<const Derived *>(this)->template capability<T>(); }
   template <class T> bool supports_transform_binary(size_t) const { return static_cast<const Derived *>(this)->template capability<T>(); }
-  template <class T> bool supports_transform_exclusive_scan(size_t) const { return static_cast<const Derived *>(this)->template capability<T>(); }
-  template <class T> bool supports_transform_inclusive_scan(size_t) const { return static_cast<const Derived *>(this)->template capability<T>(); }
+  template <class T> bool supports_transform_exclusive_scan(size_t) const {
+    return static_cast<const Derived *>(this)->template capability<T>();
+  }
+  template <class T> bool supports_transform_inclusive_scan(size_t) const {
+    return static_cast<const Derived *>(this)->template capability<T>();
+  }
   template <class T> bool supports_transform_reduce(size_t) const { return static_cast<const Derived *>(this)->template capability<T>(); }
   template <class T> bool supports_transform_unary(size_t) const { return static_cast<const Derived *>(this)->template capability<T>(); }
   template <class T> bool supports_uninitialized_copy(size_t) const { return static_cast<const Derived *>(this)->template capability<T>(); }

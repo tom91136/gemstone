@@ -20,9 +20,49 @@ import java.nio.charset.StandardCharsets
 import java.util.concurrent.Executors
 
 final class AMDGPUArithmeticSuite extends munit.FunSuite with CodeObjectTestSupport {
+  test("gfx1030 SOP2 shift-left-two and add decodes") {
+    assertEquals(
+      VMCompiler.decodeInstruction(Vec[Byte](0x01, 0x02, 0x80.toByte, 0x97.toByte), Target("gfx1030")),
+      Right(Instruction.SBinary(
+        ScalarBinaryOperation.ShiftLeftTwoAndAddU32,
+        0,
+        InstructionSource.Scalar(1),
+        InstructionSource.Scalar(2)
+      ))
+    )
+  }
+
   test("AMDGPU f32 trigonometry consumes turns") {
     assert(math.abs(VMInterpreter.trigF32(VectorConvertOperation.SineF32, 0.25f) - 1.0f) < 1.0e-6f)
     assert(math.abs(VMInterpreter.trigF32(VectorConvertOperation.CosineF32, 0.25f)) < 1.0e-6f)
+  }
+
+  test("division fixup recovers a finite quotient after pre-scale approximation overflows") {
+    val denominator = -java.lang.Float.MAX_VALUE
+    val result      = VMInterpreter.divisionFixupF32(Float.NaN, denominator, 1.0f)
+    assertEquals(result, 1.0f / denominator)
+    assert(!result.isNaN)
+    assertEquals(VMInterpreter.divisionFixupF32(Float.NaN, 0.0f, 1.0f), Float.PositiveInfinity)
+  }
+
+  test("gfx1030 VOP3 bitwise operations decode to their VOP2 semantics") {
+    for (
+      (bytes, operation, destination, left, right) <- Seq(
+        (Vec[Byte](0, 0, 0x1c, 0xd5.toByte, 1, 5, 2, 0), VectorBinaryOperation.Or32, 0, 1, 2),
+        (Vec[Byte](3, 0, 0x1b, 0xd5.toByte, 4, 0x0b, 2, 0), VectorBinaryOperation.And32, 3, 4, 5),
+        (Vec[Byte](6, 0, 0x1d, 0xd5.toByte, 7, 0x11, 2, 0), VectorBinaryOperation.Xor32, 6, 7, 8)
+      )
+    )
+      assertEquals(
+        VMCompiler.decodeInstruction(bytes, Target("gfx1030")),
+        Right(Instruction.VBinary(
+          operation,
+          destination,
+          InstructionSource.VectorRegister(left),
+          InstructionSource.VectorRegister(right),
+          clamp = false
+        ))
+      )
   }
 
   test("gfx1030 VOP3 signed 16-bit median of three lowers") {

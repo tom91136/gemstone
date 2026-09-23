@@ -10,9 +10,9 @@
 #include <stdexcept>
 #include <thread>
 
-#include <fmt/format.h>
-
 #include "conformance/device.hpp"
+
+#include <fmt/format.h>
 
 #if defined(_WIN32)
   #define WIN32_LEAN_AND_MEAN

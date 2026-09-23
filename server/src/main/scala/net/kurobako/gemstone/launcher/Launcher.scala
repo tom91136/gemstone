@@ -53,6 +53,13 @@ object Launcher {
     }
   }
 
+  // Workaround for Scala Native, whose blocking waitFor path spins in a future
+  // wait while the child runs. Polling with a short sleep avoids that spin.
+  private def waitForChild(process: Process): Int = {
+    while (process.isAlive()) Thread.sleep(20L)
+    process.exitValue()
+  }
+
   private given Argument[Set[ComputeAPI]] = Argument.from("apis") { value =>
     parseAPIs(value).toValidatedNel
   }
@@ -100,7 +107,7 @@ object Launcher {
       val launched = launch(options.apis, layout, sys.env, options.serverPort) { environment =>
         val builder = ProcessBuilder((options.executable.value +: options.arguments)*).inheritIO()
         environment.applyTo(builder.environment())
-        Using.resource(RunningProcess(builder.start()))(_.process.waitFor())
+        Using.resource(RunningProcess(builder.start()))(running => waitForChild(running.process))
       }
       launched match {
         case Left(error)   => Console.err.println(s"gemstone: $error"); 86
@@ -142,7 +149,9 @@ object Launcher {
       val preload = ComputeAPI.values.view.filter(apis).collect {
         case api @ (ComputeAPI.CUDA | ComputeAPI.HIP | ComputeAPI.HSA | ComputeAPI.OpenCL) => runtime.library(api)
       }.toVector
-      val directories          = preload.flatMap(path => Option(path.getParent)).distinct
+      val directories = (preload ++ Option.when(apis(ComputeAPI.Vulkan))(runtime.library(ComputeAPI.Vulkan))).flatMap(
+        path => Option(path.getParent)
+      ).distinct
       val inheritedPreload     = inherited.get("LD_PRELOAD").filter(_.nonEmpty).toVector
       val inheritedLibraryPath = inherited.get("LD_LIBRARY_PATH").filter(_.nonEmpty).toVector
       val common               = Map(
@@ -167,8 +176,10 @@ object Launcher {
       if (preload.nonEmpty) dynamic += "LD_PRELOAD" -> (preload.map(path => s"$path") ++ inheritedPreload).mkString(":")
       if (directories.nonEmpty)
         dynamic += "LD_LIBRARY_PATH" -> (directories.map(path => s"$path") ++ inheritedLibraryPath).mkString(":")
-      if (apis(ComputeAPI.OpenCL))
+      if (apis(ComputeAPI.OpenCL)) {
         dynamic += "OCL_ICD_FILENAMES" -> s"${runtime.library(ComputeAPI.OpenCL)}"
+        dynamic += "OCL_ICD_VENDORS"   -> s"${runtime.library(ComputeAPI.OpenCL)}"
+      }
       if (apis(ComputeAPI.LevelZero)) {
         dynamic += "ZE_ENABLE_ALT_DRIVERS"        -> s"${runtime.library(ComputeAPI.LevelZero)}"
         dynamic += "ZE_ENABLE_LOADER_DEBUG_TRACE" -> "0"

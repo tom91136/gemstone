@@ -9,11 +9,10 @@
 #include <utility>
 #include <vector>
 
-#include <fmt/format.h>
-
 #include "conformance/device.hpp"
-#include "device_selector.hpp"
 
+#include "device_selector.hpp"
+#include <fmt/format.h>
 #include <magic_enum/magic_enum.hpp>
 
 #if defined(CONFORMANCE_DEVICE_CUDA)
@@ -127,8 +126,8 @@ hsa_status_t collect_hsa_agent(hsa_agent_t agent, void *data) {
   auto &discovery = *static_cast<HsaDiscovery *>(data);
   const std::string identity(uuid.data());
   discovery.selectors.push_back(identity.starts_with("GPU-") && identity.size() == 20 ? identity : fmt::to_string(discovery.agents.size()));
-  discovery.devices.push_back(
-      make_pci_device(domain, static_cast<uint8_t>((bdf >> 8) & 0xff), static_cast<uint8_t>((bdf >> 3) & 0x1f), static_cast<uint8_t>(bdf & 7)));
+  discovery.devices.push_back(make_pci_device(domain, static_cast<uint8_t>((bdf >> 8) & 0xff), static_cast<uint8_t>((bdf >> 3) & 0x1f),
+                                              static_cast<uint8_t>(bdf & 7)));
   discovery.agents.push_back(agent);
   discovery.descriptions.push_back(
       fmt::format("hsa:{}:{}:{}", name.data(), isas.joined, pci_description(domain, (bdf >> 8) & 0xff, (bdf >> 3) & 0x1f, bdf & 0x7)));
@@ -189,7 +188,7 @@ static DeviceSelection discover_physical_device() {
     visible += fmt::format("{:02x}", static_cast<unsigned>(uuid.bytes[byte]));
   }
   return {make_pci_device(selected.domain, static_cast<uint8_t>(selected.bus), static_cast<uint8_t>(selected.slot),
-                     static_cast<uint8_t>(selected.function)),
+                          static_cast<uint8_t>(selected.function)),
           {{"CUDA_VISIBLE_DEVICES", visible}, {"CUDA_DEVICE_ORDER", "PCI_BUS_ID"}, {"ACC_DEVICE_NUM", "0"}, {"OMP_DEFAULT_DEVICE", "0"}}};
 #elif defined(CONFORMANCE_DEVICE_CUDA)
   int count = 0;
@@ -208,11 +207,10 @@ static DeviceSelection discover_physical_device() {
   if (!targets_architecture(architecture))
     throw std::runtime_error(fmt::format("selected CUDA device {} is incompatible with targeted architecture(s) {}", descriptions[index],
                                          CONFORMANCE_DEVICE_TARGETS));
-  if (cudaSetDevice(static_cast<int>(index)) != cudaSuccess)
-    throw std::runtime_error(fmt::format("cannot select {}", descriptions[index]));
+  if (cudaSetDevice(static_cast<int>(index)) != cudaSuccess) throw std::runtime_error(fmt::format("cannot select {}", descriptions[index]));
   const auto &properties = devices[index];
   return {make_pci_device(static_cast<uint32_t>(properties.pciDomainID), static_cast<uint8_t>(properties.pciBusID),
-                     static_cast<uint8_t>(properties.pciDeviceID), 0),
+                          static_cast<uint8_t>(properties.pciDeviceID), 0),
           {{"CUDA_VISIBLE_DEVICES", fmt::to_string(index)},
            {"CUDA_DEVICE_ORDER", "PCI_BUS_ID"},
            {"ACC_DEVICE_NUM", "0"},
@@ -234,11 +232,10 @@ static DeviceSelection discover_physical_device() {
   if (!targets_architecture(devices[index].gcnArchName))
     throw std::runtime_error(fmt::format("selected HIP device {} is incompatible with targeted architecture(s) {}", descriptions[index],
                                          CONFORMANCE_DEVICE_TARGETS));
-  if (hipSetDevice(static_cast<int>(index)) != hipSuccess)
-    throw std::runtime_error(fmt::format("cannot select {}", descriptions[index]));
+  if (hipSetDevice(static_cast<int>(index)) != hipSuccess) throw std::runtime_error(fmt::format("cannot select {}", descriptions[index]));
   const auto &properties = devices[index];
   const auto physical = make_pci_device(static_cast<uint32_t>(properties.pciDomainID), static_cast<uint8_t>(properties.pciBusID),
-                                   static_cast<uint8_t>(properties.pciDeviceID), 0);
+                                        static_cast<uint8_t>(properties.pciDeviceID), 0);
   static HsaRuntime runtime;
   HsaDiscovery hsa;
   if (hsa_iterate_agents(collect_hsa_agent, &hsa) != HSA_STATUS_SUCCESS) throw std::runtime_error("cannot map HIP device to ROCr");
@@ -358,15 +355,14 @@ static DeviceSelection discover_physical_device() {
   static_assert(sizeof(AmdTopology) == 24);
   if (clGetDeviceInfo(candidate.device, topology_amd, sizeof(topology), &topology, nullptr) == CL_SUCCESS
       && topology.type == topology_type_pcie_amd)
-    return selection(
-        make_pci_device(0, static_cast<uint8_t>(topology.bus), static_cast<uint8_t>(topology.device), static_cast<uint8_t>(topology.function)));
+    return selection(make_pci_device(0, static_cast<uint8_t>(topology.bus), static_cast<uint8_t>(topology.device),
+                                     static_cast<uint8_t>(topology.function)));
   constexpr cl_device_info uuid_khr = 0x106a;
   uint8_t uuid[16]{};
   if (clGetDeviceInfo(candidate.device, uuid_khr, sizeof(uuid), uuid, nullptr) == CL_SUCCESS
       && std::ranges::any_of(uuid, [](uint8_t byte) { return byte != 0; }))
     return selection(make_uuid_device(uuid));
-  return selection(
-      make_registry_device(fmt::format("{}:{}:{}", candidate.description, candidate.platform_index, candidate.device_index)));
+  return selection(make_registry_device(fmt::format("{}:{}:{}", candidate.description, candidate.platform_index, candidate.device_index)));
 #elif defined(CONFORMANCE_DEVICE_SYCL)
   const auto all = sycl::device::get_devices();
   std::map<sycl::backend, size_t> ordinals;
@@ -383,8 +379,7 @@ static DeviceSelection discover_physical_device() {
       throw std::runtime_error("SYCL backend cannot honor a propagated device selector");
     std::string address = "no-pci";
     if (candidate.has(sycl::aspect::ext_intel_pci_address)) address = candidate.get_info<sycl::ext::intel::info::device::pci_address>();
-    descriptions.push_back(fmt::format("sycl:{}:{}:{}:{}:{}", backend_name,
-                                       candidate.get_platform().get_info<sycl::info::platform::name>(),
+    descriptions.push_back(fmt::format("sycl:{}:{}:{}:{}:{}", backend_name, candidate.get_platform().get_info<sycl::info::platform::name>(),
                                        candidate.get_info<sycl::info::device::vendor>(), candidate.get_info<sycl::info::device::name>(),
                                        address));
     filters.push_back(fmt::format("{}:{}", backend_name, ordinal));

@@ -125,6 +125,76 @@ final class ExecutionControlFlowSuite extends munit.FunSuite with ExecutionTestS
     assertEquals(memory.bytes, LittleEndian.toVec(java.lang.Double.doubleToRawLongBits(5.0), ScalarByteWidth(8)))
   }
 
+  test("dispatch executes OpenCL.std fma with one rounding") {
+    val voidType     = operand("IdResult", 1)
+    val f32          = operand("IdResult", 2)
+    val pointerType  = operand("IdResult", 3)
+    val functionType = operand("IdResult", 4)
+    val opencl       = operand("IdResult", 5)
+    val function     = operand("IdResult", 6)
+    val output       = operand("IdResult", 7)
+    val left         = operand("IdResult", 8)
+    val right        = operand("IdResult", 9)
+    val addend       = operand("IdResult", 10)
+    val result       = operand("IdResult", 12)
+    val module       = Module(
+      Header(ISA.version, Word(0), Word(16), Word(0)),
+      Vec(
+        Instruction.ExtInstImport(opencl, stringOperand("OpenCL.std")),
+        Instruction.TypeVoid(voidType),
+        Instruction.TypeFloat(f32, operand("LiteralInteger", 32), None),
+        Instruction.TypePointer(pointerType, operand("StorageClass", 5), f32),
+        Instruction.TypeFunction(functionType, voidType, Vec(pointerType, f32, f32, f32)),
+        Instruction.EntryPoint(operand("ExecutionModel", 6), function, stringOperand("fma"), Vec.empty),
+        Instruction.Function(voidType, function, operand("FunctionControl", 0), functionType),
+        Instruction.FunctionParameter(pointerType, output),
+        Instruction.FunctionParameter(f32, left),
+        Instruction.FunctionParameter(f32, right),
+        Instruction.FunctionParameter(f32, addend),
+        Instruction.Label(operand("IdResult", 11)),
+        Instruction.ExtInst(f32, result, opencl, operand("LiteralExtInstInteger", 26), Vec(left, right, addend)),
+        Instruction.Store(output, result, None),
+        Instruction.Return(),
+        Instruction.FunctionEnd()
+      ),
+      Endianness.Little
+    )
+    val allocation = MemoryRegion(25L)
+    val memory     = ArrayMemory(allocation, 4)
+    val a          = 1.0f + math.pow(2, -23).toFloat
+    val b          = 1.0f - math.pow(2, -23).toFloat
+    val c          = -1.0f
+    val dispatch   = KernelTask
+      .validated(
+        KernelName("fma"),
+        Dimensions.One,
+        Dimensions.One,
+        Vec(
+          KernelTask.Argument.Memory(allocation, 0L),
+          KernelTask.Argument.Scalar(LittleEndian.toVec(
+            java.lang.Float.floatToRawIntBits(a).toLong,
+            ScalarByteWidth(4)
+          )),
+          KernelTask.Argument.Scalar(LittleEndian.toVec(
+            java.lang.Float.floatToRawIntBits(b).toLong,
+            ScalarByteWidth(4)
+          )),
+          KernelTask.Argument.Scalar(LittleEndian.toVec(
+            java.lang.Float.floatToRawIntBits(c).toLong,
+            ScalarByteWidth(4)
+          ))
+        )
+      )
+      .toOption
+      .get
+
+    assertEquals(executeUnchecked(module, dispatch, memory), Right(()))
+    assertEquals(
+      memory.bytes,
+      LittleEndian.toVec(java.lang.Float.floatToRawIntBits(Math.fma(a, b, c)).toLong, ScalarByteWidth(4))
+    )
+  }
+
   test("dispatch executes OpenCL.std native reciprocal") {
     val voidType     = operand("IdResult", 1)
     val f32          = operand("IdResult", 2)

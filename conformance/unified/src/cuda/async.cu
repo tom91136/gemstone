@@ -2,8 +2,8 @@
 #include <catch2/generators/catch_generators_adapters.hpp>
 #include <catch2/generators/catch_generators_range.hpp>
 
-#include "backend_thrust.hpp"
 #include "async_cases.hpp"
+#include "backend_thrust.hpp"
 
 #undef UNIFIED_ASYNC_TYPE
 #undef UNIFIED_ASYNC_NAME

@@ -107,7 +107,10 @@ object GenerateSPIRVISA {
               optionalString(operand, "name"),
               optionalString(operand, "quantifier")
             )
-          }
+          } ++
+            (if (stringField(obj, "opname") == "OpSpecConstantOp")
+               Vector(Operand("LiteralInteger", Some("operands"), Some("*")))
+             else Vector.empty)
         )
       case _ => throw IllegalArgumentException("instruction entry is not an object")
     }.sortBy(_.opcode).refineEither[MinLength[1]].fold(error => throw IllegalArgumentException(error), value => value)

@@ -9,6 +9,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "conformance/device.hpp"
+
 #include "device_selector.hpp"
 
 #if !defined(_WIN32)

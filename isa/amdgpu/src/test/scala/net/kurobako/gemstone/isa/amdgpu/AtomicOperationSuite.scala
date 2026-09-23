@@ -50,8 +50,21 @@ final class AtomicOperationSuite extends munit.FunSuite with CodeObjectTestSuppo
     }
   }
   for {
-    op        <- Seq("add", "cas", "flatcas", "inc")
-    width     <- Seq(32, 64)
+    op <- Seq(
+      "add",
+      "cas",
+      "flatcas",
+      "flatswap",
+      "flatadd",
+      "flatsub",
+      "flatmin",
+      "flatmax",
+      "flatand",
+      "flator",
+      "flatxor",
+      "inc"
+    )
+    width     <- if (op.startsWith("flat") && op != "flatcas" && op != "flatswap") Seq(32) else Seq(32, 64)
     returning <- Seq(false, true)
     groups    <- Seq(1, 5)
     scenario  <- if (op == "inc") Seq("below", "equal", "above", "high")
@@ -78,13 +91,20 @@ final class AtomicOperationSuite extends munit.FunSuite with CodeObjectTestSuppo
     ).toOption.get
     val memory   = Memory(groups, old)
     val expected = (0 until groups).scanLeft(old) { (previous, _) =>
-      if (op == "add") (previous + operand) & mask
+      if (op == "add" || op == "flatadd") (previous + operand) & mask
       else if (op == "inc") { if (java.lang.Long.compareUnsigned(previous, operand) >= 0) 0L else previous + 1 }
+      else if (op == "flatswap") operand & mask
+      else if (op == "flatsub") (previous - operand) & mask
+      else if (op == "flatmin") Math.min(previous, operand)
+      else if (op == "flatmax") Math.max(previous, operand)
+      else if (op == "flatand") previous & operand
+      else if (op == "flator") previous | operand
+      else if (op == "flatxor") previous ^ operand
       else if (previous == 7L) operand else previous
     }
     assertEquals(
       executeKernel(
-        VMCompiler.compile(kernel).toOption.get,
+        VMCompiler.compile(kernel).fold(error => fail(error.message), identity),
         dispatch,
         memory,
         TaskControl.default

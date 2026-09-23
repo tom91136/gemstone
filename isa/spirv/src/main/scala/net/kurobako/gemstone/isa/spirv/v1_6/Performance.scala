@@ -22,10 +22,9 @@ object Performance {
 
   final case class Observation(snapshot: Snapshot) extends Event
 
-  /**
-   * Per-task execution measurements emitted through the VM observer. Group-local counters are written by one worker
-   * thread, so only the cross-thread merge and snapshot take the lock.
-   */
+  /** Per-task execution measurements emitted through the VM observer. Group-local counters are written by one worker
+    * thread, so only the cross-thread merge and snapshot take the lock.
+    */
   private[v1_6] final class Metrics {
     private val lock = ReentrantLock()
     @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
@@ -53,7 +52,7 @@ object Performance {
       if (collective) collectiveDispatchCount = saturatedAdd(collectiveDispatchCount, 1L)
     }
 
-    private[v1_6] def recordInvocation(): Unit = invocationCount = saturatedAdd(invocationCount, 1L)
+    private[v1_6] def recordInvocation(): Unit  = invocationCount = saturatedAdd(invocationCount, 1L)
     private[v1_6] def recordInstruction(): Unit = instructionCount = saturatedAdd(instructionCount, 1L)
 
     private[v1_6] def recordInvocationValues(

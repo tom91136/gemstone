@@ -3,6 +3,5 @@
 #include <catch2/generators/catch_generators_range.hpp>
 
 #include "backend_blas.hpp"
-#include <magic_enum/magic_enum.hpp>
-
 #include "cases/blas.inl"
+#include <magic_enum/magic_enum.hpp>

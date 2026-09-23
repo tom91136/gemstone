@@ -61,6 +61,10 @@ public:
     uint64_t size;
     std::vector<uint32_t> pointerOffsets;
   };
+  struct ExpectedAllocationArgument {
+    size_t alias;
+    uint64_t offset;
+  };
   RpcFixture() {
     listener_ = socket(AF_INET, SOCK_STREAM, 0);
     GEMSTONE_RPC_REQUIRE(listener_ >= 0);
@@ -126,6 +130,14 @@ public:
     std::lock_guard lock(stateMutex_);
     trailingArguments_ = std::move(bytes);
   }
+  void expectAllocationArguments(std::vector<ExpectedAllocationArgument> arguments) {
+    std::lock_guard lock(stateMutex_);
+    allocationArguments_ = std::move(arguments);
+  }
+  void writeAllocationArgument(size_t argument, uint64_t offset, std::vector<uint8_t> bytes) {
+    std::lock_guard lock(stateMutex_);
+    allocationArgumentWrite_ = AllocationArgumentWrite{argument, offset, std::move(bytes)};
+  }
   void kernelMetadata(uint32_t argumentBlockSize, uint32_t explicitParameterCount, std::vector<KernelParameter> parameters) {
     std::lock_guard lock(stateMutex_);
     GEMSTONE_RPC_REQUIRE(explicitParameterCount <= parameters.size());
@@ -149,6 +161,21 @@ public:
         std::find_if(allocationAddresses_.begin(), allocationAddresses_.end(), [&](const auto &entry) { return entry.second == address; });
     GEMSTONE_RPC_REQUIRE((found != allocationAddresses_.end()) == present);
   }
+  void checkAllocationContainingAddress(const void *pointer, bool present = true) {
+    std::lock_guard lock(stateMutex_);
+    const auto address = reinterpret_cast<uint64_t>(pointer);
+    const auto found = std::find_if(allocationAddresses_.begin(), allocationAddresses_.end(), [&](const auto &entry) {
+      const auto size = allocations_.at(entry.first).size();
+      return address >= entry.second && address - entry.second < size;
+    });
+    GEMSTONE_RPC_REQUIRE((found != allocationAddresses_.end()) == present);
+  }
+  void pauseReleaseContaining(const void *pointer) {
+    releaseEntered_ = false;
+    pauseReleaseAddress_ = reinterpret_cast<uint64_t>(pointer);
+  }
+  bool releaseEntered() const { return releaseEntered_.load(); }
+  void releasePausedRelease() { pauseReleaseAddress_ = 0; }
   void checkAllocationWord(const void *base, size_t offset, uint64_t expected) {
     std::lock_guard lock(stateMutex_);
     const auto found = std::find_if(allocationAddresses_.begin(), allocationAddresses_.end(),
@@ -181,6 +208,12 @@ public:
     GEMSTONE_RPC_REQUIRE(!active_ && launches_ > 0 && awaited_ == launches_);
   }
   void failNextCompletion() { failCompletion_ = true; }
+  void pauseNextCompletion() {
+    completionEntered_ = false;
+    pauseCompletion_ = true;
+  }
+  bool completionEntered() const { return completionEntered_.load(); }
+  void releasePausedCompletion() { pauseCompletion_ = false; }
   unsigned launches() const { return launches_.load(); }
   unsigned programLoads() const { return programLoads_.load(); }
 
@@ -298,10 +331,20 @@ private:
           wire::appendBigEndian<uint64_t>(result, id);
           break;
         }
-        case operation::ReleaseAllocation:
-          GEMSTONE_RPC_REQUIRE(allocations_.erase(wire::readBigEndian<uint64_t>(payload.data())) == 1);
-          allocationAddresses_.erase(wire::readBigEndian<uint64_t>(payload.data()));
+        case operation::ReleaseAllocation: {
+          const auto id = wire::readBigEndian<uint64_t>(payload.data());
+          const auto address = pauseReleaseAddress_.load();
+          const auto alias = allocationAddresses_.find(id);
+          if (address != 0 && alias != allocationAddresses_.end() && address >= alias->second
+              && address - alias->second < allocations_.at(id).size()) {
+            releaseEntered_ = true;
+            while (pauseReleaseAddress_.load() != 0 && !stopped_.load())
+              std::this_thread::yield();
+          }
+          GEMSTONE_RPC_REQUIRE(allocations_.erase(id) == 1);
+          allocationAddresses_.erase(id);
           break;
+        }
         case operation::RegisterAllocationAddress: {
           GEMSTONE_RPC_REQUIRE(size == 16);
           const auto id = wire::readBigEndian<uint64_t>(payload.data()), base = wire::readBigEndian<uint64_t>(payload.data() + 8);
@@ -404,6 +447,11 @@ private:
           break;
         case operation::AwaitCompletion:
           GEMSTONE_RPC_REQUIRE(wire::readBigEndian<uint64_t>(payload.data()) == completion_);
+          if (pauseCompletion_.load()) {
+            completionEntered_ = true;
+            while (pauseCompletion_.load() && !stopped_.load())
+              std::this_thread::yield();
+          }
           ++awaited_;
           completed_ = true;
           failed = failCompletion_.exchange(false);
@@ -511,6 +559,40 @@ private:
     take();
     take();
     const auto argumentCount = take();
+    if (allocationArguments_) {
+      GEMSTONE_RPC_REQUIRE(argumentCount == allocationArguments_->size());
+      std::map<size_t, uint64_t> aliases;
+      std::vector<std::pair<uint64_t, uint64_t>> actual;
+      for (const auto &expected : *allocationArguments_) {
+        GEMSTONE_RPC_REQUIRE(wire::readBigEndian<uint64_t>(payload.data() + cursor) == tag::KernelArgumentAllocation);
+        cursor += 8;
+        const auto id = wire::readBigEndian<uint64_t>(payload.data() + cursor);
+        cursor += 8;
+        const auto offset = wire::readBigEndian<uint64_t>(payload.data() + cursor);
+        cursor += 8;
+        const auto [alias, inserted] = aliases.emplace(expected.alias, id);
+        GEMSTONE_RPC_REQUIRE((inserted || alias->second == id) && offset == expected.offset);
+        actual.emplace_back(id, offset);
+      }
+      const auto relocationCount = take();
+      GEMSTONE_RPC_REQUIRE(relocationCount == 0 && cursor == payload.size());
+      if (allocationArgumentWrite_) {
+        GEMSTONE_RPC_REQUIRE(allocationArgumentWrite_->argument < actual.size());
+        const auto [id, base] = actual[allocationArgumentWrite_->argument];
+        auto &bytes = allocations_.at(id);
+        const auto offset = base + allocationArgumentWrite_->offset;
+        GEMSTONE_RPC_REQUIRE(offset <= bytes.size() && allocationArgumentWrite_->bytes.size() <= bytes.size() - offset);
+        std::copy(allocationArgumentWrite_->bytes.begin(), allocationArgumentWrite_->bytes.end(), bytes.begin() + offset);
+      }
+      outputId_ = actual.empty() ? 0 : actual.front().first;
+      ranges_.clear();
+      ++completion_;
+      ++launches_;
+      polls_ = 0;
+      active_ = true;
+      completed_ = false;
+      return;
+    }
     GEMSTONE_RPC_REQUIRE(argumentCount >= 2);
     GEMSTONE_RPC_REQUIRE(wire::readBigEndian<uint64_t>(payload.data() + cursor) == tag::KernelArgumentAllocation);
     cursor += 8;
@@ -589,6 +671,13 @@ private:
   std::vector<std::thread> workers_;
   Expected expected_{};
   std::optional<std::vector<uint8_t>> trailingArguments_;
+  struct AllocationArgumentWrite {
+    size_t argument;
+    uint64_t offset;
+    std::vector<uint8_t> bytes;
+  };
+  std::optional<std::vector<ExpectedAllocationArgument>> allocationArguments_;
+  std::optional<AllocationArgumentWrite> allocationArgumentWrite_;
   uint32_t kernelArgumentBlockSize_ = 12;
   uint32_t kernelExplicitParameterCount_ = 2;
   std::vector<KernelParameter> kernelParameters_{{8, 0, 2, 0}, {4, 8, 1, 0}};
@@ -607,6 +696,9 @@ private:
   std::map<std::string, std::pair<uint64_t, std::vector<uint8_t>>> expectedGlobals_;
   std::vector<std::pair<uint64_t, uint32_t>> ranges_;
   std::atomic_bool failCompletion_{false};
+  std::atomic_bool pauseCompletion_{false}, completionEntered_{false};
+  std::atomic_uint64_t pauseReleaseAddress_{0};
+  std::atomic_bool releaseEntered_{false};
   uint64_t nextAllocation_ = 1, outputId_ = 0, completion_ = 100;
   uint32_t polls_ = 0;
   std::atomic<unsigned> launches_{0}, pending_{0}, awaited_{0}, programLoads_{0};

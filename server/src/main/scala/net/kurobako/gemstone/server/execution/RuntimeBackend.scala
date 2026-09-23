@@ -69,6 +69,7 @@ object RuntimeBackend {
   val defaults: List[RuntimeBackend] = List(
     PTXRuntimeBackend,
     HSARuntimeBackend,
-    SPIRVRuntimeBackend(Validation.Environment.OpenCLCompute)
+    SPIRVRuntimeBackend(Validation.Environment.OpenCLCompute),
+    SPIRVRuntimeBackend(Validation.Environment.VulkanCompute, "spirv-vulkan-binary")
   )
 }

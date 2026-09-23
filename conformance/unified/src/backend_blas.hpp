@@ -1,8 +1,8 @@
 #pragma once
 
-#include <fmt/format.h>
-#include "test_support.hpp"
 #include "blas_cases.hpp"
+#include "test_support.hpp"
+#include <fmt/format.h>
 
 #if defined(UNIFIED_API_CUDA)
 

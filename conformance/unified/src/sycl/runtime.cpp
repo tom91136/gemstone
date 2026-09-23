@@ -4,8 +4,8 @@
 #include <catch2/catch_test_macros.hpp>
 #include <sycl/sycl.hpp>
 
-#include <fmt/format.h>
 #include "test_support.hpp"
+#include <fmt/format.h>
 
 TEST_CASE("edge-cases/runtime/sycl/accessor-local-barrier/i32/n128", "[unified][runtime][compact]") {
   constexpr size_t size = 128, local = 32;

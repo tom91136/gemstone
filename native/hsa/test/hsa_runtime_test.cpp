@@ -21,6 +21,55 @@
 #include "../../rpc/test/rpc_fixture.hpp"
 #include "code_object_fixture.hpp"
 
+TEST_CASE("HSA system paging ISA feature", "[hsa]") {
+  gemstone_test::RpcFixture fixture;
+  const auto port = std::to_string(fixture.port());
+  REQUIRE((setenv("GEMSTONE_RPC_PORT", port.c_str(), 1) == 0));
+  REQUIRE((setenv("GEMSTONE_RPC_CLIENT", "42", 1) == 0));
+  REQUIRE((setenv("GEMSTONE_HSA_SYSTEM_PAGING", "1", 1) == 0));
+  REQUIRE((hsa_init() == HSA_STATUS_SUCCESS));
+  hsa_agent_t gpu{};
+  REQUIRE((hsa_iterate_agents(
+               [](hsa_agent_t agent, void *data) {
+                 hsa_device_type_t type{};
+                 if (hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &type) != HSA_STATUS_SUCCESS) return HSA_STATUS_ERROR;
+                 if (type == HSA_DEVICE_TYPE_GPU) *static_cast<hsa_agent_t *>(data) = agent;
+                 return HSA_STATUS_SUCCESS;
+               },
+               &gpu)
+           == HSA_STATUS_SUCCESS));
+  REQUIRE((gpu.handle != 0));
+  hsa_isa_t isa{};
+  REQUIRE((hsa_agent_iterate_isas(
+               gpu,
+               [](hsa_isa_t value, void *data) {
+                 *static_cast<hsa_isa_t *>(data) = value;
+                 return HSA_STATUS_SUCCESS;
+               },
+               &isa)
+           == HSA_STATUS_SUCCESS));
+  uint32_t length = 0;
+  REQUIRE((hsa_isa_get_info_alt(isa, HSA_ISA_INFO_NAME_LENGTH, &length) == HSA_STATUS_SUCCESS));
+  std::string name(length, '\0');
+  REQUIRE((hsa_isa_get_info_alt(isa, HSA_ISA_INFO_NAME, name.data()) == HSA_STATUS_SUCCESS));
+  REQUIRE((name.find("xnack+") != std::string::npos));
+  std::array<uint32_t, 2> host_values{41, 43};
+  void *agent_pointer = nullptr;
+  REQUIRE((hsa_amd_memory_lock(host_values.data(), sizeof(host_values), nullptr, 0, &agent_pointer) == HSA_STATUS_SUCCESS));
+  REQUIRE((agent_pointer == host_values.data()));
+  void *second_agent_pointer = nullptr;
+  REQUIRE((hsa_amd_memory_lock(host_values.data(), sizeof(host_values), nullptr, 0, &second_agent_pointer) == HSA_STATUS_SUCCESS));
+  REQUIRE((second_agent_pointer == host_values.data()));
+  hsa_amd_pointer_info_t info{};
+  info.size = sizeof(info);
+  REQUIRE((hsa_amd_pointer_info(host_values.data(), &info, nullptr, nullptr, nullptr) == HSA_STATUS_SUCCESS));
+  REQUIRE((info.type == HSA_EXT_POINTER_TYPE_UNKNOWN));
+  REQUIRE((hsa_amd_memory_unlock(host_values.data()) == HSA_STATUS_SUCCESS));
+  REQUIRE((hsa_amd_memory_unlock(host_values.data()) == HSA_STATUS_SUCCESS));
+  REQUIRE((hsa_shut_down() == HSA_STATUS_SUCCESS));
+  unsetenv("GEMSTONE_HSA_SYSTEM_PAGING");
+}
+
 TEST_CASE("HSA runtime facade", "[hsa]") {
   // The public provider must fail closed when no identified Gemstone
   // execution endpoint is configured; it must not fall back to a physical
@@ -58,6 +107,8 @@ TEST_CASE("HSA runtime facade", "[hsa]") {
   REQUIRE((setenv("GEMSTONE_RPC_CLIENT", "42", 1) == 0));
   REQUIRE((hsa_init() == HSA_STATUS_SUCCESS));
   REQUIRE((hsa_init() == HSA_STATUS_SUCCESS));
+  // A kernel with no explicit or implicit arguments has no kernarg allocation.
+  REQUIRE((hsa_memory_free(nullptr) == HSA_STATUS_SUCCESS));
   REQUIRE((hsa_shut_down() == HSA_STATUS_SUCCESS));
   REQUIRE((hsa_system_get_info(HSA_SYSTEM_INFO_VERSION_MAJOR, &version_major) == HSA_STATUS_SUCCESS));
   REQUIRE(
@@ -80,6 +131,11 @@ TEST_CASE("HSA runtime facade", "[hsa]") {
     if (type == HSA_DEVICE_TYPE_GPU) gpu = agent;
   }
   REQUIRE((gpu.handle != 0));
+  hsa_queue_t *single_queue = nullptr;
+  REQUIRE(
+      (hsa_queue_create(gpu, 64, HSA_QUEUE_TYPE_SINGLE, nullptr, nullptr, UINT32_MAX, UINT32_MAX, &single_queue) == HSA_STATUS_SUCCESS));
+  REQUIRE((single_queue->type == HSA_QUEUE_TYPE_SINGLE));
+  REQUIRE((hsa_queue_destroy(single_queue) == HSA_STATUS_SUCCESS));
   hsa_profile_t profile{};
   REQUIRE((hsa_agent_get_info(gpu, HSA_AGENT_INFO_PROFILE, &profile) == HSA_STATUS_SUCCESS));
   REQUIRE((profile == HSA_PROFILE_BASE));
@@ -147,6 +203,9 @@ TEST_CASE("HSA runtime facade", "[hsa]") {
       REQUIRE((hsa_amd_memory_pool_allocate(pool, 64, 0, &allocation) == HSA_STATUS_ERROR_INVALID_ALLOCATION));
     } else {
       REQUIRE((segment == HSA_AMD_SEGMENT_GLOBAL));
+      bool accessible_by_all = true;
+      REQUIRE((hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_ACCESSIBLE_BY_ALL, &accessible_by_all) == HSA_STATUS_SUCCESS));
+      REQUIRE((!accessible_by_all));
       REQUIRE(
           (hsa_amd_memory_pool_allocate(pool, 64, HSA_AMD_MEMORY_POOL_CONTIGUOUS_FLAG, &allocation) == HSA_STATUS_ERROR_INVALID_ARGUMENT));
       REQUIRE((hsa_amd_memory_pool_allocate(pool, 64, HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG, &allocation) == HSA_STATUS_SUCCESS));
@@ -252,6 +311,86 @@ TEST_CASE("HSA runtime facade", "[hsa]") {
   for (uint32_t index = 0; index < 12; ++index)
     REQUIRE((static_cast<uint32_t *>(output)[index] == 37 + index));
   fixture.check();
+  // A device-to-host copy submitted while a dispatch is still running must
+  // observe that dispatch's writes. The mock server pauses completion so the
+  // ordering is deterministic even on a fast machine.
+  fixture.pauseNextCompletion();
+  *arguments = Arguments{output, 73};
+  fixture.expect({4, 3, 12, 0, arguments->seed});
+  packet = static_cast<hsa_kernel_dispatch_packet_t *>(queue->base_address) + 1;
+  std::memset(packet, 0, sizeof(*packet));
+  packet->setup = 1;
+  packet->workgroup_size_x = 4;
+  packet->workgroup_size_y = packet->workgroup_size_z = 1;
+  packet->grid_size_x = 12;
+  packet->grid_size_y = packet->grid_size_z = 1;
+  packet->kernel_object = object;
+  packet->kernarg_address = arguments;
+  __atomic_store_n(&packet->header, uint16_t(HSA_PACKET_TYPE_KERNEL_DISPATCH), __ATOMIC_RELEASE);
+  hsa_queue_store_write_index_screlease(queue, 2);
+  hsa_signal_store_screlease(queue->doorbell_signal, 1);
+  const auto entered_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+  while (!fixture.completionEntered() && std::chrono::steady_clock::now() < entered_deadline)
+    std::this_thread::yield();
+  REQUIRE((fixture.completionEntered()));
+  std::array<uint32_t, 12> copied{};
+  hsa_signal_t copy_signal{};
+  REQUIRE((hsa_signal_create(1, 0, nullptr, &copy_signal) == HSA_STATUS_SUCCESS));
+  std::atomic_bool copy_finished{false};
+  hsa_status_t copy_status = HSA_STATUS_ERROR;
+  std::thread copying([&] {
+    copy_status = hsa_amd_memory_async_copy(copied.data(), agents.front(), output, gpu, sizeof(copied), 0, nullptr, copy_signal);
+    copy_finished = true;
+  });
+  std::this_thread::sleep_for(std::chrono::milliseconds(20));
+  const bool copied_before_dispatch = copy_finished.load();
+  fixture.releasePausedCompletion();
+  copying.join();
+  REQUIRE((!copied_before_dispatch));
+  REQUIRE((copy_status == HSA_STATUS_SUCCESS));
+  REQUIRE((hsa_signal_load_scacquire(copy_signal) == 0));
+  for (uint32_t index = 0; index < copied.size(); ++index)
+    REQUIRE((copied[index] == 73 + index));
+  REQUIRE((hsa_signal_destroy(copy_signal) == HSA_STATUS_SUCCESS));
+  fixture.check();
+  REQUIRE((setenv("GEMSTONE_HSA_SYSTEM_PAGING", "1", 1) == 0));
+  for (uint32_t seed = 1; seed <= 16; ++seed) {
+    std::array<uint32_t, 12> pageable_output{};
+    if (seed == 1) fixture.pauseReleaseContaining(pageable_output.data());
+    *arguments = Arguments{pageable_output.data(), seed};
+    hsa_signal_t completion{};
+    REQUIRE((hsa_signal_create(1, 0, nullptr, &completion) == HSA_STATUS_SUCCESS));
+    fixture.expect({4, 3, 12, 0, seed});
+    const uint64_t index = hsa_queue_load_write_index_relaxed(queue);
+    packet = static_cast<hsa_kernel_dispatch_packet_t *>(queue->base_address) + (index & (queue->size - 1));
+    std::memset(packet, 0, sizeof(*packet));
+    packet->setup = 1;
+    packet->workgroup_size_x = 4;
+    packet->workgroup_size_y = packet->workgroup_size_z = 1;
+    packet->grid_size_x = 12;
+    packet->grid_size_y = packet->grid_size_z = 1;
+    packet->kernel_object = object;
+    packet->kernarg_address = arguments;
+    packet->completion_signal = completion;
+    __atomic_store_n(&packet->header, uint16_t(HSA_PACKET_TYPE_KERNEL_DISPATCH), __ATOMIC_RELEASE);
+    hsa_queue_store_write_index_screlease(queue, index + 1);
+    hsa_signal_store_screlease(queue->doorbell_signal, static_cast<hsa_signal_value_t>(index));
+    if (seed == 1) {
+      const auto release_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+      while (!fixture.releaseEntered() && std::chrono::steady_clock::now() < release_deadline)
+        std::this_thread::yield();
+      REQUIRE((fixture.releaseEntered()));
+      REQUIRE((hsa_signal_load_scacquire(completion) == 1));
+      fixture.releasePausedRelease();
+    }
+    REQUIRE((hsa_signal_wait_scacquire(completion, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_BLOCKED) == 0));
+    for (uint32_t output_index = 0; output_index < pageable_output.size(); ++output_index)
+      REQUIRE((pageable_output[output_index] == seed + output_index));
+    fixture.checkAllocationContainingAddress(pageable_output.data(), false);
+    REQUIRE((hsa_signal_destroy(completion) == HSA_STATUS_SUCCESS));
+    fixture.check();
+  }
+  REQUIRE((unsetenv("GEMSTONE_HSA_SYSTEM_PAGING") == 0));
   REQUIRE((hsa_queue_destroy(queue) == HSA_STATUS_SUCCESS));
   REQUIRE((hsa_amd_memory_pool_free(output) == HSA_STATUS_SUCCESS));
   REQUIRE((hsa_amd_memory_pool_free(argument_memory) == HSA_STATUS_SUCCESS));

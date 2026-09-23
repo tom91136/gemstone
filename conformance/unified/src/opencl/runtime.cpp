@@ -1,5 +1,5 @@
-#include <fmt/format.h>
 #include "test_support.hpp"
+#include <fmt/format.h>
 
 #define CL_TARGET_OPENCL_VERSION 120
 #include <cstddef>
