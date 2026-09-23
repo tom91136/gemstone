@@ -1,5 +1,5 @@
 if(NOT DEFINED CONFORMANCE_BACKENDS)
-  set(CONFORMANCE_BACKENDS cuda hip hsa opencl sycl)
+  set(CONFORMANCE_BACKENDS cuda hip hsa opencl sycl levelzero)
 endif()
 if(NOT DEFINED CUDA_ARCHITECTURES)
   set(CUDA_ARCHITECTURES sm_89)

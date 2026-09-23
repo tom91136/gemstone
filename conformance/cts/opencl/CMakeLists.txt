@@ -4,9 +4,9 @@ find_program(opencl_cts_spirv_as spirv-as REQUIRED)
 # Keep the catalogue useful without compiling the multi-day numerical, image,
 # vector, and exhaustive conversion categories.
 set(opencl_cts_categories
-  api basic compiler computeinfo events contractions device_partition
+  api atomics basic buffers c11_atomics commonfns compiler computeinfo events contractions device_partition
   device_timer generic_address_space geometrics mem_host_flags multiples
-  non_uniform_work_group pipes printf profiling thread_dimensions workgroups)
+  non_uniform_work_group pipes printf profiling relationals spirv_new subgroups svm thread_dimensions workgroups)
 conformance_fetch_url(opencl_cts opencl_cts_source)
 conformance_fetch_url(opencl_opencl_headers opencl_headers)
 conformance_fetch_url(opencl_spirv_headers spirv_headers)
@@ -49,6 +49,34 @@ endif()
 string(REPLACE "${image_dimensions_before}" "${image_dimensions_after}"
   image_dimensions_content "${image_dimensions_content}")
 file(WRITE "${image_dimensions}" "${image_dimensions_content}")
+
+# These SVM linked-list cases multiply the harness element count by 32 nodes.
+# Keep the reduced CTS run within the RPC service's per-collection envelope.
+foreach(svm_source IN ITEMS
+    test_cross_buffer_pointers.cpp test_shared_address_space_coarse_grain.cpp
+    test_shared_address_space_fine_grain.cpp test_shared_address_space_fine_grain_buffers.cpp
+    test_shared_sub_buffers.cpp)
+  set(svm_file "${staged_source}/test_conformance/SVM/${svm_source}")
+  file(READ "${svm_file}" svm_content)
+  set(before [[#include "common.h"]])
+  string(FIND "${svm_content}" "${before}" svm_include_point)
+  if(svm_include_point EQUAL -1)
+    message(FATAL_ERROR "Pinned OpenCL CTS SVM include integration point changed in ${svm_source}")
+  endif()
+  string(REPLACE "${before}" "#include \"common.h\"\n#include \"harness/parseParameters.h\"" svm_content "${svm_content}")
+  set(before [[size_t numLists = num_elements;]])
+  set(after [[size_t numLists = gWimpyMode ? std::min<size_t>(num_elements, 256) : num_elements;]])
+  string(FIND "${svm_content}" "${before}" svm_count_point)
+  if(svm_count_point EQUAL -1)
+    set(before [[size_t numLists =  num_elements;]])
+    string(FIND "${svm_content}" "${before}" svm_count_point)
+  endif()
+  if(svm_count_point EQUAL -1)
+    message(FATAL_ERROR "Pinned OpenCL CTS SVM count integration point changed in ${svm_source}")
+  endif()
+  string(REPLACE "${before}" "${after}" svm_content "${svm_content}")
+  file(WRITE "${svm_file}" "${svm_content}")
+endforeach()
 
 set(common "${staged_source}/test_conformance/CMakeCommon.txt")
 file(READ "${common}" common_content)
@@ -95,6 +123,7 @@ foreach(category IN LISTS opencl_cts_categories)
 endforeach()
 
 install(DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/build/test_conformance/compiler/spirv_bin"
+  "${CMAKE_CURRENT_BINARY_DIR}/build/test_conformance/spirv_new/spirv_bin"
   "${staged_source}/test_conformance/compiler/includeTestDirectory"
   "${staged_source}/test_conformance/compiler/secondIncludeTestDirectory"
   DESTINATION data COMPONENT support OPTIONAL)

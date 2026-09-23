@@ -112,15 +112,26 @@ function(conformance_verify_relocation artifact support)
   file(STRINGS "${relocated_artifact}/test-programs.txt" programs)
   foreach(entry IN LISTS programs)
     string(REGEX REPLACE "\t.*$" "" program "${entry}")
-    execute_process(COMMAND "${CMAKE_COMMAND}" -E env ${runtime_environment}
-      "${relocated_artifact}/${program}${CMAKE_EXECUTABLE_SUFFIX}" --list-tests --reporter json
-      RESULT_VARIABLE status OUTPUT_VARIABLE probe_output ERROR_VARIABLE probe_error)
+    if(program MATCHES "^levelzero_cts_")
+      execute_process(COMMAND "${CMAKE_COMMAND}" -E env ${runtime_environment}
+        "${relocated_artifact}/${program}${CMAKE_EXECUTABLE_SUFFIX}" --gtest_list_tests
+        RESULT_VARIABLE status OUTPUT_VARIABLE probe_output ERROR_VARIABLE probe_error)
+    else()
+      execute_process(COMMAND "${CMAKE_COMMAND}" -E env ${runtime_environment}
+        "${relocated_artifact}/${program}${CMAKE_EXECUTABLE_SUFFIX}" --list-tests --reporter json
+        RESULT_VARIABLE status OUTPUT_VARIABLE probe_output ERROR_VARIABLE probe_error)
+    endif()
     if(NOT status EQUAL 0)
       file(REMOVE_RECURSE "${relocated_root}")
       message(FATAL_ERROR
         "relocated conformance program ${program} cannot discover tests:\n${probe_output}${probe_error}")
     endif()
-    if(NOT probe_output MATCHES "\"tests\"")
+    if(program MATCHES "^levelzero_cts_")
+      if(NOT probe_output MATCHES "\n[ \t]+[A-Za-z_]")
+        file(REMOVE_RECURSE "${relocated_root}")
+        message(FATAL_ERROR "relocated conformance program ${program} discovered no Google Test cases")
+      endif()
+    elseif(NOT probe_output MATCHES "\"tests\"")
       file(REMOVE_RECURSE "${relocated_root}")
       message(FATAL_ERROR "relocated conformance program ${program} discovered no tests")
     endif()

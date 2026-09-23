@@ -1,10 +1,10 @@
 # These categories are comparatively small and cover fundamental runtime
 # objects. Generated type matrices and exhaustive upstream mode are omitted.
 set(sycl_cts_categories
-  item range bit_cast context device device_event device_selector error event
-  exception_handling function_objects group h_item id is_device_copyable
-  kernel kernel_args language namespace nd_item nd_range platform pointers
-  property queue sub_group)
+  item range accessor_basic atomic_fence bit_cast buffer context device device_event device_selector error event
+  exception_handling function_objects group h_item handler id is_device_copyable
+  host_accessor kernel kernel_args language local_accessor namespace nd_item nd_range platform pointers
+  property queue sub_group sycl_external usm)
 
 find_program(sycl_compiler NAMES icpx clang++ REQUIRED)
 if(NOT "${CMAKE_CXX_COMPILER}" STREQUAL "${sycl_compiler}")
@@ -57,6 +57,31 @@ if(integration_point EQUAL -1)
 endif()
 string(REPLACE "${previous}" "${current}" queue_properties_content "${queue_properties_content}")
 file(WRITE "${queue_properties}" "${queue_properties_content}")
+
+# The pinned buffer tests have the same invalid relative include.
+set(buffer_api "${staged_source}/tests/buffer/buffer_api_common.h")
+file(READ "${buffer_api}" buffer_api_content)
+set(previous [[#include "../../../util/sycl_exceptions.h"]])
+set(current [[#include "../../util/sycl_exceptions.h"]])
+string(FIND "${buffer_api_content}" "${previous}" integration_point)
+if(integration_point EQUAL -1)
+  message(FATAL_ERROR "Pinned SYCL CTS buffer API integration point changed")
+endif()
+string(REPLACE "${previous}" "${current}" buffer_api_content "${buffer_api_content}")
+file(WRITE "${buffer_api}" "${buffer_api_content}")
+
+# The pinned USM CTS repeats the atomic64 case name for the core type case.
+# Catch2 can execute both, but the conformance inventory requires unique names.
+set(usm_atomic_core "${staged_source}/tests/usm/usm_atomic_access_core.cpp")
+file(READ "${usm_atomic_core}" usm_atomic_core_content)
+set(previous [[TEST_CASE("Tests for usm atomics with atomic64 support", "[usm][atomic]")]])
+set(current [[TEST_CASE("Tests for usm atomics with core types", "[usm][atomic]")]])
+string(FIND "${usm_atomic_core_content}" "${previous}" integration_point)
+if(integration_point EQUAL -1)
+  message(FATAL_ERROR "Pinned SYCL CTS USM atomic case integration point changed")
+endif()
+string(REPLACE "${previous}" "${current}" usm_atomic_core_content "${usm_atomic_core_content}")
+file(WRITE "${usm_atomic_core}" "${usm_atomic_core_content}")
 
 set(adapter "${staged_source}/cmake/AdaptDPCPP.cmake")
 file(READ "${adapter}" adapter_content)

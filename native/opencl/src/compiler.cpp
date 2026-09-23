@@ -10,6 +10,7 @@
 #include <limits>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -169,8 +170,44 @@ std::string bitcodeLinkerPath() {
   return "/opt/intel/oneapi/compiler/2026.1/bin/compiler/llvm-link";
 }
 
+std::vector<std::string> vectorBuiltinPointers(std::string_view source) {
+  std::vector<std::string> result;
+  for (const std::string_view builtin : {"vload3", "vstore3"}) {
+    size_t position = 0;
+    while ((position = source.find(builtin, position)) != std::string_view::npos) {
+      size_t open = position + builtin.size();
+      while (open < source.size() && std::isspace(static_cast<unsigned char>(source[open]))) ++open;
+      if (open == source.size() || source[open] != '(') {
+        position += builtin.size();
+        continue;
+      }
+      int depth = 1;
+      size_t close = open + 1;
+      for (; close < source.size() && depth != 0; ++close) {
+        if (source[close] == '(') ++depth;
+        else if (source[close] == ')') --depth;
+      }
+      if (depth != 0) break;
+      const size_t comma = source.rfind(',', close - 1);
+      if (comma != std::string_view::npos && comma > open) {
+        size_t begin = comma + 1, end = close - 1;
+        while (begin < end && std::isspace(static_cast<unsigned char>(source[begin]))) ++begin;
+        while (end > begin && std::isspace(static_cast<unsigned char>(source[end - 1]))) --end;
+        if (begin < end && (std::isalpha(static_cast<unsigned char>(source[begin])) || source[begin] == '_')
+            && std::all_of(source.begin() + begin + 1, source.begin() + end, [](char c) {
+                 return std::isalnum(static_cast<unsigned char>(c)) || c == '_';
+               }))
+          result.emplace_back(source.substr(begin, end - begin));
+      }
+      position = close;
+    }
+  }
+  return result;
+}
+
 std::string makeGlobalMemoryVolatile(const std::string &source) {
   static constexpr const char marker[] = "__global";
+  const auto builtinPointers = vectorBuiltinPointers(source);
   std::string result;
   result.reserve(source.size() + source.size() / 32);
   size_t position = 0;
@@ -194,11 +231,55 @@ std::string makeGlobalMemoryVolatile(const std::string &source) {
                                    && (next + sizeof("volatile") - 1 == source.size()
                                        || (!std::isalnum(static_cast<unsigned char>(source[next + sizeof("volatile") - 1]))
                                            && source[next + sizeof("volatile") - 1] != '_'));
-      if (!alreadyVolatile) result.append(" volatile");
+      bool usedByVectorBuiltin = false;
+      const size_t boundary = source.find_first_of(",;)", next);
+      const size_t pointer = source.find('*', next);
+      if (pointer != std::string::npos && (boundary == std::string::npos || pointer < boundary)) {
+        const size_t end = boundary == std::string::npos ? source.size() : boundary;
+        std::string variable;
+        for (size_t cursor = pointer + 1; cursor < end;) {
+          if (!std::isalpha(static_cast<unsigned char>(source[cursor])) && source[cursor] != '_') {
+            ++cursor;
+            continue;
+          }
+          const size_t begin = cursor++;
+          while (cursor < end && (std::isalnum(static_cast<unsigned char>(source[cursor])) || source[cursor] == '_')) ++cursor;
+          variable = source.substr(begin, cursor - begin);
+        }
+        usedByVectorBuiltin = std::find(builtinPointers.begin(), builtinPointers.end(), variable) != builtinPointers.end();
+      }
+      if (!alreadyVolatile && !usedByVectorBuiltin) result.append(" volatile");
     }
     position = afterMarker;
   }
   return result;
+}
+
+bool hasVectorComponentSwizzle(std::string_view source) {
+  size_t position = 0;
+  while ((position = source.find('.', position)) != std::string_view::npos) {
+    size_t end = position + 1;
+    if (end == source.size()) return false;
+    const char first = source[end];
+    if (first == 's' || first == 'S') {
+      ++end;
+      while (end < source.size() && std::isxdigit(static_cast<unsigned char>(source[end]))) ++end;
+      if (end == position + 2) {
+        ++position;
+        continue;
+      }
+    } else {
+      const std::string_view components = "xyzwrgba";
+      while (end < source.size() && components.find(source[end]) != std::string_view::npos) ++end;
+      if (end == position + 1) {
+        ++position;
+        continue;
+      }
+    }
+    if (end == source.size() || (!std::isalnum(static_cast<unsigned char>(source[end])) && source[end] != '_')) return true;
+    position = end;
+  }
+  return false;
 }
 
 bool writeBytes(const std::string &path, const uint8_t *bytes, size_t size) {
@@ -245,11 +326,14 @@ bool compileSourceToBitcode(const std::string &source, const std::string &option
   const std::string output = directory.file("source.bc");
   // The installed LLVM-to-SPIR-V converter rejects legal OpenCL swizzles when
   // the frontend narrows an otherwise unused vector lane (for example, a
-  // char8 .even expression becomes an invalid LLVM <7 x i8>). Volatile global
+  // char8 .even expression becomes an invalid LLVM <7 x i8>, or a char2 .xx
+  // expression becomes <1 x i8>). Volatile global
   // accesses preserve the source semantics while forcing the frontend to keep
   // the declared vector width, which is representable in SPIR-V.
+  // vload3/vstore3 require non-volatile pointers, so leave those arguments'
+  // declarations alone while preserving other vector accesses.
   const bool hasVectorSwizzle = (source ^ contains_slice(".hi")) || (source ^ contains_slice(".lo")) || (source ^ contains_slice(".even"))
-                                || (source ^ contains_slice(".odd"));
+                                || (source ^ contains_slice(".odd")) || hasVectorComponentSwizzle(source);
   const bool usesEnqueuedLocalSize = source ^ contains_slice("get_enqueued_local_size");
   const std::string compilerSource = hasVectorSwizzle ? makeGlobalMemoryVolatile(source) : source;
   bool success = writeFile(input, compilerSource);

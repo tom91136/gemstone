@@ -1,6 +1,10 @@
+#include <algorithm>
 #include <cstdlib>
 #include <cstring>
+#include <future>
 #include <initializer_list>
+#include <thread>
+#include <vector>
 
 #include <stdint.h>
 
@@ -18,6 +22,15 @@ TEST_CASE("Level Zero facade smoke test", "[level-zero]") {
   ze_driver_handle_t driver = nullptr;
   driverCount = 1;
   REQUIRE((zeDriverGet(&driverCount, &driver) == ZE_RESULT_SUCCESS));
+
+  uint32_t extensionCount = 0;
+  REQUIRE((zeDriverGetExtensionProperties(driver, &extensionCount, nullptr) == ZE_RESULT_SUCCESS));
+  REQUIRE((extensionCount >= 2));
+  std::vector<ze_driver_extension_properties_t> extensions(extensionCount);
+  REQUIRE((zeDriverGetExtensionProperties(driver, &extensionCount, extensions.data()) == ZE_RESULT_SUCCESS));
+  REQUIRE((std::any_of(extensions.begin(), extensions.end(), [](const auto &extension) {
+    return std::strcmp(extension.name, ZE_GLOBAL_OFFSET_EXP_NAME) == 0;
+  })));
 
   void *import = nullptr;
   REQUIRE((zeDriverGetExtensionFunctionAddress(driver, "zexDriverImportExternalPointer", reinterpret_cast<void **>(&import))
@@ -45,6 +58,10 @@ TEST_CASE("Level Zero facade smoke test", "[level-zero]") {
   REQUIRE((zeDeviceGetProperties(device, &properties) == ZE_RESULT_SUCCESS));
   REQUIRE((properties.type == ZE_DEVICE_TYPE_GPU));
   REQUIRE((std::strstr(properties.name, "Gemstone") != nullptr));
+  REQUIRE((properties.timerResolution == 1));
+  properties.stype = ZE_STRUCTURE_TYPE_DEVICE_PROPERTIES_1_2;
+  REQUIRE((zeDeviceGetProperties(device, &properties) == ZE_RESULT_SUCCESS));
+  REQUIRE((properties.timerResolution == 1000000000ULL));
 
   ze_pci_ext_properties_t pciProperties{};
   pciProperties.stype = ZE_STRUCTURE_TYPE_PCI_EXT_PROPERTIES;
@@ -66,6 +83,29 @@ TEST_CASE("Level Zero facade smoke test", "[level-zero]") {
   contextDesc.stype = ZE_STRUCTURE_TYPE_CONTEXT_DESC;
   ze_context_handle_t context = nullptr;
   REQUIRE((zeContextCreate(driver, &contextDesc, &context) == ZE_RESULT_SUCCESS));
+  ze_context_handle_t extended_context = nullptr;
+  REQUIRE((zeContextCreateEx(driver, &contextDesc, 0, nullptr, &extended_context) == ZE_RESULT_SUCCESS));
+  ze_event_pool_desc_t retainedPoolDesc{};
+  retainedPoolDesc.stype = ZE_STRUCTURE_TYPE_EVENT_POOL_DESC;
+  retainedPoolDesc.count = 1;
+  ze_event_pool_handle_t retainedPool = nullptr;
+  REQUIRE((zeEventPoolCreate(extended_context, &retainedPoolDesc, 0, nullptr, &retainedPool) == ZE_RESULT_SUCCESS));
+  REQUIRE((zeContextDestroy(extended_context) == ZE_RESULT_SUCCESS));
+  ze_event_desc_t staleEventDesc{};
+  staleEventDesc.stype = ZE_STRUCTURE_TYPE_EVENT_DESC;
+  ze_event_handle_t staleEvent = nullptr;
+  REQUIRE((zeEventCreate(retainedPool, &staleEventDesc, &staleEvent) == ZE_RESULT_SUCCESS));
+  ze_context_handle_t replacement_context = nullptr;
+  REQUIRE((zeContextCreate(driver, &contextDesc, &replacement_context) == ZE_RESULT_SUCCESS));
+  ze_command_list_desc_t staleListDesc{};
+  staleListDesc.stype = ZE_STRUCTURE_TYPE_COMMAND_LIST_DESC;
+  ze_command_list_handle_t staleList = nullptr;
+  REQUIRE((zeCommandListCreate(replacement_context, device, &staleListDesc, &staleList) == ZE_RESULT_SUCCESS));
+  REQUIRE((zeCommandListAppendSignalEvent(staleList, staleEvent) == ZE_RESULT_ERROR_INVALID_ARGUMENT));
+  REQUIRE((zeCommandListDestroy(staleList) == ZE_RESULT_SUCCESS));
+  REQUIRE((zeContextDestroy(replacement_context) == ZE_RESULT_SUCCESS));
+  REQUIRE((zeEventDestroy(staleEvent) == ZE_RESULT_SUCCESS));
+  REQUIRE((zeEventPoolDestroy(retainedPool) == ZE_RESULT_SUCCESS));
   ze_context_handle_t other_context = nullptr;
   REQUIRE((zeContextCreate(driver, &contextDesc, &other_context) == ZE_RESULT_SUCCESS));
 
@@ -87,6 +127,12 @@ TEST_CASE("Level Zero facade smoke test", "[level-zero]") {
       ze_memory_allocation_properties_t allocationProperties{};
       allocationProperties.stype = ZE_STRUCTURE_TYPE_MEMORY_ALLOCATION_PROPERTIES;
       REQUIRE((zeMemGetAllocProperties(context, slab, &allocationProperties, nullptr) == ZE_RESULT_SUCCESS));
+      void *rangeBase = nullptr;
+      size_t rangeSize = 0;
+      REQUIRE((zeMemGetAddressRange(context, static_cast<char *>(slab) + 1, &rangeBase, nullptr) == ZE_RESULT_SUCCESS));
+      REQUIRE((rangeBase == slab));
+      REQUIRE((zeMemGetAddressRange(context, slab, nullptr, &rangeSize) == ZE_RESULT_SUCCESS));
+      REQUIRE((rangeSize == slabSize));
       const auto address = reinterpret_cast<uintptr_t>(slab);
       REQUIRE((allocationProperties.pageSize != 0));
       REQUIRE((address % allocationProperties.pageSize == 0));
@@ -110,7 +156,13 @@ TEST_CASE("Level Zero facade smoke test", "[level-zero]") {
   REQUIRE((zeMemFree(other_context, source) == ZE_RESULT_ERROR_INVALID_ARGUMENT));
   ze_memory_allocation_properties_t foreignProperties{};
   foreignProperties.stype = ZE_STRUCTURE_TYPE_MEMORY_ALLOCATION_PROPERTIES;
-  REQUIRE((zeMemGetAllocProperties(other_context, source, &foreignProperties, nullptr) == ZE_RESULT_ERROR_INVALID_ARGUMENT));
+  REQUIRE((zeMemGetAllocProperties(other_context, source, &foreignProperties, nullptr) == ZE_RESULT_SUCCESS));
+  REQUIRE((foreignProperties.type == ZE_MEMORY_TYPE_UNKNOWN));
+  int nonUsm = 0;
+  ze_memory_allocation_properties_t ordinaryProperties{};
+  ordinaryProperties.stype = ZE_STRUCTURE_TYPE_MEMORY_ALLOCATION_PROPERTIES;
+  REQUIRE((zeMemGetAllocProperties(context, &nonUsm, &ordinaryProperties, nullptr) == ZE_RESULT_SUCCESS));
+  REQUIRE((ordinaryProperties.type == ZE_MEMORY_TYPE_UNKNOWN));
   std::memset(source, 0x5a, 64);
 
   ze_command_queue_desc_t queueDesc{};
@@ -120,6 +172,11 @@ TEST_CASE("Level Zero facade smoke test", "[level-zero]") {
   ze_command_list_handle_t list = nullptr;
   REQUIRE((zeCommandListCreateImmediate(context, device, &queueDesc, &list) == ZE_RESULT_SUCCESS));
   REQUIRE((zeContextDestroy(context) == ZE_RESULT_ERROR_HANDLE_OBJECT_IN_USE));
+  void *foreignDestination = nullptr;
+  REQUIRE((zeMemAllocDevice(other_context, &allocationDesc, 64, 16, device, &foreignDestination) == ZE_RESULT_SUCCESS));
+  REQUIRE((zeCommandListAppendMemoryCopyFromContext(list, foreignDestination, context, source, 4, nullptr, 0, nullptr)
+           == ZE_RESULT_ERROR_INVALID_ARGUMENT));
+  REQUIRE((zeMemFree(other_context, foreignDestination) == ZE_RESULT_SUCCESS));
   ze_command_queue_handle_t foreignQueue = nullptr;
   ze_command_list_handle_t foreignList = nullptr;
   ze_command_list_desc_t isolationListDesc{};
@@ -183,9 +240,33 @@ TEST_CASE("Level Zero facade smoke test", "[level-zero]") {
   REQUIRE((zeEventDestroy(done) == ZE_RESULT_SUCCESS));
   REQUIRE((zeEventDestroy(ready) == ZE_RESULT_SUCCESS));
   REQUIRE((zeEventPoolDestroy(pool) == ZE_RESULT_SUCCESS));
+
+  poolDesc.count = 1;
+  ze_event_pool_handle_t recordedPool = nullptr;
+  REQUIRE((zeEventPoolCreate(context, &poolDesc, 0, nullptr, &recordedPool) == ZE_RESULT_SUCCESS));
+  ze_event_handle_t recordedEvent = nullptr;
+  REQUIRE((zeEventCreate(recordedPool, &eventDesc, &recordedEvent) == ZE_RESULT_SUCCESS));
+  ze_command_list_handle_t recordedList = nullptr;
+  REQUIRE((zeCommandListCreate(context, device, &isolationListDesc, &recordedList) == ZE_RESULT_SUCCESS));
+  REQUIRE((zeCommandListAppendSignalEvent(recordedList, recordedEvent) == ZE_RESULT_SUCCESS));
+  REQUIRE((zeEventDestroy(recordedEvent) == ZE_RESULT_SUCCESS));
+  REQUIRE((zeEventQueryStatus(recordedEvent) == ZE_RESULT_ERROR_INVALID_NULL_HANDLE));
+  REQUIRE((zeCommandListDestroy(recordedList) == ZE_RESULT_SUCCESS));
+  REQUIRE((zeEventPoolDestroy(recordedPool) == ZE_RESULT_SUCCESS));
   for (uint32_t i = 0; i < 64; ++i) {
     const bool copied = i >= 2 && i < 26 && (i - 2) % 10 < 4;
     REQUIRE((destinationBytes[i] == (copied ? sourceBytes[1 + (1 + (i - 2) / 10) * 8 + (i - 2) % 10] : 0xa5)));
+  }
+  // A single slice may have a slice pitch smaller than the row pitch times
+  // the destination's row origin; no second slice can overlap it.
+  std::memset(destination, 0xa5, 64);
+  ze_copy_region_t oneSliceSource{0, 0, 0, 4, 3, 1};
+  ze_copy_region_t oneSliceDestination{2, 1, 0, 4, 3, 1};
+  REQUIRE((zeCommandListAppendMemoryCopyRegion(list, destination, &oneSliceDestination, 10, 30, source, &oneSliceSource, 8, 24,
+                                               nullptr, 0, nullptr) == ZE_RESULT_SUCCESS));
+  for (uint32_t i = 0; i < 64; ++i) {
+    const bool copied = i >= 12 && i < 36 && (i - 12) % 10 < 4;
+    REQUIRE((destinationBytes[i] == (copied ? sourceBytes[((i - 12) / 10) * 8 + (i - 12) % 10] : 0xa5)));
   }
   ze_copy_region_t invalidRegion{0, 0, 0, 5, 3, 0};
   REQUIRE((zeCommandListAppendMemoryCopyRegion(list, destination, &invalidRegion, 10, 0, source, &sourceRegion, 8, 0, nullptr, 0, nullptr)
@@ -264,4 +345,78 @@ TEST_CASE("Level Zero facade smoke test", "[level-zero]") {
   REQUIRE((zeMemFree(context, source) == ZE_RESULT_SUCCESS));
   REQUIRE((zeContextDestroy(context) == ZE_RESULT_SUCCESS));
   REQUIRE((zeContextDestroy(other_context) == ZE_RESULT_SUCCESS));
+}
+
+TEST_CASE("Level Zero asynchronous queue submits before host dependency resolves", "[level-zero]") {
+  REQUIRE((zeInit(ZE_INIT_FLAG_GPU_ONLY) == ZE_RESULT_SUCCESS));
+  uint32_t count = 1;
+  ze_driver_handle_t driver = nullptr;
+  REQUIRE((zeDriverGet(&count, &driver) == ZE_RESULT_SUCCESS));
+  ze_device_handle_t device = nullptr;
+  REQUIRE((zeDeviceGet(driver, &count, &device) == ZE_RESULT_SUCCESS));
+  ze_context_desc_t contextDesc{};
+  contextDesc.stype = ZE_STRUCTURE_TYPE_CONTEXT_DESC;
+  ze_context_handle_t context = nullptr;
+  REQUIRE((zeContextCreate(driver, &contextDesc, &context) == ZE_RESULT_SUCCESS));
+
+  ze_command_queue_desc_t queueDesc{};
+  queueDesc.stype = ZE_STRUCTURE_TYPE_COMMAND_QUEUE_DESC;
+  queueDesc.mode = ZE_COMMAND_QUEUE_MODE_ASYNCHRONOUS;
+  ze_command_queue_handle_t queue = nullptr;
+  REQUIRE((zeCommandQueueCreate(context, device, &queueDesc, &queue) == ZE_RESULT_SUCCESS));
+  ze_command_list_desc_t listDesc{};
+  listDesc.stype = ZE_STRUCTURE_TYPE_COMMAND_LIST_DESC;
+  ze_command_list_handle_t list = nullptr;
+  ze_command_list_handle_t fastList = nullptr;
+  REQUIRE((zeCommandListCreate(context, device, &listDesc, &list) == ZE_RESULT_SUCCESS));
+  REQUIRE((zeCommandListCreate(context, device, &listDesc, &fastList) == ZE_RESULT_SUCCESS));
+  ze_event_pool_desc_t poolDesc{};
+  poolDesc.stype = ZE_STRUCTURE_TYPE_EVENT_POOL_DESC;
+  poolDesc.flags = ZE_EVENT_POOL_FLAG_HOST_VISIBLE;
+  poolDesc.count = 2;
+  ze_event_pool_handle_t pool = nullptr;
+  REQUIRE((zeEventPoolCreate(context, &poolDesc, 0, nullptr, &pool) == ZE_RESULT_SUCCESS));
+  ze_event_desc_t eventDesc{};
+  eventDesc.stype = ZE_STRUCTURE_TYPE_EVENT_DESC;
+  eventDesc.signal = eventDesc.wait = ZE_EVENT_SCOPE_FLAG_HOST;
+  ze_event_handle_t ready = nullptr;
+  ze_event_handle_t release = nullptr;
+  REQUIRE((zeEventCreate(pool, &eventDesc, &ready) == ZE_RESULT_SUCCESS));
+  eventDesc.index = 1;
+  REQUIRE((zeEventCreate(pool, &eventDesc, &release) == ZE_RESULT_SUCCESS));
+  REQUIRE((zeCommandListAppendSignalEvent(fastList, ready) == ZE_RESULT_SUCCESS));
+  REQUIRE((zeCommandListClose(fastList) == ZE_RESULT_SUCCESS));
+  REQUIRE((zeCommandListAppendWaitOnEvents(list, 1, &release) == ZE_RESULT_SUCCESS));
+  REQUIRE((zeCommandListClose(list) == ZE_RESULT_SUCCESS));
+  ze_fence_desc_t fenceDesc{};
+  fenceDesc.stype = ZE_STRUCTURE_TYPE_FENCE_DESC;
+  ze_fence_handle_t fence = nullptr;
+  REQUIRE((zeFenceCreate(queue, &fenceDesc, &fence) == ZE_RESULT_SUCCESS));
+  REQUIRE((zeCommandQueueExecuteCommandLists(queue, 1, &fastList, fence) == ZE_RESULT_SUCCESS));
+
+  std::promise<ze_result_t> result;
+  auto submitted = result.get_future();
+  std::thread submitter([&] { result.set_value(zeCommandQueueExecuteCommandLists(queue, 1, &list, nullptr)); });
+  const auto readyStatus = zeEventHostSynchronize(ready, 5'000'000'000ULL);
+  const bool returnedBeforeRelease = submitted.wait_for(std::chrono::milliseconds(250)) == std::future_status::ready;
+  const auto fenceStatus = zeFenceQueryStatus(fence);
+  const auto pendingStatus = zeCommandQueueSynchronize(queue, 0);
+  const auto signalStatus = zeEventHostSignal(release);
+  submitter.join();
+  CHECK((readyStatus == ZE_RESULT_SUCCESS));
+  CHECK(returnedBeforeRelease);
+  CHECK((fenceStatus == ZE_RESULT_SUCCESS));
+  CHECK((pendingStatus == ZE_RESULT_NOT_READY));
+  REQUIRE((signalStatus == ZE_RESULT_SUCCESS));
+  REQUIRE((submitted.get() == ZE_RESULT_SUCCESS));
+  REQUIRE((zeFenceHostSynchronize(fence, 5'000'000'000ULL) == ZE_RESULT_SUCCESS));
+  REQUIRE((zeCommandQueueSynchronize(queue, 5'000'000'000ULL) == ZE_RESULT_SUCCESS));
+  REQUIRE((zeCommandListDestroy(list) == ZE_RESULT_SUCCESS));
+  REQUIRE((zeCommandListDestroy(fastList) == ZE_RESULT_SUCCESS));
+  REQUIRE((zeFenceDestroy(fence) == ZE_RESULT_SUCCESS));
+  REQUIRE((zeEventDestroy(ready) == ZE_RESULT_SUCCESS));
+  REQUIRE((zeEventDestroy(release) == ZE_RESULT_SUCCESS));
+  REQUIRE((zeEventPoolDestroy(pool) == ZE_RESULT_SUCCESS));
+  REQUIRE((zeCommandQueueDestroy(queue) == ZE_RESULT_SUCCESS));
+  REQUIRE((zeContextDestroy(context) == ZE_RESULT_SUCCESS));
 }

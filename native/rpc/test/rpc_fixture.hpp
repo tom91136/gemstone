@@ -216,6 +216,10 @@ public:
   void releasePausedCompletion() { pauseCompletion_ = false; }
   unsigned launches() const { return launches_.load(); }
   unsigned programLoads() const { return programLoads_.load(); }
+  std::vector<uint8_t> lastProgramImage() {
+    std::lock_guard lock(stateMutex_);
+    return lastProgramImage_;
+  }
 
   inline static constexpr uint32_t spirv[] = {0x07230203,
                                               0x00010600,
@@ -372,6 +376,15 @@ private:
           break;
         }
         case operation::LoadProgram:
+          {
+            GEMSTONE_RPC_REQUIRE(size >= 8);
+            const auto encodingSize = wire::readBigEndian<uint32_t>(payload.data());
+            GEMSTONE_RPC_REQUIRE(encodingSize <= size - 8);
+            const size_t imageSizeOffset = 4 + encodingSize;
+            const auto imageSize = wire::readBigEndian<uint32_t>(payload.data() + imageSizeOffset);
+            GEMSTONE_RPC_REQUIRE(imageSize == size - imageSizeOffset - 4);
+            lastProgramImage_.assign(payload.begin() + imageSizeOffset + 4, payload.end());
+          }
           ++programLoads_;
           wire::appendBigEndian<uint64_t>(result, 91);
           break;
@@ -692,6 +705,7 @@ private:
   std::optional<std::pair<uint64_t, uint64_t>> indirectWrite_;
   std::map<uint64_t, uint64_t> writtenBytes_;
   std::map<uint64_t, std::vector<uint8_t>> allocations_;
+  std::vector<uint8_t> lastProgramImage_;
   std::map<uint64_t, uint64_t> allocationAddresses_;
   std::map<std::string, std::pair<uint64_t, std::vector<uint8_t>>> expectedGlobals_;
   std::vector<std::pair<uint64_t, uint32_t>> ranges_;

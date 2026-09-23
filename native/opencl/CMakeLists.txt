@@ -17,6 +17,7 @@ endif()
 add_library(gemstone_opencl SHARED
   src/compiler.cpp
   src/icd.cpp
+  ../spirv/specialization.cpp
   src/unsupported.cpp)
 target_include_directories(gemstone_opencl PRIVATE
   "${OPENCL_INCLUDE_DIR}"

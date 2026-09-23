@@ -1,10 +1,12 @@
 #define CL_USE_DEPRECATED_OPENCL_1_1_APIS
 #include <algorithm>
 #include <array>
+#include <cstring>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <vector>
 
 #include <stdint.h>
 
@@ -193,6 +195,9 @@ TEST_CASE("OpenCL facade launch and memory smoke test", "[opencl]") {
 
   cl_mem svmBuffer = clCreateBuffer(context, CL_MEM_USE_HOST_PTR, 64, svm, &error);
   REQUIRE((svmBuffer && error == CL_SUCCESS));
+  cl_bool usesSvmPointer = CL_FALSE;
+  REQUIRE((clGetMemObjectInfo(svmBuffer, CL_MEM_USES_SVM_POINTER, sizeof(usesSvmPointer), &usesSvmPointer, nullptr) == CL_SUCCESS));
+  REQUIRE((usesSvmPointer == CL_TRUE));
   void *svmBufferMap = clEnqueueMapBuffer(queue, svmBuffer, CL_TRUE, CL_MAP_READ | CL_MAP_WRITE, 0, 64, 0, nullptr, nullptr, &error);
   REQUIRE((svmBufferMap == svm && error == CL_SUCCESS));
   REQUIRE((clEnqueueUnmapMemObject(queue, svmBuffer, svmBufferMap, 0, nullptr, nullptr) == CL_SUCCESS));
@@ -200,6 +205,45 @@ TEST_CASE("OpenCL facade launch and memory smoke test", "[opencl]") {
 
   cl_mem oversizedSvmBuffer = clCreateBuffer(context, CL_MEM_USE_HOST_PTR, 65, svm, &error);
   REQUIRE((!oversizedSvmBuffer && error == CL_INVALID_BUFFER_SIZE));
+
+  std::array<uint8_t, 4> hostSource{1, 2, 3, 4};
+  std::array<uint8_t, 4> hostDestination{};
+  cl_event hostCopyEvent = nullptr;
+  REQUIRE((clEnqueueSVMMemcpy(queue, CL_TRUE, hostDestination.data(), hostSource.data(), hostSource.size(), 0, nullptr,
+                              &hostCopyEvent) == CL_SUCCESS));
+  REQUIRE((hostDestination == hostSource));
+  cl_command_type hostCopyType = 0;
+  REQUIRE((clGetEventInfo(hostCopyEvent, CL_EVENT_COMMAND_TYPE, sizeof(hostCopyType), &hostCopyType, nullptr) == CL_SUCCESS));
+  REQUIRE((hostCopyType == CL_COMMAND_SVM_MEMCPY));
+  REQUIRE((clReleaseEvent(hostCopyEvent) == CL_SUCCESS));
+
+  const void *migrationPointers[] = {svm + 8};
+  const size_t migrationSizes[] = {16};
+  cl_event migrationEvent = nullptr;
+  REQUIRE((clEnqueueSVMMigrateMem(queue, 1, migrationPointers, migrationSizes, CL_MIGRATE_MEM_OBJECT_HOST, 0, nullptr,
+                                  &migrationEvent) == CL_SUCCESS));
+  cl_command_type migrationType = 0;
+  REQUIRE((clGetEventInfo(migrationEvent, CL_EVENT_COMMAND_TYPE, sizeof(migrationType), &migrationType, nullptr) == CL_SUCCESS));
+  REQUIRE((migrationType == CL_COMMAND_SVM_MIGRATE_MEM));
+  REQUIRE((clReleaseEvent(migrationEvent) == CL_SUCCESS));
+
+  void *deferredSvm = clSVMAlloc(context, CL_MEM_READ_WRITE, 16, 16);
+  REQUIRE((deferredSvm));
+  cl_context foreignSvmContext = clCreateContext(nullptr, 1, &device, nullptr, nullptr, &error);
+  REQUIRE((foreignSvmContext && error == CL_SUCCESS));
+  void *foreignSvm = clSVMAlloc(foreignSvmContext, CL_MEM_READ_WRITE, 16, 16);
+  REQUIRE((foreignSvm));
+  const void *foreignMigrationPointers[] = {foreignSvm};
+  REQUIRE((clEnqueueSVMMigrateMem(queue, 1, foreignMigrationPointers, nullptr, 0, 0, nullptr, nullptr) == CL_INVALID_VALUE));
+  void *foreignFreePointers[] = {foreignSvm};
+  REQUIRE((clEnqueueSVMFree(queue, 1, foreignFreePointers, nullptr, nullptr, 0, nullptr, nullptr) == CL_INVALID_VALUE));
+  clSVMFree(foreignSvmContext, foreignSvm);
+  REQUIRE((clReleaseContext(foreignSvmContext) == CL_SUCCESS));
+  void *freePointers[] = {deferredSvm};
+  cl_event freeEvent = nullptr;
+  REQUIRE((clEnqueueSVMFree(queue, 1, freePointers, nullptr, nullptr, 0, nullptr, &freeEvent) == CL_SUCCESS));
+  REQUIRE((clWaitForEvents(1, &freeEvent) == CL_SUCCESS));
+  REQUIRE((clReleaseEvent(freeEvent) == CL_SUCCESS));
 
   cl_event mapEvent = nullptr;
   REQUIRE((clEnqueueSVMMap(queue, CL_TRUE, CL_MAP_READ | CL_MAP_WRITE, svm + 8, 16, 0, nullptr, &mapEvent) == CL_SUCCESS));
@@ -265,6 +309,71 @@ TEST_CASE("OpenCL facade launch and memory smoke test", "[opencl]") {
   REQUIRE((clReleaseKernel(kernel) == CL_SUCCESS));
   REQUIRE((clReleaseProgram(program) == CL_SUCCESS));
   clSVMFree(context, memory);
+
+  const std::array<uint32_t, 26> specializationWords = {
+      0x07230203, 0x00010600, 0, 6, 0,
+      (4U << 16) | 71U, 3, 1, 101,
+      (4U << 16) | 71U, 5, 1, 102,
+      (4U << 16) | 21U, 2, 32, 1,
+      (2U << 16) | 20U, 4,
+      (4U << 16) | 50U, 2, 3, 7,
+      (3U << 16) | 49U, 4, 5};
+  cl_program specialized = clCreateProgramWithIL(context, specializationWords.data(), sizeof(specializationWords), &error);
+  REQUIRE((specialized && error == CL_SUCCESS));
+  cl_uint constantValue = 42;
+  cl_uchar boolValue = 2;
+  REQUIRE((clSetProgramSpecializationConstant(specialized, 999, sizeof(constantValue), &constantValue) == CL_INVALID_SPEC_ID));
+  REQUIRE((clSetProgramSpecializationConstant(specialized, 101, 1, &constantValue) == CL_INVALID_VALUE));
+  REQUIRE((clSetProgramSpecializationConstant(specialized, 101, sizeof(constantValue), nullptr) == CL_INVALID_VALUE));
+  REQUIRE((clSetProgramSpecializationConstant(specialized, 101, sizeof(constantValue), &constantValue) == CL_SUCCESS));
+  REQUIRE((clSetProgramSpecializationConstant(specialized, 102, sizeof(boolValue), &boolValue) == CL_SUCCESS));
+  constantValue = 99;
+  boolValue = 0;
+  const unsigned loadsBeforeSpecialization = server.programLoads();
+  REQUIRE((clBuildProgram(specialized, 1, &device, nullptr, nullptr, nullptr) == CL_SUCCESS));
+  REQUIRE((server.programLoads() == loadsBeforeSpecialization + 1));
+  auto loadedSpecialization = server.lastProgramImage();
+  auto loadedWord = [&](size_t index) {
+    uint32_t value = 0;
+    std::memcpy(&value, loadedSpecialization.data() + index * 4, sizeof(value));
+    return value;
+  };
+  REQUIRE((loadedWord(19) == ((4U << 16) | 50U)));
+  REQUIRE((loadedWord(22) == 42));
+  REQUIRE((loadedWord(23) == ((3U << 16) | 48U)));
+  const cl_uchar falseValue = 0;
+  REQUIRE((clSetProgramSpecializationConstant(specialized, 102, sizeof(falseValue), &falseValue) == CL_SUCCESS));
+  REQUIRE((clBuildProgram(specialized, 1, &device, nullptr, nullptr, nullptr) == CL_SUCCESS));
+  loadedSpecialization = server.lastProgramImage();
+  REQUIRE((loadedWord(23) == ((3U << 16) | 49U)));
+  size_t originalSize = 0;
+  REQUIRE((clGetProgramInfo(specialized, CL_PROGRAM_IL, 0, nullptr, &originalSize) == CL_SUCCESS));
+  REQUIRE((originalSize == sizeof(specializationWords)));
+  REQUIRE((clReleaseProgram(specialized) == CL_SUCCESS));
+
+  const char *swizzleSource = R"CLC(
+    __kernel void sample_test(__global char2 *source, __global char2 *dest) {
+      if (get_global_id(0) != 0) return;
+      char2 tmp = (char2)((char)0);
+      tmp.S10 = source[26].xx;
+      dest[26] = tmp;
+    }
+  )CLC";
+  cl_program swizzleProgram = clCreateProgramWithSource(context, 1, &swizzleSource, nullptr, &error);
+  REQUIRE((swizzleProgram && error == CL_SUCCESS));
+  REQUIRE((clBuildProgram(swizzleProgram, 1, &device, "-cl-std=CL3.0", nullptr, nullptr) == CL_SUCCESS));
+  REQUIRE((clReleaseProgram(swizzleProgram) == CL_SUCCESS));
+
+  for (const char *vectorBuiltinSource : {
+           "__kernel void load3(__global char *source, __global char *dest) { dest[0] = vload3(0, source).z; }",
+           "__kernel void store3(__global char2 *source, __global char *dest) { "
+           "char3 value = (char3)(0); value.s2 = source[0].y; vstore3(value, 0, dest); }",
+       }) {
+    cl_program vectorBuiltinProgram = clCreateProgramWithSource(context, 1, &vectorBuiltinSource, nullptr, &error);
+    REQUIRE((vectorBuiltinProgram && error == CL_SUCCESS));
+    REQUIRE((clBuildProgram(vectorBuiltinProgram, 1, &device, "-cl-std=CL3.0", nullptr, nullptr) == CL_SUCCESS));
+    REQUIRE((clReleaseProgram(vectorBuiltinProgram) == CL_SUCCESS));
+  }
 
   clSVMFree(context, svm);
   REQUIRE((clReleaseCommandQueue(queue) == CL_SUCCESS));

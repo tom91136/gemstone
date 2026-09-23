@@ -33,6 +33,8 @@
   #include <CL/cl.h>
 #elif defined(CONFORMANCE_DEVICE_SYCL)
   #include <sycl/sycl.hpp>
+#elif defined(CONFORMANCE_DEVICE_LEVELZERO)
+  #include <level_zero/ze_api.h>
 #endif
 
 namespace conformance {
@@ -363,6 +365,40 @@ static DeviceSelection discover_physical_device() {
       && std::ranges::any_of(uuid, [](uint8_t byte) { return byte != 0; }))
     return selection(make_uuid_device(uuid));
   return selection(make_registry_device(fmt::format("{}:{}:{}", candidate.description, candidate.platform_index, candidate.device_index)));
+#elif defined(CONFORMANCE_DEVICE_LEVELZERO)
+  if (zeInit(0) != ZE_RESULT_SUCCESS) throw std::runtime_error("cannot initialize Level Zero");
+  uint32_t driver_count = 0;
+  if (zeDriverGet(&driver_count, nullptr) != ZE_RESULT_SUCCESS) throw std::runtime_error("cannot list Level Zero drivers");
+  std::vector<ze_driver_handle_t> drivers(driver_count);
+  if (zeDriverGet(&driver_count, drivers.data()) != ZE_RESULT_SUCCESS) throw std::runtime_error("cannot get Level Zero drivers");
+  struct Candidate { PhysicalDevice physical; uint32_t driver, device; };
+  std::vector<Candidate> candidates;
+  std::vector<std::string> descriptions;
+  for (uint32_t driver_index = 0; driver_index < driver_count; ++driver_index) {
+    uint32_t device_count = 0;
+    if (zeDeviceGet(drivers[driver_index], &device_count, nullptr) != ZE_RESULT_SUCCESS)
+      throw std::runtime_error("cannot list Level Zero devices");
+    std::vector<ze_device_handle_t> devices(device_count);
+    if (zeDeviceGet(drivers[driver_index], &device_count, devices.data()) != ZE_RESULT_SUCCESS)
+      throw std::runtime_error("cannot get Level Zero devices");
+    for (uint32_t device_index = 0; device_index < device_count; ++device_index) {
+      ze_device_properties_t properties{ZE_STRUCTURE_TYPE_DEVICE_PROPERTIES};
+      if (zeDeviceGetProperties(devices[device_index], &properties) != ZE_RESULT_SUCCESS)
+        throw std::runtime_error("cannot query Level Zero device");
+      if (properties.type != ZE_DEVICE_TYPE_GPU) continue;
+      ze_pci_ext_properties_t pci{ZE_STRUCTURE_TYPE_PCI_EXT_PROPERTIES};
+      PhysicalDevice physical = make_uuid_device(properties.uuid.id);
+      if (zeDevicePciGetPropertiesExt(devices[device_index], &pci) == ZE_RESULT_SUCCESS)
+        physical = make_pci_device(pci.address.domain, static_cast<uint8_t>(pci.address.bus),
+                                   static_cast<uint8_t>(pci.address.device), static_cast<uint8_t>(pci.address.function));
+      descriptions.push_back(fmt::format("levelzero:{}:{}:{}", driver_index, device_index, properties.name));
+      candidates.push_back({physical, driver_index, device_index});
+    }
+  }
+  const auto &candidate = candidates[select_device(descriptions)];
+  return {candidate.physical,
+          {{"LZT_DEFAULT_DRIVER_IDX", fmt::to_string(candidate.driver)},
+           {"LZT_DEFAULT_DEVICE_IDX", fmt::to_string(candidate.device)}}};
 #elif defined(CONFORMANCE_DEVICE_SYCL)
   const auto all = sycl::device::get_devices();
   std::map<sycl::backend, size_t> ordinals;

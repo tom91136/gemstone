@@ -13,6 +13,70 @@ import io.github.iltotore.iron.constraint.all.*
 
 import java.util.concurrent.atomic.AtomicReference
 final class ExecutionControlFlowSuite extends munit.FunSuite with ExecutionTestSupport {
+  test("indirect function call rejects a pointer from another program") {
+    val voidType       = operand("IdResult", 1)
+    val u32            = operand("IdResult", 2)
+    val u64            = operand("IdResult", 3)
+    val pointerType    = operand("IdResult", 4)
+    val entryType      = operand("IdResult", 5)
+    val helperType     = operand("IdResult", 6)
+    val helperValue    = operand("IdResult", 7)
+    val entryFunction  = operand("IdResult", 8)
+    val helperFunction = operand("IdResult", 9)
+    val output         = operand("IdResult", 10)
+    val token          = operand("IdResult", 11)
+    val result         = operand("IdResult", 13)
+    val module = Module(
+      Header(ISA.version, Word(0), Word(17), Word(0)),
+      Vec(
+        Instruction.TypeVoid(voidType),
+        Instruction.TypeInt(u32, operand("LiteralInteger", 32), operand("LiteralInteger", 0)),
+        Instruction.TypeInt(u64, operand("LiteralInteger", 64), operand("LiteralInteger", 0)),
+        Instruction.TypePointer(pointerType, operand("StorageClass", 5), u32),
+        Instruction.TypeFunction(entryType, voidType, Vec(pointerType, u64)),
+        Instruction.TypeFunction(helperType, u32, Vec.empty),
+        Instruction.Constant(u32, helperValue, operand("LiteralContextDependentNumber", 37)),
+        Instruction.EntryPoint(operand("ExecutionModel", 6), entryFunction, stringOperand("indirect"), Vec.empty),
+        Instruction.Function(voidType, entryFunction, operand("FunctionControl", 0), entryType),
+        Instruction.FunctionParameter(pointerType, output),
+        Instruction.FunctionParameter(u64, token),
+        Instruction.Label(operand("IdResult", 12)),
+        Instruction.FunctionPointerCallINTEL(u32, result, Vec(token)),
+        Instruction.Store(output, result, None),
+        Instruction.Return(),
+        Instruction.FunctionEnd(),
+        Instruction.Function(u32, helperFunction, operand("FunctionControl", 0), helperType),
+        Instruction.Label(operand("IdResult", 14)),
+        Instruction.ReturnValue(helperValue),
+        Instruction.FunctionEnd()
+      ),
+      Endianness.Little
+    )
+    val allocation = MemoryRegion(30L)
+    val memory     = ArrayMemory(allocation, 4)
+    def dispatch(pointer: Long) = KernelTask
+      .validated(
+        KernelName("indirect"),
+        Dimensions.One,
+        Dimensions.One,
+        Vec(
+          KernelTask.Argument.Memory(allocation, 0L),
+          KernelTask.Argument.Scalar(LittleEndian.toVec(pointer, ScalarByteWidth(8)))
+        )
+      )
+      .toOption
+      .get
+
+    assertEquals(executeUnchecked(module, dispatch(9L), memory), Right(()))
+    assertEquals(memory.bytes, LittleEndian.toVec(37L, ScalarByteWidth(4)))
+    val wrongProgram = (2L << 32) | 9L
+    assert(executeUnchecked(module, dispatch(wrongProgram), memory).isLeft)
+    val loaded = loadUnchecked(module).toOption.get
+    loaded.programId = 1L
+    assert(executeLoaded(loaded, dispatch(wrongProgram), memory).isLeft)
+    assertEquals(executeLoaded(loaded, dispatch((1L << 32) | 9L), memory), Right(()))
+  }
+
   test("dispatch executes typed function calls and return values") {
     val voidType        = operand("IdResult", 1)
     val u32             = operand("IdResult", 2)
@@ -36,13 +100,16 @@ final class ExecutionControlFlowSuite extends munit.FunSuite with ExecutionTestS
         Instruction.TypeFunction(entryType, voidType, Vec(pointerType, u32)),
         Instruction.TypeFunction(helperType, u32, Vec(u32)),
         Instruction.Constant(u32, one, operand("LiteralContextDependentNumber", 1)),
+        Instruction.String(operand("IdResult", 17), stringOperand("call.cl")),
         Instruction.EntryPoint(operand("ExecutionModel", 6), entryFunction, stringOperand("call"), Vec.empty),
         Instruction.Function(voidType, entryFunction, operand("FunctionControl", 0), entryType),
         Instruction.FunctionParameter(pointerType, output),
         Instruction.FunctionParameter(u32, input),
         Instruction.Label(operand("IdResult", 11)),
+        Instruction.Line(operand("IdRef", 17), operand("LiteralInteger", 1), operand("LiteralInteger", 1)),
         Instruction.FunctionCall(u32, callResult, helperFunction, Vec(input)),
         Instruction.Store(output, callResult, None),
+        Instruction.NoLine(),
         Instruction.Return(),
         Instruction.FunctionEnd(),
         Instruction.Function(u32, helperFunction, operand("FunctionControl", 0), helperType),

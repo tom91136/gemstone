@@ -10,7 +10,8 @@ inline constexpr std::string_view selection_environment_keys[]{
     "CUDA_VISIBLE_DEVICES", "CUDA_DEVICE_ORDER",      "HIP_VISIBLE_DEVICES", "ROCR_VISIBLE_DEVICES",
     "GPU_DEVICE_ORDINAL",   "ONEAPI_DEVICE_SELECTOR", "SYCL_DEVICE_FILTER",  "SYCL_DEVICE_ALLOWLIST",
     "CL_PLATFORM_INDEX",    "CL_DEVICE_INDEX",        "CL_DEVICE_TYPE",      "CONFORMANCE_OPENCL_DEVICE_INDEX",
-    "CONFORMANCE_DEVICE",   "OMP_DEFAULT_DEVICE",     "ACC_DEVICE_NUM"};
+    "CONFORMANCE_DEVICE",   "OMP_DEFAULT_DEVICE",     "ACC_DEVICE_NUM",
+    "LZT_DEFAULT_DRIVER_IDX", "LZT_DEFAULT_DEVICE_IDX"};
 inline bool selection_environment_key(std::string_view key) {
   return std::find(std::begin(selection_environment_keys), std::end(selection_environment_keys), key)
          != std::end(selection_environment_keys);

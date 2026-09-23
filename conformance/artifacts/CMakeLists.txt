@@ -54,7 +54,7 @@ foreach(variable IN ITEMS CONFORMANCE_BACKENDS CUDA_ARCHITECTURES AMDGPU_ARCHITE
   list(REMOVE_DUPLICATES "${variable}")
 endforeach()
 
-set(supported_backends cuda hip hsa opencl sycl openacc)
+set(supported_backends cuda hip hsa opencl sycl levelzero openacc)
 foreach(backend IN LISTS CONFORMANCE_BACKENDS)
   if(NOT backend IN_LIST supported_backends)
     message(FATAL_ERROR "Unsupported conformance backend: ${backend}")

@@ -1,9 +1,9 @@
 # GPU conformance
 
 This independent CMake/CTest project builds relocatable artifacts for `cuda`, `hip`, `hsa`, `opencl`, `sycl`,
-and `openacc`. Commands in this file run from this directory.
+`levelzero`, and `openacc`. Commands in this file run from this directory.
 
-Each backend has Catch2 test programs, a runtime closure, and a data bundle plus one small overlay per compiled
+Each backend has test programs, a runtime closure, and a data bundle plus one small overlay per compiled
 architecture. CUDA support bundles are keyed by SDK because overlays built by different CUDA generations cannot safely
 share one runtime closure. Workloads select tests at runtime; they do not change what is compiled.
 
@@ -22,12 +22,13 @@ hsa/support/
 hsa/gfx1030/
 opencl/
 sycl/
+levelzero/
 ```
 
 Support directories contain the shared `lib/`, `data/`, and `licenses/` payloads; the root driver is built once,
 outside every backend artifact. Architecture directories are flat and
-contain `artifact.toml`, `conformance-device`, `test-programs.txt`, and their Catch2 test executables. Architecture
-metadata names the exact support bundle it needs. The driver asks each test executable for its Catch2 inventory,
+contain `artifact.toml`, `conformance-device`, `test-programs.txt`, and their test executables. Architecture
+metadata names the exact support bundle it needs. The driver asks each executable for its Catch2 or Google Test inventory,
 filters it through the selected workload, and materializes one lean CTest entry per selected case.
 
 Configure and build the default target set from this directory:
@@ -39,12 +40,12 @@ cmake --build build/artifacts
 
 Artifacts are written to `build/artifacts/output`.
 
-`artifacts/targets/default.cmake` selects CUDA `sm_89`, HIP and HSA `gfx1030`, OpenCL, and SYCL. Extend or replace
+`artifacts/targets/default.cmake` selects CUDA `sm_89`, HIP and HSA `gfx1030`, OpenCL, SYCL, and Level Zero. Extend or replace
 the matrix at configure time:
 
 ```console
 cmake -S artifacts -B build/artifacts -G Ninja \
-  -DCONFORMANCE_BACKENDS=cuda,hip,hsa,opencl,sycl \
+  -DCONFORMANCE_BACKENDS=cuda,hip,hsa,opencl,sycl,levelzero \
   -DCUDA_ARCHITECTURES=sm_89,sm_90 -DAMDGPU_ARCHITECTURES=gfx1036,gfx1100
 ```
 
@@ -112,6 +113,18 @@ For `sbt conformance/emulate`, the default is at most eight concurrent tests, wi
 but two logical CPUs and its maximum heap scaled to the test count (8-32 GiB). `CONFORMANCE_JOBS`,
 `GEMSTONE_EXECUTION_PARALLELISM`, and `GEMSTONE_CONFORMANCE_SERVER_HEAP` override these defaults.
 `workloads/compact.toml` and `workloads/full.toml` define the available workload sizes.
+The Level Zero CTS uses Google Test. `levelzero_cases` in a workload selects full case names with `*` and `?` globs;
+an empty list selects the full compiled inventory. The compact workload selects 179 short driver, device,
+context, queue, event, fence, memory, SPIR-V kernel, specialization constant, and verified copy cases.
+Its queue and event selection includes asynchronous submission, host-signaled dependencies, and event lifetime.
+Memory cases include cross-context copies, indirect pointer copies, allocation-property queries, memory lifetime,
+and shared-system prefetch and region copies.
+The Level Zero selection also covers SPIR-V function pointers, linked modules, and virtual memory mappings.
+Linking separate SPIR-V modules uses `spirv-link` from the host's `PATH` (included in the conformance container).
+The full workload selects 544 Level Zero cases from the 20,362-case compiled inventory, including every compact case.
+It broadens API, kernel, allocation, SVM, and copy coverage with small parameter samples. Compact also includes short
+SYCL context, device, event, queue, kernel, and work-item cases plus OpenCL memory-host-flag cases. The large Level Zero
+memory/copy sweeps and OpenCL CTS `thread_dimensions` program are outside the one-hour combined workload budget.
 
 ## Unit tests
 

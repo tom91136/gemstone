@@ -15,7 +15,7 @@ if(NOT EXISTS "${LEVEL_ZERO_INCLUDE_DIR}/ze_ddi.h")
   set(LEVEL_ZERO_INCLUDE_DIR "${level_zero_headers_SOURCE_DIR}/include")
 endif()
 
-add_library(gemstone_levelzero SHARED src/driver.cpp)
+add_library(gemstone_levelzero SHARED src/driver.cpp ../spirv/specialization.cpp)
 target_include_directories(gemstone_levelzero
   PRIVATE "${LEVEL_ZERO_INCLUDE_DIR}" ../generated/levelzero
 )

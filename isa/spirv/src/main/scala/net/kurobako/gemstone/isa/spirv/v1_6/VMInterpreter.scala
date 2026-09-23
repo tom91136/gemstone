@@ -93,6 +93,18 @@ private[v1_6] object VMInterpreter {
   def kernelNames(program: Program): Vec[KernelName] =
     Vec.from(program.entryPoints.keys.toSeq.sortBy(_.value))
 
+  def globalImage(program: Program, name: String): Either[Fault, (Int, Array[Byte])] =
+    program.functionNames.find { case (id, candidate) =>
+      candidate.value == name && program.globals.contains(id)
+    }.map(_._1).toRight(Fault.Memory(s"SPIR-V global '$name' is not present")).flatMap { id =>
+      materializeGlobals(program, storageClass => storageClass != 4 && storageClass != 6, useBindings = false)
+        .flatMap(_.get(id) match {
+          case Some(RuntimeValue.Address(_, Pointer(Region.Internal(storage), _, _, _, _))) =>
+            Right(id -> storage.bytes)
+          case _ => Left(Fault.Memory(s"SPIR-V global '$name' has no storage"))
+        })
+    }
+
   def kernelMetadata(program: Program, name: KernelName): Either[Fault, KernelMetadata] =
     if (program.vulkanEntries.contains(name)) vulkanKernelMetadata(program, name)
     else {
@@ -657,6 +669,9 @@ private[v1_6] object VMInterpreter {
       memory: MemoryState,
       instruction: Instruction
   ): Either[Fault, Unit] = instruction match {
+    case _: Instruction.Line | _: Instruction.NoLine =>
+      execution.pc += 1
+      Right(())
     case _: Instruction.FunctionParameter | _: Instruction.Label | _: Instruction.Phi =>
       executePhi(program, execution, instruction)
     case _: Instruction.Variable | _: Instruction.Load | _: Instruction.Store | _: Instruction.CopyMemory | _: Instruction.CopyMemorySized | _: Instruction.GroupAsyncCopy | _: Instruction.GroupWaitEvents =>
@@ -667,9 +682,9 @@ private[v1_6] object VMInterpreter {
       executeExtended(program, execution, memory, instruction)
     case _: Instruction.UConvert | _: Instruction.SConvert | _: Instruction.ConvertPtrToU | _: Instruction.ConvertUToPtr | _: Instruction.ConvertSToF | _: Instruction.ConvertUToF | _: Instruction.ConvertFToS | _: Instruction.ConvertFToU | _: Instruction.FConvert | _: Instruction.Undef | _: Instruction.CopyObject | _: Instruction.LifetimeStart | _: Instruction.LifetimeStop =>
       executeConversion(program, execution, memory, instruction)
-    case _: Instruction.IAdd | _: Instruction.ISub | _: Instruction.IMul | _: Instruction.UDiv | _: Instruction.UMod | _: Instruction.SDiv | _: Instruction.SRem =>
+    case _: Instruction.IAdd | _: Instruction.ISub | _: Instruction.IMul | _: Instruction.UDiv | _: Instruction.UMod | _: Instruction.SDiv | _: Instruction.SRem | _: Instruction.SNegate =>
       executeInteger(program, execution, instruction)
-    case _: Instruction.AtomicStore | _: Instruction.AtomicLoad | _: Instruction.AtomicExchange | _: Instruction.AtomicCompareExchange | _: Instruction.AtomicCompareExchangeWeak | _: Instruction.AtomicFAddEXT | _: Instruction.AtomicFMinEXT | _: Instruction.AtomicFMaxEXT | _: Instruction.AtomicIAdd | _: Instruction.AtomicUMin | _: Instruction.AtomicIIncrement | _: Instruction.AtomicIDecrement | _: Instruction.AtomicISub | _: Instruction.AtomicSMin | _: Instruction.AtomicSMax | _: Instruction.AtomicUMax | _: Instruction.AtomicAnd | _: Instruction.AtomicOr | _: Instruction.AtomicXor | _: Instruction.FAdd | _: Instruction.FSub | _: Instruction.FMul | _: Instruction.Dot | _: Instruction.FDiv =>
+    case _: Instruction.AtomicStore | _: Instruction.AtomicLoad | _: Instruction.AtomicExchange | _: Instruction.AtomicCompareExchange | _: Instruction.AtomicCompareExchangeWeak | _: Instruction.AtomicFlagTestAndSet | _: Instruction.AtomicFlagClear | _: Instruction.AtomicFAddEXT | _: Instruction.AtomicFMinEXT | _: Instruction.AtomicFMaxEXT | _: Instruction.AtomicIAdd | _: Instruction.AtomicUMin | _: Instruction.AtomicIIncrement | _: Instruction.AtomicIDecrement | _: Instruction.AtomicISub | _: Instruction.AtomicSMin | _: Instruction.AtomicSMax | _: Instruction.AtomicUMax | _: Instruction.AtomicAnd | _: Instruction.AtomicOr | _: Instruction.AtomicXor | _: Instruction.FAdd | _: Instruction.FSub | _: Instruction.FMul | _: Instruction.Dot | _: Instruction.FDiv | _: Instruction.VectorTimesScalar =>
       executeAtomic(program, execution, memory, instruction)
     case _: Instruction.FNegate | _: Instruction.ShiftLeftLogical =>
       executeAtomicXor(program, execution, instruction)
@@ -679,7 +694,7 @@ private[v1_6] object VMInterpreter {
       executeComparison(program, execution, instruction)
     case _: Instruction.ControlBarrier | _: Instruction.MemoryBarrier | _: Instruction.GroupAny | _: Instruction.GroupAll | _: Instruction.GroupUMin | _: Instruction.GroupUMax | _: Instruction.GroupSMin | _: Instruction.GroupSMax | _: Instruction.GroupIAdd | _: Instruction.GroupIMulKHR | _: Instruction.GroupFAdd | _: Instruction.GroupFMin | _: Instruction.GroupFMax | _: Instruction.GroupFMulKHR | _: Instruction.SubgroupShuffleINTEL | _: Instruction.SubgroupShuffleUpINTEL | _: Instruction.SubgroupShuffleDownINTEL | _: Instruction.GroupBroadcast | _: Instruction.GroupNonUniformBallot =>
       executeCollective(program, execution, instruction)
-    case _: Instruction.FunctionCall =>
+    case _: Instruction.FunctionCall | _: Instruction.FunctionPointerCallINTEL =>
       executeCall(program, execution, memory, instruction)
     case _: Instruction.Branch | _: Instruction.BranchConditional | _: Instruction.Switch | _: Instruction.ReturnValue | _: Instruction.Return | _: Instruction.AssumeTrueKHR | _: Instruction.LoopMerge | _: Instruction.SelectionMerge =>
       executeBranch(program, execution, instruction)
@@ -1235,6 +1250,13 @@ private[v1_6] object VMInterpreter {
       case Instruction.ConvertUToPtr(resultType, dest, integerValue) =>
         (program.types.get(id(resultType)), values.get(id(integerValue))) match {
           case (
+                Some(RuntimeType.Pointer(_, pointee)),
+                Some(RuntimeValue.Bits(integerType, Array(rawAddress)))
+              ) if program.types.get(pointee).exists(_.isInstanceOf[RuntimeType.Function]) &&
+                  integerShape(program, integerType).exists(_._2 == 1) =>
+            values.update(id(dest), RuntimeValue.Bits(id(resultType), Array(rawAddress)))
+            execution.pc += 1
+          case (
                 Some(RuntimeType.Pointer(storageClass, pointee)),
                 Some(RuntimeValue.Bits(integerType, Array(rawAddress)))
               ) if integerShape(program, integerType).exists(_._2 == 1) =>
@@ -1338,6 +1360,11 @@ private[v1_6] object VMInterpreter {
         }
       case Instruction.IMul(resultType, dest, left, right) =>
         binary(program, values, resultType, dest, left, right)(_ * _) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.SNegate(resultType, dest, source) =>
+        signedNegate(program, values, resultType, dest, source) match {
           case Left(error) => return Left(error)
           case Right(())   => execution.pc += 1
         }
@@ -1464,6 +1491,16 @@ private[v1_6] object VMInterpreter {
           value,
           comparator
         ) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.AtomicFlagTestAndSet(resultType, dest, pointer, scope, semantics) =>
+        atomicFlagTestAndSet(program, values, memory, resultType, dest, pointer, scope, semantics) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.AtomicFlagClear(pointer, scope, semantics) =>
+        atomicFlagClear(program, values, memory, pointer, scope, semantics) match {
           case Left(error) => return Left(error)
           case Right(())   => execution.pc += 1
         }
@@ -1702,6 +1739,11 @@ private[v1_6] object VMInterpreter {
         }
       case Instruction.FMul(resultType, dest, left, right) =>
         floatingBinary(program, values, resultType, dest, left, right, FloatingOperation.Multiply) match {
+          case Left(error) => return Left(error)
+          case Right(())   => execution.pc += 1
+        }
+      case Instruction.VectorTimesScalar(resultType, dest, vector, scalar) =>
+        floatingVectorTimesScalar(program, values, resultType, dest, vector, scalar) match {
           case Left(error) => return Left(error)
           case Right(())   => execution.pc += 1
         }
@@ -2572,6 +2614,17 @@ private[v1_6] object VMInterpreter {
   ): Either[Fault, Unit] = {
     val values = execution.values
     instruction match {
+      case Instruction.FunctionPointerCallINTEL(resultType, dest, sources) if sources.nonEmpty =>
+        return values.get(id(sources.head)) match {
+          case Some(RuntimeValue.Bits(_, Array(token)))
+              if (token >>> 32) == program.programId &&
+                  (token & 0xffffffffL) > 0 && (token & 0xffffffffL) <= Int.MaxValue &&
+                  program.functions.contains((token & 0xffffffffL).toInt) =>
+            val called = sources.head.copy(words = Vec(Word((token & 0xffffffffL).toInt)).refineUnsafe[MinLength[1]])
+            executeCall(program, execution, memory, Instruction.FunctionCall(resultType, dest, called, sources.tail))
+          case Some(_) => Left(Fault.InvalidTask("OpFunctionPointerCallINTEL has an invalid function pointer"))
+          case None    => Left(undefined(sources.head))
+        }
       case Instruction.FunctionCall(resultType, dest, called, arguments) =>
         val callee = program.functions.get(id(called)) match {
           case Some(value) => value
@@ -4683,7 +4736,8 @@ private[v1_6] object VMInterpreter {
   @SuppressWarnings(Array("scalafix:DisableSyntax.return", "scalafix:DisableSyntax.var"))
   private def materializeGlobals(
       program: Program,
-      includeStorageClass: Int => Boolean
+      includeStorageClass: Int => Boolean,
+      useBindings: Boolean = true
   ): Either[Fault, Map[Int, RuntimeValue]] = {
     val values      = Map.newBuilder[Int, RuntimeValue]
     val globals     = program.globals.view.toVector
@@ -4713,10 +4767,11 @@ private[v1_6] object VMInterpreter {
                 encoded
             }
         }
-        values += variable -> RuntimeValue.Address(
-          global.pointerType,
-          Pointer(Region.Internal(InternalMemory(bytes)), 0L, pointee, global.storageClass)
-        )
+        val pointer = (if (useBindings) program.boundGlobals.get(variable) else None) match {
+          case Some(binding) => Pointer(Region.External(binding.region), binding.offset, pointee, global.storageClass)
+          case None          => Pointer(Region.Internal(InternalMemory(bytes)), 0L, pointee, global.storageClass)
+        }
+        values += variable -> RuntimeValue.Address(global.pointerType, pointer)
       }
       globalIndex += 1
     }
@@ -7555,6 +7610,25 @@ private[v1_6] object VMInterpreter {
     case None => Left(undefined(source))
   }
 
+  private def signedNegate(
+      program: Program,
+      values: InvocationValues,
+      resultType: Operand,
+      destination: Operand,
+      source: Operand
+  ): Either[Fault, Unit] = values.get(id(source)) match {
+    case Some(RuntimeValue.Bits(sourceType, lanes)) =>
+      (integerShape(program, sourceType), integerShape(program, id(resultType))) match {
+        case (Some(sourceShape @ (width, count)), Some(resultShape))
+            if sourceShape == resultShape && lanes.length == count =>
+          values.update(id(destination), RuntimeValue.Bits(id(resultType), lanes.map(raw => -raw & mask(width))))
+          Right(())
+        case _ => Left(Fault.InvalidTask("OpSNegate requires matching integer scalar/vector operand and result types"))
+      }
+    case Some(_) => Left(Fault.InvalidTask("OpSNegate source is a pointer"))
+    case None    => Left(undefined(source))
+  }
+
   private def floatingClassify(
       program: Program,
       values: InvocationValues,
@@ -7636,6 +7710,30 @@ private[v1_6] object VMInterpreter {
       }
     case Some(_) => Left(Fault.InvalidTask("OpFNegate source is a pointer"))
     case None    => Left(undefined(source))
+  }
+
+  private def floatingVectorTimesScalar(
+      program: Program,
+      values: InvocationValues,
+      resultType: Operand,
+      destination: Operand,
+      vector: Operand,
+      scalar: Operand
+  ): Either[Fault, Unit] = (values.get(id(vector)), values.get(id(scalar))) match {
+    case (Some(RuntimeValue.Bits(vectorType, vectorLanes)), Some(RuntimeValue.Bits(scalarType, Array(scalarRaw)))) =>
+      (floatingShape(program, vectorType), floatingShape(program, scalarType), floatingShape(program, id(resultType))) match {
+        case (Some((width, count)), Some((scalarWidth, 1)), Some((resultWidth, resultCount)))
+            if width == scalarWidth && width == resultWidth && count == resultCount && count > 1
+              && vectorLanes.length == count =>
+          val multiplier = floatingToDouble(width, scalarRaw)
+          val result     = vectorLanes.map(raw => doubleToFloating(width, floatingToDouble(width, raw) * multiplier))
+          values.update(id(destination), RuntimeValue.Bits(id(resultType), result))
+          Right(())
+        case _ => Left(Fault.InvalidTask("OpVectorTimesScalar requires a floating vector and matching scalar"))
+      }
+    case (Some(_), Some(_)) => Left(Fault.InvalidTask("OpVectorTimesScalar requires a floating vector and scalar"))
+    case (None, _) => Left(undefined(vector))
+    case (_, None) => Left(undefined(scalar))
   }
 
   private def floatingBinary(
@@ -7789,7 +7887,7 @@ private[v1_6] object VMInterpreter {
               if (program.saturatedConversions.contains(id(destination))) {
                 val minimum = if (resultWidth.value == 64) Long.MinValue else -(1L << (resultWidth.value - 1))
                 val maximum = if (resultWidth.value == 64) Long.MaxValue else (1L << (resultWidth.value - 1)) - 1L
-                if (floating.isNaN) minimum
+                if (floating.isNaN) 0L
                 else if (floating <= minimum.toDouble) minimum
                 else if (floating >= maximum.toDouble) maximum
                 else floating.toLong
@@ -8568,6 +8666,72 @@ private[v1_6] object VMInterpreter {
       }
     } yield values.updateScalar(id(destination), resultTypeId, result & mask(shape._1))
   }
+
+  private def atomicFlagTestAndSet(
+      program: Program,
+      values: InvocationValues,
+      memory: MemoryState,
+      resultType: Operand,
+      destination: Operand,
+      pointer: Operand,
+      scope: Operand,
+      semantics: Operand
+  ): Either[Fault, Unit] = {
+    val opcode = "OpAtomicFlagTestAndSet"
+    for {
+      _ <- Either.cond(
+        program.types.get(id(resultType)).contains(RuntimeType.Bool),
+        (),
+        Fault.InvalidTask(s"$opcode requires a Boolean result")
+      )
+      target   <- atomicFlagTarget(program, values, pointer, scope, semantics, opcode)
+      previous <- memory.atomicModifyScalar(target, MemoryValueByteWidth.applyUnsafe(4))(_ => 1L)
+    } yield values.updateScalar(id(destination), id(resultType), if (previous == 0L) 0L else 1L)
+  }
+
+  private def atomicFlagClear(
+      program: Program,
+      values: InvocationValues,
+      memory: MemoryState,
+      pointer: Operand,
+      scope: Operand,
+      semantics: Operand
+  ): Either[Fault, Unit] = {
+    val opcode = "OpAtomicFlagClear"
+    for {
+      target <- atomicFlagTarget(program, values, pointer, scope, semantics, opcode)
+      order  <- scalar(values, semantics)
+      _      <- Either.cond(
+        (order & 0xaL) == 0L,
+        (),
+        Fault.InvalidTask(s"$opcode cannot use Acquire or AcquireRelease memory semantics")
+      )
+      _ <- memory.atomicWriteScalar(target, 0L, MemoryValueByteWidth.applyUnsafe(4))
+    } yield ()
+  }
+
+  private def atomicFlagTarget(
+      program: Program,
+      values: InvocationValues,
+      pointer: Operand,
+      scope: Operand,
+      semantics: Operand,
+      opcode: String
+  ): Either[Fault, Pointer] =
+    for {
+      target <- address(values, pointer)
+      _      <- Either.cond(
+        integerShape(program, target.pointee).exists { case (width, count) => width.value == 32 && count == 1 },
+        (),
+        Fault.InvalidTask(s"$opcode requires a pointer to a 32-bit integer flag")
+      )
+      _ <- Either.cond(
+        Vec(4, 5, 8, 10, 11, 12, 5349).contains(target.storageClass),
+        (),
+        Fault.InvalidTask(s"$opcode pointer storage class does not support atomic access")
+      )
+      _ <- validateAtomicControls(values, scope, semantics, opcode)
+    } yield target
 
   private def validateAtomicControls(
       values: InvocationValues,

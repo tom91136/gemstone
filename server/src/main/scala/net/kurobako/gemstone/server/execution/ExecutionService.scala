@@ -172,6 +172,7 @@ final class ExecutionService(
         loaded match {
           case Left(error)    => Left(error)
           case Right(program) =>
+            program.bindProgramId(id.value)
             val accepted = stateLock.withLock {
               if (closed) Left(ExecutionFailure.Failed("execution session is closed"))
               else {

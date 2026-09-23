@@ -35,6 +35,9 @@ object RuntimeBackend {
   }
 
   trait Program {
+    // Backends that expose program-scoped function pointers can bind their
+    // service identity before the program becomes visible to launches.
+    def bindProgramId(id: Long): Unit = ()
     def symbols: Either[Error, ProgramSymbols]
     def kernel(name: KernelName): Either[Error, KernelMetadata]
     def globals: Option[Program.Globals]

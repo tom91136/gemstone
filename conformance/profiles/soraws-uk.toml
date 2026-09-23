@@ -111,3 +111,8 @@ name = "intel-sycl"
 backend = "sycl"
 device = "sycl:level_zero:*Arc*A750*"
 environment = { OverrideDefaultFP64Settings = "1", IGC_EnableDPEmulation = "1", SYCL_CACHE_PERSISTENT = "1" }
+
+[[targets]]
+name = "intel-levelzero"
+backend = "levelzero"
+device = "levelzero:*Arc*A750*"

@@ -26,6 +26,8 @@ struct RunOptions {
 };
 struct Workload {
   std::vector<std::string> specs{"*"};
+  // Full Google Test names or globs for the Level Zero CTS. Empty selects all.
+  std::vector<std::string> levelzero_cases;
   // Discovery-time exclusion: these programs are never enumerated, so they
   // apply under --isolated-launcher too. Machine-specific profile skips are
   // execution-time and are intentionally disabled there.
@@ -54,6 +56,7 @@ struct ProcessResult {
 
 int32_t configured_jobs(std::optional<std::string_view> configured, uint32_t hardware_concurrency);
 std::vector<std::string> catch_case_names(std::string_view json, std::string_view program);
+std::vector<std::string> gtest_case_names(std::string_view listing, std::string_view program);
 std::vector<std::string> catch_shard_arguments(const std::vector<std::string> &specs, uint32_t index, uint32_t count);
 std::vector<std::string> launcher_arguments(bool enabled, std::span<char *const> arguments);
 std::vector<profile::ResolvedTarget> unique_routes(const std::vector<profile::ResolvedTarget> &targets, bool isolated);

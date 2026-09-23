@@ -134,11 +134,15 @@ public:
     std::vector<std::string> arguments{"opencl_cts_" CONFORMANCE_CTS_CATEGORY, name_};
     if (const auto *wimpy = std::getenv("CONFORMANCE_OPENCL_CTS_WIMPY"); wimpy && std::string_view(wimpy) == "1")
       arguments.emplace_back("--wimpy");
-    if (std::string_view(CONFORMANCE_CTS_CATEGORY) == "compiler") {
+    if (std::string_view(CONFORMANCE_CTS_CATEGORY) == "compiler"
+        || std::string_view(CONFORMANCE_CTS_CATEGORY) == "spirv_new") {
       const auto *support = std::getenv("CONFORMANCE_SUPPORT_ROOT");
       if (!support || !*support) FAIL("CONFORMANCE_SUPPORT_ROOT is required");
       arguments.emplace_back("--spirv-binaries-path");
       arguments.push_back(std::string(support) + "/data/spirv_bin");
+    }
+    if (std::string_view(CONFORMANCE_CTS_CATEGORY) == "compiler") {
+      const auto *support = std::getenv("CONFORMANCE_SUPPORT_ROOT");
       arguments.emplace_back("--include-test-directory");
       arguments.push_back(std::string(support) + "/data/includeTestDirectory");
       arguments.emplace_back("--second-include-test-directory");

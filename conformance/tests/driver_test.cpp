@@ -56,6 +56,14 @@ TEST_CASE("Catch JSON inventories preserve names and reject malformed input", "[
   CHECK(catch_case_names(R"({"version":1,"listings":{"tests":[]}})", "empty selection").empty());
 }
 
+TEST_CASE("Google Test inventories retain parameterized cases and reject duplicates", "[driver]") {
+  const auto names = gtest_case_names(
+      "Driver.\n  Opens\n  DISABLED_Old\nParam/Copy.\n  Case/0  # GetParam() = 8\n  Case/1\n", "levelzero");
+  CHECK(names == std::vector<std::string>{"Driver.Opens", "Param/Copy.Case/0", "Param/Copy.Case/1"});
+  CHECK_THROWS(gtest_case_names("  Orphan\n", "levelzero"));
+  CHECK_THROWS(gtest_case_names("Driver.\n  Duplicate\n  Duplicate\n", "levelzero"));
+}
+
 TEST_CASE("native shards select exact names including Catch metacharacters", "[driver]") {
   const auto names = list_fixture();
   REQUIRE(names.size() == 2);

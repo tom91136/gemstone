@@ -260,6 +260,10 @@ final class ExecutionConversionSuite extends munit.FunSuite with ExecutionTestSu
     assertEquals(executeUnchecked(not, dispatch, memory), Right(()))
     assertEquals(memory.bytes, LittleEndian.toVec(6L, ScalarByteWidth(4)))
 
+    val negated = module.copy(instructions = instructions.updated(11, Instruction.SNegate(u32, remainder, left)))
+    assertEquals(executeUnchecked(negated, dispatch, memory), Right(()))
+    assertEquals(memory.bytes, LittleEndian.toVec(7L, ScalarByteWidth(4)))
+
     val signedLess =
       module.copy(instructions = instructions.updated(12, Instruction.SLessThan(bool, equal, left, right)))
     assertEquals(executeUnchecked(signedLess, dispatch, memory), Right(()))
@@ -483,4 +487,109 @@ final class ExecutionConversionSuite extends munit.FunSuite with ExecutionTestSu
     }
   }
 
+  test("saturated float-to-signed conversion maps NaN to zero") {
+    val voidType   = operand("IdResult", 1)
+    val floatType  = operand("IdResult", 2)
+    val intType    = operand("IdResult", 3)
+    val pointer    = operand("IdResult", 4)
+    val signature  = operand("IdResult", 5)
+    val function   = operand("IdResult", 6)
+    val output     = operand("IdResult", 7)
+    val input      = operand("IdResult", 8)
+    val converted  = operand("IdResult", 10)
+    val module = Module(
+      Header(ISA.version, Word(0), Word(11), Word(0)),
+      Vec(
+        Instruction.TypeVoid(voidType),
+        Instruction.TypeFloat(floatType, operand("LiteralInteger", 32), None),
+        Instruction.TypeInt(intType, operand("LiteralInteger", 32), operand("LiteralInteger", 1)),
+        Instruction.TypePointer(pointer, operand("StorageClass", 5), intType),
+        Instruction.TypeFunction(signature, voidType, Vec(pointer, floatType)),
+        Instruction.Decorate(converted, operand("Decoration", 28)),
+        Instruction.EntryPoint(operand("ExecutionModel", 6), function, stringOperand("saturated_nan"), Vec.empty),
+        Instruction.Function(voidType, function, operand("FunctionControl", 0), signature),
+        Instruction.FunctionParameter(pointer, output),
+        Instruction.FunctionParameter(floatType, input),
+        Instruction.Label(operand("IdResult", 9)),
+        Instruction.ConvertFToS(intType, converted, input),
+        Instruction.Store(output, converted, None),
+        Instruction.Return(),
+        Instruction.FunctionEnd()
+      ),
+      Endianness.Little
+    )
+    val allocation = MemoryRegion(17L)
+    val memory     = ArrayMemory(allocation, 4)
+    val dispatch = KernelTask
+      .validated(
+        KernelName("saturated_nan"),
+        Dimensions.One,
+        Dimensions.One,
+        Vec(
+          KernelTask.Argument.Memory(allocation, 0L),
+          KernelTask.Argument.Scalar(
+            LittleEndian.toVec(java.lang.Float.floatToRawIntBits(Float.NaN).toLong, ScalarByteWidth(4))
+          )
+        )
+      )
+      .toOption
+      .get
+
+    assertEquals(executeUnchecked(module, dispatch, memory), Right(()))
+    assertEquals(memory.bytes, LittleEndian.toVec(0L, ScalarByteWidth(4)))
+  }
+
+  test("vector-times-scalar multiplies each floating lane") {
+    val voidType   = operand("IdResult", 1)
+    val floatType  = operand("IdResult", 2)
+    val vectorType = operand("IdResult", 3)
+    val pointer    = operand("IdResult", 4)
+    val signature  = operand("IdResult", 5)
+    val function   = operand("IdResult", 6)
+    val output     = operand("IdResult", 7)
+    val vector     = operand("IdResult", 8)
+    val scalar     = operand("IdResult", 9)
+    val product    = operand("IdResult", 11)
+    val module = Module(
+      Header(ISA.version, Word(0), Word(12), Word(0)),
+      Vec(
+        Instruction.TypeVoid(voidType),
+        Instruction.TypeFloat(floatType, operand("LiteralInteger", 32), None),
+        Instruction.TypeVector(vectorType, floatType, operand("LiteralInteger", 2)),
+        Instruction.TypePointer(pointer, operand("StorageClass", 5), vectorType),
+        Instruction.TypeFunction(signature, voidType, Vec(pointer, vectorType, floatType)),
+        Instruction.EntryPoint(operand("ExecutionModel", 6), function, stringOperand("vector_scale"), Vec.empty),
+        Instruction.Function(voidType, function, operand("FunctionControl", 0), signature),
+        Instruction.FunctionParameter(pointer, output),
+        Instruction.FunctionParameter(vectorType, vector),
+        Instruction.FunctionParameter(floatType, scalar),
+        Instruction.Label(operand("IdResult", 10)),
+        Instruction.VectorTimesScalar(vectorType, product, vector, scalar),
+        Instruction.Store(output, product, None),
+        Instruction.Return(),
+        Instruction.FunctionEnd()
+      ),
+      Endianness.Little
+    )
+    val allocation = MemoryRegion(18L)
+    val memory     = ArrayMemory(allocation, 8)
+    def bits(value: Float): Vec[Byte] =
+      LittleEndian.toVec(java.lang.Float.floatToRawIntBits(value).toLong, ScalarByteWidth(4))
+    val dispatch = KernelTask
+      .validated(
+        KernelName("vector_scale"),
+        Dimensions.One,
+        Dimensions.One,
+        Vec(
+          KernelTask.Argument.Memory(allocation, 0L),
+          KernelTask.Argument.Scalar(bits(2.0f) ++ bits(-3.0f)),
+          KernelTask.Argument.Scalar(bits(-2.0f))
+        )
+      )
+      .toOption
+      .get
+
+    assertEquals(executeUnchecked(module, dispatch, memory), Right(()))
+    assertEquals(memory.bytes, bits(-4.0f) ++ bits(6.0f))
+  }
 }

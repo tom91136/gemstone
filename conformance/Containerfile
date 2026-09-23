@@ -24,6 +24,15 @@ RUN apt-get update \
        ocl-icd-opencl-dev opencl-headers python3 spirv-tools \
     && rm -rf /var/lib/apt/lists/*
 
+FROM docker.io/library/ubuntu@sha256:61ebaa5cc23ca45450db85eac015435199ec569e28ec222ea13f2aed2110b8a6 AS toolchain-levelzero
+USER root
+ARG DEBIAN_FRONTEND=noninteractive
+RUN apt-get update \
+    && apt-get install --no-install-recommends --yes \
+       binutils build-essential ca-certificates cmake ninja-build patchelf \
+       libboost-all-dev libpng-dev libva-dev libze-dev \
+    && rm -rf /var/lib/apt/lists/*
+
 FROM ubuntu-build-base AS rocm-repository
 ARG DEBIAN_FRONTEND=noninteractive
 ARG ROCM_VERSION

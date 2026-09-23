@@ -35,6 +35,7 @@
 #include "compiler.hpp"
 #include "completion.hpp"
 #include "objects.hpp"
+#include "../../spirv/specialization.hpp"
 
 namespace {
 
@@ -89,6 +90,7 @@ std::once_flag dispatchInitialized;
 cl_icd_dispatch dispatch{};
 _cl_platform_id platform;
 _cl_device_id device;
+std::atomic_uint64_t nextContextIdentity{1};
 
 struct OpenCLIdentity {
   const char *platformName;
@@ -367,6 +369,16 @@ cl_int readAllocation(const std::shared_ptr<Allocation> &allocation, size_t offs
     std::memcpy(static_cast<uint8_t *>(allocation->data()) + offset, bytes, size);
   } else if (size != 0) {
     std::memcpy(bytes, static_cast<uint8_t *>(allocation->data()) + offset, size);
+  }
+  // The execution service stores device addresses in linked structures. Kernel
+  // completion translates them for the host, but a later map reads the raw
+  // remote bytes again. Reapply the known translations to the mapped range.
+  for (const auto &[pointerOffset, target] : allocation->pointerRelocations) {
+    if (pointerOffset < offset || pointerOffset - offset > size || sizeof(uintptr_t) > size - (pointerOffset - offset)) continue;
+    if (!target.first || target.first->released.load(std::memory_order_acquire) || target.second > target.first->size) continue;
+    const uintptr_t address = reinterpret_cast<uintptr_t>(target.first->data()) + target.second;
+    std::memcpy(static_cast<uint8_t *>(allocation->data()) + pointerOffset, &address, sizeof(address));
+    std::memcpy(static_cast<uint8_t *>(bytes) + pointerOffset - offset, &address, sizeof(address));
   }
   return CL_SUCCESS;
 }
@@ -1587,6 +1599,7 @@ CL_API_ENTRY cl_context CL_API_CALL clCreateContext(const cl_context_properties 
   }
   registerLiveObject(result);
   result->dispatch = &dispatch;
+  result->identity = nextContextIdentity.fetch_add(1, std::memory_order_relaxed);
   result->device = &device;
   if (properties) {
     for (size_t index = 0; properties[index] != 0; index += 2) {
@@ -1973,6 +1986,10 @@ CL_API_ENTRY cl_int CL_API_CALL clGetMemObjectInfo(cl_mem value, cl_mem_info nam
     case CL_MEM_FLAGS: return outputScalar(size, output, written, mem->flags);
     case CL_MEM_SIZE: return outputScalar(size, output, written, mem->size);
     case CL_MEM_HOST_PTR: return outputScalar(size, output, written, mem->hostPointer);
+    case CL_MEM_USES_SVM_POINTER: {
+      const cl_bool usesSvmPointer = (mem->flags & CL_MEM_USE_HOST_PTR) && findPointer(mem->hostPointer) ? CL_TRUE : CL_FALSE;
+      return outputScalar(size, output, written, usesSvmPointer);
+    }
     case CL_MEM_REFERENCE_COUNT: {
       cl_uint v = mem->header.references.load();
       return outputScalar(size, output, written, v);
@@ -2050,6 +2067,8 @@ CL_API_ENTRY cl_program CL_API_CALL clCreateProgramWithIL(cl_context value, cons
   program->dispatch = &dispatch;
   program->context = context;
   program->il.assign(static_cast<const uint8_t *>(il), static_cast<const uint8_t *>(il) + length);
+  program->originalIL = program->il;
+  program->createdWithIL = true;
   retain(context);
   if (error) *error = CL_SUCCESS;
   return reinterpret_cast<cl_program>(program);
@@ -2075,6 +2094,7 @@ CL_API_ENTRY cl_program CL_API_CALL clCreateProgramWithBinary(cl_context context
     auto result = clCreateProgramWithIL(context, binaries[0], lengths[0], error);
     if (result) {
       auto *program = reinterpret_cast<_cl_program *>(result);
+      program->createdWithIL = false;
       const auto loaded = loadProgramIL(program);
       if (loaded == CL_SUCCESS) {
         program->buildStatus = CL_BUILD_SUCCESS;
@@ -2181,6 +2201,17 @@ CL_API_ENTRY cl_int CL_API_CALL clReleaseProgram(cl_program value) {
   }
   return CL_SUCCESS;
 }
+CL_API_ENTRY cl_int CL_API_CALL clSetProgramSpecializationConstant(cl_program value, cl_uint specId, size_t specSize,
+                                                                   const void *specValue) {
+  auto *program = checked(reinterpret_cast<_cl_program *>(value), Kind::Program);
+  if (!program || !program->createdWithIL) return CL_INVALID_PROGRAM;
+  const auto constant = gemstone::spirv::findSpecializationConstant(program->originalIL, specId);
+  if (!constant) return CL_INVALID_SPEC_ID;
+  if (!specValue || specSize != constant->byteSize) return CL_INVALID_VALUE;
+  const auto *bytes = static_cast<const uint8_t *>(specValue);
+  program->specializationConstants[specId].assign(bytes, bytes + specSize);
+  return CL_SUCCESS;
+}
 CL_API_ENTRY cl_int CL_API_CALL clBuildProgram(cl_program value, cl_uint count, const cl_device_id *devices, const char *options,
                                                void(CL_CALLBACK *notify)(cl_program, void *), void *user) {
   auto *program = checked(reinterpret_cast<_cl_program *>(value), Kind::Program);
@@ -2188,6 +2219,22 @@ CL_API_ENTRY cl_int CL_API_CALL clBuildProgram(cl_program value, cl_uint count, 
   if (count != 0 && !devices) return CL_INVALID_VALUE;
   if (count > 1 || (count == 1 && !validDevice(devices[0]))) return CL_INVALID_DEVICE;
   program->buildOptions = !options ? "" : options;
+  if (program->createdWithIL) {
+    if (program->remoteId != 0) {
+      auto &state = remoteState();
+      if (state.ready) {
+        std::lock_guard lock(remoteMutex);
+        (void)state.client->call(UnloadProgram{ProgramId{static_cast<int64_t>(program->remoteId)}});
+      }
+      program->remoteId = 0;
+    }
+    if (!gemstone::spirv::specializeSpirv(program->originalIL, program->specializationConstants, program->il)) {
+      program->buildStatus = CL_BUILD_ERROR;
+      program->buildLog = "invalid SPIR-V specialization constant";
+      if (notify) notify(value, user);
+      return CL_BUILD_PROGRAM_FAILURE;
+    }
+  }
   const std::string source = program->buildSource.empty() ? program->source : program->buildSource;
   if (!source.empty() && program->remoteId != 0) {
     auto &state = remoteState();
@@ -2501,7 +2548,10 @@ CL_API_ENTRY cl_int CL_API_CALL clGetProgramInfo(cl_program value, cl_program_in
     case CL_PROGRAM_KERNEL_NAMES:
       if (program->buildStatus != CL_BUILD_SUCCESS) return CL_INVALID_PROGRAM_EXECUTABLE;
       return outputString(size, output, written, program->kernelNames);
-    case CL_PROGRAM_IL: return outputBytes(size, output, written, program->il.data(), program->il.size());
+    case CL_PROGRAM_IL: {
+      const auto &il = program->createdWithIL ? program->originalIL : program->il;
+      return outputBytes(size, output, written, il.data(), il.size());
+    }
     case CL_PROGRAM_BINARY_SIZES: {
       const auto binary = programBinary(program);
       return outputScalar(size, output, written, binary.size());
@@ -3519,12 +3569,14 @@ CL_API_ENTRY cl_int CL_API_CALL clEnqueueBarrierWithWaitList(cl_command_queue qu
 }
 
 CL_API_ENTRY void *CL_API_CALL clSVMAlloc(cl_context contextValue, cl_svm_mem_flags, size_t size, cl_uint alignment) {
-  if (!checked(reinterpret_cast<_cl_context *>(contextValue), Kind::Context)) return nullptr;
+  auto *context = checked(reinterpret_cast<_cl_context *>(contextValue), Kind::Context);
+  if (!context) return nullptr;
   cl_int error = CL_SUCCESS;
   auto allocation = allocate(size, &error, alignment);
   if (allocation) {
     allocation->externallyMutable.store(true, std::memory_order_relaxed);
     allocation->runtimeOwnsBase = true;
+    allocation->svmContextIdentity = context->identity;
   }
   return !allocation ? nullptr : allocation->data();
 }
@@ -3544,18 +3596,90 @@ CL_API_ENTRY void CL_API_CALL clSVMFree(cl_context, void *pointer) {
   }
   releaseAllocation(allocation, true);
 }
+CL_API_ENTRY cl_int CL_API_CALL clEnqueueSVMFree(cl_command_queue queueValue, cl_uint count, void *pointers[],
+                                                 void(CL_CALLBACK *callback)(cl_command_queue, cl_uint, void *[], void *),
+                                                 void *userData, cl_uint waitCount, const cl_event *waits, cl_event *event) {
+  auto *queue = checked(reinterpret_cast<_cl_command_queue *>(queueValue), Kind::Queue);
+  if (!queue) return CL_INVALID_COMMAND_QUEUE;
+  if ((count == 0) != (pointers == nullptr)) return CL_INVALID_VALUE;
+  auto result = validateWaitList(queue, waitCount, waits);
+  if (result != CL_SUCCESS) return result;
+  std::vector<void *> copiedPointers;
+  if (count != 0) copiedPointers.assign(pointers, pointers + count);
+  for (void *pointer : copiedPointers) {
+    auto allocation = findPointer(pointer);
+    if (allocation && allocation->svmContextIdentity != 0
+        && allocation->svmContextIdentity != queue->context->identity)
+      return CL_INVALID_VALUE;
+    if (!callback && (!allocation || allocation->data() != pointer || !allocation->runtimeOwnsBase
+                      || allocation->svmContextIdentity == 0))
+      return CL_INVALID_VALUE;
+  }
+  return submitCommand(queue, CL_COMMAND_SVM_FREE, false, waitCount, waits,
+                       [=]() mutable {
+                         if (callback) callback(queueValue, count, copiedPointers.data(), userData);
+                         else
+                           for (void *pointer : copiedPointers)
+                             clSVMFree(reinterpret_cast<cl_context>(queue->context), pointer);
+                         return CL_SUCCESS;
+                       },
+                       event);
+}
+CL_API_ENTRY cl_int CL_API_CALL clEnqueueSVMMigrateMem(cl_command_queue queueValue, cl_uint count, const void **pointers,
+                                                       const size_t *sizes, cl_mem_migration_flags flags, cl_uint waitCount,
+                                                       const cl_event *waits, cl_event *event) {
+  auto *queue = checked(reinterpret_cast<_cl_command_queue *>(queueValue), Kind::Queue);
+  if (!queue) return CL_INVALID_COMMAND_QUEUE;
+  if (count == 0 || !pointers || (flags & ~(CL_MIGRATE_MEM_OBJECT_HOST | CL_MIGRATE_MEM_OBJECT_CONTENT_UNDEFINED)))
+    return CL_INVALID_VALUE;
+  auto result = validateWaitList(queue, waitCount, waits);
+  if (result != CL_SUCCESS) return result;
+  struct MigrationRange {
+    std::shared_ptr<Allocation> allocation;
+    size_t offset;
+    size_t size;
+  };
+  std::vector<MigrationRange> ranges;
+  ranges.reserve(count);
+  for (cl_uint index = 0; index < count; ++index) {
+    size_t offset = 0;
+    auto allocation = findPointer(pointers[index], &offset);
+    if (!allocation || allocation->svmContextIdentity != queue->context->identity || offset == allocation->size)
+      return CL_INVALID_VALUE;
+    const size_t rangeSize = !sizes || sizes[index] == 0 ? allocation->size : sizes[index];
+    const size_t rangeOffset = !sizes || sizes[index] == 0 ? 0 : offset;
+    if (!validRange(allocation, rangeOffset, rangeSize)) return CL_INVALID_VALUE;
+    ranges.push_back({std::move(allocation), rangeOffset, rangeSize});
+  }
+  return submitCommand(queue, CL_COMMAND_SVM_MIGRATE_MEM, false, waitCount, waits,
+                       [=] {
+                         if ((flags & CL_MIGRATE_MEM_OBJECT_HOST) && !(flags & CL_MIGRATE_MEM_OBJECT_CONTENT_UNDEFINED))
+                           for (const auto &range : ranges) {
+                             auto *host = static_cast<uint8_t *>(range.allocation->data()) + range.offset;
+                             const cl_int error = readAllocation(range.allocation, range.offset, host, range.size);
+                             if (error != CL_SUCCESS) return error;
+                           }
+                         return CL_SUCCESS;
+                       },
+                       event);
+}
 CL_API_ENTRY cl_int CL_API_CALL clEnqueueSVMMemcpy(cl_command_queue queueValue, cl_bool blocking, void *dst, const void *src, size_t size,
                                                    cl_uint count, const cl_event *waits, cl_event *event) {
   auto *queue = checked(reinterpret_cast<_cl_command_queue *>(queueValue), Kind::Queue);
   if (!queue) return CL_INVALID_COMMAND_QUEUE;
   auto result = validateWaitList(queue, count, waits);
   if (result != CL_SUCCESS) return result;
+  if (!dst || !src) return CL_INVALID_VALUE;
+  const auto destinationAddress = reinterpret_cast<uintptr_t>(dst);
+  const auto sourceAddress = reinterpret_cast<uintptr_t>(src);
+  if ((destinationAddress >= sourceAddress && destinationAddress - sourceAddress < size) ||
+      (sourceAddress >= destinationAddress && sourceAddress - destinationAddress < size))
+    return CL_MEM_COPY_OVERLAP;
   size_t destinationOffset = 0, sourceOffset = 0;
   auto destinationAllocation = findPointer(dst, &destinationOffset);
   auto sourceAllocation = findPointer(src, &sourceOffset);
   if (destinationAllocation && !validRange(destinationAllocation, destinationOffset, size)) return CL_INVALID_VALUE;
   if (sourceAllocation && !validRange(sourceAllocation, sourceOffset, size)) return CL_INVALID_VALUE;
-  if (!destinationAllocation && !sourceAllocation) return CL_INVALID_VALUE;
   return submitCommand(
       queue, CL_COMMAND_SVM_MEMCPY, blocking, count, waits,
       [=] {
@@ -3575,7 +3699,8 @@ CL_API_ENTRY cl_int CL_API_CALL clEnqueueSVMMemcpy(cl_command_queue queueValue, 
                                    static_cast<uint8_t *>(destinationAllocation->data()) + destinationOffset, size);
           if (result != CL_SUCCESS) return result;
         } else {
-          std::memmove(dst, static_cast<const uint8_t *>(sourceAllocation->data()) + sourceOffset, size);
+          const void *source = !sourceAllocation ? src : static_cast<const uint8_t *>(sourceAllocation->data()) + sourceOffset;
+          std::memcpy(dst, source, size);
         }
         return CL_SUCCESS;
       },

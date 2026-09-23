@@ -46,6 +46,7 @@ struct _cl_device_id {
 struct _cl_context {
   const cl_icd_dispatch *dispatch = nullptr;
   Header header{Kind::Context};
+  uint64_t identity = 0;
   _cl_device_id *device = nullptr;
   std::vector<cl_context_properties> properties;
   std::vector<std::pair<void(CL_CALLBACK *)(cl_context, void *), void *>> destructorCallbacks;
@@ -73,6 +74,7 @@ struct Allocation {
   std::atomic_bool externallyMutable{false};
   std::atomic_bool released{false};
   bool runtimeOwnsBase = false;
+  uint64_t svmContextIdentity = 0;
   // Host-visible buffers can be copied by the SYCL runtime without updating
   // their host mirror.  Preserve pointer identities discovered by the
   // relocation scan so copied aggregate arguments remain relocatable.
@@ -124,6 +126,9 @@ struct _cl_program {
   _cl_context *context = nullptr;
   std::string source;
   std::vector<uint8_t> il;
+  std::vector<uint8_t> originalIL;
+  std::map<cl_uint, std::vector<uint8_t>> specializationConstants;
+  bool createdWithIL = false;
   std::vector<uint8_t> bitcode;
   uint64_t remoteId = 0;
   cl_build_status buildStatus = CL_BUILD_NONE;

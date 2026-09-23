@@ -25,7 +25,7 @@ namespace conformance::profile {
 using namespace aspartame;
 namespace {
 
-constexpr std::array<std::string_view, 6> supported_backends{"cuda", "hip", "hsa", "opencl", "sycl", "openacc"};
+constexpr std::array<std::string_view, 7> supported_backends{"cuda", "hip", "hsa", "opencl", "sycl", "levelzero", "openacc"};
 
 std::string target_id(const ProfileTarget &target) { return target.name.value_or(target.backend); }
 

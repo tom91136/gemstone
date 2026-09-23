@@ -17,6 +17,7 @@
 #include <glaze/toml.hpp>
 
 #include "conformance/device.hpp"
+#include "device_selector.hpp"
 
 #include "device_lock.hpp"
 #include "environment.hpp"
@@ -86,6 +87,32 @@ std::vector<std::string> catch_case_names(std::string_view json, std::string_vie
     if (test.name.empty() || test.name.find('\0') != std::string::npos || !names.insert(test.name).second)
       throw std::runtime_error("invalid or duplicate Catch test from " + std::string(program));
     result.push_back(std::move(test.name));
+  }
+  return result;
+}
+std::vector<std::string> gtest_case_names(std::string_view listing, std::string_view program) {
+  std::vector<std::string> result;
+  std::set<std::string> unique;
+  std::string suite;
+  while (!listing.empty()) {
+    const auto end = listing.find('\n');
+    auto line = listing.substr(0, end);
+    if (!line.empty() && line.back() == '\r') line.remove_suffix(1);
+    if (end == std::string_view::npos) listing = {};
+    else listing.remove_prefix(end + 1);
+    if (line.empty()) continue;
+    if (line.starts_with("  ")) {
+      if (suite.empty()) throw std::runtime_error("Google Test case without suite from " + std::string(program));
+      line.remove_prefix(2);
+      line = line.substr(0, line.find_first_of(" \t#"));
+      if (line.empty()) throw std::runtime_error("empty Google Test case from " + std::string(program));
+      const auto name = suite + std::string(line);
+      if (!unique.insert(name).second) throw std::runtime_error("duplicate Google Test case from " + std::string(program));
+      if (name.find("DISABLED_") == std::string::npos) result.push_back(name);
+    } else {
+      if (line.back() != '.') throw std::runtime_error("invalid Google Test suite from " + std::string(program));
+      suite = line;
+    }
   }
   return result;
 }
@@ -250,13 +277,22 @@ std::vector<ScheduledCase> discover_cases(const RunOptions &configuration, const
   std::vector<ScheduledCase> tests;
   for (const auto &program : test_programs(artifact)) {
     if (std::ranges::find(workload.exclude_programs, program.name) != workload.exclude_programs.end()) continue;
-    auto command = std::vector<std::string>{program.path.string(), "--list-tests", "--reporter", "json", "--order", "lex"};
-    command.insert(command.end(), workload.specs.begin(), workload.specs.end());
+    const bool gtest = program.name.starts_with("levelzero_cts_");
+    auto command = gtest ? std::vector<std::string>{program.path.string(), "--gtest_list_tests"}
+                         : std::vector<std::string>{program.path.string(), "--list-tests", "--reporter", "json", "--order", "lex"};
+    if (!gtest) command.insert(command.end(), workload.specs.begin(), workload.specs.end());
     const auto listing = run_process(launched(configuration.launcher, std::move(command)), artifact, environment, 10min,
                                      fmt::format("[{}/{} discovery] ", id, program.name), true);
-    if (listing.status != 0) throw std::runtime_error(fmt::format("Catch discovery failed for {}/{}: {}", id, program.name, listing.error));
-    auto names = catch_case_names(listing.output, program.name);
-    if (names.size() > UINT32_MAX) throw std::runtime_error("Catch inventory is too large");
+    if (listing.status != 0)
+      throw std::runtime_error(fmt::format("test discovery failed for {}/{}: {}", id, program.name, listing.error));
+    auto names = gtest ? gtest_case_names(listing.output, program.name) : catch_case_names(listing.output, program.name);
+    if (gtest && !workload.levelzero_cases.empty())
+      std::erase_if(names, [&](const std::string &name) {
+        return std::ranges::none_of(workload.levelzero_cases, [&](const std::string &pattern) {
+          return glob_matches(pattern.c_str(), name.c_str());
+        });
+      });
+    if (names.size() > UINT32_MAX) throw std::runtime_error("test inventory is too large");
     const auto count = static_cast<uint32_t>(names.size());
     auto timeout = program.timeout_seconds;
     if (const auto key = suite_timeout_environment(program.name); !key.empty()) {
@@ -341,8 +377,10 @@ int32_t execute_case(const fs::path &path, const ScheduledCase &test) {
     std::cout << "SKIP " << test.identity << ": machine profile\n";
     return 4;
   }
+  const bool gtest = test.program.starts_with("levelzero_cts_");
   const bool sharded = suite_uses_catch_sharding(test.program);
-  auto arguments = catch_shard_arguments(config.specs, sharded ? test.index : 0, sharded ? test.count : 1);
+  auto arguments = gtest ? std::vector<std::string>{"--gtest_filter=" + test.identity}
+                         : catch_shard_arguments(config.specs, sharded ? test.index : 0, sharded ? test.count : 1);
   auto program = fs::path(config.directory) / test.program;
 #ifdef _WIN32
   program += ".exe";
@@ -356,7 +394,8 @@ int32_t execute_case(const fs::path &path, const ScheduledCase &test) {
   std::unique_ptr<DeviceLock> lock;
   if (config.deviceLock) lock = std::make_unique<DeviceLock>(physical_device_from_key(config.device), 10min);
   const auto result =
-      run_process(launched(config.launcher, std::move(arguments)), report, environment, std::chrono::seconds(test.timeout_seconds));
+      run_process(launched(config.launcher, std::move(arguments)), gtest ? fs::path(config.directory) : report,
+                  environment, std::chrono::seconds(test.timeout_seconds));
   return result.status;
 }
 int32_t run(RunOptions configuration, const fs::path &driver) {

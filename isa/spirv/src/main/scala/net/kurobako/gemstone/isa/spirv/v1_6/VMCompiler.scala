@@ -135,7 +135,11 @@ private[v1_6] object VMCompiler {
         case Instruction.TypeEvent(dest)                => types.update(id(dest), RuntimeType.Event)
         case Instruction.ConstantTrue(resultType, dest) =>
           constants.update(id(dest), Constant.Bits(id(resultType), Vec(1L)))
+        case Instruction.SpecConstantTrue(resultType, dest) =>
+          constants.update(id(dest), Constant.Bits(id(resultType), Vec(1L)))
         case Instruction.ConstantFalse(resultType, dest) =>
+          constants.update(id(dest), Constant.Bits(id(resultType), Vec(0L)))
+        case Instruction.SpecConstantFalse(resultType, dest) =>
           constants.update(id(dest), Constant.Bits(id(resultType), Vec(0L)))
         case Instruction.Constant(resultType, dest, value) =>
           constants.update(id(dest), Constant.Bits(id(resultType), Vec(literalBits(value))))

@@ -13,6 +13,85 @@ import io.github.iltotore.iron.constraint.all.*
 
 import java.util.concurrent.atomic.AtomicReference
 final class ExecutionAtomicSuite extends munit.FunSuite with ExecutionTestSupport {
+  test("atomic flag test-and-set returns the prior state and clear resets the flag") {
+    val voidType     = operand("IdResult", 1)
+    val u32          = operand("IdResult", 2)
+    val boolType     = operand("IdResult", 3)
+    val pointerType  = operand("IdResult", 4)
+    val functionType = operand("IdResult", 5)
+    val scope        = operand("IdResult", 6)
+    val semantics    = operand("IdResult", 7)
+    val zero         = operand("IdResult", 8)
+    val one          = operand("IdResult", 9)
+    val function     = operand("IdResult", 10)
+    val target       = operand("IdResult", 11)
+    val first        = operand("IdResult", 13)
+    val second       = operand("IdResult", 14)
+    val third        = operand("IdResult", 15)
+    val firstValue   = operand("IdResult", 16)
+    val secondValue  = operand("IdResult", 17)
+    val thirdValue   = operand("IdResult", 18)
+    val firstOutput  = operand("IdResult", 19)
+    val secondOutput = operand("IdResult", 20)
+    val thirdOutput  = operand("IdResult", 21)
+    val two          = operand("IdResult", 22)
+    val three        = operand("IdResult", 23)
+    val module       = Module(
+      Header(ISA.version, Word(0), Word(24), Word(0)),
+      Vec(
+        Instruction.TypeVoid(voidType),
+        Instruction.TypeInt(u32, operand("LiteralInteger", 32), operand("LiteralInteger", 0)),
+        Instruction.TypeBool(boolType),
+        Instruction.TypePointer(pointerType, operand("StorageClass", 5), u32),
+        Instruction.TypeFunction(functionType, voidType, Vec(pointerType)),
+        Instruction.Constant(u32, scope, operand("LiteralContextDependentNumber", 2)),
+        Instruction.Constant(u32, semantics, operand("LiteralContextDependentNumber", 896)),
+        Instruction.Constant(u32, zero, operand("LiteralContextDependentNumber", 0)),
+        Instruction.Constant(u32, one, operand("LiteralContextDependentNumber", 1)),
+        Instruction.Constant(u32, two, operand("LiteralContextDependentNumber", 2)),
+        Instruction.Constant(u32, three, operand("LiteralContextDependentNumber", 3)),
+        Instruction.EntryPoint(operand("ExecutionModel", 6), function, stringOperand("atomic_flag"), Vec.empty),
+        Instruction.Function(voidType, function, operand("FunctionControl", 0), functionType),
+        Instruction.FunctionParameter(pointerType, target),
+        Instruction.Label(operand("IdResult", 12)),
+        Instruction.AtomicFlagTestAndSet(boolType, first, target, scope, semantics),
+        Instruction.AtomicFlagTestAndSet(boolType, second, target, scope, semantics),
+        Instruction.AtomicFlagClear(target, scope, semantics),
+        Instruction.AtomicFlagTestAndSet(boolType, third, target, scope, semantics),
+        Instruction.Select(u32, firstValue, first, one, zero),
+        Instruction.Select(u32, secondValue, second, one, zero),
+        Instruction.Select(u32, thirdValue, third, one, zero),
+        Instruction.PtrAccessChain(pointerType, firstOutput, target, one, Vec.empty),
+        Instruction.Store(firstOutput, firstValue, None),
+        Instruction.PtrAccessChain(pointerType, secondOutput, target, two, Vec.empty),
+        Instruction.Store(secondOutput, secondValue, None),
+        Instruction.PtrAccessChain(pointerType, thirdOutput, target, three, Vec.empty),
+        Instruction.Store(thirdOutput, thirdValue, None),
+        Instruction.Return(),
+        Instruction.FunctionEnd()
+      ),
+      Endianness.Little
+    )
+    val allocation = MemoryRegion(122L)
+    val memory     = ArrayMemory(allocation, 16)
+    val dispatch   = KernelTask
+      .validated(
+        KernelName("atomic_flag"),
+        Dimensions.One,
+        Dimensions.One,
+        Vec(KernelTask.Argument.Memory(allocation, 0L))
+      )
+      .toOption
+      .get
+
+    assertEquals(executeUnchecked(module, dispatch, memory), Right(()))
+    assertEquals(
+      memory.bytes,
+      LittleEndian.toVec(1L, ScalarByteWidth(4)) ++ LittleEndian.toVec(0L, ScalarByteWidth(4)) ++
+        LittleEndian.toVec(1L, ScalarByteWidth(4)) ++ LittleEndian.toVec(0L, ScalarByteWidth(4))
+    )
+  }
+
   test("dispatch executes typed 64-bit atomic add and unsigned minimum") {
     val voidType      = operand("IdResult", 1)
     val u32           = operand("IdResult", 2)
