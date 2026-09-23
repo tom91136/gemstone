@@ -18,6 +18,7 @@ import net.kurobako.gemstone.binary.LittleEndian
 import net.kurobako.gemstone.binary.ScalarByteWidth
 import net.kurobako.gemstone.isa.KernelName
 import net.kurobako.gemstone.vm.LaunchGeometry
+import net.kurobako.gemstone.vm.LaunchGeometry.Axis
 import net.kurobako.gemstone.vm.LaunchGeometry.Dimensions
 import net.kurobako.gemstone.memory.DeviceAllocationByteSize
 import net.kurobako.gemstone.memory.GuestAddress
@@ -75,6 +76,19 @@ private object VMSemantics {
         Right(())
     }
 
+  private def stageRegisterResult(
+      effects: VMStateEffects,
+      lane: Int,
+      destination: RegisterName,
+      result: Either[ExecutionFault, Long]
+  ): Either[ExecutionFault, Unit] =
+    result match {
+      case Left(fault)  => Left(fault)
+      case Right(value) =>
+        effects.stageRegister(lane, destination, value)
+        Right(())
+    }
+
   private def stageResults(
       effects: VMStateEffects,
       result: Either[ExecutionFault, Vec[VMStateWrite]]
@@ -88,65 +102,62 @@ private object VMSemantics {
 
   extension (instruction: VMIR.Instruction) {
     // A PTX instruction updates per-lane machine state; staged mutable maps avoid allocating immutable copies.
-    @SuppressWarnings(Array("scalafix:DisableSyntax.var", "scalafix:GemstoneNoAssume"))
+    @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
     def execute(context: VMExecutionContext, effects: VMStateEffects): Either[ExecutionFault, Step] =
       if (executeFast(instruction, context)) Right(Step.Advance)
       else instruction match {
         case VMIR.Instruction.LoadParameter(destinations, parameter, offset, elementWidth, signed) =>
-          forEveryLane(context) { lane =>
-            val elementBytes = byteCount(elementWidth)
-            context.state.parameters(lane).get(parameter) match {
-              case Some(value) if offset == 0 && destinations.size == 1 =>
-                effects.stage(VMStateWrite.Register(
-                  lane,
-                  destinations.head,
-                  loadBits(value, elementWidth, signed)
-                ))
-                Right(())
-              case Some(_) =>
-                Left(ExecutionFault.InvalidState(
-                  s"unsupported local parameter load: $parameter+$offset"
-                ))
-              case None =>
-                context.arguments.get(parameter) match {
-                  case None =>
-                    Left(ExecutionFault.InvalidState(
-                      s"missing kernel argument $parameter"
-                    ))
-                  case Some(argument) =>
-                    if (offset < 0 || offset > argument.bytes.length - elementBytes.value * destinations.size)
-                      Left(ExecutionFault.InvalidState(
-                        s"parameter $parameter load at $offset exceeds ${argument.bytes.length} bytes"
+          val elementBytes   = byteCount(elementWidth)
+          val argumentValues = context.arguments.get(parameter).map { argument =>
+            if (offset < 0 || offset > argument.bytes.length - elementBytes.value * destinations.size)
+              Left(ExecutionFault.InvalidState(
+                s"parameter $parameter load at $offset exceeds ${argument.bytes.length} bytes"
+              ))
+            else
+              Right(Array.tabulate(destinations.size) { index =>
+                val byteOffset = offset + index * elementBytes.value
+                loadBits(LittleEndian.decode(argument.bytes, byteOffset, elementBytes), elementWidth, signed)
+              })
+          }
+          var failure: Option[ExecutionFault] = None
+          context.active.foreachLane { lane =>
+            if (failure.isEmpty)
+              context.state.parameters(lane).get(parameter) match {
+                case Some(value) if offset == 0 && destinations.size == 1 =>
+                  effects.stageRegister(lane, destinations.head, loadBits(value, elementWidth, signed))
+                case Some(_) =>
+                  failure = Some(ExecutionFault.InvalidState(
+                    s"unsupported local parameter load: $parameter+$offset"
+                  ))
+                case None =>
+                  argumentValues match {
+                    case None =>
+                      failure = Some(ExecutionFault.InvalidState(
+                        s"missing kernel argument $parameter"
                       ))
-                    else {
-                      destinations.zipWithIndex.foreach { case (destination, index) =>
-                        val byteOffset = offset + index * elementBytes.value
-                        val value      = LittleEndian.decode(argument.bytes, byteOffset, elementBytes)
-                        effects.stage(VMStateWrite.Register(lane, destination, loadBits(value, elementWidth, signed)))
+                    case Some(Left(error))   => failure = Some(error)
+                    case Some(Right(values)) =>
+                      var index = 0
+                      while (index < destinations.size) {
+                        effects.stageRegister(lane, destinations(index), values(index))
+                        index += 1
                       }
-                      Right(())
-                    }
-                }
-            }
-          }.map(_ => Step.Advance)
+                  }
+              }
+          }
+          failure match {
+            case Some(fault) => Left(fault)
+            case None        => Right(Step.Advance)
+          }
         case VMIR.Instruction.LoadParameterIndirect(destination, address, width, signed) =>
           forEveryLane(context) { lane =>
-            val write = context.read(lane, address).flatMap { rawAddress =>
+            val loaded = context.read(lane, address).flatMap { rawAddress =>
               context.state.readParameterBuffer(rawAddress, byteCount(width)) match {
-                case Some(loaded) =>
-                  Right(VMStateWrite.Register(lane, destination, loadBits(loaded, width, signed)))
+                case Some(value)                         => Right(loadBits(value, width, signed))
                 case None if isSharedAddress(rawAddress) =>
-                  Right(VMStateWrite.Register(
-                    lane,
-                    destination,
-                    loadBits(context.state.readShared(rawAddress, width), width, signed)
-                  ))
+                  Right(loadBits(context.state.readShared(rawAddress, width), width, signed))
                 case None if isLocalAddress(rawAddress) =>
-                  Right(VMStateWrite.Register(
-                    lane,
-                    destination,
-                    loadBits(context.state.readLocal(lane, rawAddress, width), width, signed)
-                  ))
+                  Right(loadBits(context.state.readLocal(lane, rawAddress, width), width, signed))
                 case None =>
                   context.memory
                     .readLittleEndian(GuestAddress(rawAddress), memoryByteCount(width))
@@ -155,16 +166,10 @@ private object VMSemantics {
                         s"pc ${context.pc.value}, lane $lane: ${error.message}"
                       )
                     )
-                    .map(loaded =>
-                      VMStateWrite.Register(
-                        lane,
-                        destination,
-                        loadBits(loaded, width, signed)
-                      )
-                    )
+                    .map(value => loadBits(value, width, signed))
               }
             }
-            stageResult(effects, write)
+            stageRegisterResult(effects, lane, destination, loaded)
           }.map(_ => Step.Advance)
         case VMIR.Instruction.LoadParameterIndirectVector(destinations, address, width, signed) =>
           forEveryLane(context) { lane =>
@@ -677,97 +682,146 @@ private object VMSemantics {
             )
             stageResult(effects, write)
           }.map(_ => Step.Advance)
-        case VMIR.Instruction.LoadGlobal(destination, address, width, signed) =>
-          forEveryLane(context) { lane =>
-            val write = context.read(lane, address).flatMap { rawAddress =>
-              context.state.readParameterBuffer(rawAddress, byteCount(width)) match {
-                case Some(loaded) =>
-                  Right(VMStateWrite.Register(lane, destination, loadBits(loaded, width, signed)))
-                case None =>
-                  context.memory
-                    .readLittleEndian(GuestAddress(rawAddress), memoryByteCount(width))
-                    .leftMap(error =>
-                      ExecutionFault.Memory(
-                        s"pc ${context.pc.value}, lane $lane: ${error.message}"
-                      )
-                    )
-                    .map { loaded =>
-                      VMStateWrite.Register(
-                        lane,
-                        destination,
-                        loadBits(loaded, width, signed)
-                      )
-                    }
+        case other => executeMemoryAndControl(other, context, effects)
+      }
+  }
+
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var", "scalafix:GemstoneNoAssume"))
+  private def executeMemoryAndControl(
+      instruction: VMIR.Instruction,
+      context: VMExecutionContext,
+      effects: VMStateEffects
+  ): Either[ExecutionFault, Step] = instruction match {
+    case VMIR.Instruction.LoadGlobal(destination, address, width, signed) =>
+      var failure: Option[ExecutionFault] = None
+      context.active.foreachLane { lane =>
+        if (failure.isEmpty) {
+          val rawAddress = readFast(context, lane, address)
+          context.state.readParameterBuffer(rawAddress, byteCount(width)) match {
+            case Some(value) =>
+              effects.stageRegister(lane, destination, loadBits(value, width, signed))
+            case None =>
+              context.memory.readLittleEndian(GuestAddress(rawAddress), memoryByteCount(width)) match {
+                case Left(error) =>
+                  failure = Some(ExecutionFault.Memory(
+                    s"pc ${context.pc.value}, lane $lane: ${error.message}"
+                  ))
+                case Right(value) =>
+                  effects.stageRegister(lane, destination, loadBits(value, width, signed))
               }
-            }
-            stageResult(effects, write)
-          }.map(_ => Step.Advance)
-        case VMIR.Instruction.LoadGeneric(destination, address, width, signed) =>
-          forEveryLane(context) { lane =>
-            val write = context.read(lane, address).flatMap { rawAddress =>
-              context.state.readParameterBuffer(rawAddress, byteCount(width)) match {
-                case Some(value) => Right(VMStateWrite.Register(
-                    lane,
-                    destination,
-                    loadBits(value, width, signed)
+          }
+        }
+      }
+      failure match {
+        case Some(fault) => Left(fault)
+        case None        => Right(Step.Advance)
+      }
+    case VMIR.Instruction.LoadGeneric(destination, address, width, signed) =>
+      var failure: Option[ExecutionFault] = None
+      context.active.foreachLane { lane =>
+        if (failure.isEmpty) {
+          val rawAddress = readFast(context, lane, address)
+          context.state.readParameterBuffer(rawAddress, byteCount(width)) match {
+            case Some(value) =>
+              effects.stageRegister(lane, destination, loadBits(value, width, signed))
+            case None if isSharedAddress(rawAddress) =>
+              effects.stageRegister(
+                lane,
+                destination,
+                loadBits(context.state.readShared(rawAddress, width), width, signed)
+              )
+            case None if isLocalAddress(rawAddress) =>
+              effects.stageRegister(
+                lane,
+                destination,
+                loadBits(context.state.readLocal(lane, rawAddress, width), width, signed)
+              )
+            case None =>
+              context.memory.readLittleEndian(GuestAddress(rawAddress), memoryByteCount(width)) match {
+                case Left(error) =>
+                  failure = Some(ExecutionFault.Memory(
+                    s"pc ${context.pc.value}, lane $lane: ${error.message}"
                   ))
-                case None if isSharedAddress(rawAddress) =>
-                  Right(VMStateWrite.Register(
-                    lane,
-                    destination,
-                    loadBits(context.state.readShared(rawAddress, width), width, signed)
-                  ))
-                case None if isLocalAddress(rawAddress) =>
-                  Right(VMStateWrite.Register(
-                    lane,
-                    destination,
-                    loadBits(context.state.readLocal(lane, rawAddress, width), width, signed)
-                  ))
-                case None =>
-                  context.memory
-                    .readLittleEndian(GuestAddress(rawAddress), memoryByteCount(width))
-                    .leftMap(error =>
-                      ExecutionFault.Memory(
-                        s"pc ${context.pc.value}, lane $lane: ${error.message}"
-                      )
-                    )
-                    .map(value =>
-                      VMStateWrite.Register(
-                        lane,
-                        destination,
-                        loadBits(value, width, signed)
-                      )
-                    )
+                case Right(value) =>
+                  effects.stageRegister(lane, destination, loadBits(value, width, signed))
               }
-            }
-            stageResult(effects, write)
-          }.map(_ => Step.Advance)
-        case VMIR.Instruction.DiscardGlobalLoad(address, width) =>
-          forEveryLane(context) { lane =>
-            context.read(lane, address).flatMap { rawAddress =>
-              if (context.state.readParameterBuffer(rawAddress, byteCount(width)).nonEmpty) Right(())
-              else
+          }
+        }
+      }
+      failure match {
+        case Some(fault) => Left(fault)
+        case None        => Right(Step.Advance)
+      }
+    case VMIR.Instruction.DiscardGlobalLoad(address, width) =>
+      forEveryLane(context) { lane =>
+        context.read(lane, address).flatMap { rawAddress =>
+          if (context.state.readParameterBuffer(rawAddress, byteCount(width)).nonEmpty) Right(())
+          else
+            context.memory
+              .readLittleEndian(GuestAddress(rawAddress), memoryByteCount(width))
+              .leftMap(error =>
+                ExecutionFault.Memory(
+                  s"pc ${context.pc.value}, lane $lane: ${error.message}"
+                )
+              )
+              .map(_ => ())
+        }
+      }.map(_ => Step.Advance)
+    case VMIR.Instruction.LoadGlobalVector(destinations, address, width, signed) =>
+      forEveryLane(context) { lane =>
+        val writes = context.read(lane, address).flatMap { rawAddress =>
+          if (coherentGlobalVector(context, rawAddress, destinations.size, width))
+            loadCoherentVector(context, lane, rawAddress, destinations, width, signed)
+          else destinations.zipWithIndex.traverse { case (destination, index) =>
+            context.memory
+              .readLittleEndian(
+                GuestAddress(rawAddress + index.toLong * byteCount(width).value.toLong),
+                memoryByteCount(width)
+              )
+              .leftMap(error =>
+                ExecutionFault.Memory(
+                  s"pc ${context.pc.value}, lane $lane: ${error.message}"
+                )
+              )
+              .map(value =>
+                VMStateWrite.Register(
+                  lane,
+                  destination,
+                  loadBits(value, width, signed)
+                )
+              )
+          }
+        }
+        stageResults(effects, writes)
+      }.map(_ => Step.Advance)
+    case VMIR.Instruction.LoadGenericVector(destinations, address, width, signed) =>
+      forEveryLane(context) { lane =>
+        val writes = context.read(lane, address).flatMap { rawAddress =>
+          if (coherentGlobalVector(context, rawAddress, destinations.size, width))
+            loadCoherentVector(context, lane, rawAddress, destinations, width, signed)
+          else destinations.zipWithIndex.traverse { case (destination, index) =>
+            val elementAddress = rawAddress + index.toLong * byteCount(width).value.toLong
+            context.state.readParameterBuffer(elementAddress, byteCount(width)) match {
+              case Some(value) => Right(VMStateWrite.Register(
+                  lane,
+                  destination,
+                  loadBits(value, width, signed)
+                ))
+              case None if isSharedAddress(elementAddress) =>
+                Right(VMStateWrite.Register(
+                  lane,
+                  destination,
+                  loadBits(context.state.readShared(elementAddress, width), width, signed)
+                ))
+              case None if isLocalAddress(elementAddress) =>
+                Right(VMStateWrite.Register(
+                  lane,
+                  destination,
+                  loadBits(context.state.readLocal(lane, elementAddress, width), width, signed)
+                ))
+              case None =>
                 context.memory
-                  .readLittleEndian(GuestAddress(rawAddress), memoryByteCount(width))
-                  .leftMap(error =>
-                    ExecutionFault.Memory(
-                      s"pc ${context.pc.value}, lane $lane: ${error.message}"
-                    )
-                  )
-                  .map(_ => ())
-            }
-          }.map(_ => Step.Advance)
-        case VMIR.Instruction.LoadGlobalVector(destinations, address, width, signed) =>
-          forEveryLane(context) { lane =>
-            val writes = context.read(lane, address).flatMap { rawAddress =>
-              if (coherentGlobalVector(context, rawAddress, destinations.size, width))
-                loadCoherentVector(context, lane, rawAddress, destinations, width, signed)
-              else destinations.zipWithIndex.traverse { case (destination, index) =>
-                context.memory
-                  .readLittleEndian(
-                    GuestAddress(rawAddress + index.toLong * byteCount(width).value.toLong),
-                    memoryByteCount(width)
-                  )
+                  .readLittleEndian(GuestAddress(elementAddress), memoryByteCount(width))
                   .leftMap(error =>
                     ExecutionFault.Memory(
                       s"pc ${context.pc.value}, lane $lane: ${error.message}"
@@ -780,506 +834,454 @@ private object VMSemantics {
                       loadBits(value, width, signed)
                     )
                   )
-              }
             }
-            stageResults(effects, writes)
-          }.map(_ => Step.Advance)
-        case VMIR.Instruction.LoadGenericVector(destinations, address, width, signed) =>
-          forEveryLane(context) { lane =>
-            val writes = context.read(lane, address).flatMap { rawAddress =>
-              if (coherentGlobalVector(context, rawAddress, destinations.size, width))
-                loadCoherentVector(context, lane, rawAddress, destinations, width, signed)
-              else destinations.zipWithIndex.traverse { case (destination, index) =>
-                val elementAddress = rawAddress + index.toLong * byteCount(width).value.toLong
-                context.state.readParameterBuffer(elementAddress, byteCount(width)) match {
-                  case Some(value) => Right(VMStateWrite.Register(
-                      lane,
-                      destination,
-                      loadBits(value, width, signed)
-                    ))
-                  case None if isSharedAddress(elementAddress) =>
-                    Right(VMStateWrite.Register(
-                      lane,
-                      destination,
-                      loadBits(context.state.readShared(elementAddress, width), width, signed)
-                    ))
-                  case None if isLocalAddress(elementAddress) =>
-                    Right(VMStateWrite.Register(
-                      lane,
-                      destination,
-                      loadBits(context.state.readLocal(lane, elementAddress, width), width, signed)
-                    ))
-                  case None =>
-                    context.memory
-                      .readLittleEndian(GuestAddress(elementAddress), memoryByteCount(width))
-                      .leftMap(error =>
-                        ExecutionFault.Memory(
-                          s"pc ${context.pc.value}, lane $lane: ${error.message}"
-                        )
-                      )
-                      .map(value =>
-                        VMStateWrite.Register(
-                          lane,
-                          destination,
-                          loadBits(value, width, signed)
-                        )
-                      )
-                }
-              }
-            }
-            stageResults(effects, writes)
-          }.map(_ => Step.Advance)
-        case VMIR.Instruction.StoreGlobal(address, source, width) =>
-          forEveryLane(context) { lane =>
-            val write = for {
-              rawAddress <- context.read(lane, address)
-              value      <- context.read(lane, source)
-            } yield
-              if (context.state.parameterBufferRange(rawAddress, byteCount(width).value).nonEmpty)
-                VMStateWrite.ParameterBuffer(rawAddress, width, value)
-              else VMStateWrite.Memory(lane, GuestAddress(rawAddress), width, value)
-            stageResult(effects, write)
-          }.map(_ => Step.Advance)
-        case VMIR.Instruction.StoreGeneric(address, source, width) =>
-          forEveryLane(context) { lane =>
-            val write = for {
-              rawAddress <- context.read(lane, address)
-              value      <- context.read(lane, source)
-            } yield
-              if (context.state.parameterBufferRange(rawAddress, byteCount(width).value).nonEmpty)
-                VMStateWrite.ParameterBuffer(rawAddress, width, value)
-              else if (isSharedAddress(rawAddress)) VMStateWrite.Shared(lane, rawAddress, width, value)
-              else if (isLocalAddress(rawAddress)) VMStateWrite.Local(lane, rawAddress, width, value)
-              else VMStateWrite.Memory(lane, GuestAddress(rawAddress), width, value)
-            stageResult(effects, write)
-          }.map(_ => Step.Advance)
-        case VMIR.Instruction.StoreGlobalVector(address, sources, width) =>
-          forEveryLane(context) { lane =>
-            val writes = context.read(lane, address).flatMap { rawAddress =>
-              if (coherentGlobalVector(context, rawAddress, sources.size, width))
-                storeCoherentVector(context, lane, rawAddress, sources, width)
-              else sources.zipWithIndex.traverse { case (source, index) =>
-                context.read(lane, source).map(value =>
-                  VMStateWrite.Memory(
-                    lane,
-                    GuestAddress(rawAddress + index.toLong * byteCount(width).value.toLong),
-                    width,
-                    value
-                  )
-                )
-              }
-            }
-            stageResults(effects, writes)
-          }.map(_ => Step.Advance)
-        case VMIR.Instruction.StoreGenericVector(address, sources, width) =>
-          forEveryLane(context) { lane =>
-            val writes = context.read(lane, address).flatMap { rawAddress =>
-              if (coherentGlobalVector(context, rawAddress, sources.size, width))
-                storeCoherentVector(context, lane, rawAddress, sources, width)
-              else sources.zipWithIndex.traverse { case (source, index) =>
-                context.read(lane, source).map { value =>
-                  val elementAddress = rawAddress + index.toLong * byteCount(width).value.toLong
-                  if (isSharedAddress(elementAddress))
-                    VMStateWrite.Shared(lane, elementAddress, width, value)
-                  else if (isLocalAddress(elementAddress))
-                    VMStateWrite.Local(lane, elementAddress, width, value)
-                  else
-                    VMStateWrite.Memory(lane, GuestAddress(elementAddress), width, value)
-                }
-              }
-            }
-            stageResults(effects, writes)
-          }.map(_ => Step.Advance)
-        case VMIR.Instruction.LoadShared(destination, address, width, signed) =>
-          forEveryLane(context) { lane =>
-            stageResult(
-              effects,
-              context.read(lane, address).map(rawAddress =>
-                VMStateWrite.Register(
-                  lane,
-                  destination,
-                  loadBits(context.state.readShared(rawAddress, width), width, signed)
-                )
+          }
+        }
+        stageResults(effects, writes)
+      }.map(_ => Step.Advance)
+    case VMIR.Instruction.StoreGlobal(address, source, width) =>
+      context.active.foreachLane { lane =>
+        val rawAddress = readFast(context, lane, address)
+        val value      = readFast(context, lane, source)
+        if (context.state.parameterBufferRange(rawAddress, byteCount(width).value).nonEmpty)
+          effects.stage(VMStateWrite.ParameterBuffer(rawAddress, width, value))
+        else effects.stageMemory(lane, GuestAddress(rawAddress), width, value)
+      }
+      Right(Step.Advance)
+    case VMIR.Instruction.StoreGeneric(address, source, width) =>
+      context.active.foreachLane { lane =>
+        val rawAddress = readFast(context, lane, address)
+        val value      = readFast(context, lane, source)
+        if (context.state.parameterBufferRange(rawAddress, byteCount(width).value).nonEmpty)
+          effects.stage(VMStateWrite.ParameterBuffer(rawAddress, width, value))
+        else if (isSharedAddress(rawAddress)) effects.stage(VMStateWrite.Shared(lane, rawAddress, width, value))
+        else if (isLocalAddress(rawAddress)) effects.stage(VMStateWrite.Local(lane, rawAddress, width, value))
+        else effects.stageMemory(lane, GuestAddress(rawAddress), width, value)
+      }
+      Right(Step.Advance)
+    case VMIR.Instruction.StoreGlobalVector(address, sources, width) =>
+      forEveryLane(context) { lane =>
+        val writes = context.read(lane, address).flatMap { rawAddress =>
+          if (coherentGlobalVector(context, rawAddress, sources.size, width))
+            storeCoherentVector(context, lane, rawAddress, sources, width)
+          else sources.zipWithIndex.traverse { case (source, index) =>
+            context.read(lane, source).map(value =>
+              VMStateWrite.Memory(
+                lane,
+                GuestAddress(rawAddress + index.toLong * byteCount(width).value.toLong),
+                width,
+                value
               )
             )
-          }.map(_ => Step.Advance)
-        case VMIR.Instruction.LoadSharedVector(destinations, address, width, signed) =>
-          forEveryLane(context) { lane =>
-            val writes = context.read(lane, address).map { rawAddress =>
-              destinations.zipWithIndex.map { case (destination, index) =>
-                VMStateWrite.Register(
-                  lane,
-                  destination,
-                  loadBits(
-                    context.state.readShared(rawAddress + index.toLong * byteCount(width).value.toLong, width),
-                    width,
-                    signed
-                  )
-                )
-              }
+          }
+        }
+        stageResults(effects, writes)
+      }.map(_ => Step.Advance)
+    case VMIR.Instruction.StoreGenericVector(address, sources, width) =>
+      forEveryLane(context) { lane =>
+        val writes = context.read(lane, address).flatMap { rawAddress =>
+          if (coherentGlobalVector(context, rawAddress, sources.size, width))
+            storeCoherentVector(context, lane, rawAddress, sources, width)
+          else sources.zipWithIndex.traverse { case (source, index) =>
+            context.read(lane, source).map { value =>
+              val elementAddress = rawAddress + index.toLong * byteCount(width).value.toLong
+              if (isSharedAddress(elementAddress))
+                VMStateWrite.Shared(lane, elementAddress, width, value)
+              else if (isLocalAddress(elementAddress))
+                VMStateWrite.Local(lane, elementAddress, width, value)
+              else
+                VMStateWrite.Memory(lane, GuestAddress(elementAddress), width, value)
             }
-            stageResults(effects, writes)
-          }.map(_ => Step.Advance)
-        case VMIR.Instruction.LoadLocal(destination, address, width, signed) =>
-          forEveryLane(context) { lane =>
-            stageResult(
-              effects,
-              context.read(lane, address).map(rawAddress =>
-                VMStateWrite.Register(
-                  lane,
-                  destination,
-                  loadBits(context.state.readLocal(lane, rawAddress, width), width, signed)
-                )
+          }
+        }
+        stageResults(effects, writes)
+      }.map(_ => Step.Advance)
+    case VMIR.Instruction.LoadShared(destination, address, width, signed) =>
+      forEveryLane(context) { lane =>
+        stageRegisterResult(
+          effects,
+          lane,
+          destination,
+          context.read(lane, address).map(rawAddress =>
+            loadBits(context.state.readShared(rawAddress, width), width, signed)
+          )
+        )
+      }.map(_ => Step.Advance)
+    case VMIR.Instruction.LoadSharedVector(destinations, address, width, signed) =>
+      forEveryLane(context) { lane =>
+        val writes = context.read(lane, address).map { rawAddress =>
+          destinations.zipWithIndex.map { case (destination, index) =>
+            VMStateWrite.Register(
+              lane,
+              destination,
+              loadBits(
+                context.state.readShared(rawAddress + index.toLong * byteCount(width).value.toLong, width),
+                width,
+                signed
               )
             )
-          }.map(_ => Step.Advance)
-        case VMIR.Instruction.LoadLocalVector(destinations, address, width, signed) =>
-          forEveryLane(context) { lane =>
-            val writes = context.read(lane, address).map { rawAddress =>
-              destinations.zipWithIndex.map { case (destination, index) =>
-                VMStateWrite.Register(
+          }
+        }
+        stageResults(effects, writes)
+      }.map(_ => Step.Advance)
+    case VMIR.Instruction.LoadLocal(destination, address, width, signed) =>
+      forEveryLane(context) { lane =>
+        stageRegisterResult(
+          effects,
+          lane,
+          destination,
+          context.read(lane, address).map(rawAddress =>
+            loadBits(context.state.readLocal(lane, rawAddress, width), width, signed)
+          )
+        )
+      }.map(_ => Step.Advance)
+    case VMIR.Instruction.LoadLocalVector(destinations, address, width, signed) =>
+      forEveryLane(context) { lane =>
+        val writes = context.read(lane, address).map { rawAddress =>
+          destinations.zipWithIndex.map { case (destination, index) =>
+            VMStateWrite.Register(
+              lane,
+              destination,
+              loadBits(
+                context.state.readLocal(lane, rawAddress + index.toLong * byteCount(width).value.toLong, width),
+                width,
+                signed
+              )
+            )
+          }
+        }
+        stageResults(effects, writes)
+      }.map(_ => Step.Advance)
+    case VMIR.Instruction.StoreShared(address, source, width) =>
+      forEveryLane(context) { lane =>
+        val write = for {
+          rawAddress <- context.read(lane, address)
+          value      <- context.read(lane, source)
+        } yield VMStateWrite.Shared(lane, rawAddress, width, value)
+        stageResult(effects, write)
+      }.map(_ => Step.Advance)
+    case VMIR.Instruction.StoreSharedVector(address, sources, width) =>
+      forEveryLane(context) { lane =>
+        val writes = context.read(lane, address).flatMap { rawAddress =>
+          sources.zipWithIndex.traverse { case (source, index) =>
+            context.read(lane, source).map(value =>
+              VMStateWrite.Shared(
+                lane,
+                rawAddress + index.toLong * byteCount(width).value.toLong,
+                width,
+                value
+              )
+            )
+          }
+        }
+        stageResults(effects, writes)
+      }.map(_ => Step.Advance)
+    case VMIR.Instruction.StoreLocal(address, source, width) =>
+      forEveryLane(context) { lane =>
+        val write = for {
+          rawAddress <- context.read(lane, address)
+          value      <- context.read(lane, source)
+        } yield VMStateWrite.Local(lane, rawAddress, width, value)
+        stageResult(effects, write)
+      }.map(_ => Step.Advance)
+    case VMIR.Instruction.StoreLocalVector(address, sources, width) =>
+      forEveryLane(context) { lane =>
+        val writes = context.read(lane, address).flatMap { rawAddress =>
+          sources.zipWithIndex.traverse { case (source, index) =>
+            context.read(lane, source).map(value =>
+              VMStateWrite.Local(
+                lane,
+                rawAddress + index.toLong * byteCount(width).value.toLong,
+                width,
+                value
+              )
+            )
+          }
+        }
+        stageResults(effects, writes)
+      }.map(_ => Step.Advance)
+    case VMIR.Instruction.AsyncCopy(destination, source, size) =>
+      forEveryLane(context) { lane =>
+        val writes = for {
+          destinationAddress <- context.read(lane, destination)
+          sourceAddress      <- context.read(lane, source)
+          pending            <- Vec.from(0 until size by 8).traverse { offset =>
+            val width = BitWidth.assume(Math.min(8, size - offset) * 8)
+            context.memory
+              .readLittleEndian(GuestAddress(sourceAddress + offset.toLong), memoryByteCount(width))
+              .leftMap(error =>
+                ExecutionFault.Memory(
+                  s"pc ${context.pc.value}, lane $lane: ${error.message}"
+                )
+              )
+              .map(value =>
+                VMStateWrite.Shared(
                   lane,
-                  destination,
-                  loadBits(
-                    context.state.readLocal(lane, rawAddress + index.toLong * byteCount(width).value.toLong, width),
-                    width,
-                    signed
-                  )
+                  destinationAddress + offset.toLong,
+                  width,
+                  value
                 )
+              )
+          }
+        } yield pending
+        stageResults(effects, writes)
+      }.map(_ => Step.Advance)
+    case VMIR.Instruction.AsyncCommit | VMIR.Instruction.AsyncWait                      => Right(Step.Advance)
+    case VMIR.Instruction.WarpReduce(destination, source, memberMask, operation, width) =>
+      val values                          = mutable.Map.empty[Int, Long]
+      val masks                           = mutable.Map.empty[Int, Long]
+      var failure: Option[ExecutionFault] = None
+      context.active.foreachLane { lane =>
+        if (failure.isEmpty)
+          context.read(lane, source) match {
+            case Left(error)  => failure = Some(error)
+            case Right(value) => context.read(lane, memberMask) match {
+                case Left(error) => failure = Some(error)
+                case Right(mask) =>
+                  values(lane) = value
+                  masks(lane) = mask
               }
-            }
-            stageResults(effects, writes)
-          }.map(_ => Step.Advance)
-        case VMIR.Instruction.StoreShared(address, source, width) =>
-          forEveryLane(context) { lane =>
-            val write = for {
-              rawAddress <- context.read(lane, address)
-              value      <- context.read(lane, source)
-            } yield VMStateWrite.Shared(lane, rawAddress, width, value)
-            stageResult(effects, write)
-          }.map(_ => Step.Advance)
-        case VMIR.Instruction.StoreSharedVector(address, sources, width) =>
-          forEveryLane(context) { lane =>
-            val writes = context.read(lane, address).flatMap { rawAddress =>
-              sources.zipWithIndex.traverse { case (source, index) =>
-                context.read(lane, source).map(value =>
-                  VMStateWrite.Shared(
-                    lane,
-                    rawAddress + index.toLong * byteCount(width).value.toLong,
-                    width,
-                    value
-                  )
-                )
-              }
-            }
-            stageResults(effects, writes)
-          }.map(_ => Step.Advance)
-        case VMIR.Instruction.StoreLocal(address, source, width) =>
-          forEveryLane(context) { lane =>
-            val write = for {
-              rawAddress <- context.read(lane, address)
-              value      <- context.read(lane, source)
-            } yield VMStateWrite.Local(lane, rawAddress, width, value)
-            stageResult(effects, write)
-          }.map(_ => Step.Advance)
-        case VMIR.Instruction.StoreLocalVector(address, sources, width) =>
-          forEveryLane(context) { lane =>
-            val writes = context.read(lane, address).flatMap { rawAddress =>
-              sources.zipWithIndex.traverse { case (source, index) =>
-                context.read(lane, source).map(value =>
-                  VMStateWrite.Local(
-                    lane,
-                    rawAddress + index.toLong * byteCount(width).value.toLong,
-                    width,
-                    value
-                  )
-                )
-              }
-            }
-            stageResults(effects, writes)
-          }.map(_ => Step.Advance)
-        case VMIR.Instruction.AsyncCopy(destination, source, size) =>
-          forEveryLane(context) { lane =>
-            val writes = for {
-              destinationAddress <- context.read(lane, destination)
-              sourceAddress      <- context.read(lane, source)
-              pending            <- Vec.from(0 until size by 8).traverse { offset =>
-                val width = BitWidth.assume(Math.min(8, size - offset) * 8)
-                context.memory
-                  .readLittleEndian(GuestAddress(sourceAddress + offset.toLong), memoryByteCount(width))
-                  .leftMap(error =>
-                    ExecutionFault.Memory(
-                      s"pc ${context.pc.value}, lane $lane: ${error.message}"
-                    )
-                  )
-                  .map(value =>
-                    VMStateWrite.Shared(
-                      lane,
-                      destinationAddress + offset.toLong,
-                      width,
-                      value
-                    )
-                  )
-              }
-            } yield pending
-            stageResults(effects, writes)
-          }.map(_ => Step.Advance)
-        case VMIR.Instruction.AsyncCommit | VMIR.Instruction.AsyncWait                      => Right(Step.Advance)
-        case VMIR.Instruction.WarpReduce(destination, source, memberMask, operation, width) =>
-          val values                          = mutable.Map.empty[Int, Long]
-          val masks                           = mutable.Map.empty[Int, Long]
-          var failure: Option[ExecutionFault] = None
+          }
+      }
+      failure match {
+        case Some(error) => Left(error)
+        case None        =>
           context.active.foreachLane { lane =>
-            if (failure.isEmpty)
-              context.read(lane, source) match {
-                case Left(error)  => failure = Some(error)
-                case Right(value) => context.read(lane, memberMask) match {
-                    case Left(error) => failure = Some(error)
-                    case Right(mask) =>
-                      values(lane) = value
-                      masks(lane) = mask
-                  }
-              }
-          }
-          failure match {
-            case Some(error) => Left(error)
-            case None        =>
-              context.active.foreachLane { lane =>
-                val warpBase = lane & ~31
-                val mask     = masks.getOrElse(lane, 0L)
-                val members  = Vec.toVec(values.view.collect {
-                  case (candidate, value)
-                      if (candidate & ~31) == warpBase && (mask & (1L << (candidate & 31))) != 0L => value
-                })
-                if ((mask & (1L << (lane & 31))) == 0L || members.isEmpty)
-                  failure = Some(ExecutionFault.InvalidState(
-                    s"redux.sync lane $lane is absent from its member mask"
-                  ))
-                else {
-                  val reduced = members.tail.foldLeft(truncate(members.head, width)) { (accumulator, rawValue) =>
-                    val value = truncate(rawValue, width)
-                    operation match {
-                      case IntegerOperation.Add                       => truncate(accumulator + value, width)
-                      case IntegerOperation.Minimum(signed) if signed =>
-                        Math.min(signExtend(accumulator, width), signExtend(value, width))
-                      case IntegerOperation.Minimum(_) =>
-                        if (java.lang.Long.compareUnsigned(accumulator, value) < 0) accumulator else value
-                      case IntegerOperation.Maximum(signed) if signed =>
-                        Math.max(signExtend(accumulator, width), signExtend(value, width))
-                      case IntegerOperation.Maximum(_) =>
-                        if (java.lang.Long.compareUnsigned(accumulator, value) > 0) accumulator else value
-                      case _ => accumulator
-                    }
-                  }
-                  effects.stage(VMStateWrite.Register(lane, destination, truncate(reduced, width)))
+            val warpBase = lane & ~31
+            val mask     = masks.getOrElse(lane, 0L)
+            val members  = Vec.toVec(values.view.collect {
+              case (candidate, value)
+                  if (candidate & ~31) == warpBase && (mask & (1L << (candidate & 31))) != 0L => value
+            })
+            if ((mask & (1L << (lane & 31))) == 0L || members.isEmpty)
+              failure = Some(ExecutionFault.InvalidState(
+                s"redux.sync lane $lane is absent from its member mask"
+              ))
+            else {
+              val reduced = members.tail.foldLeft(truncate(members.head, width)) { (accumulator, rawValue) =>
+                val value = truncate(rawValue, width)
+                operation match {
+                  case IntegerOperation.Add                       => truncate(accumulator + value, width)
+                  case IntegerOperation.Minimum(signed) if signed =>
+                    Math.min(signExtend(accumulator, width), signExtend(value, width))
+                  case IntegerOperation.Minimum(_) =>
+                    if (java.lang.Long.compareUnsigned(accumulator, value) < 0) accumulator else value
+                  case IntegerOperation.Maximum(signed) if signed =>
+                    Math.max(signExtend(accumulator, width), signExtend(value, width))
+                  case IntegerOperation.Maximum(_) =>
+                    if (java.lang.Long.compareUnsigned(accumulator, value) > 0) accumulator else value
+                  case _ => accumulator
                 }
               }
-              failure.toLeft(Step.Advance)
+              effects.stageRegister(lane, destination, truncate(reduced, width))
+            }
           }
-        case VMIR.Instruction.AtomicAdd(destination, address, source, width, global) =>
-          forEveryLane(context) { lane =>
-            val write = for {
-              rawAddress  <- context.read(lane, address)
-              sourceValue <- context.read(lane, source)
-            } yield
-              if (atomicTargetsShared(global, rawAddress))
-                VMStateWrite.AtomicSharedAdd(lane, destination, rawAddress, width, sourceValue)
-              else
-                VMStateWrite.AtomicMemoryAdd(
-                  lane,
-                  destination,
-                  GuestAddress(rawAddress),
-                  width,
-                  sourceValue
-                )
-            stageResult(effects, write)
-          }.map(_ => Step.Advance)
-        case VMIR.Instruction.AtomicExchange(destination, address, source, width, global) =>
-          forEveryLane(context) { lane =>
-            val write = for {
-              rawAddress  <- context.read(lane, address)
-              sourceValue <- context.read(lane, source)
-            } yield
-              if (atomicTargetsShared(global, rawAddress))
-                VMStateWrite.AtomicSharedExchange(lane, destination, rawAddress, width, sourceValue)
-              else
-                VMStateWrite.AtomicMemoryExchange(lane, destination, GuestAddress(rawAddress), width, sourceValue)
-            stageResult(effects, write)
-          }.map(_ => Step.Advance)
-        case VMIR.Instruction.AtomicBinary(destination, address, source, width, global, operation) =>
-          forEveryLane(context) { lane =>
-            val write = for {
-              rawAddress  <- context.read(lane, address)
-              sourceValue <- context.read(lane, source)
-            } yield
-              if (atomicTargetsShared(global, rawAddress))
-                VMStateWrite.AtomicSharedBinary(lane, destination, rawAddress, width, sourceValue, operation)
-              else
-                VMStateWrite.AtomicMemoryBinary(
-                  lane,
-                  destination,
-                  GuestAddress(rawAddress),
-                  width,
-                  sourceValue,
-                  operation
-                )
-            stageResult(effects, write)
-          }.map(_ => Step.Advance)
-        case VMIR.Instruction.AtomicMin(destination, address, source, width, global) =>
-          forEveryLane(context) { lane =>
-            val write = for {
-              rawAddress  <- context.read(lane, address)
-              sourceValue <- context.read(lane, source)
-            } yield
-              if (atomicTargetsShared(global, rawAddress))
-                VMStateWrite.AtomicSharedMin(lane, destination, rawAddress, width, sourceValue)
-              else
-                VMStateWrite.AtomicMemoryMin(
-                  lane,
-                  destination,
-                  GuestAddress(rawAddress),
-                  width,
-                  sourceValue
-                )
-            stageResult(effects, write)
-          }.map(_ => Step.Advance)
-        case VMIR.Instruction.AtomicAddFloat(destination, address, source, width) =>
-          forEveryLane(context) { lane =>
-            val write = for {
-              rawAddress  <- context.read(lane, address)
-              sourceValue <- context.read(lane, source)
-            } yield VMStateWrite.AtomicMemoryAddFloat(
+          failure.toLeft(Step.Advance)
+      }
+    case VMIR.Instruction.AtomicAdd(destination, address, source, width, global) =>
+      forEveryLane(context) { lane =>
+        val write = for {
+          rawAddress  <- context.read(lane, address)
+          sourceValue <- context.read(lane, source)
+        } yield
+          if (atomicTargetsShared(global, rawAddress))
+            VMStateWrite.AtomicSharedAdd(lane, destination, rawAddress, width, sourceValue)
+          else
+            VMStateWrite.AtomicMemoryAdd(
               lane,
               destination,
               GuestAddress(rawAddress),
               width,
               sourceValue
             )
-            stageResult(effects, write)
-          }.map(_ => Step.Advance)
-        case VMIR.Instruction.SetPredicate(destination, comparison, kind, left, right, width) =>
-          forEveryLane(context) { lane =>
-            val write = for {
-              leftValue  <- context.read(lane, left)
-              rightValue <- context.read(lane, right)
-            } yield VMStateWrite.Predicate(lane, destination, compare(leftValue, rightValue, comparison, kind, width))
-            stageResult(effects, write)
-          }.map(_ => Step.Advance)
-        case VMIR.Instruction.PredicateCompare(destination, comparison, left, right) =>
-          forEveryLane(context) { lane =>
-            val write = for {
-              leftValue <- context.state.predicates(lane).get(left).toRight(
-                ExecutionFault.UndefinedRegister(left, context.pc, lane)
-              )
-              rightValue <- context.state.predicates(lane).get(right).toRight(
-                ExecutionFault.UndefinedRegister(right, context.pc, lane)
-              )
-            } yield VMStateWrite.Predicate(
+        stageResult(effects, write)
+      }.map(_ => Step.Advance)
+    case VMIR.Instruction.AtomicExchange(destination, address, source, width, global) =>
+      forEveryLane(context) { lane =>
+        val write = for {
+          rawAddress  <- context.read(lane, address)
+          sourceValue <- context.read(lane, source)
+        } yield
+          if (atomicTargetsShared(global, rawAddress))
+            VMStateWrite.AtomicSharedExchange(lane, destination, rawAddress, width, sourceValue)
+          else
+            VMStateWrite.AtomicMemoryExchange(lane, destination, GuestAddress(rawAddress), width, sourceValue)
+        stageResult(effects, write)
+      }.map(_ => Step.Advance)
+    case VMIR.Instruction.AtomicBinary(destination, address, source, width, global, operation) =>
+      forEveryLane(context) { lane =>
+        val write = for {
+          rawAddress  <- context.read(lane, address)
+          sourceValue <- context.read(lane, source)
+        } yield
+          if (atomicTargetsShared(global, rawAddress))
+            VMStateWrite.AtomicSharedBinary(lane, destination, rawAddress, width, sourceValue, operation)
+          else
+            VMStateWrite.AtomicMemoryBinary(
               lane,
               destination,
-              comparePredicates(leftValue, rightValue, comparison)
+              GuestAddress(rawAddress),
+              width,
+              sourceValue,
+              operation
             )
-            stageResult(effects, write)
-          }.map(_ => Step.Advance)
-        case VMIR.Instruction.PredicateUnary(destination, source) =>
-          forEveryLane(context) { lane =>
-            stageResult(
-              effects,
-              context.state.predicates(lane).get(source).toRight(
-                ExecutionFault.UndefinedRegister(source, context.pc, lane)
-              ).map(value => VMStateWrite.Predicate(lane, destination, !value))
-            )
-          }.map(_ => Step.Advance)
-        case VMIR.Instruction.PredicateBinary(operation, destination, left, right) =>
-          forEveryLane(context) { lane =>
-            val write = for {
-              leftValue <- context.state.predicates(lane).get(left).toRight(
-                ExecutionFault.UndefinedRegister(left, context.pc, lane)
-              )
-              rightValue <- context.state.predicates(lane).get(right).toRight(
-                ExecutionFault.UndefinedRegister(right, context.pc, lane)
-              )
-            } yield VMStateWrite.Predicate(
+        stageResult(effects, write)
+      }.map(_ => Step.Advance)
+    case VMIR.Instruction.AtomicMin(destination, address, source, width, global) =>
+      forEveryLane(context) { lane =>
+        val write = for {
+          rawAddress  <- context.read(lane, address)
+          sourceValue <- context.read(lane, source)
+        } yield
+          if (atomicTargetsShared(global, rawAddress))
+            VMStateWrite.AtomicSharedMin(lane, destination, rawAddress, width, sourceValue)
+          else
+            VMStateWrite.AtomicMemoryMin(
               lane,
               destination,
-              operation match {
-                case PredicateOperation.And => leftValue && rightValue
-                case PredicateOperation.Or  => leftValue || rightValue
-                case PredicateOperation.Xor => leftValue ^ rightValue
-              }
+              GuestAddress(rawAddress),
+              width,
+              sourceValue
             )
-            stageResult(effects, write)
-          }.map(_ => Step.Advance)
-        case VMIR.Instruction.Branch(target)  => Right(Step.Jump(target))
-        case VMIR.Instruction.BarrierSync(id) =>
-          // A workgroup barrier is identified by its hardware barrier slot, not
-          // by the static PC at which a divergent cohort happens to arrive.
-          Right(Step.Suspend(WaitKey(WaitScope.Workgroup, id.toLong, 0L)))
-        case VMIR.Instruction.BarrierReduce(_, id, _, _) =>
-          Right(Step.Suspend(WaitKey(WaitScope.Workgroup, id.toLong, 0L)))
-        case VMIR.Instruction.WarpBarrier(memberMask) =>
-          var firstLane = -1
-          context.active.foreachLane { lane => if (firstLane < 0) firstLane = lane }
-          context.read(firstLane, memberMask) match {
-            case Left(fault)            => Left(fault)
-            case Right(memberMaskValue) =>
-              var mismatch = false
-              context.active.foreachLane { lane =>
-                if (!mismatch) {
-                  context.read(lane, memberMask) match {
-                    case Right(value) if value == memberMaskValue => ()
-                    case _                                        => mismatch = true
-                  }
-                }
-              }
-              if (mismatch)
-                Left(ExecutionFault.InvalidState("bar.warp.sync member mask differs across active lanes"))
-              else
-                Right(Step.Suspend(WaitKey(WaitScope.Warp, memberMaskValue, context.pc.value.toLong)))
+        stageResult(effects, write)
+      }.map(_ => Step.Advance)
+    case VMIR.Instruction.AtomicAddFloat(destination, address, source, width) =>
+      forEveryLane(context) { lane =>
+        val write = for {
+          rawAddress  <- context.read(lane, address)
+          sourceValue <- context.read(lane, source)
+        } yield VMStateWrite.AtomicMemoryAddFloat(
+          lane,
+          destination,
+          GuestAddress(rawAddress),
+          width,
+          sourceValue
+        )
+        stageResult(effects, write)
+      }.map(_ => Step.Advance)
+    case VMIR.Instruction.SetPredicate(destination, comparison, kind, left, right, width) =>
+      forEveryLane(context) { lane =>
+        val write = for {
+          leftValue  <- context.read(lane, left)
+          rightValue <- context.read(lane, right)
+        } yield VMStateWrite.Predicate(lane, destination, compare(leftValue, rightValue, comparison, kind, width))
+        stageResult(effects, write)
+      }.map(_ => Step.Advance)
+    case VMIR.Instruction.PredicateCompare(destination, comparison, left, right) =>
+      forEveryLane(context) { lane =>
+        val write = for {
+          leftValue <- context.state.predicates(lane).get(left).toRight(
+            ExecutionFault.UndefinedRegister(left, context.pc, lane)
+          )
+          rightValue <- context.state.predicates(lane).get(right).toRight(
+            ExecutionFault.UndefinedRegister(right, context.pc, lane)
+          )
+        } yield VMStateWrite.Predicate(
+          lane,
+          destination,
+          comparePredicates(leftValue, rightValue, comparison)
+        )
+        stageResult(effects, write)
+      }.map(_ => Step.Advance)
+    case VMIR.Instruction.PredicateUnary(destination, source) =>
+      forEveryLane(context) { lane =>
+        stageResult(
+          effects,
+          context.state.predicates(lane).get(source).toRight(
+            ExecutionFault.UndefinedRegister(source, context.pc, lane)
+          ).map(value => VMStateWrite.Predicate(lane, destination, !value))
+        )
+      }.map(_ => Step.Advance)
+    case VMIR.Instruction.PredicateBinary(operation, destination, left, right) =>
+      forEveryLane(context) { lane =>
+        val write = for {
+          leftValue <- context.state.predicates(lane).get(left).toRight(
+            ExecutionFault.UndefinedRegister(left, context.pc, lane)
+          )
+          rightValue <- context.state.predicates(lane).get(right).toRight(
+            ExecutionFault.UndefinedRegister(right, context.pc, lane)
+          )
+        } yield VMStateWrite.Predicate(
+          lane,
+          destination,
+          operation match {
+            case PredicateOperation.And => leftValue && rightValue
+            case PredicateOperation.Or  => leftValue || rightValue
+            case PredicateOperation.Xor => leftValue ^ rightValue
           }
-        case VMIR.Instruction.MemoryBarrier                              => Right(Step.Advance)
-        case VMIR.Instruction.Prefetch                                   => Right(Step.Advance)
-        case VMIR.Instruction.Call(function, returnParameter, parameter) =>
-          val groups = mutable.LinkedHashMap.empty[FunctionName, VMLaneMask]
-          forEveryLane(context) { lane =>
-            context.functionName(lane, function).flatMap { name =>
-              VMLaneMask.one(lane).map { member =>
-                groups(name) = groups.getOrElse(name, VMLaneMask.Empty).union(member)
+        )
+        stageResult(effects, write)
+      }.map(_ => Step.Advance)
+    case VMIR.Instruction.Branch(target)  => Right(Step.Jump(target))
+    case VMIR.Instruction.BarrierSync(id) =>
+      // A workgroup barrier is identified by its hardware barrier slot, not
+      // by the static PC at which a divergent cohort happens to arrive.
+      Right(Step.Suspend(WaitKey(WaitScope.Workgroup, id.toLong, 0L)))
+    case VMIR.Instruction.BarrierReduce(_, id, _, _) =>
+      Right(Step.Suspend(WaitKey(WaitScope.Workgroup, id.toLong, 0L)))
+    case VMIR.Instruction.WarpBarrier(memberMask) =>
+      var firstLane = -1
+      context.active.foreachLane { lane => if (firstLane < 0) firstLane = lane }
+      context.read(firstLane, memberMask) match {
+        case Left(fault)            => Left(fault)
+        case Right(memberMaskValue) =>
+          var mismatch = false
+          context.active.foreachLane { lane =>
+            if (!mismatch) {
+              context.read(lane, memberMask) match {
+                case Right(value) if value == memberMaskValue => ()
+                case _                                        => mismatch = true
               }
             }
-          }.flatMap { _ =>
-            groups.foldLeft[Either[ExecutionFault, Unit]](Right(())) { case (current, (name, lanes)) =>
-              current.flatMap { _ =>
-                val groupContext = VMExecutionContext(
-                  context.kernel,
-                  context.block,
-                  context.group,
-                  context.geometry,
-                  context.state,
-                  context.pc,
-                  lanes,
-                  context.arguments,
-                  context.memory,
-                  context.control,
-                  context.scheduler
-                )
-                context.kernel.functions.get(name) match {
-                  case Some(deviceFunction) =>
-                    VMInterpreter.executeDeviceFunction(groupContext, deviceFunction, parameter, returnParameter)
-                  case None =>
-                    forEveryLane(groupContext) { lane =>
-                      executeBuiltin(groupContext, lane, name, returnParameter, parameter).getOrElse(
-                        Left(ExecutionFault.InvalidState(s"missing device function $name"))
-                      )
-                    }
-                }
-              }
-            }
-          }.map(_ => Step.Advance)
-        case VMIR.Instruction.Trap =>
-          Left(ExecutionFault.ArchitecturalTrap("ptx", 0L, context.pc))
-        case VMIR.Instruction.Return => Right(Step.Exit(context.active))
+          }
+          if (mismatch)
+            Left(ExecutionFault.InvalidState("bar.warp.sync member mask differs across active lanes"))
+          else
+            Right(Step.Suspend(WaitKey(WaitScope.Warp, memberMaskValue, context.pc.value.toLong)))
       }
+    case VMIR.Instruction.MemoryBarrier                              => Right(Step.Advance)
+    case VMIR.Instruction.Prefetch                                   => Right(Step.Advance)
+    case VMIR.Instruction.Call(function, returnParameter, parameter) =>
+      val groups = mutable.LinkedHashMap.empty[FunctionName, VMLaneMask]
+      forEveryLane(context) { lane =>
+        context.functionName(lane, function).flatMap { name =>
+          VMLaneMask.one(lane).map { member =>
+            groups(name) = groups.getOrElse(name, VMLaneMask.Empty).union(member)
+          }
+        }
+      }.flatMap { _ =>
+        groups.foldLeft[Either[ExecutionFault, Unit]](Right(())) { case (current, (name, lanes)) =>
+          current.flatMap { _ =>
+            val groupContext = VMExecutionContext(
+              context.kernel,
+              context.block,
+              context.group,
+              context.geometry,
+              context.state,
+              context.pc,
+              lanes,
+              context.arguments,
+              context.memory,
+              context.control,
+              context.scheduler
+            )
+            context.kernel.functions.get(name) match {
+              case Some(deviceFunction) =>
+                VMInterpreter.executeDeviceFunction(groupContext, deviceFunction, parameter, returnParameter)
+              case None =>
+                forEveryLane(groupContext) { lane =>
+                  executeBuiltin(groupContext, lane, name, returnParameter, parameter).getOrElse(
+                    Left(ExecutionFault.InvalidState(s"missing device function $name"))
+                  )
+                }
+            }
+          }
+        }
+      }.map(_ => Step.Advance)
+    case VMIR.Instruction.Trap =>
+      Left(ExecutionFault.ArchitecturalTrap("ptx", 0L, context.pc))
+    case VMIR.Instruction.Return => Right(Step.Exit(context.active))
+    case other                   => Left(ExecutionFault.InvalidState(s"unhandled compiled PTX instruction $other"))
   }
 
   /** CUB's scan descriptors rely on coherent aligned status/value transfers, including 16-byte double descriptors. This
@@ -1949,8 +1951,14 @@ private object VMSemantics {
     case Value.LaneMaskLessEqual     => (1L << ((lane & 31) + 1)) - 1L
     case Value.LaneMaskLess          => (1L << (lane & 31)) - 1L
     case Value.LaneMaskEqual         => 1L << (lane & 31)
-    case Value.ThreadId(axis)        => context.geometry.localCoordinates(lane)
-        .fold(error => throw IllegalStateException(error.toString), coordinates => axis.select(coordinates).toLong)
+    case Value.ThreadId(axis)        =>
+      val sizeX = context.geometry.groupSize.x
+      val index = axis match {
+        case Axis.X => lane           % sizeX
+        case Axis.Y => (lane / sizeX) % context.geometry.groupSize.y
+        case Axis.Z => lane / sizeX / context.geometry.groupSize.y
+      }
+      index.toLong
     case Value.BlockId(axis)  => axis.select(context.group).toLong
     case Value.BlockDim(axis) => axis.select(context.geometry.groupSize).toLong
     case Value.GridDim(axis)  => axis.select(context.geometry.groupCount).toLong
@@ -2324,7 +2332,33 @@ private object VMSemantics {
     ((leftValue * rightValue) >> width.value).longValue
   }
 
-  private def integerMultiplyAdd(
+  private def unsignedMultiplyHigh(left: Long, right: Long): Long = {
+    val mask      = 0xffffffffL
+    val leftLow   = left & mask
+    val leftHigh  = left >>> 32
+    val rightLow  = right & mask
+    val rightHigh = right >>> 32
+    val low       = leftLow * rightLow
+    val middle1   = leftHigh * rightLow + (low >>> 32)
+    val middle2   = leftLow * rightHigh + (middle1 & mask)
+    leftHigh * rightHigh + (middle1 >>> 32) + (middle2 >>> 32)
+  }
+
+  private def addUnsigned(
+      left: Long,
+      right: Long,
+      carryIn: Boolean,
+      width: BitWidth
+  ): (Long, Boolean) = {
+    val first         = left + right
+    val firstOverflow = java.lang.Long.compareUnsigned(first, left) < 0
+    val result        = if (carryIn) first + 1L else first
+    val nextOverflow  = carryIn && java.lang.Long.compareUnsigned(result, first) < 0
+    if (width.value == 64) result -> (firstOverflow || nextOverflow)
+    else truncate(result, width)  -> ((result >>> width.value) != 0L)
+  }
+
+  private[v9_3] def integerMultiplyAdd(
       left: Long,
       right: Long,
       addend: Long,
@@ -2332,17 +2366,34 @@ private object VMSemantics {
       carryIn: Boolean
   ): (Long, Boolean) = operation match {
     case IntegerMultiplyAddOperation.Low(operandWidth, resultWidth, usesCarry, _) =>
-      val leftValue   = BigInt(java.lang.Long.toUnsignedString(truncate(left, operandWidth)))
-      val rightValue  = BigInt(java.lang.Long.toUnsignedString(truncate(right, operandWidth)))
-      val addendValue = BigInt(java.lang.Long.toUnsignedString(truncate(addend, resultWidth)))
-      val sum         = leftValue * rightValue + addendValue + (if (usesCarry && carryIn) 1 else 0)
-      (truncate(sum.longValue, resultWidth), (sum >> resultWidth.value) != 0)
+      val leftValue    = truncate(left, operandWidth)
+      val rightValue   = truncate(right, operandWidth)
+      val productLow   = leftValue * rightValue
+      val productHigh  = unsignedMultiplyHigh(leftValue, rightValue)
+      val addendValue  = truncate(addend, resultWidth)
+      val first        = productLow + addendValue
+      val firstCarry   = java.lang.Long.compareUnsigned(first, productLow) < 0
+      val useCarry     = usesCarry && carryIn
+      val result       = if (useCarry) first + 1L else first
+      val secondCarry  = useCarry && java.lang.Long.compareUnsigned(result, first) < 0
+      val overflowHigh = productHigh + (if (firstCarry || secondCarry) 1L else 0L)
+      val overflow     =
+        if (resultWidth.value == 64) overflowHigh != 0L
+        else overflowHigh != 0L || (result >>> resultWidth.value) != 0L
+      truncate(result, resultWidth) -> overflow
     case IntegerMultiplyAddOperation.High(operandWidth, resultWidth, usesCarry, _) =>
-      val leftValue   = BigInt(java.lang.Long.toUnsignedString(truncate(left, operandWidth)))
-      val rightValue  = BigInt(java.lang.Long.toUnsignedString(truncate(right, operandWidth)))
-      val addendValue = BigInt(java.lang.Long.toUnsignedString(truncate(addend, resultWidth)))
-      val sum = (leftValue * rightValue >> operandWidth.value) + addendValue + (if (usesCarry && carryIn) 1 else 0)
-      (truncate(sum.longValue, resultWidth), (sum >> resultWidth.value) != 0)
+      val leftValue   = truncate(left, operandWidth)
+      val rightValue  = truncate(right, operandWidth)
+      val productLow  = leftValue * rightValue
+      val productHigh = unsignedMultiplyHigh(leftValue, rightValue)
+      val high        =
+        if (operandWidth.value == 64) productHigh
+        else truncate(
+          (productLow >>> operandWidth.value) | (productHigh << (64 - operandWidth.value)),
+          operandWidth
+        )
+      val addendValue = truncate(addend, resultWidth)
+      addUnsigned(high, addendValue, usesCarry && carryIn, resultWidth)
   }
 
   private def integerAddWithCarry(

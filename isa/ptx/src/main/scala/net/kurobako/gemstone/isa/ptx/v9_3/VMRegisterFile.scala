@@ -8,16 +8,19 @@ import scala.collection.mutable
   * numeric register suffix on every access is cheaper than allocating and hashing a String in a mutable map.
   */
 // Lazy chunks avoid allocating 48 KiB per lane in the register-file hot path.
-private[v9_3] final class VMRegisterFile {
-  private val values = Array.ofDim[Array[Long] | Null](96)
-  private val named  = mutable.Map.empty[String, Long]
+@SuppressWarnings(Array("scalafix:DisableSyntax.null", "scalafix:DisableSyntax.var"))
+private[v9_3] final class VMRegisterFile(chunkCount: Int = 96) {
+  private val values                                  = Array.ofDim[Array[Long] | Null](chunkCount)
+  private var named: mutable.Map[String, Long] | Null = null
 
   def get(name: RegisterName): Long = slot(name.value) match {
     case Some(index) => getSlot(index)
-    case None        => named.getOrElse(name.value, 0L)
+    case None        => named match {
+        case null   => 0L
+        case values => values.getOrElse(name.value, 0L)
+      }
   }
 
-  @SuppressWarnings(Array("scalafix:DisableSyntax.null"))
   def getSlot(index: Int): Long =
     values(index >>> 6) match {
       case null  => 0L
@@ -28,10 +31,17 @@ private[v9_3] final class VMRegisterFile {
 
   def update(name: RegisterName, value: Long): Unit = slot(name.value) match {
     case Some(index) => updateSlot(index, value)
-    case None        => named(name.value) = value
+    case None        =>
+      val values = named match {
+        case null =>
+          val allocated = mutable.Map.empty[String, Long]
+          named = allocated
+          allocated
+        case existing => existing
+      }
+      values(name.value) = value
   }
 
-  @SuppressWarnings(Array("scalafix:DisableSyntax.null"))
   def updateSlot(index: Int, value: Long): Unit = {
     val chunkIndex = index >>> 6
     values(chunkIndex) match {
@@ -40,6 +50,21 @@ private[v9_3] final class VMRegisterFile {
         values(chunkIndex) = chunk
         chunk(index & 63) = value
       case chunk => chunk(index & 63) = value
+    }
+  }
+
+  def clear(): Unit = {
+    var index = 0
+    while (index < values.length) {
+      values(index) match {
+        case null  => ()
+        case chunk => java.util.Arrays.fill(chunk, 0L)
+      }
+      index += 1
+    }
+    named match {
+      case null   => ()
+      case values => values.clear()
     }
   }
 

@@ -18,7 +18,13 @@ import java.nio.charset.StandardCharsets
 
 /** AMDGPU MessagePack metadata from the ELF note already owned by the Scala code-object decoder. */
 object CodeObjectMetadata {
-  final case class KernelManifest(name: KernelName, symbol: LinkageName, metadata: KernelMetadata)
+  final case class HiddenArgument(valueKind: String, offset: Int, width: Int)
+  final case class KernelManifest(
+      name: KernelName,
+      symbol: LinkageName,
+      metadata: KernelMetadata,
+      hiddenArguments: Vec[HiddenArgument]
+  )
 
   private val MetadataNoteType        = 32
   private val MaximumDepth            = 64
@@ -112,7 +118,7 @@ object CodeObjectMetadata {
 
   private final case class ParameterFields(offset: Option[Int], width: Option[Int], valueKind: Option[String])
 
-  private def decodeParameter(reader: Reader): Either[CodeObjectError, (KernelMetadata.Parameter, Boolean)] =
+  private def decodeParameter(reader: Reader): Either[CodeObjectError, (KernelMetadata.Parameter, Option[String])] =
     reader.mapSize.flatMap { count =>
       (0 until count).foldLeft[Either[CodeObjectError, ParameterFields]](
         Right(ParameterFields(None, None, None))
@@ -146,7 +152,7 @@ object CodeObjectMetadata {
               refinedOffset,
               if (allocation) KernelMetadata.ParameterKind.Memory else KernelMetadata.ParameterKind.Scalar,
               containsPointers = !allocation
-            ) -> valueKind.startsWith("hidden_")
+            ) -> Option.when(valueKind.startsWith("hidden_"))(valueKind)
           case _ => Left(CodeObjectError.Invalid("invalid AMDGPU kernel argument metadata"))
         }
       }
@@ -156,7 +162,7 @@ object CodeObjectMetadata {
       name: Option[String],
       symbol: Option[String],
       argumentBlockSize: Option[Int],
-      parameters: Option[Vec[(KernelMetadata.Parameter, Boolean)]]
+      parameters: Option[Vec[(KernelMetadata.Parameter, Option[String])]]
   )
 
   private def decodeKernel(reader: Reader): Either[CodeObjectError, KernelManifest] =
@@ -171,7 +177,10 @@ object CodeObjectMetadata {
             case ".kernarg_segment_size" => reader.uint32.map(value => fields.copy(argumentBlockSize = Some(value)))
             case ".args"                 =>
               reader.arraySize.flatMap { parameterCount =>
-                (0 until parameterCount).foldLeft[Either[CodeObjectError, Vec[(KernelMetadata.Parameter, Boolean)]]](
+                (0 until parameterCount).foldLeft[Either[CodeObjectError, Vec[(
+                    KernelMetadata.Parameter,
+                    Option[String]
+                )]]](
                   Right(Vec.empty)
                 )((parameters, _) => parameters.flatMap(values => decodeParameter(reader).map(values.appended)))
                   .map(value => fields.copy(parameters = Some(value)))
@@ -193,7 +202,7 @@ object CodeObjectMetadata {
               refinedBlockSize <- blockSize.refineEither[Positive0].left.map(_ =>
                 CodeObjectError.Invalid("AMDGPU kernarg block size must be non-negative")
               )
-              refinedParameterCount <- sorted.count(!_._2).refineEither[Positive0].left.map(_ =>
+              refinedParameterCount <- sorted.count(_._2.isEmpty).refineEither[Positive0].left.map(_ =>
                 CodeObjectError.Invalid("AMDGPU explicit parameter count must be non-negative")
               )
               metadata <- KernelMetadata.validated(refinedBlockSize, refinedParameterCount, sorted.map(_._1))
@@ -201,7 +210,14 @@ object CodeObjectMetadata {
                   val raw: String = detail
                   CodeObjectError.Invalid(raw)
                 }
-            } yield KernelManifest(refinedName, refinedSymbol, metadata)
+            } yield KernelManifest(
+              refinedName,
+              refinedSymbol,
+              metadata,
+              sorted.collect { case (parameter, Some(kind)) =>
+                HiddenArgument(kind, parameter.offset, parameter.width)
+              }
+            )
           case (Some(name), Some(symbol), Some(0), None) =>
             for {
               refinedName <- KernelName.either(name).left.map(_ =>
@@ -215,7 +231,7 @@ object CodeObjectMetadata {
                   val raw: String = detail
                   CodeObjectError.Invalid(raw)
                 }
-            } yield KernelManifest(refinedName, refinedSymbol, metadata)
+            } yield KernelManifest(refinedName, refinedSymbol, metadata, Vec.empty)
           case _ => Left(CodeObjectError.Invalid(
               "AMDGPU kernel metadata is missing name, symbol, kernarg size, or arguments"
             ))

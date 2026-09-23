@@ -10,43 +10,123 @@ import net.kurobako.gemstone.binary.Bits
 import net.kurobako.gemstone.binary.IEEE754
 import net.kurobako.gemstone.binary.LittleEndian
 import net.kurobako.gemstone.memory.AddressMemory
+import net.kurobako.gemstone.memory.GuestAddress
 import net.kurobako.gemstone.memory.MemoryValueByteWidth
 
 import cats.syntax.all.*
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 
-import scala.collection.mutable
-
+@SuppressWarnings(Array("scalafix:DisableSyntax.null", "scalafix:DisableSyntax.var"))
 private[v9_3] final class VMStateEffects {
-  private val pending = mutable.ArrayBuffer.empty[VMStateWrite]
+  private val ObjectWrite   = 0.toByte
+  private val RegisterWrite = 1.toByte
+  private val MemoryWrite   = 2.toByte
+  private var kinds         = Array.ofDim[Byte](64)
+  private var writes        = Array.ofDim[VMStateWrite | Null](64)
+  private var lanes         = Array.ofDim[Int](64)
+  private var registerNames = Array.ofDim[RegisterName](64)
+  private var values        = Array.ofDim[Long](64)
+  private var addresses     = Array.ofDim[Long](64)
+  private var widths        = Array.ofDim[BitWidth](64)
+  private var pendingSize   = 0
 
-  def stage(write: VMStateWrite): Unit = pending += write
-  def isEmpty: Boolean                 = pending.isEmpty
-  def size: Int                        = pending.size
-  def clear(): Unit                    = pending.clear()
+  def stage(write: VMStateWrite): Unit = {
+    ensureCapacity()
+    kinds(pendingSize) = ObjectWrite
+    writes(pendingSize) = write
+    pendingSize += 1
+  }
 
-  @SuppressWarnings(Array("scalafix:DisableSyntax.var", "scalafix:DisableSyntax.return"))
-  def commit(
-      validate: VMStateWrite => Either[ExecutionFault, Unit],
-      applyWrite: VMStateWrite => Unit
-  ): Either[ExecutionFault, Unit] = {
+  def stageRegister(lane: Int, name: RegisterName, value: Long): Unit = {
+    ensureCapacity()
+    kinds(pendingSize) = RegisterWrite
+    writes(pendingSize) = null
+    lanes(pendingSize) = lane
+    registerNames(pendingSize) = name
+    values(pendingSize) = value
+    pendingSize += 1
+  }
+
+  def stageMemory(lane: Int, address: GuestAddress, width: BitWidth, value: Long): Unit = {
+    ensureCapacity()
+    kinds(pendingSize) = MemoryWrite
+    writes(pendingSize) = null
+    lanes(pendingSize) = lane
+    addresses(pendingSize) = address.value
+    widths(pendingSize) = width
+    values(pendingSize) = value
+    pendingSize += 1
+  }
+
+  def isEmpty: Boolean = pendingSize == 0
+  def size: Int        = pendingSize
+
+  def clear(): Unit = {
     var index = 0
-    while (index < pending.size) {
-      validate(pending(index)) match {
-        case Left(fault) =>
-          pending.clear()
-          return Left(fault)
-        case Right(()) => ()
-      }
+    while (index < pendingSize) {
+      writes(index) = null
+      index += 1
+    }
+    pendingSize = 0
+  }
+
+  private def ensureCapacity(): Unit =
+    if (pendingSize == kinds.length) {
+      val capacity = Math.multiplyExact(kinds.length, 2)
+      kinds = java.util.Arrays.copyOf(kinds, capacity)
+      writes = java.util.Arrays.copyOf(writes, capacity)
+      lanes = java.util.Arrays.copyOf(lanes, capacity)
+      val nextRegisterNames = Array.ofDim[RegisterName](capacity)
+      Array.copy(registerNames, 0, nextRegisterNames, 0, registerNames.length)
+      registerNames = nextRegisterNames
+      values = java.util.Arrays.copyOf(values, capacity)
+      addresses = java.util.Arrays.copyOf(addresses, capacity)
+      val nextWidths = Array.ofDim[BitWidth](capacity)
+      Array.copy(widths, 0, nextWidths, 0, widths.length)
+      widths = nextWidths
+    }
+
+  @SuppressWarnings(Array("scalafix:DisableSyntax.return"))
+  def commit(state: VMState, memory: AddressMemory, pc: Pc): Either[ExecutionFault, Unit] = {
+    var index = 0
+    while (index < pendingSize) {
+      if (kinds(index) == ObjectWrite)
+        VMStateEffects.validateWrite(memory, pc)(writes(index).nn) match {
+          case Left(fault) =>
+            clear()
+            return Left(fault)
+          case Right(()) => ()
+        }
+      else if (kinds(index) == MemoryWrite)
+        memory.validateRange(
+          GuestAddress(addresses(index)),
+          VMStateEffects.byteCount(widths(index)).value.refineUnsafe[Positive0]
+        ) match {
+          case Left(error) =>
+            clear()
+            return Left(ExecutionFault.Memory(s"pc ${pc.value}, lane ${lanes(index)}: ${error.message}"))
+          case Right(()) => ()
+        }
       index += 1
     }
     index = 0
-    while (index < pending.size) {
-      applyWrite(pending(index))
+    while (index < pendingSize) {
+      if (kinds(index) == RegisterWrite)
+        state.registers(lanes(index))(registerNames(index)) = values(index)
+      else if (kinds(index) == MemoryWrite)
+        memory.writeLittleEndian(
+          GuestAddress(addresses(index)),
+          values(index),
+          VMStateEffects.memoryByteCount(widths(index))
+        ).left.foreach(error => throw IllegalStateException(error.message))
+      else {
+        VMStateEffects.applyWrite(state, memory)(writes(index).nn)
+        writes(index) = null
+      }
       index += 1
     }
-    pending.clear()
+    pendingSize = 0
     Right(())
   }
 }

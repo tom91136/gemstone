@@ -6,6 +6,8 @@ import net.kurobako.gemstone.Vec.*
 import upickle.default.{ReadWriter, macroRW, read}
 
 import java.nio.charset.StandardCharsets
+import java.nio.file.Files
+import java.nio.file.Path
 import scala.util.Using
 
 /** Lazily loads the generated AMDGPU encoding catalog from its checked-in JSON resource. */
@@ -26,9 +28,13 @@ private[amdgpu] object MetadataCatalog {
   private lazy val values: Vec[Metadata] = load()
 
   private def load(): Vec[Metadata] = {
-    val stream = Option(getClass.getResourceAsStream(Resource))
-      .getOrElse(throw IllegalStateException(s"missing AMDGPU metadata resource $Resource"))
-    val json    = Using.resource(stream)(input => String(input.readAllBytes(), StandardCharsets.UTF_8))
+    val json = Option(getClass.getResourceAsStream(Resource)) match {
+      case Some(stream) => Using.resource(stream)(input => String(input.readAllBytes(), StandardCharsets.UTF_8))
+      case None         =>
+        val file = Path.of("isa/amdgpu/src/generated/main/resources", Resource.stripPrefix("/"))
+        if (Files.isRegularFile(file)) Files.readString(file, StandardCharsets.UTF_8)
+        else throw IllegalStateException(s"missing AMDGPU metadata resource $Resource")
+    }
     val file    = read[CatalogFile](json)
     val strings = file.strings
     val schemas = file.schemas.map(_.map { case (field, kind, implicitOperand) =>

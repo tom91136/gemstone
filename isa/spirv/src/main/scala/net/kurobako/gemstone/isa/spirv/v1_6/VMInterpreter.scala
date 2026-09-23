@@ -184,7 +184,7 @@ private[v1_6] object VMInterpreter {
       parameterId: Int,
       parameterType: Int
   ): Either[Fault, KernelMetadata.Parameter] =
-    program.types.get(parameterType) match {
+    program.runtimeType(parameterType) match {
       case Some(RuntimeType.Pointer(_, pointee)) if program.byValueParameters.contains(parameterId) =>
         pointerLeafOffsets(program, pointee, 0L).flatMap(pointers =>
           parameterMetadata(typeSize(program, pointee), KernelMetadata.ParameterKind.Scalar, pointers.nonEmpty)
@@ -365,6 +365,12 @@ private[v1_6] object VMInterpreter {
           )
         )
     val reusableExecution = Array[InvocationExecution | Null](null)
+    // Collective invocations must keep separate register files while a workgroup is suspended,
+    // but a completed workgroup no longer needs them. Reuse each local lane's file in the
+    // next workgroup when dispatch is sequential.
+    val collectiveValues =
+      if (hasCollectives && !parallelWork && groupCount > 1L) Array.fill[Option[InvocationValues]](totalLocal)(None)
+      else Array.empty[Option[InvocationValues]]
 
     def runGroup(
         groupIndex: Long :| Positive0,
@@ -391,9 +397,12 @@ private[v1_6] object VMInterpreter {
         case Left(error)  => return Left(error)
         case Right(value) => value
       }
-      val shared = dispatch.arguments.zipWithIndex.collect { case (KernelTask.Argument.Local(size), argumentIndex) =>
-        argumentIndex -> Region.Internal(InternalMemory(Array.ofDim[Byte](checkedSize(size))))
-      }.toMap
+      val shared =
+        if (dispatch.arguments.isEmpty) Map.empty[Int, Region]
+        else
+          dispatch.arguments.zipWithIndex.collect { case (KernelTask.Argument.Local(size), argumentIndex) =>
+            argumentIndex -> Region.Internal(InternalMemory(Array.ofDim[Byte](checkedSize(size))))
+          }.toMap
       val reusableValues = if (hasCollectives) None
       else reuseValues.orElse(
         Some(
@@ -410,7 +419,7 @@ private[v1_6] object VMInterpreter {
         case Some(slot) => slot(0)
         case None       => null
       }
-      val executions  = mutable.ArrayBuffer.empty[InvocationExecution]
+      val executions  = if (hasCollectives) mutable.ArrayBuffer.empty[InvocationExecution] else null
       var linearLocal = 0
       while (linearLocal < activeLocalCount) {
         // The loop lower bound proves the linear local index is non-negative.
@@ -429,38 +438,57 @@ private[v1_6] object VMInterpreter {
             case Right(value) => value
           }
           val subgroupIndex = linearLocal / subgroup
-          val invocation    = Invocation(
-            groupX = group.x.toLong,
-            groupY = group.y.toLong,
-            groupZ = group.z.toLong,
-            localX = local.x.toLong,
-            localY = local.y.toLong,
-            localZ = local.z.toLong,
-            globalX = global.x,
-            globalY = global.y,
-            globalZ = global.z,
-            globalSizeX = dispatch.geometry.globalExtent.x.toLong,
-            globalSizeY = dispatch.geometry.globalExtent.y.toLong,
-            globalSizeZ = dispatch.geometry.globalExtent.z.toLong,
-            globalOffsetX = dispatch.geometry.globalOffset.x.toLong,
-            globalOffsetY = dispatch.geometry.globalOffset.y.toLong,
-            globalOffsetZ = dispatch.geometry.globalOffset.z.toLong,
-            workDim = dispatch.geometry.workDim,
-            numWorkgroupsX = dispatch.geometry.groupCount.x.toLong,
-            numWorkgroupsY = dispatch.geometry.groupCount.y.toLong,
-            numWorkgroupsZ = dispatch.geometry.groupCount.z.toLong,
-            workgroupSizeX = activeGroupSize.x.toLong,
-            workgroupSizeY = activeGroupSize.y.toLong,
-            workgroupSizeZ = activeGroupSize.z.toLong,
-            enqueuedWorkgroupSizeX = groupSize.x.toLong,
-            enqueuedWorkgroupSizeY = groupSize.y.toLong,
-            enqueuedWorkgroupSizeZ = groupSize.z.toLong,
-            subgroupSize = math.min(subgroup, activeLocalCount - subgroupIndex * subgroup),
-            maxSubgroupSize = subgroup,
-            numSubgroups = (activeLocalCount.toLong + subgroup.toLong - 1L) / subgroup.toLong,
-            subgroupIndex = subgroupIndex,
-            subgroupLocal = linearLocal % subgroup
-          )
+          val subgroupSize  = math.min(subgroup, activeLocalCount - subgroupIndex * subgroup)
+          val numSubgroups  = (activeLocalCount.toLong + subgroup.toLong - 1L) / subgroup.toLong
+          val invocation    = reusableExecution match {
+            case null => Invocation(
+                groupX = group.x.toLong,
+                groupY = group.y.toLong,
+                groupZ = group.z.toLong,
+                localX = local.x.toLong,
+                localY = local.y.toLong,
+                localZ = local.z.toLong,
+                globalX = global.x,
+                globalY = global.y,
+                globalZ = global.z,
+                globalSizeX = dispatch.geometry.globalExtent.x.toLong,
+                globalSizeY = dispatch.geometry.globalExtent.y.toLong,
+                globalSizeZ = dispatch.geometry.globalExtent.z.toLong,
+                globalOffsetX = dispatch.geometry.globalOffset.x.toLong,
+                globalOffsetY = dispatch.geometry.globalOffset.y.toLong,
+                globalOffsetZ = dispatch.geometry.globalOffset.z.toLong,
+                workDim = dispatch.geometry.workDim,
+                numWorkgroupsX = dispatch.geometry.groupCount.x.toLong,
+                numWorkgroupsY = dispatch.geometry.groupCount.y.toLong,
+                numWorkgroupsZ = dispatch.geometry.groupCount.z.toLong,
+                workgroupSizeX = activeGroupSize.x.toLong,
+                workgroupSizeY = activeGroupSize.y.toLong,
+                workgroupSizeZ = activeGroupSize.z.toLong,
+                enqueuedWorkgroupSizeX = groupSize.x.toLong,
+                enqueuedWorkgroupSizeY = groupSize.y.toLong,
+                enqueuedWorkgroupSizeZ = groupSize.z.toLong,
+                subgroupSize = subgroupSize,
+                maxSubgroupSize = subgroup,
+                numSubgroups = numSubgroups,
+                subgroupIndex = subgroupIndex,
+                subgroupLocal = linearLocal % subgroup
+              )
+            case execution =>
+              execution.invocation.reset(
+                group,
+                local,
+                global,
+                dispatch.geometry,
+                activeGroupSize,
+                groupSize,
+                subgroupSize,
+                subgroup,
+                numSubgroups,
+                subgroupIndex,
+                linearLocal % subgroup
+              )
+              execution.invocation
+          }
           prepareInvocation(
             program,
             function,
@@ -468,19 +496,25 @@ private[v1_6] object VMInterpreter {
             shared,
             invocation,
             globalValues ++ workgroupValues ++ privateValues,
-            reusableValues,
+            if (collectiveValues.nonEmpty) collectiveValues(linearLocal) else reusableValues,
             reusableExecution,
             groupState,
             baseScalars,
-            groupMetrics
+            groupMetrics,
+            collectiveValues.nonEmpty
           ) match {
             case Left(error)  => return Left(error)
             case Right(value) =>
-              if (hasCollectives) executions += value
-              else {
+              if (collectiveValues.nonEmpty) collectiveValues(linearLocal) = Some(value.values)
+              if (hasCollectives) {
+                val _ = executions.nn += value
+              } else {
                 if (reuseInvocationState) {
                   reusableExecution = value
-                  reuseExecution.foreach(_(0) = value)
+                  reuseExecution match {
+                    case Some(slot) => slot(0) = value
+                    case None       => ()
+                  }
                 }
                 resumeInvocation(program, value, groupState, control, groupMetrics) match {
                   case Left(error)                  => return Left(error)
@@ -498,7 +532,7 @@ private[v1_6] object VMInterpreter {
         linearLocal += 1
       }
       if (hasCollectives)
-        runWorkgroup(program, executions, groupState, control, groupMetrics)
+        runWorkgroup(program, executions.nn, groupState, control, groupMetrics)
       else Right(())
     }
 
@@ -552,11 +586,13 @@ private[v1_6] object VMInterpreter {
       reusableExecution: InvocationExecution | Null,
       memory: MemoryState,
       baseScalars: BaseScalarValues,
-      metrics: Performance.Metrics
+      metrics: Performance.Metrics,
+      trackTouched: Boolean
   ): Either[Fault, InvocationExecution] = {
     val values = reusableValues match {
       case Some(value) =>
         value.clear()
+        globalValues.foreach { case (id, global) => value.update(id, global) }
         value
       case None =>
         InvocationValues(
@@ -564,10 +600,10 @@ private[v1_6] object VMInterpreter {
           globalValues,
           program.module.header.bound.toUnsigned,
           baseScalars,
-          metrics
+          metrics,
+          trackTouched
         )
     }
-    globalValues.foreach { case (id, value) => values.update(id, value) }
     val globals     = program.globals.view.toVector
     var globalIndex = 0
     while (globalIndex < globals.size) {
@@ -635,7 +671,7 @@ private[v1_6] object VMInterpreter {
   // Keep the loop and semantic families below HotSpot's huge-method threshold.
   // Invocation state is explicit so calls, returns and collective suspension share one path.
   // The instruction loop exits as soon as the invocation completes, suspends, or faults.
-  @SuppressWarnings(Array("scalafix:DisableSyntax.return"))
+  @SuppressWarnings(Array("scalafix:DisableSyntax.null", "scalafix:DisableSyntax.return"))
   private def resumeInvocation(
       program: Program,
       execution: InvocationExecution,
@@ -650,10 +686,12 @@ private[v1_6] object VMInterpreter {
         case Left(fault) => return Left(fault)
         case Right(_)    => ()
       }
-      executeInstruction(program, execution, memory, program.module.instructions(execution.pc)) match {
-        case Left(error) => return Left(error)
-        case Right(_)    => ()
-      }
+      val scalarInteger = program.scalarIntegerInstruction(execution.pc)
+      if (scalarInteger == null || !executeScalarInteger(execution, scalarInteger.nn))
+        executeInstruction(program, execution, memory, program.module.instructions(execution.pc)) match {
+          case Left(error) => return Left(error)
+          case Right(_)    => ()
+        }
       if (execution.completed || execution.suspended.nonEmpty) return InstructionCompleted
     }
     Left(Fault.InvalidTask(
@@ -661,6 +699,36 @@ private[v1_6] object VMInterpreter {
         s"(${program.functionNames.get(execution.currentFunction.id).fold("unnamed")(_.value)}) " +
         "reached OpFunctionEnd without OpReturn"
     ))
+  }
+
+  private def executeScalarInteger(
+      execution: InvocationExecution,
+      instruction: VMScalarIntegerInstruction
+  ): Boolean = {
+    val values = execution.values
+    val left   =
+      if (instruction.leftConstant) instruction.leftConstantBits
+      else values.readScalar(instruction.left)
+    val leftIsScalar = instruction.leftConstant || values.scalarReadSucceeded
+    val right        =
+      if (instruction.rightConstant) instruction.rightConstantBits
+      else values.readScalar(instruction.right)
+    val rightIsScalar = instruction.rightConstant || values.scalarReadSucceeded
+    if (!leftIsScalar || !rightIsScalar) false
+    else {
+      val result = instruction.operation match {
+        case VMScalarIntegerInstruction.Add      => left + right
+        case VMScalarIntegerInstruction.Subtract => left - right
+        case VMScalarIntegerInstruction.Multiply => left * right
+      }
+      values.updateScalar(
+        instruction.destination,
+        instruction.resultType,
+        result & instruction.resultMask
+      )
+      execution.pc += 1
+      true
+    }
   }
 
   private def executeInstruction(
@@ -772,7 +840,7 @@ private[v1_6] object VMInterpreter {
         val buffer  = Array.ofDim[Byte](typeSize(program, pointee))
         val slots   = mutable.LongMap.empty[(Int, Pointer)]
         pointerLeafOffsets(program, pointee, 0L).toOption.foreach(_.foreach { case (offset, pointerType) =>
-          program.types.get(pointerType) match {
+          program.runtimeType(pointerType) match {
             case Some(RuntimeType.Pointer(pointerStorage, pointerPointee)) =>
               slots.update(offset, pointerType -> Pointer(Region.Null, 0L, pointerPointee, pointerStorage))
             case _ => ()
@@ -805,7 +873,7 @@ private[v1_6] object VMInterpreter {
         address(values, pointer) match {
           case Left(error)   => return Left(error)
           case Right(source) =>
-            program.types.get(id(resultType)) match {
+            program.runtimeType(id(resultType)) match {
               case Some(RuntimeType.Pointer(_, _)) =>
                 loadPointer(program, memory, source, id(resultType)) match {
                   case Left(error) =>
@@ -985,7 +1053,8 @@ private[v1_6] object VMInterpreter {
         values.get(id(source)) match {
           case Some(RuntimeValue.Address(_, pointer)) =>
             val pointee = pointerPointee(program, id(resultType))
-            values.update(id(dest), RuntimeValue.Address(id(resultType), pointer.copy(pointee = pointee)))
+            val result  = if (pointer.pointee == pointee) pointer else pointer.copy(pointee = pointee)
+            values.update(id(dest), RuntimeValue.Address(id(resultType), result))
             execution.pc += 1
           case Some(value) =>
             value match {
@@ -998,7 +1067,8 @@ private[v1_6] object VMInterpreter {
                 }
               case RuntimeValue.Address(_, pointer) =>
                 val pointee = pointerPointee(program, id(resultType))
-                values.update(id(dest), RuntimeValue.Address(id(resultType), pointer.copy(pointee = pointee)))
+                val result  = if (pointer.pointee == pointee) pointer else pointer.copy(pointee = pointee)
+                values.update(id(dest), RuntimeValue.Address(id(resultType), result))
                 execution.pc += 1
             }
           case None => return Left(undefined(source))
@@ -1009,9 +1079,9 @@ private[v1_6] object VMInterpreter {
           case Right(())   => execution.pc += 1
         }
       case Instruction.PtrCastToGeneric(resultType, dest, source) =>
-        (program.types.get(id(resultType)), values.get(id(source))) match {
+        (program.runtimeType(id(resultType)), values.get(id(source))) match {
           case (Some(RuntimeType.Pointer(8, pointee)), Some(RuntimeValue.Address(sourceType, pointer))) =>
-            program.types.get(sourceType) match {
+            program.runtimeType(sourceType) match {
               case Some(RuntimeType.Pointer(storageClass, sourcePointee))
                   if Vec(4, 5, 7).contains(storageClass) && sourcePointee == pointee &&
                     pointer.pointee == pointee && (pointer.region == Region.Null || pointer.storageClass == storageClass) =>
@@ -1248,12 +1318,16 @@ private[v1_6] object VMInterpreter {
             execution.pc += 1
         }
       case Instruction.ConvertUToPtr(resultType, dest, integerValue) =>
-        (program.types.get(id(resultType)), values.get(id(integerValue))) match {
+        (program.runtimeType(id(resultType)), values.get(id(integerValue))) match {
           case (
                 Some(RuntimeType.Pointer(_, pointee)),
                 Some(RuntimeValue.Bits(integerType, Array(rawAddress)))
-              ) if program.types.get(pointee).exists(_.isInstanceOf[RuntimeType.Function]) &&
-                  integerShape(program, integerType).exists(_._2 == 1) =>
+              )
+              if program.types.get(pointee).exists {
+                case RuntimeType.Function(_, _) => true
+                case _                          => false
+              } &&
+                integerShape(program, integerType).exists(_._2 == 1) =>
             values.update(id(dest), RuntimeValue.Bits(id(resultType), Array(rawAddress)))
             execution.pc += 1
           case (
@@ -2618,8 +2692,8 @@ private[v1_6] object VMInterpreter {
         return values.get(id(sources.head)) match {
           case Some(RuntimeValue.Bits(_, Array(token)))
               if (token >>> 32) == program.programId &&
-                  (token & 0xffffffffL) > 0 && (token & 0xffffffffL) <= Int.MaxValue &&
-                  program.functions.contains((token & 0xffffffffL).toInt) =>
+                (token & 0xffffffffL) > 0 && (token & 0xffffffffL) <= Int.MaxValue &&
+                program.functions.contains((token & 0xffffffffL).toInt) =>
             val called = sources.head.copy(words = Vec(Word((token & 0xffffffffL).toInt)).refineUnsafe[MinLength[1]])
             executeCall(program, execution, memory, Instruction.FunctionCall(resultType, dest, called, sources.tail))
           case Some(_) => Left(Fault.InvalidTask("OpFunctionPointerCallINTEL has an invalid function pointer"))
@@ -2906,7 +2980,7 @@ private[v1_6] object VMInterpreter {
               case None => return Left(undefined(arguments.head))
             }
           case Some("__to_global") =>
-            (values.get(id(arguments.head)), program.types.get(id(resultType))) match {
+            (values.get(id(arguments.head)), program.runtimeType(id(resultType))) match {
               case (Some(RuntimeValue.Address(_, pointer)), Some(RuntimeType.Pointer(storageClass, pointee))) =>
                 values.update(
                   id(dest),
@@ -3176,7 +3250,7 @@ private[v1_6] object VMInterpreter {
           case None =>
             execution.completed = true
             return Right(())
-          case Some(frame) => program.types.get(frame.resultType) match {
+          case Some(frame) => program.runtimeType(frame.resultType) match {
               case Some(RuntimeType.Void) =>
                 execution.currentFunction = frame.function
                 execution.pc = frame.pc
@@ -4453,7 +4527,7 @@ private[v1_6] object VMInterpreter {
       argumentIndex: Int,
       memory: MemoryState
   ): Either[Fault, RuntimeValue] =
-    program.types.get(parameterType) match {
+    program.runtimeType(parameterType) match {
       case Some(RuntimeType.Pointer(storageClass, pointee)) => argument match {
           case KernelTask.Argument.Memory(allocation, offset) =>
             pointerLeafOffsets(program, pointee, 0L) match {
@@ -4475,7 +4549,7 @@ private[v1_6] object VMInterpreter {
             }
           case KernelTask.Argument.Scalar(bytes)
               if !byValue && bytes.toArray.forall(_ == 0) &&
-                !program.types.get(pointee).exists {
+                !program.runtimeType(pointee).exists {
                   case RuntimeType.Structure(_) | RuntimeType.Array(_, _) => true
                   case _                                                  => false
                 } =>
@@ -4506,7 +4580,7 @@ private[v1_6] object VMInterpreter {
                 val slots = mutable.LongMap.empty[(Int, Pointer)]
                 pointerLeafOffsets(program, pointee, 0L) match {
                   case Right(leaves) => leaves.foreach { case (offset, pointerType) =>
-                      program.types.get(pointerType) match {
+                      program.runtimeType(pointerType) match {
                         case Some(RuntimeType.Pointer(pointerStorage, pointerPointee)) =>
                           val pointer = memory.argumentRelocation(argumentIndex, offset) match {
                             case Some((target, targetOffset)) =>
@@ -4572,7 +4646,7 @@ private[v1_6] object VMInterpreter {
       case Right(leaves) =>
         val slots = mutable.LongMap.empty[(Int, Pointer)]
         leaves.foreach { case (slotOffset, pointerType) =>
-          program.types.get(pointerType) match {
+          program.runtimeType(pointerType) match {
             case Some(RuntimeType.Pointer(pointerStorage, pointerPointee)) =>
               val pointer = memory.allocationRelocation(allocation, allocationOffset + slotOffset) match {
                 case Some((target, targetOffset)) =>
@@ -4609,7 +4683,7 @@ private[v1_6] object VMInterpreter {
       program: Program,
       typeId: Int,
       baseOffset: Long
-  ): Either[Fault, Vec[(Long, Int)]] = program.types.get(typeId) match {
+  ): Either[Fault, Vec[(Long, Int)]] = program.runtimeType(typeId) match {
     case Some(RuntimeType.Pointer(_, _))      => Right(Vec(baseOffset -> typeId))
     case Some(RuntimeType.Structure(members)) =>
       members.zipWithIndex.foldLeft[Either[Fault, Vec[(Long, Int)]]](Right(Vec.empty)) {
@@ -4643,7 +4717,7 @@ private[v1_6] object VMInterpreter {
       memory: MemoryState,
       source: Pointer,
       resultType: Int
-  ): Either[Fault, RuntimeValue] = program.types.get(resultType) match {
+  ): Either[Fault, RuntimeValue] = program.runtimeType(resultType) match {
     case Some(RuntimeType.Pointer(resultStorage, resultPointee)) =>
       val rawPointer = memory.readScalar(source, MemoryValueByteWidth(8))
       source.slots.flatMap(_.get(source.offset)).orElse(
@@ -4654,7 +4728,7 @@ private[v1_6] object VMInterpreter {
           .flatMap(raw => memory.integerPointer(raw, resultPointee, resultStorage).toOption)
           .map(resultType -> _)
       ) match {
-        case Some((slotType, pointer)) => program.types.get(slotType) match {
+        case Some((slotType, pointer)) => program.runtimeType(slotType) match {
             case Some(RuntimeType.Pointer(slotStorage, _))
                 if pointer.region == Region.Null ||
                   ((slotStorage == 8 || pointer.storageClass == slotStorage) &&
@@ -4671,7 +4745,7 @@ private[v1_6] object VMInterpreter {
               Left(
                 Fault.InvalidTask(
                   s"SPIR-V pointer slot at byte ${source.offset} has type %$slotType ($value), " +
-                    s"expected %$resultType (${program.types.get(resultType)}), " +
+                    s"expected %$resultType (${program.runtimeType(resultType)}), " +
                     s"base pointee %${source.pointee}, storage ${source.storageClass}, " +
                     s"slots ${source.slots.map(slots => Vec.from(slots.keys).sorted.mkString("[", ",", "]")).getOrElse("none")}"
                 )
@@ -4699,7 +4773,7 @@ private[v1_6] object VMInterpreter {
       sourceType: Int,
       source: Pointer
   ): Either[Fault, Unit] =
-    (program.types.get(target.pointee), program.types.get(sourceType)) match {
+    (program.runtimeType(target.pointee), program.runtimeType(sourceType)) match {
       case (
             Some(RuntimeType.Pointer(targetStorage, targetPointee)),
             Some(RuntimeType.Pointer(sourceStorage, sourcePointee))
@@ -4813,7 +4887,7 @@ private[v1_6] object VMInterpreter {
         case Left(error)  => return Left(error)
         case Right(value) => value
       }
-      program.types.get(typeId) match {
+      program.runtimeType(typeId) match {
         case Some(RuntimeType.Structure(members)) =>
           if (index < 0L || index >= members.size.toLong)
             return Left(
@@ -4851,12 +4925,12 @@ private[v1_6] object VMInterpreter {
       source: Operand
   ): Either[Fault, Unit] = {
     val outputType = id(resultType)
-    (program.types.get(outputType), values.get(id(source))) match {
+    (program.runtimeType(outputType), values.get(id(source))) match {
       case (
             Some(RuntimeType.Pointer(targetStorage, targetPointee)),
             Some(RuntimeValue.Address(sourceType, pointer))
           ) if Vec(4, 5, 7).contains(targetStorage) =>
-        program.types.get(sourceType) match {
+        program.runtimeType(sourceType) match {
           case Some(RuntimeType.Pointer(8, sourcePointee))
               if sourcePointee == targetPointee && pointer.pointee == targetPointee =>
             val converted = pointer.region match {
@@ -4900,12 +4974,12 @@ private[v1_6] object VMInterpreter {
   ): Either[Fault, Unit] = {
     val outputType    = id(resultType)
     val targetStorage = operandBits(storage)
-    (program.types.get(outputType), values.get(id(source))) match {
+    (program.runtimeType(outputType), values.get(id(source))) match {
       case (
             Some(RuntimeType.Pointer(resultStorage, targetPointee)),
             Some(RuntimeValue.Address(sourceType, pointer))
           ) if resultStorage == targetStorage && Vec(4, 5, 7).contains(targetStorage) =>
-        program.types.get(sourceType) match {
+        program.runtimeType(sourceType) match {
           case Some(RuntimeType.Pointer(8, sourcePointee))
               if sourcePointee == targetPointee && pointer.pointee == targetPointee =>
             val converted =
@@ -4951,7 +5025,7 @@ private[v1_6] object VMInterpreter {
     var index   = 0
     while (index < indexes.size) {
       val selected = unsigned(indexes(index))
-      program.types.get(current) match {
+      program.runtimeType(current) match {
         case Some(RuntimeType.VectorType(component, count)) if selected < count.toLong =>
           scalarLeafCount(program, component) match {
             case Left(error)   => return Left(error)
@@ -5185,7 +5259,7 @@ private[v1_6] object VMInterpreter {
         s"OpenCL.std vloadn expects 3 operands, received ${sources.size}"
       ))
     else
-      (program.types.get(id(resultType)), scalar(values, sources(0)), address(values, sources(1))) match {
+      (program.runtimeType(id(resultType)), scalar(values, sources(0)), address(values, sources(1))) match {
         case (_, Left(error), _) => Left(error)
         case (_, _, Left(error)) => Left(error)
         case (Some(RuntimeType.VectorType(component, count)), Right(offset), Right(pointer))
@@ -5245,7 +5319,7 @@ private[v1_6] object VMInterpreter {
     else
       (values.get(id(source)), scalar(values, sources(0)), address(values, sources(1))) match {
         case (Some(RuntimeValue.Bits(sourceType, lanes)), Right(offset), Right(pointer)) =>
-          program.types.get(sourceType) match {
+          program.runtimeType(sourceType) match {
             case Some(RuntimeType.VectorType(component, count)) if lanes.length == count =>
               val elementSize = scalarMemoryWidth(program, component) match {
                 case Left(error) => return Left(error)
@@ -5554,9 +5628,9 @@ private[v1_6] object VMInterpreter {
   }
 
   private def signedIntegerShape(program: Program, typeId: Int): Option[(BitWidth, Int, Boolean)] =
-    program.types.get(typeId) match {
+    program.runtimeType(typeId) match {
       case Some(RuntimeType.Integer(width, signed))       => Some((width, 1, signed))
-      case Some(RuntimeType.VectorType(component, count)) => program.types.get(component) match {
+      case Some(RuntimeType.VectorType(component, count)) => program.runtimeType(component) match {
           case Some(RuntimeType.Integer(width, signed)) => Some((width, count, signed))
           case _                                        => None
         }
@@ -7077,7 +7151,7 @@ private[v1_6] object VMInterpreter {
       byteStart: Int,
       lanes: Array[Long],
       laneStart: Int
-  ): Int = program.types.get(typeId) match {
+  ): Int = program.runtimeType(typeId) match {
     case Some(RuntimeType.Bool) | Some(RuntimeType.Integer(_, _)) | Some(RuntimeType.Floating(_)) |
         Some(RuntimeType.Event) =>
       if (laneStart >= lanes.length)
@@ -7152,7 +7226,7 @@ private[v1_6] object VMInterpreter {
       laneStart: Int,
       output: Array[Byte],
       byteStart: Int
-  ): Int = program.types.get(typeId) match {
+  ): Int = program.runtimeType(typeId) match {
     case Some(RuntimeType.Bool) | Some(RuntimeType.Integer(_, _)) | Some(RuntimeType.Floating(_)) |
         Some(RuntimeType.Event) =>
       if (laneStart >= lanes.length)
@@ -7213,7 +7287,7 @@ private[v1_6] object VMInterpreter {
   }
 
   private def typeSize(program: Program, typeId: Int): Int =
-    program.typeSizeCache.getOrElseUpdate(typeId, typeSizeUncached(program, typeId))
+    program.cachedTypeSize(typeId)(typeSizeUncached(program, typeId))
 
   private def nonNegativeTypeSize(
       program: Program,
@@ -7240,7 +7314,7 @@ private[v1_6] object VMInterpreter {
       .map(size => MemoryValueByteWidth(size))
   }
 
-  private def typeSizeUncached(program: Program, typeId: Int): Int = program.types.get(typeId) match {
+  private def typeSizeUncached(program: Program, typeId: Int): Int = program.runtimeType(typeId) match {
     case Some(RuntimeType.Bool)                     => 1
     case Some(RuntimeType.Integer(width, _))        => width.value / 8
     case Some(RuntimeType.Floating(width))          => width.value / 8
@@ -7298,7 +7372,7 @@ private[v1_6] object VMInterpreter {
   private def typeAlignment(program: Program, typeId: Int): Int =
     program.typeAlignmentCache.getOrElseUpdate(typeId, typeAlignmentUncached(program, typeId))
 
-  private def typeAlignmentUncached(program: Program, typeId: Int): Int = program.types.get(typeId) match {
+  private def typeAlignmentUncached(program: Program, typeId: Int): Int = program.runtimeType(typeId) match {
     case Some(RuntimeType.Structure(_)) if program.packedStructures.contains(typeId) => 1
     case Some(RuntimeType.Structure(members))           => members.map(typeAlignment(program, _)).maxOption.getOrElse(1)
     case Some(RuntimeType.Array(element, _))            => typeAlignment(program, element)
@@ -7308,7 +7382,7 @@ private[v1_6] object VMInterpreter {
     case _                               => math.max(1, typeSize(program, typeId))
   }
 
-  private def scalarWidth(program: Program, typeId: Int): BitWidth = program.types.get(typeId) match {
+  private def scalarWidth(program: Program, typeId: Int): BitWidth = program.runtimeType(typeId) match {
     case Some(RuntimeType.Bool)                     => BitWidth(8)
     case Some(RuntimeType.Integer(width, _))        => width
     case Some(RuntimeType.Floating(width))          => width.bitWidth
@@ -7317,7 +7391,7 @@ private[v1_6] object VMInterpreter {
     case value => throw IllegalArgumentException(s"SPIR-V type %$typeId is not scalar or vector: $value")
   }
 
-  private def pointerPointee(program: Program, typeId: Int): Int = program.types.get(typeId) match {
+  private def pointerPointee(program: Program, typeId: Int): Int = program.runtimeType(typeId) match {
     case Some(RuntimeType.Pointer(_, pointee)) => pointee
     case value => throw IllegalArgumentException(s"SPIR-V type %$typeId is not a pointer: $value")
   }
@@ -7342,7 +7416,7 @@ private[v1_6] object VMInterpreter {
   ): Either[Fault, Unit] =
     (pointerOperand.words, sizeOperand.words) match {
       case (Vec(pointerId), Vec(sizeWord)) => values.get(pointerId.bits) match {
-          case Some(RuntimeValue.Address(pointerType, pointer)) => program.types.get(pointerType) match {
+          case Some(RuntimeValue.Address(pointerType, pointer)) => program.runtimeType(pointerType) match {
               case Some(RuntimeType.Pointer(_, pointee)) if pointee == pointer.pointee =>
                 val size = sizeWord.toUnsigned
                 pointer.region match {
@@ -7458,10 +7532,10 @@ private[v1_6] object VMInterpreter {
     integerShape(program, typeId)
       .orElse(floatingShape(program, typeId).map((width, count) => width.bitWidth -> count))
       .orElse {
-        program.types.get(typeId) match {
+        program.runtimeType(typeId) match {
           case Some(RuntimeType.Bool) => Some((BitWidth(8), 1))
           case Some(RuntimeType.VectorType(component, count))
-              if program.types.get(component).contains(RuntimeType.Bool) => Some((BitWidth(8), count))
+              if program.runtimeType(component).contains(RuntimeType.Bool) => Some((BitWidth(8), count))
           case _ => None
         }
       }
@@ -7721,7 +7795,11 @@ private[v1_6] object VMInterpreter {
       scalar: Operand
   ): Either[Fault, Unit] = (values.get(id(vector)), values.get(id(scalar))) match {
     case (Some(RuntimeValue.Bits(vectorType, vectorLanes)), Some(RuntimeValue.Bits(scalarType, Array(scalarRaw)))) =>
-      (floatingShape(program, vectorType), floatingShape(program, scalarType), floatingShape(program, id(resultType))) match {
+      (
+        floatingShape(program, vectorType),
+        floatingShape(program, scalarType),
+        floatingShape(program, id(resultType))
+      ) match {
         case (Some((width, count)), Some((scalarWidth, 1)), Some((resultWidth, resultCount)))
             if width == scalarWidth && width == resultWidth && count == resultCount && count > 1
               && vectorLanes.length == count =>
@@ -7732,8 +7810,8 @@ private[v1_6] object VMInterpreter {
         case _ => Left(Fault.InvalidTask("OpVectorTimesScalar requires a floating vector and matching scalar"))
       }
     case (Some(_), Some(_)) => Left(Fault.InvalidTask("OpVectorTimesScalar requires a floating vector and scalar"))
-    case (None, _) => Left(undefined(vector))
-    case (_, None) => Left(undefined(scalar))
+    case (None, _)          => Left(undefined(vector))
+    case (_, None)          => Left(undefined(scalar))
   }
 
   private def floatingBinary(
@@ -9227,9 +9305,9 @@ private[v1_6] object VMInterpreter {
   }
 
   private def integerShape(program: Program, typeId: Int): Option[(BitWidth, Int)] =
-    program.types.get(typeId) match {
+    program.runtimeType(typeId) match {
       case Some(RuntimeType.Integer(width, _))            => Some((width, 1))
-      case Some(RuntimeType.VectorType(component, count)) => program.types.get(component) match {
+      case Some(RuntimeType.VectorType(component, count)) => program.runtimeType(component) match {
           case Some(RuntimeType.Integer(width, _)) => Some((width, count))
           case _                                   => None
         }
@@ -9237,9 +9315,9 @@ private[v1_6] object VMInterpreter {
     }
 
   private def floatingShape(program: Program, typeId: Int): Option[(FloatingPointWidth, Int)] =
-    program.types.get(typeId) match {
+    program.runtimeType(typeId) match {
       case Some(RuntimeType.Floating(width))              => Some((width, 1))
-      case Some(RuntimeType.VectorType(component, count)) => program.types.get(component) match {
+      case Some(RuntimeType.VectorType(component, count)) => program.runtimeType(component) match {
           case Some(RuntimeType.Floating(width)) => Some((width, count))
           case _                                 => None
         }
@@ -9419,9 +9497,9 @@ private[v1_6] object VMInterpreter {
 
   private def bfloat16ToFloat32Bits(value: Long): Long = (value & 0xffffL) << 16
 
-  private def booleanLanes(program: Program, typeId: Int): Option[Int] = program.types.get(typeId) match {
+  private def booleanLanes(program: Program, typeId: Int): Option[Int] = program.runtimeType(typeId) match {
     case Some(RuntimeType.Bool) => Some(1)
-    case Some(RuntimeType.VectorType(component, count)) if program.types.get(component).contains(RuntimeType.Bool) =>
+    case Some(RuntimeType.VectorType(component, count)) if program.runtimeType(component).contains(RuntimeType.Bool) =>
       Some(count)
     case _ => None
   }

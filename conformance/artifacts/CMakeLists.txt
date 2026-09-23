@@ -25,29 +25,7 @@ if(NOT EXISTS "${target_set}")
 endif()
 include("${target_set}")
 
-set(cuda_11_8_architectures sm_35 sm_50 sm_60 sm_70)
-set(cuda_13_3_architectures sm_75 sm_80 sm_86 sm_87 sm_89 sm_90 sm_100 sm_103 sm_120)
-set(cuda_11_8_image
-  "docker.io/nvidia/cuda@sha256:94fd755736cb58979173d491504f0b573247b1745250249415b07fefc738e41f")
-set(cuda_13_3_image
-  "docker.io/nvidia/cuda@sha256:a535b42e387b5ea69f3be73e14e79eb979913b622bc61b21c8000830b4965ea4")
-
-function(cuda_toolchain architecture image_output package_output support_output)
-  if(architecture IN_LIST cuda_11_8_architectures)
-    set(image "${cuda_11_8_image}")
-    set(package "11-8")
-    set(support "support-11.8")
-  elseif(architecture IN_LIST cuda_13_3_architectures)
-    set(image "${cuda_13_3_image}")
-    set(package "13-3")
-    set(support "support-13.3")
-  else()
-    message(FATAL_ERROR "No CUDA toolchain supports architecture ${architecture}")
-  endif()
-  set(${image_output} "${image}" PARENT_SCOPE)
-  set(${package_output} "${package}" PARENT_SCOPE)
-  set(${support_output} "${support}" PARENT_SCOPE)
-endfunction()
+include("${CONFORMANCE_SOURCE_DIRECTORY}/cmake/ToolchainImages.cmake")
 
 foreach(variable IN ITEMS CONFORMANCE_BACKENDS CUDA_ARCHITECTURES AMDGPU_ARCHITECTURES)
   string(REPLACE "," ";" "${variable}" "${${variable}}")
@@ -124,9 +102,6 @@ if(CONFORMANCE_CLEAN_WORK AND EXISTS "${CONFORMANCE_WORK_DIRECTORY}")
   file(REMOVE_RECURSE "${CONFORMANCE_WORK_DIRECTORY}")
 endif()
 
-string(SHA256 toolchain_namespace "${CONFORMANCE_SOURCE_DIRECTORY}")
-string(SUBSTRING "${toolchain_namespace}" 0 12 toolchain_namespace)
-
 execute_process(COMMAND id -u OUTPUT_VARIABLE container_uid OUTPUT_STRIP_TRAILING_WHITESPACE)
 execute_process(COMMAND id -g OUTPUT_VARIABLE container_gid OUTPUT_STRIP_TRAILING_WHITESPACE)
 if(CONTAINER_EXECUTABLE MATCHES "(^|/)podman$")
@@ -135,57 +110,13 @@ else()
   set(container_identity "--user ${container_uid}:${container_gid}")
 endif()
 
-function(toolchain backend architecture image_output dependency_output support_output)
-  set(build_arguments)
-  set(support "support")
-  if(backend STREQUAL "cuda")
-    cuda_toolchain("${architecture}" cuda_image cuda_package support)
-    set(key "cuda-${cuda_package}")
-    list(APPEND build_arguments
-      --build-arg "CUDA_IMAGE=${cuda_image}"
-      --build-arg "CUDA_PACKAGE_VERSION=${cuda_package}")
-    set(tag "localhost/gemstone-conformance-${toolchain_namespace}-cuda:${cuda_package}")
-  else()
-    set(key "${backend}")
-    set(tag "localhost/gemstone-conformance-${toolchain_namespace}-${backend}:latest")
-    if(backend STREQUAL "hip" OR backend STREQUAL "hsa")
-      list(APPEND build_arguments --build-arg "ROCM_VERSION=${ROCM_VERSION}")
-    endif()
-  endif()
-
-  set(stamp "${CMAKE_BINARY_DIR}/toolchains/${key}")
-  string(MAKE_C_IDENTIFIER "toolchain-${key}" target)
-  if(NOT TARGET "${target}")
-    add_custom_command(
-      OUTPUT "${stamp}"
-      COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_BINARY_DIR}/toolchains"
-      COMMAND "${CONTAINER_EXECUTABLE}" build
-        --file "${CONFORMANCE_SOURCE_DIRECTORY}/Containerfile"
-        --target "toolchain-${backend}"
-        --tag "${tag}"
-        ${build_arguments}
-        "${CONFORMANCE_SOURCE_DIRECTORY}"
-      COMMAND "${CMAKE_COMMAND}" -E touch "${stamp}"
-      DEPENDS "${CONFORMANCE_SOURCE_DIRECTORY}/Containerfile"
-      COMMENT "Preparing ${backend} conformance toolchain"
-      JOB_POOL container_build
-      VERBATIM
-    )
-    add_custom_target("${target}" DEPENDS "${stamp}")
-  endif()
-
-  set(${image_output} "${tag}" PARENT_SCOPE)
-  set(${dependency_output} "${stamp}" PARENT_SCOPE)
-  set(${support_output} "${support}" PARENT_SCOPE)
-endfunction()
-
 function(artifact_arguments backend architecture output_mode result)
   set(arguments
     "-DBACKEND=${backend}"
     "-DCONFORMANCE_OUTPUT=${output_mode}"
     "-DROCM_VERSION=${ROCM_VERSION}")
   if(backend STREQUAL "cuda")
-    cuda_toolchain("${architecture}" unused_image unused_package support)
+    conformance_cuda_toolchain("${architecture}" unused_image unused_package support)
     list(APPEND arguments
       "-DCUDA_ARCHITECTURES=${architecture}"
       "-DCONFORMANCE_SUPPORT_KEY=${support}")
@@ -210,7 +141,7 @@ function(add_artifact backend architecture output)
   endif()
   set(directory "${CONFORMANCE_ARTIFACT_DIRECTORY}/${name}")
   set(metadata "${directory}/artifact.toml")
-  toolchain("${backend}" "${architecture}" image toolchain_stamp support)
+  conformance_toolchain("${backend}" "${architecture}" image toolchain_stamp support)
   artifact_arguments("${backend}" "${architecture}" "${output}" arguments)
 
   list(APPEND arguments
@@ -269,7 +200,7 @@ foreach(backend IN LISTS CONFORMANCE_BACKENDS)
       if(NOT architecture MATCHES "^sm_[0-9]+$")
         message(FATAL_ERROR "Invalid CUDA architecture: ${architecture}")
       endif()
-      cuda_toolchain("${architecture}" unused_image unused_package support)
+      conformance_cuda_toolchain("${architecture}" unused_image unused_package support)
       if(NOT support IN_LIST cuda_supports)
         add_artifact("${backend}" "${architecture}" both)
         list(APPEND cuda_supports "${support}")

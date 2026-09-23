@@ -633,6 +633,34 @@ final class ExecutionService(
     atomicModifyValue(id, offset, size, None)(update)
 
   private final class CompletionMemory(completion: CompletionId) extends Memory with AddressSpace {
+    @SuppressWarnings(Array(
+      "scalafix:DisableSyntax.var",
+      "scalafix:GemstoneNoAssume",
+      "scalafix:GemstoneNoIterator.no-iterator"
+    ))
+    private inline def withAllocation[A](
+        address: GuestAddress,
+        size: Int :| Positive0
+    )(inline operation: (AllocationId, Long :| Positive0) => Either[Fault, A]): Either[Fault, A] = {
+      val allocations = state.get().allocations.iterator
+      var foundId     = 0L
+      var foundOffset = 0L
+      while (allocations.hasNext && foundId == 0L) {
+        val (id, allocation) = allocations.next()
+        val base             = allocation.address.getOrElse(syntheticAddress(id))
+        val relative         = address.value - base.value
+        if (
+          java.lang.Long.compareUnsigned(address.value, base.value) >= 0 &&
+          size <= allocation.size && relative <= allocation.size.toLong - size.toLong
+        ) {
+          foundId = id.value
+          foundOffset = relative
+        }
+      }
+      if (foundId == 0L) Left(Fault.Memory(s"address ${address.value} is not bound"))
+      else operation(AllocationId.assume(foundId), foundOffset.assume[Positive0])
+    }
+
     override def read(
         region: MemoryRegion,
         offset: Long :| Positive0,
@@ -682,6 +710,44 @@ final class ExecutionService(
 
     override def locate(address: GuestAddress, size: Int :| Positive0): Either[Fault, AddressSpace.Location] =
       locateAddress(address, size)
+
+    override def read(memory: Memory, address: GuestAddress, size: Int :| Positive0): Either[Fault, Vec[Byte]] =
+      withAllocation(address, size)((id, offset) =>
+        ExecutionService.this.read(id, offset, size).left.map(memoryFault(_))
+      )
+
+    override def readValue(
+        memory: Memory,
+        address: GuestAddress,
+        size: MemoryValueByteWidth
+    ): Either[Fault, Long] =
+      withAllocation(address, size.nonNegative)((id, offset) =>
+        ExecutionService.this.readValue(id, offset, size).left.map(memoryFault(_))
+      )
+
+    override def write(memory: Memory, address: GuestAddress, bytes: Vec[Byte]): Either[Fault, Unit] =
+      withAllocation(address, bytes.nonNegativeSize)((id, offset) =>
+        ExecutionService.this.write(id, offset, bytes, Some(completion)).left.map(memoryFault(_))
+      )
+
+    override def writeValue(
+        memory: Memory,
+        address: GuestAddress,
+        value: Long,
+        size: MemoryValueByteWidth
+    ): Either[Fault, Unit] =
+      withAllocation(address, size.nonNegative)((id, offset) =>
+        ExecutionService.this.writeValue(id, offset, value, size, Some(completion)).left.map(memoryFault(_))
+      )
+
+    override def atomicModifyValue(
+        memory: Memory,
+        address: GuestAddress,
+        size: MemoryValueByteWidth
+    )(update: Long => Long): Either[Fault, Long] =
+      withAllocation(address, size.nonNegative)((id, offset) =>
+        ExecutionService.this.atomicModifyValue(id, offset, size, Some(completion))(update).left.map(memoryFault(_))
+      )
   }
 
   private def completionMemory(completion: CompletionId): Memory = CompletionMemory(completion)
@@ -903,16 +969,25 @@ final class ExecutionService(
     state.get().allocations.get(allocationId(region)).toRight(Fault.Memory(s"memory region ${region.value} is absent"))
       .map(allocation => allocation.address.getOrElse(syntheticAddress(allocationId(region))).offset(offset))
 
-  private def locateAddress(address: GuestAddress, size: Int :| Positive0): Either[Fault, AddressSpace.Location] =
-    state.get().allocations.view.collectFirst(Function.unlift { case (id, allocation) =>
-      Some(allocation.address.getOrElse(syntheticAddress(id))).flatMap { base =>
-        val relative = address.value - base.value
-        Option.when(
-          java.lang.Long.compareUnsigned(address.value, base.value) >= 0 &&
-            size <= allocation.size && relative <= allocation.size.toLong - size.toLong
-        )(AddressSpace.Location(MemoryRegion(id.value), relative.refineUnsafe[Positive0]))
-      }
-    }).toRight(Fault.Memory(s"address ${address.value} is not bound"))
+  @SuppressWarnings(Array(
+    "scalafix:DisableSyntax.null",
+    "scalafix:DisableSyntax.var",
+    "scalafix:GemstoneNoIterator.no-iterator"
+  ))
+  private def locateAddress(address: GuestAddress, size: Int :| Positive0): Either[Fault, AddressSpace.Location] = {
+    val allocations                          = state.get().allocations.iterator
+    var result: AddressSpace.Location | Null = null
+    while (allocations.hasNext && result == null) {
+      val (id, allocation) = allocations.next()
+      val base             = allocation.address.getOrElse(syntheticAddress(id))
+      val relative         = address.value - base.value
+      if (
+        java.lang.Long.compareUnsigned(address.value, base.value) >= 0 &&
+        size <= allocation.size && relative <= allocation.size.toLong - size.toLong
+      ) result = AddressSpace.Location(MemoryRegion(id.value), relative.refineUnsafe[Positive0])
+    }
+    if (result == null) Left(Fault.Memory(s"address ${address.value} is not bound")) else Right(result.nn)
+  }
 
   private def syntheticAddress(id: AllocationId): GuestAddress =
     GuestAddress(SyntheticAddressBase + (id.value - 1L) * SyntheticAddressStride)

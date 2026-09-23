@@ -1,16 +1,18 @@
-# Generic OCI container command construction for the artifact matrix.
+# Generic OCI container command construction for conformance and benchmark builds.
 include_guard(GLOBAL)
 
 # conformance_container_command(<out>
 #   EXECUTABLE <container-exe> IMAGE <image>
-#   [SOURCE <dir>] [ARTIFACTS <dir>] [DEPENDENCIES <dir>] [WORK <dir>]
+#   [SOURCE <dir>] [SOURCE_TARGET <container-dir>] [ARTIFACTS <dir>]
+#   [DEPENDENCIES <dir>] [WORK <dir>]
 #   [NETWORK <mode>] [CPU_SHARES <n>] [IDENTITY <flags>]
 #   COMMAND <argv...>)
 # Produces the argv list for `run --rm` with the stable mount layout used by
-# the artifact scripts: source at /source/conformance, output at /output, the
-# dependency cache at /conformance-deps, and the persistent build tree at /work.
+# the artifact scripts: source at /source/conformance by default, output at
+# /output, the dependency cache at /conformance-deps, and the persistent build
+# tree at /work.
 function(conformance_container_command output)
-  cmake_parse_arguments(ARG "" "EXECUTABLE;IMAGE;SOURCE;ARTIFACTS;DEPENDENCIES;WORK;NETWORK;CPU_SHARES;IDENTITY"
+  cmake_parse_arguments(ARG "" "EXECUTABLE;IMAGE;SOURCE;SOURCE_TARGET;ARTIFACTS;DEPENDENCIES;WORK;NETWORK;CPU_SHARES;IDENTITY"
     "COMMAND" ${ARGN})
   if(NOT ARG_EXECUTABLE OR NOT ARG_IMAGE)
     message(FATAL_ERROR "conformance_container_command requires EXECUTABLE and IMAGE")
@@ -27,7 +29,12 @@ function(conformance_container_command output)
     list(APPEND command ${identity})
   endif()
   if(ARG_SOURCE)
-    list(APPEND command --mount "type=bind,source=${ARG_SOURCE},target=/source/conformance,readonly")
+    if(ARG_SOURCE_TARGET)
+      set(source_target "${ARG_SOURCE_TARGET}")
+    else()
+      set(source_target "/source/conformance")
+    endif()
+    list(APPEND command --mount "type=bind,source=${ARG_SOURCE},target=${source_target},readonly")
   endif()
   if(ARG_ARTIFACTS)
     list(APPEND command --mount "type=bind,source=${ARG_ARTIFACTS},target=/output")

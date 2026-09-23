@@ -156,11 +156,13 @@ object AMDGPUExecutionBenchmark {
 
   // Mutable allocation contents are confined to this final benchmark memory fixture.
   private final class BenchmarkMemory extends Memory with BenchmarkAddressSpace {
-    private val allocations                                            = mutable.Map.empty[MemoryRegion, Array[Byte]]
-    override protected def regionSizes: Iterable[(MemoryRegion, Long)] =
-      allocations.view.mapValues(_.length.toLong)
+    private val allocations                                             = mutable.Map.empty[MemoryRegion, Array[Byte]]
+    override protected val regionSizes: mutable.Map[MemoryRegion, Long] = mutable.Map.empty
 
-    def allocate(id: MemoryRegion, size: Int :| Positive): Unit = allocations(id) = Array.ofDim[Byte](size)
+    def allocate(id: MemoryRegion, size: Int :| Positive): Unit = {
+      allocations(id) = Array.ofDim[Byte](size)
+      regionSizes(id) = size.toLong
+    }
 
     def putInt(id: MemoryRegion, offset: Int :| Positive0, value: Int): Unit =
       LittleEndian.write(value.toLong, allocations(id), offset, ScalarByteWidth(4))

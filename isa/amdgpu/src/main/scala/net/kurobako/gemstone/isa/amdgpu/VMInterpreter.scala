@@ -457,7 +457,7 @@ private[amdgpu] object VMInterpreter {
     Bits.low32(base + java.lang.Integer.bitCount((mask & relevant).toInt).toLong)
   }
 
-  private final class MemoryContext(delegate: Memory, val addresses: AddressSpace)
+  private final class MemoryContext(delegate: Memory, addresses: AddressSpace)
       extends Memory {
     override def read(
         region: MemoryRegion,
@@ -490,6 +490,22 @@ private[amdgpu] object VMInterpreter {
         size: MemoryValueByteWidth
     )(update: Long => Long): Either[Fault, Long] =
       delegate.atomicModifyValue(region, offset, size)(update)
+
+    def read(address: GuestAddress, size: Int :| Positive0): Either[Fault, Vec[Byte]] =
+      addresses.read(delegate, address, size)
+
+    def write(address: GuestAddress, bytes: Vec[Byte]): Either[Fault, Unit] =
+      addresses.write(delegate, address, bytes)
+
+    def readValue(address: GuestAddress, size: MemoryValueByteWidth): Either[Fault, Long] =
+      addresses.readValue(delegate, address, size)
+
+    def writeValue(address: GuestAddress, value: Long, size: MemoryValueByteWidth): Either[Fault, Unit] =
+      addresses.writeValue(delegate, address, value, size)
+
+    def atomicModifyValue(address: GuestAddress, size: MemoryValueByteWidth)(
+        update: Long => Long
+    ): Either[Fault, Long] = addresses.atomicModifyValue(delegate, address, size)(update)
   }
   // Lane-wise register updates are an allocation-sensitive interpreter loop.
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
@@ -890,6 +906,7 @@ private[amdgpu] object VMInterpreter {
       case null  => ScratchMemory(lanes, math.max(4096, kernel.privateSegmentSize))
       case state => state.scratch
     }
+    val maskAccumulator = Array.ofDim[Long](1)
     val codeBase     = if (kernel.textAddress != 0L && kernel.text.nonEmpty) kernel.textAddress else kernel.codeAddress
     var nextUserSgpr = 0
     def enabled(value: Int, bit: Int): Boolean = (value & (1 << bit)) != 0
@@ -1104,7 +1121,7 @@ private[amdgpu] object VMInterpreter {
       advanceAfter(storeLane(0))
     }
 
-    // Keep the instruction switch in its own method so it remains within the JVM JIT size limit.
+    // Split the instruction switch into JIT-sized methods. The complete switch is too large for C2 to compile.
     def stepInstruction(index: Int): Either[Fault, Option[Int]] = operations(index) match {
       case Instruction.End                       => Right(None)
       case Instruction.Wait                      => AdvanceStep
@@ -1569,6 +1586,10 @@ private[amdgpu] object VMInterpreter {
         if (operation == ScalarUnaryOperation.Not32 || operation == ScalarUnaryOperation.Not64)
           scalarCarry = result != 0L
         AdvanceStep
+      case other => stepScalarAndVector(index, other)
+    }
+
+    def stepScalarAndVector(index: Int, instruction: Instruction): Either[Fault, Option[Int]] = instruction match {
       case Instruction.SBinary(operation, dest, srcA, srcB) =>
         val left   = Bits.low32(source(srcA, 0))
         val right  = Bits.low32(source(srcB, 0))
@@ -1893,6 +1914,10 @@ private[amdgpu] object VMInterpreter {
           vector(dest)(lane) = Bits.low32(modified)
         }
         AdvanceStep
+      case other => stepVectorInstruction(index, other)
+    }
+
+    def stepVectorInstruction(index: Int, instruction: Instruction): Either[Fault, Option[Int]] = instruction match {
       case Instruction.VReadFirstLane(dest, src) =>
         active.first match {
           case None       => Left(Fault.Backend("v_readfirstlane_b32 has an empty EXEC mask"))
@@ -2375,23 +2400,43 @@ private[amdgpu] object VMInterpreter {
         }
         AdvanceStep
       case Instruction.VBinary64Modified(operation, dest, srcA, srcB, absA, absB, negateA, negateB) =>
-        foreachActive { lane =>
-          val rawA      = IEEE754.binary64ToDouble(sourceFloating64(srcA, lane, scalar, vector))
-          val rawB      = IEEE754.binary64ToDouble(sourceFloating64(srcB, lane, scalar, vector))
-          val preparedA = if (absA) math.abs(rawA) else rawA
-          val preparedB = if (absB) math.abs(rawB) else rawB
-          val valueA    = if (negateA) -preparedA else preparedA
-          val valueB    = if (negateB) -preparedB else preparedB
-          val result    = operation match {
-            case VectorBinary64Operation.LoadExponent => Math.scalb(valueA, source(srcB, lane).toInt)
-            case VectorBinary64Operation.Add          => valueA + valueB
-            case VectorBinary64Operation.Multiply     => valueA * valueB
-            case VectorBinary64Operation.Maximum      => math.max(valueA, valueB)
-            case VectorBinary64Operation.Minimum      => math.min(valueA, valueB)
+        val destinationLow  = vector(dest)
+        val destinationHigh = vector(dest + 1)
+        val sourceARegister = srcA match {
+          case InstructionSource.VectorRegister(index) => index
+          case _                                       => -1
+        }
+        val sourceBRegister = srcB match {
+          case InstructionSource.VectorRegister(index) => index
+          case _                                       => -1
+        }
+        val invariantA =
+          if (sourceARegister >= 0) 0L else sourceFloating64(srcA, 0, scalar, vector)
+        val invariantB =
+          if (sourceBRegister >= 0) 0L else sourceFloating64(srcB, 0, scalar, vector)
+        var lane = 0
+        while (lane < lanes.value) {
+          if (active(lane)) {
+            val bitsA     = if (sourceARegister >= 0) pair(vector, sourceARegister, lane) else invariantA
+            val bitsB     = if (sourceBRegister >= 0) pair(vector, sourceBRegister, lane) else invariantB
+            val rawA      = IEEE754.binary64ToDouble(bitsA)
+            val rawB      = IEEE754.binary64ToDouble(bitsB)
+            val preparedA = if (absA) math.abs(rawA) else rawA
+            val preparedB = if (absB) math.abs(rawB) else rawB
+            val valueA    = if (negateA) -preparedA else preparedA
+            val valueB    = if (negateB) -preparedB else preparedB
+            val result    = operation match {
+              case VectorBinary64Operation.LoadExponent => Math.scalb(valueA, source(srcB, lane).toInt)
+              case VectorBinary64Operation.Add          => valueA + valueB
+              case VectorBinary64Operation.Multiply     => valueA * valueB
+              case VectorBinary64Operation.Maximum      => math.max(valueA, valueB)
+              case VectorBinary64Operation.Minimum      => math.min(valueA, valueB)
+            }
+            val bits = IEEE754.doubleToBinary64(result)
+            destinationLow(lane) = Bits.low32(bits)
+            destinationHigh(lane) = Bits.high32(bits)
           }
-          val bits = IEEE754.doubleToBinary64(result)
-          vector(dest)(lane) = Bits.low32(bits)
-          vector(dest + 1)(lane) = Bits.high32(bits)
+          lane += 1
         }
         AdvanceStep
       case Instruction.VBinarySubDword(
@@ -2606,24 +2651,31 @@ private[amdgpu] object VMInterpreter {
         }
         AdvanceStep
       case Instruction.VAddCarry(dest, carryDest, srcA, srcB, carryIn) =>
-        val outputCarry = Array.fill(lanes.value)(false)
+        val inputCarry = carryIn match {
+          case Some(mask) => sourceScalar64(mask)
+          case None       => 0L
+        }
+        maskAccumulator(0) = 0L
         foreachActive { lane =>
           val left     = Bits.low32(source(srcA, lane))
           val right    = Bits.low32(source(srcB, lane))
-          val carryBit = carryIn.exists(mask => (sourceScalar64(mask) & (1L << lane)) != 0L)
+          val carryBit = (inputCarry & (1L << lane)) != 0L
           val sum      = left + right + (if (carryBit) 1L else 0L)
           vector(dest)(lane) = Bits.low32(sum)
-          outputCarry(lane) = sum > Bits.Mask32
+          if (sum > Bits.Mask32) maskAccumulator(0) |= 1L << lane
         }
-        val carryMask = booleanLaneMask(outputCarry)
-        updateLaneMask(carryDest, carryMask)
+        updateLaneMask(carryDest, maskAccumulator(0))
         AdvanceStep
       case Instruction.VSubCarry(dest, carryDest, srcA, srcB, carryIn) =>
+        val inputCarry = carryIn match {
+          case Some(mask) => sourceScalar64(mask)
+          case None       => 0L
+        }
         val outputCarry = Array.fill(lanes.value)(false)
         foreachActive { lane =>
           val left                 = Bits.low32(source(srcA, lane))
           val right                = Bits.low32(source(srcB, lane))
-          val borrowIn             = carryIn.exists(mask => (sourceScalar64(mask) & (1L << lane)) != 0L)
+          val borrowIn             = (inputCarry & (1L << lane)) != 0L
           val (difference, borrow) =
             if (carryIn.isDefined) unsignedSubtractWithBorrow32(left, right, borrowIn)
             else unsignedSubtract32(left, right)
@@ -2634,11 +2686,15 @@ private[amdgpu] object VMInterpreter {
         updateLaneMask(carryDest, carryMask)
         AdvanceStep
       case Instruction.VSubReverseCarry(dest, carryDest, srcA, srcB, carryIn) =>
+        val inputCarry = carryIn match {
+          case Some(mask) => sourceScalar64(mask)
+          case None       => 0L
+        }
         val outputCarry = Array.fill(lanes.value)(false)
         foreachActive { lane =>
           val left                 = Bits.low32(source(srcA, lane))
           val right                = Bits.low32(source(srcB, lane))
-          val borrowIn             = carryIn.exists(mask => (sourceScalar64(mask) & (1L << lane)) != 0L)
+          val borrowIn             = (inputCarry & (1L << lane)) != 0L
           val (difference, borrow) =
             if (carryIn.isDefined) unsignedSubtractWithBorrow32(right, left, borrowIn)
             else unsignedSubtract32(right, left)
@@ -2799,6 +2855,10 @@ private[amdgpu] object VMInterpreter {
         }
         updateLaneMask(carryDest, booleanLaneMask(madCarry))
         AdvanceStep
+      case other => stepCompareAndMemory(index, other)
+    }
+
+    def stepCompareAndMemory(index: Int, instruction: Instruction): Either[Fault, Option[Int]] = instruction match {
       case Instruction.VCompare(operation, srcA, srcB) =>
         def operand(sourceRegister: InstructionSource, lane: Int, right: Boolean): Long = operation.kind match {
           case VectorComparisonKind.Signed64 | VectorComparisonKind.Unsigned64 =>
@@ -3207,43 +3267,53 @@ private[amdgpu] object VMInterpreter {
           }
         advanceAfter(storeLane(0))
       case Instruction.GlobalLoad(dest, addressRegister, scalarAddress, byteCount, offset) =>
-        def loadLane(lane: Int): Either[Fault, Unit] =
-          if (lane == lanes.value) Right(())
-          else if (!active(lane)) loadLane(lane + 1)
-          else {
-            val address = scalarAddress
-              .map(register => pair(scalar, register) + Bits.low32(vector(addressRegister)(lane)))
-              .getOrElse(pair(vector, addressRegister, lane)) + signed13(offset)
-            val loaded =
-              if (byteCount <= 8)
-                readValue(
-                  address,
-                  MemoryValueByteWidth.assume(byteCount),
-                  kernarg,
-                  dispatchBytes,
-                  kernel.readOnlyAddress,
-                  kernel.readOnly,
-                  kernel.globalMemory,
-                  allocations,
-                  memory
-                ).map { value =>
-                  writeVectorValue(vector, dest, lane, value, byteCount)
-                }
-              else
-                readBytes(
-                  address,
-                  byteCount,
-                  kernarg,
-                  dispatchBytes,
-                  kernel.readOnlyAddress,
-                  kernel.readOnly,
-                  kernel.globalMemory,
-                  allocations,
-                  memory
-                ).map(bytes => writeVectorBytes(vector, dest, lane, bytes))
-            loaded.flatMap(_ => loadLane(lane + 1))
+        val scalarBase = scalarAddress match {
+          case Some(register) => pair(scalar, register)
+          case None           => 0L
+        }
+        val scalarWidth           = if (byteCount <= 8) MemoryValueByteWidth.assume(byteCount) else null
+        val displacement          = signed13(offset)
+        var lane                  = 0
+        var failure: Fault | Null = null
+        while (lane < lanes.value && failure == null) {
+          if (active(lane)) {
+            val address =
+              if (scalarAddress.isDefined) scalarBase + Bits.low32(vector(addressRegister)(lane)) + displacement
+              else pair(vector, addressRegister, lane) + displacement
+            if (scalarWidth != null)
+              readValue(
+                address,
+                scalarWidth.nn,
+                kernarg,
+                dispatchBytes,
+                kernel.readOnlyAddress,
+                kernel.readOnly,
+                kernel.globalMemory,
+                allocations,
+                memory
+              ) match {
+                case Left(error)  => failure = error
+                case Right(value) => writeVectorValue(vector, dest, lane, value, byteCount)
+              }
+            else
+              readBytes(
+                address,
+                byteCount,
+                kernarg,
+                dispatchBytes,
+                kernel.readOnlyAddress,
+                kernel.readOnly,
+                kernel.globalMemory,
+                allocations,
+                memory
+              ) match {
+                case Left(error)  => failure = error
+                case Right(bytes) => writeVectorBytes(vector, dest, lane, bytes)
+              }
           }
-        advanceAfter(loadLane(0))
+          lane += 1
+        }
+        advanceAfter(if (failure == null) Right(()) else Left(failure.nn))
       case Instruction.GlobalLoadSigned(dest, addressRegister, scalarAddress, byteCount, offset) =>
         val scalarByteCount                          = ScalarByteWidth.assume(byteCount)
         val bitWidth                                 = BitWidth.assume(byteCount * 8)
@@ -3734,6 +3804,7 @@ private[amdgpu] object VMInterpreter {
           offset,
           Some(ScalarByteWidth.assume(byteCount))
         )
+      case other => Left(Fault.Unsupported(s"unhandled AMDGPU instruction $other"))
     }
 
     def step(index: Int): Either[Fault, Option[Int]] = stepInstruction(index)
@@ -3836,15 +3907,13 @@ private[amdgpu] object VMInterpreter {
       .orElse(globalRead(address, size, globalMemory)) match {
       case Some(bytes) => Right(Vec.unsafeFromArray(bytes))
       case None        =>
-        externalLocation(address, size, memory).flatMap { location =>
-          memory.read(location.region, location.offset, size.assume[Positive0]).leftMap { error =>
-            Fault.Memory(
-              s"AMDGPU memory read address=0x${address.toHexString} size=$size region=${location.region.value} offset=${location.offset}: ${error.message}"
-            )
-          } match {
-            case Left(error)   => Left(error)
-            case Right(result) => Right(result)
-          }
+        memory match {
+          case context: MemoryContext =>
+            context.read(GuestAddress(address), size.assume[Positive0]).leftMap { error =>
+              Fault.Memory(s"AMDGPU memory read address=0x${address.toHexString} size=$size: ${error.message}")
+            }
+          case _ =>
+            Left(Fault.Backend("AMDGPU memory context has no address space"))
         }
     }
 
@@ -3879,16 +3948,18 @@ private[amdgpu] object VMInterpreter {
           if (ByteRange.contains(readOnly.length, readOnlyOffset, size.value.toLong))
             Right(LittleEndian.decode(readOnly, readOnlyOffset.toInt, scalarSize))
           else {
-            globalRead(address, size.value, globalMemory)
-              .map(bytes => LittleEndian.decode(bytes, 0, scalarSize))
-              .map(Right(_))
-              .getOrElse(externalLocation(address, size.value, memory).flatMap(location =>
-                memory.readValue(location.region, location.offset, size).leftMap(error =>
-                  Fault.Memory(
-                    s"AMDGPU memory read address=0x${address.toHexString} size=$size region=${location.region.value} offset=${location.offset}: ${error.message}"
-                  )
+            val globalIndex = globalRegionIndex(address, size.value, globalMemory)
+            if (globalIndex >= 0) {
+              val (base, bytes) = globalMemory(globalIndex)
+              Right(LittleEndian.decode(bytes, (address - base).toInt, scalarSize))
+            } else memory match {
+              case context: MemoryContext =>
+                context.readValue(GuestAddress(address), size).leftMap(error =>
+                  Fault.Memory(s"AMDGPU memory read address=0x${address.toHexString} size=$size: ${error.message}")
                 )
-              ))
+              case _ =>
+                Left(Fault.Backend("AMDGPU memory context has no address space"))
+            }
           }
         }
       }
@@ -3913,13 +3984,15 @@ private[amdgpu] object VMInterpreter {
     else globalWrite(address, bytes, globalMemory) match {
       case Some(_) => Right(())
       case None    =>
-        externalLocation(address, bytes.length, memory).flatMap { location =>
-          val result = memory.write(location.region, location.offset, Vec.unsafeFromArray(bytes))
-          result.leftMap { error =>
-            Fault.Memory(
-              s"AMDGPU memory write address=0x${address.toHexString} size=${bytes.length} region=${location.region.value} offset=${location.offset}: ${error.message}"
-            )
-          }
+        memory match {
+          case context: MemoryContext =>
+            context.write(GuestAddress(address), Vec.unsafeFromArray(bytes)).leftMap { error =>
+              Fault.Memory(
+                s"AMDGPU memory write address=0x${address.toHexString} size=${bytes.length}: ${error.message}"
+              )
+            }
+          case _ =>
+            Left(Fault.Backend("AMDGPU memory context has no address space"))
         }
     }
 
@@ -3939,17 +4012,18 @@ private[amdgpu] object VMInterpreter {
     if (binding != null)
       memory.writeValue(binding.allocation, (binding.offset + address - binding.address).assume[Positive0], value, size)
     else {
-      val bytes = LittleEndian.toArray(value, scalarSize)
-      globalWrite(address, bytes, globalMemory) match {
-        case Some(_) => Right(())
-        case None    =>
-          externalLocation(address, size.value, memory).flatMap(location =>
-            memory.writeValue(location.region, location.offset, value, size).leftMap(error =>
-              Fault.Memory(
-                s"AMDGPU memory write address=0x${address.toHexString} size=$size region=${location.region.value} offset=${location.offset}: ${error.message}"
-              )
-            )
+      val globalIndex = globalRegionIndex(address, size.value, globalMemory)
+      if (globalIndex >= 0) {
+        val (base, bytes) = globalMemory(globalIndex)
+        LittleEndian.write(value, bytes, (address - base).toInt, scalarSize)
+        Right(())
+      } else memory match {
+        case context: MemoryContext =>
+          context.writeValue(GuestAddress(address), value, size).leftMap(error =>
+            Fault.Memory(s"AMDGPU memory write address=0x${address.toHexString} size=$size: ${error.message}")
           )
+        case _ =>
+          Left(Fault.Backend("AMDGPU memory context has no address space"))
       }
     }
   }
@@ -3972,44 +4046,59 @@ private[amdgpu] object VMInterpreter {
         size
       )(update)
     else {
-      val local = globalMemory.view.zip(globalMemoryLocks.view).find { case ((base, bytes), _) =>
-        address >= base && address - base <= bytes.length.toLong - size.value.toLong
-      }
-      local match {
-        case Some(((base, bytes), lock)) =>
-          lock.withLock {
-            val offset   = (address - base).toInt
-            val previous = LittleEndian.decode(bytes, offset, scalarSize)
-            LittleEndian.write(update(previous), bytes, offset, scalarSize)
-            Right(previous)
+      val globalIndex = globalRegionIndex(address, size.value, globalMemory)
+      if (globalIndex >= 0) {
+        val (base, bytes) = globalMemory(globalIndex)
+        globalMemoryLocks(globalIndex).withLock {
+          val offset   = (address - base).toInt
+          val previous = LittleEndian.decode(bytes, offset, scalarSize)
+          LittleEndian.write(update(previous), bytes, offset, scalarSize)
+          Right(previous)
+        }
+      } else memory match {
+        case context: MemoryContext =>
+          context.atomicModifyValue(GuestAddress(address), size)(update).left.map { error =>
+            Fault.Memory(s"AMDGPU atomic address=0x${address.toHexString} size=$size: ${error.message}")
           }
-        case None =>
-          externalLocation(address, size.value, memory).flatMap(location =>
-            memory.atomicModifyValue(location.region, location.offset, size)(update).left.map { error =>
-              Fault.Memory(
-                s"AMDGPU atomic address=0x${address.toHexString} size=$size region=${location.region.value} offset=${location.offset}: ${error.message}"
-              )
-            }
-          )
+        case _ =>
+          Left(Fault.Backend("AMDGPU memory context has no address space"))
       }
     }
   }
 
-  private def globalRead(address: Long, size: Int, regions: Array[(Long, Array[Byte])]): Option[Array[Byte]] =
-    regions.view.collectFirst {
-      case (base, bytes) if address >= base && address - base <= bytes.length.toLong - size.toLong =>
-        java.util.Arrays.copyOfRange(bytes, (address - base).toInt, (address - base).toInt + size)
+  private def globalRead(address: Long, size: Int, regions: Array[(Long, Array[Byte])]): Option[Array[Byte]] = {
+    val index = globalRegionIndex(address, size, regions)
+    if (index < 0) None
+    else {
+      val (base, bytes) = regions(index)
+      val offset        = address - base
+      Some(java.util.Arrays.copyOfRange(bytes, offset.toInt, offset.toInt + size))
     }
+  }
 
-  private def globalWrite(address: Long, value: Array[Byte], regions: Array[(Long, Array[Byte])]): Option[Unit] =
-    regions.view.find { case (base, bytes) =>
-      address >= base && address - base <= bytes.length.toLong - value.length.toLong
-    } match {
-      case Some((base, bytes)) =>
-        Array.copy(value, 0, bytes, (address - base).toInt, value.length)
-        Some(())
-      case None => None
+  private def globalWrite(address: Long, value: Array[Byte], regions: Array[(Long, Array[Byte])]): Option[Unit] = {
+    val index = globalRegionIndex(address, value.length, regions)
+    if (index < 0) None
+    else {
+      val (base, bytes) = regions(index)
+      val offset        = address - base
+      Array.copy(value, 0, bytes, offset.toInt, value.length)
+      Some(())
     }
+  }
+
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+  private def globalRegionIndex(address: Long, size: Int, regions: Array[(Long, Array[Byte])]): Int = {
+    var index = 0
+    var found = -1
+    while (index < regions.length && found < 0) {
+      val (base, bytes) = regions(index)
+      val offset        = address - base
+      if (address >= base && offset <= bytes.length.toLong - size.toLong) found = index
+      index += 1
+    }
+    found
+  }
 
   // Null is the allocation-free miss sentinel in this memory-instruction hot path.
   @SuppressWarnings(Array("scalafix:DisableSyntax.var", "scalafix:DisableSyntax.null"))
@@ -4022,16 +4111,6 @@ private[amdgpu] object VMInterpreter {
       index += 1
     }
     result
-  }
-
-  @SuppressWarnings(Array("scalafix:GemstoneNoAssume"))
-  private def externalLocation(
-      address: Long,
-      size: Int,
-      memory: Memory
-  ): Either[Fault, AddressSpace.Location] = memory match {
-    case context: MemoryContext => context.addresses.locate(GuestAddress(address), size.assume[Positive0])
-    case _                      => Left(Fault.Backend("AMDGPU memory context has no address space"))
   }
 
   private def localRead(address: Long, size: Int, base: Long, bytes: Array[Byte]): Option[Array[Byte]] = {

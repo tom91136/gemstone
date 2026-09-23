@@ -8,17 +8,19 @@ import scala.collection.mutable
   * storage only when a numbered predicate is first written: many kernels never use predicates.
   */
 // The nullable backing array is a measured lazy-allocation sentinel on predicate accesses.
+@SuppressWarnings(Array("scalafix:DisableSyntax.null", "scalafix:DisableSyntax.var"))
 private[v9_3] final class VMPredicateFile {
-  @SuppressWarnings(Array("scalafix:DisableSyntax.null", "scalafix:DisableSyntax.var"))
-  private var bits: Array[Long] | Null = null
-  private val named                    = mutable.Map.empty[String, Boolean]
+  private var bits: Array[Long] | Null                   = null
+  private var named: mutable.Map[String, Boolean] | Null = null
 
   def get(name: RegisterName): Option[Boolean] = predicateSlot(name.value) match {
     case Some(index) => getSlot(index)
-    case None        => named.get(name.value)
+    case None        => named match {
+        case null   => None
+        case values => values.get(name.value)
+      }
   }
 
-  @SuppressWarnings(Array("scalafix:DisableSyntax.null"))
   def getSlot(index: Int): Option[Boolean] = {
     val word = index >>> 6
     val bit  = 1L << (index & 63)
@@ -33,10 +35,17 @@ private[v9_3] final class VMPredicateFile {
 
   def update(name: RegisterName, value: Boolean): Unit = predicateSlot(name.value) match {
     case Some(index) => updateSlot(index, value)
-    case None        => named(name.value) = value
+    case None        =>
+      val values = named match {
+        case null =>
+          val allocated = mutable.Map.empty[String, Boolean]
+          named = allocated
+          allocated
+        case existing => existing
+      }
+      values(name.value) = value
   }
 
-  @SuppressWarnings(Array("scalafix:DisableSyntax.null"))
   def updateSlot(index: Int, value: Boolean): Unit = {
     val values = bits match {
       case null =>
@@ -50,6 +59,17 @@ private[v9_3] final class VMPredicateFile {
     values(word) |= bit
     if (value) values(word + 16) |= bit
     else values(word + 16) &= ~bit
+  }
+
+  def clear(): Unit = {
+    bits match {
+      case null   => ()
+      case values => java.util.Arrays.fill(values, 0L)
+    }
+    named match {
+      case null   => ()
+      case values => values.clear()
+    }
   }
 
   private def predicateSlot(name: String): Option[Int] = {

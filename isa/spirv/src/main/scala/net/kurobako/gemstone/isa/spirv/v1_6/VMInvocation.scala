@@ -5,6 +5,8 @@ import VMIR.{Constant, Function}
 import VMMemory.{Pointer, Region}
 
 import net.kurobako.gemstone.Vec
+import net.kurobako.gemstone.vm.LaunchGeometry
+import net.kurobako.gemstone.vm.LaunchGeometry.{Coordinates, Dimensions, LongCoordinates}
 
 import scala.collection.mutable
 
@@ -53,7 +55,8 @@ private[v1_6] object VMInvocation {
       globals: Map[Int, RuntimeValue],
       idBound: Long,
       baseScalars: BaseScalarValues,
-      metrics: Performance.Metrics
+      metrics: Performance.Metrics,
+      trackTouched: Boolean = true
   ) {
     private val denseLimit = 1000000L
     private val dense      =
@@ -61,9 +64,10 @@ private[v1_6] object VMInvocation {
       else Array.empty[RuntimeValue | Null]
     private val denseScalarTypes = Array.fill(dense.length)(-1)
     private val denseScalarBits  = Array.ofDim[Long](dense.length)
-    private val touched          = Array.ofDim[Int](dense.length)
+    private val touched          = if (trackTouched) Array.ofDim[Int](dense.length) else Array.empty[Int]
     private var touchedSize      = 0
     private val overflow         = mutable.LongMap.empty[RuntimeValue]
+    private var scalarReadValid  = false
 
     metrics.recordInvocationValues(dense.length, 16)
 
@@ -85,7 +89,7 @@ private[v1_6] object VMInvocation {
     def update(key: Long, value: RuntimeValue): Unit =
       if (key >= 0L && key < dense.length.toLong) {
         val index = key.toInt
-        if (dense(index) == null && denseScalarTypes(index) < 0) {
+        if (trackTouched && dense(index) == null && denseScalarTypes(index) < 0) {
           touched(touchedSize) = index
           touchedSize += 1
         }
@@ -128,6 +132,44 @@ private[v1_6] object VMInvocation {
           case None    => fallbackScalarBits(key)
         }
 
+    def readScalar(key: Int): Long =
+      if (key >= 0 && key < dense.length) {
+        if (denseScalarTypes(key) >= 0) {
+          scalarReadValid = true
+          denseScalarBits(key)
+        } else if (dense(key) != null) {
+          scalarReadValid = false
+          0L
+        } else {
+          val baseType = baseScalars.scalarType(key)
+          if (baseType >= 0) {
+            scalarReadValid = true
+            baseScalars.scalarBits(key)
+          } else readFallbackScalar(key)
+        }
+      } else
+        overflow.get(key.toLong) match {
+          case Some(RuntimeValue.Bits(_, Array(value))) =>
+            scalarReadValid = true
+            value
+          case Some(_) =>
+            scalarReadValid = false
+            0L
+          case None => readFallbackScalar(key)
+        }
+
+    def scalarReadSucceeded: Boolean = scalarReadValid
+
+    private def readFallbackScalar(key: Int): Long =
+      globals.get(key).orElse(constants.get(key)) match {
+        case Some(RuntimeValue.Bits(_, Array(value))) =>
+          scalarReadValid = true
+          value
+        case _ =>
+          scalarReadValid = false
+          0L
+      }
+
     private def fallbackScalarType(key: Int): Int =
       globals.get(key).orElse(constants.get(key)) match {
         case Some(RuntimeValue.Bits(typeId, Array(_))) => typeId
@@ -142,7 +184,7 @@ private[v1_6] object VMInvocation {
 
     def updateScalar(key: Int, typeId: Int, bits: Long): Unit =
       if (key >= 0 && key < dense.length) {
-        if (dense(key) == null && denseScalarTypes(key) < 0) {
+        if (trackTouched && dense(key) == null && denseScalarTypes(key) < 0) {
           touched(touchedSize) = key
           touchedSize += 1
         }
@@ -171,37 +213,38 @@ private[v1_6] object VMInvocation {
       resultType: Int,
       destination: Int
   )
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   final case class Invocation(
-      groupX: Long,
-      groupY: Long,
-      groupZ: Long,
-      localX: Long,
-      localY: Long,
-      localZ: Long,
-      globalX: Long,
-      globalY: Long,
-      globalZ: Long,
-      globalSizeX: Long,
-      globalSizeY: Long,
-      globalSizeZ: Long,
-      globalOffsetX: Long,
-      globalOffsetY: Long,
-      globalOffsetZ: Long,
-      workDim: Int,
-      numWorkgroupsX: Long,
-      numWorkgroupsY: Long,
-      numWorkgroupsZ: Long,
-      workgroupSizeX: Long,
-      workgroupSizeY: Long,
-      workgroupSizeZ: Long,
-      enqueuedWorkgroupSizeX: Long,
-      enqueuedWorkgroupSizeY: Long,
-      enqueuedWorkgroupSizeZ: Long,
-      subgroupSize: Int,
-      maxSubgroupSize: Int,
-      numSubgroups: Long,
-      subgroupIndex: Int,
-      subgroupLocal: Int
+      var groupX: Long,
+      var groupY: Long,
+      var groupZ: Long,
+      var localX: Long,
+      var localY: Long,
+      var localZ: Long,
+      var globalX: Long,
+      var globalY: Long,
+      var globalZ: Long,
+      var globalSizeX: Long,
+      var globalSizeY: Long,
+      var globalSizeZ: Long,
+      var globalOffsetX: Long,
+      var globalOffsetY: Long,
+      var globalOffsetZ: Long,
+      var workDim: Int,
+      var numWorkgroupsX: Long,
+      var numWorkgroupsY: Long,
+      var numWorkgroupsZ: Long,
+      var workgroupSizeX: Long,
+      var workgroupSizeY: Long,
+      var workgroupSizeZ: Long,
+      var enqueuedWorkgroupSizeX: Long,
+      var enqueuedWorkgroupSizeY: Long,
+      var enqueuedWorkgroupSizeZ: Long,
+      var subgroupSize: Int,
+      var maxSubgroupSize: Int,
+      var numSubgroups: Long,
+      var subgroupIndex: Int,
+      var subgroupLocal: Int
   ) {
     val group: Array[Long]                 = Array(groupX, groupY, groupZ)
     val local: Array[Long]                 = Array(localX, localY, localZ)
@@ -212,6 +255,75 @@ private[v1_6] object VMInvocation {
     val enqueuedWorkgroupSize: Array[Long] =
       Array(enqueuedWorkgroupSizeX, enqueuedWorkgroupSizeY, enqueuedWorkgroupSizeZ)
     val numWorkgroups: Array[Long] = Array(numWorkgroupsX, numWorkgroupsY, numWorkgroupsZ)
+
+    def reset(
+        nextGroup: Coordinates,
+        nextLocal: Coordinates,
+        nextGlobal: LongCoordinates,
+        geometry: LaunchGeometry,
+        activeGroupSize: Dimensions,
+        enqueuedGroupSize: Dimensions,
+        nextSubgroupSize: Int,
+        nextMaxSubgroupSize: Int,
+        nextNumSubgroups: Long,
+        nextSubgroupIndex: Int,
+        nextSubgroupLocal: Int
+    ): Unit = {
+      groupX = nextGroup.x.toLong
+      groupY = nextGroup.y.toLong
+      groupZ = nextGroup.z.toLong
+      localX = nextLocal.x.toLong
+      localY = nextLocal.y.toLong
+      localZ = nextLocal.z.toLong
+      globalX = nextGlobal.x
+      globalY = nextGlobal.y
+      globalZ = nextGlobal.z
+      globalSizeX = geometry.globalExtent.x.toLong
+      globalSizeY = geometry.globalExtent.y.toLong
+      globalSizeZ = geometry.globalExtent.z.toLong
+      globalOffsetX = geometry.globalOffset.x.toLong
+      globalOffsetY = geometry.globalOffset.y.toLong
+      globalOffsetZ = geometry.globalOffset.z.toLong
+      workDim = geometry.workDim
+      numWorkgroupsX = geometry.groupCount.x.toLong
+      numWorkgroupsY = geometry.groupCount.y.toLong
+      numWorkgroupsZ = geometry.groupCount.z.toLong
+      workgroupSizeX = activeGroupSize.x.toLong
+      workgroupSizeY = activeGroupSize.y.toLong
+      workgroupSizeZ = activeGroupSize.z.toLong
+      enqueuedWorkgroupSizeX = enqueuedGroupSize.x.toLong
+      enqueuedWorkgroupSizeY = enqueuedGroupSize.y.toLong
+      enqueuedWorkgroupSizeZ = enqueuedGroupSize.z.toLong
+      subgroupSize = nextSubgroupSize
+      maxSubgroupSize = nextMaxSubgroupSize
+      numSubgroups = nextNumSubgroups
+      subgroupIndex = nextSubgroupIndex
+      subgroupLocal = nextSubgroupLocal
+      group(0) = groupX
+      group(1) = groupY
+      group(2) = groupZ
+      local(0) = localX
+      local(1) = localY
+      local(2) = localZ
+      global(0) = globalX
+      global(1) = globalY
+      global(2) = globalZ
+      globalSize(0) = globalSizeX
+      globalSize(1) = globalSizeY
+      globalSize(2) = globalSizeZ
+      globalOffset(0) = globalOffsetX
+      globalOffset(1) = globalOffsetY
+      globalOffset(2) = globalOffsetZ
+      workgroupSize(0) = workgroupSizeX
+      workgroupSize(1) = workgroupSizeY
+      workgroupSize(2) = workgroupSizeZ
+      enqueuedWorkgroupSize(0) = enqueuedWorkgroupSizeX
+      enqueuedWorkgroupSize(1) = enqueuedWorkgroupSizeY
+      enqueuedWorkgroupSize(2) = enqueuedWorkgroupSizeZ
+      numWorkgroups(0) = numWorkgroupsX
+      numWorkgroups(1) = numWorkgroupsY
+      numWorkgroups(2) = numWorkgroupsZ
+    }
   }
   // PC, call stack and collective suspension are the mutable state of one invocation machine.
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))

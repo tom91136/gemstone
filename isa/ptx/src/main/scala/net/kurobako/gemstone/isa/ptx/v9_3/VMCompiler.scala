@@ -99,8 +99,30 @@ private[v9_3] object VMCompiler {
       loweredProgram,
       loweredFunctions,
       sharedSymbols(body) ++ additionalSharedSymbols,
-      globalSymbols
+      globalSymbols,
+      registerChunkCount(loweredProgram, loweredFunctions)
     )
+  }
+
+  // Lowered register slots retain their class offset, so the highest referenced slot determines the directory size.
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+  private def registerChunkCount(
+      program: ExecutableProgram[PredicatedInstruction],
+      functions: Map[FunctionName, DeviceFunction]
+  ): Int = {
+    var highest                   = -1
+    def inspect(value: Any): Unit = value match {
+      case Value.RegisterSlot(index) => highest = math.max(highest, index)
+      case raw: String               =>
+        val index = VMRegisterFile.indexRaw(raw)
+        if (index >= 0 && VMPredicateFile.indexRaw(raw) < 0) highest = math.max(highest, index)
+      case values: Iterable[?] => values.foreach(inspect(_))
+      case value: Product      => value.productIterator.foreach(inspect(_))
+      case _                   => ()
+    }
+    program.instructions.foreach(inspect(_))
+    functions.values.foreach(function => function.program.instructions.foreach(inspect(_)))
+    if (highest < 0) 1 else (highest >>> 6) + 1
   }
 
   // Traverse the reachable call graph with a mutable work queue and fail on the first invalid callee.

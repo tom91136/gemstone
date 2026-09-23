@@ -1,7 +1,6 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
 import net.kurobako.gemstone.Vec
-import net.kurobako.gemstone.Vec.*
 import net.kurobako.gemstone.memory.AddressMemory
 import net.kurobako.gemstone.memory.GuestAddress
 import net.kurobako.gemstone.memory.MemoryError
@@ -27,14 +26,10 @@ private[v9_3] final class VMMemory(memory: Memory, addresses: AddressSpace) exte
     writeValue(address, value.toLong, MemoryValueByteWidth(4))
 
   override def readBytes(address: GuestAddress, size: Int :| Positive0): Either[MemoryError, Vec[Byte]] =
-    addresses.locate(address, size).left.map(error(address, size, _)).flatMap { location =>
-      memory.read(location.region, location.offset, size).left.map(error(address, size, _))
-    }
+    addresses.read(memory, address, size).left.map(error(address, size, _))
 
   override def writeBytes(address: GuestAddress, bytes: Vec[Byte]): Either[MemoryError, Unit] =
-    addresses.locate(address, bytes.nonNegativeSize).left.map(error(address, bytes.size, _)).flatMap { location =>
-      memory.write(location.region, location.offset, bytes).left.map(error(address, bytes.size, _))
-    }
+    addresses.write(memory, address, bytes).left.map(error(address, bytes.size, _))
 
   override def readLittleEndian(
       address: GuestAddress,
@@ -51,23 +46,17 @@ private[v9_3] final class VMMemory(memory: Memory, addresses: AddressSpace) exte
       address: GuestAddress,
       size: MemoryValueByteWidth
   )(update: Long => Long): Either[MemoryError, Long] =
-    addresses.locate(address, size.nonNegative).left.map(error(address, size.value, _)).flatMap { location =>
-      memory.atomicModifyValue(location.region, location.offset, size)(update).left.map(error(address, size.value, _))
-    }
+    addresses.atomicModifyValue(memory, address, size)(update).left.map(error(address, size.value, _))
 
   private def readValue(address: GuestAddress, size: MemoryValueByteWidth): Either[MemoryError, Long] =
-    addresses.locate(address, size.nonNegative).left.map(error(address, size.value, _)).flatMap { location =>
-      memory.readValue(location.region, location.offset, size).left.map(error(address, size.value, _))
-    }
+    addresses.readValue(memory, address, size).left.map(error(address, size.value, _))
 
   private def writeValue(
       address: GuestAddress,
       value: Long,
       size: MemoryValueByteWidth
   ): Either[MemoryError, Unit] =
-    addresses.locate(address, size.nonNegative).left.map(error(address, size.value, _)).flatMap { location =>
-      memory.writeValue(location.region, location.offset, value, size).left.map(error(address, size.value, _))
-    }
+    addresses.writeValue(memory, address, value, size).left.map(error(address, size.value, _))
 
   private def error(address: GuestAddress, size: Int, fault: Fault): MemoryError =
     MemoryError.InvalidAddress(address, size, fault.message)

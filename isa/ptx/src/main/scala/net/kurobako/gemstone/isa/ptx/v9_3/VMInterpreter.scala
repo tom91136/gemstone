@@ -56,28 +56,37 @@ private[v9_3] object VMInterpreter {
       case Left(fault)  => return Left(fault)
       case Right(value) => value
     }
-    def liveLanes(group: Coordinates): Either[ExecutionFault, VMLaneMask] = {
-      var live                    = VMLaneMask.Empty
-      var failure: Option[String] = None
-      allLanes.foreachLane { lane =>
-        if (failure.isEmpty)
-          geometry.localCoordinates(lane) match {
-            case Left(message) => failure = Some(message)
-            case Right(local)  =>
-              geometry.globalCoordinatesLong(group, local) match {
+    val everyGroupFull =
+      geometry.globalExtent.x == geometry.groupSize.x.toLong * geometry.groupCount.x.toLong &&
+        geometry.globalExtent.y == geometry.groupSize.y.toLong * geometry.groupCount.y.toLong &&
+        geometry.globalExtent.z == geometry.groupSize.z.toLong * geometry.groupCount.z.toLong
+    def liveLanes(group: Coordinates): Either[ExecutionFault, VMLaneMask] =
+      if (everyGroupFull) Right(allLanes)
+      else geometry.activeGroupSize(group) match {
+        case Left(message) => Left(ExecutionFault.InvalidState(s"PTX geometry failure: $message"))
+        case Right(activeSize) if activeSize == geometry.groupSize => Right(allLanes)
+        case Right(_)                                              =>
+          var live                    = VMLaneMask.Empty
+          var failure: Option[String] = None
+          allLanes.foreachLane { lane =>
+            if (failure.isEmpty)
+              geometry.localCoordinates(lane) match {
                 case Left(message) => failure = Some(message)
-                case Right(global) =>
-                  if (geometry.containsGlobal(global))
-                    live = live.union(VMLaneMask.one(lane).fold(_ => VMLaneMask.Empty, value => value))
+                case Right(local)  =>
+                  geometry.globalCoordinatesLong(group, local) match {
+                    case Left(message) => failure = Some(message)
+                    case Right(global) =>
+                      if (geometry.containsGlobal(global))
+                        live = live.union(VMLaneMask.one(lane).fold(_ => VMLaneMask.Empty, value => value))
+                  }
               }
           }
+          failure match {
+            case Some(message) =>
+              Left(ExecutionFault.InvalidState(s"PTX geometry failure: $message"))
+            case None => Right(live)
+          }
       }
-      failure match {
-        case Some(message) =>
-          Left(ExecutionFault.InvalidState(s"PTX geometry failure: $message"))
-        case None => Right(live)
-      }
-    }
     def runBlock(block: Int): Either[ExecutionFault, Unit] =
       if (block < 0 || block >= groupCount)
         Left(ExecutionFault.InvalidState(s"selected PTX block is outside the launch: $block"))
@@ -121,14 +130,27 @@ private[v9_3] object VMInterpreter {
     Right(())
   }
 
-  // Cohort and barrier state model the SIMT machine directly; early exits preserve the first fault.
-  @SuppressWarnings(
-    Array(
-      "scalafix:DisableSyntax.var",
-      "scalafix:DisableSyntax.return",
-      "scalafix:GemstoneNoAssume"
-    )
-  )
+  // Retain one idle block state across dispatches. The single slot bounds retained memory and transfers ownership
+  // atomically when independent executions overlap.
+  @SuppressWarnings(Array("scalafix:DisableSyntax.null"))
+  private val blockState = AtomicReference[VMState | Null](null)
+
+  @SuppressWarnings(Array("scalafix:DisableSyntax.null"))
+  private def borrowState(laneCount: Int, initialLive: VMLaneMask, registerChunkCount: Int): VMState = {
+    val cached = blockState.getAndSet(null)
+    cached match {
+      case state: VMState if state.laneCount == laneCount && state.registerChunkCount == registerChunkCount =>
+        state.reset(initialLive)
+        state
+      case _ => VMState(laneCount, initialLive, registerChunkCount = registerChunkCount)
+    }
+  }
+
+  @SuppressWarnings(Array("scalafix:DisableSyntax.null"))
+  private def releaseState(state: VMState): Unit = {
+    val _ = blockState.compareAndSet(null, state)
+  }
+
   private def executeBlock(
       kernel: Kernel,
       block: Int,
@@ -142,11 +164,48 @@ private[v9_3] object VMInterpreter {
       initialParameterBuffers: Map[Long, Array[Byte]],
       initialState: Option[VMState] = None
   ): Either[ExecutionFault, VMState] = {
-    import VMSemantics.*
-
     val laneCount =
       geometry.groupSize.volumeInt.fold(message => throw IllegalArgumentException(message), value => value)
-    val state = initialState.getOrElse(VMState(laneCount, initialLive))
+    val state    = initialState.getOrElse(borrowState(laneCount, initialLive, kernel.registerChunkCount))
+    val reusable = initialState.isEmpty
+    try
+      executeBlockWithState(
+        kernel,
+        block,
+        group,
+        geometry,
+        arguments,
+        memory,
+        control,
+        scheduler,
+        initialParameterBuffers,
+        state
+      )
+    finally if (reusable) releaseState(state)
+  }
+
+  // Cohort and barrier state model the SIMT machine directly; early exits preserve the first fault.
+  @SuppressWarnings(
+    Array(
+      "scalafix:DisableSyntax.var",
+      "scalafix:DisableSyntax.return",
+      "scalafix:GemstoneNoAssume"
+    )
+  )
+  private def executeBlockWithState(
+      kernel: Kernel,
+      block: Int,
+      group: Coordinates,
+      geometry: LaunchGeometry,
+      arguments: Map[ParameterName, Argument],
+      memory: AddressMemory,
+      control: TaskControl,
+      scheduler: Scheduler,
+      initialParameterBuffers: Map[Long, Array[Byte]],
+      state: VMState
+  ): Either[ExecutionFault, VMState] = {
+    import VMSemantics.*
+
     state.importParameterBuffers(initialParameterBuffers)
     kernel.parameters.foreach { parameter =>
       arguments.get(parameter.name).foreach(argument =>
@@ -157,7 +216,7 @@ private[v9_3] object VMInterpreter {
     val waiting                                  = mutable.ArrayBuffer.empty[Waiting]
     val barrierMasks                             = mutable.Map.empty[WaitKey, VMLaneMask]
     val warpBarrierMasks                         = mutable.Map.empty[WaitKey, Long]
-    val effects                                  = VMStateEffects()
+    val effects                                  = state.effects
     def enqueue(pc: Pc, lanes: VMLaneMask): Unit =
       if (lanes.nonEmpty) {
         val existing = ready.indexWhere(_.pc == pc)
@@ -362,10 +421,7 @@ private[v9_3] object VMInterpreter {
             return Left(fault)
           case Right(Step.Trap(fault)) => return Left(fault)
           case Right(control)          =>
-            effects.commit(
-              VMStateEffects.validateWrite(memory, cohort.pc),
-              VMStateEffects.applyWrite(state, memory)
-            ) match {
+            effects.commit(state, memory, cohort.pc) match {
               case Left(fault) =>
                 return Left(fault)
               case Right(()) => ()
@@ -468,7 +524,7 @@ private[v9_3] object VMInterpreter {
         s"device function ${function.name} returns ${function.returnParameters.size} parameters, found ${returnParameters.size}"
       ))
     val laneCount = caller.state.laneCount
-    val state     = VMState(laneCount, caller.active, caller.state.shared)
+    val state     = VMState(laneCount, caller.active, caller.state.shared, caller.state.registerChunkCount)
     state.importParameterBuffers(caller.state.parameterBuffers.toMap)
     state.parameterAddresses ++= caller.state.parameterAddresses
     // Arity is validated above. A call operand whose param-space buffer was

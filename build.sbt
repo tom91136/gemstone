@@ -592,6 +592,7 @@ lazy val nativeCodestyleCheck  = taskKey[Unit]("Verify project-specific C and C+
 lazy val terminologyCheck      = taskKey[Unit]("Verify repository-authored sources use precise terminology.")
 lazy val nativeArtifact        = taskKey[Path]("Built native runtime directory.")
 lazy val conformanceExecutable = taskKey[Path]("Built native conformance executable.")
+lazy val generateBenchmarkFixtures = inputKey[Path]("Build selected benchmark fixtures in pinned toolchain containers.")
 lazy val gemstoneRun           = inputKey[Unit]("Build Gemstone and run a command through selected compute APIs.")
 lazy val emulate               = inputKey[Unit]("Run conformance through Gemstone.")
 lazy val cmakeExecutable       = settingKey[String]("CMake command used by native builds.")
@@ -1364,7 +1365,36 @@ lazy val benchmarks = projectMatrix.in(file("tools/benchmarks"))
       "org.scalameta" %% "munit" % munitVersion % Test
     ),
     Compile / mainClass  := Some(s"$rootPackage.benchmarks.BenchmarkRunner"),
-    Compile / run / fork := true
+    Compile / run / fork := true,
+    generateBenchmarkFixtures := {
+      val arguments = spaceDelimited("[cuda|hip|hsa|opencl|all]").parsed
+      if (arguments.size > 1)
+        throw MessageOnlyException("usage: benchmarks/generateBenchmarkFixtures [cuda|hip|hsa|opencl|all]")
+      val selected = arguments.headOption.getOrElse("all")
+      if (!Set("cuda", "hip", "hsa", "opencl", "all").contains(selected))
+        throw MessageOnlyException(s"unknown benchmark fixture target: $selected")
+      val root   = (LocalRootProject / baseDirectory).value.toPath.absolute
+      val source = root / "tools/benchmarks/fixtures"
+      val build  = root / "target/benchmarks/fixtures"
+      val output = root / "tools/benchmarks/target/generated-fixtures"
+      CMake.build(
+        source = source,
+        build = build,
+        cmake = nonEmptyCommand("CMAKE", (Global / cmakeExecutable).value),
+        arguments = Seq(
+          "-G",
+          "Ninja",
+          s"-DCMAKE_MAKE_PROGRAM=${nonEmptyCommand("NINJA", (Global / ninjaExecutable).value)}",
+          s"-DCONTAINER_EXECUTABLE=${nonEmptyCommand("CONTAINER_EXECUTABLE", sys.env.getOrElse("CONTAINER_EXECUTABLE", "podman"))}",
+          s"-DROCM_VERSION=$rocmVersion",
+          s"-DBENCHMARK_FIXTURE_OUTPUT_DIRECTORY=$output"
+        ),
+        parallelism = positiveEnvironmentInt("CMAKE_BUILD_PARALLEL_LEVEL", sys.runtime.availableProcessors()),
+        log = streams.value.log.info,
+        target = Some(if (selected == "all") "fixtures" else selected)
+      )
+      output
+    }
   )
   .jvmPlatform(
     scalaVersions = Seq(scala3Version),

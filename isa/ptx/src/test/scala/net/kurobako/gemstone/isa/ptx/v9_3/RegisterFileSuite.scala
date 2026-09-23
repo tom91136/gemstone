@@ -16,4 +16,18 @@ final class RegisterFileSuite extends munit.FunSuite {
       assertEquals(VMRegisterFile.indexRaw(name), -1, name)
     )
   }
+
+  test("compiled kernels size the dense register directory from numbered slots") {
+    val namedOnly = VMCompiler.compile(""".version 8.0
+.target sm_80
+.address_size 64
+.visible .entry named() { .reg .u32 %value; mov.u32 %value,1; ret; }""").toOption.get
+    val numbered = VMCompiler.compile(""".version 8.0
+.target sm_80
+.address_size 64
+.visible .entry numbered() { .reg .u32 %r<18>; mov.u32 %r17,1; ret; }""").toOption.get
+
+    assertEquals(namedOnly.registerChunkCount, 1)
+    assertEquals(numbered.registerChunkCount, 33, numbered.program.instructions.toString)
+  }
 }

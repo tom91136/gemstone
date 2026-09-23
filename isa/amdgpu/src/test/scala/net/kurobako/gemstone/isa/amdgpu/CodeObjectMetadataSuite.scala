@@ -20,6 +20,7 @@ final class CodeObjectMetadataSuite extends munit.FunSuite {
     assertEquals(kernel.symbol, LinkageName("add.kd"))
     assertEquals(kernel.metadata.argumentBlockSize, 20)
     assertEquals(kernel.metadata.explicitParameterCount, 3)
+    assertEquals(kernel.hiddenArguments, Vec.empty[CodeObjectMetadata.HiddenArgument])
     assertEquals(
       kernel.metadata.parameters.map(parameter =>
         (parameter.offset, parameter.width, parameter.kind, parameter.containsPointers)
@@ -33,11 +34,16 @@ final class CodeObjectMetadataSuite extends munit.FunSuite {
   }
 
   test("exclude hidden AMDGPU fields from the explicit parameter count") {
-    val metadata = CodeObjectMetadata.decode(Vec.unsafeFromArray(codeObject(hidden = true))).toOption.get.head.metadata
+    val manifest = CodeObjectMetadata.decode(Vec.unsafeFromArray(codeObject(hidden = true))).toOption.get.head
+    val metadata = manifest.metadata
 
     assertEquals(metadata.argumentBlockSize, 24)
     assertEquals(metadata.parameters.size, 4)
     assertEquals(metadata.explicitParameterCount, 3)
+    assertEquals(
+      manifest.hiddenArguments,
+      Vec(CodeObjectMetadata.HiddenArgument("hidden_block_count_x", 20, 4))
+    )
   }
 
   private def codeObject(hidden: Boolean): Array[Byte] = {

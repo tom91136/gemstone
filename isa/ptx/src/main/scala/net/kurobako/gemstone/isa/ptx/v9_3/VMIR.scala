@@ -665,7 +665,8 @@ private[v9_3] object VMIR {
       program: ExecutableProgram[PredicatedInstruction],
       functions: Map[FunctionName, DeviceFunction] = Map.empty,
       sharedSymbols: Map[SymbolName, Long] = Map.empty,
-      globalSymbols: Map[SymbolName, GuestAddress] = Map.empty
+      globalSymbols: Map[SymbolName, GuestAddress] = Map.empty,
+      registerChunkCount: Int = 96
   ) {
     def instructions: Vec[Instruction] = program.instructions.map(_.instruction)
   }

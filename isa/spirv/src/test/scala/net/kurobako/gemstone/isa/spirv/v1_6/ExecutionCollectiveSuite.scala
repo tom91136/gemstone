@@ -678,7 +678,7 @@ final class ExecutionCollectiveSuite extends munit.FunSuite with ExecutionTestSu
     val prepared   = loadUnchecked(module).toOption.get
 
     def dispatch(name: KernelName): KernelTask =
-      KernelTask.validated(name, geometry, Dimensions.One, Vec.empty).toOption.get
+      KernelTask.validated(name, geometry, Dimensions(2, 1, 1), Vec.empty).toOption.get
 
     def observed(name: KernelName): Performance.Snapshot = {
       val observation               = AtomicReference(Option.empty[Performance.Snapshot])
@@ -704,12 +704,12 @@ final class ExecutionCollectiveSuite extends munit.FunSuite with ExecutionTestSu
     }
 
     val plain = observed(KernelName("plain"))
-    assertEquals(plain.invocations, 8L)
+    assertEquals(plain.invocations, 16L)
     assertEquals(plain.invocationValueInstances, 1L)
     assertEquals(plain.collectiveDispatches, 0L)
 
     val collective = observed(KernelName("collective"))
-    assertEquals(collective.invocations, 8L)
+    assertEquals(collective.invocations, 16L)
     assertEquals(collective.invocationValueInstances, 8L)
     assertEquals(collective.collectiveDispatches, 1L)
     assertEquals(collective.estimatedDenseValueBytes, 8L * 12L * 16L)
