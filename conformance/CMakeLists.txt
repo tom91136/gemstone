@@ -309,6 +309,7 @@ if(CONFORMANCE_BACKEND STREQUAL "cuda")
 elseif(CONFORMANCE_BACKEND MATCHES "^(hip|hsa)$")
   conformance_runtime_search_directory(/opt/rocm/lib)
   conformance_runtime_search_directory(/opt/rocm/lib64)
+  conformance_runtime_search_directory(/opt/rocm/llvm/lib)
   conformance_runtime_prefer(libhsa-runtime64.so.1 "^/opt/rocm")
   conformance_runtime_plugins("${CONFORMANCE_HIP_RUNTIME}" "${CONFORMANCE_HSA_RUNTIME}")
   conformance_runtime_plugins(
@@ -322,6 +323,31 @@ elseif(CONFORMANCE_BACKEND STREQUAL "opencl")
   get_filename_component(conformance_opencl_runtime_directory "${OpenCL_LIBRARY}" DIRECTORY)
   conformance_runtime_search_directory("${conformance_opencl_runtime_directory}")
   conformance_runtime_plugins("${conformance_opencl_runtime_directory}/libOpenCL.so*")
+  # The runtime compiles OpenCL C to SPIR-V at execution time. Bundle the
+  # compiler subset so the artifact stays relocatable instead of depending on a
+  # toolchain installed on the host.
+  set(conformance_opencl_toolchain "/opt/intel/oneapi/compiler/latest")
+  if(EXISTS "${conformance_opencl_toolchain}/bin/icpx")
+    install(PROGRAMS "${conformance_opencl_toolchain}/bin/icpx"
+      DESTINATION "opencl-toolchain/bin" COMPONENT support)
+    install(FILES "${conformance_opencl_toolchain}/bin/icpx.cfg"
+      DESTINATION "opencl-toolchain/bin" COMPONENT support)
+    install(PROGRAMS
+      "${conformance_opencl_toolchain}/bin/compiler/clang"
+      "${conformance_opencl_toolchain}/bin/compiler/llvm-spirv"
+      "${conformance_opencl_toolchain}/bin/compiler/llvm-link"
+      DESTINATION "opencl-toolchain/bin/compiler" COMPONENT support)
+    # icpx resolves its clang++ sibling from its own directory, so recreate the
+    # relative links the oneAPI install normally provides.
+    install(CODE "
+      file(CREATE_LINK \"compiler/clang\"
+        \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/opencl-toolchain/bin/clang++\" SYMBOLIC)
+      file(CREATE_LINK \"clang\"
+        \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/opencl-toolchain/bin/compiler/clang++\" SYMBOLIC)
+    " COMPONENT support)
+    install(DIRECTORY "${conformance_opencl_toolchain}/lib/clang"
+      DESTINATION "opencl-toolchain/lib" COMPONENT support)
+  endif()
 elseif(CONFORMANCE_BACKEND STREQUAL "levelzero")
   get_filename_component(conformance_levelzero_runtime_directory "${CONFORMANCE_LEVELZERO_LOADER}" DIRECTORY)
   conformance_runtime_search_directory("${conformance_levelzero_runtime_directory}")

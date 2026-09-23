@@ -1,3 +1,9 @@
+#include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators_adapters.hpp>
+#include <catch2/generators/catch_generators_range.hpp>
+
+#include "backend_blas.hpp"
+
 #define DECLARE_BLAS_F32_COMPACT_LEVEL1(name, check)                                                                                       \
   TEST_CASE("blas/f32/compact/" name, "[unified][compact-matrix][blas][f32]") {                                                            \
     constexpr auto kind = unified::ScalarType::f32;                                                                                        \

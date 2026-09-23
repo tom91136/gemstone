@@ -1,3 +1,8 @@
+#include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators_range.hpp>
+
+#include "edge_cases.hpp"
+
 #define DECLARE_EDGE_BLAS_F32_COMPACT(name, check)                                                                                         \
   TEST_CASE("edge/blas/f32/compact/" name, "[unified][compact-matrix][edge][blas][f32]") {                                                 \
     const auto size = GENERATE(Catch::Generators::from_range(unified::compact_edge_sizes));                                                \

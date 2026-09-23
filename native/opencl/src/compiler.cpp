@@ -15,6 +15,7 @@
 #include <vector>
 
 #include <fcntl.h>
+#include <glob.h>
 #include <stddef.h>
 #include <unistd.h>
 
@@ -152,22 +153,126 @@ bool splitOptions(const std::string &options, std::vector<std::string> &result, 
   return true;
 }
 
-std::string compilerPath() {
-  const char *configured = std::getenv("GEMSTONE_OPENCL_COMPILER");
-  if (configured && configured[0] != '\0') return configured;
-  return "/opt/intel/oneapi/compiler/2026.1/bin/icpx";
+bool executable(const std::string &path) {
+  if (path.empty() || std::filesystem::is_directory(path)) return false;
+  return access(path.c_str(), X_OK) == 0;
 }
 
-std::string spirvConverterPath() {
-  const char *configured = std::getenv("GEMSTONE_OPENCL_LLVM_SPIRV");
-  if (configured && configured[0] != '\0') return configured;
-  return "/opt/intel/oneapi/compiler/2026.1/bin/compiler/llvm-spirv";
+std::string findOnPath(const std::string &name) {
+  const char *path = std::getenv("PATH");
+  if (!path || path[0] == '\0') return {};
+  std::string_view remaining(path);
+  while (!remaining.empty()) {
+    const auto separator = remaining.find(':');
+    const auto directory = remaining.substr(0, separator);
+    remaining = separator == std::string_view::npos ? std::string_view{} : remaining.substr(separator + 1);
+    if (directory.empty()) continue;
+    const auto candidate = (std::filesystem::path(directory) / name).string();
+    if (executable(candidate)) return candidate;
+  }
+  return {};
 }
 
-std::string bitcodeLinkerPath() {
-  const char *configured = std::getenv("GEMSTONE_OPENCL_LLVM_LINK");
-  if (configured && configured[0] != '\0') return configured;
-  return "/opt/intel/oneapi/compiler/2026.1/bin/compiler/llvm-link";
+// Newest match wins: toolchain directories are conventionally version ordered,
+// so sorting the expansion keeps a rolling `latest` install ahead of an older one.
+std::string findFirstGlob(const std::vector<std::string> &patterns) {
+  for (const auto &pattern : patterns) {
+    glob_t matches{};
+    const int status = glob(pattern.c_str(), GLOB_NOSORT, nullptr, &matches);
+    std::vector<std::string> candidates;
+    if (status == 0) {
+      for (size_t index = 0; index < matches.gl_pathc; ++index) {
+        std::string candidate(matches.gl_pathv[index]);
+        if (executable(candidate)) candidates.push_back(std::move(candidate));
+      }
+    }
+    globfree(&matches);
+    if (!candidates.empty()) {
+      std::sort(candidates.begin(), candidates.end());
+      return candidates.back();
+    }
+  }
+  return {};
+}
+
+std::string discoverExecutable(const std::vector<std::string> &names, const std::vector<std::string> &patterns) {
+  for (const auto &name : names)
+    if (const auto found = findOnPath(name); !found.empty()) return found;
+  return findFirstGlob(patterns);
+}
+
+// Conformance artifacts carry the toolchain under their support root so a run
+// needs no compiler installed on the host. `CONFORMANCE_SUPPORT_ROOT` is set by
+// the driver for every executed case.
+std::string bundledToolchainRoot() {
+  const char *support = std::getenv("CONFORMANCE_SUPPORT_ROOT");
+  if (!support || support[0] == '\0') return {};
+  const auto root = std::filesystem::path(support) / "opencl-toolchain";
+  return std::filesystem::is_directory(root) ? root.string() : std::string{};
+}
+
+std::string bundledExecutable(const std::vector<std::string> &relative) {
+  const auto root = bundledToolchainRoot();
+  if (root.empty()) return {};
+  for (const auto &entry : relative) {
+    const auto candidate = (std::filesystem::path(root) / entry).string();
+    if (executable(candidate)) return candidate;
+  }
+  return {};
+}
+
+const std::string &compilerPath() {
+  static const std::string path = [] {
+    if (const char *configured = std::getenv("GEMSTONE_OPENCL_COMPILER"); configured && configured[0] != '\0')
+      return std::string(configured);
+    if (const auto bundled = bundledExecutable({"bin/icpx", "bin/compiler/clang++", "bin/compiler/clang"}); !bundled.empty())
+      return bundled;
+    return discoverExecutable({"icpx", "clang++", "clang"}, {"/opt/intel/oneapi/compiler/*/bin/icpx", "/opt/rocm/llvm/bin/clang++"});
+  }();
+  return path;
+}
+
+const std::string &spirvConverterPath() {
+  static const std::string path = [] {
+    if (const char *configured = std::getenv("GEMSTONE_OPENCL_LLVM_SPIRV"); configured && configured[0] != '\0')
+      return std::string(configured);
+    if (const auto bundled = bundledExecutable({"bin/compiler/llvm-spirv"}); !bundled.empty()) return bundled;
+    return discoverExecutable({"llvm-spirv"},
+                              {"/opt/intel/oneapi/compiler/*/bin/compiler/llvm-spirv", "/opt/rocm/llvm/bin/llvm-spirv",
+                               "/usr/lib/llvm-*/bin/llvm-spirv", "/usr/lib64/llvm*/bin/llvm-spirv", "/usr/local/bin/llvm-spirv"});
+  }();
+  return path;
+}
+
+const std::string &bitcodeLinkerPath() {
+  static const std::string path = [] {
+    if (const char *configured = std::getenv("GEMSTONE_OPENCL_LLVM_LINK"); configured && configured[0] != '\0')
+      return std::string(configured);
+    if (const auto bundled = bundledExecutable({"bin/compiler/llvm-link"}); !bundled.empty()) return bundled;
+    return discoverExecutable({"llvm-link"},
+                              {"/opt/intel/oneapi/compiler/*/bin/compiler/llvm-link", "/opt/rocm/llvm/bin/llvm-link",
+                               "/usr/lib/llvm-*/bin/llvm-link", "/usr/lib64/llvm*/bin/llvm-link", "/usr/local/bin/llvm-link"});
+  }();
+  return path;
+}
+
+// llvm-spirv is the historical translator, but current clang and icpx embed the
+// same LLVM-to-SPIR-V backend and can consume bitcode directly. Falling back to
+// the compiler keeps the runtime portable to hosts without a standalone
+// llvm-spirv.
+bool bitcodeToSpirv(const std::string &input, const std::string &output, std::string &diagnostic) {
+  if (!spirvConverterPath().empty()) {
+    const ProcessResult conversion = runProcess({spirvConverterPath(), input, "-o", output});
+    diagnostic += conversion.output;
+    return conversion.status == 0;
+  }
+  if (compilerPath().empty()) {
+    diagnostic += "no OpenCL compiler or llvm-spirv available for SPIR-V generation";
+    return false;
+  }
+  const ProcessResult conversion = runProcess({compilerPath(), "-target", "spirv64", "-c", input, "-o", output});
+  diagnostic += conversion.output;
+  return conversion.status == 0;
 }
 
 std::vector<std::string> vectorBuiltinPointers(std::string_view source) {
@@ -311,6 +416,10 @@ bool readBytes(const std::string &path, std::vector<uint8_t> *bytes) {
 } // namespace
 
 bool compileSourceToBitcode(const std::string &source, const std::string &options, std::vector<uint8_t> &bitcode, std::string &log) {
+  if (compilerPath().empty()) {
+    log = "no OpenCL compiler found (set GEMSTONE_OPENCL_COMPILER or install icpx/clang)";
+    return false;
+  }
   std::vector<std::string> optionArguments;
   std::string optionError;
   if (!splitOptions(options, optionArguments, &optionError)) {
@@ -416,9 +525,8 @@ bool compileSource(const std::string &source, const std::string &options, std::v
       diagnostic = "cannot write generated LLVM bitcode";
       return false;
     }
-    const ProcessResult conversion = runProcess({spirvConverterPath(), input, "-o", output});
-    diagnostic = conversion.output;
-    if (conversion.status != 0) return false;
+    diagnostic.clear();
+    if (!bitcodeToSpirv(input, output, diagnostic)) return false;
     if (!readBytes(output, &il)) {
       diagnostic += "cannot read generated SPIR-V";
       return false;
@@ -462,6 +570,10 @@ bool reverseSpirv(const std::vector<uint8_t> &il, std::vector<uint8_t> &bitcode,
   }
   const std::string input = directory.file("input.spv");
   const std::string output = directory.file("output.bc");
+  if (spirvConverterPath().empty()) {
+    log = "linking SPIR-V modules requires llvm-spirv for reverse translation";
+    return false;
+  }
   bool success = writeBytes(input, il.data(), il.size());
   std::string diagnostic;
   if (success) {
@@ -480,6 +592,10 @@ bool reverseSpirv(const std::vector<uint8_t> &il, std::vector<uint8_t> &bitcode,
 bool linkBitcode(const std::vector<std::vector<uint8_t>> &modules, std::vector<uint8_t> &il, std::vector<uint8_t> &bitcode,
                  std::string &log) {
   if (modules.empty()) return false;
+  if (bitcodeLinkerPath().empty()) {
+    log = "no llvm-link found (set GEMSTONE_OPENCL_LLVM_LINK or install llvm-link)";
+    return false;
+  }
   const TemporaryDirectory directory("/tmp/gemstone-opencl-link-XXXXXX");
   if (!directory) {
     log = "cannot create temporary directory for OpenCL linking";
@@ -512,11 +628,7 @@ bool linkBitcode(const std::vector<std::vector<uint8_t>> &modules, std::vector<u
     success = readBytes(linkedBitcode, &bitcode) && !bitcode.empty();
     if (!success) diagnostic += "cannot read linked LLVM bitcode";
   }
-  if (success) {
-    const ProcessResult conversion = runProcess({spirvConverterPath(), linkedBitcode, "-o", output});
-    if (!conversion.output.empty()) diagnostic += conversion.output;
-    success = conversion.status == 0;
-  }
+  if (success) success = bitcodeToSpirv(linkedBitcode, output, diagnostic);
   if (success) {
     success = readBytes(output, &il) && !il.empty() && il.size() <= std::numeric_limits<uint32_t>::max();
     if (!success) diagnostic += "generated linked SPIR-V is empty or too large";

@@ -17,12 +17,24 @@ RUN apt-get update \
        binutils build-essential ca-certificates cmake ninja-build patchelf \
     && rm -rf /var/lib/apt/lists/*
 
+# Source for the relocatable OpenCL compiler subset. The runtime needs an
+# OpenCL C to SPIR-V toolchain at execution time; bundling the same icpx the
+# SYCL toolchain uses keeps OpenCL artifacts self-contained instead of relying
+# on a compiler installed on the host.
+FROM ${SYCL_IMAGE} AS oneapi-opencl-compiler
+
 FROM ubuntu-build-base AS toolchain-opencl
 ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get update \
     && apt-get install --no-install-recommends --yes \
        ocl-icd-opencl-dev opencl-headers python3 spirv-tools \
     && rm -rf /var/lib/apt/lists/*
+COPY --from=oneapi-opencl-compiler /opt/intel/oneapi/compiler/latest/bin/icpx /opt/intel/oneapi/compiler/latest/bin/icpx
+COPY --from=oneapi-opencl-compiler /opt/intel/oneapi/compiler/latest/bin/icpx.cfg /opt/intel/oneapi/compiler/latest/bin/icpx.cfg
+COPY --from=oneapi-opencl-compiler /opt/intel/oneapi/compiler/latest/bin/compiler/clang /opt/intel/oneapi/compiler/latest/bin/compiler/clang
+COPY --from=oneapi-opencl-compiler /opt/intel/oneapi/compiler/latest/bin/compiler/llvm-spirv /opt/intel/oneapi/compiler/latest/bin/compiler/llvm-spirv
+COPY --from=oneapi-opencl-compiler /opt/intel/oneapi/compiler/latest/bin/compiler/llvm-link /opt/intel/oneapi/compiler/latest/bin/compiler/llvm-link
+COPY --from=oneapi-opencl-compiler /opt/intel/oneapi/compiler/latest/lib/clang /opt/intel/oneapi/compiler/latest/lib/clang
 
 FROM docker.io/library/ubuntu@sha256:61ebaa5cc23ca45450db85eac015435199ec569e28ec222ea13f2aed2110b8a6 AS toolchain-levelzero
 USER root
