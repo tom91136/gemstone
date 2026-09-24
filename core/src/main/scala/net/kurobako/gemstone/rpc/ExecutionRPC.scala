@@ -49,10 +49,14 @@ object ExecutionRPC {
   val ResponseHeaderBytes: Int :| Positive       = ResponseHeaderBytesValue
 
   enum Operation[Reply](using val replyCodec: Codec[Reply]) derives Wire.Protocol {
-    case Ping extends Operation[Unit]
+    case Ping                                                                     extends Operation[Unit]
+    case EnableHostMemory                                                         extends Operation[Unit]
+    case PollHostMemory(completion: CompletionId)                                 extends Operation[HostMemoryBatch]
+    case SupplyHostMemory(completion: CompletionId, ranges: Vec[HostMemoryBytes]) extends Operation[Unit]
     case RegisterAllocation(kind: AllocationKind, size: Long :| Positive)
         extends Operation[AllocationId]
-    case RegisterAllocationAddress(allocation: AllocationId, nativeBase: GuestAddress)
+    case SupplyHostSync(completion: CompletionId, ticket: Long, observed: Long) extends Operation[Unit]
+    case RegisterAllocationAddress(allocation: AllocationId, nativeBase: GuestAddress, hostBacked: Boolean = false)
         extends Operation[Unit]
     case ReleaseAllocation(allocation: AllocationId)
         extends Operation[Unit]

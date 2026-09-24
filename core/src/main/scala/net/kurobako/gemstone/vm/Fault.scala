@@ -11,5 +11,6 @@ enum Fault(val message: String) {
   case Backend(detail: String)     extends Fault(detail)
   case BudgetExceeded(limit: Long :| Positive)
       extends Fault(s"instruction budget of $limit was exhausted")
-  case Cancelled extends Fault("execution was cancelled")
+  case PendingMemory extends Fault("host memory bytes are pending")
+  case Cancelled     extends Fault("execution was cancelled")
 }

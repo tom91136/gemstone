@@ -18,6 +18,81 @@ import net.kurobako.gemstone.vm.{Fault, LaunchGeometry, Scheduler, TaskControl, 
 import net.kurobako.gemstone.vm.LaunchGeometry.Dimensions
 
 final class InterpreterSuite extends munit.FunSuite {
+  for {
+    width  <- List(32, 64)
+    target <- List("generic", "global", "acquire.sys.global", "shared", "generic-shared")
+  } test(s"$target $width-bit CAS returns old bits on success and failure") {
+    val size      = width / 8
+    val shared    = target == "shared" || target == "generic-shared"
+    val qualifier = if (target.startsWith("generic")) "" else s"$target."
+    val setup     = if (shared) s"mov.u64 %p, scratch; st.shared.b$width [%p], -1;"
+    else s"mov.u64 %p, %q; st.global.b$width [%p], -1;"
+    val load   = if (shared) "shared" else "global"
+    val source = s""".version 8.0
+      .target sm_80
+      .address_size 64
+      .visible .entry compare(.param .u64 output) {
+        .shared .align 8 .b8 scratch[8];
+        .reg .u64 %p, %q;
+        .reg .b$width %old, %value;
+        ld.param.u64 %q, [output];
+        $setup
+        atom.${qualifier}cas.b$width %old, [%p], -1, 7;
+        st.global.b$width [%q+$size], %old;
+        atom.${qualifier}cas.b$width %old, [%p], -1, 19;
+        st.global.b$width [%q+${2 * size}], %old;
+        ld.$load.b$width %value, [%p];
+        st.global.b$width [%q], %value;
+        ret;
+      }"""
+    val kernel = VMCompiler.compile(source).fold(error => fail(error.toString), identity)
+    val memory = ArrayCheckedMemory.allocate((3 * size).refineUnsafe[Positive0])
+    val start  = memory.allocation.start
+    assertEquals(
+      VMInterpreter.execute(kernel, geometry(1, 1), Map(ParameterName("output") -> Argument(start.value)), memory),
+      Right(())
+    )
+    val byteWidth = MemoryValueByteWidth.applyUnsafe(size)
+    assertEquals(memory.readLittleEndian(start, byteWidth).toOption.get, 7L)
+    assertEquals(
+      memory.readLittleEndian(start.offset(size.toLong), byteWidth).toOption.get,
+      if (width == 32) 0xffffffffL else -1L
+    )
+    assertEquals(memory.readLittleEndian(start.offset(2L * size), byteWidth).toOption.get, 7L)
+  }
+
+  for (width <- List(32, 64)) test(s"$width-bit CAS has exactly one winner across lanes") {
+    val size   = width / 8
+    val source = s""".version 8.0
+      .target sm_80
+      .address_size 64
+      .visible .entry compare(.param .u64 output) {
+        .reg .u64 %p, %q, %offset;
+        .reg .u32 %lane;
+        .reg .b$width %old;
+        ld.param.u64 %p, [output];
+        mov.u32 %lane, %tid.x;
+        add.u32 %lane, %lane, 1;
+        mul.wide.u32 %offset, %lane, $size;
+        add.u64 %q, %p, %offset;
+        atom.global.cas.b$width %old, [%p], 0, 1;
+        st.global.b$width [%q], %old;
+        ret;
+      }"""
+    val kernel = VMCompiler.compile(source).fold(error => fail(error.toString), identity)
+    val memory = ArrayCheckedMemory.allocate((33 * size).refineUnsafe[Positive0])
+    val start  = memory.allocation.start
+    assertEquals(
+      VMInterpreter.execute(kernel, geometry(1, 32), Map(ParameterName("output") -> Argument(start.value)), memory),
+      Right(())
+    )
+    val byteWidth = MemoryValueByteWidth.applyUnsafe(size)
+    val observed  = (1 to 32).map(i => memory.readLittleEndian(start.offset(i.toLong * size), byteWidth).toOption.get)
+    assertEquals(observed.count(_ == 0L), 1)
+    assertEquals(observed.count(_ == 1L), 31)
+    assertEquals(memory.readLittleEndian(start, byteWidth).toOption.get, 1L)
+  }
+
   test("generic atom.exch.b32 returns the old value and stores the new value") {
     val source = """.version 8.0
       .target sm_80

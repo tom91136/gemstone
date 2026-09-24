@@ -458,11 +458,3 @@ TEST_CASE("algorithms/roc-thrust-semantic/advance-distance/i32/n11", "[unified][
     REQUIRE((thrust::distance(values.begin(), values.begin()) == 0));
   }
 }
-
-// ---------------------------------------------------------------------------
-// rocThrust `testing/out_of_memory_recovery.cu` port.  The upstream test
-// assumes a real allocation-failure path integrated through HIP and the
-// preceding device_vector destructors running during the failed helper
-// allocation; under the emulator no deterministic allocation failure can be
-// forced, so the case is a documented skip.
-// ---------------------------------------------------------------------------

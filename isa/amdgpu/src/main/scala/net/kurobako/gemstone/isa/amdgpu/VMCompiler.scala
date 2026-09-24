@@ -981,6 +981,9 @@ private[amdgpu] object VMCompiler {
       case SSetprio => Right(Decoded(Instruction.Wait, 4))
       case SBarrier => Right(Decoded(Instruction.Barrier, 4))
       case SEndpgm  => Right(Decoded(Instruction.End, 4))
+      // Linked runtime failure handlers may be decoded without being called.
+      // Preserve the trap as an executable operation rather than rejecting the module.
+      case STrap => Right(Decoded(Instruction.Trap(Bits.low16Int(word)), 4))
       // LLVM emits s_code_end as instruction-cache padding at the end of a
       // linked GFX10+ .text section.  It is not a program terminator (the
       // kernel's s_endpgm performs that job); treating the padding marker as
@@ -1900,7 +1903,8 @@ private[amdgpu] object VMCompiler {
               address = vectorAddress,
               scalarAddress = scalar,
               bytes = 4,
-              offset = memoryOffset
+              offset = memoryOffset,
+              coherent = returnValue
             ))
           case GlobalLoadDwordx2 =>
             Right(Instruction.GlobalLoad(
@@ -1908,7 +1912,8 @@ private[amdgpu] object VMCompiler {
               address = vectorAddress,
               scalarAddress = scalar,
               bytes = 8,
-              offset = memoryOffset
+              offset = memoryOffset,
+              coherent = returnValue
             ))
           case GlobalLoadDwordx3 =>
             Right(Instruction.GlobalLoad(
@@ -1916,7 +1921,8 @@ private[amdgpu] object VMCompiler {
               address = vectorAddress,
               scalarAddress = scalar,
               bytes = 12,
-              offset = memoryOffset
+              offset = memoryOffset,
+              coherent = returnValue
             ))
           case GlobalLoadDwordx4 =>
             Right(Instruction.GlobalLoad(
@@ -1924,7 +1930,8 @@ private[amdgpu] object VMCompiler {
               address = vectorAddress,
               scalarAddress = scalar,
               bytes = 16,
-              offset = memoryOffset
+              offset = memoryOffset,
+              coherent = returnValue
             ))
           case GlobalLoadUbyte =>
             Right(Instruction.GlobalLoad(
@@ -1932,7 +1939,8 @@ private[amdgpu] object VMCompiler {
               address = vectorAddress,
               scalarAddress = scalar,
               bytes = 1,
-              offset = memoryOffset
+              offset = memoryOffset,
+              coherent = returnValue
             ))
           case GlobalLoadSbyte =>
             Right(Instruction.GlobalLoadSigned(
@@ -1972,7 +1980,8 @@ private[amdgpu] object VMCompiler {
               address = vectorAddress,
               scalarAddress = scalar,
               bytes = 2,
-              offset = memoryOffset
+              offset = memoryOffset,
+              coherent = returnValue
             ))
           case GlobalStoreDword =>
             Right(Instruction.GlobalStore(
@@ -2109,7 +2118,8 @@ private[amdgpu] object VMCompiler {
               dest = destination,
               address = vectorAddress,
               bytes = 1,
-              offset = memoryOffset
+              offset = memoryOffset,
+              coherent = returnValue
             ))
           case FlatLoadSbyte =>
             Right(Instruction.FlatLoadSigned(
@@ -2144,35 +2154,40 @@ private[amdgpu] object VMCompiler {
               dest = destination,
               address = vectorAddress,
               bytes = 2,
-              offset = memoryOffset
+              offset = memoryOffset,
+              coherent = returnValue
             ))
           case FlatLoadDword =>
             Right(Instruction.FlatLoad(
               dest = destination,
               address = vectorAddress,
               bytes = 4,
-              offset = memoryOffset
+              offset = memoryOffset,
+              coherent = returnValue
             ))
           case FlatLoadDwordx2 =>
             Right(Instruction.FlatLoad(
               dest = destination,
               address = vectorAddress,
               bytes = 8,
-              offset = memoryOffset
+              offset = memoryOffset,
+              coherent = returnValue
             ))
           case FlatLoadDwordx3 =>
             Right(Instruction.FlatLoad(
               dest = destination,
               address = vectorAddress,
               bytes = 12,
-              offset = memoryOffset
+              offset = memoryOffset,
+              coherent = returnValue
             ))
           case FlatLoadDwordx4 =>
             Right(Instruction.FlatLoad(
               dest = destination,
               address = vectorAddress,
               bytes = 16,
-              offset = memoryOffset
+              offset = memoryOffset,
+              coherent = returnValue
             ))
           case FlatStoreShort =>
             Right(Instruction.FlatStore(

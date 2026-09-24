@@ -67,7 +67,6 @@ final class LaunchSuite extends munit.FunSuite {
     assertEquals(environment.set("ZE_ENABLE_ALT_DRIVERS"), s"${layout.library(ComputeAPI.LevelZero)}")
     assertEquals(environment.set("GEMSTONE_RPC_PORT"), s"${port.value}")
     assertEquals(environment.set("GEMSTONE_RPC_CLIENT"), s"${client.value}")
-    assert(environment.unset("CONFORMANCE_DEVICE"))
   }
 
   test("Vulkan loader directory is absent when Vulkan is not selected") {
@@ -92,26 +91,6 @@ final class LaunchSuite extends munit.FunSuite {
     combinations.foreach { apis =>
       assert(Launcher.plan(apis, layout, port, client, Map.empty).isRight)
     }
-  }
-
-  test("conformance target context configures virtual architectures") {
-    val cuda = Launcher.plan(
-      Set(ComputeAPI.CUDA),
-      layout,
-      port,
-      client,
-      Map("CONFORMANCE_TARGET_BACKEND" -> "cuda", "CONFORMANCE_TARGET_ARCHITECTURE" -> "sm_89")
-    ).fold(error => fail(error), value => value)
-    assertEquals(cuda.set.get("GEMSTONE_CUDA_TARGET"), Some("sm_89"))
-
-    val hsa = Launcher.plan(
-      Set(ComputeAPI.HSA),
-      layout,
-      port,
-      client,
-      Map("CONFORMANCE_TARGET_BACKEND" -> "hip", "CONFORMANCE_TARGET_ARCHITECTURE" -> "gfx1030")
-    ).fold(error => fail(error), value => value)
-    assertEquals(hsa.set.get("GEMSTONE_AMDGPU_TARGET"), Some("gfx1030"))
   }
 
   test("an empty API set is rejected") {

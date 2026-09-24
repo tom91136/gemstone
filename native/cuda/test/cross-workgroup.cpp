@@ -1,6 +1,8 @@
+#include <algorithm>
 #include <array>
 #include <cstdio>
 #include <cstdlib>
+#include <future>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -11,6 +13,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <cuda.h>
+
+#include "../../rpc/test/queued_lifetime.hpp"
 
 namespace {
 
@@ -225,6 +229,7 @@ void run() {
   uint32_t copied = 0;
   check(copy(memory + 4, devicePointer(&sample), sizeof(sample)));
   check(copyAsync(devicePointer(&copied), memory + 4, sizeof(copied), nullptr));
+  check(library.load<CUresult (*)()>("cuCtxSynchronize")());
   REQUIRE((copied == sample));
   CUdeviceptr unified = 0;
   check(managedAllocate(&unified, 64, CU_MEM_ATTACH_GLOBAL));
@@ -336,8 +341,7 @@ void run() {
 }
 
 void runStreamCallbacks() {
-  // Every emulated launch and copy completes before it returns, so a callback
-  // registered on an idle stream runs immediately rather than on synchronize.
+  // Synchronization publishes callback effects to the calling thread.
   const char *configuredPath = std::getenv("GEMSTONE_CUDA_TEST_LIBRARY");
   const SharedLibrary library{configuredPath ? configuredPath : "libcuda.so.1"};
   const auto init = library.load<CUresult (*)(unsigned)>("cuInit");
@@ -368,9 +372,7 @@ void runStreamCallbacks() {
         value.valid = value.valid && stream == value.expected && status == CUDA_SUCCESS;
       },
       &observed, 0));
-  REQUIRE((observed.calls == 1));
   check(streamSynchronize(second));
-  REQUIRE((observed.calls == 1));
   check(streamSynchronize(first));
   REQUIRE((observed.calls == 1));
   REQUIRE(observed.valid);
@@ -418,7 +420,8 @@ void runSystemPaging() {
   check(init(0));
   int pageable = 0;
   check(attribute(&pageable, CU_DEVICE_ATTRIBUTE_PAGEABLE_MEMORY_ACCESS, 0));
-  REQUIRE((pageable == 1));
+  // The opt-in demand path does not claim full system-memory atomic coherence.
+  REQUIRE((pageable == 0));
   CUcontext context = nullptr;
   check(contextCreate(&context, 0, 0));
   CUmodule module = nullptr;
@@ -429,12 +432,14 @@ void runSystemPaging() {
   CUdeviceptr pointer = devicePointer(&value);
   void *arguments[] = {&pointer};
   check(launch(function, 1, 1, 1, 1, 1, 1, 0, nullptr, arguments, nullptr));
+  check(library.load<CUresult (*)()>("cuCtxSynchronize")());
   REQUIRE((value == 42));
   check(moduleGetFunction(&function, module, "increment_indirect"));
   auto target = std::make_unique<unsigned>(20);
   CUdeviceptr indirect = devicePointer(target.get());
   pointer = devicePointer(&indirect);
   check(launch(function, 1, 1, 1, 1, 1, 1, 0, nullptr, arguments, nullptr));
+  check(library.load<CUresult (*)()>("cuCtxSynchronize")());
   REQUIRE((*target == 21));
   CUdeviceptr managed = 0;
   check(managedAllocate(&managed, sizeof(unsigned), CU_MEM_ATTACH_GLOBAL));
@@ -442,6 +447,7 @@ void runSystemPaging() {
   pointer = devicePointer(heap.get());
   check(moduleGetFunction(&function, module, "increment_host"));
   check(launch(function, 1, 1, 1, 1, 1, 1, 0, nullptr, arguments, nullptr));
+  check(library.load<CUresult (*)()>("cuCtxSynchronize")());
   REQUIRE((*heap == 31));
   check(memoryFree(managed));
   check(moduleUnload(module));
@@ -452,6 +458,202 @@ void runSystemPaging() {
 
 TEST_CASE("CUDA cross-workgroup execution", "[cuda][integration]") { run(); }
 
-TEST_CASE("CUDA callbacks run once at registration", "[cuda][integration]") { runStreamCallbacks(); }
+TEST_CASE("CUDA callbacks complete once before stream synchronization", "[cuda][integration]") { runStreamCallbacks(); }
 
 TEST_CASE("CUDA system paging reaches a plain host pointer", "[cuda][integration]") { runSystemPaging(); }
+
+namespace {
+// Exercise actual PTX execution and synchronization through the existing server.
+struct UnifiedMemoryClient {
+  SharedLibrary library{std::getenv("GEMSTONE_CUDA_TEST_LIBRARY") ? std::getenv("GEMSTONE_CUDA_TEST_LIBRARY") : "libcuda.so.1"};
+  CUcontext context = nullptr;
+  CUmodule module = nullptr;
+  decltype(&cuMemAllocManaged) managed = library.load<decltype(&cuMemAllocManaged)>("cuMemAllocManaged");
+  decltype(&cuMemFree) free = library.load<decltype(&cuMemFree)>("cuMemFree_v2");
+  decltype(&cuMemHostAlloc) hostAlloc = library.load<decltype(&cuMemHostAlloc)>("cuMemHostAlloc");
+  decltype(&cuMemFreeHost) hostFree = library.load<decltype(&cuMemFreeHost)>("cuMemFreeHost");
+  decltype(&cuMemHostRegister) hostRegister = library.load<decltype(&cuMemHostRegister)>("cuMemHostRegister_v2");
+  decltype(&cuMemHostUnregister) hostUnregister = library.load<decltype(&cuMemHostUnregister)>("cuMemHostUnregister");
+  decltype(&cuMemHostGetDevicePointer) hostDevicePointer =
+      library.load<decltype(&cuMemHostGetDevicePointer)>("cuMemHostGetDevicePointer_v2");
+  decltype(&cuLaunchKernel) launch = library.load<decltype(&cuLaunchKernel)>("cuLaunchKernel");
+  decltype(&cuCtxSynchronize) synchronize = library.load<decltype(&cuCtxSynchronize)>("cuCtxSynchronize");
+  decltype(&cuModuleGetFunction) function = library.load<decltype(&cuModuleGetFunction)>("cuModuleGetFunction");
+  UnifiedMemoryClient() {
+    check(library.load<CUresult (*)(unsigned)>("cuInit")(0));
+    check(library.load<CUresult (*)(CUcontext *, unsigned, CUdevice)>("cuCtxCreate_v2")(&context, CU_CTX_MAP_HOST, 0));
+    constexpr char source[] = ".version 8.0\n.target sm_80\n.address_size 64\n"
+                              ".visible .entry alias_increment(.param .u64 first, .param .u64 second) {\n"
+                              ".reg .u64 %p, %q; .reg .u32 %v;\n"
+                              "ld.param.u64 %p, [first]; ld.param.u64 %q, [second];\n"
+                              "ld.global.u32 %v, [%p]; add.u32 %v, %v, 1; st.global.u32 [%p], %v;\n"
+                              "ld.global.u32 %v, [%q]; add.u32 %v, %v, 1; st.global.u32 [%q], %v; ret; }\n"
+                              ".visible .entry publish_pointer(.param .u64 output, .param .u64 target) {\n"
+                              ".reg .u64 %p, %q; ld.param.u64 %p, [output]; ld.param.u64 %q, [target];\n"
+                              "st.global.u64 [%p], %q; ret; }\n"
+                              ".visible .entry indirect_increment(.param .u64 table) {\n"
+                              ".reg .u64 %p, %q; .reg .u32 %v;\n"
+                              "ld.param.u64 %p, [table]; ld.global.u64 %q, [%p];\n"
+                              "ld.global.u32 %v, [%q]; add.u32 %v, %v, 1; st.global.u32 [%q], %v; ret; }\n";
+    check(library.load<CUresult (*)(CUmodule *, const void *)>("cuModuleLoadData")(&module, source));
+  }
+  ~UnifiedMemoryClient() {
+    if (module) (void)library.load<CUresult (*)(CUmodule)>("cuModuleUnload")(module);
+    if (context) (void)library.load<CUresult (*)(CUcontext)>("cuCtxDestroy_v2")(context);
+  }
+  void increment(CUdeviceptr address) {
+    CUfunction kernel = nullptr;
+    check(function(&kernel, module, "alias_increment"));
+    void *args[] = {&address, &address};
+    check(launch(kernel, 1, 1, 1, 1, 1, 1, 0, nullptr, args, nullptr));
+    check(synchronize());
+  }
+};
+} // namespace
+
+TEST_CASE("CUDA managed interior aliases preserve host edits between launches", "[cuda][integration][unified-memory]") {
+  UnifiedMemoryClient api;
+  CUdeviceptr allocation = 0;
+  check(api.managed(&allocation, 64, CU_MEM_ATTACH_GLOBAL));
+  auto *host = reinterpret_cast<uint32_t *>(allocation);
+  for (uint32_t seed : {11U, 91U, 123U}) {
+    std::fill_n(host, 16, 0xa5a5a5a5U);
+    host[3] = seed;
+    api.increment(allocation + 3 * sizeof(uint32_t));
+    CHECK((host[3] == seed + 2));
+    for (unsigned index = 0; index < 16; ++index)
+      if (index != 3) CHECK((host[index] == 0xa5a5a5a5U));
+  }
+  check(api.free(allocation));
+}
+
+TEST_CASE("CUDA pinned interior aliases preserve host edits between launches", "[cuda][integration][unified-memory]") {
+  UnifiedMemoryClient api;
+  void *allocation = nullptr;
+  check(api.hostAlloc(&allocation, 64, CU_MEMHOSTALLOC_DEVICEMAP));
+  CUdeviceptr device = 0;
+  check(api.hostDevicePointer(&device, allocation, 0));
+  auto *host = static_cast<uint32_t *>(allocation);
+  for (uint32_t seed : {11U, 91U}) {
+    std::fill_n(host, 16, 0xa5a5a5a5U);
+    host[3] = seed;
+    api.increment(device + 3 * sizeof(uint32_t));
+    CHECK((host[3] == seed + 2));
+    CHECK((host[2] == 0xa5a5a5a5U && host[4] == 0xa5a5a5a5U));
+  }
+  check(api.hostFree(allocation));
+}
+
+TEST_CASE("CUDA registered stack subrange supports kernels and unregister", "[cuda][integration][unified-memory]") {
+  UnifiedMemoryClient api;
+  std::array<uint32_t, 16> host{};
+  auto *registered = host.data() + 2;
+  for (uint32_t seed : {11U, 91U}) {
+    host.fill(0xa5a5a5a5U);
+    host[3] = seed;
+    check(api.hostRegister(registered, 8 * sizeof(uint32_t), CU_MEMHOSTREGISTER_DEVICEMAP));
+    CUdeviceptr device = 0;
+    check(api.hostDevicePointer(&device, registered, 0));
+    api.increment(device + sizeof(uint32_t));
+    CHECK((host[3] == seed + 2));
+    check(api.hostUnregister(registered));
+    CHECK((host[2] == 0xa5a5a5a5U && host[10] == 0xa5a5a5a5U));
+  }
+}
+
+TEST_CASE("CUDA registered heap subrange supports kernels and unregister", "[cuda][integration][unified-memory]") {
+  UnifiedMemoryClient api;
+  auto host = std::make_unique<uint32_t[]>(16);
+  std::fill_n(host.get(), 16, 11U);
+  check(api.hostRegister(host.get() + 2, 8 * sizeof(uint32_t), CU_MEMHOSTREGISTER_DEVICEMAP));
+  CUdeviceptr device = 0;
+  check(api.hostDevicePointer(&device, host.get() + 2, 0));
+  api.increment(device + sizeof(uint32_t));
+  CHECK((host[3] == 13));
+  check(api.hostUnregister(host.get() + 2));
+  host[3] = 71;
+  CHECK((host[3] == 71));
+}
+
+TEST_CASE("CUDA managed pointer graph preserves interior targets and pointer bytes", "[cuda][integration][unified-memory]") {
+  UnifiedMemoryClient api;
+  CUdeviceptr allocation = 0, table = 0;
+  check(api.managed(&allocation, 64, CU_MEM_ATTACH_GLOBAL));
+  check(api.managed(&table, sizeof(CUdeviceptr), CU_MEM_ATTACH_GLOBAL));
+  auto *host = reinterpret_cast<uint32_t *>(allocation);
+  CUfunction kernel = nullptr;
+  check(api.function(&kernel, api.module, "indirect_increment"));
+  for (unsigned offset : {1U, 7U, 14U}) {
+    std::fill_n(host, 16, 41U);
+    *reinterpret_cast<CUdeviceptr *>(table) = allocation + offset * sizeof(uint32_t);
+    void *args[] = {&table};
+    check(api.launch(kernel, 1, 1, 1, 1, 1, 1, 0, nullptr, args, nullptr));
+    check(api.synchronize());
+    CHECK((host[offset] == 42));
+    CHECK((*reinterpret_cast<CUdeviceptr *>(table) == allocation + offset * sizeof(uint32_t)));
+    CHECK((host[offset - 1] == 41 && host[offset + 1] == 41));
+  }
+  check(api.free(table));
+  check(api.free(allocation));
+}
+
+TEST_CASE("CUDA managed device pointer publication preserves host addresses", "[cuda][integration][unified-memory]") {
+  UnifiedMemoryClient api;
+  CUdeviceptr allocation = 0, table = 0;
+  check(api.managed(&allocation, 64, CU_MEM_ATTACH_GLOBAL));
+  check(api.managed(&table, sizeof(CUdeviceptr), CU_MEM_ATTACH_GLOBAL));
+  CUfunction kernel = nullptr;
+  check(api.function(&kernel, api.module, "publish_pointer"));
+  for (unsigned offset : {1U, 7U, 15U}) {
+    *reinterpret_cast<CUdeviceptr *>(table) = 0;
+    CUdeviceptr target = allocation + offset * sizeof(uint32_t);
+    void *args[] = {&table, &target};
+    check(api.launch(kernel, 1, 1, 1, 1, 1, 1, 0, nullptr, args, nullptr));
+    check(api.synchronize());
+    CHECK((*reinterpret_cast<CUdeviceptr *>(table) == target));
+  }
+  check(api.free(table));
+  check(api.free(allocation));
+}
+
+TEST_CASE("CUDA runtime host registration supports a borrowed stack range", "[cuda][integration][unified-memory]") {
+  UnifiedMemoryClient api;
+  const auto registerHost = api.library.load<int (*)(void *, size_t, unsigned)>("cudaHostRegister");
+  const auto unregisterHost = api.library.load<int (*)(void *)>("cudaHostUnregister");
+  const auto devicePointer = api.library.load<int (*)(void **, void *, unsigned)>("cudaHostGetDevicePointer");
+  std::array<uint32_t, 16> host{};
+  host[3] = 61;
+  const int registered = registerHost(host.data() + 2, 8 * sizeof(uint32_t), 2 /* cudaHostRegisterMapped */);
+  REQUIRE((registered == 0));
+  void *device = nullptr;
+  const int mapped = devicePointer(&device, host.data() + 2, 0);
+  CHECK((mapped == 0));
+  if (mapped == 0) {
+    api.increment(reinterpret_cast<CUdeviceptr>(device) + sizeof(uint32_t));
+    CHECK((host[3] == 63));
+  }
+  CHECK((unregisterHost(host.data() + 2) == 0));
+}
+
+TEST_CASE("CUDA free waits for queued memory uses", "[cuda][integration]") {
+  const char *configuredPath = std::getenv("GEMSTONE_CUDA_TEST_LIBRARY");
+  const SharedLibrary library{configuredPath ? configuredPath : "libcuda.so.1"};
+  check(library.load<decltype(&cuInit)>("cuInit")(0));
+  CUcontext context{};
+  check(library.load<CUresult (*)(CUcontext *, unsigned, CUdevice)>("cuCtxCreate_v2")(&context, 0, 0));
+  gemstone_test::queuedLifetime(
+      [&](size_t size) {
+        CUdeviceptr p{};
+        check(library.load<decltype(&cuMemAlloc_v2)>("cuMemAlloc_v2")(&p, size));
+        return reinterpret_cast<void *>(p);
+      },
+      [&](void *dst, const void *src, size_t size, bool upload) {
+        if (upload) check(library.load<decltype(&cuMemcpyHtoDAsync_v2)>("cuMemcpyHtoDAsync_v2")(devicePointer(dst), src, size, nullptr));
+        else check(library.load<decltype(&cuMemcpyDtoHAsync_v2)>("cuMemcpyDtoHAsync_v2")(dst, devicePointer(src), size, nullptr));
+      },
+      [&](void (*callback)(void *), void *data) {
+        check(library.load<decltype(&cuLaunchHostFunc)>("cuLaunchHostFunc")(nullptr, callback, data));
+      },
+      [&](void *p) { return library.load<decltype(&cuMemFree_v2)>("cuMemFree_v2")(devicePointer(p)); });
+  check(library.load<decltype(&cuCtxDestroy_v2)>("cuCtxDestroy_v2")(context));
+}

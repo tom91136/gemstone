@@ -488,16 +488,16 @@ final class ExecutionConversionSuite extends munit.FunSuite with ExecutionTestSu
   }
 
   test("saturated float-to-signed conversion maps NaN to zero") {
-    val voidType   = operand("IdResult", 1)
-    val floatType  = operand("IdResult", 2)
-    val intType    = operand("IdResult", 3)
-    val pointer    = operand("IdResult", 4)
-    val signature  = operand("IdResult", 5)
-    val function   = operand("IdResult", 6)
-    val output     = operand("IdResult", 7)
-    val input      = operand("IdResult", 8)
-    val converted  = operand("IdResult", 10)
-    val module = Module(
+    val voidType  = operand("IdResult", 1)
+    val floatType = operand("IdResult", 2)
+    val intType   = operand("IdResult", 3)
+    val pointer   = operand("IdResult", 4)
+    val signature = operand("IdResult", 5)
+    val function  = operand("IdResult", 6)
+    val output    = operand("IdResult", 7)
+    val input     = operand("IdResult", 8)
+    val converted = operand("IdResult", 10)
+    val module    = Module(
       Header(ISA.version, Word(0), Word(11), Word(0)),
       Vec(
         Instruction.TypeVoid(voidType),
@@ -520,7 +520,7 @@ final class ExecutionConversionSuite extends munit.FunSuite with ExecutionTestSu
     )
     val allocation = MemoryRegion(17L)
     val memory     = ArrayMemory(allocation, 4)
-    val dispatch = KernelTask
+    val dispatch   = KernelTask
       .validated(
         KernelName("saturated_nan"),
         Dimensions.One,
@@ -550,7 +550,7 @@ final class ExecutionConversionSuite extends munit.FunSuite with ExecutionTestSu
     val vector     = operand("IdResult", 8)
     val scalar     = operand("IdResult", 9)
     val product    = operand("IdResult", 11)
-    val module = Module(
+    val module     = Module(
       Header(ISA.version, Word(0), Word(12), Word(0)),
       Vec(
         Instruction.TypeVoid(voidType),
@@ -571,8 +571,8 @@ final class ExecutionConversionSuite extends munit.FunSuite with ExecutionTestSu
       ),
       Endianness.Little
     )
-    val allocation = MemoryRegion(18L)
-    val memory     = ArrayMemory(allocation, 8)
+    val allocation                    = MemoryRegion(18L)
+    val memory                        = ArrayMemory(allocation, 8)
     def bits(value: Float): Vec[Byte] =
       LittleEndian.toVec(java.lang.Float.floatToRawIntBits(value).toLong, ScalarByteWidth(4))
     val dispatch = KernelTask

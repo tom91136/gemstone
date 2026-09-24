@@ -49,12 +49,7 @@ if(CONFORMANCE_BACKEND AND NOT CONFORMANCE_BACKEND MATCHES "^(cuda|hip|hsa|openc
   message(FATAL_ERROR "Unsupported CONFORMANCE_BACKEND: ${CONFORMANCE_BACKEND}")
 endif()
 
-if(CONFORMANCE_BACKEND STREQUAL "levelzero")
-  set(conformance_unified_default OFF)
-else()
-  set(conformance_unified_default ON)
-endif()
-option(CONFORMANCE_BUILD_UNIFIED "Build the project-owned unified suite" ${conformance_unified_default})
+option(CONFORMANCE_BUILD_UNIFIED "Build the project-owned unified suite" ON)
 option(CONFORMANCE_BUILD_CTS "Build the CTS appropriate for the selected backend" ON)
 option(CONFORMANCE_BUILD_MINIAPPS "Build the selected miniapp matrix" ON)
 option(CONFORMANCE_HIP_ENABLE_ROCBLAS "Build rocBLAS-backed HIP cases" ON)

@@ -15,8 +15,13 @@ final class ExecutionRPCSuite extends munit.FunSuite {
 
   private val operations: Vector[Operation[?]] = Vector(
     Operation.Ping,
+    Operation.EnableHostMemory,
+    Operation.PollHostMemory(completion),
+    Operation.SupplyHostMemory(completion, Vec(HostMemoryBytes(GuestAddress(0x1000), Vec[Byte](1, 2)))),
+    Operation.SupplyHostSync(completion, 71, -1L),
     Operation.RegisterAllocation(AllocationKind.Shared, 64),
     Operation.RegisterAllocationAddress(allocation, GuestAddress(0x1000L)),
+    Operation.RegisterAllocationAddress(allocation, GuestAddress(0x1000L), true),
     Operation.ReleaseAllocation(allocation),
     Operation.WriteAllocation(allocation, 4, Vec[Byte](1, 2, 3)),
     Operation.ReadAllocation(allocation, 4, 3),
@@ -60,7 +65,7 @@ final class ExecutionRPCSuite extends munit.FunSuite {
 
   test("operation IDs are stable hashes of fully-qualified message names") {
     val identifiers = ExecutionRPC.Schema.operations.map(_.request.id)
-    assertEquals(identifiers.distinct.size, operations.size)
+    assertEquals(identifiers.distinct.size, operations.map(_.productPrefix).distinct.size)
     ExecutionRPC.Schema.operations.foreach { operation =>
       assertEquals(
         operation.request.id,

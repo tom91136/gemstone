@@ -25,6 +25,7 @@ gemstone_require_abi_implementations(
 # The facade spells several ABI-compatible opaque types without vendor typedefs.
 set_target_properties(gemstone_cuda PROPERTIES C_VISIBILITY_PRESET default CXX_VISIBILITY_PRESET default)
 if(BUILD_TESTING)
+  gemstone_memory_client(cuda gemstone_cuda)
   add_test(NAME cuda/header-compatibility COMMAND ${CMAKE_COMMAND}
     "-DCUDA_SOURCE=${CMAKE_CURRENT_SOURCE_DIR}"
     "-DTEST_DIRECTORY=${CMAKE_CURRENT_BINARY_DIR}/header-compatibility"

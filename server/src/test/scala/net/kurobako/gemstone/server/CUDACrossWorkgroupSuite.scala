@@ -29,7 +29,10 @@ final class CUDACrossWorkgroupSuite extends munit.FunSuite {
         Map("GEMSTONE_EXECUTION_PARALLELISM" -> workers.toString)
       )) { server =>
         val result = NativeTestProcess.run(
-          Vector(client.toString.refineUnsafe[NoNul]).refineUnsafe[MinLength[1]],
+          Vector(
+            client.toString.refineUnsafe[NoNul],
+            "~[unified-memory]".refineUnsafe[NoNul]
+          ).refineUnsafe[MinLength[1]],
           directory,
           Environment(
             Map(
@@ -47,4 +50,40 @@ final class CUDACrossWorkgroupSuite extends munit.FunSuite {
       }
 
     }
+
+  // One process per case keeps unsupported registration from hiding later cases.
+  // These explicit allocations/registrations must not depend on system paging.
+  for (
+    name <- Seq(
+      "CUDA managed interior aliases preserve host edits between launches",
+      "CUDA pinned interior aliases preserve host edits between launches",
+      "CUDA registered stack subrange supports kernels and unregister",
+      "CUDA registered heap subrange supports kernels and unregister",
+      "CUDA managed pointer graph preserves interior targets and pointer bytes",
+      "CUDA managed device pointer publication preserves host addresses",
+      "CUDA runtime host registration supports a borrowed stack range"
+    )
+  ) test(name) {
+    val directory = runtimeDirectory
+    Using.resource(GemstoneRPCServer.start(TaskLimits(1000000, 32), Map.empty)) { server =>
+      val result = NativeTestProcess.run(
+        Vector(
+          directory.resolve("cuda_cross_workgroup_test").toString.refineUnsafe[NoNul],
+          name.refineUnsafe[NoNul]
+        ).refineUnsafe[MinLength[1]],
+        directory,
+        Environment(
+          Map(
+            "GEMSTONE_RPC_PORT"          -> server.port.value.toString,
+            "GEMSTONE_RPC_CLIENT"        -> server.client.value.toString,
+            "GEMSTONE_CUDA_TEST_LIBRARY" -> directory.resolve("libcuda.so.1").toString
+          ),
+          Set("GEMSTONE_CUDA_SYSTEM_PAGING")
+        ),
+        30.seconds
+      )
+      assertEquals(result.exit, 0, result.diagnostic)
+    }
+  }
+
 }

@@ -31,7 +31,9 @@
 #include "gemstone/hsa/target.h"
 #include "gemstone_hip_api.h"
 #include <gemstone/bytes.hpp>
+#include <gemstone/command_queue.hpp>
 #include <gemstone/export.h>
+#include <gemstone/memory.hpp>
 #include <gemstone/trace.hpp>
 #include <gemstone/zstd.hpp>
 
@@ -39,6 +41,22 @@ namespace {
 
 using namespace aspartame;
 using gemstone::readNative;
+
+gemstone::CommandQueue &commands() {
+  static gemstone::CommandQueue queue(hipErrorUnknown);
+  return queue;
+}
+
+hipError_t waitCommands() { return static_cast<hipError_t>(commands().waitAll()); }
+
+hipError_t enqueueCommand(hipStream_t stream, std::function<int32_t()> work) {
+  try {
+    commands().submit(stream, std::move(work));
+    return hipSuccess;
+  } catch (...) {
+    return hipErrorOutOfMemory;
+  }
+}
 
 constexpr uint32_t MaxBlockThreads = 1024;
 constexpr uint32_t MaxGridDimension = std::numeric_limits<int32_t>::max();
@@ -120,6 +138,10 @@ struct FunctionHandle {
   std::shared_ptr<Kernel> kernel;
 };
 
+struct Event {
+  gemstone::CommandQueue::Ticket ticket;
+};
+
 struct State {
   std::mutex lock;
   bool initialized = false;
@@ -132,11 +154,11 @@ struct State {
   std::vector<std::weak_ptr<Module>> driver_modules;
   std::unordered_map<const void *, FunctionBinding> kernels;
   std::unordered_map<const void *, Variable> variables;
-  std::unordered_map<void *, size_t> host_allocations;
+  gemstone::MemoryRegistrations host_registrations;
   std::unordered_map<void *, size_t> managed_allocations;
   std::unordered_map<void *, size_t> device_allocations;
   std::unordered_map<hipStream_t, std::unique_ptr<unsigned char>> streams;
-  std::unordered_map<hipEvent_t, std::unique_ptr<unsigned char>> events;
+  std::unordered_map<hipEvent_t, std::unique_ptr<Event>> events;
 };
 
 struct LaunchConfiguration {
@@ -191,12 +213,23 @@ hsa_status_t findGpu(hsa_agent_t agent, void *opaque) {
   return HSA_STATUS_SUCCESS;
 }
 
+hsa_status_t findCpu(hsa_agent_t agent, void *opaque) {
+  hsa_device_type_t type = HSA_DEVICE_TYPE_GPU;
+  if (hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &type) != HSA_STATUS_SUCCESS) return HSA_STATUS_ERROR;
+  if (type == HSA_DEVICE_TYPE_CPU) {
+    *static_cast<hsa_agent_t *>(opaque) = agent;
+    return HSA_STATUS_INFO_BREAK;
+  }
+  return HSA_STATUS_SUCCESS;
+}
+
 hsa_status_t findRegion(hsa_region_t region, void *opaque) {
   *static_cast<hsa_region_t *>(opaque) = region;
   return HSA_STATUS_INFO_BREAK;
 }
 
 bool ensureInitialized() {
+  (void)commands();
   auto &runtime = state();
   std::lock_guard<std::mutex> guard(runtime.lock);
   if (runtime.initialized) return true;
@@ -220,8 +253,11 @@ bool ensureInitialized() {
   }
   runtime.initialized = true;
   if (!runtime.atexit_registered) {
+    // Runtime cleanup also drains commands when no compiler fatbinary was registered.
+    (void)commands();
     runtime.atexit_registered = true;
     std::atexit([] {
+      (void)waitCommands();
       auto &value = state();
       std::lock_guard<std::mutex> exit_guard(value.lock);
       if (value.queue) {
@@ -237,7 +273,7 @@ bool ensureInitialized() {
   return true;
 }
 
-hipError_t allocateHost(void **pointer, size_t size) {
+hipError_t allocateHost(void **pointer, size_t size, unsigned flags = 0) {
   if (!pointer) return remember(hipErrorInvalidValue);
   if (size == 0) {
     *pointer = nullptr;
@@ -253,21 +289,22 @@ hipError_t allocateHost(void **pointer, size_t size) {
   }
   {
     std::lock_guard<std::mutex> guard(state().lock);
-    state().host_allocations.emplace(memory, size);
+    state().host_registrations.add({reinterpret_cast<uintptr_t>(memory), size}, gemstone::MemoryOwnership::Owned, flags);
   }
   *pointer = memory;
   return remember(hipSuccess);
 }
 
 hipError_t releaseHost(void *pointer) {
+  if (const auto pending = waitCommands(); pending != hipSuccess) return remember(pending);
   if (!pointer) return remember(hipSuccess);
   {
     std::lock_guard<std::mutex> guard(state().lock);
-    const auto found = state().host_allocations.find(pointer);
-    if (found == state().host_allocations.end()) return remember(hipErrorInvalidValue);
-    const hsa_status_t status = hsa_memory_deregister(pointer, found->second);
+    const auto found = state().host_registrations.exact(reinterpret_cast<uintptr_t>(pointer));
+    if (!found || found->ownership != gemstone::MemoryOwnership::Owned) return remember(hipErrorInvalidValue);
+    const hsa_status_t status = hsa_memory_deregister(pointer, found->range.size);
     if (status != HSA_STATUS_SUCCESS) return remember(mapHsa(status));
-    state().host_allocations.erase(found);
+    state().host_registrations.remove(reinterpret_cast<uintptr_t>(pointer), gemstone::MemoryOwnership::Owned);
   }
   std::free(pointer);
   return remember(hipSuccess);
@@ -601,56 +638,67 @@ hipError_t dispatchKernel(const std::shared_ptr<Kernel> &kernel, dim3 grid, dim3
       write_u16(hidden + 64, gemstone::hip::dispatchDimensions(grid, block));
     }
   }
-  hsa_signal_t completion{};
-  status = hsa_signal_create(1, 0, nullptr, &completion);
-  if (status == HSA_STATUS_SUCCESS) {
-    const uint64_t index = hsa_queue_add_write_index_relaxed(state().queue, 1);
-    auto *packet = &static_cast<hsa_kernel_dispatch_packet_t *>(state().queue->base_address)[index & (state().queue->size - 1U)];
-    // Keep the slot unpublished while its body is rebuilt.  Clearing the
-    // header with memset after publishing the write index briefly turns the
-    // slot into a vendor-specific (type 0) packet, which the doorbell worker
-    // is allowed to consume before the final dispatch header is released.
-    std::memset(reinterpret_cast<uint8_t *>(packet) + sizeof(packet->header), 0, sizeof(*packet) - sizeof(packet->header));
-    packet->setup = gemstone::hip::dispatchDimensions(grid, block) << HSA_KERNEL_DISPATCH_PACKET_SETUP_DIMENSIONS;
-    packet->workgroup_size_x = static_cast<uint16_t>(block.x);
-    packet->workgroup_size_y = static_cast<uint16_t>(block.y);
-    packet->workgroup_size_z = static_cast<uint16_t>(block.z);
-    packet->grid_size_x = global.x;
-    packet->grid_size_y = global.y;
-    packet->grid_size_z = global.z;
-    packet->group_segment_size = static_cast<uint32_t>(shared);
-    packet->kernel_object = kernel->object;
-    packet->kernarg_address = kernarg;
-    packet->completion_signal = completion;
-    const uint16_t header = HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE;
-    __atomic_store_n(&packet->header, header, __ATOMIC_RELEASE);
-    hsa_signal_store_screlease(state().queue->doorbell_signal, static_cast<hsa_signal_value_t>(index));
-    while (hsa_signal_load_scacquire(completion) == 1)
-      std::this_thread::yield();
-    if (hsa_signal_load_scacquire(completion) < 0) status = HSA_STATUS_ERROR;
-    // The queue read index advances after the HSA worker mirrors pageable
-    // writes back to host memory. Wait for that handoff before returning to a
-    // caller that may immediately read or free a captured host pointer.
+  auto owned = std::shared_ptr<void>(kernarg, [](void *memory) {
+    if (memory) (void)hsa_memory_free(memory);
+  });
+  return remember(enqueueCommand(stream, [=]() mutable -> int32_t {
+    hsa_queue_t *dispatchQueue{};
+    if (hsa_queue_create(state().gpu, 64, HSA_QUEUE_TYPE_MULTI, nullptr, nullptr, UINT32_MAX, UINT32_MAX, &dispatchQueue)
+        != HSA_STATUS_SUCCESS)
+      return hipErrorOutOfMemory;
+    const auto queueOwner = std::shared_ptr<hsa_queue_t>(dispatchQueue, [](hsa_queue_t *queue) { (void)hsa_queue_destroy(queue); });
+    hsa_signal_t completion{};
+    hsa_status_t status = hsa_signal_create(1, 0, nullptr, &completion);
     if (status == HSA_STATUS_SUCCESS) {
-      const auto deadline = std::chrono::steady_clock::now() + std::chrono::hours(1);
-      while (hsa_queue_load_read_index_scacquire(state().queue) <= index) {
-        if (std::chrono::steady_clock::now() >= deadline) {
-          status = HSA_STATUS_ERROR;
-          break;
-        }
+      const uint64_t index = hsa_queue_add_write_index_relaxed(dispatchQueue, 1);
+      auto *packet = &static_cast<hsa_kernel_dispatch_packet_t *>(dispatchQueue->base_address)[index & (dispatchQueue->size - 1U)];
+      // Keep the slot unpublished while its body is rebuilt.  Clearing the
+      // header with memset after publishing the write index briefly turns the
+      // slot into a vendor-specific (type 0) packet, which the doorbell worker
+      // is allowed to consume before the final dispatch header is released.
+      std::memset(reinterpret_cast<uint8_t *>(packet) + sizeof(packet->header), 0, sizeof(*packet) - sizeof(packet->header));
+      packet->setup = gemstone::hip::dispatchDimensions(grid, block) << HSA_KERNEL_DISPATCH_PACKET_SETUP_DIMENSIONS;
+      packet->workgroup_size_x = static_cast<uint16_t>(block.x);
+      packet->workgroup_size_y = static_cast<uint16_t>(block.y);
+      packet->workgroup_size_z = static_cast<uint16_t>(block.z);
+      packet->grid_size_x = global.x;
+      packet->grid_size_y = global.y;
+      packet->grid_size_z = global.z;
+      packet->group_segment_size = static_cast<uint32_t>(shared);
+      packet->kernel_object = kernel->object;
+      packet->kernarg_address = kernarg;
+      packet->completion_signal = completion;
+      const uint16_t header = HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE;
+      __atomic_store_n(&packet->header, header, __ATOMIC_RELEASE);
+      hsa_signal_store_screlease(dispatchQueue->doorbell_signal, static_cast<hsa_signal_value_t>(index));
+      while (hsa_signal_load_scacquire(completion) == 1)
         std::this_thread::yield();
+      if (hsa_signal_load_scacquire(completion) < 0) status = HSA_STATUS_ERROR;
+      // The queue read index advances after the HSA worker mirrors pageable
+      // writes back to host memory. Wait for that handoff before returning to a
+      // caller that may immediately read or free a captured host pointer.
+      if (status == HSA_STATUS_SUCCESS) {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::hours(1);
+        while (hsa_queue_load_read_index_scacquire(dispatchQueue) <= index) {
+          if (std::chrono::steady_clock::now() >= deadline) {
+            status = HSA_STATUS_ERROR;
+            break;
+          }
+          std::this_thread::yield();
+        }
       }
     }
-  }
-  const hsa_status_t free_status = hsa_memory_free(kernarg);
-  const hsa_status_t destroy_status = hsa_signal_destroy(completion);
-  if (status != HSA_STATUS_SUCCESS) {
-    if (traceModules()) std::fprintf(stderr, "Gemstone HIP dispatch HSA status=%d\n", static_cast<int>(status));
-    return remember(hipErrorLaunchFailure);
-  }
-  if (free_status != HSA_STATUS_SUCCESS || destroy_status != HSA_STATUS_SUCCESS)
-    return remember(mapHsa(free_status != HSA_STATUS_SUCCESS ? free_status : destroy_status));
-  return remember(hipSuccess);
+    owned.reset();
+    const hsa_status_t free_status = HSA_STATUS_SUCCESS;
+    const hsa_status_t destroy_status = hsa_signal_destroy(completion);
+    if (status != HSA_STATUS_SUCCESS) {
+      if (traceModules()) std::fprintf(stderr, "Gemstone HIP dispatch HSA status=%d\n", static_cast<int>(status));
+      return remember(hipErrorLaunchFailure);
+    }
+    if (free_status != HSA_STATUS_SUCCESS || destroy_status != HSA_STATUS_SUCCESS)
+      return remember(mapHsa(free_status != HSA_STATUS_SUCCESS ? free_status : destroy_status));
+    return remember(hipSuccess);
+  }));
 }
 
 hipError_t dispatch(const void *function_address, dim3 grid, dim3 block, void **args, size_t shared, hipStream_t stream) {
@@ -778,8 +826,9 @@ extern "C" hipError_t hipDeviceGet(hipDevice_t *device, int ordinal) {
   return remember(hipSuccess);
 }
 
-extern "C" hipError_t hipDeviceSynchronize() { return remember(ensureInitialized() ? hipSuccess : hipErrorNoDevice); }
+extern "C" hipError_t hipDeviceSynchronize() { return remember(ensureInitialized() ? waitCommands() : hipErrorNoDevice); }
 extern "C" hipError_t hipDeviceReset() {
+  if (const auto pending = waitCommands(); pending != hipSuccess) return remember(pending);
   auto &runtime = state();
   if (!ensureInitialized()) return remember(hipErrorNoDevice);
   std::lock_guard<std::mutex> guard(runtime.lock);
@@ -834,7 +883,10 @@ extern "C" hipError_t hipDeviceGetDefaultMemPool(hipMemPool_t *pool, int device)
 }
 
 extern "C" hipError_t hipMallocAsync(void **pointer, size_t size, hipStream_t) { return hipMalloc(pointer, size); }
-extern "C" hipError_t hipFreeAsync(void *pointer, hipStream_t) { return hipFree(pointer); }
+extern "C" hipError_t hipFreeAsync(void *pointer, hipStream_t stream) {
+  if (!validStream(stream)) return remember(hipErrorInvalidResourceHandle);
+  return remember(enqueueCommand(stream, [=] { return hipFree(pointer); }));
+}
 extern "C" hipError_t hipMemPoolTrimTo(hipMemPool_t pool, size_t) { return remember(!pool ? hipErrorInvalidValue : hipSuccess); }
 
 extern "C" hipError_t hipDeviceGetAttribute(int *value, hipDeviceAttribute_t attribute, int device) {
@@ -848,6 +900,11 @@ extern "C" hipError_t hipDeviceGetAttribute(int *value, hipDeviceAttribute_t att
     case hipDeviceAttributeMaxGridDimX: *value = std::numeric_limits<int>::max(); break;
     case hipDeviceAttributeMaxGridDimY: *value = std::numeric_limits<int>::max(); break;
     case hipDeviceAttributeMaxGridDimZ: *value = std::numeric_limits<int>::max(); break;
+    case hipDeviceAttributeUnifiedAddressing:
+    case hipDeviceAttributeCanMapHostMemory:
+    case hipDeviceAttributeHostNativeAtomicSupported:
+    case hipDeviceAttributeConcurrentManagedAccess:
+    case hipDeviceAttributeManagedMemory: *value = 1; break;
     case hipDeviceAttributePageableMemoryAccess: *value = std::getenv("GEMSTONE_HSA_SYSTEM_PAGING") ? 1 : 0; break;
     default: *value = 0; break;
   }
@@ -877,6 +934,11 @@ extern "C" hipError_t hipGetDevicePropertiesR0600(hipDeviceProp_tR0600 *properti
   properties->major = static_cast<int>(version.major);
   properties->minor = static_cast<int>(version.minor);
   properties->multiProcessorCount = 1;
+  properties->unifiedAddressing = 1;
+  properties->canMapHostMemory = 1;
+  properties->managedMemory = 1;
+  properties->hostNativeAtomicSupported = 1;
+  properties->concurrentManagedAccess = 1;
   properties->pageableMemoryAccess = std::getenv("GEMSTONE_HSA_SYSTEM_PAGING") ? 1 : 0;
   return remember(hipSuccess);
 }
@@ -903,6 +965,8 @@ constexpr size_t Arch = 356;
 constexpr size_t MaxSharedMemoryPerMultiProcessor = 376;
 constexpr size_t GcnArch = 392;
 constexpr size_t ArchName = 396;
+constexpr size_t ManagedMemory = 772;
+constexpr size_t ConcurrentManagedAccess = 780;
 constexpr size_t PageableMemoryAccess = 784;
 constexpr size_t Size = 792;
 static_assert(Name + NameSize <= TotalGlobalMem, "legacy name overlaps totalGlobalMem");
@@ -938,6 +1002,8 @@ extern "C" GEMSTONE_PUBLIC_API hipError_t hipGetDeviceProperties(void *propertie
   write(Arch, uint32_t((1U << 5) | (1U << 7))); // global int64 atomics and doubles
   write(MaxSharedMemoryPerMultiProcessor, size_t(64) * 1024U);
   write(GcnArch, int(std::atoi(target.c_str() + 3)));
+  write(ManagedMemory, int(1));
+  write(ConcurrentManagedAccess, int(1));
   write(PageableMemoryAccess, int(std::getenv("GEMSTONE_HSA_SYSTEM_PAGING") ? 1 : 0));
   return remember(hipSuccess);
 }
@@ -960,6 +1026,7 @@ extern "C" hipError_t hipMalloc(void **pointer, size_t size) {
 }
 
 extern "C" hipError_t hipFree(void *pointer) {
+  if (const auto pending = waitCommands(); pending != hipSuccess) return remember(pending);
   if (!pointer) return remember(hipSuccess);
   if (!ensureInitialized()) return remember(hipErrorNoDevice);
   const hsa_status_t status = hsa_memory_free(pointer);
@@ -972,6 +1039,7 @@ extern "C" hipError_t hipFree(void *pointer) {
 }
 
 extern "C" hipError_t hipMemcpy(void *destination, const void *source, size_t size, hipMemcpyKind kind) {
+  if (const auto pending = waitCommands(); pending != hipSuccess) return remember(pending);
   if (size == 0) return remember(hipSuccess);
   if (!destination || !source) return remember(hipErrorInvalidValue);
   if (kind == hipMemcpyHostToHost) {
@@ -984,6 +1052,7 @@ extern "C" hipError_t hipMemcpy(void *destination, const void *source, size_t si
 }
 
 hipError_t copySymbol(void *destination, const void *source, size_t size, size_t offset) {
+  if (const auto pending = waitCommands(); pending != hipSuccess) return remember(pending);
   if ((!destination || !source) && size != 0) return remember(hipErrorInvalidValue);
   std::shared_ptr<Module> module;
   std::string device_name;
@@ -1028,7 +1097,8 @@ extern "C" hipError_t hipMemcpyToSymbol(const void *symbol, const void *source, 
 
 extern "C" hipError_t hipMemcpyToSymbolAsync(const void *symbol, const void *source, size_t size, size_t offset, hipMemcpyKind kind,
                                              hipStream_t stream) {
-  return validStream(stream) ? hipMemcpyToSymbol(symbol, source, size, offset, kind) : remember(hipErrorInvalidResourceHandle);
+  if (!validStream(stream)) return remember(hipErrorInvalidResourceHandle);
+  return remember(enqueueCommand(stream, [=] { return hipMemcpyToSymbol(symbol, source, size, offset, kind); }));
 }
 
 extern "C" hipError_t hipMemcpyFromSymbol(void *destination, const void *symbol, size_t size, size_t offset, hipMemcpyKind kind) {
@@ -1040,11 +1110,13 @@ extern "C" hipError_t hipMemcpyFromSymbol(void *destination, const void *symbol,
 
 extern "C" hipError_t hipMemcpyFromSymbolAsync(void *destination, const void *symbol, size_t size, size_t offset, hipMemcpyKind kind,
                                                hipStream_t stream) {
-  return validStream(stream) ? hipMemcpyFromSymbol(destination, symbol, size, offset, kind) : remember(hipErrorInvalidResourceHandle);
+  if (!validStream(stream)) return remember(hipErrorInvalidResourceHandle);
+  return remember(enqueueCommand(stream, [=] { return hipMemcpyFromSymbol(destination, symbol, size, offset, kind); }));
 }
 
 extern "C" hipError_t hipMemcpyAsync(void *destination, const void *source, size_t size, hipMemcpyKind kind, hipStream_t stream) {
-  return validStream(stream) ? hipMemcpy(destination, source, size, kind) : remember(hipErrorInvalidResourceHandle);
+  if (!validStream(stream)) return remember(hipErrorInvalidResourceHandle);
+  return remember(enqueueCommand(stream, [=] { return hipMemcpy(destination, source, size, kind); }));
 }
 extern "C" hipError_t hipMemcpy2D(void *destination, size_t destination_pitch, const void *source, size_t source_pitch, size_t width,
                                   size_t height, hipMemcpyKind kind) {
@@ -1059,8 +1131,9 @@ extern "C" hipError_t hipMemcpy2D(void *destination, size_t destination_pitch, c
 }
 extern "C" hipError_t hipMemcpy2DAsync(void *destination, size_t destination_pitch, const void *source, size_t source_pitch, size_t width,
                                        size_t height, hipMemcpyKind kind, hipStream_t stream) {
-  return validStream(stream) ? hipMemcpy2D(destination, destination_pitch, source, source_pitch, width, height, kind)
-                             : remember(hipErrorInvalidResourceHandle);
+  if (!validStream(stream)) return remember(hipErrorInvalidResourceHandle);
+  return remember(
+      enqueueCommand(stream, [=] { return hipMemcpy2D(destination, destination_pitch, source, source_pitch, width, height, kind); }));
 }
 extern "C" hipError_t hipMemcpyWithStream(void *destination, const void *source, size_t size, hipMemcpyKind kind, hipStream_t stream) {
   return validStream(stream) ? hipMemcpy(destination, source, size, kind) : remember(hipErrorInvalidResourceHandle);
@@ -1085,10 +1158,20 @@ extern "C" hipError_t hipMemcpyDtoDAsync(hipDeviceptr_t destination, hipDevicept
 }
 
 extern "C" hipError_t hipMallocManaged(void **pointer, size_t size, unsigned int) {
-  const auto status = hipMalloc(pointer, size);
-  if (status != hipSuccess || !*pointer) return status;
+  if (!pointer) return remember(hipErrorInvalidValue);
+  *pointer = nullptr;
+  if (size == 0) return remember(hipSuccess);
+  if (!ensureInitialized()) return remember(hipErrorNoDevice);
+  hsa_agent_t cpu{};
+  hsa_region_t region{};
+  if (hsa_iterate_agents(findCpu, &cpu) != HSA_STATUS_INFO_BREAK
+      || hsa_agent_iterate_regions(cpu, findRegion, &region) != HSA_STATUS_INFO_BREAK)
+    return remember(hipErrorNoDevice);
+  const auto status = hsa_memory_allocate(region, size, pointer);
+  if (status != HSA_STATUS_SUCCESS) return remember(mapHsa(status));
   try {
     std::lock_guard<std::mutex> guard(state().lock);
+    state().device_allocations.emplace(*pointer, size);
     state().managed_allocations.emplace(*pointer, size);
   } catch (...) {
     (void)hipFree(*pointer);
@@ -1097,6 +1180,7 @@ extern "C" hipError_t hipMallocManaged(void **pointer, size_t size, unsigned int
   }
   return remember(hipSuccess);
 }
+
 extern "C" hipError_t hipMemAdvise(const void *pointer, size_t size, hipMemoryAdvise advice, int device) {
   if ((!pointer && size != 0) || device != 0) return remember(hipErrorInvalidValue);
   if (!ensureInitialized()) return remember(hipErrorNoDevice);
@@ -1114,6 +1198,7 @@ extern "C" hipError_t hipMemAdvise(const void *pointer, size_t size, hipMemoryAd
       return remember(status == HSA_STATUS_ERROR_INVALID_ALLOCATION ? hipSuccess : mapHsa(status));
     }
     case hipMemAdviseUnsetAccessedBy: {
+      if (const auto pending = waitCommands(); pending != hipSuccess) return remember(pending);
       if (!pointer) return remember(hipErrorInvalidValue);
       const hsa_status_t status = hsa_memory_deregister(const_cast<void *>(pointer), 0);
       return remember(status == HSA_STATUS_ERROR_INVALID_ALLOCATION ? hipSuccess : mapHsa(status));
@@ -1122,17 +1207,48 @@ extern "C" hipError_t hipMemAdvise(const void *pointer, size_t size, hipMemoryAd
   }
 }
 extern "C" hipError_t hipMallocHost(void **pointer, size_t size) { return allocateHost(pointer, size); }
-extern "C" hipError_t hipHostMalloc(void **pointer, size_t size, unsigned int) { return allocateHost(pointer, size); }
+extern "C" hipError_t hipHostMalloc(void **pointer, size_t size, unsigned int flags) { return allocateHost(pointer, size, flags); }
 extern "C" hipError_t hipFreeHost(void *pointer) { return releaseHost(pointer); }
 extern "C" hipError_t hipHostFree(void *pointer) { return hipFreeHost(pointer); }
 
-extern "C" hipError_t hipHostRegister(void *pointer, size_t size, unsigned int) {
+extern "C" hipError_t hipHostRegister(void *pointer, size_t size, unsigned int flags) {
   if (!ensureInitialized()) return remember(hipErrorNoDevice);
-  return remember(mapHsa(hsa_memory_register(pointer, size)));
+  const gemstone::MemoryRange range{reinterpret_cast<uintptr_t>(pointer), size};
+  if (!range.valid() || (flags & ~(hipHostRegisterPortable | hipHostRegisterMapped | hipHostRegisterIoMemory | hipHostRegisterReadOnly)))
+    return remember(hipErrorInvalidValue);
+  std::lock_guard<std::mutex> guard(state().lock);
+  if (state().host_registrations.overlaps(range)) return remember(hipErrorHostMemoryAlreadyRegistered);
+  const auto status = hsa_memory_register(pointer, size);
+  if (status == HSA_STATUS_SUCCESS) state().host_registrations.add(range, gemstone::MemoryOwnership::Borrowed, flags);
+  return remember(mapHsa(status));
 }
 extern "C" hipError_t hipHostUnregister(void *pointer) {
+  if (const auto pending = waitCommands(); pending != hipSuccess) return remember(pending);
   if (!ensureInitialized()) return remember(hipErrorNoDevice);
-  return remember(mapHsa(hsa_memory_deregister(pointer, 0)));
+  std::lock_guard<std::mutex> guard(state().lock);
+  const auto found = state().host_registrations.exact(reinterpret_cast<uintptr_t>(pointer));
+  if (!found || found->ownership != gemstone::MemoryOwnership::Borrowed) return remember(hipErrorHostMemoryNotRegistered);
+  const auto status = hsa_memory_deregister(pointer, found->range.size);
+  if (status == HSA_STATUS_SUCCESS)
+    state().host_registrations.remove(reinterpret_cast<uintptr_t>(pointer), gemstone::MemoryOwnership::Borrowed);
+  return remember(mapHsa(status));
+}
+extern "C" hipError_t hipHostGetDevicePointer(void **device, void *host, unsigned flags) {
+  if (!device || !host || flags != 0) return remember(hipErrorInvalidValue);
+  if (!ensureInitialized()) return remember(hipErrorNoDevice);
+  std::lock_guard<std::mutex> guard(state().lock);
+  if (!state().host_registrations.find(reinterpret_cast<uintptr_t>(host))) return remember(hipErrorInvalidValue);
+  *device = host;
+  return remember(hipSuccess);
+}
+extern "C" hipError_t hipHostGetFlags(unsigned *flags, void *host) {
+  if (!flags || !host) return remember(hipErrorInvalidValue);
+  if (!ensureInitialized()) return remember(hipErrorNoDevice);
+  std::lock_guard<std::mutex> guard(state().lock);
+  const auto found = state().host_registrations.find(reinterpret_cast<uintptr_t>(host));
+  if (!found) return remember(hipErrorInvalidValue);
+  *flags = static_cast<unsigned>(found->flags);
+  return remember(hipSuccess);
 }
 
 extern "C" hipError_t hipPointerGetAttributes(hipPointerAttribute_t *attributes, const void *pointer) {
@@ -1167,6 +1283,7 @@ extern "C" hipError_t hipPointerGetAttributes(hipPointerAttribute_t *attributes,
 }
 
 extern "C" hipError_t hipMemset(void *destination, int value, size_t size) {
+  if (const auto pending = waitCommands(); pending != hipSuccess) return remember(pending);
   if (!destination && size != 0) return remember(hipErrorInvalidValue);
   if (!ensureInitialized()) return remember(hipErrorNoDevice);
   const unsigned char byte = static_cast<unsigned char>(value);
@@ -1182,7 +1299,8 @@ extern "C" hipError_t hipMemsetD32(hipDeviceptr_t destination, int value, size_t
   return remember(mapHsa(hsa_amd_memory_fill(reinterpret_cast<void *>(destination), static_cast<uint32_t>(value), count)));
 }
 extern "C" hipError_t hipMemsetAsync(void *destination, int value, size_t size, hipStream_t stream) {
-  return validStream(stream) ? hipMemset(destination, value, size) : remember(hipErrorInvalidResourceHandle);
+  if (!validStream(stream)) return remember(hipErrorInvalidResourceHandle);
+  return remember(enqueueCommand(stream, [=] { return hipMemset(destination, value, size); }));
 }
 
 extern "C" GEMSTONE_PUBLIC_API hipError_t __hipPushCallConfiguration(dim3 grid, dim3 block, size_t shared, hipStream_t stream) {
@@ -1241,43 +1359,45 @@ extern "C" hipError_t hipStreamCreate(hipStream_t *stream) {
   }
   return remember(hipSuccess);
 }
-extern "C" hipError_t hipStreamCreateWithFlags(hipStream_t *stream, unsigned int) { return hipStreamCreate(stream); }
+extern "C" hipError_t hipStreamCreateWithFlags(hipStream_t *stream, unsigned int flags) {
+  const auto status = hipStreamCreate(stream);
+  if (status == hipSuccess) commands().configure(*stream, (flags & hipStreamNonBlocking) != 0);
+  return status;
+}
 extern "C" hipError_t hipStreamCreateWithPriority(hipStream_t *stream, unsigned int, int) { return hipStreamCreate(stream); }
 extern "C" hipError_t hipStreamDestroy(hipStream_t stream) {
+  if (const auto pending = static_cast<hipError_t>(commands().wait(commands().snapshot(stream))); pending != hipSuccess)
+    return remember(pending);
   if (stream && stream != hipStreamLegacy && stream != hipStreamPerThread) {
     std::lock_guard<std::mutex> guard(state().lock);
     if (state().streams.erase(stream) != 1) return remember(hipErrorInvalidResourceHandle);
+    commands().forget(stream);
   }
   return remember(hipSuccess);
 }
 extern "C" hipError_t hipStreamSynchronize(hipStream_t stream) {
-  if (stream == hipStreamLegacy || stream == hipStreamPerThread) return remember(hipErrorInvalidResourceHandle);
-  if (stream) {
-    std::lock_guard<std::mutex> guard(state().lock);
-    if (state().streams.count(stream) != 1) return remember(hipErrorInvalidResourceHandle);
-  }
-  return hipDeviceSynchronize();
+  if (!validStream(stream)) return remember(hipErrorInvalidResourceHandle);
+  return remember(static_cast<hipError_t>(commands().wait(commands().snapshot(stream))));
 }
 extern "C" hipError_t hipStreamQuery(hipStream_t stream) {
-  if (stream == hipStreamLegacy || stream == hipStreamPerThread) return remember(hipErrorInvalidResourceHandle);
-  std::lock_guard<std::mutex> guard(state().lock);
-  return remember(!stream || state().streams.count(stream) == 1 ? hipSuccess : hipErrorInvalidResourceHandle);
+  if (!validStream(stream)) return remember(hipErrorInvalidResourceHandle);
+  return remember(static_cast<hipError_t>(commands().query(commands().snapshot(stream), hipErrorNotReady)));
 }
 extern "C" hipError_t hipStreamAddCallback(hipStream_t stream, hipStreamCallback_t callback, void *data, unsigned int flags) {
   if (!callback || flags != 0) return remember(hipErrorInvalidValue);
   if (!validStream(stream)) return remember(hipErrorInvalidResourceHandle);
-  // Kernel launches and copies complete before returning in this facade.
-  try {
+  return remember(enqueueCommand(stream, [=] {
     callback(stream, hipSuccess, data);
-    return remember(hipSuccess);
-  } catch (...) {
-    return remember(hipErrorUnknown);
-  }
+    return hipSuccess;
+  }));
 }
 extern "C" hipError_t hipStreamWaitEvent(hipStream_t stream, hipEvent_t event, unsigned int) {
+  if (!validStream(stream)) return remember(hipErrorInvalidResourceHandle);
   std::lock_guard<std::mutex> guard(state().lock);
-  const bool validStream = !stream || state().streams.count(stream) == 1;
-  return remember(validStream && event && state().events.count(event) == 1 ? hipSuccess : hipErrorInvalidResourceHandle);
+  const auto found = state().events.find(event);
+  if (found == state().events.end()) return remember(hipErrorInvalidResourceHandle);
+  commands().submit(stream, [] { return hipSuccess; }, {found->second->ticket});
+  return remember(hipSuccess);
 }
 extern "C" hipError_t hipStreamGetDevice(hipStream_t stream, hipDevice_t *device) {
   if (!device) return remember(hipErrorInvalidValue);
@@ -1336,6 +1456,7 @@ extern "C" hipError_t hipModuleLoadDataEx(hipModule_t *module, const void *image
 extern "C" hipError_t hipModuleLoadFatBinary(hipModule_t *module, const void *fatbin) { return hipModuleLoadData(module, fatbin); }
 
 extern "C" hipError_t hipModuleUnload(hipModule_t module) {
+  if (const auto pending = waitCommands(); pending != hipSuccess) return remember(pending);
   if (!module) return remember(hipErrorInvalidValue);
   delete moduleHandle(module);
   return remember(hipSuccess);
@@ -1437,36 +1558,42 @@ extern "C" GEMSTONE_PUBLIC_API hipError_t hipExtModuleLaunchKernel(hipFunction_t
 
 extern "C" hipError_t hipEventCreateWithFlags(hipEvent_t *event, unsigned int) {
   if (!event) return remember(hipErrorInvalidValue);
-  auto storage = std::unique_ptr<unsigned char>(new (std::nothrow) unsigned char);
+  auto storage = std::unique_ptr<Event>(new (std::nothrow) Event);
   if (!storage) return remember(hipErrorOutOfMemory);
   *event = reinterpret_cast<hipEvent_t>(storage.get());
-  {
-    std::lock_guard<std::mutex> guard(state().lock);
-    state().events.emplace(*event, std::move(storage));
-  }
+  std::lock_guard<std::mutex> guard(state().lock);
+  state().events.emplace(*event, std::move(storage));
   return remember(hipSuccess);
 }
 extern "C" hipError_t hipEventCreate(hipEvent_t *event) { return hipEventCreateWithFlags(event, 0); }
 extern "C" hipError_t hipEventDestroy(hipEvent_t event) {
-  if (event) {
-    std::lock_guard<std::mutex> guard(state().lock);
-    if (state().events.erase(event) != 1) return remember(hipErrorInvalidResourceHandle);
-  }
-  return remember(hipSuccess);
+  std::lock_guard<std::mutex> guard(state().lock);
+  return remember(state().events.erase(event) == 1 ? hipSuccess : hipErrorInvalidResourceHandle);
 }
 extern "C" hipError_t hipEventRecordWithFlags(hipEvent_t event, hipStream_t stream, unsigned int) {
+  if (!validStream(stream)) return remember(hipErrorInvalidResourceHandle);
   std::lock_guard<std::mutex> guard(state().lock);
-  const bool validStream = !stream || state().streams.count(stream) == 1;
-  return remember(validStream && event && state().events.count(event) == 1 ? hipSuccess : hipErrorInvalidResourceHandle);
+  const auto found = state().events.find(event);
+  if (found == state().events.end()) return remember(hipErrorInvalidResourceHandle);
+  found->second->ticket = commands().submit(stream, [] { return hipSuccess; });
+  return remember(hipSuccess);
 }
 extern "C" hipError_t hipEventRecord(hipEvent_t event, hipStream_t stream) { return hipEventRecordWithFlags(event, stream, 0); }
 extern "C" hipError_t hipEventSynchronize(hipEvent_t event) {
-  std::lock_guard<std::mutex> guard(state().lock);
-  return remember(event && state().events.count(event) == 1 ? hipSuccess : hipErrorInvalidResourceHandle);
+  gemstone::CommandQueue::Ticket ticket;
+  {
+    std::lock_guard<std::mutex> guard(state().lock);
+    const auto found = state().events.find(event);
+    if (found == state().events.end()) return remember(hipErrorInvalidResourceHandle);
+    ticket = found->second->ticket;
+  }
+  return remember(static_cast<hipError_t>(commands().wait(ticket)));
 }
 extern "C" hipError_t hipEventQuery(hipEvent_t event) {
   std::lock_guard<std::mutex> guard(state().lock);
-  return remember(event && state().events.count(event) == 1 ? hipSuccess : hipErrorInvalidResourceHandle);
+  const auto found = state().events.find(event);
+  if (found == state().events.end()) return remember(hipErrorInvalidResourceHandle);
+  return remember(static_cast<hipError_t>(commands().query(found->second->ticket, hipErrorNotReady)));
 }
 extern "C" hipError_t hipEventElapsedTime(float *milliseconds, hipEvent_t start, hipEvent_t stop) {
   if (!milliseconds) return remember(hipErrorInvalidValue);
@@ -1480,6 +1607,9 @@ extern "C" hipError_t hipEventElapsedTime(float *milliseconds, hipEvent_t start,
 }
 
 extern "C" GEMSTONE_PUBLIC_API void **__hipRegisterFatBinary(const void *fatbin) {
+  // Compiler-generated unregister callbacks are registered after this call.
+  // Construct the queue first so its destructor runs after those callbacks.
+  (void)commands();
   auto module = std::make_shared<Module>();
   module->fatbin = fatbin;
   void **token = &module->token;
@@ -1514,6 +1644,7 @@ extern "C" GEMSTONE_PUBLIC_API void __hipRegisterVar(void **modules, void *var, 
 }
 
 extern "C" GEMSTONE_PUBLIC_API void __hipUnregisterFatBinary(void **modules) {
+  (void)waitCommands();
   auto &runtime = state();
   std::shared_ptr<Module> module;
   {

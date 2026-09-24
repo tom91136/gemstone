@@ -5,6 +5,8 @@
 #undef UNIFIED_API_ROCTHRUST
 #include <cstddef>
 #include <cstdint>
+#include <limits>
+#include <new>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -295,7 +297,7 @@ template <class Number> inline void check_complex_arithmetic() {
   using Std = std::complex<Number>;
   const std::vector<Complex> first{Complex(1.5, -2.0), Complex(-3.0, 4.0), Complex(0.5, 0.75), Complex(-1.25, -2.5), Complex(7.0, 0.0)};
   const std::vector<Complex> second{Complex(0.5, 1.0), Complex(-1.0, 0.5), Complex(2.0, 0.25), Complex(1.0, -1.0), Complex(0.0, 1.0)};
-  const Number tolerance = static_cast<Number>(1e-9);
+  const Number tolerance = static_cast<Number>(sizeof(Number) == sizeof(float) ? 1e-5 : 1e-9);
   const thrust::device_vector<Complex> a(first.begin(), first.end());
   const thrust::device_vector<Complex> b(second.begin(), second.end());
   const std::vector<Std> a_std = to_std(first);
@@ -342,16 +344,10 @@ template <class Number> inline void check_complex_arithmetic() {
 template <class Number> inline void check_complex_math_transform() {
   using Complex = thrust::complex<Number>;
   using Std = std::complex<Number>;
-  // Every component stays strictly positive: the emulator's device complex
-  // transcendentals flip the sign of components handled on the negative-side
-  // of the reciprocal identity in catrig, which is an upstream red on this
-  // backend rather than a property this port can verify.
-  const std::vector<Complex> input{Complex(0.5, 0.25), Complex(1.0, 0.5), Complex(0.75, 1.0), Complex(1.25, 0.5), Complex(2.0, 1.0)};
-  const Number tolerance = static_cast<Number>(1e-9);
+  // Exercise all four quadrants, including the reciprocal branches.
+  const std::vector<Complex> input{Complex(0.5, 0.25), Complex(-1.0, 0.5), Complex(0.75, -1.0), Complex(-1.25, -0.5), Complex(2.0, 1.0)};
+  const Number tolerance = static_cast<Number>(sizeof(Number) == sizeof(float) ? 1e-5 : 1e-9);
   const thrust::device_vector<Complex> source(input.begin(), input.end());
-  // The host reference evaluates the same thrust complex overloads on the
-  // host; the standalone C library cexp disagrees with the GPU transcendentals
-  // on the emulator for some arguments.
   const auto check_unary = [&](auto functor, const std::string &where) {
     thrust::device_vector<Complex> result(source.size());
     thrust::transform(source.begin(), source.end(), result.begin(), functor);
@@ -366,6 +362,10 @@ template <class Number> inline void check_complex_math_transform() {
   check_unary(ComplexLog<Complex>{}, "complex-math-transform-log");
   check_unary(ComplexSquareRoot<Complex>{}, "complex-math-transform-sqrt");
   check_unary(ComplexSine<Complex>{}, "complex-math-transform-sin");
+}
+
+TEST_CASE("algorithms/roc-thrust-semantic/complex-math-transform/f32/n5", "[unified][rocthrust][compact]") {
+  check_complex_math_transform<float>();
 }
 
 template <class Number> inline void check_complex_std_interop() {
@@ -533,20 +533,15 @@ template <class Value> inline void check_tabulate_output_iterator() {
   }
 }
 
-// ---------------------------------------------------------------------------
-// rocThrust `testing/out_of_memory_recovery.cu` port.  The upstream test
-// assumes a real allocation-failure path integrated through HIP and the
-// preceding device_vector destructors running during the failed helper
-// allocation; under the emulator no deterministic allocation failure can be
-// forced, so the case is a documented skip.
-// ---------------------------------------------------------------------------
+// Allocation failure must leave prior allocations valid and permit subsequent use.
+// A request larger than the address space fails without exhausting physical RAM.
 
 TEST_CASE("algorithms/roc-thrust-semantic/out-of-memory-recovery/i32/n11", "[unified][rocthrust][compact]") {
-  SKIP("out-of-memory-recovery: the upstream test asserts "
-       "allocation-failure recovery; forcing a real "
-       "failed device allocation whose failure path still runs the preceding "
-       "device_vector destructor is "
-       "not reproducible under the emulator");
+  const thrust::device_vector<int32_t> before(11, 7);
+  REQUIRE_THROWS_AS(thrust::device_vector<int32_t>(std::numeric_limits<size_t>::max() / sizeof(int32_t)), std::bad_alloc);
+  REQUIRE(std::vector<int32_t>(before.begin(), before.end()) == std::vector<int32_t>(11, 7));
+  const thrust::device_vector<int32_t> after(11, 9);
+  REQUIRE(std::vector<int32_t>(after.begin(), after.end()) == std::vector<int32_t>(11, 9));
 }
 
 // ---------------------------------------------------------------------------

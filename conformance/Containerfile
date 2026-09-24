@@ -45,6 +45,9 @@ RUN apt-get update \
        libboost-all-dev libpng-dev libva-dev libze-dev \
     && rm -rf /var/lib/apt/lists/*
 
+# Compile project-owned Level Zero kernels from source in the artifact build.
+COPY --from=toolchain-opencl /opt/intel/oneapi/compiler /opt/intel/oneapi/compiler
+
 FROM ubuntu-build-base AS rocm-repository
 ARG DEBIAN_FRONTEND=noninteractive
 ARG ROCM_VERSION

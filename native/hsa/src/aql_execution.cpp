@@ -244,8 +244,10 @@ bool resolveArguments(gemstone_hsa_aql_runtime &runtime, const KernelBinding &bi
         continue;
       }
       gemstone_hsa_argument allocation{};
-      if (!resolveAllocation(runtime, pointer, allocation)) return false;
-      arguments.push_back(allocation);
+      if (!resolveAllocation(runtime, pointer, allocation)) {
+        if (!std::getenv("GEMSTONE_HSA_SYSTEM_PAGING")) return false;
+        append_scalar(field.offset, field.size);
+      } else arguments.push_back(allocation);
     } else {
       append_scalar(field.offset, field.size);
     }
@@ -610,9 +612,11 @@ extern "C" int gemstone_hsa_aql_runtime_take_dirty_ranges(gemstone_hsa_aql_runti
   const auto required = static_cast<uint32_t>(runtime->dirty_ranges.size());
   *count = required;
   if (capacity == 0) return 0;
-  if (capacity < required) return -1;
-  std::copy(runtime->dirty_ranges.begin(), runtime->dirty_ranges.end(), ranges);
-  runtime->dirty_ranges.clear();
+  // Producers may append after a consumer queries the count. Drain the
+  // requested prefix; the later completion's mirror-back takes the suffix.
+  *count = std::min(capacity, required);
+  std::copy_n(runtime->dirty_ranges.begin(), *count, ranges);
+  runtime->dirty_ranges.erase(runtime->dirty_ranges.begin(), runtime->dirty_ranges.begin() + *count);
   return 0;
 }
 

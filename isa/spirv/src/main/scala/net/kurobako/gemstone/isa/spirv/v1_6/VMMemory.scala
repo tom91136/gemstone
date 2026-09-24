@@ -1,5 +1,8 @@
 package net.kurobako.gemstone.isa.spirv.v1_6
 
+import net.kurobako.gemstone.vm.AddressSpace
+import net.kurobako.gemstone.memory.GuestAddress
+
 import net.kurobako.gemstone.Vec
 import net.kurobako.gemstone.binary.{ByteRange, LittleEndian}
 import net.kurobako.gemstone.concurrent.withLock
@@ -78,12 +81,14 @@ private[v1_6] object VMMemory {
       observer: Observer[Event],
       observation: ObservationContext
   ) {
-    private val writes                   = mutable.HashMap.empty[MemoryRegion, mutable.LongMap[DirtyPage]]
-    private val externalVirtualAddresses = mutable.HashMap.empty[MemoryRegion, Long]
-    private val internalVirtualAddresses = java.util.IdentityHashMap[Array[Byte], java.lang.Long]()
-    private val virtualPointers          = mutable.LongMap.empty[Pointer]
-    private val exceptionalAddresses     = mutable.HashMap.empty[(Region, Long), Long]
-    private val exceptionalPointers      = mutable.LongMap.empty[Pointer]
+    def flushHostReads(): Either[Fault, Unit] = memory.flushHostReads()
+    def fence(): Either[Fault, Unit]          = flush().flatMap(_ => memory.fenceHostMemory())
+    private val writes                        = mutable.HashMap.empty[MemoryRegion, mutable.LongMap[DirtyPage]]
+    private val externalVirtualAddresses      = mutable.HashMap.empty[MemoryRegion, Long]
+    private val internalVirtualAddresses      = java.util.IdentityHashMap[Array[Byte], java.lang.Long]()
+    private val virtualPointers               = mutable.LongMap.empty[Pointer]
+    private val exceptionalAddresses          = mutable.HashMap.empty[(Region, Long), Long]
+    private val exceptionalPointers           = mutable.LongMap.empty[Pointer]
     private val pointerRelocations: mutable.HashMap[(MemoryRegion, Long), (MemoryRegion, Long)] =
       mutable.HashMap.from(relocations.view.collect {
         case KernelTask.PointerRelocation(
@@ -118,6 +123,11 @@ private[v1_6] object VMMemory {
     /** IdentityHashMap uses null for a missing Java entry; confine it to this interop pattern. */
     @SuppressWarnings(Array("scalafix:DisableSyntax.null", "scalafix:DisableSyntax.return"))
     def pointerInteger(pointer: Pointer): Either[Fault, Long] = {
+      (memory, pointer.region) match {
+        case (addresses: AddressSpace, Region.External(id)) if pointer.offset >= 0 =>
+          return addresses.address(id, pointer.offset.refineUnsafe[Positive0]).map(_.value)
+        case _ => ()
+      }
       val base = pointer.region match {
         case Region.External(id)     => externalVirtualAddresses.getOrElseUpdate(id, allocateVirtualAddress(pointer))
         case Region.Internal(memory) =>
@@ -179,18 +189,24 @@ private[v1_6] object VMMemory {
     def argumentRelocation(index: Int, offset: Long): Option[(MemoryRegion, Long)] =
       argumentRelocations.get(index).flatMap(_.get(offset))
 
+    def nativePointerStorage(pointer: Pointer): Boolean = pointer.region match {
+      case Region.External(region) => memory.hasNativePointers(region)
+      case _                       => false
+    }
+
     def allocationRelocation(source: MemoryRegion, offset: Long): Option[(MemoryRegion, Long)] =
-      pointerRelocations.get(source -> offset)
+      if (memory.hasNativePointers(source)) None else pointerRelocations.get(source -> offset)
 
     def recordPointerRelocation(pointer: Pointer, destination: Pointer): Either[Fault, Unit] =
       destination.region match {
-        case Region.External(destinationAllocation) =>
+        case Region.External(destinationAllocation)
+            if destinationAllocation.value != 0 && !memory.hasNativePointers(destinationAllocation) =>
           destination.offset.refineEither[Positive0] match {
             case Left(_) => Left(Fault.InvalidTask(
                 s"negative SPIR-V pointer relocation destination offset ${destination.offset}"
               ))
             case Right(sourceOffset) => pointer.region match {
-                case Region.External(pointerAllocation) =>
+                case Region.External(pointerAllocation) if pointerAllocation.value != 0 =>
                   pointer.offset.refineEither[Positive0] match {
                     case Left(_) => Left(Fault.InvalidTask(
                         s"negative SPIR-V pointer relocation target offset ${pointer.offset}"
@@ -257,8 +273,12 @@ private[v1_6] object VMMemory {
                     s"${origin.storageClass}, not $storageClass"
                 )
               )
-            case _ =>
-              Right(Pointer(Region.Opaque(address), 0L, pointee, storageClass))
+            case _ => memory match {
+                case addresses: AddressSpace => addresses.locate(GuestAddress(address), 0).map(location =>
+                    Pointer(Region.External(location.region), location.offset, pointee, storageClass)
+                  ).orElse(Right(Pointer(Region.Opaque(address), 0L, pointee, storageClass)))
+                case _ => Right(Pointer(Region.Opaque(address), 0L, pointee, storageClass))
+              }
           }
       }
 
@@ -311,7 +331,7 @@ private[v1_6] object VMMemory {
         if (size.value != 8) None
         else
           pointer.region match {
-            case Region.External(source) => pointerRelocations.get(source -> pointer.offset)
+            case Region.External(source) => allocationRelocation(source, pointer.offset)
             case Region.Internal(_)      => None
             case Region.Opaque(_)        => None
             case Region.Null             => None

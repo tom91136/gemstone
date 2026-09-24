@@ -638,12 +638,8 @@ public:
   template <class T> algorithms::KeyValues<T> exclusive_scan_by_key(const std::vector<T> &keys, const std::vector<int32_t> &values) {
     onedpl_detail::Shared<T> device_keys(queue_, keys);
     onedpl_detail::Shared<int32_t> source(queue_, values);
-    onedpl_detail::Shared<int32_t> output(queue_, values.size());
-    // oneDPL's segmented exclusive scan can leave the first slot untouched on
-    // the emulated SPIR-V path for a 128-element dispatch.  Initialize the
-    // destination so that an otherwise valid zero-initialized segment cannot
-    // inherit a value from a recycled USM allocation.
-    std::fill(policy<T, 70>(), output.begin(), output.end(), int32_t{0});
+    // Every output must be written, including zero-valued segment starts.
+    onedpl_detail::Shared<int32_t> output(queue_, std::vector<int32_t>(values.size(), std::numeric_limits<int32_t>::min()));
     oneapi::dpl::exclusive_scan_by_segment(policy<T, 67>(), device_keys.begin(), device_keys.end(), source.begin(), output.begin(),
                                            int32_t{0});
     queue_.wait_and_throw();

@@ -106,12 +106,18 @@ object ExecutionRPCProtocol {
       operation: Operation[?],
       service: ExecutionService
   ): Either[ExecutionFailure, Array[Byte]] = operation match {
+    case Operation.EnableHostMemory => encode(Operation.EnableHostMemory, service.enableHostMemory())
+    case request @ Operation.PollHostMemory(completion)           => encode(request, service.pollHostMemory(completion))
+    case request @ Operation.SupplyHostMemory(completion, ranges) =>
+      encode(request, service.supplyHostMemory(completion, ranges))
     case Operation.Ping => summon[Wire.Codec[Unit]].encode((), ExecutionRPC.Limits)
         .leftMap(message => ExecutionFailure.Failed(message))
     case request @ Operation.RegisterAllocation(kind, size) =>
       encode(request, service.registerAllocation(size, kind))
-    case request @ Operation.RegisterAllocationAddress(allocation, nativeBase) =>
-      encode(request, service.registerAllocationAddress(allocation, nativeBase))
+    case request @ Operation.RegisterAllocationAddress(allocation, nativeBase, hostBacked) =>
+      encode(request, service.registerAllocationAddress(allocation, nativeBase, hostBacked))
+    case request @ Operation.SupplyHostSync(completion, ticket, observed) =>
+      encode(request, service.supplyHostSync(completion, ticket, observed))
     case request @ Operation.ReleaseAllocation(allocation) =>
       encode(request, service.releaseAllocation(allocation))
     case request @ Operation.WriteAllocation(allocation, offset, bytes) =>

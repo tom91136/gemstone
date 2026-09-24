@@ -10,6 +10,7 @@
 #include <memory>
 #include <mutex>
 #include <new>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -71,14 +72,41 @@ struct Allocation {
   std::unique_ptr<void, AlignedDelete> storage{nullptr, AlignedDelete{}};
   size_t size = 0;
   uint64_t id = 0;
+  bool hostBacked = false;
+  std::mutex useMutex;
+  std::condition_variable usesFinished;
+  size_t pendingUses = 0;
   std::atomic_bool externallyMutable{false};
   std::atomic_bool released{false};
   bool runtimeOwnsBase = false;
   uint64_t svmContextIdentity = 0;
+  cl_unified_shared_memory_type_intel usmType = CL_MEM_TYPE_UNKNOWN_INTEL;
   // Host-visible buffers can be copied by the SYCL runtime without updating
   // their host mirror.  Preserve pointer identities discovered by the
   // relocation scan so copied aggregate arguments remain relocatable.
   std::map<size_t, std::pair<std::shared_ptr<Allocation>, size_t>> pointerRelocations;
+};
+
+// One lease per enqueued command, released on both execution and dependency failure.
+struct AllocationUses {
+  std::vector<std::shared_ptr<Allocation>> allocations;
+  explicit AllocationUses(std::vector<std::shared_ptr<Allocation>> values) : allocations(std::move(values)) {
+    for (const auto &allocation : allocations) {
+      if (!allocation) continue;
+      std::lock_guard lock(allocation->useMutex);
+      ++allocation->pendingUses;
+    }
+  }
+  ~AllocationUses() {
+    for (const auto &allocation : allocations) {
+      if (!allocation) continue;
+      {
+        std::lock_guard lock(allocation->useMutex);
+        --allocation->pendingUses;
+      }
+      allocation->usesFinished.notify_all();
+    }
+  }
 };
 
 struct PendingCommand {
@@ -88,6 +116,7 @@ struct PendingCommand {
   bool waitPrior = false;
   bool fence = false;
   std::function<void(cl_int)> finish;
+  std::shared_ptr<AllocationUses> uses;
 };
 
 struct _cl_command_queue {
@@ -167,6 +196,8 @@ struct _cl_kernel {
   std::vector<gemstone::opencl::KernelArgumentInfo> argumentInfo;
   std::vector<KernelArgument> arguments;
   std::vector<bool> argumentsSet;
+  std::map<cl_kernel_exec_info, std::vector<std::shared_ptr<Allocation>>> indirectAllocations;
+  std::set<cl_kernel_exec_info> indirectTypes;
 };
 
 struct _cl_event {

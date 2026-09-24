@@ -7,6 +7,7 @@ import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 
 import net.kurobako.gemstone.Vec
+import net.kurobako.gemstone.memory.GuestAddress
 import net.kurobako.gemstone.binary.{Bits, ByteRange, ScalarByteWidth}
 import net.kurobako.gemstone.binary.IEEE754
 import net.kurobako.gemstone.binary.LittleEndian
@@ -121,6 +122,63 @@ final class CodeObjectExecutionSuite extends munit.FunSuite with CodeObjectTestS
       codeAddress = 0x1000L,
       text = branch ++ unsupported
     )).isLeft)
+  }
+
+  for (architecture <- List("gfx900", "gfx1030")) {
+    test(s"$architecture decodes an unreachable linked s_trap without executing it") {
+      // The entry branches into another function, requiring linked decoding.
+      // The trap models an uncalled __cxa_pure_virtual at the start of .text.
+      val trap   = LittleEndian.toVec(0xbf920002L, ScalarByteWidth(4))
+      val branch = LittleEndian.toVec(0xbf820000L, ScalarByteWidth(4))
+      val end    = LittleEndian.toVec(0xbf810000L, ScalarByteWidth(4))
+      val kernel = CodeObjectKernel(
+        "skip_linked_trap",
+        Target(architecture),
+        0,
+        0,
+        0,
+        0,
+        0,
+        branch,
+        codeAddress = 0x1004L,
+        textAddress = 0x1000L,
+        text = trap ++ branch ++ end,
+        functionSizes = Map(0x1000L -> 4, 0x1004L -> 4, 0x1008L -> 4)
+      )
+      val dispatch = KernelTask.validated(
+        KernelName("skip_linked_trap"),
+        Dimensions.One,
+        Dimensions.One,
+        Vec.empty
+      ).toOption.get
+      assertEquals(executeKernel(compileKernel(kernel), dispatch, TestMemory()), Right(()))
+    }
+
+    for (trapId <- List(2, 0x3141)) test(s"$architecture executed s_trap $trapId is a runtime fault") {
+      val code = Vec[Long](0xbf920000L | trapId.toLong, 0xbf810000L)
+        .flatMap(word => LittleEndian.toVec(word, ScalarByteWidth(4)))
+      val kernel = CodeObjectKernel(
+        "execute_trap",
+        Target(architecture),
+        0,
+        0,
+        0,
+        0,
+        0,
+        code,
+        codeAddress = 0x1000L
+      )
+      val dispatch = KernelTask.validated(
+        KernelName("execute_trap"),
+        Dimensions.One,
+        Dimensions.One,
+        Vec.empty
+      ).toOption.get
+      assertEquals(
+        executeKernel(compileKernel(kernel), dispatch, TestMemory()),
+        Left(Fault.Backend(s"AMDGPU s_trap $trapId at pc 0x1000"))
+      )
+    }
   }
 
   test("proven local PC-relative branches keep unrelated functions isolated") {
@@ -398,7 +456,7 @@ final class CodeObjectExecutionSuite extends munit.FunSuite with CodeObjectTestS
     assertEquals(executeKernel(compileKernel(kernel), dispatch, TestMemory()), Right(()))
   }
 
-  test("gfx900 executes the official ROCr vector-copy kernel subset") {
+  for (rawPointers <- List(false, true)) test(s"gfx900 vector copy batches external addresses: $rawPointers") {
     val words = Vec[Long](
       0xc0020242L, 0x00000004L, 0xc0020283L, 0x00000018L,
       0xc00a0003L, 0x00000000L, 0xbea10080L, 0xbf8cc07fL,
@@ -423,11 +481,30 @@ final class CodeObjectExecutionSuite extends munit.FunSuite with CodeObjectTestS
       memory.putInt(input, (index * 4).refineUnsafe[Positive0], value)
     }
 
+    val batches = scala.collection.mutable.ArrayBuffer.empty[Vec[(GuestAddress, Int :| Positive0)]]
+    final class TrackedMemory extends Memory with AddressSpace {
+      private val pending                                = java.util.concurrent.atomic.AtomicBoolean(!rawPointers)
+      override def flushHostReads(): Either[Fault, Unit] = { pending.set(false); Right(()) }
+      override def read(region: MemoryRegion, offset: Long :| Positive0, size: Int :| Positive0) =
+        if (pending.get()) Left(Fault.PendingMemory) else memory.read(region, offset, size)
+      override def write(region: MemoryRegion, offset: Long :| Positive0, bytes: Vec[Byte]) =
+        memory.write(region, offset, bytes)
+      override def address(region: MemoryRegion, offset: Long :| Positive0)    = memory.address(region, offset)
+      override def locate(address: GuestAddress, size: Int :| Positive0)       = memory.locate(address, size)
+      override def prepareReads(ranges: Vec[(GuestAddress, Int :| Positive0)]) = { batches += ranges; Right(()) }
+    }
+    val tracked                                            = TrackedMemory()
+    def pointer(region: MemoryRegion): KernelTask.Argument =
+      if (rawPointers) KernelTask.Argument.Scalar(LittleEndian.toVec(
+        memory.address(region, 0L).toOption.get.value,
+        ScalarByteWidth(8)
+      ))
+      else KernelTask.Argument.Memory(region, 0L)
     val zero      = KernelTask.Argument.Scalar(Vec.fill(8)(0.toByte))
     val arguments = Vec(
-      KernelTask.Argument.Memory(input, 0L),
-      KernelTask.Argument.Memory(output, 0L),
-      KernelTask.Argument.Memory(unused, 0L),
+      pointer(input),
+      pointer(output),
+      pointer(unused),
       zero,
       zero,
       zero,
@@ -443,7 +520,16 @@ final class CodeObjectExecutionSuite extends munit.FunSuite with CodeObjectTestS
       arguments
     ).toOption.get
 
-    assertEquals(executeKernel(compileKernel(kernel), dispatch, memory), Right(()))
+    assertEquals(executeKernel(compileKernel(kernel), dispatch, tracked), Right(()))
+    if (rawPointers) {
+      assertEquals(batches.size, 1)
+      assertEquals(batches.head.size, 64)
+      assertEquals(batches.head.map(_._2.toInt).sum, 256)
+      assertEquals(
+        batches.head.map(_._1.value).toSeq,
+        (0 until 64).map(i => memory.address(input, (i * 4L).refineUnsafe[Positive0]).toOption.get.value)
+      )
+    }
     assertEquals(
       Array.tabulate(64)(index => memory.getInt(output, (index * 4).refineUnsafe[Positive0])).toSeq,
       expected.toSeq

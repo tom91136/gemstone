@@ -50,34 +50,6 @@ string(REPLACE "${image_dimensions_before}" "${image_dimensions_after}"
   image_dimensions_content "${image_dimensions_content}")
 file(WRITE "${image_dimensions}" "${image_dimensions_content}")
 
-# These SVM linked-list cases multiply the harness element count by 32 nodes.
-# Keep the reduced CTS run within the RPC service's per-collection envelope.
-foreach(svm_source IN ITEMS
-    test_cross_buffer_pointers.cpp test_shared_address_space_coarse_grain.cpp
-    test_shared_address_space_fine_grain.cpp test_shared_address_space_fine_grain_buffers.cpp
-    test_shared_sub_buffers.cpp)
-  set(svm_file "${staged_source}/test_conformance/SVM/${svm_source}")
-  file(READ "${svm_file}" svm_content)
-  set(before [[#include "common.h"]])
-  string(FIND "${svm_content}" "${before}" svm_include_point)
-  if(svm_include_point EQUAL -1)
-    message(FATAL_ERROR "Pinned OpenCL CTS SVM include integration point changed in ${svm_source}")
-  endif()
-  string(REPLACE "${before}" "#include \"common.h\"\n#include \"harness/parseParameters.h\"" svm_content "${svm_content}")
-  set(before [[size_t numLists = num_elements;]])
-  set(after [[size_t numLists = gWimpyMode ? std::min<size_t>(num_elements, 256) : num_elements;]])
-  string(FIND "${svm_content}" "${before}" svm_count_point)
-  if(svm_count_point EQUAL -1)
-    set(before [[size_t numLists =  num_elements;]])
-    string(FIND "${svm_content}" "${before}" svm_count_point)
-  endif()
-  if(svm_count_point EQUAL -1)
-    message(FATAL_ERROR "Pinned OpenCL CTS SVM count integration point changed in ${svm_source}")
-  endif()
-  string(REPLACE "${before}" "${after}" svm_content "${svm_content}")
-  file(WRITE "${svm_file}" "${svm_content}")
-endforeach()
-
 set(common "${staged_source}/test_conformance/CMakeCommon.txt")
 file(READ "${common}" common_content)
 set(before [=[add_executable(${${MODULE_NAME}_OUT} ${${MODULE_NAME}_SOURCES})]=])

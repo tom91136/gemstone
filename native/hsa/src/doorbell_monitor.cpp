@@ -41,6 +41,7 @@ struct QueueState {
   std::atomic<bool> fatal{false};
   std::atomic<uint32_t> scans{0};
   std::atomic<bool> tracedArmed{false};
+  std::mutex consumeLock;
   std::mutex scanLock;
   std::condition_variable scanFinished;
 };
@@ -62,16 +63,19 @@ struct ScanGuard {
 
 struct gemstone_hsa_doorbell_monitor {
   explicit gemstone_hsa_doorbell_monitor(const gemstone_hsa_doorbell_monitor_config &requested)
-      : config(requested), slots(new DoorbellSlot[config.max_queues]), used(config.max_queues, false),
-        worker(&gemstone_hsa_doorbell_monitor::run, this) {}
+      : config(requested), slots(new DoorbellSlot[config.max_queues]), used(config.max_queues, false) {
+    for (unsigned i = 0; i < 2; ++i)
+      workers.emplace_back(&gemstone_hsa_doorbell_monitor::run, this);
+  }
 
   ~gemstone_hsa_doorbell_monitor() {
     {
       std::lock_guard<std::mutex> guard(lock);
       stopping = true;
     }
-    changed.notify_one();
-    worker.join();
+    changed.notify_all();
+    for (auto &worker : workers)
+      worker.join();
   }
 
   void run() {
@@ -105,6 +109,8 @@ struct gemstone_hsa_doorbell_monitor {
 
   static bool scan(QueueState &queue) {
     ScanGuard guard(queue);
+    std::unique_lock consumeGuard(queue.consumeLock, std::try_to_lock);
+    if (!consumeGuard.owns_lock()) return false;
     if (!queue.active.load(std::memory_order_acquire)) return false;
     const auto &q = queue.descriptor;
 
@@ -166,7 +172,7 @@ struct gemstone_hsa_doorbell_monitor {
   std::condition_variable changed;
   std::vector<std::shared_ptr<QueueState>> queues;
   bool stopping = false;
-  std::thread worker;
+  std::vector<std::thread> workers;
 };
 
 struct gemstone_hsa_queue_registration {
@@ -218,7 +224,7 @@ extern "C" gemstone_hsa_queue_registration *gemstone_hsa_doorbell_monitor_regist
       monitor->queues.push_back(state);
       *doorbell_address = &state->doorbell->value;
     }
-    monitor->changed.notify_one();
+    monitor->changed.notify_all();
     return registration;
   } catch (...) {
     return nullptr;
@@ -242,4 +248,6 @@ extern "C" void gemstone_hsa_doorbell_monitor_unregister(gemstone_hsa_queue_regi
   delete registration;
 }
 
-extern "C" uint32_t gemstone_hsa_doorbell_monitor_thread_count(const gemstone_hsa_doorbell_monitor *monitor) { return !monitor ? 0 : 1; }
+extern "C" uint32_t gemstone_hsa_doorbell_monitor_thread_count(const gemstone_hsa_doorbell_monitor *monitor) {
+  return !monitor ? 0 : static_cast<uint32_t>(monitor->workers.size());
+}

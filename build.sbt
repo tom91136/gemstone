@@ -234,6 +234,51 @@ def runConformance(
   require(status == 0, s"conformance run exited with $status")
 }
 
+// The build owns emulator routing; the conformance project only sees an opaque launcher.
+def withConformanceLauncher[A](
+    root: Path,
+    command: Seq[String],
+    environment: Seq[(String, String)]
+)(run: Seq[String] => A): A = {
+  def quoted(value: String): String = "'" + value.replace("'", "'\"'\"'") + "'"
+  val directory = root / "target/conformance"
+  Files.createDirectories(directory)
+  val script = Files.createTempFile(directory, "launcher-", ".sh")
+  val configured = (sys.env.filter(_._1.startsWith("GEMSTONE_")) ++ environment.toMap)
+    .toVector.sortBy(_._1).map { case (key, value) => s"export $key=${quoted(value)}" }.mkString("\n")
+  val routing = """
+    |unset CONFORMANCE_DEVICE
+    |case "$CONFORMANCE_TARGET_BACKEND" in
+    |  cuda)
+    |    if [ -z "$GEMSTONE_CUDA_TARGET" ] && [ -z "$GEMSTONE_CUDA_TARGET_ARCH" ] && [ -n "$CONFORMANCE_TARGET_ARCHITECTURE" ]; then
+    |      export GEMSTONE_CUDA_TARGET="$CONFORMANCE_TARGET_ARCHITECTURE"
+    |    fi ;;
+    |  hip|hsa)
+    |    if [ -z "$GEMSTONE_AMDGPU_TARGET" ] && [ -n "$CONFORMANCE_TARGET_ARCHITECTURE" ]; then
+    |      export GEMSTONE_AMDGPU_TARGET="$CONFORMANCE_TARGET_ARCHITECTURE"
+    |    fi ;;
+    |  levelzero) export CONFORMANCE_DEVICE='*Gemstone*' ;;
+    |esac
+    |toolchain="$CONFORMANCE_SUPPORT_ROOT/opencl-toolchain"
+    |if [ -z "$GEMSTONE_OPENCL_COMPILER" ] && [ -x "$toolchain/bin/icpx" ]; then
+    |  export GEMSTONE_OPENCL_COMPILER="$toolchain/bin/icpx"
+    |fi
+    |if [ -z "$GEMSTONE_OPENCL_LLVM_SPIRV" ] && [ -x "$toolchain/bin/compiler/llvm-spirv" ]; then
+    |  export GEMSTONE_OPENCL_LLVM_SPIRV="$toolchain/bin/compiler/llvm-spirv"
+    |fi
+    |if [ -z "$GEMSTONE_OPENCL_LLVM_LINK" ] && [ -x "$toolchain/bin/compiler/llvm-link" ]; then
+    |  export GEMSTONE_OPENCL_LLVM_LINK="$toolchain/bin/compiler/llvm-link"
+    |fi
+    |export CONFORMANCE_OPENCL_CTS_ELEMENTS=256
+    |export CONFORMANCE_OPENCL_CTS_WIMPY=1
+    |export CONFORMANCE_OPENCL_CTS_TIMEOUT=600
+    |""".stripMargin
+  try {
+    Files.writeString(script, configured + "\n" + routing + "exec " + command.map(quoted).mkString(" ") + " \"$@\"\n")
+    run(Seq("/bin/sh", script.toString))
+  } finally Files.deleteIfExists(script)
+}
+
 def awaitGemstoneServerPort(portFile: Path, server: scala.sys.process.Process): Int = {
   val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30)
   var port     = Option.empty[Int]
@@ -587,13 +632,13 @@ lazy val nativeConfigureArguments =
   taskKey[Seq[String]]("CMake configure arguments for the native runtime.")
 lazy val nativeSourceDirectories =
   settingKey[Seq[Path]]("C and C++ source trees governed by the native codestyle checks.")
-lazy val nativeFormatCheck     = taskKey[Unit]("Verify hand-written C and C++ sources are clang-formatted.")
-lazy val nativeCodestyleCheck  = taskKey[Unit]("Verify project-specific C and C++ source conventions.")
-lazy val terminologyCheck      = taskKey[Unit]("Verify repository-authored sources use precise terminology.")
-lazy val nativeArtifact        = taskKey[Path]("Built native runtime directory.")
-lazy val conformanceExecutable = taskKey[Path]("Built native conformance executable.")
+lazy val nativeFormatCheck         = taskKey[Unit]("Verify hand-written C and C++ sources are clang-formatted.")
+lazy val nativeCodestyleCheck      = taskKey[Unit]("Verify project-specific C and C++ source conventions.")
+lazy val terminologyCheck          = taskKey[Unit]("Verify repository-authored sources use precise terminology.")
+lazy val nativeArtifact            = taskKey[Path]("Built native runtime directory.")
+lazy val conformanceExecutable     = taskKey[Path]("Built native conformance executable.")
 lazy val generateBenchmarkFixtures = inputKey[Path]("Build selected benchmark fixtures in pinned toolchain containers.")
-lazy val gemstoneRun           = inputKey[Unit]("Build Gemstone and run a command through selected compute APIs.")
+lazy val gemstoneRun               = inputKey[Unit]("Build Gemstone and run a command through selected compute APIs.")
 lazy val emulate               = inputKey[Unit]("Run conformance through Gemstone.")
 lazy val cmakeExecutable       = settingKey[String]("CMake command used by native builds.")
 lazy val ctestExecutable       = settingKey[String]("CTest command used by native tests.")
@@ -980,6 +1025,8 @@ lazy val nativeRuntimeSettings = Seq(
       "Ninja",
       s"-DCMAKE_MAKE_PROGRAM=${nonEmptyCommand("NINJA", (Global / ninjaExecutable).value)}",
       "-DBUILD_TESTING=ON",
+      s"-DCONTAINER_EXECUTABLE=${nonEmptyCommand("CONTAINER_EXECUTABLE", sys.env.getOrElse("CONTAINER_EXECUTABLE", "podman"))}",
+      s"-DROCM_VERSION=$rocmVersion",
       s"-DCMAKE_BUILD_TYPE=${sys.env.getOrElse("CMAKE_BUILD_TYPE", "Release")}",
       s"-DCUDA_INCLUDE_DIR=$cudaInclude",
       s"-DHIP_INCLUDE_DIR=${references / "amd/hip/include"}",
@@ -1229,7 +1276,7 @@ lazy val spirv = projectMatrix
       val source    = (Test / sourceDirectory).value.toPath / "fixtures"
       val output    = (Test / resourceManaged).value.toPath
       val assembler = nonEmptyCommand("SPIRV_AS", sys.env.getOrElse("SPIRV_AS", "spirv-as"))
-      val fixtures = Seq(
+      val fixtures  = Seq(
         ("glcompute-dot-double", "spv1.3"),
         ("glcompute-fma", "spv1.3"),
         ("glcompute-pow", "spv1.5"),
@@ -1364,8 +1411,8 @@ lazy val benchmarks = projectMatrix.in(file("tools/benchmarks"))
 
       "org.scalameta" %% "munit" % munitVersion % Test
     ),
-    Compile / mainClass  := Some(s"$rootPackage.benchmarks.BenchmarkRunner"),
-    Compile / run / fork := true,
+    Compile / mainClass       := Some(s"$rootPackage.benchmarks.BenchmarkRunner"),
+    Compile / run / fork      := true,
     generateBenchmarkFixtures := {
       val arguments = spaceDelimited("[cuda|hip|hsa|opencl|all]").parsed
       if (arguments.size > 1)
@@ -1599,6 +1646,7 @@ lazy val conformance = project.in(file("conformance"))
         log = log.info,
         error = log.error
       ) { port =>
+        withConformanceLauncher(root, clientCommand ++ Seq("run", "--server-port", port.toString), environment) { launcher =>
         runConformance(
           root = root,
           artifacts = root / "target/conformance/artifacts",
@@ -1606,11 +1654,12 @@ lazy val conformance = project.in(file("conformance"))
           ctest = nonEmptyCommand("CTEST", (Global / ctestExecutable).value),
           arguments = arguments :+ "--isolated-launcher",
           output = root / "target/conformance/emulated",
-          launcher = clientCommand ++ Seq("run", "--server-port", port.toString),
+          launcher = launcher,
           environment = environment,
           log = log.info,
           error = log.error
         )
+        }
       }
     },
     cleanFiles := Seq((LocalRootProject / baseDirectory).value.toPath / "target/conformance")

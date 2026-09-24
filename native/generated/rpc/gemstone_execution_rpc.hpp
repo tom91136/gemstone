@@ -18,7 +18,7 @@ inline constexpr uint32_t ResponseMagic = UINT32_C(0x474d4632);
 inline constexpr uint32_t MaximumPayload = 134217728U;
 inline constexpr uint32_t MaximumElements = 16384U;
 inline constexpr uint32_t MaximumTextBytes = 8192U;
-inline constexpr uint64_t SchemaFingerprint = 0xc38b40ee5e26b972ULL;
+inline constexpr uint64_t SchemaFingerprint = 0x64c8fbb072008b08ULL;
 inline constexpr size_t RequestFingerprintOffset = 4U;
 inline constexpr size_t RequestClientOffset = 12U;
 inline constexpr size_t RequestSessionHighOffset = 20U;
@@ -32,7 +32,11 @@ inline constexpr size_t ResponsePayloadSizeOffset = 16U;
 inline constexpr size_t ResponseHeaderBytes = 20U;
 namespace operation {
 inline constexpr uint64_t Ping = 0xfe6050c5d9e5b2f0ULL;
+inline constexpr uint64_t EnableHostMemory = 0x427c0ec0880d913aULL;
+inline constexpr uint64_t PollHostMemory = 0x5f758336f94460f8ULL;
+inline constexpr uint64_t SupplyHostMemory = 0xf062de3285328d0eULL;
 inline constexpr uint64_t RegisterAllocation = 0x3ab2cfea883bea23ULL;
+inline constexpr uint64_t SupplyHostSync = 0xd852c98d040d805aULL;
 inline constexpr uint64_t RegisterAllocationAddress = 0xe96fefec41f65bf1ULL;
 inline constexpr uint64_t ReleaseAllocation = 0x91cc677536b84617ULL;
 inline constexpr uint64_t WriteAllocation = 0x5c2847c6c97d6de9ULL;
@@ -80,6 +84,42 @@ inline constexpr uint64_t PrintArgumentText = 0x722582b3534d844cULL;
 
 struct Unit {};
 
+struct CompletionId { int64_t value{}; };
+
+struct GuestAddress { int64_t value{}; };
+
+struct IntPositive { int32_t value{}; };
+
+struct HostMemoryRange {
+  GuestAddress address{};
+  IntPositive size{};
+};
+
+struct HostMemoryBytes {
+  GuestAddress address{};
+  std::vector<uint8_t> bytes{};
+  int32_t atomicWidth{};
+};
+
+struct HostMemoryAtomic {
+  GuestAddress address{};
+  int32_t size{};
+  int64_t expected{};
+  int64_t desired{};
+};
+
+struct HostMemorySync {
+  int64_t ticket{};
+  std::optional<HostMemoryAtomic> atomic{};
+};
+
+struct HostMemoryBatch {
+  std::vector<HostMemoryRange> reads{};
+  std::vector<HostMemoryBytes> writes{};
+  bool completed{};
+  std::optional<HostMemorySync> sync{};
+};
+
 enum class AllocationKind : uint64_t {
   Device = 0x550c809331279417ULL,
   Managed = 0xe3e753f7a49fdebaULL,
@@ -90,8 +130,6 @@ enum class AllocationKind : uint64_t {
 struct LongPositive { int64_t value{}; };
 
 struct AllocationId { int64_t value{}; };
-
-struct GuestAddress { int64_t value{}; };
 
 struct LongPositive0 { int64_t value{}; };
 
@@ -121,8 +159,6 @@ struct ProgramCatalog {
   std::vector<ProgramKernel> kernels{};
   std::vector<ProgramGlobalMetadata> globals{};
 };
-
-struct IntPositive { int32_t value{}; };
 
 enum class KernelParameterKind : uint64_t {
   Scalar = 0x8e8237265871dac9ULL,
@@ -195,8 +231,6 @@ struct PointerRelocation {
   LongPositive0 targetOffset{};
 };
 
-struct CompletionId { int64_t value{}; };
-
 struct ExecutionFailureInvalidRequest {
   std::string detail{};
 };
@@ -251,14 +285,33 @@ struct PrintEvent {
 struct Ping {
 };
 
+struct EnableHostMemory {
+};
+
+struct PollHostMemory {
+  CompletionId completion{};
+};
+
+struct SupplyHostMemory {
+  CompletionId completion{};
+  std::vector<HostMemoryBytes> ranges{};
+};
+
 struct RegisterAllocation {
   AllocationKind kind{};
   LongPositive size{};
 };
 
+struct SupplyHostSync {
+  CompletionId completion{};
+  int64_t ticket{};
+  int64_t observed{};
+};
+
 struct RegisterAllocationAddress {
   AllocationId allocation{};
   GuestAddress nativeBase{};
+  bool hostBacked{};
 };
 
 struct ReleaseAllocation {
@@ -380,7 +433,11 @@ class Client {
   Client &operator=(const Client &) = delete;
   std::string error() const;
   Result<Unit> call(const Ping &request);
+  Result<Unit> call(const EnableHostMemory &request);
+  Result<HostMemoryBatch> call(const PollHostMemory &request);
+  Result<Unit> call(const SupplyHostMemory &request);
   Result<AllocationId> call(const RegisterAllocation &request);
+  Result<Unit> call(const SupplyHostSync &request);
   Result<Unit> call(const RegisterAllocationAddress &request);
   Result<Unit> call(const ReleaseAllocation &request);
   Result<Unit> call(const WriteAllocation &request);

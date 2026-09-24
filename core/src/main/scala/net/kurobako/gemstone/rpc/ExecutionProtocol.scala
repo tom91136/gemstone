@@ -36,6 +36,17 @@ object ExecutionProtocol {
       z: Long :| Positive
   ) derives Codec
 
+  final case class HostMemoryRange(address: GuestAddress, size: Int :| Positive) derives Codec
+  final case class HostMemoryBytes(address: GuestAddress, bytes: Vec[Byte], atomicWidth: Int = 0) derives Codec
+  final case class HostMemoryAtomic(address: GuestAddress, size: Int, expected: Long, desired: Long) derives Codec
+  final case class HostMemorySync(ticket: Long, atomic: Option[HostMemoryAtomic]) derives Codec
+  final case class HostMemoryBatch(
+      reads: Vec[HostMemoryRange],
+      writes: Vec[HostMemoryBytes],
+      completed: Boolean,
+      sync: Option[HostMemorySync] = None
+  ) derives Codec
+
   enum KernelArgument derives Codec {
     case Scalar(bytes: Vec[Byte])
     case Allocation(id: AllocationId, offset: Long :| Positive0)

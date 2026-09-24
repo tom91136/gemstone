@@ -2,7 +2,17 @@ package net.kurobako.gemstone.isa.spirv.v1_6
 
 import net.kurobako.gemstone.Vec
 import net.kurobako.gemstone.isa.{GlobalName, KernelMetadata, KernelName}
-import net.kurobako.gemstone.vm.{Event, Fault, KernelTask, Memory, MemoryRegion, Observer, Result, Scheduler, TaskControl}
+import net.kurobako.gemstone.vm.{
+  Event,
+  Fault,
+  KernelTask,
+  Memory,
+  MemoryRegion,
+  Observer,
+  Result,
+  Scheduler,
+  TaskControl
+}
 
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*

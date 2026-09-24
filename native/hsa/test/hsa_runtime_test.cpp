@@ -63,7 +63,7 @@ TEST_CASE("HSA system paging ISA feature", "[hsa]") {
   hsa_amd_pointer_info_t info{};
   info.size = sizeof(info);
   REQUIRE((hsa_amd_pointer_info(host_values.data(), &info, nullptr, nullptr, nullptr) == HSA_STATUS_SUCCESS));
-  REQUIRE((info.type == HSA_EXT_POINTER_TYPE_UNKNOWN));
+  REQUIRE((info.type == HSA_EXT_POINTER_TYPE_LOCKED));
   REQUIRE((hsa_amd_memory_unlock(host_values.data()) == HSA_STATUS_SUCCESS));
   REQUIRE((hsa_amd_memory_unlock(host_values.data()) == HSA_STATUS_SUCCESS));
   REQUIRE((hsa_shut_down() == HSA_STATUS_SUCCESS));
@@ -356,7 +356,7 @@ TEST_CASE("HSA runtime facade", "[hsa]") {
   REQUIRE((setenv("GEMSTONE_HSA_SYSTEM_PAGING", "1", 1) == 0));
   for (uint32_t seed = 1; seed <= 16; ++seed) {
     std::array<uint32_t, 12> pageable_output{};
-    if (seed == 1) fixture.pauseReleaseContaining(pageable_output.data());
+    if (seed == 1) fixture.pauseNextCompletion();
     *arguments = Arguments{pageable_output.data(), seed};
     hsa_signal_t completion{};
     REQUIRE((hsa_signal_create(1, 0, nullptr, &completion) == HSA_STATUS_SUCCESS));
@@ -377,11 +377,11 @@ TEST_CASE("HSA runtime facade", "[hsa]") {
     hsa_signal_store_screlease(queue->doorbell_signal, static_cast<hsa_signal_value_t>(index));
     if (seed == 1) {
       const auto release_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
-      while (!fixture.releaseEntered() && std::chrono::steady_clock::now() < release_deadline)
+      while (!fixture.completionEntered() && std::chrono::steady_clock::now() < release_deadline)
         std::this_thread::yield();
-      REQUIRE((fixture.releaseEntered()));
+      REQUIRE((fixture.completionEntered()));
       REQUIRE((hsa_signal_load_scacquire(completion) == 1));
-      fixture.releasePausedRelease();
+      fixture.releasePausedCompletion();
     }
     REQUIRE((hsa_signal_wait_scacquire(completion, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_BLOCKED) == 0));
     for (uint32_t output_index = 0; output_index < pageable_output.size(); ++output_index)
@@ -522,7 +522,9 @@ TEST_CASE("HSA runtime facade", "[hsa]") {
     const uint32_t expected = iteration < 2 ? 37 : iteration < 4 ? 73 : iteration == 4 ? 91 : 111;
     void *output_memory = iteration < 4 ? table_memory : child.data();
     auto *nested = &child[17000];
-    std::memcpy(table_memory, &nested, sizeof(nested));
+    // table_memory belongs to the device pool: publish its pointer field through
+    // the copy API instead of relying on dispatch-time uploads of shadow bytes.
+    REQUIRE((hsa_memory_copy(table_memory, &nested, sizeof(nested)) == HSA_STATUS_SUCCESS));
     *arguments = Arguments{output_memory, expected};
     fixture.expect({4, 2, 8, 0, expected});
     if (iteration < 4) fixture.expectIndirectInput(table_memory, expected, iteration == 0 ? std::optional<uint32_t>(55) : std::nullopt);
@@ -546,7 +548,7 @@ TEST_CASE("HSA runtime facade", "[hsa]") {
       REQUIRE((static_cast<uint32_t *>(output_memory)[index] == expected + index));
     REQUIRE((child[17000] == (iteration == 0 ? 55 : iteration == 1 ? 37 : 73)));
     fixture.check();
-    REQUIRE((fixture.writtenBytes(child.data()) == uint64_t(128 + 64 * std::min(iteration, 2U) + (iteration == 5 ? 64 : 0)) * 1024));
+    REQUIRE((fixture.writtenBytes(child.data()) == 0));
     REQUIRE((fixture.writtenBytes(device_only) == 0));
   }
   REQUIRE((hsa_shut_down() == HSA_STATUS_ERROR_INVALID_RUNTIME_STATE));
@@ -558,4 +560,154 @@ TEST_CASE("HSA runtime facade", "[hsa]") {
   REQUIRE((hsa_amd_memory_pool_free(argument_memory) == HSA_STATUS_SUCCESS));
   REQUIRE((hsa_memory_deregister(child.data(), child.size() * sizeof(uint32_t)) == HSA_STATUS_SUCCESS));
   REQUIRE((hsa_shut_down() == HSA_STATUS_SUCCESS));
+}
+
+namespace {
+// Explicit registrations must work without the optional process-map fallback.
+struct MemoryLockSession {
+  gemstone_test::RpcFixture server;
+  MemoryLockSession() {
+    const auto port = std::to_string(server.port());
+    REQUIRE((setenv("GEMSTONE_RPC_PORT", port.c_str(), 1) == 0));
+    REQUIRE((setenv("GEMSTONE_RPC_CLIENT", "42", 1) == 0));
+    REQUIRE((unsetenv("GEMSTONE_HSA_SYSTEM_PAGING") == 0));
+    REQUIRE((hsa_init() == HSA_STATUS_SUCCESS));
+  }
+  ~MemoryLockSession() { (void)hsa_shut_down(); }
+};
+} // namespace
+
+TEST_CASE("HSA locked interior view addresses the requested bytes", "[hsa][unified-memory]") {
+  MemoryLockSession session;
+  std::array<uint32_t, 8> host{11, 22, 33, 44, 55, 66, 77, 88};
+  void *whole = nullptr, *interior = nullptr;
+  REQUIRE((hsa_amd_memory_lock(host.data(), sizeof(host), nullptr, 0, &whole) == HSA_STATUS_SUCCESS));
+  REQUIRE((hsa_amd_memory_lock(host.data() + 2, 3 * sizeof(uint32_t), nullptr, 0, &interior) == HSA_STATUS_SUCCESS));
+  uint32_t observed = 0;
+  REQUIRE((hsa_memory_copy(&observed, interior, sizeof(observed)) == HSA_STATUS_SUCCESS));
+  CHECK((observed == host[2]));
+  CHECK((hsa_amd_memory_unlock(host.data() + 2) == HSA_STATUS_SUCCESS));
+  CHECK((hsa_amd_memory_unlock(host.data()) == HSA_STATUS_SUCCESS));
+}
+
+TEST_CASE("HSA repeated locks retain memory until the final unlock", "[hsa][unified-memory]") {
+  MemoryLockSession session;
+  std::array<uint32_t, 8> host{};
+  void *first = nullptr, *second = nullptr;
+  REQUIRE((hsa_amd_memory_lock(host.data(), sizeof(host), nullptr, 0, &first) == HSA_STATUS_SUCCESS));
+  REQUIRE((hsa_amd_memory_lock(host.data(), sizeof(host), nullptr, 0, &second) == HSA_STATUS_SUCCESS));
+  REQUIRE((hsa_amd_memory_unlock(host.data()) == HSA_STATUS_SUCCESS));
+  hsa_amd_pointer_info_t info{};
+  info.size = sizeof(info);
+  REQUIRE((hsa_amd_pointer_info(second, &info, nullptr, nullptr, nullptr) == HSA_STATUS_SUCCESS));
+  CHECK((info.type == HSA_EXT_POINTER_TYPE_LOCKED));
+  CHECK((hsa_amd_memory_unlock(host.data()) == HSA_STATUS_SUCCESS));
+  host[0] = 91; // Unlock must not free application-owned storage.
+  CHECK((host[0] == 91));
+}
+
+TEST_CASE("HSA partially overlapping locks preserve both ranges", "[hsa][unified-memory]") {
+  MemoryLockSession session;
+  std::array<uint32_t, 8> host{11, 22, 33, 44, 55, 66, 77, 88};
+  void *first = nullptr, *second = nullptr;
+  REQUIRE((hsa_amd_memory_lock(host.data(), 4 * sizeof(uint32_t), nullptr, 0, &first) == HSA_STATUS_SUCCESS));
+  REQUIRE((hsa_amd_memory_lock(host.data() + 2, 6 * sizeof(uint32_t), nullptr, 0, &second) == HSA_STATUS_SUCCESS));
+  REQUIRE((hsa_amd_memory_unlock(host.data()) == HSA_STATUS_SUCCESS));
+  std::array<uint32_t, 6> observed{};
+  REQUIRE((hsa_memory_copy(observed.data(), second, sizeof(observed)) == HSA_STATUS_SUCCESS));
+  CHECK((std::equal(observed.begin(), observed.end(), host.begin() + 2)));
+  CHECK((hsa_amd_memory_unlock(host.data() + 2) == HSA_STATUS_SUCCESS));
+}
+
+TEST_CASE("HSA async copy and fill span overlapping lock backing fragments", "[hsa][unified-memory]") {
+  MemoryLockSession session;
+  std::array<uint32_t, 8> host{11, 22, 33, 44, 55, 66, 77, 88};
+  void *first = nullptr, *second = nullptr;
+  REQUIRE(hsa_amd_memory_lock(host.data(), 4 * sizeof(uint32_t), nullptr, 0, &first) == HSA_STATUS_SUCCESS);
+  REQUIRE(hsa_amd_memory_lock(host.data() + 2, 6 * sizeof(uint32_t), nullptr, 0, &second) == HSA_STATUS_SUCCESS);
+  hsa_agent_t cpu{};
+  REQUIRE(hsa_iterate_agents(
+              [](hsa_agent_t agent, void *data) {
+                hsa_device_type_t type{};
+                if (hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &type) != HSA_STATUS_SUCCESS) return HSA_STATUS_ERROR;
+                if (type == HSA_DEVICE_TYPE_CPU) *static_cast<hsa_agent_t *>(data) = agent;
+                return HSA_STATUS_SUCCESS;
+              },
+              &cpu)
+          == HSA_STATUS_SUCCESS);
+  hsa_signal_t signal{};
+  REQUIRE(hsa_signal_create(1, 0, nullptr, &signal) == HSA_STATUS_SUCCESS);
+  std::array<uint32_t, 6> observed{};
+  CHECK(hsa_amd_memory_async_copy(observed.data(), cpu, second, cpu, sizeof(observed), 0, nullptr, signal) == HSA_STATUS_SUCCESS);
+  CHECK(hsa_signal_load_scacquire(signal) == 0);
+  CHECK(std::equal(observed.begin(), observed.end(), host.begin() + 2));
+  CHECK(hsa_amd_memory_fill(second, 99, 6) == HSA_STATUS_SUCCESS);
+  CHECK(std::all_of(host.begin() + 2, host.end(), [](auto value) { return value == 99; }));
+  CHECK(host[0] == 11);
+  CHECK(host[1] == 22);
+  CHECK(hsa_signal_destroy(signal) == HSA_STATUS_SUCCESS);
+  CHECK(hsa_amd_memory_unlock(host.data()) == HSA_STATUS_SUCCESS);
+  CHECK(hsa_amd_memory_unlock(host.data() + 2) == HSA_STATUS_SUCCESS);
+}
+
+TEST_CASE("HSA nested lock survives release of its enclosing lock", "[hsa][unified-memory]") {
+  MemoryLockSession session;
+  std::array<uint32_t, 8> host{11, 22, 33, 44, 55, 66, 77, 88};
+  void *whole = nullptr, *interior = nullptr;
+  REQUIRE((hsa_amd_memory_lock(host.data(), sizeof(host), nullptr, 0, &whole) == HSA_STATUS_SUCCESS));
+  REQUIRE((hsa_amd_memory_lock(host.data() + 2, 3 * sizeof(uint32_t), nullptr, 0, &interior) == HSA_STATUS_SUCCESS));
+  REQUIRE((hsa_amd_memory_unlock(host.data()) == HSA_STATUS_SUCCESS));
+  hsa_amd_pointer_info_t info{};
+  info.size = sizeof(info);
+  REQUIRE((hsa_amd_pointer_info(interior, &info, nullptr, nullptr, nullptr) == HSA_STATUS_SUCCESS));
+  CHECK((info.type == HSA_EXT_POINTER_TYPE_LOCKED));
+  CHECK((hsa_amd_memory_unlock(host.data() + 2) == HSA_STATUS_SUCCESS));
+}
+
+TEST_CASE("HSA disjoint registrations can be released and reused independently", "[hsa][unified-memory]") {
+  MemoryLockSession session;
+  std::array<uint32_t, 8> host{};
+  for (unsigned iteration = 0; iteration < 3; ++iteration) {
+    REQUIRE((hsa_memory_register(host.data(), 2 * sizeof(uint32_t)) == HSA_STATUS_SUCCESS));
+    REQUIRE((hsa_memory_register(host.data() + 4, 2 * sizeof(uint32_t)) == HSA_STATUS_SUCCESS));
+    REQUIRE((hsa_memory_deregister(host.data(), 2 * sizeof(uint32_t)) == HSA_STATUS_SUCCESS));
+    hsa_amd_pointer_info_t info{};
+    info.size = sizeof(info);
+    REQUIRE((hsa_amd_pointer_info(host.data() + 5, &info, nullptr, nullptr, nullptr) == HSA_STATUS_SUCCESS));
+    CHECK((info.type == HSA_EXT_POINTER_TYPE_LOCKED));
+    REQUIRE((hsa_memory_deregister(host.data() + 4, 2 * sizeof(uint32_t)) == HSA_STATUS_SUCCESS));
+  }
+}
+
+TEST_CASE("HSA pool lock preserves an interior view", "[hsa][unified-memory]") {
+  MemoryLockSession session;
+  hsa_amd_memory_pool_t pool{};
+  REQUIRE((hsa_iterate_agents(
+               [](hsa_agent_t agent, void *data) {
+                 hsa_device_type_t type{};
+                 const auto status = hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &type);
+                 if (status != HSA_STATUS_SUCCESS || type != HSA_DEVICE_TYPE_CPU) return status;
+                 return hsa_amd_agent_iterate_memory_pools(
+                     agent,
+                     [](hsa_amd_memory_pool_t candidate, void *output) {
+                       hsa_amd_segment_t segment{};
+                       const auto status = hsa_amd_memory_pool_get_info(candidate, HSA_AMD_MEMORY_POOL_INFO_SEGMENT, &segment);
+                       if (status == HSA_STATUS_SUCCESS && segment == HSA_AMD_SEGMENT_GLOBAL)
+                         *static_cast<hsa_amd_memory_pool_t *>(output) = candidate;
+                       return status;
+                     },
+                     data);
+               },
+               &pool)
+           == HSA_STATUS_SUCCESS));
+  REQUIRE((pool.handle != 0));
+  std::array<uint32_t, 8> host{11, 22, 33, 44, 55, 66, 77, 88};
+  void *whole = nullptr, *interior = nullptr;
+  REQUIRE((hsa_amd_memory_lock_to_pool(host.data(), sizeof(host), nullptr, 0, pool, 0, &whole) == HSA_STATUS_SUCCESS));
+  REQUIRE((hsa_amd_memory_lock_to_pool(host.data() + 2, 3 * sizeof(uint32_t), nullptr, 0, pool, 0, &interior) == HSA_STATUS_SUCCESS));
+  uint32_t observed = 0;
+  REQUIRE((hsa_memory_copy(&observed, interior, sizeof(observed)) == HSA_STATUS_SUCCESS));
+  CHECK((observed == host[2]));
+  CHECK((hsa_amd_memory_unlock(host.data() + 2) == HSA_STATUS_SUCCESS));
+  CHECK((hsa_amd_memory_unlock(host.data()) == HSA_STATUS_SUCCESS));
 }

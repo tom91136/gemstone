@@ -84,6 +84,7 @@ gemstone_require_abi_implementations(
   FORCE_INCLUDE)
 
 if(BUILD_TESTING)
+  gemstone_memory_client(hsa gemstone_hsa_runtime)
   add_executable(gemstone_hsa_doorbell_test test/doorbell_monitor_test.cpp)
   target_link_libraries(gemstone_hsa_doorbell_test PRIVATE gemstone_hsa_core)
   gemstone_test_target(gemstone_hsa_doorbell_test)

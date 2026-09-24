@@ -1,32 +1,29 @@
 #include <algorithm>
 #include <atomic>
-#include <chrono>
 #include <cerrno>
+#include <chrono>
 #include <condition_variable>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <functional>
 #include <fstream>
+#include <functional>
 #include <iterator>
 #include <limits>
-#include <malloc.h>
 #include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
-#include <spawn.h>
 #include <string>
 #include <string_view>
-#include <sys/mman.h>
-#include <sys/syscall.h>
-#include <sys/wait.h>
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
-#include <unistd.h>
 #include <utility>
 #include <vector>
+
+#include <spawn.h>
+#include <unistd.h>
 
 #include <ze_ddi.h>
 #include <zes_ddi.h>
@@ -36,9 +33,12 @@
 #include "gemstone_levelzero_ddi.hpp"
 #include <gemstone/bytes.hpp>
 
+#include "../../spirv/specialization.hpp"
 #include "completion.hpp"
 #include "objects.hpp"
-#include "../../spirv/specialization.hpp"
+#include <sys/mman.h>
+#include <sys/syscall.h>
+#include <sys/wait.h>
 
 extern char **environ;
 
@@ -210,6 +210,7 @@ int mirrorAllocationsToServer(RemoteExecution &state, const KernelLaunch &kernel
   reachable.insert(moduleGlobals.begin(), moduleGlobals.end());
   std::lock_guard lock(allocationsMutex);
   for (const auto &[base, allocation] : allocations) {
+    if (allocation->type != ZE_MEMORY_TYPE_DEVICE) continue;
     if (!kernel.indirect && !reachable.contains(allocation->id)) continue;
     const auto *bytes = static_cast<const uint8_t *>(base);
     const size_t pageCount = (allocation->size + MirrorPageSize - 1U) / MirrorPageSize;
@@ -296,7 +297,7 @@ std::vector<PointerRelocation> collectPointerRelocations(const KernelLaunch &ker
   if (kernel.indirect) {
     std::lock_guard lock(allocationsMutex);
     for (const auto &[base, source] : allocations) {
-      if (source->size < sizeof(uintptr_t)) continue;
+      if (source->type != ZE_MEMORY_TYPE_DEVICE || source->size < sizeof(uintptr_t)) continue;
       performance.relocationScanBytes += source->size;
       const auto *bytes = static_cast<const uint8_t *>(base);
       for (size_t offset = 0; offset <= source->size - sizeof(uintptr_t); offset += sizeof(uint32_t)) {
@@ -778,9 +779,11 @@ ze_result_t ZE_APICALL deviceMemory(ze_device_handle_t, uint32_t *count, ze_devi
 
 ze_result_t ZE_APICALL deviceMemoryAccess(ze_device_handle_t, ze_device_memory_access_properties_t *properties) {
   if (!properties) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
-  properties->hostAllocCapabilities = ZE_MEMORY_ACCESS_CAP_FLAG_RW | ZE_MEMORY_ACCESS_CAP_FLAG_ATOMIC;
-  properties->deviceAllocCapabilities = properties->hostAllocCapabilities;
-  properties->sharedSingleDeviceAllocCapabilities = properties->hostAllocCapabilities;
+  properties->hostAllocCapabilities = ZE_MEMORY_ACCESS_CAP_FLAG_RW | ZE_MEMORY_ACCESS_CAP_FLAG_ATOMIC | ZE_MEMORY_ACCESS_CAP_FLAG_CONCURRENT
+                                      | ZE_MEMORY_ACCESS_CAP_FLAG_CONCURRENT_ATOMIC;
+  properties->deviceAllocCapabilities = ZE_MEMORY_ACCESS_CAP_FLAG_RW | ZE_MEMORY_ACCESS_CAP_FLAG_ATOMIC;
+  properties->sharedSingleDeviceAllocCapabilities =
+      properties->hostAllocCapabilities | ZE_MEMORY_ACCESS_CAP_FLAG_CONCURRENT | ZE_MEMORY_ACCESS_CAP_FLAG_CONCURRENT_ATOMIC;
   properties->sharedCrossDeviceAllocCapabilities = ZE_MEMORY_ACCESS_CAP_FLAG_RW;
   properties->sharedSystemAllocCapabilities = ZE_MEMORY_ACCESS_CAP_FLAG_RW | ZE_MEMORY_ACCESS_CAP_FLAG_ATOMIC;
   return ZE_RESULT_SUCCESS;
@@ -821,7 +824,7 @@ ze_result_t ZE_APICALL contextCreate(ze_driver_handle_t driver, const ze_context
   return ZE_RESULT_SUCCESS;
 }
 ze_result_t ZE_APICALL contextCreateEx(ze_driver_handle_t driver, const ze_context_desc_t *desc, uint32_t count,
-                                      ze_device_handle_t *devices, ze_context_handle_t *result) {
+                                       ze_device_handle_t *devices, ze_context_handle_t *result) {
   if (!devices && count != 0) return ZE_RESULT_ERROR_INVALID_SIZE;
   for (uint32_t index = 0; index < count; ++index)
     if (cast<Device>(devices[index], Kind::Device) == nullptr) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
@@ -957,9 +960,7 @@ ze_result_t ZE_APICALL listCreateImmediate(ze_context_handle_t context, ze_devic
 }
 bool listUsesReleased(CommandList *list) {
   std::unique_lock lock(list->usersMutex);
-  return list->usersChanged.wait_for(lock, std::chrono::seconds(1), [&] {
-    return list->users.load(std::memory_order_acquire) == 0;
-  });
+  return list->usersChanged.wait_for(lock, std::chrono::seconds(1), [&] { return list->users.load(std::memory_order_acquire) == 0; });
 }
 ze_result_t ZE_APICALL listDestroy(ze_command_list_handle_t handle) {
   auto *list = cast<CommandList>(handle, Kind::List);
@@ -995,9 +996,8 @@ ze_result_t ZE_APICALL listBarrier(ze_command_list_handle_t handle, ze_event_han
   });
 }
 
-ze_result_t listCopyInContext(ze_command_list_handle_t handle, void *destination, Context *sourceContext,
-                              const void *source, size_t size, ze_event_handle_t signal, uint32_t waitCount,
-                              ze_event_handle_t *waits) {
+ze_result_t listCopyInContext(ze_command_list_handle_t handle, void *destination, Context *sourceContext, const void *source, size_t size,
+                              ze_event_handle_t signal, uint32_t waitCount, ze_event_handle_t *waits) {
   auto *list = cast<CommandList>(handle, Kind::List);
   if (!list) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   if (!sourceContext) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
@@ -1038,11 +1038,10 @@ ze_result_t ZE_APICALL listCopy(ze_command_list_handle_t handle, void *destinati
   return listCopyInContext(handle, destination, list->context.get(), source, size, signal, waitCount, waits);
 }
 
-ze_result_t ZE_APICALL listCopyFromContext(ze_command_list_handle_t handle, void *destination,
-                                           ze_context_handle_t sourceContextHandle, const void *source, size_t size,
-                                           ze_event_handle_t signal, uint32_t waitCount, ze_event_handle_t *waits) {
-  return listCopyInContext(handle, destination, cast<Context>(sourceContextHandle, Kind::Context), source, size,
-                           signal, waitCount, waits);
+ze_result_t ZE_APICALL listCopyFromContext(ze_command_list_handle_t handle, void *destination, ze_context_handle_t sourceContextHandle,
+                                           const void *source, size_t size, ze_event_handle_t signal, uint32_t waitCount,
+                                           ze_event_handle_t *waits) {
+  return listCopyInContext(handle, destination, cast<Context>(sourceContextHandle, Kind::Context), source, size, signal, waitCount, waits);
 }
 
 ze_result_t ZE_APICALL listCopyRegion(ze_command_list_handle_t handle, void *destination, const ze_copy_region_t *destinationRegion,
@@ -1212,9 +1211,7 @@ ze_result_t ZE_APICALL listWait(ze_command_list_handle_t handle, uint32_t count,
   EventUses retainedEvents;
   const auto retained = retainEvents(count, events, retainedEvents);
   if (retained != ZE_RESULT_SUCCESS) return retained;
-  if (std::ranges::any_of(retainedEvents, [list](const HandleUse<Event> &event) {
-        return event->pool->contextId != list->context->id;
-      }))
+  if (std::ranges::any_of(retainedEvents, [list](const HandleUse<Event> &event) { return event->pool->contextId != list->context->id; }))
     return ZE_RESULT_ERROR_INVALID_ARGUMENT;
   return append(list, [events = std::move(retainedEvents)] { return waitDependencies(events); });
 }
@@ -1237,68 +1234,14 @@ ze_result_t launchRpc(const KernelLaunch &kernel, const ze_group_count_t &groups
     std::lock_guard cacheLock(kernel.moduleGlobals->mutex);
     moduleGlobals = kernel.moduleGlobals->allocationIds;
   }
-  // Mirroring, launch and copy-back form one transaction. Serializing the
-  // complete sequence prevents concurrent queues from observing one another's
-  // partially mirrored allocation state.
-  std::lock_guard rpcLock(rpcTransactionMutex);
+  // Serialize metadata preparation and copy-back, but let independent queues
+  // execute and pump host-memory exchanges on separate connections.
+  std::unique_lock rpcLock(rpcTransactionMutex);
   auto &state = remoteExecution();
   if (state.mode == RemoteMode::Misconfigured) return ZE_RESULT_ERROR_UNINITIALIZED;
   if (state.mode != RemoteMode::Ready || kernel.backend != ModuleBackend::RPC) return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
-  // The Level Zero shared-system-memory capability includes ordinary host
-  // allocations. For malloc-backed pointer arguments, mirror their owning
-  // allocation for this dispatch and release it after copy-back. The heap
-  // check excludes stack and unrelated mappings, but cannot prove that a
-  // pointer is the base of a malloc allocation.
-  struct ExternalMirrors {
-    RemoteExecution &state;
-    std::vector<std::pair<void *, uint64_t>> entries;
-    ~ExternalMirrors() {
-      for (const auto &[base, id] : entries) {
-        {
-          std::lock_guard lock(allocationsMutex);
-          allocations.erase(base);
-        }
-        (void)state.client->call(ReleaseAllocation{AllocationId{static_cast<int64_t>(id)}});
-      }
-    }
-  } external{state, {}};
-  const auto heapAllocationSize = [](const void *pointer) -> size_t {
-    std::ifstream maps("/proc/self/maps");
-    std::string line;
-    const auto address = reinterpret_cast<uintptr_t>(pointer);
-    while (std::getline(maps, line)) {
-      if (line.find("[heap]") == std::string::npos) continue;
-      unsigned long start = 0;
-      unsigned long end = 0;
-      if (std::sscanf(line.c_str(), "%lx-%lx", &start, &end) == 2 && address >= start && address < end)
-        return malloc_usable_size(const_cast<void *>(pointer));
-    }
-    return 0;
-  };
-  for (size_t index = 0; index < kernel.arguments.size(); ++index) {
-    const auto &argument = kernel.arguments[index];
-    if (argument.local || argument.bytes.size() != sizeof(uintptr_t)
-        || index >= kernel.parameters.size() || !kernel.parameters[index].containsPointer)
-      continue;
-    const auto address = gemstone::readNative<uintptr_t>(argument.bytes.data(), 0);
-    if (address == 0 || retainAllocation(reinterpret_cast<void *>(address), 0)) continue;
-    const auto size = heapAllocationSize(reinterpret_cast<void *>(address));
-    if (size == 0 || size > static_cast<size_t>(std::numeric_limits<int32_t>::max())) continue;
-    auto registered = state.client->call(RegisterAllocation{AllocationKind::Host, static_cast<int64_t>(size)});
-    if (!registered) {
-      rememberRemoteError(state, remoteError(state));
-      return ZE_RESULT_ERROR_DEVICE_LOST;
-    }
-    const auto id = static_cast<uint64_t>(registered.value().value);
-    {
-      std::lock_guard lock(allocationsMutex);
-      allocations.emplace(reinterpret_cast<void *>(address),
-                          std::make_shared<Allocation>(Allocation{HandleUse<Context>(kernel.context),
-                                                                  reinterpret_cast<void *>(address), size,
-                                                                  ZE_MEMORY_TYPE_HOST, id, false, {}}));
-    }
-    external.entries.emplace_back(reinterpret_cast<void *>(address), id);
-  }
+  // Ordinary host pointers are serviced by exact interpreter accesses.
+  if (!state.client->call(EnableHostMemory{})) return ZE_RESULT_ERROR_DEVICE_LOST;
   const auto started = std::chrono::steady_clock::now();
   LaunchPerformance performance;
   const auto relocations = collectPointerRelocations(kernel, performance);
@@ -1366,7 +1309,12 @@ ze_result_t launchRpc(const KernelLaunch &kernel, const ze_group_count_t &groups
   // each RPC exchange still retains its independent transport-progress timeout.
   gemstone::execution::CompletionResult result;
   std::string completionError;
-  if (!gemstone::execution::collect_completion(*state.client, launched.value(), result, completionError)) {
+  auto completionClient = Client::fromEnvironment();
+  rpcLock.unlock();
+  const bool collected =
+      completionClient && gemstone::execution::collect_completion(*completionClient, launched.value(), result, completionError, true);
+  rpcLock.lock();
+  if (!collected) {
     rememberRemoteError(state, completionError);
     return ZE_RESULT_ERROR_DEVICE_LOST;
   }
@@ -1464,16 +1412,14 @@ ze_result_t ZE_APICALL listLaunch(ze_command_list_handle_t handle, ze_kernel_han
   return recordLaunch(handle, kernel, groups, false, signal, waitCount, waits);
 }
 
-ze_result_t ZE_APICALL listLaunchIndirect(ze_command_list_handle_t handle, ze_kernel_handle_t kernel,
-                                          const ze_group_count_t *groups, ze_event_handle_t signal, uint32_t waitCount,
-                                          ze_event_handle_t *waits) {
+ze_result_t ZE_APICALL listLaunchIndirect(ze_command_list_handle_t handle, ze_kernel_handle_t kernel, const ze_group_count_t *groups,
+                                          ze_event_handle_t signal, uint32_t waitCount, ze_event_handle_t *waits) {
   return recordLaunch(handle, kernel, groups, true, signal, waitCount, waits);
 }
 
-ze_result_t ZE_APICALL listLaunchMultipleIndirect(ze_command_list_handle_t handle, uint32_t maxCount,
-                                                  ze_kernel_handle_t *handles, const uint32_t *count,
-                                                  const ze_group_count_t *groups, ze_event_handle_t signal, uint32_t waitCount,
-                                                  ze_event_handle_t *waits) {
+ze_result_t ZE_APICALL listLaunchMultipleIndirect(ze_command_list_handle_t handle, uint32_t maxCount, ze_kernel_handle_t *handles,
+                                                  const uint32_t *count, const ze_group_count_t *groups, ze_event_handle_t signal,
+                                                  uint32_t waitCount, ze_event_handle_t *waits) {
   auto *list = cast<CommandList>(handle, Kind::List);
   if (!list) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   if (!handles || !count || !groups) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
@@ -1485,7 +1431,8 @@ ze_result_t ZE_APICALL listLaunchMultipleIndirect(ze_command_list_handle_t handl
     if (!kernel) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
     if (kernel->module->context.get() != list->context.get()) return ZE_RESULT_ERROR_INVALID_ARGUMENT;
     launches.push_back(snapshotLaunch(kernel));
-    for (auto &allocation : launches.back().allocations) allocationLifetime->push_back(std::move(allocation));
+    for (auto &allocation : launches.back().allocations)
+      allocationLifetime->push_back(std::move(allocation));
     launches.back().allocations.clear();
   }
   if (auto allocation = retainAllocation(count, sizeof(*count))) allocationLifetime->push_back(std::move(allocation));
@@ -1495,22 +1442,25 @@ ze_result_t ZE_APICALL listLaunchMultipleIndirect(ze_command_list_handle_t handl
   const auto retained = retainCommandEvents(list->context.get(), signal, waitCount, waits, retainedSignal, retainedWaits);
   if (retained != ZE_RESULT_SUCCESS) return retained;
   auto lifetimes = std::make_shared<std::vector<std::shared_ptr<HandleUse<Kernel>>>>();
-  for (const auto &launch : launches) lifetimes->push_back(launch.lifetime);
-  return append(list,
-                [launches = std::move(launches), count, groups, maxCount, signal = std::move(retainedSignal),
-                 waits = std::move(retainedWaits), allocationLifetime] {
-                  auto result = waitDependencies(waits);
-                  if (result != ZE_RESULT_SUCCESS) return result;
-                  for (uint32_t index = 0; index < std::min(*count, maxCount); ++index) {
-                    result = launchRpc(launches[index], groups[index]);
-                    if (result != ZE_RESULT_SUCCESS) return result;
-                  }
-                  return signalEvent(signal.get());
-                },
-                [allocationLifetime, lifetimes] {
-                  allocationLifetime->clear();
-                  for (auto &lifetime : *lifetimes) *lifetime = {};
-                });
+  for (const auto &launch : launches)
+    lifetimes->push_back(launch.lifetime);
+  return append(
+      list,
+      [launches = std::move(launches), count, groups, maxCount, signal = std::move(retainedSignal), waits = std::move(retainedWaits),
+       allocationLifetime] {
+        auto result = waitDependencies(waits);
+        if (result != ZE_RESULT_SUCCESS) return result;
+        for (uint32_t index = 0; index < std::min(*count, maxCount); ++index) {
+          result = launchRpc(launches[index], groups[index]);
+          if (result != ZE_RESULT_SUCCESS) return result;
+        }
+        return signalEvent(signal.get());
+      },
+      [allocationLifetime, lifetimes] {
+        allocationLifetime->clear();
+        for (auto &lifetime : *lifetimes)
+          *lifetime = {};
+      });
 }
 
 // UMF uses the reported allocation page size as its minimum slab alignment.
@@ -1548,6 +1498,13 @@ ze_result_t allocate(Context *context, size_t size, size_t alignment, ze_memory_
       return ZE_RESULT_ERROR_DEVICE_LOST;
     }
     allocationId = static_cast<uint64_t>(registered.value().value);
+    if (!state.client->call(RegisterAllocationAddress{
+            registered.value(), GuestAddress{static_cast<int64_t>(reinterpret_cast<uintptr_t>(*result))}, type != ZE_MEMORY_TYPE_DEVICE})) {
+      (void)state.client->call(ReleaseAllocation{registered.value()});
+      std::free(*result);
+      *result = nullptr;
+      return ZE_RESULT_ERROR_DEVICE_LOST;
+    }
   }
   std::lock_guard lock(allocationsMutex);
   allocations.emplace(*result,
@@ -1619,8 +1576,8 @@ ze_result_t ZE_APICALL virtualReserve(ze_context_handle_t contextHandle, const v
   if (state.mode == RemoteMode::Ready && size > static_cast<size_t>(std::numeric_limits<int32_t>::max()))
     return ZE_RESULT_ERROR_UNSUPPORTED_SIZE;
   void *address = MAP_FAILED;
-  if (start) address = mmap(const_cast<void *>(start), size, PROT_READ | PROT_WRITE,
-                            MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
+  if (start)
+    address = mmap(const_cast<void *>(start), size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
   if (address == MAP_FAILED) address = mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
   if (address == MAP_FAILED) return ZE_RESULT_ERROR_OUT_OF_HOST_MEMORY;
   uint64_t allocationId = 0;
@@ -1632,12 +1589,18 @@ ze_result_t ZE_APICALL virtualReserve(ze_context_handle_t contextHandle, const v
       munmap(address, size);
       return ZE_RESULT_ERROR_DEVICE_LOST;
     }
+    if (!state.client->call(
+            RegisterAllocationAddress{registered.value(), GuestAddress{static_cast<int64_t>(reinterpret_cast<uintptr_t>(address))}})) {
+      (void)state.client->call(ReleaseAllocation{registered.value()});
+      munmap(address, size);
+      return ZE_RESULT_ERROR_DEVICE_LOST;
+    }
     allocationId = static_cast<uint64_t>(registered.value().value);
   }
   {
     std::lock_guard allocationLock(allocationsMutex);
-    allocations.emplace(address, std::make_shared<Allocation>(
-                                     Allocation{HandleUse<Context>(context), address, size, ZE_MEMORY_TYPE_DEVICE, allocationId, false, {}}));
+    allocations.emplace(address, std::make_shared<Allocation>(Allocation{
+                                     HandleUse<Context>(context), address, size, ZE_MEMORY_TYPE_DEVICE, allocationId, false, {}}));
   }
   {
     std::lock_guard lock(virtualMemoryMutex);
@@ -1679,8 +1642,8 @@ ze_result_t ZE_APICALL virtualFree(ze_context_handle_t contextHandle, const void
   return ZE_RESULT_SUCCESS;
 }
 
-ze_result_t ZE_APICALL physicalCreate(ze_context_handle_t contextHandle, ze_device_handle_t deviceHandle,
-                                      ze_physical_mem_desc_t *desc, ze_physical_mem_handle_t *result) {
+ze_result_t ZE_APICALL physicalCreate(ze_context_handle_t contextHandle, ze_device_handle_t deviceHandle, ze_physical_mem_desc_t *desc,
+                                      ze_physical_mem_handle_t *result) {
   auto *context = cast<Context>(contextHandle, Kind::Context);
   if (!context) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   if (!desc || !result) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
@@ -1746,8 +1709,8 @@ ze_result_t ZE_APICALL virtualMap(ze_context_handle_t contextHandle, const void 
   if ((next != record.mappings.end() && next->first < address + size)
       || (next != record.mappings.begin() && std::prev(next)->first + std::prev(next)->second.size > address))
     return ZE_RESULT_ERROR_INVALID_ARGUMENT;
-  if (mmap(const_cast<void *>(pointer), size, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED, physical->fd,
-           static_cast<off_t>(offset)) == MAP_FAILED)
+  if (mmap(const_cast<void *>(pointer), size, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED, physical->fd, static_cast<off_t>(offset))
+      == MAP_FAILED)
     return ZE_RESULT_ERROR_OUT_OF_HOST_MEMORY;
   record.mappings.emplace(address, VirtualMapping{size, access, HandleUse<PhysicalMemory>(physical)});
   return ZE_RESULT_SUCCESS;
@@ -1765,8 +1728,7 @@ ze_result_t ZE_APICALL virtualUnmap(ze_context_handle_t contextHandle, const voi
   if (reservation->second.context.get() != context) return ZE_RESULT_ERROR_INVALID_ARGUMENT;
   auto mapping = reservation->second.mappings.find(address);
   if (mapping == reservation->second.mappings.end() || mapping->second.size != size) return ZE_RESULT_ERROR_INVALID_ARGUMENT;
-  if (mmap(const_cast<void *>(pointer), size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0)
-      == MAP_FAILED)
+  if (mmap(const_cast<void *>(pointer), size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0) == MAP_FAILED)
     return ZE_RESULT_ERROR_UNKNOWN;
   reservation->second.mappings.erase(mapping);
   return ZE_RESULT_SUCCESS;
@@ -1814,8 +1776,7 @@ ze_result_t ZE_APICALL virtualGetAccess(ze_context_handle_t contextHandle, const
     ++mapping;
   }
   *access = ZE_MEMORY_ACCESS_ATTRIBUTE_NONE;
-  *outSize = (mapping == reservation->second.mappings.end() ? reservation->first + reservation->second.size : mapping->first)
-             - address;
+  *outSize = (mapping == reservation->second.mappings.end() ? reservation->first + reservation->second.size : mapping->first) - address;
   return ZE_RESULT_SUCCESS;
 }
 ze_result_t ZE_APICALL memProperties(ze_context_handle_t contextHandle, const void *pointer, ze_memory_allocation_properties_t *properties,
@@ -1976,7 +1937,8 @@ std::optional<std::string> temporarySpirvFile(const std::vector<uint8_t> &bytes)
 bool linkSpirvModules(const std::vector<std::vector<uint8_t>> &modules, std::vector<uint8_t> &linked, std::string &error) {
   std::vector<std::string> paths;
   const auto cleanup = [&] {
-    for (const auto &path : paths) unlink(path.c_str());
+    for (const auto &path : paths)
+      unlink(path.c_str());
   };
   for (const auto &module : modules) {
     auto path = temporarySpirvFile(module);
@@ -1995,9 +1957,11 @@ bool linkSpirvModules(const std::vector<std::vector<uint8_t>> &modules, std::vec
   }
   paths.push_back(*output);
   std::vector<std::string> arguments = {"spirv-link", "--use-highest-version", "--target-env", "opencl2.2", "-o", *output};
-  for (size_t index = 0; index < modules.size(); ++index) arguments.push_back(paths[index]);
+  for (size_t index = 0; index < modules.size(); ++index)
+    arguments.push_back(paths[index]);
   std::vector<char *> argv;
-  for (auto &argument : arguments) argv.push_back(argument.data());
+  for (auto &argument : arguments)
+    argv.push_back(argument.data());
   argv.push_back(nullptr);
   pid_t process = 0;
   const int spawnResult = posix_spawnp(&process, "spirv-link", nullptr, nullptr, argv.data(), environ);
@@ -2050,8 +2014,8 @@ ze_result_t ZE_APICALL moduleCreate(ze_context_handle_t contextHandle, ze_device
       inputs.reserve(program->count);
       for (uint32_t index = 0; index < program->count; ++index) {
         if (program->inputSizes[index] == 0 || program->pInputModules[index] == nullptr) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
-        inputs.push_back({program->pInputModules[index], program->inputSizes[index],
-                          program->pConstants ? program->pConstants[index] : nullptr});
+        inputs.push_back(
+            {program->pInputModules[index], program->inputSizes[index], program->pConstants ? program->pConstants[index] : nullptr});
       }
       break;
     }
@@ -2152,8 +2116,7 @@ std::optional<uint32_t> spirvFunctionId(const std::vector<uint8_t> &bytes, const
       const char *text = reinterpret_cast<const char *>(bytes.data() + (index + textWord) * 4);
       const size_t available = (count - textWord) * 4;
       const void *end = std::memchr(text, 0, available);
-      if (end && static_cast<size_t>(static_cast<const char *>(end) - text) == nameLength
-          && std::memcmp(text, name, nameLength) == 0)
+      if (end && static_cast<size_t>(static_cast<const char *>(end) - text) == nameLength && std::memcmp(text, name, nameLength) == 0)
         return word(index + 1);
     }
     index += count;
@@ -2220,8 +2183,7 @@ ze_result_t ZE_APICALL moduleGlobalPointer(ze_module_handle_t handle, const char
     discard();
     return ZE_RESULT_ERROR_MODULE_BUILD_FAILURE;
   }
-  if (!described.value().initial.empty())
-    std::memcpy(base, described.value().initial.data(), described.value().initial.size());
+  if (!described.value().initial.empty()) std::memcpy(base, described.value().initial.data(), described.value().initial.size());
   const auto allocation = retainAllocation(base, bytes);
   if (!allocation) {
     discard();
@@ -2231,7 +2193,7 @@ ze_result_t ZE_APICALL moduleGlobalPointer(ze_module_handle_t handle, const char
   {
     std::lock_guard rpcLock(rpcTransactionMutex);
     bound = static_cast<bool>(state.client->call(BindProgramGlobal{ProgramId{static_cast<int64_t>(module->programId)}, name,
-                                                                  AllocationId{static_cast<int64_t>(allocation->id)}, LongPositive0{0}}));
+                                                                   AllocationId{static_cast<int64_t>(allocation->id)}, LongPositive0{0}}));
     if (!bound) rememberRemoteError(state, remoteError(state));
   }
   if (!bound) {
@@ -2371,8 +2333,7 @@ ze_result_t ZE_APICALL kernelGroup(ze_kernel_handle_t handle, uint32_t x, uint32
 ze_result_t ZE_APICALL kernelGlobalOffset(ze_kernel_handle_t handle, uint32_t x, uint32_t y, uint32_t z) {
   auto *kernel = cast<Kernel>(handle, Kind::Kernel);
   if (!kernel) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
-  if (x > static_cast<uint32_t>(std::numeric_limits<int32_t>::max())
-      || y > static_cast<uint32_t>(std::numeric_limits<int32_t>::max())
+  if (x > static_cast<uint32_t>(std::numeric_limits<int32_t>::max()) || y > static_cast<uint32_t>(std::numeric_limits<int32_t>::max())
       || z > static_cast<uint32_t>(std::numeric_limits<int32_t>::max()))
     return ZE_RESULT_ERROR_INVALID_ARGUMENT;
   kernel->offsetX = x;
@@ -2498,8 +2459,7 @@ template <class T> ze_result_t emptyTable(ze_api_version_t version, T *table) {
 
 } // namespace
 
-extern "C" ZE_DLLEXPORT ze_result_t ZE_APICALL zeKernelSetGlobalOffsetExp(ze_kernel_handle_t handle, uint32_t x, uint32_t y,
-                                                                             uint32_t z) {
+extern "C" ZE_DLLEXPORT ze_result_t ZE_APICALL zeKernelSetGlobalOffsetExp(ze_kernel_handle_t handle, uint32_t x, uint32_t y, uint32_t z) {
   return kernelGlobalOffset(handle, x, y, z);
 }
 

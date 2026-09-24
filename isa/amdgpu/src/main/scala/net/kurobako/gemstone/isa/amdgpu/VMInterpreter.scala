@@ -459,11 +459,17 @@ private[amdgpu] object VMInterpreter {
 
   private final class MemoryContext(delegate: Memory, addresses: AddressSpace)
       extends Memory {
+    override def flushHostWrites(): Either[Fault, Unit]                  = delegate.flushHostWrites()
+    override def invalidateHostReads(): Unit                             = delegate.invalidateHostReads()
+    private def complete[A](read: => Either[Fault, A]): Either[Fault, A] = read match {
+      case Left(Fault.PendingMemory) => delegate.flushHostReads().flatMap(_ => complete(read))
+      case result                    => result
+    }
     override def read(
         region: MemoryRegion,
         offset: Long :| Positive0,
         size: Int :| Positive0
-    ): Either[Fault, Vec[Byte]] = delegate.read(region, offset, size)
+    ): Either[Fault, Vec[Byte]] = complete(delegate.read(region, offset, size))
 
     override def write(
         region: MemoryRegion,
@@ -475,7 +481,7 @@ private[amdgpu] object VMInterpreter {
         region: MemoryRegion,
         offset: Long :| Positive0,
         size: MemoryValueByteWidth
-    ): Either[Fault, Long] = delegate.readValue(region, offset, size)
+    ): Either[Fault, Long] = complete(delegate.readValue(region, offset, size))
 
     override def writeValue(
         region: MemoryRegion,
@@ -489,16 +495,19 @@ private[amdgpu] object VMInterpreter {
         offset: Long :| Positive0,
         size: MemoryValueByteWidth
     )(update: Long => Long): Either[Fault, Long] =
-      delegate.atomicModifyValue(region, offset, size)(update)
+      complete(delegate.atomicModifyValue(region, offset, size)(update))
+
+    def prepareReads(ranges: Vec[(GuestAddress, Int :| Positive0)]): Either[Fault, Unit] =
+      addresses.prepareReads(ranges)
 
     def read(address: GuestAddress, size: Int :| Positive0): Either[Fault, Vec[Byte]] =
-      addresses.read(delegate, address, size)
+      complete(addresses.read(delegate, address, size))
 
     def write(address: GuestAddress, bytes: Vec[Byte]): Either[Fault, Unit] =
       addresses.write(delegate, address, bytes)
 
     def readValue(address: GuestAddress, size: MemoryValueByteWidth): Either[Fault, Long] =
-      addresses.readValue(delegate, address, size)
+      complete(addresses.readValue(delegate, address, size))
 
     def writeValue(address: GuestAddress, value: Long, size: MemoryValueByteWidth): Either[Fault, Unit] =
       addresses.writeValue(delegate, address, value, size)
@@ -1036,6 +1045,11 @@ private[amdgpu] object VMInterpreter {
     // functions (the hardware applies the local aperture); model that
     // aperture explicitly before falling back to per-lane scratch or the
     // dispatch allocation map.
+    def immutableAddress(address: Long, size: Int): Boolean =
+      ByteRange.contains(kernarg.length, address - KernargAddress, size.toLong) ||
+        ByteRange.contains(dispatchBytes.length, address - DispatchAddress, size.toLong) ||
+        ByteRange.contains(kernel.readOnly.length, address - kernel.readOnlyAddress, size.toLong)
+
     def flatLoad(lane: Int, address: Long, size: Int): Either[Fault, Vec[Byte]] =
       if (address >= 0L && address <= lds.length.toLong - size.toLong)
         readLDS(lds, address, size).map(Vec.unsafeFromArray)
@@ -1123,8 +1137,10 @@ private[amdgpu] object VMInterpreter {
 
     // Split the instruction switch into JIT-sized methods. The complete switch is too large for C2 to compile.
     def stepInstruction(index: Int): Either[Fault, Option[Int]] = operations(index) match {
-      case Instruction.End                       => Right(None)
-      case Instruction.Wait                      => AdvanceStep
+      case Instruction.End        => memory.flushHostWrites().map(_ => None)
+      case Instruction.Trap(code) =>
+        Left(Fault.Backend(f"AMDGPU s_trap $code%d at pc 0x${programCounter(index)}%x"))
+      case Instruction.Wait                      => memory.flushHostWrites().flatMap(_ => AdvanceStep)
       case Instruction.SSetGprIdxOn              => AdvanceStep
       case Instruction.Barrier                   => Right(Some(-1))
       case Instruction.Branch(condition, target) =>
@@ -2858,7 +2874,64 @@ private[amdgpu] object VMInterpreter {
       case other => stepCompareAndMemory(index, other)
     }
 
-    def stepCompareAndMemory(index: Int, instruction: Instruction): Either[Fault, Option[Int]] = instruction match {
+    // Only collect addresses that this instruction will actually read. Local apertures,
+    // code-object globals and descriptor out-of-bounds lanes never reach the host pump.
+    def prepareVectorReads(instruction: Instruction): Either[Fault, Unit] = {
+      def global(register: Int, scalarRegister: Option[Int], offset: Int)(lane: Int): Option[Long] =
+        Some(scalarRegister.map(r => pair(scalar, r) + Bits.low32(vector(register)(lane)))
+          .getOrElse(pair(vector, register, lane)) + signed13(offset))
+      def flat(register: Int, offset: Int, size: Int)(lane: Int): Option[Long] = {
+        val address = pair(vector, register, lane) + flatOffset(offset)
+        Option.unless(ByteRange.contains(lds.length, address, size.toLong) ||
+          ByteRange.contains(scratch(lane).length, address, size.toLong))(address)
+      }
+      def buffer(
+          register: Option[Int],
+          resource: Int,
+          scalarOffset: Option[Int],
+          offset: Int,
+          size: Int
+      )(lane: Int): Option[Long] = {
+        val base  = sourceScalar64(InstructionSource.Scalar(resource)) & 0x0000ffffffffffffL
+        val start = bufferOffset(lane, register, scalarOffset, offset, base == 0L)
+        Option.when(
+          base != 0L && (start >= 0L && start <= Bits.low32(scalar(resource + 2)) - size.toLong)
+        )(base + start)
+      }
+      def prepare(size: Int, addressOf: Int => Option[Long]): Either[Fault, Unit] = memory match {
+        case context: MemoryContext =>
+          val ranges = Vec.from((0 until lanes.value).filter(active(_)).flatMap(addressOf).filter { address =>
+            aliasedRegion(address, allocations) == null &&
+            !ByteRange.contains(kernarg.length, address - KernargAddress, size.toLong) &&
+            !ByteRange.contains(dispatchBytes.length, address - DispatchAddress, size.toLong) &&
+            !ByteRange.contains(kernel.readOnly.length, address - kernel.readOnlyAddress, size.toLong) &&
+            globalRegionIndex(address, size, kernel.globalMemory) < 0
+          }.map(address => (GuestAddress(address), size.refineUnsafe[Positive0])))
+          if (ranges.isEmpty) Right(()) else context.prepareReads(ranges)
+        case _ => Right(())
+      }
+      instruction match {
+        case Instruction.GlobalLoad(_, address, scalarAddress, size, offset, false) =>
+          prepare(size, global(address, scalarAddress, offset))
+        case Instruction.GlobalLoadSigned(_, address, scalarAddress, size, offset) =>
+          prepare(size, global(address, scalarAddress, offset))
+        case Instruction.GlobalLoadD16(_, address, scalarAddress, offset, _) =>
+          prepare(2, global(address, scalarAddress, offset))
+        case Instruction.FlatLoad(_, address, size, offset, false) => prepare(size, flat(address, offset, size))
+        case Instruction.FlatLoadSigned(_, address, size, offset)  => prepare(size, flat(address, offset, size))
+        case Instruction.VFlatLoadD16(_, address, offset, _)       => prepare(2, flat(address, offset, 2))
+        case Instruction.BufferLoad(_, address, resource, scalarOffset, size, offset) =>
+          prepare(size, buffer(address, resource, scalarOffset, offset, size))
+        case Instruction.BufferLoadD16(_, address, resource, scalarOffset, size, offset, _) =>
+          prepare(size, buffer(address, resource, scalarOffset, offset, size))
+        case _ => Right(())
+      }
+    }
+
+    def stepCompareAndMemory(index: Int, instruction: Instruction): Either[Fault, Option[Int]] =
+      prepareVectorReads(instruction).flatMap(_ => stepPreparedMemory(index, instruction))
+
+    def stepPreparedMemory(index: Int, instruction: Instruction): Either[Fault, Option[Int]] = instruction match {
       case Instruction.VCompare(operation, srcA, srcB) =>
         def operand(sourceRegister: InstructionSource, lane: Int, right: Boolean): Long = operation.kind match {
           case VectorComparisonKind.Signed64 | VectorComparisonKind.Unsigned64 =>
@@ -3266,7 +3339,7 @@ private[amdgpu] object VMInterpreter {
               .flatMap(_ => storeLane(lane + 1))
           }
         advanceAfter(storeLane(0))
-      case Instruction.GlobalLoad(dest, addressRegister, scalarAddress, byteCount, offset) =>
+      case Instruction.GlobalLoad(dest, addressRegister, scalarAddress, byteCount, offset, coherent) =>
         val scalarBase = scalarAddress match {
           case Some(register) => pair(scalar, register)
           case None           => 0L
@@ -3281,17 +3354,26 @@ private[amdgpu] object VMInterpreter {
               if (scalarAddress.isDefined) scalarBase + Bits.low32(vector(addressRegister)(lane)) + displacement
               else pair(vector, addressRegister, lane) + displacement
             if (scalarWidth != null)
-              readValue(
-                address,
-                scalarWidth.nn,
-                kernarg,
-                dispatchBytes,
-                kernel.readOnlyAddress,
-                kernel.readOnly,
-                kernel.globalMemory,
-                allocations,
-                memory
-              ) match {
+              (if (coherent && (byteCount == 4 || byteCount == 8) && !immutableAddress(address, byteCount))
+                 atomicModifyValue(
+                   address,
+                   scalarWidth.nn,
+                   allocations,
+                   memory,
+                   kernel.globalMemory,
+                   kernel.globalMemoryLocks
+                 )(identity)
+               else readValue(
+                 address,
+                 scalarWidth.nn,
+                 kernarg,
+                 dispatchBytes,
+                 kernel.readOnlyAddress,
+                 kernel.readOnly,
+                 kernel.globalMemory,
+                 allocations,
+                 memory
+               )) match {
                 case Left(error)  => failure = error
                 case Right(value) => writeVectorValue(vector, dest, lane, value, byteCount)
               }
@@ -3630,13 +3712,28 @@ private[amdgpu] object VMInterpreter {
             }
           }
         advanceAfter(storeLane(0))
-      case Instruction.FlatLoad(dest, addressRegister, byteCount, offset) =>
+      case Instruction.FlatLoad(dest, addressRegister, byteCount, offset, coherent) =>
         def loadLane(lane: Int): Either[Fault, Unit] =
           if (lane == lanes.value) Right(())
           else if (!active(lane)) loadLane(lane + 1)
           else {
             val address = pair(vector, addressRegister, lane) + flatOffset(offset)
-            val bytes   = flatLoad(lane, address, byteCount)
+            val bytes   =
+              if (
+                coherent && (byteCount == 4 || byteCount == 8) && !immutableAddress(address, byteCount) &&
+                !ByteRange.contains(lds.length, address, byteCount.toLong) &&
+                !ByteRange.contains(scratch(lane).length, address, byteCount.toLong)
+              )
+                atomicModifyValue(
+                  address,
+                  MemoryValueByteWidth.assume(byteCount),
+                  allocations,
+                  memory,
+                  kernel.globalMemory,
+                  kernel.globalMemoryLocks
+                )(identity)
+                  .map(value => LittleEndian.toVec(value, ScalarByteWidth.assume(byteCount)))
+              else flatLoad(lane, address, byteCount)
             bytes match {
               case Left(error)  => Left(error)
               case Right(bytes) =>
@@ -3708,7 +3805,8 @@ private[amdgpu] object VMInterpreter {
           }
         advanceAfter(storeLane(0))
       case Instruction.BufferCacheInvalidate =>
-        // Cache invalidation has no observable effect in the CPU-backed emulator.
+        // A following ordinary load must not reuse bytes cached before acquire.
+        memory.invalidateHostReads()
         AdvanceStep
       case Instruction.BufferLoad(dest, address, resource, scalarOffset, byteCount, offset) =>
         def loadLane(lane: Int): Either[Fault, Unit] =

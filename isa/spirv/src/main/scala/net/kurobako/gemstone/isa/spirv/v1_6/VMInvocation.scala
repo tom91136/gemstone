@@ -339,6 +339,7 @@ private[v1_6] object VMInvocation {
       var suspended: Option[CollectiveRequest],
       var completed: Boolean
   ) {
+    var memoryPending: Boolean                                      = false
     def reset(nextInvocation: Invocation, function: Function): Unit = {
       invocation = nextInvocation
       currentFunction = function
@@ -349,6 +350,7 @@ private[v1_6] object VMInvocation {
       calls.clear()
       suspended = None
       completed = false
+      memoryPending = false
     }
   }
 }

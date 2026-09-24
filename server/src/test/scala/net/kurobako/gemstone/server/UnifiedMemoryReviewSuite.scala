@@ -1,0 +1,67 @@
+package net.kurobako.gemstone.server
+
+import net.kurobako.gemstone.NoNul
+import net.kurobako.gemstone.launcher.Environment
+import net.kurobako.gemstone.vm.TaskLimits
+
+import io.github.iltotore.iron.*
+import io.github.iltotore.iron.constraint.all.*
+
+import java.nio.file.Files
+import scala.concurrent.duration.*
+import scala.util.Using
+
+/** The same mixed-backing and pointer-publication scenarios run through every native API. */
+final class UnifiedMemoryReviewSuite extends munit.FunSuite {
+  override val munitTimeout = 150.seconds
+  for (api <- List("cuda", "hip", "hsa", "levelzero", "opencl", "sycl"))
+    test(s"$api mixed memory and pointer publication") {
+      val directory = NativeTestProcess.nativeDirectory
+      val client    = directory.resolve(s"gemstone_memory_$api")
+      assert(Files.isExecutable(client))
+      val vendors = Files.createTempDirectory("gemstone-memory-review-")
+      val icd     = vendors.resolve("gemstone.icd")
+      val _       = Files.writeString(icd, directory.resolve("libOpenCL_gemstone.so.1").toString + "\n")
+      try
+        Using.resource(GemstoneRPCServer.start(
+          TaskLimits(1000000000, 64),
+          Map("GEMSTONE_EXECUTION_PARALLELISM" -> "2")
+        )) { server =>
+          val libraries = directory.resolve("gemstone_memory_sycl.library-path")
+          val extra     = if (api == "sycl" && Files.isRegularFile(libraries)) Files.readString(libraries) else ""
+          val result    = NativeTestProcess.run(
+            Vector(client.toString.refineUnsafe[NoNul]).refineUnsafe[MinLength[1]],
+            directory,
+            Environment(
+              Map(
+                "GEMSTONE_MEMORY_REVIEW_PROBE" -> "1",
+                "GEMSTONE_RPC_PORT"            -> server.port.value.toString,
+                "GEMSTONE_RPC_CLIENT"          -> server.client.value.toString,
+                "LD_LIBRARY_PATH"              ->
+                  List(directory.toString, extra, sys.env.getOrElse("LD_LIBRARY_PATH", "")).mkString(":"),
+                "ZE_ENABLE_ALT_DRIVERS"  -> directory.resolve("libze_gemstone.so.1").toString,
+                "OCL_ICD_VENDORS"        -> vendors.toString,
+                "OCL_ICD_FILENAMES"      -> directory.resolve("libOpenCL_gemstone.so.1").toString,
+                "ONEAPI_DEVICE_SELECTOR" -> "opencl:*"
+              ),
+              Set("GEMSTONE_CUDA_SYSTEM_PAGING", "GEMSTONE_HSA_SYSTEM_PAGING", "UR_ADAPTERS_FORCE_LOAD")
+            ),
+            120.seconds
+          )
+          assertEquals(result.exit, 0, result.diagnostic)
+          assertEquals(
+            result.stdout.linesIterator.filter(_.startsWith("verified ")).toList,
+            List(
+              "verified disjoint device writes",
+              "verified mixed backing publication",
+              "verified synchronized device pointer replacement"
+            ),
+            result.diagnostic
+          )
+        }
+      finally {
+        val _ = Files.deleteIfExists(icd)
+        val _ = Files.deleteIfExists(vendors)
+      }
+    }
+}

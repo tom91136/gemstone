@@ -502,14 +502,6 @@ TEST_CASE("algorithms/roc-thrust-semantic/zip-iterator-sort-by-key/i32/n11", "[u
 // compared against the tuple base case, on both host and device.
 // ---------------------------------------------------------------------------
 
-// ---------------------------------------------------------------------------
-// rocThrust `testing/out_of_memory_recovery.cu` port.  The upstream test
-// assumes a real allocation-failure path integrated through HIP and the
-// preceding device_vector destructors running during the failed helper
-// allocation; under the emulator no deterministic allocation failure can be
-// forced, so the case is a documented skip.
-// ---------------------------------------------------------------------------
-
 TEST_CASE("algorithms/roc-thrust-semantic/set-union-by-key/i32/n11", "[unified][rocthrust][compact]") {
   check_set_by_key<TestType>(SetKind::union_set, false);
 }

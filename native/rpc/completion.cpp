@@ -1,6 +1,7 @@
 #include "completion.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <cmath>
 #include <cstdio>
@@ -163,13 +164,98 @@ bool render(const PrintEvent &event, std::string &output) {
 
 } // namespace
 
-bool collect_completion(Client &client, CompletionId completion, CompletionResult &result, std::string &error) {
+bool await_completion(Client &client, CompletionId completion, std::string &error, bool hostMemory) {
+  if (!hostMemory) {
+    const auto result = client.call(AwaitCompletion{completion});
+    if (!result) error = result.error().detail;
+    return static_cast<bool>(result);
+  }
+  for (;;) {
+    auto batch = client.call(PollHostMemory{completion});
+    if (!batch) {
+      error = batch.error().detail;
+      return false;
+    }
+    // Only exact interpreter-requested ranges are touched. Never round to pages.
+    std::vector<HostMemoryBytes> replies;
+    for (const auto &range : batch.value().reads) {
+      const auto address = static_cast<uintptr_t>(range.address.value);
+      const auto size = static_cast<size_t>(range.size.value);
+      if (!address || size > UINTPTR_MAX - address) {
+        error = "invalid host read range";
+        return false;
+      }
+      const auto *begin = reinterpret_cast<const uint8_t *>(address);
+      replies.push_back({range.address, std::vector<uint8_t>(begin, begin + size)});
+    }
+    for (const auto &range : batch.value().writes) {
+      const auto address = static_cast<uintptr_t>(range.address.value);
+      if (!address || range.bytes.size() > UINTPTR_MAX - address) {
+        error = "invalid host write range";
+        return false;
+      }
+      if (range.atomicWidth != 0) {
+        const auto width = range.atomicWidth;
+        if ((width != 4 && width != 8) || address % width || range.bytes.size() % width) {
+          error = "invalid host atomic store range";
+          return false;
+        }
+        for (size_t offset = 0; offset < range.bytes.size(); offset += width) {
+          if (width == 4) {
+            uint32_t value;
+            std::memcpy(&value, range.bytes.data() + offset, sizeof(value));
+            std::atomic_ref<uint32_t>(*reinterpret_cast<uint32_t *>(address + offset)).store(value, std::memory_order_seq_cst);
+          } else {
+            uint64_t value;
+            std::memcpy(&value, range.bytes.data() + offset, sizeof(value));
+            std::atomic_ref<uint64_t>(*reinterpret_cast<uint64_t *>(address + offset)).store(value, std::memory_order_seq_cst);
+          }
+        }
+      } else std::memcpy(reinterpret_cast<void *>(address), range.bytes.data(), range.bytes.size());
+    }
+    if (batch.value().sync) {
+      const auto &sync = *batch.value().sync;
+      uint64_t observed = 0;
+      if (sync.atomic) {
+        const auto &request = *sync.atomic;
+        const auto address = static_cast<uintptr_t>(request.address.value);
+        observed = static_cast<uint64_t>(request.expected);
+        if (!address || (request.size != 4 && request.size != 8) || address % request.size != 0) {
+          error = "invalid host atomic range";
+          return false;
+        }
+        if (request.size == 4) {
+          auto expected = static_cast<uint32_t>(observed);
+          std::atomic_ref<uint32_t>(*reinterpret_cast<uint32_t *>(address))
+              .compare_exchange_strong(expected, static_cast<uint32_t>(request.desired), std::memory_order_seq_cst);
+          observed = expected;
+        } else {
+          std::atomic_ref<uint64_t>(*reinterpret_cast<uint64_t *>(address))
+              .compare_exchange_strong(observed, static_cast<uint64_t>(request.desired), std::memory_order_seq_cst);
+        }
+      } else std::atomic_thread_fence(std::memory_order_seq_cst);
+      auto supplied = client.call(SupplyHostSync{completion, sync.ticket, static_cast<int64_t>(observed)});
+      if (!supplied) {
+        error = supplied.error().detail;
+        return false;
+      }
+    }
+    if (batch.value().completed) return true;
+    if (replies.empty()) continue;
+    auto supplied = client.call(SupplyHostMemory{completion, std::move(replies)});
+    if (!supplied) {
+      error = supplied.error().detail;
+      return false;
+    }
+  }
+}
+
+bool collect_completion(Client &client, CompletionId completion, CompletionResult &result, std::string &error, bool hostMemory) {
   result.dirty_ranges.clear();
   result.pointer_relocations.clear();
   error.clear();
 
-  bool succeeded = static_cast<bool>(client.call(AwaitCompletion{completion}));
-  if (!succeeded) error = client.error();
+  bool succeeded = await_completion(client, completion, error, hostMemory);
   if (succeeded) {
     auto ranges = client.call(CompletionDirtyRanges{completion});
     succeeded = static_cast<bool>(ranges);

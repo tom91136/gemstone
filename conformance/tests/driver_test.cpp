@@ -57,8 +57,7 @@ TEST_CASE("Catch JSON inventories preserve names and reject malformed input", "[
 }
 
 TEST_CASE("Google Test inventories retain parameterized cases and reject duplicates", "[driver]") {
-  const auto names = gtest_case_names(
-      "Driver.\n  Opens\n  DISABLED_Old\nParam/Copy.\n  Case/0  # GetParam() = 8\n  Case/1\n", "levelzero");
+  const auto names = gtest_case_names("Driver.\n  Opens\n  DISABLED_Old\nParam/Copy.\n  Case/0  # GetParam() = 8\n  Case/1\n", "levelzero");
   CHECK(names == std::vector<std::string>{"Driver.Opens", "Param/Copy.Case/0", "Param/Copy.Case/1"});
   CHECK_THROWS(gtest_case_names("  Orphan\n", "levelzero"));
   CHECK_THROWS(gtest_case_names("Driver.\n  Duplicate\n  Duplicate\n", "levelzero"));
@@ -226,3 +225,11 @@ TEST_CASE("device lock acquisition has a deadline", "[driver][process]") {
   CHECK(std::chrono::steady_clock::now() - start < 1s);
 }
 #endif
+
+TEST_CASE("isolated launchers preserve configured device selection", "[driver]") {
+  for (const auto *backend : {"cuda", "hip", "hsa", "opencl", "levelzero", "sycl"}) {
+    std::map<std::string, std::string> environment{{"CONFORMANCE_DEVICE", "*chosen device*"}};
+    apply_suite_isolated_environment(environment, backend);
+    CHECK(environment.at("CONFORMANCE_DEVICE") == "*chosen device*");
+  }
+}

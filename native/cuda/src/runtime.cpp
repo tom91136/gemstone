@@ -27,15 +27,35 @@
 #include "gemstone_cuda_constants.hpp"
 #include "gemstone_execution_rpc.hpp"
 #include <gemstone/bytes.hpp>
+#include <gemstone/command_queue.hpp>
 #include <gemstone/export.h>
 #include <gemstone/lz4.hpp>
+#include <gemstone/memory.hpp>
 #include <gemstone/zstd.hpp>
+
+#include "completion.hpp"
 
 using namespace aspartame;
 using namespace gemstone::cuda::api;
 using gemstone::readNative;
 
 namespace {
+
+int32_t ensureRuntimeContext();
+
+gemstone::CommandQueue &commands() {
+  static gemstone::CommandQueue queue(CUDA_ERROR_UNKNOWN);
+  return queue;
+}
+
+int32_t enqueueCommand(void *stream, std::function<int32_t()> work) noexcept {
+  try {
+    commands().submit(stream, std::move(work));
+    return CUDA_SUCCESS;
+  } catch (...) {
+    return CUDA_ERROR_UNKNOWN;
+  }
+}
 
 struct FatBinaryWrapper {
   int32_t magic;
@@ -208,7 +228,6 @@ int32_t managedRegisterRemote(uint64_t pointer, size_t size, int hostMemory) noe
 int32_t managedUnregisterRemote(uint64_t pointer) noexcept;
 extern thread_local void *currentContext;
 void *activeContext();
-int32_t managedSynchronizeFromDevice();
 bool systemPagingEnabled() noexcept;
 thread_local void *contextStack[64];
 thread_local size_t contextStackSize = 0;
@@ -422,15 +441,14 @@ struct MirroredAllocation {
   uint64_t pointer;
   size_t size;
   std::unique_ptr<unsigned char[]> host;
+  unsigned char *data() const { return reinterpret_cast<unsigned char *>(pointer); }
 };
 
 std::mutex mirroredMutex;
+gemstone::MemoryRegistrations mirrorRegistrations;
 std::vector<std::unique_ptr<MirroredAllocation>> mirroredAllocations;
-bool managedDeviceDirty = false;
-thread_local bool managedSyncToDeviceActive = false;
-thread_local bool managedSyncFromDeviceActive = false;
 
-int32_t mirroredAllocate(uint64_t *pointer, size_t size, bool hostMemory) {
+int32_t mirroredAllocate(uint64_t *pointer, size_t size, bool hostMemory, uint32_t flags = 0) {
   if (!pointer) return CUDA_ERROR_INVALID_VALUE;
   const size_t allocation_size = size == 0 ? 1 : size;
   auto host = std::unique_ptr<unsigned char[]>{new (std::nothrow) unsigned char[allocation_size]};
@@ -450,6 +468,7 @@ int32_t mirroredAllocate(uint64_t *pointer, size_t size, bool hostMemory) {
   entry->host = std::move(host);
   try {
     std::lock_guard lock{mirroredMutex};
+    mirrorRegistrations.add({address, allocation_size}, gemstone::MemoryOwnership::Owned, flags);
     mirroredAllocations.push_back(std::move(entry));
   } catch (const std::exception &) {
     (void)managedUnregisterRemote(address);
@@ -461,7 +480,7 @@ int32_t mirroredAllocate(uint64_t *pointer, size_t size, bool hostMemory) {
 
 int32_t managedAllocate(uint64_t *pointer, size_t size) { return mirroredAllocate(pointer, size, false); }
 
-std::optional<int32_t> freeManaged(uint64_t pointer) {
+std::optional<int32_t> freeManaged(uint64_t pointer, gemstone::MemoryOwnership ownership = gemstone::MemoryOwnership::Owned) {
   std::unique_ptr<MirroredAllocation> entry;
   int32_t status = CUDA_SUCCESS;
   {
@@ -469,59 +488,25 @@ std::optional<int32_t> freeManaged(uint64_t pointer) {
     const auto cursor = std::find_if(mirroredAllocations.begin(), mirroredAllocations.end(),
                                      [=](const auto &allocation) { return allocation->pointer == pointer; });
     if (cursor == mirroredAllocations.end()) return std::nullopt;
+    const auto view = mirrorRegistrations.exact(pointer);
+    if (!view || view->ownership != ownership) return CUDA_ERROR_INVALID_VALUE;
     status = managedUnregisterRemote(pointer);
     if (status != CUDA_SUCCESS) return status;
     entry = std::move(*cursor);
     mirroredAllocations.erase(cursor);
+    mirrorRegistrations.remove(pointer, ownership);
   }
   untrackDevice(pointer);
   return status;
 }
 
-int32_t managedSynchronizeToDevice() {
-  // A preceding device launch may have updated a managed allocation.  Bring
-  // that state back to the host before the next launch copies host-visible
-  // managed bytes into the emulator, otherwise stale host bytes overwrite the
-  // device result between dependent kernels.
-  int32_t status = managedDeviceDirty ? managedSynchronizeFromDevice() : CUDA_SUCCESS;
-  if (status != CUDA_SUCCESS) return status;
-  managedSyncToDeviceActive = true;
-  {
-    std::lock_guard lock{mirroredMutex};
-    for (const auto &entry : mirroredAllocations) {
-      if (status != CUDA_SUCCESS) break;
-      status = cuMemcpyHtoD_v2(entry->pointer, entry->host.get(), entry->size);
-    }
-  }
-  managedSyncToDeviceActive = false;
-  return status;
-}
-
 bool copyManagedToHost(void *destination, uint64_t pointer, size_t size) {
-  if (managedSyncFromDeviceActive) return false;
   bool handled = false;
   std::lock_guard lock{mirroredMutex};
   for (const auto &entry : mirroredAllocations) {
     const uint64_t offset = pointer - entry->pointer;
     if (pointer >= entry->pointer && offset <= entry->size && size <= entry->size - offset) {
-      if (!managedDeviceDirty) {
-        if (size != 0) memcpy(destination, entry->host.get() + offset, size);
-        handled = true;
-      }
-      break;
-    }
-  }
-  return handled;
-}
-
-bool copyManagedFromHost(uint64_t pointer, const void *source, size_t size) {
-  if (managedSyncToDeviceActive) return false;
-  bool handled = false;
-  std::lock_guard lock{mirroredMutex};
-  for (const auto &entry : mirroredAllocations) {
-    const uint64_t offset = pointer - entry->pointer;
-    if (pointer >= entry->pointer && offset <= entry->size && size <= entry->size - offset) {
-      if (size != 0) memmove(entry->host.get() + offset, source, size);
+      if (size != 0) memcpy(destination, entry->data() + offset, size);
       handled = true;
       break;
     }
@@ -529,24 +514,18 @@ bool copyManagedFromHost(uint64_t pointer, const void *source, size_t size) {
   return handled;
 }
 
-void markManagedDeviceDirty() {
+bool copyManagedFromHost(uint64_t pointer, const void *source, size_t size) {
+  bool handled = false;
   std::lock_guard lock{mirroredMutex};
-  managedDeviceDirty = true;
-}
-
-int32_t managedSynchronizeFromDevice() {
-  int32_t status = CUDA_SUCCESS;
-  std::lock_guard lock{mirroredMutex};
-  if (managedDeviceDirty) {
-    managedSyncFromDeviceActive = true;
-    for (const auto &entry : mirroredAllocations) {
-      if (status != CUDA_SUCCESS) break;
-      status = cuMemcpyDtoH_v2(entry->host.get(), entry->pointer, entry->size);
+  for (const auto &entry : mirroredAllocations) {
+    const uint64_t offset = pointer - entry->pointer;
+    if (pointer >= entry->pointer && offset <= entry->size && size <= entry->size - offset) {
+      if (size != 0) memmove(entry->data() + offset, source, size);
+      handled = true;
+      break;
     }
-    managedSyncFromDeviceActive = false;
-    if (status == CUDA_SUCCESS) managedDeviceDirty = false;
   }
-  return status;
+  return handled;
 }
 
 } // namespace
@@ -563,32 +542,62 @@ extern "C" int32_t cuMemAllocHost_v2(void **pointer, size_t size) {
 extern "C" int32_t cuMemAllocHost(void **pointer, size_t size) { return cuMemAllocHost_v2(pointer, size); }
 
 extern "C" int32_t cuMemFreeHost(void *pointer) {
+  if (const auto pending = commands().waitAll(); pending != CUDA_SUCCESS) return pending;
   return freeManaged(reinterpret_cast<uintptr_t>(pointer)).value_or(CUDA_ERROR_INVALID_VALUE);
 }
 
 extern "C" int32_t cuMemHostAlloc(void **pointer, size_t size, uint32_t flags) {
-  (void)flags;
-  return cuMemAllocHost_v2(pointer, size);
+  if (flags & ~UINT32_C(7)) return CUDA_ERROR_INVALID_VALUE;
+  return mirroredAllocate(reinterpret_cast<uint64_t *>(pointer), size, true, flags);
 }
 
 extern "C" int32_t cuMemHostGetDevicePointer_v2(uint64_t *pointer, void *host_pointer, uint32_t flags) {
-  (void)flags;
-  if (!pointer || !host_pointer) return CUDA_ERROR_INVALID_VALUE;
+  if (flags != 0 || !pointer || !host_pointer) return CUDA_ERROR_INVALID_VALUE;
   std::lock_guard lock{mirroredMutex};
-  const auto entry = std::find_if(mirroredAllocations.begin(), mirroredAllocations.end(),
-                                  [=](const auto &allocation) { return allocation->pointer == reinterpret_cast<uintptr_t>(host_pointer); });
-  if (entry == mirroredAllocations.end()) return CUDA_ERROR_INVALID_VALUE;
-  *pointer = (*entry)->pointer;
+  const auto view = mirrorRegistrations.find(reinterpret_cast<uintptr_t>(host_pointer));
+  if (!view) return CUDA_ERROR_INVALID_VALUE;
+  *pointer = reinterpret_cast<uintptr_t>(host_pointer);
   return CUDA_SUCCESS;
 }
 
 extern "C" int32_t cuMemHostGetFlags(uint32_t *flags, void *host_pointer) {
   if (!flags || !host_pointer) return CUDA_ERROR_INVALID_VALUE;
-  uint64_t device_pointer = 0;
-  const int32_t status = cuMemHostGetDevicePointer_v2(&device_pointer, host_pointer, 0);
-  if (status == CUDA_SUCCESS) *flags = 0;
-  return status;
+  std::lock_guard lock{mirroredMutex};
+  const auto view = mirrorRegistrations.find(reinterpret_cast<uintptr_t>(host_pointer));
+  if (!view) return CUDA_ERROR_INVALID_VALUE;
+  *flags = static_cast<uint32_t>(view->flags);
+  return CUDA_SUCCESS;
 }
+
+extern "C" int32_t cuMemHostRegister_v2(void *pointer, size_t size, uint32_t flags) {
+  const gemstone::MemoryRange range{reinterpret_cast<uintptr_t>(pointer), size};
+  if (!range.valid() || (flags & ~UINT32_C(15))) return CUDA_ERROR_INVALID_VALUE;
+  std::lock_guard lock{mirroredMutex};
+  if (mirrorRegistrations.overlaps(range)) return CUDA_ERROR_INVALID_VALUE;
+  const auto status = managedRegisterRemote(range.base, size, true);
+  if (status != CUDA_SUCCESS) return status;
+  auto entry = std::make_unique<MirroredAllocation>();
+  entry->pointer = range.base;
+  entry->size = size;
+  // Borrowed storage is never deleted by the mirror.
+  mirrorRegistrations.add(range, gemstone::MemoryOwnership::Borrowed, flags);
+  mirroredAllocations.push_back(std::move(entry));
+  return CUDA_SUCCESS;
+}
+extern "C" int32_t cuMemHostRegister(void *pointer, size_t size, uint32_t flags) { return cuMemHostRegister_v2(pointer, size, flags); }
+extern "C" int32_t cuMemHostUnregister(void *pointer) {
+  if (const auto pending = commands().waitAll(); pending != CUDA_SUCCESS) return pending;
+  return freeManaged(reinterpret_cast<uintptr_t>(pointer), gemstone::MemoryOwnership::Borrowed).value_or(CUDA_ERROR_INVALID_VALUE);
+}
+extern "C" int32_t cudaHostRegister(void *pointer, size_t size, uint32_t flags) {
+  const auto status = ensureRuntimeContext();
+  return status == CUDA_SUCCESS ? cuMemHostRegister_v2(pointer, size, flags) : status;
+}
+extern "C" int32_t cudaHostUnregister(void *pointer) { return cuMemHostUnregister(pointer); }
+extern "C" int32_t cudaHostGetDevicePointer(void **pointer, void *host, uint32_t flags) {
+  return cuMemHostGetDevicePointer_v2(reinterpret_cast<uint64_t *>(pointer), host, flags);
+}
+extern "C" int32_t cudaHostGetFlags(uint32_t *flags, void *host) { return cuMemHostGetFlags(flags, host); }
 
 namespace {
 
@@ -898,6 +907,7 @@ bool linearBounds(size_t x, size_t y, size_t pitch, size_t width, size_t height,
 }
 
 int32_t copyRows(const CudaMemcpy2D *copy) {
+  if (const auto pending = commands().waitAll(); pending != CUDA_SUCCESS) return pending;
   if (!copy || copy->width_in_bytes == 0 || copy->height == 0) return CUDA_SUCCESS;
   if ((copy->src_memory_type != CU_MEMORYTYPE_HOST && copy->src_memory_type != CU_MEMORYTYPE_DEVICE
        && copy->src_memory_type != CU_MEMORYTYPE_ARRAY)
@@ -972,8 +982,9 @@ extern "C" int32_t cuMemcpy2D_v2(const void *copy) { return copyRows(static_cast
 extern "C" int32_t cuMemcpy2DUnaligned_v2(const void *copy) { return copyRows(static_cast<const CudaMemcpy2D *>(copy)); }
 
 extern "C" int32_t cuMemcpy2DAsync_v2(const void *copy, void *stream) {
-  (void)stream;
-  return copyRows(static_cast<const CudaMemcpy2D *>(copy));
+  if (!copy) return CUDA_ERROR_INVALID_VALUE;
+  const auto snapshot = *static_cast<const CudaMemcpy2D *>(copy);
+  return enqueueCommand(stream, [snapshot] { return copyRows(&snapshot); });
 }
 
 namespace {
@@ -996,8 +1007,9 @@ extern "C" int32_t cuMemcpy2D(const void *copy) {
 extern "C" int32_t cuMemcpy2DUnaligned(const void *copy) { return cuMemcpy2D(copy); }
 
 extern "C" int32_t cuMemcpy2DAsync(const void *copy, void *stream) {
-  (void)stream;
-  return cuMemcpy2D(copy);
+  if (!copy) return CUDA_ERROR_INVALID_VALUE;
+  const auto expanded = expandCopy2d(static_cast<const CudaMemcpy2DV1 *>(copy));
+  return cuMemcpy2DAsync_v2(&expanded, stream);
 }
 
 namespace {
@@ -1030,6 +1042,7 @@ bool volumeArrayBounds(const CudaArray *array, size_t x, size_t y, size_t z, siz
 }
 
 int32_t copyVolume(const CudaMemcpy3D *copy) {
+  if (const auto pending = commands().waitAll(); pending != CUDA_SUCCESS) return pending;
   if (!copy || copy->width_in_bytes == 0 || copy->height == 0 || copy->depth == 0) {
     return CUDA_SUCCESS;
   }
@@ -1116,8 +1129,9 @@ int32_t copyVolume(const CudaMemcpy3D *copy) {
 extern "C" int32_t cuMemcpy3D_v2(const void *copy) { return copyVolume(static_cast<const CudaMemcpy3D *>(copy)); }
 
 extern "C" int32_t cuMemcpy3DAsync_v2(const void *copy, void *stream) {
-  (void)stream;
-  return copyVolume(static_cast<const CudaMemcpy3D *>(copy));
+  if (!copy) return CUDA_ERROR_INVALID_VALUE;
+  const auto snapshot = *static_cast<const CudaMemcpy3D *>(copy);
+  return enqueueCommand(stream, [snapshot] { return copyVolume(&snapshot); });
 }
 
 namespace {
@@ -1139,8 +1153,9 @@ extern "C" int32_t cuMemcpy3D(const void *copy) {
 }
 
 extern "C" int32_t cuMemcpy3DAsync(const void *copy, void *stream) {
-  (void)stream;
-  return cuMemcpy3D(copy);
+  if (!copy) return CUDA_ERROR_INVALID_VALUE;
+  const auto expanded = expandCopy3d(static_cast<const CudaMemcpy3DV1 *>(copy));
+  return cuMemcpy3DAsync_v2(&expanded, stream);
 }
 
 extern "C" int32_t cuKernelGetFunction(void **function, void *kernel) {
@@ -1480,11 +1495,13 @@ extern "C" int32_t cudaMalloc(void **pointer, size_t size) {
 }
 
 extern "C" int32_t cudaFree(void *pointer) {
+  if (const auto pending = commands().waitAll(); pending != CUDA_SUCCESS) return pending;
   const auto managed = freeManaged(reinterpret_cast<uintptr_t>(pointer));
   return managed ? *managed : cuMemFree_v2(reinterpret_cast<uintptr_t>(pointer));
 }
 
 extern "C" int32_t cudaMemcpy(void *destination, const void *source, size_t size, int32_t kind) {
+  if (const auto pending = commands().waitAll(); pending != CUDA_SUCCESS) return pending;
   switch (kind) {
     case 1: return cuMemcpyHtoD_v2(reinterpret_cast<uintptr_t>(destination), source, size);
     case 2: return cuMemcpyDtoH_v2(destination, reinterpret_cast<uintptr_t>(source), size);
@@ -1641,9 +1658,12 @@ extern "C" int32_t cudaDeviceGetAttribute(int32_t *value, int32_t attribute, int
     case 83: *value = 1; break;
     case 84: *value = 0; break;
     case 85: *value = 0; break;
-    case 86: *value = 0; break;
+    case 86: *value = 1; break;
     case 87: *value = 32; break;
-    case 88: *value = systemPagingEnabled() ? 1 : 0; break;
+    // Managed, pinned and registered allocations share the native atomic path.
+    // Ordinary pageable memory remains an experimental opt-in path.
+    // GEMSTONE_CUDA_SYSTEM_PAGING remains an explicit experimental access path.
+    case 88: *value = 0; break;
     case 89: *value = 1; break;
     case 90: *value = 1; break;
     case 91: *value = 1; break;
@@ -1762,10 +1782,13 @@ extern "C" int32_t cudaMallocHost(void **pointer, size_t size) {
 }
 
 extern "C" int32_t cudaHostAlloc(void **pointer, size_t size, uint32_t flags) {
-  return (flags & ~UINT32_C(7)) == 0 ? cudaMallocHost(pointer, size) : CUDA_ERROR_INVALID_VALUE;
+  const int32_t initialized = ensureRuntimeContext();
+  if (initialized != CUDA_SUCCESS) return initialized;
+  return cuMemHostAlloc(pointer, size, flags);
 }
 
 extern "C" int32_t cudaFreeHost(void *pointer) {
+  if (const auto pending = commands().waitAll(); pending != CUDA_SUCCESS) return pending;
   return freeManaged(reinterpret_cast<uintptr_t>(pointer)).value_or(CUDA_ERROR_INVALID_VALUE);
 }
 
@@ -1777,8 +1800,7 @@ extern "C" int32_t cudaMallocManaged(void **pointer, size_t size, uint32_t flags
 }
 
 extern "C" int32_t cudaMemcpyAsync(void *destination, const void *source, size_t size, int32_t kind, void *stream) {
-  (void)stream;
-  return cudaMemcpy(destination, source, size, kind);
+  return enqueueCommand(stream, [=] { return cudaMemcpy(destination, source, size, kind); });
 }
 
 namespace {
@@ -2123,6 +2145,7 @@ int32_t devicePrimaryCtxRetain(void **context, int32_t device) {
 }
 
 int32_t devicePrimaryCtxReleaseV2(int32_t device) {
+  if (const auto pending = commands().waitAll(); pending != CUDA_SUCCESS) return pending;
   if (device != 0) return CUDA_ERROR_INVALID_VALUE;
   std::lock_guard lock{primaryContextMutex};
   int32_t status = CUDA_SUCCESS;
@@ -2464,8 +2487,7 @@ int32_t memAllocFromPoolAsync(uint64_t *pointer, size_t size, void *pool, void *
 }
 
 int32_t memFreeAsync(uint64_t pointer, void *stream) {
-  (void)stream;
-  return cuMemFree_v2(pointer);
+  return enqueueCommand(stream, [=] { return cuMemFree_v2(pointer); });
 }
 
 int32_t memAllocPitchV2(uint64_t *pointer, size_t *pitch, size_t width, size_t height, uint32_t elementSize) {
@@ -2582,18 +2604,15 @@ extern "C" int32_t cuGetErrorName(int32_t status, const char **name) { return ge
 namespace {
 
 int32_t memcpyHtoDAsyncV2(uint64_t destination, const void *source, size_t size, void *stream) {
-  (void)stream;
-  return cuMemcpyHtoD_v2(destination, source, size);
+  return enqueueCommand(stream, [=] { return cuMemcpyHtoD_v2(destination, source, size); });
 }
 
 int32_t memcpyDtoHAsyncV2(void *destination, uint64_t source, size_t size, void *stream) {
-  (void)stream;
-  return cuMemcpyDtoH_v2(destination, source, size);
+  return enqueueCommand(stream, [=] { return cuMemcpyDtoH_v2(destination, source, size); });
 }
 
 int32_t memcpyDtoDAsyncV2(uint64_t destination, uint64_t source, size_t size, void *stream) {
-  (void)stream;
-  return cuMemcpyDtoD_v2(destination, source, size);
+  return enqueueCommand(stream, [=] { return cuMemcpyDtoD_v2(destination, source, size); });
 }
 
 /* Generic copies use the same allocation metadata as the pointer attributes. */
@@ -2679,8 +2698,7 @@ extern "C" int32_t cuMemcpyDtoDAsync_v2_ptsz(uint64_t destination, uint64_t sour
 namespace {
 
 int32_t memsetD8Async(uint64_t destination, uint8_t value, size_t count, void *stream) {
-  (void)stream;
-  return cuMemsetD8_v2(destination, value, count);
+  return enqueueCommand(stream, [=] { return cuMemsetD8_v2(destination, value, count); });
 }
 
 } // namespace
@@ -2701,23 +2719,24 @@ int32_t synchronizeStreamCallbacks(void *stream) noexcept;
 
 int32_t streamSynchronize(void *stream) { return synchronizeStreamCallbacks(stream); }
 
-int32_t streamQuery(void *stream) {
-  (void)stream;
-  return CUDA_SUCCESS;
-}
+int32_t streamQuery(void *stream) { return commands().query(commands().snapshot(stream), CUDA_ERROR_NOT_READY); }
 
+std::mutex eventMutex;
+std::map<void *, gemstone::CommandQueue::Ticket> events;
 std::atomic_uint64_t nextEvent{UINT64_C(0x500000000)};
 
 int32_t eventCreate(void **event, uint32_t flags) {
   (void)flags;
   if (!event) return CUDA_ERROR_INVALID_VALUE;
   *event = reinterpret_cast<void *>(static_cast<uintptr_t>(nextEvent.fetch_add(UINT64_C(1), std::memory_order_relaxed)));
+  std::lock_guard lock(eventMutex);
+  events.emplace(*event, gemstone::CommandQueue::Ticket{});
   return CUDA_SUCCESS;
 }
 
 int32_t eventDestroy(void *event) {
-  (void)event;
-  return CUDA_SUCCESS;
+  std::lock_guard lock(eventMutex);
+  return events.erase(event) == 1 ? CUDA_SUCCESS : CUDA_ERROR_INVALID_HANDLE;
 }
 
 int32_t eventElapsedTime(float *milliseconds, void *start, void *end) {
@@ -2729,13 +2748,17 @@ int32_t eventElapsedTime(float *milliseconds, void *start, void *end) {
 }
 
 int32_t eventQuery(void *event) {
-  (void)event;
-  return CUDA_SUCCESS;
+  std::lock_guard lock(eventMutex);
+  const auto found = events.find(event);
+  if (found == events.end()) return CUDA_ERROR_INVALID_HANDLE;
+  return commands().query(found->second, CUDA_ERROR_NOT_READY);
 }
 
 int32_t eventRecord(void *event, void *stream) {
-  (void)event;
-  (void)stream;
+  std::lock_guard lock(eventMutex);
+  const auto found = events.find(event);
+  if (found == events.end()) return CUDA_ERROR_INVALID_HANDLE;
+  found->second = commands().submit(stream, [] { return CUDA_SUCCESS; });
   return CUDA_SUCCESS;
 }
 
@@ -2745,14 +2768,22 @@ int32_t eventRecordWithFlags(void *event, void *stream, uint32_t flags) {
 }
 
 int32_t eventSynchronize(void *event) {
-  (void)event;
-  return CUDA_SUCCESS;
+  gemstone::CommandQueue::Ticket ticket;
+  {
+    std::lock_guard lock(eventMutex);
+    const auto found = events.find(event);
+    if (found == events.end()) return CUDA_ERROR_INVALID_HANDLE;
+    ticket = found->second;
+  }
+  return commands().wait(ticket);
 }
 
 int32_t streamWaitEvent(void *stream, void *event, uint32_t flags) {
-  (void)stream;
-  (void)event;
-  (void)flags;
+  if (flags != 0) return CUDA_ERROR_INVALID_VALUE;
+  std::lock_guard lock(eventMutex);
+  const auto found = events.find(event);
+  if (found == events.end()) return CUDA_ERROR_INVALID_HANDLE;
+  commands().submit(stream, [] { return CUDA_SUCCESS; }, {found->second});
   return CUDA_SUCCESS;
 }
 
@@ -2764,6 +2795,7 @@ extern "C" int32_t cuStreamCreate(void **stream, uint32_t flags) {
   (void)flags;
   if (!stream) return CUDA_ERROR_INVALID_VALUE;
   *stream = reinterpret_cast<void *>(static_cast<uintptr_t>(nextStream.fetch_add(UINT64_C(1), std::memory_order_relaxed)));
+  commands().configure(*stream, (flags & 1) != 0);
   return CUDA_SUCCESS;
 }
 
@@ -2772,10 +2804,7 @@ extern "C" int32_t cuStreamCreateWithPriority(void **stream, uint32_t flags, int
   return cuStreamCreate(stream, flags);
 }
 
-extern "C" int32_t cuStreamDestroy_v2(void *stream) {
-  (void)stream;
-  return CUDA_SUCCESS;
-}
+extern "C" int32_t cuStreamDestroy_v2(void *stream) { return commands().wait(commands().snapshot(stream)); }
 
 extern "C" int32_t cuStreamDestroy(void *stream) { return cuStreamDestroy_v2(stream); }
 
@@ -3439,6 +3468,9 @@ extern "C" GEMSTONE_PUBLIC_API int32_t GEMSTONE_CUDA_API cuGetProcAddress_v2(con
   GEMSTONE_CUDA_PROC("cuMemAllocHost", cuMemAllocHost)
   GEMSTONE_CUDA_PROC("cuMemAllocHost_v2", cuMemAllocHost_v2)
   GEMSTONE_CUDA_PROC("cuMemFreeHost", cuMemFreeHost)
+  GEMSTONE_CUDA_PROC("cuMemHostRegister", cuMemHostRegister_v2)
+  GEMSTONE_CUDA_PROC("cuMemHostRegister_v2", cuMemHostRegister_v2)
+  GEMSTONE_CUDA_PROC("cuMemHostUnregister", cuMemHostUnregister)
   GEMSTONE_CUDA_PROC("cuMemHostAlloc", cuMemHostAlloc)
   GEMSTONE_CUDA_PROC("cuMemHostGetDevicePointer", cuMemHostGetDevicePointer_v2)
   GEMSTONE_CUDA_PROC("cuMemHostGetDevicePointer_v2", cuMemHostGetDevicePointer_v2)
@@ -3624,10 +3656,10 @@ bool registerAllocation(size_t size, AllocationKind kind, uint64_t &id) noexcept
   }
 }
 
-bool registerAddress(uint64_t id, uint64_t address) noexcept {
+bool registerAddress(uint64_t id, uint64_t address, bool hostBacked = false) noexcept {
   try {
-    return static_cast<bool>(
-        client->call(RegisterAllocationAddress{AllocationId{static_cast<int64_t>(id)}, GuestAddress{static_cast<int64_t>(address)}}));
+    return static_cast<bool>(client->call(
+        RegisterAllocationAddress{AllocationId{static_cast<int64_t>(id)}, GuestAddress{static_cast<int64_t>(address)}, hostBacked}));
   } catch (...) {
     return false;
   }
@@ -3681,175 +3713,6 @@ bool readAllocation(uint64_t id, uint64_t offset, void *bytes, size_t size) noex
 }
 
 bool systemPagingEnabled() noexcept { return std::getenv("GEMSTONE_CUDA_SYSTEM_PAGING") != nullptr; }
-
-struct HostPagingLease {
-  uint64_t base = 0;
-  size_t size = 0;
-  uint64_t id = 0;
-  bool writable = false;
-  std::vector<uint8_t> original;
-
-  ~HostPagingLease() {
-    if (id) (void)releaseAllocation(id);
-  }
-
-  bool applyDeviceChanges() const {
-    std::vector<uint8_t> device(size);
-    if (!readAllocation(id, 0, device.data(), size)) return false;
-    auto *host = reinterpret_cast<uint8_t *>(base);
-    for (size_t index = 0; index < size; ++index)
-      if (device[index] != original[index]) {
-        if (!writable) return false;
-        host[index] = device[index];
-      }
-    return true;
-  }
-};
-
-std::unique_ptr<HostPagingLease> mapHostAddress(uint64_t pointer, bool skipExecutable = false) {
-  const bool trace = std::getenv("GEMSTONE_CUDA_PAGING_TRACE") != nullptr;
-  auto *maps = std::fopen("/proc/self/maps", "r");
-  if (!maps) return nullptr;
-  uint64_t base = 0;
-  size_t size = 0;
-  bool writable = false;
-  char line[1024];
-  while (std::fgets(line, sizeof(line), maps)) {
-    unsigned long long begin = 0, end = 0;
-    char permissions[5] = {};
-    if (std::sscanf(line, "%llx-%llx %4s", &begin, &end, permissions) != 3) continue;
-    if (pointer >= begin && pointer < end && permissions[0] == 'r' && (!skipExecutable || permissions[2] != 'x')
-        && end - begin <= size_t(64) * 1024 * 1024) {
-      base = begin;
-      size = static_cast<size_t>(end - begin);
-      writable = permissions[1] == 'w';
-      break;
-    }
-  }
-  std::fclose(maps);
-  if (!base || !size) return nullptr;
-  uint64_t end = base + size;
-  {
-    std::lock_guard lock(pointerMutex);
-    for (const auto &tracked : pointers) {
-      const auto tracked_end = tracked.base + tracked.size;
-      if (tracked_end <= pointer && tracked_end > base) base = tracked_end;
-      if (tracked.base > pointer && tracked.base < end) end = tracked.base;
-    }
-  }
-  if (end <= base || pointer < base || pointer >= end) return nullptr;
-  size = static_cast<size_t>(end - base);
-  uint64_t id = 0;
-  if (!registerAllocation(size, AllocationKind::Host, id)) {
-    if (trace)
-      std::fprintf(stderr, "Gemstone CUDA host map register failed pointer=%p base=%p size=%zu\n", reinterpret_cast<void *>(pointer),
-                   reinterpret_cast<void *>(base), size);
-    return nullptr;
-  }
-  if (!registerAddress(id, base)) {
-    if (trace)
-      std::fprintf(stderr, "Gemstone CUDA host map alias failed pointer=%p base=%p size=%zu\n", reinterpret_cast<void *>(pointer),
-                   reinterpret_cast<void *>(base), size);
-    (void)releaseAllocation(id);
-    return nullptr;
-  }
-  if (trace)
-    std::fprintf(stderr, "Gemstone CUDA host map pointer=%p base=%p size=%zu writable=%d id=%llu\n", reinterpret_cast<void *>(pointer),
-                 reinterpret_cast<void *>(base), size, writable ? 1 : 0, static_cast<unsigned long long>(id));
-  auto lease = std::make_unique<HostPagingLease>();
-  lease->base = base;
-  lease->size = size;
-  lease->id = id;
-  lease->writable = writable;
-  lease->original.assign(reinterpret_cast<const uint8_t *>(base), reinterpret_cast<const uint8_t *>(base) + size);
-  if (!writeAllocation(id, 0, lease->original.data(), size)) return nullptr;
-  return lease;
-}
-
-void mapMainExecutable(std::vector<std::unique_ptr<HostPagingLease>> &pages) {
-  char executable[4096] = {};
-  const auto length = readlink("/proc/self/exe", executable, sizeof(executable) - 1);
-  if (length <= 0) return;
-  executable[length] = '\0';
-  auto *maps = std::fopen("/proc/self/maps", "r");
-  if (!maps) return;
-  char line[8192];
-  uint64_t preceding_executable_end = 0;
-  while (std::fgets(line, sizeof(line), maps) && pages.size() < 96) {
-    unsigned long long begin = 0, end = 0;
-    char permissions[5] = {};
-    if (std::sscanf(line, "%llx-%llx %4s", &begin, &end, permissions) != 3 || permissions[0] != 'r') continue;
-    const bool executable_segment = std::strstr(line, executable) != nullptr;
-    const bool adjacent_data = preceding_executable_end == begin && !std::strchr(line, '/') && !std::strchr(line, '[');
-    if (!executable_segment && !adjacent_data) {
-      preceding_executable_end = 0;
-      continue;
-    }
-    preceding_executable_end = end;
-    if (std::any_of(pages.begin(), pages.end(), [begin](const auto &page) { return page->base == begin; })) continue;
-    auto page = mapHostAddress(begin);
-    if (page) pages.push_back(std::move(page));
-  }
-  std::fclose(maps);
-}
-
-void mapWritableAnonymous(std::vector<std::unique_ptr<HostPagingLease>> &pages) {
-  auto *maps = std::fopen("/proc/self/maps", "r");
-  if (!maps) return;
-  char line[8192];
-  while (std::fgets(line, sizeof(line), maps) && pages.size() < 128) {
-    unsigned long long begin = 0, end = 0;
-    char permissions[5] = {};
-    if (std::sscanf(line, "%llx-%llx %4s", &begin, &end, permissions) != 3 || permissions[0] != 'r' || permissions[1] != 'w'
-        || permissions[2] == 'x' || end - begin > size_t(1) * 1024 * 1024
-        || (std::strchr(line, '/') && !std::strstr(line, "[heap]") && !std::strstr(line, "[stack]")))
-      continue;
-    if (std::any_of(pages.begin(), pages.end(),
-                    [begin](const auto &page) { return begin >= page->base && begin - page->base < page->size; }))
-      continue;
-    auto page = mapHostAddress(begin);
-    if (page) pages.push_back(std::move(page));
-  }
-  std::fclose(maps);
-}
-
-std::optional<PointerBinding> mapReachableHostAddress(uint64_t pointer, std::vector<std::unique_ptr<HostPagingLease>> &pages) {
-  const auto findPage = [&pages](uint64_t address) -> HostPagingLease * {
-    const auto found = std::find_if(pages.begin(), pages.end(),
-                                    [address](const auto &page) { return address >= page->base && address - page->base < page->size; });
-    return found == pages.end() ? nullptr : found->get();
-  };
-  HostPagingLease *root = findPage(pointer);
-  if (!root) {
-    auto page = mapHostAddress(pointer);
-    if (!page) return std::nullopt;
-    root = page.get();
-    pages.push_back(std::move(page));
-  }
-  mapMainExecutable(pages);
-  mapWritableAnonymous(pages);
-  std::vector<uint64_t> pending{pointer};
-  for (size_t current = 0; current < pending.size() && current < 128; ++current) {
-    const auto address = pending[current];
-    const auto *page = findPage(address);
-    if (!page) continue;
-    const size_t start = static_cast<size_t>(address - page->base);
-    const size_t length = std::min<size_t>(16384, page->size - start);
-    for (size_t offset = 0; offset + sizeof(uint64_t) <= length && pages.size() < 128; offset += sizeof(uint64_t)) {
-      uint64_t candidate = 0;
-      std::memcpy(&candidate, page->original.data() + start + offset, sizeof(candidate));
-      if (candidate < 4096 || findPage(candidate) || pointerBinding(candidate)) continue;
-      auto next = mapHostAddress(candidate, true);
-      if (next) {
-        pages.push_back(std::move(next));
-        pending.push_back(candidate);
-      }
-    }
-  }
-  if (std::getenv("GEMSTONE_CUDA_PAGING_TRACE"))
-    std::fprintf(stderr, "Gemstone CUDA host graph root=%p maps=%zu\n", reinterpret_cast<void *>(pointer), pages.size());
-  return PointerBinding{root->id, pointer - root->base, root->size - (pointer - root->base)};
-}
 
 Module *findModule(void *handle) {
   const std::lock_guard lock(stateMutex);
@@ -3940,7 +3803,7 @@ int32_t synchronizeStreamCallbacks(void *stream) noexcept {
   (void)stream;
   void *context = activeContext();
   if (!contextIsLive(context)) return 201;
-  return managedSynchronizeFromDevice();
+  return commands().wait(commands().snapshot(stream));
 }
 
 } // namespace
@@ -3948,6 +3811,7 @@ int32_t synchronizeStreamCallbacks(void *stream) noexcept {
 extern "C" {
 
 int32_t cuCtxDestroy_v2(void *context) noexcept {
+  if (const auto pending = commands().waitAll(); pending != CUDA_SUCCESS) return pending;
   if (!contextIsLive(context)) return 201;
   untrackContext(context);
   return CUDA_SUCCESS;
@@ -3956,7 +3820,7 @@ int32_t cuCtxDestroy_v2(void *context) noexcept {
 int32_t cuCtxSynchronize() noexcept {
   void *context = activeContext();
   if (!contextIsLive(context)) return 201;
-  return managedSynchronizeFromDevice();
+  return commands().waitAll();
 }
 
 } // extern "C"
@@ -3967,11 +3831,11 @@ int32_t enqueueCallback(void *stream, HostCallback host, StreamCallback streamCa
   void *context = activeContext();
   if (!contextIsLive(context) || (!host && !streamCallback)) return CUDA_ERROR_INVALID_VALUE;
   try {
-    // Device work is completed by each emulated launch/copy before this call.
-    // Report that completion now so callers waiting on callbacks can progress.
-    if (host) host(userData);
-    else streamCallback(stream, CUDA_SUCCESS, userData);
-    return CUDA_SUCCESS;
+    return enqueueCommand(stream, [=] {
+      if (host) host(userData);
+      else streamCallback(stream, CUDA_SUCCESS, userData);
+      return CUDA_SUCCESS;
+    });
   } catch (...) {
     return CUDA_ERROR_UNKNOWN;
   }
@@ -4037,6 +3901,7 @@ extern "C" {
 int32_t cuMemAlloc_v2(uint64_t *pointer, size_t size) noexcept { return allocate(pointer, size, nullptr); }
 
 int32_t cuMemFree_v2(uint64_t pointer) noexcept {
+  if (const auto pending = commands().waitAll(); pending != CUDA_SUCCESS) return pending;
   if (pointer == 0) return CUDA_SUCCESS;
   if (const auto managed = freeManaged(pointer)) return *managed;
   const auto binding = pointerBinding(pointer);
@@ -4047,15 +3912,16 @@ int32_t cuMemFree_v2(uint64_t pointer) noexcept {
 }
 
 int32_t cuMemcpyHtoD_v2(uint64_t destination, const void *source, size_t size) noexcept {
+  if (const auto pending = commands().waitAll(); pending != CUDA_SUCCESS) return pending;
   if (!source && size != 0) return CUDA_ERROR_INVALID_VALUE;
   const auto binding = pointerBinding(destination);
   if (!binding || size > binding->remaining) return CUDA_ERROR_INVALID_VALUE;
-  const int32_t status = writeAllocation(binding->allocation, binding->offset, source, size) ? CUDA_SUCCESS : CUDA_ERROR_UNKNOWN;
-  if (status == CUDA_SUCCESS) copyManagedFromHost(destination, source, size);
-  return status;
+  if (copyManagedFromHost(destination, source, size)) return CUDA_SUCCESS;
+  return writeAllocation(binding->allocation, binding->offset, source, size) ? CUDA_SUCCESS : CUDA_ERROR_UNKNOWN;
 }
 
 int32_t cuMemcpyDtoH_v2(void *destination, uint64_t source, size_t size) noexcept {
+  if (const auto pending = commands().waitAll(); pending != CUDA_SUCCESS) return pending;
   if (!destination && size != 0) return CUDA_ERROR_INVALID_VALUE;
   if (copyManagedToHost(destination, source, size)) return CUDA_SUCCESS;
   const auto binding = pointerBinding(source);
@@ -4092,7 +3958,7 @@ int32_t managedRegisterRemote(uint64_t pointer, size_t size, int hostMemory) noe
   if (pointer == 0 || size == 0 || executionReady() != CUDA_SUCCESS) return CUDA_ERROR_INVALID_VALUE;
   uint64_t id = 0;
   int32_t status = registerAllocation(size, AllocationKind::Managed, id) ? CUDA_SUCCESS : CUDA_ERROR_UNKNOWN;
-  if (status == CUDA_SUCCESS && !registerAddress(id, pointer)) status = CUDA_ERROR_UNKNOWN;
+  if (status == CUDA_SUCCESS && !registerAddress(id, pointer, true)) status = CUDA_ERROR_UNKNOWN;
   if (status == CUDA_SUCCESS) status = trackPointer(pointer, size, id, nullptr, hostMemory != 0, hostMemory == 0);
   if (status != CUDA_SUCCESS && id != 0) (void)releaseAllocation(id);
   return status;
@@ -4275,6 +4141,7 @@ int32_t registerGlobalRemote(uint64_t module, const char *name, const void *init
 extern "C" {
 
 int32_t cuModuleUnload(void *module) noexcept {
+  if (const auto pending = commands().waitAll(); pending != CUDA_SUCCESS) return pending;
   try {
     Module *owner = findModule(module);
     if (!owner) return CUDA_ERROR_INVALID_VALUE;
@@ -4305,8 +4172,6 @@ int32_t cuModuleUnload(void *module) noexcept {
 
 int32_t cuLaunchKernel(void *function, uint32_t grid_x, uint32_t grid_y, uint32_t grid_z, uint32_t block_x, uint32_t block_y,
                        uint32_t block_z, uint32_t shared_memory_bytes, void *stream, void **kernel_params, void **extra) noexcept {
-  CompletionId completion{};
-  bool launched_completion = false;
   try {
     if (!function || grid_x == 0 || grid_y == 0 || grid_z == 0 || block_x == 0 || block_y == 0 || block_z == 0 || extra)
       return CUDA_ERROR_INVALID_VALUE;
@@ -4323,13 +4188,13 @@ int32_t cuLaunchKernel(void *function, uint32_t grid_x, uint32_t grid_y, uint32_
 
     Function *entry = findFunction(function);
     if (!entry || (!entry->parameters.empty() && !kernel_params)) return CUDA_ERROR_INVALID_VALUE;
-    int32_t status = managedSynchronizeToDevice();
+    int32_t status = CUDA_SUCCESS;
     if (status != CUDA_SUCCESS) return status;
 
     std::vector<gemstone::execution::KernelArgument> arguments;
     arguments.reserve(entry->parameters.size());
     std::vector<PointerRelocation> relocations;
-    std::vector<std::unique_ptr<HostPagingLease>> hostPages;
+    if (systemPagingEnabled() && !client->call(EnableHostMemory{})) return CUDA_ERROR_UNKNOWN;
     for (size_t index = 0; index < entry->parameters.size(); ++index) {
       const auto &parameter = entry->parameters[index];
       const auto width = static_cast<uint32_t>(parameter.width.value);
@@ -4341,8 +4206,6 @@ int32_t cuLaunchKernel(void *function, uint32_t grid_x, uint32_t grid_y, uint32_
       if (parameter.kind == KernelParameterKind::Allocation && width == sizeof(pointer))
         std::memcpy(&pointer, kernel_params[index], sizeof(pointer));
       auto binding = parameter.kind == KernelParameterKind::Allocation ? pointerBinding(pointer) : std::nullopt;
-      if (!binding && parameter.kind == KernelParameterKind::Allocation && width == sizeof(pointer) && systemPagingEnabled())
-        binding = mapReachableHostAddress(pointer, hostPages);
       if (width == sizeof(pointer) && binding) {
         arguments.emplace_back(
             KernelArgumentAllocation{AllocationId{static_cast<int64_t>(binding->allocation)}, static_cast<int64_t>(binding->offset)});
@@ -4363,67 +4226,58 @@ int32_t cuLaunchKernel(void *function, uint32_t grid_x, uint32_t grid_y, uint32_
       }
     }
 
-    if (status == CUDA_SUCCESS) {
-      auto launched = client->call(
-          Launch{ProgramId{static_cast<int64_t>(entry->module->program)}, entry->name,
-                 Dimensions{static_cast<int32_t>(block_x), static_cast<int32_t>(block_y), static_cast<int32_t>(block_z)},
-                 Dimensions{static_cast<int32_t>(grid_x), static_cast<int32_t>(grid_y), static_cast<int32_t>(grid_z)},
-                 GlobalDimensions{static_cast<int64_t>(global_x), static_cast<int64_t>(global_y), static_cast<int64_t>(global_z)}, 3,
-                 Coordinates{}, 0, static_cast<int32_t>(shared_memory_bytes), std::move(arguments), std::move(relocations)});
-      if (launched) {
-        completion = launched.value();
-        launched_completion = true;
-      } else {
-        if (std::getenv("GEMSTONE_TRACE")) std::fprintf(stderr, "Gemstone CUDA launch failed: %s\n", launched.error().detail.c_str());
-        status = 700;
-      }
-    }
-    if (status == CUDA_SUCCESS && !client->call(AwaitCompletion{completion})) {
-      if (std::getenv("GEMSTONE_TRACE")) std::fprintf(stderr, "Gemstone CUDA execution failed: %s\n", client->error().c_str());
-      if (std::getenv("GEMSTONE_CUDA_PAGING_TRACE")) {
-        const auto error = client->error();
-        const char *address_text = std::strstr(error.c_str(), ": 0x");
-        if (address_text) {
-          const auto address = std::strtoull(address_text + 2, nullptr, 16);
-          if (auto *maps = std::fopen("/proc/self/maps", "r")) {
-            char line[8192];
-            while (std::fgets(line, sizeof(line), maps)) {
-              unsigned long long begin = 0, end = 0;
-              if (std::sscanf(line, "%llx-%llx", &begin, &end) == 2 && address >= begin && address < end) {
-                std::fprintf(stderr, "Gemstone CUDA missing host mapping: %s", line);
-                break;
-              }
+    if (status != CUDA_SUCCESS) return status;
+    auto launch = Launch{ProgramId{static_cast<int64_t>(entry->module->program)},
+                         entry->name,
+                         Dimensions{static_cast<int32_t>(block_x), static_cast<int32_t>(block_y), static_cast<int32_t>(block_z)},
+                         Dimensions{static_cast<int32_t>(grid_x), static_cast<int32_t>(grid_y), static_cast<int32_t>(grid_z)},
+                         GlobalDimensions{static_cast<int64_t>(global_x), static_cast<int64_t>(global_y), static_cast<int64_t>(global_z)},
+                         3,
+                         Coordinates{},
+                         0,
+                         static_cast<int32_t>(shared_memory_bytes),
+                         std::move(arguments),
+                         std::move(relocations)};
+    return enqueueCommand(stream, [launch = std::move(launch)]() mutable -> int32_t {
+      auto workerClient = Client::fromEnvironment();
+      if (!workerClient) return CUDA_ERROR_UNKNOWN;
+      auto launched = workerClient->call(launch);
+      if (!launched) return 700;
+      const auto completion = launched.value();
+      int32_t status = CUDA_SUCCESS;
+      std::string completionError;
+      if (status == CUDA_SUCCESS) {
+        gemstone::execution::CompletionResult result;
+        const bool collected = gemstone::execution::collect_completion(*workerClient, completion, result, completionError, true);
+
+        if (!collected) {
+          if (std::getenv("GEMSTONE_TRACE")) std::fprintf(stderr, "Gemstone CUDA execution failed: %s\n", completionError.c_str());
+          status = 700;
+        } else {
+          for (const auto &range : result.dirty_ranges) {
+            std::optional<PointerMetadata> target;
+            {
+              std::lock_guard lock(pointerMutex);
+              for (const auto &pointer : pointers)
+                if (pointer.id == static_cast<uint64_t>(range.allocation.value)) {
+                  target = pointer;
+                  break;
+                }
             }
-            std::fclose(maps);
+            if (!target || (!target->host && !target->managed)) continue;
+            const auto offset = static_cast<uint64_t>(range.offset.value);
+            const auto size = static_cast<uint64_t>(range.size.value);
+            if (offset > target->size || size > target->size - offset
+                || !readAllocation(target->id, offset, reinterpret_cast<void *>(target->base + offset), size)) {
+              status = 700;
+              break;
+            }
           }
         }
       }
-      status = 700;
-    }
-    if (launched_completion) {
-      const bool released = static_cast<bool>(client->call(ReleaseCompletion{completion}));
-      launched_completion = false;
-      if (!released) status = 700;
-    }
-    if (status == CUDA_SUCCESS) {
-      for (const auto &page : hostPages)
-        if (!page->applyDeviceChanges()) {
-          status = 700;
-          break;
-        }
-    }
-    if (status == CUDA_SUCCESS) {
-      markManagedDeviceDirty();
-      status = managedSynchronizeFromDevice();
-    }
-    return status;
+      return status;
+    });
   } catch (...) {
-    if (launched_completion) {
-      try {
-        (void)client->call(ReleaseCompletion{completion});
-      } catch (...) {
-      }
-    }
     return CUDA_ERROR_UNKNOWN;
   }
 }

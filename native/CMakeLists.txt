@@ -153,6 +153,72 @@ function(gemstone_require_abi_implementations)
   endif()
 endfunction()
 
+# Consumers invoke the artifact builder; it owns fixture sources and toolchains.
+if(BUILD_TESTING)
+  get_filename_component(REPOSITORY_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
+  set(CONFORMANCE_ARTIFACT_PROJECT "${REPOSITORY_DIRECTORY}/conformance/artifacts" CACHE PATH
+    "Independent conformance artifact build entry point")
+  set(CONTAINER_EXECUTABLE podman CACHE STRING "OCI container executable")
+  set(ROCM_VERSION 7.1.1 CACHE STRING "ROCm toolchain version")
+  set(GEMSTONE_MEMORY_FIXTURE_DIRECTORY "${CMAKE_BINARY_DIR}/rpc/memory-fixtures")
+  set_property(GLOBAL APPEND PROPERTY JOB_POOLS "container_build=1")
+
+  function(gemstone_memory_image backend architecture)
+    if(TARGET gemstone_memory_${backend}_image)
+      return()
+    endif()
+    set(build "${CMAKE_BINARY_DIR}/artifact-builds/memory-${backend}")
+    if(backend STREQUAL "cuda")
+      set(outputs)
+      foreach(name IN ITEMS kernel atomic fence contended)
+        list(APPEND outputs "${GEMSTONE_MEMORY_FIXTURE_DIRECTORY}/${name}.ptx")
+      endforeach()
+    elseif(backend STREQUAL "hsa")
+      set(outputs "${GEMSTONE_MEMORY_FIXTURE_DIRECTORY}/kernel.hsaco")
+    else()
+      set(outputs "${GEMSTONE_MEMORY_FIXTURE_DIRECTORY}/kernel.spv")
+    endif()
+    # Invoke the independent build every time so its own dependency graph sees
+    # changes to its inputs. Unchanged artifacts remain a Ninja no-op.
+    add_custom_target(gemstone_memory_${backend}_image
+      COMMAND "${CMAKE_COMMAND}" -S "${CONFORMANCE_ARTIFACT_PROJECT}" -B "${build}" -G Ninja
+        -DCONFORMANCE_ARTIFACT_KIND=fixture -DCONFORMANCE_FIXTURE=memory
+        "-DCONFORMANCE_BACKEND=${backend}" "-DCONFORMANCE_ARCHITECTURE=${architecture}"
+        "-DCONFORMANCE_ARTIFACT_DIRECTORY=${GEMSTONE_MEMORY_FIXTURE_DIRECTORY}"
+        "-DCONTAINER_EXECUTABLE=${CONTAINER_EXECUTABLE}" "-DROCM_VERSION=${ROCM_VERSION}"
+      COMMAND "${CMAKE_COMMAND}" --build "${build}" --target artifacts --parallel 1
+      BYPRODUCTS ${outputs} JOB_POOL container_build VERBATIM)
+  endfunction()
+
+  function(gemstone_memory_client api provider)
+    add_executable(gemstone_memory_${api} test/memory.cpp)
+    target_compile_features(gemstone_memory_${api} PRIVATE cxx_std_20)
+    target_include_directories(gemstone_memory_${api} PRIVATE "$<TARGET_PROPERTY:${provider},INCLUDE_DIRECTORIES>")
+    target_compile_definitions(gemstone_memory_${api} PRIVATE GEMSTONE_MEMORY_IMAGE_DIRECTORY="${GEMSTONE_MEMORY_FIXTURE_DIRECTORY}")
+    if(api STREQUAL "levelzero")
+      target_link_libraries(gemstone_memory_${api} PRIVATE ${LEVEL_ZERO_LOADER_LIBRARY})
+    else()
+      target_link_libraries(gemstone_memory_${api} PRIVATE ${provider} ${CMAKE_DL_LIBS})
+    endif()
+    if(api STREQUAL "cuda")
+      gemstone_memory_image(cuda "")
+      add_dependencies(gemstone_memory_${api} gemstone_memory_cuda_image)
+    elseif(api MATCHES "^(hip|hsa)$")
+      gemstone_memory_image(hsa gfx900)
+      add_dependencies(gemstone_memory_${api} gemstone_memory_hsa_image)
+    else()
+      gemstone_memory_image(opencl "")
+      add_dependencies(gemstone_memory_${api} gemstone_memory_opencl_image)
+    endif()
+    if(api STREQUAL "hip")
+      target_compile_definitions(gemstone_memory_${api} PRIVATE __HIP_PLATFORM_AMD__=1)
+      target_compile_options(gemstone_memory_${api} PRIVATE -Wno-attributes)
+    elseif(api STREQUAL "opencl")
+      target_compile_definitions(gemstone_memory_${api} PRIVATE CL_TARGET_OPENCL_VERSION=300)
+    endif()
+  endfunction()
+endif()
+
 add_subdirectory(rpc)
 
 set(_gemstone_install_targets)

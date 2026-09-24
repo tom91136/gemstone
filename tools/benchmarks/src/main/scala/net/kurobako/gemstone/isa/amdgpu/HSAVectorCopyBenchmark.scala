@@ -13,7 +13,7 @@ import com.monovore.decline.Opts
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 
-/** The direct-HSA conformance vector-copy source, compiled and dispatched without the HSA queue. */
+/** The exported HSA vector-copy fixture, dispatched without the HSA queue. */
 object HSAVectorCopyBenchmark {
   private final case class Options(groups: Int :| Positive, iterations: Int :| Positive)
   private val name    = BenchmarkName("hsa-vector-copy")

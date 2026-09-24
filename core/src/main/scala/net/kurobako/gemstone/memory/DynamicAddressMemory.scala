@@ -20,7 +20,8 @@ final class DynamicAddressMemory(
     delegate: AddressMemory,
     state: DynamicAddressMemory.State = DynamicAddressMemory.State()
 ) extends DeviceAllocationMemory {
-  private val mutableAllocations = state.mutableAllocations
+  override def fence(): Either[MemoryError, Unit] = delegate.fence()
+  private val mutableAllocations                  = state.mutableAllocations
 
   override def allocate(size: DeviceAllocationByteSize): Either[MemoryError, GuestAddress] = allocate(size, Vec.empty)
 
@@ -46,6 +47,29 @@ final class DynamicAddressMemory(
     val found = mutableAllocations.containsKey(address.value)
     if (found) { val _ = mutableAllocations.remove(address.value) }
     found
+  }
+
+  override def prepareReads(ranges: Vec[(GuestAddress, Int :| Positive0)]): Either[MemoryError, Unit] = {
+    val external = state.lock.withLock {
+      ranges.flatMap { case (address, size) =>
+        if (dynamicRange(address, size).nonEmpty) Vec.empty[(GuestAddress, Int :| Positive0)]
+        else if (!overlapsDynamic(address, size)) Vec((address, size))
+        else Vec.from((0 until size).collect {
+          case offset if dynamicRange(address.offset(offset.toLong), 1).isEmpty =>
+            (address.offset(offset.toLong), 1.refineUnsafe[Positive0])
+        })
+      }
+    }
+    delegate.prepareReads(external)
+  }
+
+  override def validateRange(address: GuestAddress, size: Int :| Positive0): Either[MemoryError, Unit] = {
+    val local = state.lock.withLock {
+      if (dynamicRange(address, size).nonEmpty) Some(Right(()))
+      else if (overlapsDynamic(address, size)) Some(super.validateRange(address, size))
+      else None
+    }
+    local.getOrElse(delegate.validateRange(address, size))
   }
 
   override def readInt8(address: GuestAddress): Either[MemoryError, Byte] =

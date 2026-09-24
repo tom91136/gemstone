@@ -2,6 +2,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <future>
 #include <limits>
 #include <string>
 #include <vector>
@@ -18,6 +19,7 @@
 #include <gemstone/bytes.hpp>
 
 #include "../../hsa/test/code_object_fixture.hpp"
+#include "../../rpc/test/queued_lifetime.hpp"
 #include "../../rpc/test/rpc_fixture.hpp"
 
 namespace {
@@ -47,6 +49,11 @@ TEST_CASE("HIP legacy device properties symbol", "[hip]") {
   hipDeviceProp_tR0600 current{};
   REQUIRE((hipGetDevicePropertiesR0600(&current, 0) == hipSuccess));
   REQUIRE((current.pageableMemoryAccess == 1));
+  REQUIRE((current.managedMemory == 1));
+  REQUIRE((current.concurrentManagedAccess == 1));
+  REQUIRE((current.hostNativeAtomicSupported == 1));
+  REQUIRE((word(772) == current.managedMemory));
+  REQUIRE((word(780) == current.concurrentManagedAccess));
   REQUIRE((unsetenv("GEMSTONE_HSA_SYSTEM_PAGING") == 0));
   REQUIRE((unsetenv("GEMSTONE_AMDGPU_TARGET") == 0));
 }
@@ -76,6 +83,7 @@ TEST_CASE("HIP stream callback reports completed work", "[hip]") {
       (hipStreamAddCallback(
            stream, [](hipStream_t, hipError_t status, void *data) { *static_cast<int *>(data) = status == hipSuccess ? 1 : -1; }, &calls, 0)
        == hipSuccess));
+  REQUIRE((hipStreamSynchronize(stream) == hipSuccess));
   REQUIRE((calls == 1));
   REQUIRE((hipStreamDestroy(stream) == hipSuccess));
 }
@@ -184,6 +192,7 @@ void asymmetricAndBoundaryLaunches(gemstone_test::RpcFixture &fixture, hipFuncti
     fixture.expect(expectedShape(shape, seed, true));
     fixture.expectTrailingArguments(implicitArguments(shape.global, shape.local));
     REQUIRE((launchShape(function, shape, arguments) == hipSuccess));
+    REQUIRE((hipDeviceSynchronize() == hipSuccess));
     fixture.check();
   }
 
@@ -514,6 +523,13 @@ TEST_CASE("HIP launch-buffer and runtime behavior", "[hip]") {
   REQUIRE((hipGetDevicePropertiesR0600(&properties, 0) == hipSuccess));
   REQUIRE((std::strcmp(properties.gcnArchName, "gfx1010") == 0));
   REQUIRE((properties.major == 10 && properties.minor == 1));
+  REQUIRE((properties.unifiedAddressing == 1));
+  REQUIRE((properties.canMapHostMemory == 1));
+  int unified{}, mapped{};
+  REQUIRE((hipDeviceGetAttribute(&unified, hipDeviceAttributeUnifiedAddressing, 0) == hipSuccess));
+  REQUIRE((hipDeviceGetAttribute(&mapped, hipDeviceAttributeCanMapHostMemory, 0) == hipSuccess));
+  REQUIRE((unified == properties.unifiedAddressing));
+  REQUIRE((mapped == properties.canMapHostMemory));
   REQUIRE((properties.maxThreadsPerMultiProcessor == 1024));
   REQUIRE((properties.maxSharedMemoryPerMultiProcessor == 64U * 1024U));
 
@@ -534,3 +550,149 @@ TEST_CASE("HIP registered host copies", "[hip]") { registeredHostCopy(); }
 TEST_CASE("HIP pointer attributes", "[hip]") { pointerAttributes(); }
 
 TEST_CASE("HIP device-reset lifetime", "[hip]") { deviceResetLifetime(); }
+
+TEST_CASE("HIP registered host memory exposes its device pointer", "[hip][unified-memory]") {
+  gemstone_test::RpcFixture fixture;
+  const auto port = std::to_string(fixture.port());
+  REQUIRE((setenv("GEMSTONE_RPC_PORT", port.c_str(), 1) == 0));
+  REQUIRE((setenv("GEMSTONE_RPC_CLIENT", "42", 1) == 0));
+  REQUIRE((unsetenv("GEMSTONE_HSA_SYSTEM_PAGING") == 0));
+  std::array<uint32_t, 8> host{11, 22, 33, 44, 55, 66, 77, 88};
+  REQUIRE((hipHostRegister(host.data(), sizeof(host), hipHostRegisterMapped) == hipSuccess));
+  void *device = nullptr;
+  const auto status = hipHostGetDevicePointer(&device, host.data(), 0);
+  CHECK((status == hipSuccess));
+  if (status == hipSuccess) {
+    uint32_t observed = 0;
+    REQUIRE((hipMemcpy(&observed, static_cast<uint32_t *>(device) + 2, sizeof(observed), hipMemcpyDeviceToHost) == hipSuccess));
+    CHECK((observed == host[2]));
+  }
+  REQUIRE((hipHostUnregister(host.data()) == hipSuccess));
+}
+
+TEST_CASE("HIP allocated mapped host memory exposes its device pointer", "[hip][unified-memory]") {
+  gemstone_test::RpcFixture fixture;
+  const auto port = std::to_string(fixture.port());
+  REQUIRE((setenv("GEMSTONE_RPC_PORT", port.c_str(), 1) == 0));
+  REQUIRE((setenv("GEMSTONE_RPC_CLIENT", "42", 1) == 0));
+  void *host = nullptr;
+  REQUIRE((hipHostMalloc(&host, 64, hipHostMallocMapped) == hipSuccess));
+  void *device = nullptr;
+  CHECK((hipHostGetDevicePointer(&device, host, 0) == hipSuccess));
+  CHECK((device != nullptr));
+  REQUIRE((hipHostFree(host) == hipSuccess));
+}
+
+TEST_CASE("HIP registered host flags round trip", "[hip][unified-memory]") {
+  gemstone_test::RpcFixture fixture;
+  const auto port = std::to_string(fixture.port());
+  REQUIRE((setenv("GEMSTONE_RPC_PORT", port.c_str(), 1) == 0));
+  REQUIRE((setenv("GEMSTONE_RPC_CLIENT", "42", 1) == 0));
+  std::array<uint32_t, 8> host{};
+  const unsigned requested = hipHostRegisterMapped | hipHostRegisterPortable;
+  REQUIRE((hipHostRegister(host.data(), sizeof(host), requested) == hipSuccess));
+  unsigned flags = 0;
+  CHECK((hipHostGetFlags(&flags, host.data()) == hipSuccess));
+  CHECK((flags == requested));
+  REQUIRE((hipHostUnregister(host.data()) == hipSuccess));
+}
+
+TEST_CASE("HIP registered subranges retain ownership and permit address reuse", "[hip][unified-memory]") {
+  gemstone_test::RpcFixture fixture;
+  const auto port = std::to_string(fixture.port());
+  REQUIRE((setenv("GEMSTONE_RPC_PORT", port.c_str(), 1) == 0));
+  REQUIRE((setenv("GEMSTONE_RPC_CLIENT", "42", 1) == 0));
+  REQUIRE((unsetenv("GEMSTONE_HSA_SYSTEM_PAGING") == 0));
+  std::array<uint32_t, 16> host{};
+  for (unsigned iteration = 0; iteration < 3; ++iteration) {
+    REQUIRE((hipHostRegister(host.data() + 1, 4 * sizeof(uint32_t), 0) == hipSuccess));
+    REQUIRE((hipHostRegister(host.data() + 9, 4 * sizeof(uint32_t), 0) == hipSuccess));
+    REQUIRE((hipHostUnregister(host.data() + 1) == hipSuccess));
+    hipPointerAttribute_t info{};
+    REQUIRE((hipPointerGetAttributes(&info, host.data() + 10) == hipSuccess));
+    CHECK((info.type == hipMemoryTypeHost));
+    REQUIRE((hipHostUnregister(host.data() + 9) == hipSuccess));
+    host[1] = iteration;
+    CHECK((hipPointerGetAttributes(&info, host.data() + 1) == hipErrorInvalidValue));
+  }
+}
+
+namespace {
+void unifiedMemoryRoundTrip(unsigned kind) {
+  gemstone_test::RpcFixture fixture;
+  fixture.kernelMetadata(12, 2, {{8, 0, 2, 0}, {4, 8, 1, 0}});
+  const auto port = std::to_string(fixture.port());
+  REQUIRE((setenv("GEMSTONE_RPC_PORT", port.c_str(), 1) == 0));
+  REQUIRE((setenv("GEMSTONE_RPC_CLIENT", "42", 1) == 0));
+  REQUIRE((unsetenv("GEMSTONE_HSA_SYSTEM_PAGING") == 0));
+  std::array<uint32_t, 16> storage{};
+  void *memory = storage.data();
+  if (kind == 0) REQUIRE((hipMallocManaged(&memory, sizeof(storage)) == hipSuccess));
+  else if (kind == 1) REQUIRE((hipHostMalloc(&memory, sizeof(storage), 0) == hipSuccess));
+  else REQUIRE((hipHostRegister(memory, sizeof(storage), 0) == hipSuccess));
+  fixture.checkHostBacked(memory);
+  const auto image = gemstone::hsa::test::codeObjectFixture(1, true, true);
+  hipModule_t module = nullptr;
+  hipFunction_t kernel = nullptr;
+  REQUIRE((hipModuleLoadData(&module, image.data()) == hipSuccess));
+  REQUIRE((hipModuleGetFunction(&kernel, module, "add") == hipSuccess));
+  auto *host = static_cast<uint32_t *>(memory);
+  for (uint32_t seed : {11U, 71U, 93U}) {
+    std::fill_n(host, 16, 0xa5a5a5a5U);
+    const uint64_t input = uint64_t(seed) * 0x100000001ULL;
+    std::memcpy(host + 8, &input, sizeof(input));
+    auto *interior = host + 1;
+    void *arguments[] = {&interior, &seed};
+    fixture.expect({4, 1, 4, 0, seed});
+    REQUIRE((hipModuleLaunchKernel(kernel, 1, 1, 1, 4, 1, 1, 0, nullptr, arguments, nullptr) == hipSuccess));
+    REQUIRE((hipDeviceSynchronize() == hipSuccess));
+    for (unsigned index = 0; index < 4; ++index)
+      CHECK((host[index + 1] == seed + index));
+    CHECK((host[0] == 0xa5a5a5a5U && host[5] == 0xa5a5a5a5U));
+    fixture.checkAllocationWord(memory, 8 * sizeof(uint32_t), input);
+    fixture.check();
+  }
+  REQUIRE((hipModuleUnload(module) == hipSuccess));
+  if (kind == 0) REQUIRE((hipFree(memory) == hipSuccess));
+  else if (kind == 1) REQUIRE((hipHostFree(memory) == hipSuccess));
+  else REQUIRE((hipHostUnregister(memory) == hipSuccess));
+}
+} // namespace
+
+TEST_CASE("HIP managed interior kernel writes and host edits round trip", "[hip][unified-memory]") { unifiedMemoryRoundTrip(0); }
+
+TEST_CASE("HIP pinned interior kernel writes and host edits round trip", "[hip][unified-memory]") { unifiedMemoryRoundTrip(1); }
+
+TEST_CASE("HIP registered interior kernel writes and host edits round trip", "[hip][unified-memory]") { unifiedMemoryRoundTrip(2); }
+
+TEST_CASE("HIP free waits for queued memory uses", "[hip]") {
+  gemstone_test::RpcFixture fixture;
+  const auto port = std::to_string(fixture.port());
+  REQUIRE(setenv("GEMSTONE_RPC_PORT", port.c_str(), 1) == 0);
+  REQUIRE(setenv("GEMSTONE_RPC_CLIENT", "42", 1) == 0);
+  gemstone_test::queuedLifetime(
+      [](size_t size) {
+        void *p{};
+        REQUIRE(hipMalloc(&p, size) == hipSuccess);
+        return p;
+      },
+      [](void *dst, const void *src, size_t size, bool upload) {
+        REQUIRE(hipMemcpyAsync(dst, src, size, upload ? hipMemcpyHostToDevice : hipMemcpyDeviceToHost, nullptr) == hipSuccess);
+      },
+      [](void (*callback)(void *), void *data) {
+        struct Callback {
+          void (*function)(void *);
+          void *data;
+        };
+        auto *owned = new Callback{callback, data};
+        REQUIRE(hipStreamAddCallback(
+                    nullptr,
+                    [](hipStream_t, hipError_t, void *p) {
+                      std::unique_ptr<Callback> callback(static_cast<Callback *>(p));
+                      callback->function(callback->data);
+                    },
+                    owned, 0)
+                == hipSuccess);
+      },
+      [](void *p) { return hipFree(p); });
+}

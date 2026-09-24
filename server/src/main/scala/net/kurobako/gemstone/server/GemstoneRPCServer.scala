@@ -224,7 +224,7 @@ object GemstoneRPCServer {
   def start(taskLimits: TaskLimits, environment: Map[String, String]): RunningServer =
     startWith(RuntimeBackend.defaults, taskLimits, SocketTimeoutMillis, environment)
 
-  private def startWith(
+  private[server] def startWith(
       backends: List[RuntimeBackend],
       taskLimits: TaskLimits,
       socketTimeoutMillis: Int :| Positive,

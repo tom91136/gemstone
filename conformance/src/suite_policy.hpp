@@ -18,10 +18,6 @@ inline std::string_view suite_timeout_environment(std::string_view program) {
 }
 
 inline void apply_suite_isolated_environment(std::map<std::string, std::string> &environment, std::string_view backend) {
-  if (backend == "levelzero") {
-    environment["CONFORMANCE_DEVICE"] = "*Gemstone Virtual SPIR-V GPU*";
-    return;
-  }
   if (backend != "opencl") return;
   environment["CONFORMANCE_OPENCL_CTS_ELEMENTS"] = "1024";
   environment["CONFORMANCE_OPENCL_CTS_WIMPY"] = "1";

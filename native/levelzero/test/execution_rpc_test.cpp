@@ -6,6 +6,7 @@
 #include <thread>
 #include <vector>
 
+#include <poll.h>
 #include <stdint.h>
 #include <unistd.h>
 
@@ -86,10 +87,27 @@ struct MockServer {
 
 private:
   void serve() {
-    const int connection = accept(listener, nullptr, nullptr);
-    REQUIRE((connection >= 0));
+    std::vector<pollfd> peers{{listener, POLLIN, 0}};
     bool running = true;
     while (running) {
+      REQUIRE(poll(peers.data(), peers.size(), 30000) > 0);
+      if (peers[0].revents & POLLIN) {
+        const auto connection = accept(listener, nullptr, nullptr);
+        REQUIRE(connection >= 0);
+        peers.push_back({connection, POLLIN, 0});
+        continue;
+      }
+      size_t ready = 1;
+      while (ready < peers.size() && peers[ready].revents == 0)
+        ++ready;
+      if (ready == peers.size()) continue;
+      const int connection = peers[ready].fd;
+      uint8_t probe{};
+      if (recv(connection, &probe, 1, MSG_PEEK) == 0) {
+        close(connection);
+        peers.erase(peers.begin() + static_cast<ptrdiff_t>(ready));
+        continue;
+      }
       std::array<uint8_t, RequestHeaderBytes> header{};
       receiveAll(connection, header.data(), header.size());
       REQUIRE((gemstone_test::wire::readBigEndian<uint32_t>(header.data()) == RequestMagic));
@@ -102,11 +120,13 @@ private:
       if (!payload.empty()) receiveAll(connection, payload.data(), payload.size());
 
       switch (operationId) {
+        case operation::EnableHostMemory:
         case operation::Ping:
           REQUIRE((payload.empty()));
           respond(connection);
           break;
         case operation::RegisterAllocation: registerAllocation(connection, payload); break;
+        case operation::RegisterAllocationAddress: respond(connection); break;
         case operation::ReleaseAllocation:
           releaseAllocation(payload);
           respond(connection);
@@ -126,6 +146,7 @@ private:
         case operation::Launch: launch(connection, payload); break;
         case operation::QueryCompletion: queryCompletion(connection, payload); break;
         case operation::AwaitCompletion: awaitCompletion(connection, payload); break;
+        case operation::PollHostMemory: awaitCompletion(connection, payload, true); break;
         case operation::ReleaseCompletion:
           REQUIRE((gemstone_test::wire::readBigEndian<uint64_t>(payload.data()) == completionId));
           respond(connection);
@@ -148,7 +169,8 @@ private:
         default: REQUIRE((false));
       }
     }
-    close(connection);
+    for (size_t i = 1; i < peers.size(); ++i)
+      close(peers[i].fd);
   }
 
   void registerAllocation(int connection, const std::vector<uint8_t> &payload) {
@@ -303,7 +325,7 @@ private:
     respond(connection, response);
   }
 
-  void awaitCompletion(int connection, const std::vector<uint8_t> &payload) {
+  void awaitCompletion(int connection, const std::vector<uint8_t> &payload, bool hostMemory = false) {
     REQUIRE((gemstone_test::wire::readBigEndian<uint64_t>(payload.data()) == completionId));
     if (failNextCompletion.exchange(false)) {
       std::vector<uint8_t> failure;
@@ -314,7 +336,7 @@ private:
       respond(connection, failure, true);
       return;
     }
-    respond(connection);
+    respond(connection, hostMemory ? std::vector<uint8_t>{0, 0, 0, 0, 0, 0, 0, 0, 1, 0} : std::vector<uint8_t>{});
   }
 
   int listener = -1;
@@ -422,8 +444,8 @@ void crossWorkgroupApi() {
           REQUIRE((zeEventHostReset(event) == ZE_RESULT_SUCCESS));
           REQUIRE((zeEventQueryStatus(event) == ZE_RESULT_NOT_READY));
           REQUIRE((zeKernelSetGroupSize(kernel, local, 1, 1) == ZE_RESULT_SUCCESS));
-          REQUIRE(((offset == 0 ? setGlobalOffset(kernel, offset, 0, 0)
-                                : zeKernelSetGlobalOffsetExp(kernel, offset, 0, 0)) == ZE_RESULT_SUCCESS));
+          REQUIRE(((offset == 0 ? setGlobalOffset(kernel, offset, 0, 0) : zeKernelSetGlobalOffsetExp(kernel, offset, 0, 0))
+                   == ZE_RESULT_SUCCESS));
           REQUIRE((zeKernelSetArgumentValue(kernel, 1, sizeof(seed), &seed) == ZE_RESULT_SUCCESS));
           const ze_group_count_t geometry{groups, 1, 1};
           REQUIRE((zeCommandListAppendLaunchKernel(list, kernel, &geometry, event, 0, nullptr) == ZE_RESULT_SUCCESS));
@@ -468,7 +490,8 @@ void crossWorkgroupApi() {
     std::fill(ordinary, ordinary + 16, 0U);
     server.expect({4, 1, 4, 0, replaySeed});
     REQUIRE((zeCommandQueueExecuteCommandLists(replayQueue, 1, &replayList, nullptr) == ZE_RESULT_SUCCESS));
-    for (uint32_t index = 0; index < 4; ++index) REQUIRE((ordinary[index] == replaySeed + index));
+    for (uint32_t index = 0; index < 4; ++index)
+      REQUIRE((ordinary[index] == replaySeed + index));
   }
   REQUIRE((zeCommandListDestroy(replayList) == ZE_RESULT_SUCCESS));
   REQUIRE((zeCommandQueueDestroy(replayQueue) == ZE_RESULT_SUCCESS));
@@ -692,7 +715,8 @@ TEST_CASE("Level Zero execution RPC", "[level-zero][rpc]") {
 
 TEST_CASE("Level Zero cross-workgroup API", "[level-zero][rpc]") { crossWorkgroupApi(); }
 
-TEST_CASE("Level Zero kernel accepts an interior ordinary host pointer", "[level-zero][rpc]") {
+namespace {
+void ordinaryHostPointer(unsigned storageKind, bool primeBase) {
   gemstone_test::RpcFixture server;
   const auto port = std::to_string(server.port());
   REQUIRE((setenv("GEMSTONE_RPC_PORT", port.c_str(), 1) == 0));
@@ -720,7 +744,11 @@ TEST_CASE("Level Zero kernel accepts an interior ordinary host pointer", "[level
   ze_kernel_handle_t kernel = nullptr;
   REQUIRE((zeKernelCreate(module, &kernelDesc, &kernel) == ZE_RESULT_SUCCESS));
 
-  auto *base = static_cast<uint32_t *>(std::malloc(64));
+  std::array<uint32_t, 16> stack{};
+  static std::array<uint32_t, 16> global{};
+  std::unique_ptr<uint32_t, decltype(&std::free)> heap(nullptr, &std::free);
+  if (storageKind == 0 || storageKind == 3) heap.reset(static_cast<uint32_t *>(std::malloc(storageKind == 3 ? 2 * 1024 * 1024 : 64)));
+  auto *base = storageKind == 1 ? stack.data() : storageKind == 2 ? global.data() : heap.get();
   REQUIRE((base));
   std::fill(base, base + 16, 0U);
   auto *interior = base + 1;
@@ -739,15 +767,17 @@ TEST_CASE("Level Zero kernel accepts an interior ordinary host pointer", "[level
   ze_command_list_handle_t list = nullptr;
   REQUIRE((zeCommandListCreate(context, device, &listDesc, &list) == ZE_RESULT_SUCCESS));
   const ze_group_count_t groups{1, 1, 1};
-  REQUIRE((zeCommandListAppendLaunchKernel(list, kernel, &groups, nullptr, 0, nullptr) == ZE_RESULT_SUCCESS));
-  REQUIRE((zeCommandListClose(list) == ZE_RESULT_SUCCESS));
+  if (primeBase) {
+    REQUIRE((zeCommandListAppendLaunchKernel(list, kernel, &groups, nullptr, 0, nullptr) == ZE_RESULT_SUCCESS));
+    REQUIRE((zeCommandListClose(list) == ZE_RESULT_SUCCESS));
+    server.expect({4, 1, 4, 0, seed});
+    REQUIRE((zeCommandQueueExecuteCommandLists(queue, 1, &list, nullptr) == ZE_RESULT_SUCCESS));
+    for (uint32_t index = 0; index < 4; ++index)
+      REQUIRE((base[index] == seed + index));
+    REQUIRE((zeCommandListReset(list) == ZE_RESULT_SUCCESS));
+  }
 
-  server.expect({4, 1, 4, 0, seed});
-  REQUIRE((zeCommandQueueExecuteCommandLists(queue, 1, &list, nullptr) == ZE_RESULT_SUCCESS));
-  for (uint32_t index = 0; index < 4; ++index) REQUIRE((base[index] == seed + index));
-
-  // The same kernel and malloc allocation should also accept an offset pointer.
-  REQUIRE((zeCommandListReset(list) == ZE_RESULT_SUCCESS));
+  // Interior pointers must work even when no earlier launch supplied the base.
   std::fill(base, base + 16, 0U);
   REQUIRE((zeKernelSetArgumentValue(kernel, 0, sizeof(interior), &interior) == ZE_RESULT_SUCCESS));
   REQUIRE((zeCommandListAppendLaunchKernel(list, kernel, &groups, nullptr, 0, nullptr) == ZE_RESULT_SUCCESS));
@@ -755,14 +785,35 @@ TEST_CASE("Level Zero kernel accepts an interior ordinary host pointer", "[level
   server.expect({4, 1, 4, 0, seed});
   REQUIRE((zeCommandQueueExecuteCommandLists(queue, 1, &list, nullptr) == ZE_RESULT_SUCCESS));
   REQUIRE((base[0] == 0));
-  for (uint32_t index = 0; index < 4; ++index) REQUIRE((interior[index] == seed + index));
+  for (uint32_t index = 0; index < 4; ++index)
+    REQUIRE((interior[index] == seed + index));
 
   REQUIRE((zeCommandListDestroy(list) == ZE_RESULT_SUCCESS));
   REQUIRE((zeCommandQueueDestroy(queue) == ZE_RESULT_SUCCESS));
   REQUIRE((zeKernelDestroy(kernel) == ZE_RESULT_SUCCESS));
   REQUIRE((zeModuleDestroy(module) == ZE_RESULT_SUCCESS));
   REQUIRE((zeContextDestroy(context) == ZE_RESULT_SUCCESS));
-  std::free(base);
-  REQUIRE((server.launches() == 2));
+  REQUIRE((server.launches() == (primeBase ? 2U : 1U)));
   server.check();
+}
+} // namespace
+
+TEST_CASE("Level Zero kernel accepts an interior ordinary host pointer", "[level-zero][rpc][unified-memory]") {
+  ordinaryHostPointer(0, true);
+}
+
+TEST_CASE("Level Zero first launch accepts an interior heap pointer", "[level-zero][rpc][unified-memory]") {
+  ordinaryHostPointer(0, false);
+}
+
+TEST_CASE("Level Zero first launch accepts an interior stack pointer", "[level-zero][rpc][unified-memory]") {
+  ordinaryHostPointer(1, false);
+}
+
+TEST_CASE("Level Zero first launch accepts an interior static pointer", "[level-zero][rpc][unified-memory]") {
+  ordinaryHostPointer(2, false);
+}
+
+TEST_CASE("Level Zero first launch accepts an interior large heap pointer", "[level-zero][rpc][unified-memory]") {
+  ordinaryHostPointer(3, false);
 }

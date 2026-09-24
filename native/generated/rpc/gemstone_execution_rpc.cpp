@@ -65,6 +65,46 @@ template <> struct Codec<std::string> { static void write(Writer &w, const std::
 template <class T> struct Codec<std::vector<T>> { static void write(Writer &w, const std::vector<T> &v) { const size_t limit = std::is_same_v<T, uint8_t> ? MaximumPayload : MaximumElements; if (v.size() > limit) { w.invalidate(); return; } w.u32(static_cast<uint32_t>(v.size())); if constexpr (std::is_same_v<T, uint8_t>) w.bytes(v.data(), v.size()); else for (const auto &item : v) Codec<T>::write(w, item); } static bool read(Reader &r, std::vector<T> &v) { uint32_t n = 0; const uint32_t limit = std::is_same_v<T, uint8_t> ? MaximumPayload : MaximumElements; if (!r.u32(n) || n > limit) return false; v.resize(n); if constexpr (std::is_same_v<T, uint8_t>) return r.bytes(v.data(), v.size()); else { for (auto &item : v) if (!Codec<T>::read(r, item)) return false; return true; } } };
 template <class T> struct Codec<std::optional<T>> { static void write(Writer &w, const std::optional<T> &v) { w.u8(v ? 1 : 0); if (v) Codec<T>::write(w, *v); } static bool read(Reader &r, std::optional<T> &v) { uint8_t tag = 0; if (!r.u8(tag) || tag > 1) return false; if (tag == 0) { v.reset(); return true; } T item{}; if (!Codec<T>::read(r, item)) return false; v = std::move(item); return true; } };
 
+template <> struct Codec<CompletionId> {
+  static void write(Writer &writer, const CompletionId &value) { if (!((value.value > 0))) { writer.invalidate(); return; } Codec<int64_t>::write(writer, value.value); }
+  static bool read(Reader &reader, CompletionId &value) { return Codec<int64_t>::read(reader, value.value) && ((value.value > 0)); }
+};
+
+template <> struct Codec<GuestAddress> {
+  static void write(Writer &writer, const GuestAddress &value) { if (!(true)) { writer.invalidate(); return; } Codec<int64_t>::write(writer, value.value); }
+  static bool read(Reader &reader, GuestAddress &value) { return Codec<int64_t>::read(reader, value.value) && (true); }
+};
+
+template <> struct Codec<IntPositive> {
+  static void write(Writer &writer, const IntPositive &value) { if (!((value.value > 0))) { writer.invalidate(); return; } Codec<int32_t>::write(writer, value.value); }
+  static bool read(Reader &reader, IntPositive &value) { return Codec<int32_t>::read(reader, value.value) && ((value.value > 0)); }
+};
+
+template <> struct Codec<HostMemoryRange> {
+  static void write(Writer &writer, const HostMemoryRange &value) { Codec<GuestAddress>::write(writer, value.address); Codec<IntPositive>::write(writer, value.size); }
+  static bool read(Reader &reader, HostMemoryRange &value) { return Codec<GuestAddress>::read(reader, value.address) && Codec<IntPositive>::read(reader, value.size); }
+};
+
+template <> struct Codec<HostMemoryBytes> {
+  static void write(Writer &writer, const HostMemoryBytes &value) { Codec<GuestAddress>::write(writer, value.address); Codec<std::vector<uint8_t>>::write(writer, value.bytes); Codec<int32_t>::write(writer, value.atomicWidth); }
+  static bool read(Reader &reader, HostMemoryBytes &value) { return Codec<GuestAddress>::read(reader, value.address) && Codec<std::vector<uint8_t>>::read(reader, value.bytes) && Codec<int32_t>::read(reader, value.atomicWidth); }
+};
+
+template <> struct Codec<HostMemoryAtomic> {
+  static void write(Writer &writer, const HostMemoryAtomic &value) { Codec<GuestAddress>::write(writer, value.address); Codec<int32_t>::write(writer, value.size); Codec<int64_t>::write(writer, value.expected); Codec<int64_t>::write(writer, value.desired); }
+  static bool read(Reader &reader, HostMemoryAtomic &value) { return Codec<GuestAddress>::read(reader, value.address) && Codec<int32_t>::read(reader, value.size) && Codec<int64_t>::read(reader, value.expected) && Codec<int64_t>::read(reader, value.desired); }
+};
+
+template <> struct Codec<HostMemorySync> {
+  static void write(Writer &writer, const HostMemorySync &value) { Codec<int64_t>::write(writer, value.ticket); Codec<std::optional<HostMemoryAtomic>>::write(writer, value.atomic); }
+  static bool read(Reader &reader, HostMemorySync &value) { return Codec<int64_t>::read(reader, value.ticket) && Codec<std::optional<HostMemoryAtomic>>::read(reader, value.atomic); }
+};
+
+template <> struct Codec<HostMemoryBatch> {
+  static void write(Writer &writer, const HostMemoryBatch &value) { Codec<std::vector<HostMemoryRange>>::write(writer, value.reads); Codec<std::vector<HostMemoryBytes>>::write(writer, value.writes); Codec<bool>::write(writer, value.completed); Codec<std::optional<HostMemorySync>>::write(writer, value.sync); }
+  static bool read(Reader &reader, HostMemoryBatch &value) { return Codec<std::vector<HostMemoryRange>>::read(reader, value.reads) && Codec<std::vector<HostMemoryBytes>>::read(reader, value.writes) && Codec<bool>::read(reader, value.completed) && Codec<std::optional<HostMemorySync>>::read(reader, value.sync); }
+};
+
 template <> struct Codec<AllocationKind> {
   static void write(Writer &writer, AllocationKind value) { writer.u64(static_cast<uint64_t>(value)); }
   static bool read(Reader &reader, AllocationKind &value) { uint64_t id = 0; if (!reader.u64(id)) return false; switch (id) { case 0x550c809331279417ULL: value = AllocationKind::Device; return true; case 0xe3e753f7a49fdebaULL: value = AllocationKind::Managed; return true; case 0x3cca1c4bb4e27b28ULL: value = AllocationKind::Shared; return true; case 0x1502c13a23427453ULL: value = AllocationKind::Host; return true; default: return false; } }
@@ -78,11 +118,6 @@ template <> struct Codec<LongPositive> {
 template <> struct Codec<AllocationId> {
   static void write(Writer &writer, const AllocationId &value) { if (!((value.value > 0))) { writer.invalidate(); return; } Codec<int64_t>::write(writer, value.value); }
   static bool read(Reader &reader, AllocationId &value) { return Codec<int64_t>::read(reader, value.value) && ((value.value > 0)); }
-};
-
-template <> struct Codec<GuestAddress> {
-  static void write(Writer &writer, const GuestAddress &value) { if (!(true)) { writer.invalidate(); return; } Codec<int64_t>::write(writer, value.value); }
-  static bool read(Reader &reader, GuestAddress &value) { return Codec<int64_t>::read(reader, value.value) && (true); }
 };
 
 template <> struct Codec<LongPositive0> {
@@ -128,11 +163,6 @@ template <> struct Codec<ProgramGlobalMetadata> {
 template <> struct Codec<ProgramCatalog> {
   static void write(Writer &writer, const ProgramCatalog &value) { Codec<std::vector<ProgramKernel>>::write(writer, value.kernels); Codec<std::vector<ProgramGlobalMetadata>>::write(writer, value.globals); }
   static bool read(Reader &reader, ProgramCatalog &value) { return Codec<std::vector<ProgramKernel>>::read(reader, value.kernels) && Codec<std::vector<ProgramGlobalMetadata>>::read(reader, value.globals); }
-};
-
-template <> struct Codec<IntPositive> {
-  static void write(Writer &writer, const IntPositive &value) { if (!((value.value > 0))) { writer.invalidate(); return; } Codec<int32_t>::write(writer, value.value); }
-  static bool read(Reader &reader, IntPositive &value) { return Codec<int32_t>::read(reader, value.value) && ((value.value > 0)); }
 };
 
 template <> struct Codec<KernelParameterKind> {
@@ -188,11 +218,6 @@ template <> struct Codec<RelocationSource> {
 template <> struct Codec<PointerRelocation> {
   static void write(Writer &writer, const PointerRelocation &value) { Codec<RelocationSource>::write(writer, value.source); Codec<LongPositive0>::write(writer, value.sourceOffset); Codec<AllocationId>::write(writer, value.target); Codec<LongPositive0>::write(writer, value.targetOffset); }
   static bool read(Reader &reader, PointerRelocation &value) { return Codec<RelocationSource>::read(reader, value.source) && Codec<LongPositive0>::read(reader, value.sourceOffset) && Codec<AllocationId>::read(reader, value.target) && Codec<LongPositive0>::read(reader, value.targetOffset); }
-};
-
-template <> struct Codec<CompletionId> {
-  static void write(Writer &writer, const CompletionId &value) { if (!((value.value > 0))) { writer.invalidate(); return; } Codec<int64_t>::write(writer, value.value); }
-  static bool read(Reader &reader, CompletionId &value) { return Codec<int64_t>::read(reader, value.value) && ((value.value > 0)); }
 };
 
 template <> struct Codec<ExecutionFailure> {
@@ -302,12 +327,28 @@ Result<Unit> Client::call(const Ping &) {
   return implementation_->call<Unit>(operation::Ping, [](Writer &) {  });
 }
 
+Result<Unit> Client::call(const EnableHostMemory &) {
+  return implementation_->call<Unit>(operation::EnableHostMemory, [](Writer &) {  });
+}
+
+Result<HostMemoryBatch> Client::call(const PollHostMemory &request) {
+  return implementation_->call<HostMemoryBatch>(operation::PollHostMemory, [&](Writer &writer) { Codec<CompletionId>::write(writer, request.completion); });
+}
+
+Result<Unit> Client::call(const SupplyHostMemory &request) {
+  return implementation_->call<Unit>(operation::SupplyHostMemory, [&](Writer &writer) { Codec<CompletionId>::write(writer, request.completion); Codec<std::vector<HostMemoryBytes>>::write(writer, request.ranges); });
+}
+
 Result<AllocationId> Client::call(const RegisterAllocation &request) {
   return implementation_->call<AllocationId>(operation::RegisterAllocation, [&](Writer &writer) { Codec<AllocationKind>::write(writer, request.kind); Codec<LongPositive>::write(writer, request.size); });
 }
 
+Result<Unit> Client::call(const SupplyHostSync &request) {
+  return implementation_->call<Unit>(operation::SupplyHostSync, [&](Writer &writer) { Codec<CompletionId>::write(writer, request.completion); Codec<int64_t>::write(writer, request.ticket); Codec<int64_t>::write(writer, request.observed); });
+}
+
 Result<Unit> Client::call(const RegisterAllocationAddress &request) {
-  return implementation_->call<Unit>(operation::RegisterAllocationAddress, [&](Writer &writer) { Codec<AllocationId>::write(writer, request.allocation); Codec<GuestAddress>::write(writer, request.nativeBase); });
+  return implementation_->call<Unit>(operation::RegisterAllocationAddress, [&](Writer &writer) { Codec<AllocationId>::write(writer, request.allocation); Codec<GuestAddress>::write(writer, request.nativeBase); Codec<bool>::write(writer, request.hostBacked); });
 }
 
 Result<Unit> Client::call(const ReleaseAllocation &request) {

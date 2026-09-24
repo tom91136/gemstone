@@ -1,6 +1,11 @@
 # Compact matrix registrations retain the smaller size/type sets.
 specs = ["~[full-matrix]~[regression]"]
 levelzero_cases = [
+  # Shared/system memory transfers across page boundaries (bounded kernel sizes).
+  "ParamSVMAllocationLaunchKernelTests/SharedSystemMemoryLaunchKernelTests.*/svm_to_usm_non_atomic_regular_4KB",
+  "ParamSVMAllocationLaunchKernelTests/SharedSystemMemoryLaunchKernelTests.*/usm_to_svm_non_atomic_regular_4KB",
+  "ParamSVMAllocationLaunchKernelTests/SharedSystemMemoryLaunchKernelTests.*/svm_to_svm_non_atomic_regular_4KB",
+
   "zeInitTests.*",
   "zeDriverGetDriverVersionTests.*",
   "zeDriverGetApiVersionTests.*",

@@ -590,6 +590,15 @@ private[v9_3] object VMIR {
     case AtomicAdd(destination: RegisterName, address: Value, source: Value, width: BitWidth, global: Option[Boolean])
         extends Instruction(s"atom.${global.fold("")(if (_) "global." else "shared.")}add.u$width")
 
+    case AtomicCompareExchange(
+        destination: RegisterName,
+        address: Value,
+        comparator: Value,
+        source: Value,
+        width: BitWidth,
+        global: Option[Boolean]
+    ) extends Instruction(s"atom.${global.fold("")(if (_) "global." else "shared.")}cas.b$width")
+
     case AtomicExchange(
         destination: RegisterName,
         address: Value,

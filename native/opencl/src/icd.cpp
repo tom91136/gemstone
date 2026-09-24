@@ -32,10 +32,10 @@
 #include <gemstone/bytes.hpp>
 #include <gemstone/trace.hpp>
 
+#include "../../spirv/specialization.hpp"
 #include "compiler.hpp"
 #include "completion.hpp"
 #include "objects.hpp"
-#include "../../spirv/specialization.hpp"
 
 namespace {
 
@@ -80,6 +80,8 @@ struct Remote {
 
 Remote remote;
 std::mutex remoteMutex;
+std::mutex kernelSubmissionMutex;
+std::mutex pointerRelocationsMutex;
 std::mutex allocationsMutex;
 std::mutex eventsMutex;
 std::condition_variable eventsCondition;
@@ -250,6 +252,7 @@ bool hostWriteAllowed(const _cl_mem *mem) { return mem && (mem->flags & (CL_MEM_
 
 void invalidatePointerRelocations(const std::shared_ptr<Allocation> &allocation, size_t offset, size_t size) {
   if (!allocation || size == 0) return;
+  std::lock_guard relocationsLock(pointerRelocationsMutex);
   const size_t end = offset > std::numeric_limits<size_t>::max() - size ? std::numeric_limits<size_t>::max() : offset + size;
   for (auto it = allocation->pointerRelocations.begin(); it != allocation->pointerRelocations.end();) {
     const size_t pointerEnd = it->first > std::numeric_limits<size_t>::max() - sizeof(uint64_t) ? std::numeric_limits<size_t>::max()
@@ -262,6 +265,7 @@ void invalidatePointerRelocations(const std::shared_ptr<Allocation> &allocation,
 void copyPointerRelocations(const std::shared_ptr<Allocation> &source, size_t sourceOffset, const std::shared_ptr<Allocation> &target,
                             size_t targetOffset, size_t size) {
   if (!source || !target || size < sizeof(uint64_t)) return;
+  std::lock_guard relocationsLock(pointerRelocationsMutex);
   const size_t sourceEnd =
       sourceOffset > std::numeric_limits<size_t>::max() - size ? std::numeric_limits<size_t>::max() : sourceOffset + size;
   for (const auto &[offset, relocation] : source->pointerRelocations) {
@@ -274,7 +278,7 @@ void copyPointerRelocations(const std::shared_ptr<Allocation> &source, size_t so
 
 size_t allocationOffset(const _cl_mem *mem, size_t offset) { return mem->origin + offset; }
 
-std::shared_ptr<Allocation> allocate(size_t size, cl_int *error, size_t requestedAlignment = 128) {
+std::shared_ptr<Allocation> allocate(size_t size, cl_int *error, size_t requestedAlignment = 128, bool hostBacked = false) {
   if (size == 0) {
     if (error) *error = CL_INVALID_BUFFER_SIZE;
     return {};
@@ -301,6 +305,7 @@ std::shared_ptr<Allocation> allocate(size_t size, cl_int *error, size_t requeste
   }
   result->storage = std::move(storage);
   result->size = size;
+  result->hostBacked = hostBacked;
   auto &state = remoteState();
   if (state.ready) {
     std::lock_guard lock(remoteMutex);
@@ -310,6 +315,12 @@ std::shared_ptr<Allocation> allocate(size_t size, cl_int *error, size_t requeste
       return {};
     }
     result->id = static_cast<uint64_t>(registered.value().value);
+    if (!state.client->call(RegisterAllocationAddress{registered.value(),
+                                                      GuestAddress{static_cast<int64_t>(reinterpret_cast<uintptr_t>(base))}, hostBacked})) {
+      (void)state.client->call(ReleaseAllocation{registered.value()});
+      if (error) *error = CL_OUT_OF_RESOURCES;
+      return {};
+    }
   }
   bool inserted = false;
   {
@@ -353,7 +364,7 @@ cl_int writeAllocation(const std::shared_ptr<Allocation> &allocation, size_t off
   invalidatePointerRelocations(allocation, offset, size);
   if (size != 0) std::memcpy(static_cast<uint8_t *>(allocation->data()) + offset, bytes, size);
   auto &state = remoteState();
-  if (state.ready && size != 0) {
+  if (state.ready && size != 0 && !allocation->hostBacked) {
     std::lock_guard lock(remoteMutex);
     if (!writeRemote(*state.client, allocation->id, offset, bytes, size)) return CL_OUT_OF_RESOURCES;
   }
@@ -363,13 +374,14 @@ cl_int writeAllocation(const std::shared_ptr<Allocation> &allocation, size_t off
 cl_int readAllocation(const std::shared_ptr<Allocation> &allocation, size_t offset, void *bytes, size_t size) {
   if (!validRange(allocation, offset, size) || (size != 0 && !bytes)) return CL_INVALID_VALUE;
   auto &state = remoteState();
-  if (state.ready && size != 0) {
+  if (state.ready && size != 0 && !allocation->hostBacked) {
     std::lock_guard lock(remoteMutex);
     if (!readRemote(*state.client, allocation->id, offset, bytes, size)) return CL_OUT_OF_RESOURCES;
     std::memcpy(static_cast<uint8_t *>(allocation->data()) + offset, bytes, size);
   } else if (size != 0) {
     std::memcpy(bytes, static_cast<uint8_t *>(allocation->data()) + offset, size);
   }
+  std::lock_guard relocationsLock(pointerRelocationsMutex);
   // The execution service stores device addresses in linked structures. Kernel
   // completion translates them for the host, but a later map reads the raw
   // remote bytes again. Reapply the known translations to the mapped range.
@@ -619,6 +631,9 @@ PendingStep runPendingOnce(_cl_command_queue *queue) {
   }
   if (command.finish) command.finish(result);
   command.finish = {};
+  // Release allocation leases before the retained memory objects: their final
+  // release decides whether the registry's backing allocation can be reclaimed.
+  command.uses.reset();
   command.execute = {};
   for (auto dependency : command.dependencies)
     clReleaseEvent(dependency);
@@ -647,14 +662,18 @@ PendingStep runPendingOnce(_cl_command_queue *queue) {
 
 class QueueScheduler {
 public:
-  QueueScheduler() : worker_([this] { run(); }) {}
+  QueueScheduler() {
+    for (unsigned i = 0; i < 2; ++i)
+      workers_.emplace_back([this] { run(); });
+  }
   ~QueueScheduler() {
     {
       std::lock_guard lock(mutex_);
       stopping_ = true;
     }
     changed_.notify_all();
-    worker_.join();
+    for (auto &worker : workers_)
+      worker.join();
     for (auto *queue : queues_)
       clReleaseCommandQueue(reinterpret_cast<cl_command_queue>(queue));
   }
@@ -701,7 +720,7 @@ private:
   std::condition_variable changed_;
   std::deque<_cl_command_queue *> queues_;
   bool stopping_ = false;
-  std::thread worker_;
+  std::vector<std::thread> workers_;
 };
 
 QueueScheduler &queueScheduler() {
@@ -710,7 +729,8 @@ QueueScheduler &queueScheduler() {
 }
 
 cl_int enqueuePending(_cl_command_queue *queue, cl_command_type type, std::vector<cl_event> dependencies, std::function<cl_int()> execute,
-                      cl_event *output, bool waitPrior = false, bool fence = false, std::function<void(cl_int)> finish = {}) {
+                      cl_event *output, bool waitPrior = false, bool fence = false, std::function<void(cl_int)> finish = {},
+                      std::shared_ptr<AllocationUses> uses = {}) {
   cl_event completion = nullptr;
   if (output) {
     auto *created = makeEvent(queue, type, &completion);
@@ -728,7 +748,7 @@ cl_int enqueuePending(_cl_command_queue *queue, cl_command_type type, std::vecto
   {
     std::lock_guard lock(queue->pendingMutex);
     try {
-      queue->commands.push_back({dependencies, completion, std::move(execute), waitPrior, fence, finish});
+      queue->commands.push_back({dependencies, completion, std::move(execute), waitPrior, fence, finish, std::move(uses)});
       ++queue->pendingCommands;
       if (!queue->workerRunning) {
         retain(queue);
@@ -766,14 +786,22 @@ cl_int enqueuePending(_cl_command_queue *queue, cl_command_type type, std::vecto
   return CL_SUCCESS;
 }
 
+std::shared_ptr<AllocationUses> allocationUses(std::vector<std::shared_ptr<Allocation>> values) {
+  return std::make_shared<AllocationUses>(std::move(values));
+}
+
 std::shared_ptr<_cl_mem> retainMemory(_cl_mem *memory) {
+  auto uses = allocationUses({memory->allocation});
   retain(memory);
-  return {memory, [](_cl_mem *value) { clReleaseMemObject(reinterpret_cast<cl_mem>(value)); }};
+  return {memory, [uses = std::move(uses)](_cl_mem *value) mutable {
+            uses.reset();
+            clReleaseMemObject(reinterpret_cast<cl_mem>(value));
+          }};
 }
 
 cl_int submitCommand(_cl_command_queue *queue, cl_command_type type, bool blocking, cl_uint count, const cl_event *waits,
                      std::function<cl_int()> execute, cl_event *output, bool waitPrior = false, bool fence = false,
-                     std::function<void(cl_int)> finish = {}) {
+                     std::function<void(cl_int)> finish = {}, std::shared_ptr<AllocationUses> uses = {}) {
   if (!queue) {
     if (finish) finish(CL_INVALID_COMMAND_QUEUE);
     return CL_INVALID_COMMAND_QUEUE;
@@ -810,8 +838,8 @@ cl_int submitCommand(_cl_command_queue *queue, cl_command_type type, bool blocki
     for (cl_uint index = 0; index < count; ++index)
       dependencies.push_back(waits[index]);
     cl_event completion = nullptr;
-    result =
-        enqueuePending(queue, type, std::move(dependencies), std::move(execute), blocking ? &completion : output, waitPrior, fence, finish);
+    result = enqueuePending(queue, type, std::move(dependencies), std::move(execute), blocking ? &completion : output, waitPrior, fence,
+                            finish, std::move(uses));
     if (!blocking || result != CL_SUCCESS) return result;
     result = clWaitForEvents(1, &completion);
     if (output) *output = completion;
@@ -841,7 +869,7 @@ MirrorResult mirrorAllocations() {
   std::lock_guard lock(remoteMutex);
   std::lock_guard memoryLock(allocationsMutex);
   for (const auto &[_, allocation] : allocations) {
-    if (!allocation->externallyMutable.load(std::memory_order_relaxed)) continue;
+    if (allocation->hostBacked || !allocation->externallyMutable.load(std::memory_order_relaxed)) continue;
     if (!writeRemote(*state.client, allocation->id, 0, allocation->data(), allocation->size)) return {CL_OUT_OF_RESOURCES, result.bytes};
     result.bytes += allocation->size;
   }
@@ -849,12 +877,14 @@ MirrorResult mirrorAllocations() {
 }
 
 std::vector<PointerRelocation> collectRelocations(uint64_t &scannedBytes) {
+  std::lock_guard relocationsLock(pointerRelocationsMutex);
   std::vector<PointerRelocation> result;
   std::vector<std::shared_ptr<Allocation>> snapshot;
   {
     std::lock_guard lock(allocationsMutex);
     for (const auto &[_, allocation] : allocations)
-      if (allocation->externallyMutable.load(std::memory_order_relaxed) || scanBufferPointerRelocations()) snapshot.push_back(allocation);
+      if (!allocation->hostBacked && (allocation->externallyMutable.load(std::memory_order_relaxed) || scanBufferPointerRelocations()))
+        snapshot.push_back(allocation);
   }
   for (const auto &source : snapshot) {
     scannedBytes += source->size;
@@ -909,6 +939,7 @@ std::vector<PointerRelocation> collectRelocations(uint64_t &scannedBytes) {
 
 cl_int finishRemote(_cl_command_queue *queue, _cl_kernel *kernel, size_t workDimension, const size_t *offset, const size_t *global,
                     const size_t *local, cl_event *output) {
+  std::unique_lock submissionLock(kernelSubmissionMutex);
   const uint64_t started = nowNanos();
   uint64_t scannedBytes = 0;
   uint64_t downloadedBytes = 0;
@@ -982,7 +1013,7 @@ cl_int finishRemote(_cl_command_queue *queue, _cl_kernel *kernel, size_t workDim
   int launched;
   std::string failureMessage;
   {
-    std::lock_guard lock(remoteMutex);
+    std::unique_lock lock(remoteMutex);
     auto launch = state.client->call(Launch{ProgramId{static_cast<int64_t>(kernel->program->remoteId)}, kernel->name, groupSize, groupCount,
                                             globalSize, static_cast<int32_t>(workDimension), globalOffset, 0, 0, std::move(arguments),
                                             std::move(relocations)});
@@ -990,8 +1021,14 @@ cl_int finishRemote(_cl_command_queue *queue, _cl_kernel *kernel, size_t workDim
     if (launch) completion = launch.value();
     else failureMessage = launch.error().detail;
     if (launched == 0) {
+      auto completionClient = Client::fromEnvironment();
       gemstone::execution::CompletionResult result;
-      if (!gemstone::execution::collect_completion(*state.client, completion, result, failureMessage)) launched = -1;
+      lock.unlock();
+      submissionLock.unlock();
+      if (!completionClient || !gemstone::execution::collect_completion(*completionClient, completion, result, failureMessage, true))
+        launched = -1;
+      submissionLock.lock();
+      lock.lock();
       for (const auto &range : result.dirty_ranges) {
         if (launched != 0) break;
         const auto allocation = findAllocation(static_cast<uint64_t>(range.allocation.value));
@@ -1026,6 +1063,7 @@ cl_int finishRemote(_cl_command_queue *queue, _cl_kernel *kernel, size_t workDim
         }
         const auto address = reinterpret_cast<uintptr_t>(target->data()) + targetOffset;
         std::memcpy(static_cast<uint8_t *>(source->data()) + sourceOffset, &address, sizeof(address));
+        std::lock_guard relocationsLock(pointerRelocationsMutex);
         source->pointerRelocations[sourceOffset] = {target, targetOffset};
       }
     }
@@ -1159,7 +1197,7 @@ CL_API_ENTRY cl_int CL_API_CALL clGetDeviceInfo(cl_device_id value, cl_device_in
   // requested, but it can still honor the OpenCL queue property: out-of-order
   // execution permits reordering; it does not require concurrent execution.
   static const cl_command_queue_properties queueProperties = CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE | CL_QUEUE_PROFILING_ENABLE;
-  static const cl_device_svm_capabilities svm = CL_DEVICE_SVM_COARSE_GRAIN_BUFFER | CL_DEVICE_SVM_FINE_GRAIN_BUFFER;
+  static const cl_device_svm_capabilities svm = CL_DEVICE_SVM_COARSE_GRAIN_BUFFER | CL_DEVICE_SVM_FINE_GRAIN_BUFFER | CL_DEVICE_SVM_ATOMICS;
   static const cl_device_fp_config fp = CL_FP_INF_NAN | CL_FP_ROUND_TO_NEAREST | CL_FP_DENORM;
   static const cl_device_fp_config doubleFp =
       CL_FP_FMA | CL_FP_ROUND_TO_NEAREST | CL_FP_ROUND_TO_ZERO | CL_FP_ROUND_TO_INF | CL_FP_INF_NAN | CL_FP_DENORM;
@@ -1351,7 +1389,7 @@ CL_API_ENTRY cl_int CL_API_CALL clGetDeviceInfo(cl_device_id value, cl_device_in
     }
     // This provider is an emulator, so fp64 is a supported device feature.
     // DPC++/IGC lowers it through Intel's DP emulation path, enabled by the
-    // environment supplied by the oneDPL conformance harness.
+    // explicit compiler configuration.
     case CL_DEVICE_DOUBLE_FP_CONFIG: return outputScalar(size, output, written, doubleFp);
     case CL_DEVICE_MEM_BASE_ADDR_ALIGN: {
       cl_uint v = 1024;
@@ -1463,15 +1501,23 @@ CL_API_ENTRY cl_int CL_API_CALL clGetDeviceInfo(cl_device_id value, cl_device_in
     case CL_DEVICE_OPENCL_C_FEATURES: {
       static const cl_name_version features[] = {{CL_MAKE_VERSION(3, 0, 0), "__opencl_c_int64"},
                                                  {CL_MAKE_VERSION(3, 0, 0), "__opencl_c_fp64"},
-                                                 {CL_MAKE_VERSION(3, 0, 0), "__opencl_c_subgroups"}};
+                                                 {CL_MAKE_VERSION(3, 0, 0), "__opencl_c_subgroups"},
+                                                 {CL_MAKE_VERSION(3, 0, 0), "__opencl_c_atomic_order_acq_rel"},
+                                                 {CL_MAKE_VERSION(3, 0, 0), "__opencl_c_atomic_order_seq_cst"},
+                                                 {CL_MAKE_VERSION(3, 0, 0), "__opencl_c_atomic_scope_device"},
+                                                 {CL_MAKE_VERSION(3, 0, 0), "__opencl_c_atomic_scope_all_devices"}};
       return outputBytes(size, output, written, features, sizeof(features));
     }
     case CL_DEVICE_ATOMIC_MEMORY_CAPABILITIES: {
-      cl_device_atomic_capabilities v = CL_DEVICE_ATOMIC_ORDER_RELAXED | CL_DEVICE_ATOMIC_SCOPE_WORK_GROUP;
+      cl_device_atomic_capabilities v = CL_DEVICE_ATOMIC_ORDER_RELAXED | CL_DEVICE_ATOMIC_ORDER_ACQ_REL | CL_DEVICE_ATOMIC_ORDER_SEQ_CST
+                                        | CL_DEVICE_ATOMIC_SCOPE_WORK_GROUP | CL_DEVICE_ATOMIC_SCOPE_DEVICE
+                                        | CL_DEVICE_ATOMIC_SCOPE_ALL_DEVICES;
       return outputScalar(size, output, written, v);
     }
     case CL_DEVICE_ATOMIC_FENCE_CAPABILITIES: {
-      cl_device_atomic_capabilities v = CL_DEVICE_ATOMIC_ORDER_RELAXED | CL_DEVICE_ATOMIC_ORDER_ACQ_REL | CL_DEVICE_ATOMIC_SCOPE_WORK_GROUP;
+      cl_device_atomic_capabilities v = CL_DEVICE_ATOMIC_ORDER_RELAXED | CL_DEVICE_ATOMIC_ORDER_ACQ_REL | CL_DEVICE_ATOMIC_ORDER_SEQ_CST
+                                        | CL_DEVICE_ATOMIC_SCOPE_WORK_ITEM | CL_DEVICE_ATOMIC_SCOPE_WORK_GROUP
+                                        | CL_DEVICE_ATOMIC_SCOPE_DEVICE | CL_DEVICE_ATOMIC_SCOPE_ALL_DEVICES;
       return outputScalar(size, output, written, v);
     }
     case CL_DEVICE_WORK_GROUP_COLLECTIVE_FUNCTIONS_SUPPORT:
@@ -1526,11 +1572,20 @@ CL_API_ENTRY cl_int CL_API_CALL clGetDeviceInfo(cl_device_id value, cl_device_in
       cl_bool v = CL_FALSE;
       return outputScalar(size, output, written, v);
     }
-    case CL_DEVICE_HOST_MEM_CAPABILITIES_INTEL:
-    case CL_DEVICE_DEVICE_MEM_CAPABILITIES_INTEL:
-    case CL_DEVICE_SINGLE_DEVICE_SHARED_MEM_CAPABILITIES_INTEL:
-    case CL_DEVICE_CROSS_DEVICE_SHARED_MEM_CAPABILITIES_INTEL:
     case CL_DEVICE_SHARED_SYSTEM_MEM_CAPABILITIES_INTEL: {
+      // clSetKernelArgMemPointerINTEL requires a known SVM/USM allocation.
+      const cl_device_unified_shared_memory_capabilities_intel v = 0;
+      return outputScalar(size, output, written, v);
+    }
+    case CL_DEVICE_HOST_MEM_CAPABILITIES_INTEL:
+    case CL_DEVICE_SINGLE_DEVICE_SHARED_MEM_CAPABILITIES_INTEL: {
+      const cl_device_unified_shared_memory_capabilities_intel v =
+          CL_UNIFIED_SHARED_MEMORY_ACCESS_INTEL | CL_UNIFIED_SHARED_MEMORY_CONCURRENT_ACCESS_INTEL
+          | CL_UNIFIED_SHARED_MEMORY_ATOMIC_ACCESS_INTEL | CL_UNIFIED_SHARED_MEMORY_CONCURRENT_ATOMIC_ACCESS_INTEL;
+      return outputScalar(size, output, written, v);
+    }
+    case CL_DEVICE_DEVICE_MEM_CAPABILITIES_INTEL:
+    case CL_DEVICE_CROSS_DEVICE_SHARED_MEM_CAPABILITIES_INTEL: {
       cl_device_unified_shared_memory_capabilities_intel v =
           CL_UNIFIED_SHARED_MEMORY_ACCESS_INTEL | CL_UNIFIED_SHARED_MEMORY_CONCURRENT_ACCESS_INTEL;
       return outputScalar(size, output, written, v);
@@ -1921,7 +1976,9 @@ CL_API_ENTRY cl_int CL_API_CALL clReleaseMemObject(cl_mem value) {
     auto *parent = mem->parent;
     unregisterLiveObject(mem);
     delete mem;
-    if (!allocation->runtimeOwnsBase && allocation.use_count() <= 2) releaseAllocation(allocation);
+    // The root buffer owns backing storage. Sub-buffers and queued commands
+    // retain that object; kernel argument/relocation metadata does not own it.
+    if (!allocation->runtimeOwnsBase && !parent) releaseAllocation(allocation);
     clReleaseContext(reinterpret_cast<cl_context>(context));
     if (parent) clReleaseMemObject(reinterpret_cast<cl_mem>(parent));
   }
@@ -2703,6 +2760,8 @@ CL_API_ENTRY cl_kernel CL_API_CALL clCloneKernel(cl_kernel value, cl_int *error)
   clone->argumentInfo = source->argumentInfo;
   clone->arguments = source->arguments;
   clone->argumentsSet = source->argumentsSet;
+  clone->indirectAllocations = source->indirectAllocations;
+  clone->indirectTypes = source->indirectTypes;
   retain(clone->program);
   if (error) *error = CL_SUCCESS;
   return reinterpret_cast<cl_kernel>(clone);
@@ -2828,10 +2887,35 @@ CL_API_ENTRY cl_int CL_API_CALL clSetKernelArgSVMPointer(cl_kernel value, cl_uin
   kernel->argumentsSet[index] = true;
   return CL_SUCCESS;
 }
-CL_API_ENTRY cl_int CL_API_CALL clSetKernelExecInfo(cl_kernel value, cl_kernel_exec_info, size_t size, const void *valueData) {
-  if (!checked(reinterpret_cast<_cl_kernel *>(value), Kind::Kernel)) return CL_INVALID_KERNEL;
-  if (size != 0 && !valueData) return CL_INVALID_VALUE;
-  return CL_SUCCESS;
+CL_API_ENTRY cl_int CL_API_CALL clSetKernelExecInfo(cl_kernel value, cl_kernel_exec_info name, size_t size, const void *valueData) {
+  auto *kernel = checked(reinterpret_cast<_cl_kernel *>(value), Kind::Kernel);
+  if (!kernel) return CL_INVALID_KERNEL;
+  if (!valueData) return CL_INVALID_VALUE;
+  if (name == CL_KERNEL_EXEC_INFO_SVM_PTRS || name == CL_KERNEL_EXEC_INFO_USM_PTRS_INTEL) {
+    if (size == 0 || size % sizeof(void *) != 0) return CL_INVALID_VALUE;
+    std::vector<std::shared_ptr<Allocation>> values;
+    for (size_t index = 0; index < size / sizeof(void *); ++index) {
+      const auto pointer = gemstone::readNative<const void *>(valueData, index * sizeof(void *));
+      size_t offset = 0;
+      auto allocation = findPointer(pointer, &offset);
+      if (!allocation || allocation->svmContextIdentity != kernel->program->context->identity || offset >= allocation->size)
+        return CL_INVALID_VALUE;
+      values.push_back(std::move(allocation));
+    }
+    kernel->indirectAllocations[name] = std::move(values);
+    return CL_SUCCESS;
+  }
+  if (name == CL_KERNEL_EXEC_INFO_INDIRECT_HOST_ACCESS_INTEL || name == CL_KERNEL_EXEC_INFO_INDIRECT_DEVICE_ACCESS_INTEL
+      || name == CL_KERNEL_EXEC_INFO_INDIRECT_SHARED_ACCESS_INTEL || name == CL_KERNEL_EXEC_INFO_SVM_FINE_GRAIN_SYSTEM) {
+    if (size != sizeof(cl_bool)) return CL_INVALID_VALUE;
+    const auto enabled = gemstone::readNative<cl_bool>(valueData);
+    if (enabled != CL_TRUE && enabled != CL_FALSE) return CL_INVALID_VALUE;
+    if (name == CL_KERNEL_EXEC_INFO_SVM_FINE_GRAIN_SYSTEM) return enabled ? CL_INVALID_OPERATION : CL_SUCCESS;
+    if (enabled) kernel->indirectTypes.insert(name);
+    else kernel->indirectTypes.erase(name);
+    return CL_SUCCESS;
+  }
+  return CL_INVALID_VALUE;
 }
 CL_API_ENTRY cl_int CL_API_CALL clGetKernelInfo(cl_kernel value, cl_kernel_info name, size_t size, void *output, size_t *written) {
   auto *kernel = checked(reinterpret_cast<_cl_kernel *>(value), Kind::Kernel);
@@ -3503,19 +3587,13 @@ CL_API_ENTRY cl_int CL_API_CALL clEnqueueNDRangeKernel(cl_command_queue queueVal
     if (dependency->context != queue->context) return CL_INVALID_CONTEXT;
     dependencies.push_back(dependency);
   }
-  bool pending = false;
   {
     std::lock_guard lock(eventsMutex);
-    for (auto *dependency : dependencies) {
+    for (auto *dependency : dependencies)
       if (dependency->status < 0) return CL_EXEC_STATUS_ERROR_FOR_EVENTS_IN_WAIT_LIST;
-      pending = pending || dependency->status != CL_COMPLETE;
-    }
   }
-  {
-    std::lock_guard lock(queue->pendingMutex);
-    pending = pending || queue->pendingCommands != 0;
-  }
-  if (!pending) return finishRemote(queue, kernel, workDimension, offset, global, local, event);
+  // Submission must return before execution: a shared-memory kernel may wait
+  // for a host store performed immediately after this call returns.
   try {
     cl_int error = CL_SUCCESS;
     auto clone = clCloneKernel(kernelValue, &error);
@@ -3530,6 +3608,23 @@ CL_API_ENTRY cl_int CL_API_CALL clEnqueueNDRangeKernel(cl_command_queue queueVal
         if (argument.memory) clReleaseMemObject(reinterpret_cast<cl_mem>(argument.memory));
       clReleaseKernel(reinterpret_cast<cl_kernel>(value));
     });
+    std::vector<std::shared_ptr<Allocation>> used;
+    for (const auto &argument : snapshot->arguments)
+      if (argument.allocation) used.push_back(argument.allocation);
+    for (const auto &[name, values] : snapshot->indirectAllocations)
+      used.insert(used.end(), values.begin(), values.end());
+    {
+      std::lock_guard lock(allocationsMutex);
+      for (const auto &[address, allocation] : allocations) {
+        if (allocation->svmContextIdentity != queue->context->identity) continue;
+        const cl_kernel_exec_info type =
+            allocation->usmType == CL_MEM_TYPE_HOST_INTEL     ? CL_KERNEL_EXEC_INFO_INDIRECT_HOST_ACCESS_INTEL
+            : allocation->usmType == CL_MEM_TYPE_DEVICE_INTEL ? CL_KERNEL_EXEC_INFO_INDIRECT_DEVICE_ACCESS_INTEL
+            : allocation->usmType == CL_MEM_TYPE_SHARED_INTEL ? CL_KERNEL_EXEC_INFO_INDIRECT_SHARED_ACCESS_INTEL
+                                                              : 0;
+        if (snapshot->indirectTypes.contains(type)) used.push_back(allocation);
+      }
+    }
     const bool hasOffset = offset;
     const bool hasLocal = local;
     std::array<size_t, 3> deferredOffset{0, 0, 0};
@@ -3549,7 +3644,7 @@ CL_API_ENTRY cl_int CL_API_CALL clEnqueueNDRangeKernel(cl_command_queue queueVal
           return finishRemote(queue, snapshot.get(), workDimension, hasOffset ? deferredOffset.data() : nullptr, deferredGlobal.data(),
                               hasLocal ? deferredLocal.data() : nullptr, nullptr);
         },
-        event);
+        event, false, false, {}, allocationUses(std::move(used)));
   } catch (...) {
     return CL_OUT_OF_HOST_MEMORY;
   }
@@ -3568,11 +3663,17 @@ CL_API_ENTRY cl_int CL_API_CALL clEnqueueBarrierWithWaitList(cl_command_queue qu
   return completeEvent(checked(reinterpret_cast<_cl_command_queue *>(queueValue), Kind::Queue), CL_COMMAND_BARRIER, count, waits, event);
 }
 
-CL_API_ENTRY void *CL_API_CALL clSVMAlloc(cl_context contextValue, cl_svm_mem_flags, size_t size, cl_uint alignment) {
+CL_API_ENTRY void *CL_API_CALL clSVMAlloc(cl_context contextValue, cl_svm_mem_flags flags, size_t size, cl_uint alignment) {
   auto *context = checked(reinterpret_cast<_cl_context *>(contextValue), Kind::Context);
   if (!context) return nullptr;
+  constexpr cl_svm_mem_flags access = CL_MEM_READ_WRITE | CL_MEM_READ_ONLY | CL_MEM_WRITE_ONLY;
+  constexpr cl_svm_mem_flags allowed = access | CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_SVM_ATOMICS;
+  const auto mode = flags & access;
+  if ((flags & ~allowed) != 0 || (mode != 0 && (mode & (mode - 1)) != 0)
+      || ((flags & CL_MEM_SVM_ATOMICS) && !(flags & CL_MEM_SVM_FINE_GRAIN_BUFFER)))
+    return nullptr;
   cl_int error = CL_SUCCESS;
-  auto allocation = allocate(size, &error, alignment);
+  auto allocation = allocate(size, &error, alignment, true);
   if (allocation) {
     allocation->externallyMutable.store(true, std::memory_order_relaxed);
     allocation->runtimeOwnsBase = true;
@@ -3597,8 +3698,8 @@ CL_API_ENTRY void CL_API_CALL clSVMFree(cl_context, void *pointer) {
   releaseAllocation(allocation, true);
 }
 CL_API_ENTRY cl_int CL_API_CALL clEnqueueSVMFree(cl_command_queue queueValue, cl_uint count, void *pointers[],
-                                                 void(CL_CALLBACK *callback)(cl_command_queue, cl_uint, void *[], void *),
-                                                 void *userData, cl_uint waitCount, const cl_event *waits, cl_event *event) {
+                                                 void(CL_CALLBACK *callback)(cl_command_queue, cl_uint, void *[], void *), void *userData,
+                                                 cl_uint waitCount, const cl_event *waits, cl_event *event) {
   auto *queue = checked(reinterpret_cast<_cl_command_queue *>(queueValue), Kind::Queue);
   if (!queue) return CL_INVALID_COMMAND_QUEUE;
   if ((count == 0) != (pointers == nullptr)) return CL_INVALID_VALUE;
@@ -3608,30 +3709,28 @@ CL_API_ENTRY cl_int CL_API_CALL clEnqueueSVMFree(cl_command_queue queueValue, cl
   if (count != 0) copiedPointers.assign(pointers, pointers + count);
   for (void *pointer : copiedPointers) {
     auto allocation = findPointer(pointer);
-    if (allocation && allocation->svmContextIdentity != 0
-        && allocation->svmContextIdentity != queue->context->identity)
+    if (allocation && allocation->svmContextIdentity != 0 && allocation->svmContextIdentity != queue->context->identity)
       return CL_INVALID_VALUE;
-    if (!callback && (!allocation || allocation->data() != pointer || !allocation->runtimeOwnsBase
-                      || allocation->svmContextIdentity == 0))
+    if (!callback && (!allocation || allocation->data() != pointer || !allocation->runtimeOwnsBase || allocation->svmContextIdentity == 0))
       return CL_INVALID_VALUE;
   }
-  return submitCommand(queue, CL_COMMAND_SVM_FREE, false, waitCount, waits,
-                       [=]() mutable {
-                         if (callback) callback(queueValue, count, copiedPointers.data(), userData);
-                         else
-                           for (void *pointer : copiedPointers)
-                             clSVMFree(reinterpret_cast<cl_context>(queue->context), pointer);
-                         return CL_SUCCESS;
-                       },
-                       event);
+  return submitCommand(
+      queue, CL_COMMAND_SVM_FREE, false, waitCount, waits,
+      [=]() mutable {
+        if (callback) callback(queueValue, count, copiedPointers.data(), userData);
+        else
+          for (void *pointer : copiedPointers)
+            clSVMFree(reinterpret_cast<cl_context>(queue->context), pointer);
+        return CL_SUCCESS;
+      },
+      event);
 }
 CL_API_ENTRY cl_int CL_API_CALL clEnqueueSVMMigrateMem(cl_command_queue queueValue, cl_uint count, const void **pointers,
                                                        const size_t *sizes, cl_mem_migration_flags flags, cl_uint waitCount,
                                                        const cl_event *waits, cl_event *event) {
   auto *queue = checked(reinterpret_cast<_cl_command_queue *>(queueValue), Kind::Queue);
   if (!queue) return CL_INVALID_COMMAND_QUEUE;
-  if (count == 0 || !pointers || (flags & ~(CL_MIGRATE_MEM_OBJECT_HOST | CL_MIGRATE_MEM_OBJECT_CONTENT_UNDEFINED)))
-    return CL_INVALID_VALUE;
+  if (count == 0 || !pointers || (flags & ~(CL_MIGRATE_MEM_OBJECT_HOST | CL_MIGRATE_MEM_OBJECT_CONTENT_UNDEFINED))) return CL_INVALID_VALUE;
   auto result = validateWaitList(queue, waitCount, waits);
   if (result != CL_SUCCESS) return result;
   struct MigrationRange {
@@ -3644,24 +3743,27 @@ CL_API_ENTRY cl_int CL_API_CALL clEnqueueSVMMigrateMem(cl_command_queue queueVal
   for (cl_uint index = 0; index < count; ++index) {
     size_t offset = 0;
     auto allocation = findPointer(pointers[index], &offset);
-    if (!allocation || allocation->svmContextIdentity != queue->context->identity || offset == allocation->size)
-      return CL_INVALID_VALUE;
+    if (!allocation || allocation->svmContextIdentity != queue->context->identity || offset == allocation->size) return CL_INVALID_VALUE;
     const size_t rangeSize = !sizes || sizes[index] == 0 ? allocation->size : sizes[index];
     const size_t rangeOffset = !sizes || sizes[index] == 0 ? 0 : offset;
     if (!validRange(allocation, rangeOffset, rangeSize)) return CL_INVALID_VALUE;
     ranges.push_back({std::move(allocation), rangeOffset, rangeSize});
   }
-  return submitCommand(queue, CL_COMMAND_SVM_MIGRATE_MEM, false, waitCount, waits,
-                       [=] {
-                         if ((flags & CL_MIGRATE_MEM_OBJECT_HOST) && !(flags & CL_MIGRATE_MEM_OBJECT_CONTENT_UNDEFINED))
-                           for (const auto &range : ranges) {
-                             auto *host = static_cast<uint8_t *>(range.allocation->data()) + range.offset;
-                             const cl_int error = readAllocation(range.allocation, range.offset, host, range.size);
-                             if (error != CL_SUCCESS) return error;
-                           }
-                         return CL_SUCCESS;
-                       },
-                       event);
+  std::vector<std::shared_ptr<Allocation>> used;
+  for (const auto &range : ranges)
+    used.push_back(range.allocation);
+  return submitCommand(
+      queue, CL_COMMAND_SVM_MIGRATE_MEM, false, waitCount, waits,
+      [=] {
+        if ((flags & CL_MIGRATE_MEM_OBJECT_HOST) && !(flags & CL_MIGRATE_MEM_OBJECT_CONTENT_UNDEFINED))
+          for (const auto &range : ranges) {
+            auto *host = static_cast<uint8_t *>(range.allocation->data()) + range.offset;
+            const cl_int error = readAllocation(range.allocation, range.offset, host, range.size);
+            if (error != CL_SUCCESS) return error;
+          }
+        return CL_SUCCESS;
+      },
+      event, false, false, {}, allocationUses(std::move(used)));
 }
 CL_API_ENTRY cl_int CL_API_CALL clEnqueueSVMMemcpy(cl_command_queue queueValue, cl_bool blocking, void *dst, const void *src, size_t size,
                                                    cl_uint count, const cl_event *waits, cl_event *event) {
@@ -3672,8 +3774,8 @@ CL_API_ENTRY cl_int CL_API_CALL clEnqueueSVMMemcpy(cl_command_queue queueValue, 
   if (!dst || !src) return CL_INVALID_VALUE;
   const auto destinationAddress = reinterpret_cast<uintptr_t>(dst);
   const auto sourceAddress = reinterpret_cast<uintptr_t>(src);
-  if ((destinationAddress >= sourceAddress && destinationAddress - sourceAddress < size) ||
-      (sourceAddress >= destinationAddress && sourceAddress - destinationAddress < size))
+  if ((destinationAddress >= sourceAddress && destinationAddress - sourceAddress < size)
+      || (sourceAddress >= destinationAddress && sourceAddress - destinationAddress < size))
     return CL_MEM_COPY_OVERLAP;
   size_t destinationOffset = 0, sourceOffset = 0;
   auto destinationAllocation = findPointer(dst, &destinationOffset);
@@ -3704,7 +3806,7 @@ CL_API_ENTRY cl_int CL_API_CALL clEnqueueSVMMemcpy(cl_command_queue queueValue, 
         }
         return CL_SUCCESS;
       },
-      event);
+      event, false, false, {}, allocationUses({sourceAllocation, destinationAllocation}));
 }
 CL_API_ENTRY cl_int CL_API_CALL clEnqueueSVMMemFill(cl_command_queue queueValue, void *pointer, const void *pattern, size_t patternSize,
                                                     size_t size, cl_uint count, const cl_event *waits, cl_event *event) {
@@ -3727,7 +3829,7 @@ CL_API_ENTRY cl_int CL_API_CALL clEnqueueSVMMemFill(cl_command_queue queueValue,
         if (result != CL_SUCCESS) return result;
         return CL_SUCCESS;
       },
-      event);
+      event, false, false, {}, allocationUses({allocation}));
 }
 CL_API_ENTRY cl_int CL_API_CALL clEnqueueSVMMap(cl_command_queue queueValue, cl_bool blocking, cl_map_flags, void *pointer, size_t size,
                                                 cl_uint count, const cl_event *waits, cl_event *event) {
@@ -3755,7 +3857,8 @@ CL_API_ENTRY cl_int CL_API_CALL clEnqueueSVMMap(cl_command_queue queueValue, cl_
         std::lock_guard lock(allocationsMutex);
         const auto found = svmMappings.find(key);
         if (found != svmMappings.end() && found->second == mapping) svmMappings.erase(found);
-      });
+      },
+      allocationUses({allocation}));
 }
 CL_API_ENTRY cl_int CL_API_CALL clEnqueueSVMUnmap(cl_command_queue queueValue, void *pointer, cl_uint count, const cl_event *waits,
                                                   cl_event *event) {
@@ -3785,40 +3888,72 @@ CL_API_ENTRY cl_int CL_API_CALL clEnqueueSVMUnmap(cl_command_queue queueValue, v
           if (status == CL_SUCCESS) svmMappings.erase(found);
           else mapping->unmapping = false;
         }
-      });
+      },
+      allocationUses({allocation}));
 }
 
-CL_API_ENTRY void *CL_API_CALL clHostMemAllocINTEL(cl_context context, const cl_mem_properties_intel *, size_t size, cl_uint alignment,
-                                                   cl_int *error) {
-  if (!checked(reinterpret_cast<_cl_context *>(context), Kind::Context)) {
+namespace {
+void *allocateUSM(cl_context contextValue, cl_device_id deviceValue, cl_unified_shared_memory_type_intel type, size_t size,
+                  cl_uint alignment, cl_int *error) {
+  auto *context = checked(reinterpret_cast<_cl_context *>(contextValue), Kind::Context);
+  if (!context) {
     if (error) *error = CL_INVALID_CONTEXT;
     return nullptr;
   }
-  auto allocation = allocate(size, error, alignment);
+  if (type != CL_MEM_TYPE_HOST_INTEL && (deviceValue || type == CL_MEM_TYPE_DEVICE_INTEL) && !validDevice(deviceValue)) {
+    if (error) *error = CL_INVALID_DEVICE;
+    return nullptr;
+  }
+  auto allocation = allocate(size, error, alignment, type != CL_MEM_TYPE_DEVICE_INTEL);
   if (allocation) {
-    allocation->externallyMutable.store(true, std::memory_order_relaxed);
+    allocation->externallyMutable.store(type != CL_MEM_TYPE_DEVICE_INTEL, std::memory_order_relaxed);
     allocation->runtimeOwnsBase = true;
+    allocation->svmContextIdentity = context->identity;
+    allocation->usmType = type;
   }
   return !allocation ? nullptr : allocation->data();
 }
-CL_API_ENTRY void *CL_API_CALL clDeviceMemAllocINTEL(cl_context context, cl_device_id, const cl_mem_properties_intel *p, size_t size,
-                                                     cl_uint a, cl_int *error) {
-  return clHostMemAllocINTEL(context, p, size, a, error);
+} // namespace
+
+CL_API_ENTRY void *CL_API_CALL clHostMemAllocINTEL(cl_context context, const cl_mem_properties_intel *, size_t size, cl_uint alignment,
+                                                   cl_int *error) {
+  return allocateUSM(context, nullptr, CL_MEM_TYPE_HOST_INTEL, size, alignment, error);
 }
-CL_API_ENTRY void *CL_API_CALL clSharedMemAllocINTEL(cl_context context, cl_device_id, const cl_mem_properties_intel *p, size_t size,
-                                                     cl_uint a, cl_int *error) {
-  return clHostMemAllocINTEL(context, p, size, a, error);
+CL_API_ENTRY void *CL_API_CALL clDeviceMemAllocINTEL(cl_context context, cl_device_id device, const cl_mem_properties_intel *, size_t size,
+                                                     cl_uint alignment, cl_int *error) {
+  return allocateUSM(context, device, CL_MEM_TYPE_DEVICE_INTEL, size, alignment, error);
 }
-CL_API_ENTRY cl_int CL_API_CALL clMemFreeINTEL(cl_context, void *pointer) {
-  clSVMFree(nullptr, pointer);
-  return CL_SUCCESS;
+CL_API_ENTRY void *CL_API_CALL clSharedMemAllocINTEL(cl_context context, cl_device_id device, const cl_mem_properties_intel *, size_t size,
+                                                     cl_uint alignment, cl_int *error) {
+  return allocateUSM(context, device, CL_MEM_TYPE_SHARED_INTEL, size, alignment, error);
 }
-CL_API_ENTRY cl_int CL_API_CALL clMemBlockingFreeINTEL(cl_context context, void *pointer) { return clMemFreeINTEL(context, pointer); }
-CL_API_ENTRY cl_int CL_API_CALL clGetMemAllocInfoINTEL(cl_context, const void *pointer, cl_mem_info_intel name, size_t size, void *output,
-                                                       size_t *written) {
+namespace {
+cl_int freeUSM(cl_context contextValue, void *pointer, bool blocking) {
+  auto *context = checked(reinterpret_cast<_cl_context *>(contextValue), Kind::Context);
+  if (!context) return CL_INVALID_CONTEXT;
+  if (!pointer) return CL_SUCCESS;
+  auto allocation = findPointer(pointer);
+  if (!allocation || allocation->data() != pointer || allocation->usmType == CL_MEM_TYPE_UNKNOWN_INTEL
+      || allocation->svmContextIdentity != context->identity)
+    return CL_INVALID_VALUE;
+  if (blocking) {
+    std::unique_lock lock(allocation->useMutex);
+    allocation->usesFinished.wait(lock, [&] { return allocation->pendingUses == 0; });
+  }
+  return releaseAllocation(allocation, true);
+}
+} // namespace
+
+CL_API_ENTRY cl_int CL_API_CALL clMemFreeINTEL(cl_context context, void *pointer) { return freeUSM(context, pointer, false); }
+CL_API_ENTRY cl_int CL_API_CALL clMemBlockingFreeINTEL(cl_context context, void *pointer) { return freeUSM(context, pointer, true); }
+CL_API_ENTRY cl_int CL_API_CALL clGetMemAllocInfoINTEL(cl_context contextValue, const void *pointer, cl_mem_info_intel name, size_t size,
+                                                       void *output, size_t *written) {
+  auto *context = checked(reinterpret_cast<_cl_context *>(contextValue), Kind::Context);
+  if (!context) return CL_INVALID_CONTEXT;
   size_t offset = 0;
   auto allocation = findPointer(pointer, &offset);
-  if (!allocation) {
+  if (!allocation || allocation->usmType == CL_MEM_TYPE_UNKNOWN_INTEL || allocation->svmContextIdentity != context->identity
+      || offset >= allocation->size) {
     if (name == CL_MEM_ALLOC_TYPE_INTEL) {
       cl_unified_shared_memory_type_intel type = CL_MEM_TYPE_UNKNOWN_INTEL;
       return outputScalar(size, output, written, type);
@@ -3831,13 +3966,13 @@ CL_API_ENTRY cl_int CL_API_CALL clGetMemAllocInfoINTEL(cl_context, const void *p
   }
   switch (name) {
     case CL_MEM_ALLOC_TYPE_INTEL: {
-      cl_unified_shared_memory_type_intel v = CL_MEM_TYPE_SHARED_INTEL;
+      cl_unified_shared_memory_type_intel v = allocation->usmType;
       return outputScalar(size, output, written, v);
     }
     case CL_MEM_ALLOC_BASE_PTR_INTEL: return outputScalar(size, output, written, allocation->data());
     case CL_MEM_ALLOC_SIZE_INTEL: return outputScalar(size, output, written, allocation->size);
     case CL_MEM_ALLOC_DEVICE_INTEL: {
-      cl_device_id v = reinterpret_cast<cl_device_id>(&device);
+      cl_device_id v = allocation->usmType == CL_MEM_TYPE_HOST_INTEL ? nullptr : reinterpret_cast<cl_device_id>(&device);
       return outputScalar(size, output, written, v);
     }
     default: return CL_INVALID_VALUE;
@@ -3854,9 +3989,16 @@ CL_API_ENTRY cl_int CL_API_CALL clEnqueueMemFillINTEL(cl_command_queue queueValu
                                                       size_t size, cl_uint count, const cl_event *waits, cl_event *event) {
   return clEnqueueSVMMemFill(queueValue, dst, pattern, patternSize, size, count, waits, event);
 }
-CL_API_ENTRY cl_int CL_API_CALL clEnqueueMemAdviseINTEL(cl_command_queue queue, const void *, size_t, cl_mem_advice_intel, cl_uint count,
-                                                        const cl_event *waits, cl_event *event) {
-  return completeEvent(checked(reinterpret_cast<_cl_command_queue *>(queue), Kind::Queue), CL_COMMAND_MEMADVISE_INTEL, count, waits, event);
+CL_API_ENTRY cl_int CL_API_CALL clEnqueueMemAdviseINTEL(cl_command_queue queueValue, const void *pointer, size_t size, cl_mem_advice_intel,
+                                                        cl_uint count, const cl_event *waits, cl_event *event) {
+  auto *queue = checked(reinterpret_cast<_cl_command_queue *>(queueValue), Kind::Queue);
+  if (!queue) return CL_INVALID_COMMAND_QUEUE;
+  size_t offset = 0;
+  auto allocation = findPointer(pointer, &offset);
+  if (!validRange(allocation, offset, size)) return CL_INVALID_VALUE;
+  return submitCommand(
+      queue, CL_COMMAND_MEMADVISE_INTEL, false, count, waits, [] { return CL_SUCCESS; }, event, false, false, {},
+      allocationUses({allocation}));
 }
 
 CL_API_ENTRY void *CL_API_CALL clGetExtensionFunctionAddress(const char *name) {

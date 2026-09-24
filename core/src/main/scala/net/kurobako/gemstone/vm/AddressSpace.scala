@@ -9,6 +9,9 @@ import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 
 trait AddressSpace {
+  @scala.annotation.nowarn("msg=unused explicit parameter")
+  def prepareReads(ranges: Vec[(GuestAddress, Int :| Positive0)]): Either[Fault, Unit] = Right(())
+
   def address(
       region: MemoryRegion,
       offset: Long :| Positive0

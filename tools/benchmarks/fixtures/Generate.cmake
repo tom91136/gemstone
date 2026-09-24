@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.25)
 
-if(NOT FIXTURE MATCHES "^(cuda|hip|hsa|opencl)$")
-  message(FATAL_ERROR "FIXTURE must be cuda, hip, hsa, or opencl")
+if(NOT FIXTURE MATCHES "^(cuda|hip|opencl)$")
+  message(FATAL_ERROR "FIXTURE must be cuda, hip, or opencl")
 endif()
 
 set(source /source/tools/benchmarks/src/main/resources)
@@ -25,15 +25,6 @@ elseif(FIXTURE STREQUAL "hip")
     COMMAND_ERROR_IS_FATAL ANY)
   file(RENAME "${temporary}" "${output}/cloverleaf-flux.hsaco")
   file(REMOVE "${bundle}")
-elseif(FIXTURE STREQUAL "hsa")
-  set(temporary "${output}/.hsa-vector-copy.hsaco.tmp")
-  execute_process(
-    COMMAND /opt/rocm/llvm/bin/clang -x cl -target amdgcn-amd-amdhsa
-      -mcpu=gfx1030 -cl-std=CL2.0 -mcode-object-version=4
-      -ffile-prefix-map=/source=. -Xclang -finclude-default-header
-      /source/conformance/unified/src/vector_copy.cl -o "${temporary}"
-    COMMAND_ERROR_IS_FATAL ANY)
-  file(RENAME "${temporary}" "${output}/hsa-vector-copy.hsaco")
 elseif(FIXTURE STREQUAL "opencl")
   set(bitcode "${output}/.opencl-cts-async-copy.bc.tmp")
   set(temporary "${output}/.opencl-cts-async-copy.spv.tmp")

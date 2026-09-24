@@ -17,7 +17,8 @@ struct CompletionResult {
  * The first transport/execution error is preserved even when release also
  * fails. Facades remain responsible for applying records to native memory.
  */
-bool collect_completion(Client &client, CompletionId completion, CompletionResult &result, std::string &error);
+bool await_completion(Client &client, CompletionId completion, std::string &error, bool hostMemory = false);
+bool collect_completion(Client &client, CompletionId completion, CompletionResult &result, std::string &error, bool hostMemory = false);
 
 } // namespace gemstone::execution
 

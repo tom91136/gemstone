@@ -1,8 +1,12 @@
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <map>
 #include <memory>
+#include <mutex>
 #include <new>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include <stdint.h>
@@ -11,16 +15,33 @@
 #include "gemstone/hsa/trace.hpp"
 #include "gemstone_execution_rpc.hpp"
 
+#include "completion.hpp"
+
 namespace {
 
 using namespace gemstone::execution;
 
-struct EnvironmentExecutor {
+struct Connection {
   std::unique_ptr<Client> client;
   std::string error;
 };
 
-template <class T> int accept(EnvironmentExecutor &executor, Result<T> result, T *output = nullptr) {
+struct EnvironmentExecutor {
+  std::mutex mutex;
+  std::map<std::thread::id, std::unique_ptr<Connection>> connections;
+};
+
+Connection &connection(void *context) {
+  auto &executor = *static_cast<EnvironmentExecutor *>(context);
+  std::lock_guard lock(executor.mutex);
+  // Fixed monitor workers poll independently; the runtime owns all connections
+  // and closes them after its workers have joined, including the loading thread.
+  auto &value = executor.connections[std::this_thread::get_id()];
+  if (!value) value = std::make_unique<Connection>(Connection{Client::fromEnvironment(), {}});
+  return *value;
+}
+
+template <class T> int accept(Connection &executor, Result<T> result, T *output = nullptr) {
   if (!result) {
     executor.error = result.error().detail;
     return -1;
@@ -31,7 +52,7 @@ template <class T> int accept(EnvironmentExecutor &executor, Result<T> result, T
 }
 
 int loadProgram(void *context, const void *image, uint32_t image_size, uint64_t *program_id) {
-  auto &executor = *static_cast<EnvironmentExecutor *>(context);
+  auto &executor = connection(context);
   if (!program_id || (!image && image_size != 0)) return -1;
   if (gemstone::hsa::traceEnabled("packets")) std::fprintf(stderr, "Gemstone loading HSA code object bytes=%u\n", image_size);
   auto result = executor.client->call(LoadProgram{
@@ -43,12 +64,12 @@ int loadProgram(void *context, const void *image, uint32_t image_size, uint64_t 
 }
 
 int unloadProgram(void *context, uint64_t program_id) {
-  auto &executor = *static_cast<EnvironmentExecutor *>(context);
+  auto &executor = connection(context);
   return accept(executor, executor.client->call(UnloadProgram{ProgramId{static_cast<int64_t>(program_id)}}));
 }
 
 int bindGlobal(void *context, uint64_t program_id, const char *name, uint64_t allocation_id, uint64_t offset) {
-  auto &executor = *static_cast<EnvironmentExecutor *>(context);
+  auto &executor = connection(context);
   if (!name) return -1;
   return accept(executor,
                 executor.client->call(BindProgramGlobal{ProgramId{static_cast<int64_t>(program_id)}, name,
@@ -56,7 +77,7 @@ int bindGlobal(void *context, uint64_t program_id, const char *name, uint64_t al
 }
 
 int writeGlobal(void *context, uint64_t program_id, const char *name, uint64_t offset, const void *bytes, uint32_t size) {
-  auto &executor = *static_cast<EnvironmentExecutor *>(context);
+  auto &executor = connection(context);
   if (!name || (!bytes && size != 0)) return -1;
   const auto *begin = static_cast<const uint8_t *>(bytes);
   return accept(executor,
@@ -66,7 +87,7 @@ int writeGlobal(void *context, uint64_t program_id, const char *name, uint64_t o
 
 int describeKernel(void *context, uint64_t program_id, const char *name, uint32_t *kernarg_size, gemstone_hsa_kernarg_field *fields,
                    uint32_t capacity, uint32_t *field_count, uint32_t *explicit_argument_count) {
-  auto &executor = *static_cast<EnvironmentExecutor *>(context);
+  auto &executor = connection(context);
   if (!name || !kernarg_size || !field_count || !explicit_argument_count || (capacity != 0 && !fields)) return -1;
   KernelMetadata metadata{};
   if (accept(executor, executor.client->call(DescribeKernel{ProgramId{static_cast<int64_t>(program_id)}, name}), &metadata) != 0) return -1;
@@ -91,7 +112,7 @@ int describeKernel(void *context, uint64_t program_id, const char *name, uint32_
 int launch(void *context, uint64_t program_id, const char *kernel_name, gemstone_hsa_dimensions group_size,
            gemstone_hsa_dimensions group_count, gemstone_hsa_dimensions global_size, uint32_t private_segment_bytes,
            uint32_t group_segment_bytes, const gemstone_hsa_argument *arguments, uint32_t argument_count, uint64_t *completion_id) {
-  auto &executor = *static_cast<EnvironmentExecutor *>(context);
+  auto &executor = connection(context);
   if (!kernel_name || !completion_id || (!arguments && argument_count != 0)) return -1;
   std::vector<KernelArgument> converted;
   converted.reserve(argument_count);
@@ -106,6 +127,7 @@ int launch(void *context, uint64_t program_id, const char *kernel_name, gemstone
     } else return -1;
   }
   CompletionId completion{};
+  if (std::getenv("GEMSTONE_HSA_SYSTEM_PAGING") && !executor.client->call(EnableHostMemory{})) return -1;
   const auto result = accept(
       executor,
       executor.client->call(Launch{
@@ -126,12 +148,14 @@ int launch(void *context, uint64_t program_id, const char *kernel_name, gemstone
 }
 
 int awaitCompletion(void *context, uint64_t completion_id) {
-  auto &executor = *static_cast<EnvironmentExecutor *>(context);
-  return accept(executor, executor.client->call(AwaitCompletion{CompletionId{static_cast<int64_t>(completion_id)}}));
+  auto &executor = connection(context);
+  return gemstone::execution::await_completion(*executor.client, CompletionId{static_cast<int64_t>(completion_id)}, executor.error, true)
+             ? 0
+             : -1;
 }
 
 int completionDirtyRanges(void *context, uint64_t completion_id, gemstone_hsa_dirty_range *ranges, uint32_t capacity, uint32_t *count) {
-  auto &executor = *static_cast<EnvironmentExecutor *>(context);
+  auto &executor = connection(context);
   if (!count || (capacity != 0 && !ranges)) return -1;
   std::vector<DirtyRange> converted;
   if (accept(executor, executor.client->call(CompletionDirtyRanges{CompletionId{static_cast<int64_t>(completion_id)}}), &converted) != 0)
@@ -149,11 +173,11 @@ int completionDirtyRanges(void *context, uint64_t completion_id, gemstone_hsa_di
 }
 
 int releaseCompletion(void *context, uint64_t completion_id) {
-  auto &executor = *static_cast<EnvironmentExecutor *>(context);
+  auto &executor = connection(context);
   return accept(executor, executor.client->call(ReleaseCompletion{CompletionId{static_cast<int64_t>(completion_id)}}));
 }
 
-const char *error(void *context) { return static_cast<EnvironmentExecutor *>(context)->error.c_str(); }
+const char *error(void *context) { return connection(context).error.c_str(); }
 
 void destroy(void *context) { delete static_cast<EnvironmentExecutor *>(context); }
 
@@ -163,8 +187,7 @@ extern "C" gemstone_hsa_aql_runtime *gemstone_hsa_aql_runtime_create_from_enviro
   if (!signals) return nullptr;
   auto *executor = new (std::nothrow) EnvironmentExecutor();
   if (!executor) return nullptr;
-  executor->client = Client::fromEnvironment();
-  if (!executor->client) {
+  if (!connection(executor).client) {
     delete executor;
     return nullptr;
   }

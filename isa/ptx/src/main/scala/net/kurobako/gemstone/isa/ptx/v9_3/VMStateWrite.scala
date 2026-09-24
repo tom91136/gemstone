@@ -20,6 +20,22 @@ private[v9_3] enum VMStateWrite {
   case Memory(lane: Int, address: GuestAddress, width: BitWidth, value: Long)
   case MemoryVector(lane: Int, address: GuestAddress, width: BitWidth, values: Vec[Long])
   case AtomicSharedAdd(lane: Int, destination: RegisterName, address: Long, width: BitWidth, value: Long)
+  case AtomicSharedCompareExchange(
+      lane: Int,
+      destination: RegisterName,
+      address: Long,
+      width: BitWidth,
+      comparator: Long,
+      value: Long
+  )
+  case AtomicMemoryCompareExchange(
+      lane: Int,
+      destination: RegisterName,
+      address: GuestAddress,
+      width: BitWidth,
+      comparator: Long,
+      value: Long
+  )
   case AtomicSharedExchange(lane: Int, destination: RegisterName, address: Long, width: BitWidth, value: Long)
   case AtomicSharedBinary(
       lane: Int,

@@ -3,6 +3,14 @@ specs = ["~[compact-matrix]"]
 # Level Zero runs a bounded expansion of compact. The upstream suite has
 # over 20,000 cases, mostly allocation and copy parameter sweeps.
 levelzero_cases = [
+  # Shared/system memory transfers across page boundaries (bounded kernel sizes).
+  "ParamSVMAllocationLaunchKernelTests/SharedSystemMemoryLaunchKernelTests.*/svm_to_usm_non_atomic_regular_4KB",
+  "ParamSVMAllocationLaunchKernelTests/SharedSystemMemoryLaunchKernelTests.*/usm_to_svm_non_atomic_regular_4KB",
+  "ParamSVMAllocationLaunchKernelTests/SharedSystemMemoryLaunchKernelTests.*/svm_to_svm_non_atomic_regular_4KB",
+  "ParamSVMAllocationLaunchKernelTests/SharedSystemMemoryLaunchKernelTests.*/svm_to_usm_non_atomic_regular_6KB",
+  "ParamSVMAllocationLaunchKernelTests/SharedSystemMemoryLaunchKernelTests.*/usm_to_svm_non_atomic_regular_6KB",
+  "ParamSVMAllocationLaunchKernelTests/SharedSystemMemoryLaunchKernelTests.*/svm_to_svm_non_atomic_regular_6KB",
+
   "zeInitTests.*",
   "zeDriverGetDriverVersionTests.*",
   "zeDriverGetApiVersionTests.*",

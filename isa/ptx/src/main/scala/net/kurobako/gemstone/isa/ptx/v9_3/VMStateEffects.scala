@@ -162,6 +162,10 @@ private object VMStateEffects {
         memory.validateRange(address, byteCount(width).value.refineUnsafe[Positive0]).leftMap(error =>
           ExecutionFault.Memory(s"pc ${pc.value}, lane $lane: ${error.message}")
         )
+      case VMStateWrite.AtomicMemoryCompareExchange(lane, _, address, width, _, _) =>
+        memory.validateRange(address, byteCount(width).value.refineUnsafe[Positive0]).leftMap(error =>
+          ExecutionFault.Memory(s"pc ${pc.value}, lane $lane: ${error.message}")
+        )
       case VMStateWrite.AtomicMemoryExchange(lane, _, address, width, _) =>
         memory.validateRange(address, byteCount(width).value.refineUnsafe[Positive0]).leftMap(error =>
           ExecutionFault.Memory(s"pc ${pc.value}, lane $lane: ${error.message}")
@@ -207,6 +211,10 @@ private object VMStateEffects {
       val previous = state.readShared(address, width)
       state.registers(lane)(destination) = Bits.truncate(previous, width.asBitWidth)
       state.writeShared(address, width, previous + value)
+    case VMStateWrite.AtomicSharedCompareExchange(lane, destination, address, width, comparator, value) =>
+      val previous = Bits.truncate(state.readShared(address, width), width.asBitWidth)
+      state.registers(lane)(destination) = previous
+      if (previous == Bits.truncate(comparator, width.asBitWidth)) state.writeShared(address, width, value)
     case VMStateWrite.AtomicSharedExchange(lane, destination, address, width, value) =>
       val previous = state.readShared(address, width)
       state.registers(lane)(destination) = Bits.truncate(previous, width.asBitWidth)
@@ -227,6 +235,11 @@ private object VMStateEffects {
         error => throw IllegalStateException(error.message),
         value => value
       )
+      state.registers(lane)(destination) = Bits.truncate(previous, width.asBitWidth)
+    case VMStateWrite.AtomicMemoryCompareExchange(lane, destination, address, width, comparator, value) =>
+      val previous = memory.atomicModifyLittleEndian(address, memoryByteCount(width)) { current =>
+        if (Bits.truncate(current, width.asBitWidth) == Bits.truncate(comparator, width.asBitWidth)) value else current
+      }.fold(error => throw IllegalStateException(error.message), value => value)
       state.registers(lane)(destination) = Bits.truncate(previous, width.asBitWidth)
     case VMStateWrite.AtomicMemoryExchange(lane, destination, address, width, value) =>
       val previous = memory.atomicModifyLittleEndian(address, memoryByteCount(width))(_ => value).fold(

@@ -201,32 +201,10 @@ std::string discoverExecutable(const std::vector<std::string> &names, const std:
   return findFirstGlob(patterns);
 }
 
-// Conformance artifacts carry the toolchain under their support root so a run
-// needs no compiler installed on the host. `CONFORMANCE_SUPPORT_ROOT` is set by
-// the driver for every executed case.
-std::string bundledToolchainRoot() {
-  const char *support = std::getenv("CONFORMANCE_SUPPORT_ROOT");
-  if (!support || support[0] == '\0') return {};
-  const auto root = std::filesystem::path(support) / "opencl-toolchain";
-  return std::filesystem::is_directory(root) ? root.string() : std::string{};
-}
-
-std::string bundledExecutable(const std::vector<std::string> &relative) {
-  const auto root = bundledToolchainRoot();
-  if (root.empty()) return {};
-  for (const auto &entry : relative) {
-    const auto candidate = (std::filesystem::path(root) / entry).string();
-    if (executable(candidate)) return candidate;
-  }
-  return {};
-}
-
 const std::string &compilerPath() {
   static const std::string path = [] {
     if (const char *configured = std::getenv("GEMSTONE_OPENCL_COMPILER"); configured && configured[0] != '\0')
       return std::string(configured);
-    if (const auto bundled = bundledExecutable({"bin/icpx", "bin/compiler/clang++", "bin/compiler/clang"}); !bundled.empty())
-      return bundled;
     return discoverExecutable({"icpx", "clang++", "clang"}, {"/opt/intel/oneapi/compiler/*/bin/icpx", "/opt/rocm/llvm/bin/clang++"});
   }();
   return path;
@@ -236,7 +214,6 @@ const std::string &spirvConverterPath() {
   static const std::string path = [] {
     if (const char *configured = std::getenv("GEMSTONE_OPENCL_LLVM_SPIRV"); configured && configured[0] != '\0')
       return std::string(configured);
-    if (const auto bundled = bundledExecutable({"bin/compiler/llvm-spirv"}); !bundled.empty()) return bundled;
     return discoverExecutable({"llvm-spirv"},
                               {"/opt/intel/oneapi/compiler/*/bin/compiler/llvm-spirv", "/opt/rocm/llvm/bin/llvm-spirv",
                                "/usr/lib/llvm-*/bin/llvm-spirv", "/usr/lib64/llvm*/bin/llvm-spirv", "/usr/local/bin/llvm-spirv"});
@@ -248,7 +225,6 @@ const std::string &bitcodeLinkerPath() {
   static const std::string path = [] {
     if (const char *configured = std::getenv("GEMSTONE_OPENCL_LLVM_LINK"); configured && configured[0] != '\0')
       return std::string(configured);
-    if (const auto bundled = bundledExecutable({"bin/compiler/llvm-link"}); !bundled.empty()) return bundled;
     return discoverExecutable({"llvm-link"},
                               {"/opt/intel/oneapi/compiler/*/bin/compiler/llvm-link", "/opt/rocm/llvm/bin/llvm-link",
                                "/usr/lib/llvm-*/bin/llvm-link", "/usr/lib64/llvm*/bin/llvm-link", "/usr/local/bin/llvm-link"});
@@ -281,7 +257,8 @@ std::vector<std::string> vectorBuiltinPointers(std::string_view source) {
     size_t position = 0;
     while ((position = source.find(builtin, position)) != std::string_view::npos) {
       size_t open = position + builtin.size();
-      while (open < source.size() && std::isspace(static_cast<unsigned char>(source[open]))) ++open;
+      while (open < source.size() && std::isspace(static_cast<unsigned char>(source[open])))
+        ++open;
       if (open == source.size() || source[open] != '(') {
         position += builtin.size();
         continue;
@@ -296,12 +273,14 @@ std::vector<std::string> vectorBuiltinPointers(std::string_view source) {
       const size_t comma = source.rfind(',', close - 1);
       if (comma != std::string_view::npos && comma > open) {
         size_t begin = comma + 1, end = close - 1;
-        while (begin < end && std::isspace(static_cast<unsigned char>(source[begin]))) ++begin;
-        while (end > begin && std::isspace(static_cast<unsigned char>(source[end - 1]))) --end;
+        while (begin < end && std::isspace(static_cast<unsigned char>(source[begin])))
+          ++begin;
+        while (end > begin && std::isspace(static_cast<unsigned char>(source[end - 1])))
+          --end;
         if (begin < end && (std::isalpha(static_cast<unsigned char>(source[begin])) || source[begin] == '_')
-            && std::all_of(source.begin() + begin + 1, source.begin() + end, [](char c) {
-                 return std::isalnum(static_cast<unsigned char>(c)) || c == '_';
-               }))
+            && std::all_of(
+                source.begin() + begin + 1, source.begin() + end,
+                [](char c) { return std::isalnum(static_cast<unsigned char>(c)) || c == '_'; }))
           result.emplace_back(source.substr(begin, end - begin));
       }
       position = close;
@@ -348,7 +327,8 @@ std::string makeGlobalMemoryVolatile(const std::string &source) {
             continue;
           }
           const size_t begin = cursor++;
-          while (cursor < end && (std::isalnum(static_cast<unsigned char>(source[cursor])) || source[cursor] == '_')) ++cursor;
+          while (cursor < end && (std::isalnum(static_cast<unsigned char>(source[cursor])) || source[cursor] == '_'))
+            ++cursor;
           variable = source.substr(begin, cursor - begin);
         }
         usedByVectorBuiltin = std::find(builtinPointers.begin(), builtinPointers.end(), variable) != builtinPointers.end();
@@ -368,14 +348,16 @@ bool hasVectorComponentSwizzle(std::string_view source) {
     const char first = source[end];
     if (first == 's' || first == 'S') {
       ++end;
-      while (end < source.size() && std::isxdigit(static_cast<unsigned char>(source[end]))) ++end;
+      while (end < source.size() && std::isxdigit(static_cast<unsigned char>(source[end])))
+        ++end;
       if (end == position + 2) {
         ++position;
         continue;
       }
     } else {
       const std::string_view components = "xyzwrgba";
-      while (end < source.size() && components.find(source[end]) != std::string_view::npos) ++end;
+      while (end < source.size() && components.find(source[end]) != std::string_view::npos)
+        ++end;
       if (end == position + 1) {
         ++position;
         continue;
@@ -466,10 +448,6 @@ bool compileSourceToBitcode(const std::string &source, const std::string &option
                                         output};
     static constexpr const char *unsupportedFeatures[] = {"__opencl_c_program_scope_global_variables",
                                                           "__opencl_c_3d_image_writes",
-                                                          "__opencl_c_atomic_order_acq_rel",
-                                                          "__opencl_c_atomic_order_seq_cst",
-                                                          "__opencl_c_atomic_scope_device",
-                                                          "__opencl_c_atomic_scope_all_devices",
                                                           "__opencl_c_device_enqueue",
                                                           "__opencl_c_generic_address_space",
                                                           "__opencl_c_pipes",

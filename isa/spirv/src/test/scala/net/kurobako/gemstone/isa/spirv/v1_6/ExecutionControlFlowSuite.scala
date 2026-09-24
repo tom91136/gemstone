@@ -26,7 +26,7 @@ final class ExecutionControlFlowSuite extends munit.FunSuite with ExecutionTestS
     val output         = operand("IdResult", 10)
     val token          = operand("IdResult", 11)
     val result         = operand("IdResult", 13)
-    val module = Module(
+    val module         = Module(
       Header(ISA.version, Word(0), Word(17), Word(0)),
       Vec(
         Instruction.TypeVoid(voidType),
@@ -52,8 +52,8 @@ final class ExecutionControlFlowSuite extends munit.FunSuite with ExecutionTestS
       ),
       Endianness.Little
     )
-    val allocation = MemoryRegion(30L)
-    val memory     = ArrayMemory(allocation, 4)
+    val allocation              = MemoryRegion(30L)
+    val memory                  = ArrayMemory(allocation, 4)
     def dispatch(pointer: Long) = KernelTask
       .validated(
         KernelName("indirect"),

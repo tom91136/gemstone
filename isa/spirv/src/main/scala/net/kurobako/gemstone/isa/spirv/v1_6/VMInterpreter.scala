@@ -337,7 +337,7 @@ private[v1_6] object VMInterpreter {
       case Right(value)  => value
     }
     val subgroup       = program.subgroupSizes.getOrElse(function.id, math.max(1, math.min(32, totalLocal)))
-    val hasCollectives = program.collectiveFunctions.contains(function.id)
+    val hasCollectives = program.collectiveFunctions.contains(function.id) || memory.defersHostReads
     val baseScalars    = BaseScalarValues(program.constants, globalValues, program.module.header.bound.toUnsigned)
     metrics.recordDispatch(hasCollectives)
     val groupCount = dispatch.geometry.groupCount.volume match {
@@ -689,6 +689,9 @@ private[v1_6] object VMInterpreter {
       val scalarInteger = program.scalarIntegerInstruction(execution.pc)
       if (scalarInteger == null || !executeScalarInteger(execution, scalarInteger.nn))
         executeInstruction(program, execution, memory, program.module.instructions(execution.pc)) match {
+          case Left(Fault.PendingMemory) =>
+            execution.memoryPending = true
+            return InstructionCompleted
           case Left(error) => return Left(error)
           case Right(_)    => ()
         }
@@ -761,7 +764,7 @@ private[v1_6] object VMInterpreter {
     case _: Instruction.IsNormal | _: Instruction.SignBitSet | _: Instruction.ULessThan | _: Instruction.UGreaterThan | _: Instruction.ULessThanEqual | _: Instruction.UGreaterThanEqual | _: Instruction.SGreaterThan | _: Instruction.SGreaterThanEqual | _: Instruction.SLessThan | _: Instruction.SLessThanEqual | _: Instruction.Select =>
       executeComparison(program, execution, instruction)
     case _: Instruction.ControlBarrier | _: Instruction.MemoryBarrier | _: Instruction.GroupAny | _: Instruction.GroupAll | _: Instruction.GroupUMin | _: Instruction.GroupUMax | _: Instruction.GroupSMin | _: Instruction.GroupSMax | _: Instruction.GroupIAdd | _: Instruction.GroupIMulKHR | _: Instruction.GroupFAdd | _: Instruction.GroupFMin | _: Instruction.GroupFMax | _: Instruction.GroupFMulKHR | _: Instruction.SubgroupShuffleINTEL | _: Instruction.SubgroupShuffleUpINTEL | _: Instruction.SubgroupShuffleDownINTEL | _: Instruction.GroupBroadcast | _: Instruction.GroupNonUniformBallot =>
-      executeCollective(program, execution, instruction)
+      executeCollective(program, execution, memory, instruction)
     case _: Instruction.FunctionCall | _: Instruction.FunctionPointerCallINTEL =>
       executeCall(program, execution, memory, instruction)
     case _: Instruction.Branch | _: Instruction.BranchConditional | _: Instruction.Switch | _: Instruction.ReturnValue | _: Instruction.Return | _: Instruction.AssumeTrueKHR | _: Instruction.LoopMerge | _: Instruction.SelectionMerge =>
@@ -2209,6 +2212,7 @@ private[v1_6] object VMInterpreter {
   private def executeCollective(
       program: Program,
       execution: InvocationExecution,
+      memory: MemoryState,
       instruction: Instruction
   ): Either[Fault, Unit] = {
     val values = execution.values
@@ -2236,7 +2240,7 @@ private[v1_6] object VMInterpreter {
             return Right(())
         }
       case Instruction.MemoryBarrier(memoryScope, semantics) =>
-        validateAtomicControls(values, memoryScope, semantics, "OpMemoryBarrier") match {
+        validateAtomicControls(values, memoryScope, semantics, "OpMemoryBarrier").flatMap(_ => memory.fence()) match {
           case Left(error) => return Left(error)
           case Right(())   => execution.pc += 1
         }
@@ -3314,9 +3318,16 @@ private[v1_6] object VMInterpreter {
           }
         index += 1
       }
+      val hadPendingMemory = executions.exists(_.memoryPending)
+      if (hadPendingMemory) {
+        memory.flushHostReads() match {
+          case Left(error) => return Left(error)
+          case Right(())   => executions.foreach(_.memoryPending = false)
+        }
+      }
       resolveCollectives(program, executions) match {
-        case Left(error)                                 => return Left(error)
-        case Right(0) if executions.exists(!_.completed) =>
+        case Left(error)                                                      => return Left(error)
+        case Right(0) if !hadPendingMemory && executions.exists(!_.completed) =>
           val waiting = executions.view
             .filter(!_.completed)
             .map(execution =>
@@ -4570,6 +4581,14 @@ private[v1_6] object VMInterpreter {
                 )
               case None => Left(Fault.InvalidTask("missing SVM pointer relocation"))
             }
+          case KernelTask.Argument.Scalar(bytes)
+              if !byValue && bytes.size == 8 && (storageClass == 5 || storageClass == 8) =>
+            memory.integerPointer(
+              LittleEndian.decode(bytes, 0, MemoryValueByteWidth(8).scalarByteWidth),
+              pointee,
+              storageClass
+            )
+              .map(pointer => RuntimeValue.Address(parameterType, pointer))
           case KernelTask.Argument.Scalar(bytes) =>
             memory.relocateArgument(argumentIndex, bytes) match {
               case Left(error)      => Left(error)
@@ -4582,12 +4601,10 @@ private[v1_6] object VMInterpreter {
                   case Right(leaves) => leaves.foreach { case (offset, pointerType) =>
                       program.runtimeType(pointerType) match {
                         case Some(RuntimeType.Pointer(pointerStorage, pointerPointee)) =>
-                          val pointer = memory.argumentRelocation(argumentIndex, offset) match {
-                            case Some((target, targetOffset)) =>
-                              Pointer(Region.External(target), targetOffset, pointerPointee, pointerStorage)
-                            case None => Pointer(Region.Null, 0L, pointerPointee, pointerStorage)
+                          memory.argumentRelocation(argumentIndex, offset).foreach { (target, targetOffset) =>
+                            val pointer = Pointer(Region.External(target), targetOffset, pointerPointee, pointerStorage)
+                            slots.update(offset, pointerType -> pointer)
                           }
-                          slots.update(offset, pointerType -> pointer)
                         case _ => ()
                       }
                     }
@@ -4648,12 +4665,12 @@ private[v1_6] object VMInterpreter {
         leaves.foreach { case (slotOffset, pointerType) =>
           program.runtimeType(pointerType) match {
             case Some(RuntimeType.Pointer(pointerStorage, pointerPointee)) =>
-              val pointer = memory.allocationRelocation(allocation, allocationOffset + slotOffset) match {
-                case Some((target, targetOffset)) =>
-                  Pointer(Region.External(target), targetOffset, pointerPointee, pointerStorage)
-                case None => Pointer(Region.Null, 0L, pointerPointee, pointerStorage)
+              // Missing relocation metadata says nothing about the stored pointer.
+              // Leave the slot absent so loadPointer reads the registered native bytes.
+              memory.allocationRelocation(allocation, allocationOffset + slotOffset).foreach { (target, targetOffset) =>
+                val pointer = Pointer(Region.External(target), targetOffset, pointerPointee, pointerStorage)
+                slots.update(allocationOffset + slotOffset, pointerType -> pointer)
               }
-              slots.update(allocationOffset + slotOffset, pointerType -> pointer)
             case _ => ()
           }
         }
@@ -4719,46 +4736,41 @@ private[v1_6] object VMInterpreter {
       resultType: Int
   ): Either[Fault, RuntimeValue] = program.runtimeType(resultType) match {
     case Some(RuntimeType.Pointer(resultStorage, resultPointee)) =>
-      val rawPointer = memory.readScalar(source, MemoryValueByteWidth(8))
-      source.slots.flatMap(_.get(source.offset)).orElse(
+      val stored = if (memory.nativePointerStorage(source)) None
+      else source.slots.flatMap(_.get(source.offset)).orElse(
         memory.relocatedPointer(source, resultPointee, resultStorage).map(resultType -> _)
-      ).orElse(
-        rawPointer
-          .toOption
-          .flatMap(raw => memory.integerPointer(raw, resultPointee, resultStorage).toOption)
-          .map(resultType -> _)
-      ) match {
-        case Some((slotType, pointer)) => program.runtimeType(slotType) match {
-            case Some(RuntimeType.Pointer(slotStorage, _))
-                if pointer.region == Region.Null ||
-                  ((slotStorage == 8 || pointer.storageClass == slotStorage) &&
-                    (resultStorage == 8 || pointer.storageClass == resultStorage)) =>
-              // A pointer-valued aggregate may be accessed through an OpBitcast
-              // (common in oneDPL's iterator wrappers). The slot records the
-              // pointer's original static type, while the load supplies the
-              // bitcast destination type. Preserve the address and retag the
-              // pointer for the destination; Generic is compatible with any
-              // concrete storage class.
-              val result = pointer.copy(pointee = resultPointee, storageClass = resultStorage)
-              Right(RuntimeValue.Address(resultType, result))
-            case value =>
-              Left(
-                Fault.InvalidTask(
-                  s"SPIR-V pointer slot at byte ${source.offset} has type %$slotType ($value), " +
-                    s"expected %$resultType (${program.runtimeType(resultType)}), " +
-                    s"base pointee %${source.pointee}, storage ${source.storageClass}, " +
-                    s"slots ${source.slots.map(slots => Vec.from(slots.keys).sorted.mkString("[", ",", "]")).getOrElse("none")}"
-                )
+      )
+      val resolved = stored match {
+        case Some(pointer) => Right(pointer)
+        case None          => memory.readScalar(source, MemoryValueByteWidth(8))
+            .flatMap(raw => memory.integerPointer(raw, resultPointee, resultStorage))
+            .map(resultType -> _)
+      }
+      resolved.flatMap { case (slotType, pointer) =>
+        program.runtimeType(slotType) match {
+          case Some(RuntimeType.Pointer(slotStorage, _))
+              if pointer.region == Region.Null ||
+                ((slotStorage == 8 || pointer.storageClass == slotStorage) &&
+                  (resultStorage == 8 || pointer.storageClass == resultStorage)) =>
+            // A pointer-valued aggregate may be accessed through an OpBitcast
+            // (common in oneDPL's iterator wrappers). The slot records the
+            // pointer's original static type, while the load supplies the
+            // bitcast destination type. Preserve the address and retag the
+            // pointer for the destination; Generic is compatible with any
+            // concrete storage class.
+            val result = pointer.copy(pointee = resultPointee, storageClass = resultStorage)
+            Right(RuntimeValue.Address(resultType, result))
+          case value =>
+            Left(
+              Fault.InvalidTask(
+                s"SPIR-V pointer slot at byte ${source.offset} has type %$slotType ($value), " +
+                  s"expected %$resultType (${program.runtimeType(resultType)}), " +
+                  s"base pointee %${source.pointee}, storage ${source.storageClass}, " +
+                  s"slots ${source.slots.map(slots => Vec.from(slots.keys).sorted.mkString("[", ",", "]")).getOrElse("none")}"
               )
-          }
-        case None =>
-          Left(
-            Fault.InvalidTask(
-              s"SPIR-V pointer load at byte ${source.offset} does not reference a typed pointer slot " +
-                s"(source pointee %${source.pointee}, source storage ${source.storageClass}, " +
-                s"result type %$resultType, raw ${rawPointer.fold(_.message, value => s"0x${java.lang.Long.toHexString(value)}")})"
             )
-          )
+        }
+
       }
     case value =>
       Left(Fault.InvalidTask(

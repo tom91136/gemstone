@@ -1,0 +1,71 @@
+.version 8.0
+.target sm_80
+.address_size 64
+.visible .entry probe(.param .u64 input, .param .u64 output, .param .u64 indices, .param .u32 mode) {
+ .reg .u64 %p, %q, %old64, %v64, %n64; .reg .u32 %old, %v, %m, %round, %n; .reg .pred %pred;
+ ld.param.u64 %p, [input]; ld.param.u64 %q, [output]; ld.param.u32 %m, [mode]; mov.u32 %round, 0;
+ setp.eq.u32 %pred, %m, 13; @%pred bra compare32;
+ setp.eq.u32 %pred, %m, 14; @%pred bra compare64;
+ setp.eq.u32 %pred, %m, 11; @%pred bra publish32;
+ setp.eq.u32 %pred, %m, 12; @%pred bra publish64;
+ setp.eq.u32 %pred, %m, 6; @%pred bra loop64;
+ loop32:
+ ld.acquire.sys.global.u32 %old, [%p];
+ setp.ne.u32 %pred, %old, 1; @%pred bra loop32;
+ atom.acq_rel.sys.global.add.u32 %old, [%p+8], 1;
+ ld.global.u32 %v, [%p+4]; st.global.u32 [%q], %v;
+ mul.lo.u32 %v, %v, 2; st.global.u32 [%p+4], %v;
+ st.release.sys.global.u32 [%p], 2;
+ add.u64 %q, %q, 4; add.u32 %round, %round, 1;
+ setp.lt.u32 %pred, %round, 32; @%pred bra loop32; ret;
+ loop64:
+ ld.acquire.sys.global.u64 %old64, [%p];
+ setp.ne.u64 %pred, %old64, 1; @%pred bra loop64;
+ atom.acq_rel.sys.global.add.u64 %old64, [%p+16], 1;
+ ld.global.u64 %v64, [%p+8]; st.global.u64 [%q], %v64;
+ mul.lo.u64 %v64, %v64, 2; st.global.u64 [%p+8], %v64;
+ st.release.sys.global.u64 [%p], 2;
+ add.u64 %q, %q, 8; add.u32 %round, %round, 1;
+ setp.lt.u32 %pred, %round, 32; @%pred bra loop64; ret;
+ publish32:
+ st.global.u32 [%p+4], 74;
+ st.release.sys.global.u32 [%p], 1;
+ st.global.u32 [%q], 74; ret;
+ publish64:
+ st.global.u64 [%p+8], 74;
+ st.release.sys.global.u64 [%p], 1;
+ st.global.u64 [%q], 74; ret;
+ compare32:
+ add.u32 %n, %round, 1;
+ or.b32 %n, %n, 2147483648;
+ wait32:
+ ld.relaxed.sys.global.u32 %old, [%p];
+ setp.ne.u32 %pred, %old, %n; @%pred bra wait32;
+ atom.acquire.sys.global.cas.b32 %old, [%p], 0, 0;
+ ld.global.u32 %v, [%p+4];
+ st.global.u32 [%q], %v;
+ st.global.u32 [%q+4], %old;
+ setp.eq.u32 %pred, %old, 0;
+ selp.u32 %v, 1, 0, %pred;
+ st.global.u32 [%q+8], %v;
+ st.release.sys.global.u32 [%p+8], %n;
+ add.u64 %q, %q, 12; add.u32 %round, %round, 1;
+ setp.lt.u32 %pred, %round, 32; @%pred bra compare32; ret;
+ compare64:
+ add.u32 %n, %round, 1;
+ cvt.u64.u32 %n64, %n;
+ or.b64 %n64, %n64, 9223372036854775808;
+ wait64:
+ ld.relaxed.sys.global.u64 %old64, [%p];
+ setp.ne.u64 %pred, %old64, %n64; @%pred bra wait64;
+ atom.acquire.sys.global.cas.b64 %old64, [%p], 0, 0;
+ ld.global.u64 %v64, [%p+8];
+ st.global.u64 [%q], %v64;
+ st.global.u64 [%q+8], %old64;
+ setp.eq.u64 %pred, %old64, 0;
+ selp.u64 %v64, 1, 0, %pred;
+ st.global.u64 [%q+16], %v64;
+ st.release.sys.global.u64 [%p+16], %n64;
+ add.u64 %q, %q, 24; add.u32 %round, %round, 1;
+ setp.lt.u32 %pred, %round, 32; @%pred bra compare64; ret;
+}

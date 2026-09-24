@@ -436,9 +436,19 @@ void execution_queue_dispatches_and_completes() {
   uint32_t dirty_count = 0;
   REQUIRE((gemstone_hsa_aql_runtime_take_dirty_ranges(runtime, nullptr, 0, &dirty_count) == 0));
   REQUIRE((dirty_count == 1));
+  // Another queue completes between mirror-back's count and take calls.
+  // The original count must still drain its prefix without losing newer writes.
+  executor.dirty_ranges = {{99, 12, 4}};
+  set_signal(signals, 104, 1);
+  const auto intervening = kernel_packet(77, reinterpret_cast<uint64_t>(kernarg.data()), 104);
+  REQUIRE((gemstone_hsa_aql_runtime_consume(2, 0, intervening.data(), intervening.size(), runtime) == GEMSTONE_HSA_PACKET_ACCEPTED));
+  REQUIRE((signal_value(signals, 104) == 0));
   gemstone_hsa_dirty_range dirty_range{};
   REQUIRE((gemstone_hsa_aql_runtime_take_dirty_ranges(runtime, &dirty_range, 1, &dirty_count) == 0));
   REQUIRE((dirty_count == 1 && dirty_range.allocation_id == 99 && dirty_range.offset == 8 && dirty_range.size == 4));
+  REQUIRE((gemstone_hsa_aql_runtime_take_dirty_ranges(runtime, nullptr, 0, &dirty_count) == 0 && dirty_count == 1));
+  REQUIRE((gemstone_hsa_aql_runtime_take_dirty_ranges(runtime, &dirty_range, 1, &dirty_count) == 0));
+  REQUIRE((dirty_count == 1 && dirty_range.allocation_id == 99 && dirty_range.offset == 12 && dirty_range.size == 4));
   REQUIRE((gemstone_hsa_aql_runtime_take_dirty_ranges(runtime, nullptr, 0, &dirty_count) == 0));
   REQUIRE((dirty_count == 0));
 
@@ -450,7 +460,7 @@ void execution_queue_dispatches_and_completes() {
   REQUIRE(
       (gemstone_test::waitUntil([&] { return __atomic_load_n(resource.read_pointer, __ATOMIC_ACQUIRE) == 2; }, std::chrono::seconds(10))));
   REQUIRE((signal_value(signals, 103) == 0));
-  REQUIRE((executor.dirty_queries == 3 && executor.completion_released));
+  REQUIRE((executor.dirty_queries == 5 && executor.completion_released));
   REQUIRE((gemstone_hsa_aql_runtime_take_dirty_ranges(runtime, nullptr, 0, &dirty_count) == 0 && dirty_count == 0));
 
   set_signal(signals, 101, 1);
@@ -469,7 +479,7 @@ void execution_queue_dispatches_and_completes() {
   REQUIRE(
       (gemstone_test::waitUntil([&] { return __atomic_load_n(resource.read_pointer, __ATOMIC_ACQUIRE) == 4; }, std::chrono::seconds(10))));
   REQUIRE((signal_value(signals, 102) == -3));
-  REQUIRE((executor.dirty_queries == 3 && executor.completion_released));
+  REQUIRE((executor.dirty_queries == 5 && executor.completion_released));
   REQUIRE((std::string(gemstone_hsa_aql_runtime_error(runtime)) == "add_one: typed completion failure"));
 
   gemstone_hsa_virtual_kfd_destroy_queue(queue);

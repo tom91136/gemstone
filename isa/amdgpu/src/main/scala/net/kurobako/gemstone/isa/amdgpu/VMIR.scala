@@ -503,7 +503,8 @@ private[amdgpu] object VMIR {
         address: Int,
         scalarAddress: Option[Int],
         bytes: Int :| Interval.Closed[1, 16],
-        offset: Int
+        offset: Int,
+        coherent: Boolean = false
     )
     case GlobalLoadSigned(
         dest: Int,
@@ -574,7 +575,7 @@ private[amdgpu] object VMIR {
         offset: Int,
         returnValue: Boolean
     )
-    case FlatLoad(dest: Int, address: Int, bytes: Int :| Interval.Closed[1, 16], offset: Int)
+    case FlatLoad(dest: Int, address: Int, bytes: Int :| Interval.Closed[1, 16], offset: Int, coherent: Boolean = false)
     case FlatLoadSigned(dest: Int, address: Int, bytes: Int :| Interval.Closed[1, 2], offset: Int)
     case FlatStore(address: Int, src: Int, bytes: Int :| Interval.Closed[1, 16], offset: Int)
     case FlatStoreD16High(address: Int, src: Int, bytes: Int :| Interval.Closed[1, 2], offset: Int)
@@ -643,6 +644,7 @@ private[amdgpu] object VMIR {
     case Barrier
     case Wait
     case End
+    case Trap(code: Int)
   }
 
   final class Kernel private[amdgpu] (

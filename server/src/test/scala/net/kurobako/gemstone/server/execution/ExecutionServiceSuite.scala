@@ -10,6 +10,7 @@ import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.{CountDownLatch, FutureTask, TimeUnit}
 import scala.util.Using
 
 final class ExecutionServiceSuite extends munit.FunSuite {
@@ -25,7 +26,7 @@ final class ExecutionServiceSuite extends munit.FunSuite {
     ): Either[RuntimeBackend.Error, RuntimeBackend.Program] = Right(Program(services, programClosed))
   }
 
-  private final class Program(services: RuntimeBackend.Services, closed: AtomicBoolean) extends RuntimeBackend.Program {
+  private class Program(services: RuntimeBackend.Services, closed: AtomicBoolean) extends RuntimeBackend.Program {
     override def symbols: Either[RuntimeBackend.Error, ProgramSymbols] = Right(ProgramSymbols(Vec.empty, Vec.empty))
     override def kernel(name: ISAKernelName): Either[RuntimeBackend.Error, ISAKernelMetadata] =
       ISAKernelMetadata.validated(
@@ -73,9 +74,223 @@ final class ExecutionServiceSuite extends munit.FunSuite {
       assertEquals(service.completion(completion), Right(CompletionStatus.Succeeded))
       assertEquals(service.read(allocation, 2, 1), Right(Vec[Byte](42)))
       assertEquals(service.completionPrints(completion).map(_.map(_.format)), Right(Vec("done")))
-      assert(service.completionDirtyRanges(completion).toOption.get.exists(_.allocation == allocation))
+      assertEquals(service.completionDirtyRanges(completion), Right(Vec(DirtyRange(allocation, 2L, 1))))
     }
     assert(backend.programClosed.get())
+  }
+
+  test("acknowledged host fences wake polling reads from another worker") {
+    Using.resource(WorkerPool(2)) { workers =>
+      final class FenceBackend extends RuntimeBackend {
+        override val encoding: String                                          = ExecutionServiceSuite.this.encoding
+        override def load(services: RuntimeBackend.Services, image: Vec[Byte]) =
+          Right(ReadFenceProgram(services))
+        private final class ReadFenceProgram(services: RuntimeBackend.Services)
+            extends Program(services, AtomicBoolean()) {
+          override def execute(task: KernelTask, memory: Memory, control: TaskControl) = {
+            val staged = CountDownLatch(1)
+            services.scheduler.parallelFor(2) { lane =>
+              if (lane == 0) {
+                assertEquals(memory.read(MemoryRegion(0), 0x1000L, 4), Left(Fault.PendingMemory))
+                staged.countDown()
+                memory.flushHostReads()
+              } else {
+                assert(staged.await(5, TimeUnit.SECONDS))
+                memory.fenceHostMemory()
+              }
+            }.left.map(RuntimeBackend.Error.Execution(_)).map(_ => Result(control.usedInstructions))
+          }
+        }
+      }
+      Using.resource(ExecutionService(List(FenceBackend()), scheduler = workers)) { service =>
+        assertEquals(service.enableHostMemory(), Right(()))
+        val program = service.load(encoding, Vec[Byte](1)).toOption.get
+        val task    = KernelTask.validated(
+          ISAKernelName("read-and-fence"),
+          LaunchGeometry.Dimensions.One,
+          LaunchGeometry.Dimensions.One,
+          Vec.empty
+        ).toOption.get
+        val pump = FutureTask[Unit](() =>
+          (0 until 512).foreach { _ =>
+            val completion   = service.launch(program, task).toOption.get
+            def poll(): Unit = {
+              val batch = service.pollHostMemory(completion).fold(error => fail(error.message), identity)
+              batch.sync.foreach(sync => assertEquals(service.supplyHostSync(completion, sync.ticket, 0L), Right(())))
+              if (batch.reads.nonEmpty)
+                assertEquals(
+                  service.supplyHostMemory(
+                    completion,
+                    batch.reads.map(range =>
+                      HostMemoryBytes(range.address, Vec.fill(range.size)(1.toByte))
+                    )
+                  ),
+                  Right(())
+                )
+              if (!batch.completed) poll()
+            }
+            poll()
+            assertEquals(service.releaseCompletion(completion), Right(()))
+          }
+        )
+        val thread = Thread(pump, "host-fence-read-regression")
+        thread.setDaemon(true)
+        thread.start()
+        try pump.get(15, TimeUnit.SECONDS)
+        finally {
+          service.close()
+          thread.join(5000)
+        }
+      }
+    }
+  }
+
+  for (sync <- List(false, true)) test(s"closing a session cancels pending host memory and queued work, fence=$sync") {
+    val finished = CountDownLatch(1)
+    val disposed = CountDownLatch(1)
+    final class WaitingProgram(services: RuntimeBackend.Services) extends Program(services, AtomicBoolean()) {
+      override def execute(task: KernelTask, memory: Memory, control: TaskControl) =
+        try {
+          val result = if (sync) memory.fenceHostMemory()
+          else {
+            assertEquals(memory.read(MemoryRegion(0), 0x1000L, 4), Left(Fault.PendingMemory))
+            memory.flushHostReads()
+          }
+          result.left.map(RuntimeBackend.Error.Execution(_)).map(_ => Result(control.usedInstructions))
+        } finally finished.countDown()
+      override def close(): Unit = disposed.countDown()
+    }
+    final class WaitingBackend extends RuntimeBackend {
+      override val encoding: String                                          = ExecutionServiceSuite.this.encoding
+      override def load(services: RuntimeBackend.Services, image: Vec[Byte]) = Right(WaitingProgram(services))
+    }
+    Using.resource(WorkerPool(1)) { workers =>
+      Using.resource(ExecutionService(List(WaitingBackend()), scheduler = workers)) { service =>
+        assertEquals(service.enableHostMemory(), Right(()))
+        val allocation = service.registerAllocation(8, AllocationKind.Shared).toOption.get
+        val program    = service.load(encoding, Vec[Byte](1)).toOption.get
+        val task       = KernelTask.validated(
+          ISAKernelName("wait"),
+          LaunchGeometry.Dimensions.One,
+          LaunchGeometry.Dimensions.One,
+          Vec(KernelTask.Argument.Memory(MemoryRegion(allocation.value), 0))
+        ).toOption.get
+        val first = service.launch(program, task).toOption.get
+        val batch = service.pollHostMemory(first).toOption.get
+        assertEquals(batch.sync.nonEmpty, sync)
+        assertEquals(batch.reads.nonEmpty, !sync)
+        val queued = service.launch(program, task).toOption.get
+        assert(service.releaseAllocation(allocation).isLeft)
+        assert(service.unload(program).isLeft)
+        assert(service.releaseCompletion(first).isLeft)
+        service.close()
+        assert(finished.await(5, TimeUnit.SECONDS), "host-memory waiter survived session close")
+        assert(disposed.await(5, TimeUnit.SECONDS), "program outlived cancelled dispatches")
+        assert(service.awaitCompletion(first).isLeft)
+        assert(service.awaitCompletion(queued).isLeft)
+        assert(service.supplyHostMemory(first, Vec.empty).isLeft)
+      }
+    }
+  }
+
+  test("independent dispatches can rendezvous before either completes") {
+    val entered = CountDownLatch(2)
+    val release = CountDownLatch(1)
+    final class RendezvousBackend extends RuntimeBackend {
+      override val encoding: String                                          = ExecutionServiceSuite.this.encoding
+      override def load(services: RuntimeBackend.Services, image: Vec[Byte]) = Right(RendezvousProgram(services))
+      private final class RendezvousProgram(services: RuntimeBackend.Services)
+          extends Program(services, AtomicBoolean()) {
+        override def execute(task: KernelTask, memory: Memory, control: TaskControl) = {
+          entered.countDown()
+          val released = release.await(5, TimeUnit.SECONDS)
+          if (released) Right(Result(control.usedInstructions))
+          else Left(RuntimeBackend.Error.Failed("rendezvous timed out"))
+        }
+      }
+    }
+    Using.resource(WorkerPool(2)) { workers =>
+      Using.resource(ExecutionService(List(RendezvousBackend()), scheduler = workers)) { service =>
+        val program = service.load(encoding, Vec[Byte](1)).toOption.get
+        val task    = KernelTask.validated(
+          ISAKernelName("rendezvous"),
+          LaunchGeometry.Dimensions.One,
+          LaunchGeometry.Dimensions.One,
+          Vec.empty
+        ).toOption.get
+        val first      = service.launch(program, task).toOption.get
+        val second     = service.launch(program, task).toOption.get
+        val concurrent = entered.await(1, TimeUnit.SECONDS)
+        val retained   = service.unload(program).isLeft
+        release.countDown()
+        assertEquals(service.awaitCompletion(first), Right(()))
+        assertEquals(service.awaitCompletion(second), Right(()))
+        assert(retained, "program retired while dispatches were running")
+        assert(concurrent, "one dispatch prevented the other from entering execution")
+      }
+    }
+  }
+
+  test("overlapping dispatches keep host read replies and cached bytes separate") {
+    val firstRead = CountDownLatch(1)
+    val release   = CountDownLatch(1)
+    val observed  = java.util.concurrent.ConcurrentHashMap[Long, Byte]()
+    final class IsolatedBackend extends RuntimeBackend {
+      override val encoding: String                                          = ExecutionServiceSuite.this.encoding
+      override def load(services: RuntimeBackend.Services, image: Vec[Byte]) = Right(IsolatedProgram(services))
+      private final class IsolatedProgram(services: RuntimeBackend.Services)
+          extends Program(services, AtomicBoolean()) {
+        override def execute(task: KernelTask, memory: Memory, control: TaskControl) = {
+          val staged  = memory.read(MemoryRegion(0), 0x1000L, 1)
+          val flushed = if (staged == Left(Fault.PendingMemory)) memory.flushHostReads() else staged.map(_ => ())
+          flushed.flatMap { _ =>
+            firstRead.countDown()
+            if (!release.await(5, TimeUnit.SECONDS)) Left(Fault.Cancelled)
+            else memory.read(MemoryRegion(0), 0x1000L, 1).map { bytes =>
+              val _ = observed.put(control.observation.value, bytes.head)
+              Result(control.usedInstructions)
+            }
+          }.left.map(RuntimeBackend.Error.Execution(_))
+        }
+      }
+    }
+    Using.resource(WorkerPool(2)) { workers =>
+      Using.resource(ExecutionService(List(IsolatedBackend()), scheduler = workers)) { service =>
+        assertEquals(service.enableHostMemory(), Right(()))
+        val program = service.load(encoding, Vec[Byte](1)).toOption.get
+        val task    = KernelTask.validated(
+          ISAKernelName("isolate"),
+          LaunchGeometry.Dimensions.One,
+          LaunchGeometry.Dimensions.One,
+          Vec.empty
+        ).toOption.get
+        val first   = service.launch(program, task).toOption.get
+        val initial = service.pollHostMemory(first).toOption.get
+        assertEquals(initial.reads.size, 1)
+        assertEquals(
+          service.supplyHostMemory(first, Vec(HostMemoryBytes(initial.reads.head.address, Vec[Byte](11)))),
+          Right(())
+        )
+        assert(firstRead.await(2, TimeUnit.SECONDS))
+        val second  = service.launch(program, task).toOption.get
+        val polling = FutureTask(() => service.pollHostMemory(second))
+        val pump    = Thread(polling, "gemstone-isolation-test")
+        pump.start()
+        try {
+          val batch = polling.get(2, TimeUnit.SECONDS).toOption.get
+          assertEquals(batch.reads.size, 1)
+          assertEquals(
+            service.supplyHostMemory(second, Vec(HostMemoryBytes(batch.reads.head.address, Vec[Byte](22)))),
+            Right(())
+          )
+        } finally release.countDown()
+        assertEquals(service.awaitCompletion(first), Right(()))
+        assertEquals(service.awaitCompletion(second), Right(()))
+        pump.join(5000)
+        assertEquals(observed.get(first.value), 11.toByte)
+        assertEquals(observed.get(second.value), 22.toByte)
+      }
+    }
   }
 
   test("unknown encodings fail without invoking a backend") {

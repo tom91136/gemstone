@@ -10,6 +10,19 @@ import io.github.iltotore.iron.constraint.all.*
 import scala.annotation.nowarn
 
 trait Memory {
+
+  /** Pointer bytes use canonical addresses shared by all dispatches. Relocation metadata must not cache or replay them.
+    */
+  @nowarn("msg=unused explicit parameter")
+  def hasNativePointers(region: MemoryRegion): Boolean = false
+
+  /** A full fence; remote backing owners acknowledge publication before returning. */
+  def fenceHostMemory(): Either[Fault, Unit] = flushHostWrites().map(_ => invalidateHostReads())
+  def flushHostWrites(): Either[Fault, Unit] = Right(())
+  def invalidateHostReads(): Unit            = ()
+  def defersHostReads: Boolean               = false
+  def flushHostReads(): Either[Fault, Unit]  = Right(())
+
   def read(
       region: MemoryRegion,
       offset: Long :| Positive0,

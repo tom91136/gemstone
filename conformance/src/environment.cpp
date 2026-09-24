@@ -8,12 +8,6 @@
 
 #include "driver.hpp"
 
-#if defined(_WIN32)
-  #include <windows.h>
-#else
-extern char **environ;
-#endif
-
 namespace conformance::driver {
 using namespace aspartame;
 
@@ -23,25 +17,10 @@ std::map<std::string, std::string> base_environment() {
                            "DISPLAY", "WAYLAND_DISPLAY", "XDG_RUNTIME_DIR"}) {
     if (const auto *value = std::getenv(name)) result[name] = value;
   }
-  // Gemstone's explicit launcher configuration must survive the clean runtime environment.
 #if defined(_WIN32)
-  auto *block = GetEnvironmentStringsA();
-  if (block) {
-    for (auto *entry = block; *entry; entry += std::char_traits<char>::length(entry) + 1) {
-      std::string text(entry);
-      const auto end = text.find('=');
-      if (text.starts_with("GEMSTONE_") && end != std::string::npos) result[text.substr(0, end)] = text.substr(end + 1);
-    }
-    FreeEnvironmentStringsA(block);
-  }
   const auto system = result.contains("SystemRoot") ? result.at("SystemRoot") : "C:\\Windows";
   result["PATH"] = system + "\\System32;" + system;
 #else
-  for (auto **entry = environ; entry && *entry; ++entry) {
-    std::string text(*entry);
-    const auto end = text.find('=');
-    if (text.starts_with("GEMSTONE_") && end != std::string::npos) result[text.substr(0, end)] = text.substr(end + 1);
-  }
   result["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin";
 #endif
   return result;

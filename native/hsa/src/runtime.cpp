@@ -18,6 +18,8 @@
 #include <hsa.h>
 #include <hsa_ext_amd.h>
 #include <stdint.h>
+
+#include <gemstone/memory.hpp>
 #if defined(__linux__)
   #include <sys/mman.h>
 #endif
@@ -74,29 +76,13 @@ struct Allocation {
   uint64_t id = 0;
   uint64_t pool = 0;
   bool owned = false;
-  bool pageable = false;
-  size_t pageable_references = 0;
-  bool writable = true;
   // Transfers borrow native storage while free or deregistration retires it.
   std::mutex transfer_lock;
   bool retired = false;
   bool freeing = false;
-  std::vector<uint8_t> host_snapshot;
 
   Allocation(void *base_value, size_t size_value, uint64_t id_value, uint64_t pool_value, bool owned_value)
       : base(base_value), size(size_value), id(id_value), pool(pool_value), owned(owned_value) {}
-
-  bool prepareHostSnapshot() {
-    if (pool != CpuPool || !host_snapshot.empty()) return true;
-    try {
-      // RegisterAllocation creates zero-filled remote storage. Subsequent
-      // uploads and copy-back keep this snapshot equal to its remote bytes.
-      host_snapshot.resize(size, 0);
-      return true;
-    } catch (...) {
-      return false;
-    }
-  }
 };
 using AllocationRef = std::shared_ptr<Allocation>;
 
@@ -172,10 +158,7 @@ struct AsyncHandler {
 
 struct RuntimeState {
   std::mutex lock;
-  // Pageable mirrors span RPC registration and AQL bookkeeping. Serialize
-  // their acquire/release transaction so concurrent queues cannot retire a
-  // mirror that another dispatch has just found.
-  std::mutex pageable_lock;
+  std::mutex mirrorLock;
   uint32_t references = 0;
   uint64_t next_handle = 1;
   uint64_t next_kernel = UINT64_C(0x10000);
@@ -186,11 +169,8 @@ struct RuntimeState {
   std::unordered_map<hsa_queue_t *, QueueRef> queues;
   std::unordered_map<void *, AllocationRef> allocations;
   std::unordered_map<uint64_t, AllocationRef> allocation_ids;
-  struct BorrowedPageableLock {
-    size_t size;
-    size_t references;
-  };
-  std::unordered_map<void *, BorrowedPageableLock> borrowed_pageable_locks;
+  std::mutex registration_lock;
+  gemstone::MemoryRegistrations registrations;
   std::unordered_map<uint64_t, std::shared_ptr<Reader>> readers;
   std::unordered_map<uint64_t, ExecutableRef> executables;
   std::unordered_map<uint64_t, KernelRef> kernels;
@@ -259,9 +239,9 @@ bool registerAllocation(Client &client, size_t size, uint64_t &id) {
   return true;
 }
 
-bool registerAddress(Client &client, uint64_t id, uint64_t address) {
-  return static_cast<bool>(
-      client.call(RegisterAllocationAddress{AllocationId{static_cast<int64_t>(id)}, GuestAddress{static_cast<int64_t>(address)}}));
+bool registerAddress(Client &client, uint64_t id, uint64_t address, bool hostBacked) {
+  return static_cast<bool>(client.call(
+      RegisterAllocationAddress{AllocationId{static_cast<int64_t>(id)}, GuestAddress{static_cast<int64_t>(address)}, hostBacked}));
 }
 
 bool releaseAllocation(Client &client, uint64_t id) {
@@ -430,19 +410,16 @@ int publicSignalFail(void *context, uint64_t handle, int32_t error_code) {
 AllocationRef findAllocation(RuntimeState &runtime, const void *pointer, size_t size = 0) {
   const auto address = reinterpret_cast<uintptr_t>(pointer);
   AllocationRef endpoint;
-  AllocationRef pageable;
   for (const auto &[_, allocation] : runtime.allocations) {
     const auto base = reinterpret_cast<uintptr_t>(allocation->base);
     if (address < base || address - base > allocation->size) continue;
     if (size > allocation->size - (address - base)) continue;
     if (address - base < allocation->size) {
-      if (!allocation->pageable) return allocation;
-      pageable = allocation;
-      continue;
+      return allocation;
     }
     endpoint = allocation;
   }
-  return pageable ? pageable : endpoint;
+  return endpoint;
 }
 
 AllocationRef findAllocationById(RuntimeState &runtime, uint64_t id) {
@@ -479,10 +456,10 @@ void restoreGlobalPointers(RuntimeState &runtime, const AllocationRef &allocatio
   }
 }
 
-int upload(RuntimeState &runtime, const AllocationRef &allocation, size_t offset, size_t size, bool optional = false) {
+int upload(RuntimeState &runtime, const AllocationRef &allocation, size_t offset, size_t size) {
   std::lock_guard<std::mutex> transfer(allocation->transfer_lock);
-  if (allocation->retired) return optional ? 0 : -1;
-  if (!allocation->prepareHostSnapshot()) return -1;
+  if (allocation->retired) return -1;
+  if (allocation->pool == CpuPool) return 0;
   const bool trace = gemstone::hsa::traceEnabled("memory");
   const size_t start = offset;
   const size_t requested = size;
@@ -521,14 +498,11 @@ int upload(RuntimeState &runtime, const AllocationRef &allocation, size_t offset
   }
   while (size != 0) {
     const uint32_t chunk = static_cast<uint32_t>(std::min<size_t>(size, TransferChunk));
-    if (allocation->host_snapshot.empty() || std::memcmp(allocation->host_snapshot.data() + offset, bytes, chunk) != 0) {
-      if (!writeAllocation(*runtime.client, allocation->id, offset, bytes, chunk)) {
-        if (trace)
-          std::fprintf(stderr, "Gemstone HSA upload failed allocation=%lu offset=%zu size=%u error=%s\n", allocation->id, offset, chunk,
-                       runtime.client->error().c_str());
-        return -1;
-      }
-      if (!allocation->host_snapshot.empty()) std::memcpy(allocation->host_snapshot.data() + offset, bytes, chunk);
+    if (!writeAllocation(*runtime.client, allocation->id, offset, bytes, chunk)) {
+      if (trace)
+        std::fprintf(stderr, "Gemstone HSA upload failed allocation=%lu offset=%zu size=%u error=%s\n", allocation->id, offset, chunk,
+                     runtime.client->error().c_str());
+      return -1;
     }
     offset += chunk;
     bytes += chunk;
@@ -539,8 +513,9 @@ int upload(RuntimeState &runtime, const AllocationRef &allocation, size_t offset
 }
 
 int download(RuntimeState &runtime, const AllocationRef &allocation, size_t offset, size_t size) {
+  if (allocation->pool == CpuPool) return 0;
   std::lock_guard<std::mutex> transfer(allocation->transfer_lock);
-  if (allocation->retired || !allocation->prepareHostSnapshot()) return -1;
+  if (allocation->retired) return -1;
   const bool trace = gemstone::hsa::traceEnabled("memory");
   const size_t start = offset;
   const size_t requested = size;
@@ -548,21 +523,7 @@ int download(RuntimeState &runtime, const AllocationRef &allocation, size_t offs
   auto *bytes = static_cast<uint8_t *>(allocation->base) + offset;
   while (size != 0) {
     const uint32_t chunk = static_cast<uint32_t>(std::min<size_t>(size, TransferChunk));
-    if (allocation->pageable) {
-      std::vector<uint8_t> device(chunk);
-      if (!readAllocation(*runtime.client, allocation->id, offset, device.data(), chunk)) return -1;
-      for (size_t index = 0; index < chunk; ++index)
-        if (device[index] != allocation->host_snapshot[offset + index]) {
-          if (!allocation->writable) return -1;
-          // A live host allocator or runtime may update another object on the
-          // same mirrored page while the kernel runs. Preserve that host write.
-          if (bytes[index] == allocation->host_snapshot[offset + index]) bytes[index] = device[index];
-        }
-      std::memcpy(allocation->host_snapshot.data() + offset, device.data(), chunk);
-    } else {
-      if (!readAllocation(*runtime.client, allocation->id, offset, bytes, chunk)) return -1;
-      if (!allocation->host_snapshot.empty()) std::memcpy(allocation->host_snapshot.data() + offset, bytes, chunk);
-    }
+    if (!readAllocation(*runtime.client, allocation->id, offset, bytes, chunk)) return -1;
     offset += chunk;
     bytes += chunk;
     size -= chunk;
@@ -578,53 +539,26 @@ int download(RuntimeState &runtime, const AllocationRef &allocation, size_t offs
   return 0;
 }
 
-int uploadDispatchAllocations(RuntimeState &runtime, const void *packet, size_t packet_size) {
-  uint32_t count = 0;
-  if (gemstone_hsa_aql_runtime_dispatch_allocations(runtime.aql, packet, packet_size, nullptr, 0, &count) != 0) {
-    // Let the AQL executor report malformed and unsupported packets through
-    // their original completion signal. A valid dispatch that cannot resolve
-    // its kernel or allocations must fail before stale host memory is used.
-    gemstone_hsa_aql_packet decoded{};
-    const auto decode = gemstone_hsa_decode_aql_packet(packet, packet_size, &decoded);
-    return decode != GEMSTONE_HSA_AQL_DECODE_SUCCESS || decoded.type != GEMSTONE_HSA_AQL_KERNEL_DISPATCH ? 0 : -1;
-  }
-  std::vector<uint64_t> ids(count);
-  if (count != 0 && gemstone_hsa_aql_runtime_dispatch_allocations(runtime.aql, packet, packet_size, ids.data(), count, &count) != 0) {
-    return -1;
-  }
-  std::vector<std::pair<AllocationRef, bool>> allocations;
-  {
-    std::lock_guard<std::mutex> guard(runtime.lock);
-    allocations.reserve(ids.size() + runtime.allocations.size());
-    for (uint64_t id : ids) {
-      auto allocation = findAllocationById(runtime, id);
-      if (!allocation) {
-        return -1;
-      }
-      allocations.emplace_back(std::move(allocation), false);
-    }
-    // Fine-grained CPU pools and registered host memory can be reached through
-    // native pointer data without appearing as direct kernargs. Refresh those
-    // mirrors too; unrelated device-only buffers remain remote-authoritative.
-    for (const auto &[_, allocation] : runtime.allocations)
-      if (allocation->pool == CpuPool && !(ids ^ contains(allocation->id))) allocations.emplace_back(allocation, true);
-  }
-  for (const auto &[allocation, optional] : allocations) {
-    if (gemstone::hsa::traceEnabled("memory"))
-      std::fprintf(stderr, "Gemstone HSA dispatch upload allocation=%lu size=%zu\n", allocation->id, allocation->size);
-    if (upload(runtime, allocation, 0, allocation->size, optional) != 0) {
-      return -1;
-    }
-  }
-  return 0;
+std::vector<gemstone::MemoryRange> liveTransferRanges(RuntimeState &runtime, const AllocationRef &allocation, size_t offset, size_t size) {
+  const gemstone::MemoryRange requested{reinterpret_cast<uintptr_t>(allocation->base) + offset, size};
+  if (allocation->owned) return {requested};
+  std::lock_guard<std::mutex> guard(runtime.lock);
+  std::vector<gemstone::MemoryRange> views;
+  for (const auto &view : runtime.registrations.views())
+    views.push_back(view.range);
+  return gemstone::coveredMemoryRanges(requested, std::move(views));
 }
 
 int mirrorBack(RuntimeState &runtime) {
+  // A completion may drain several queues' dirty ranges. Serialize the entire
+  // drain and copy-back so every queue publishes its signal after those writes.
+  std::lock_guard mirrorGuard(runtime.mirrorLock);
   uint32_t count = 0;
   if (gemstone_hsa_aql_runtime_take_dirty_ranges(runtime.aql, nullptr, 0, &count) != 0) return -1;
   if (gemstone::hsa::traceEnabled("memory")) std::fprintf(stderr, "Gemstone HSA mirror query count=%u\n", count);
   std::vector<gemstone_hsa_dirty_range> ranges(count);
   if (count != 0 && gemstone_hsa_aql_runtime_take_dirty_ranges(runtime.aql, ranges.data(), count, &count) != 0) return -1;
+  ranges.resize(count);
   for (const auto &range : ranges) {
     AllocationRef allocation;
     {
@@ -632,33 +566,8 @@ int mirrorBack(RuntimeState &runtime) {
       allocation = findAllocationById(runtime, range.allocation_id);
     }
     if (!allocation || range.offset > allocation->size || range.size > allocation->size - range.offset) return -1;
-    std::lock_guard<std::mutex> transfer(allocation->transfer_lock);
-    if (allocation->retired || !allocation->prepareHostSnapshot()) return -1;
-    if (gemstone::hsa::traceEnabled("memory"))
-      std::fprintf(stderr, "Gemstone HSA mirror range allocation=%lu offset=%lu size=%u\n", range.allocation_id, range.offset, range.size);
-    auto *bytes = static_cast<uint8_t *>(allocation->base) + range.offset;
-    size_t offset = range.offset;
-    size_t remaining = range.size;
-    while (remaining != 0) {
-      const uint32_t chunk = static_cast<uint32_t>(std::min<size_t>(remaining, TransferChunk));
-      if (allocation->pageable) {
-        std::vector<uint8_t> device(chunk);
-        if (!readAllocation(*runtime.client, allocation->id, offset, device.data(), chunk)) return -1;
-        for (size_t index = 0; index < chunk; ++index)
-          if (device[index] != allocation->host_snapshot[offset + index]) {
-            if (!allocation->writable) return -1;
-            if (bytes[index] == allocation->host_snapshot[offset + index]) bytes[index] = device[index];
-          }
-        std::memcpy(allocation->host_snapshot.data() + offset, device.data(), chunk);
-      } else {
-        if (!readAllocation(*runtime.client, allocation->id, offset, bytes, chunk)) return -1;
-        if (!allocation->host_snapshot.empty()) std::memcpy(allocation->host_snapshot.data() + offset, bytes, chunk);
-      }
-      offset += chunk;
-      bytes += chunk;
-      remaining -= chunk;
-    }
-    restoreGlobalPointers(runtime, allocation, range.offset, range.size);
+    for (const auto live : liveTransferRanges(runtime, allocation, range.offset, range.size))
+      if (download(runtime, allocation, live.base - reinterpret_cast<uintptr_t>(allocation->base), live.size) != 0) return -1;
   }
   return 0;
 }
@@ -672,217 +581,6 @@ void failPacket(RuntimeState &runtime, const void *packet, size_t packet_size, i
     signal = decoded.value.barrier.completion_signal;
   else if (decoded.type == GEMSTONE_HSA_AQL_VENDOR_SPECIFIC) signal = decoded.value.pm4_ib.completion_signal;
   if (signal != 0) publicSignalFail(&runtime, signal, code);
-}
-
-AllocationRef registerPageableAddress(RuntimeState &runtime, uint64_t address, size_t maximum_size = size_t(64) * 1024 * 1024,
-                                      bool nested = false) {
-  if (address < 4096) return {};
-  std::lock_guard<std::mutex> pageable_guard(runtime.pageable_lock);
-  {
-    std::lock_guard<std::mutex> guard(runtime.lock);
-    if (const auto existing = findAllocation(runtime, reinterpret_cast<void *>(address), 1)) {
-      if (!existing->pageable) return {};
-      ++existing->pageable_references;
-      return existing;
-    }
-  }
-  auto *maps = std::fopen("/proc/self/maps", "r");
-  if (!maps) return {};
-  uint64_t base = 0;
-  size_t size = 0;
-  bool writable = false;
-  char line[1024];
-  while (std::fgets(line, sizeof(line), maps)) {
-    unsigned long long begin = 0, end = 0;
-    char permissions[5] = {};
-    if (std::sscanf(line, "%llx-%llx %4s", &begin, &end, permissions) != 3) continue;
-    if (address >= begin && address < end && permissions[0] == 'r' && end - begin <= maximum_size
-        && (!nested || (permissions[1] == 'w' && !std::strchr(line, '/')))) {
-      base = std::max<uint64_t>(begin, address & ~uint64_t(AllocationGranule - 1));
-      size = static_cast<size_t>(end - base);
-      writable = permissions[1] == 'w';
-      break;
-    }
-  }
-  std::fclose(maps);
-  if (!base || !size) return {};
-  uint64_t end = base + size;
-  // Host mirrors must not include this runtime's mutexes and allocation
-  // registry. Application objects can share the same page in the C heap.
-  const auto state_begin = reinterpret_cast<uint64_t>(&runtime);
-  const auto state_end = state_begin + sizeof(runtime);
-  if (address >= state_begin && address < state_end) return {};
-  if (base < state_end && end > state_begin) {
-    if (address < state_begin) end = std::min(end, state_begin);
-    else base = std::max(base, state_end);
-  }
-  {
-    std::lock_guard<std::mutex> guard(runtime.lock);
-    for (const auto &[_, existing] : runtime.allocations) {
-      const auto allocated_base = reinterpret_cast<uint64_t>(existing->base);
-      const auto allocated_end = allocated_base + existing->size;
-      if (allocated_end <= address && allocated_end > base) base = allocated_end;
-      if (allocated_base > address && allocated_base < end) end = allocated_base;
-    }
-  }
-  if (end <= base || address < base || address >= end) return {};
-  size = static_cast<size_t>(end - base);
-  const bool trace = std::getenv("GEMSTONE_HSA_PAGING_TRACE") != nullptr;
-  uint64_t id = 0;
-  if (!registerAllocation(*runtime.client, size, id)) return {};
-  if (!registerAddress(*runtime.client, id, base) || gemstone_hsa_aql_runtime_register_allocation(runtime.aql, base, size, id) != 0) {
-    if (trace)
-      std::fprintf(stderr, "Gemstone HSA host map alias failed pointer=%p base=%p size=%zu\n", reinterpret_cast<void *>(address),
-                   reinterpret_cast<void *>(base), size);
-    (void)releaseAllocation(*runtime.client, id);
-    return {};
-  }
-  if (trace)
-    std::fprintf(stderr, "Gemstone HSA host map pointer=%p base=%p size=%zu writable=%d id=%llu\n", reinterpret_cast<void *>(address),
-                 reinterpret_cast<void *>(base), size, writable ? 1 : 0, static_cast<unsigned long long>(id));
-  auto allocation = std::make_shared<Allocation>(reinterpret_cast<void *>(base), size, id, CpuPool, false);
-  allocation->pageable = true;
-  allocation->pageable_references = 1;
-  allocation->writable = writable;
-  {
-    std::lock_guard<std::mutex> guard(runtime.lock);
-    runtime.allocations.emplace(allocation->base, allocation);
-    runtime.allocation_ids.emplace(id, allocation);
-  }
-  return allocation;
-}
-
-void unregisterPageableAddresses(RuntimeState &runtime, const std::vector<AllocationRef> &pages) {
-  for (const auto &allocation : pages) {
-    std::lock_guard<std::mutex> pageable_guard(runtime.pageable_lock);
-    bool release = false;
-    {
-      std::lock_guard<std::mutex> guard(runtime.lock);
-      const auto found = runtime.allocations.find(allocation->base);
-      if (found == runtime.allocations.end() || found->second != allocation || allocation->pageable_references == 0) continue;
-      --allocation->pageable_references;
-      if (allocation->pageable_references == 0) {
-        runtime.allocations.erase(found);
-        runtime.allocation_ids.erase(allocation->id);
-        release = true;
-      }
-    }
-    if (release) {
-      (void)gemstone_hsa_aql_runtime_unregister_allocation(runtime.aql, reinterpret_cast<uint64_t>(allocation->base));
-      (void)releaseAllocation(*runtime.client, allocation->id);
-    }
-  }
-}
-
-void registerMainExecutablePages(RuntimeState &runtime, std::vector<AllocationRef> &pages) {
-  char executable[4096] = {};
-  const auto length = readlink("/proc/self/exe", executable, sizeof(executable) - 1);
-  if (length <= 0) return;
-  executable[length] = '\0';
-  auto *maps = std::fopen("/proc/self/maps", "r");
-  if (!maps) return;
-  char line[8192];
-  uint64_t preceding_end = 0;
-  while (std::fgets(line, sizeof(line), maps) && pages.size() < 32) {
-    unsigned long long begin = 0, end = 0;
-    char permissions[5] = {};
-    if (std::sscanf(line, "%llx-%llx %4s", &begin, &end, permissions) != 3 || permissions[0] != 'r') continue;
-    const bool executable_segment = std::strstr(line, executable) != nullptr;
-    const bool adjacent_data = preceding_end == begin && !std::strchr(line, '/') && !std::strchr(line, '[');
-    if (!executable_segment && !adjacent_data) {
-      preceding_end = 0;
-      continue;
-    }
-    preceding_end = end;
-    if (permissions[2] == 'x') continue;
-    auto page = registerPageableAddress(runtime, begin);
-    if (page) pages.push_back(std::move(page));
-  }
-  std::fclose(maps);
-}
-
-void registerWritableAnonymousPages(RuntimeState &runtime, std::vector<AllocationRef> &pages) {
-  auto *maps = std::fopen("/proc/self/maps", "r");
-  if (!maps) return;
-  char line[8192];
-  while (std::fgets(line, sizeof(line), maps) && pages.size() < 64) {
-    unsigned long long begin = 0, end = 0;
-    char permissions[5] = {};
-    if (std::sscanf(line, "%llx-%llx %4s", &begin, &end, permissions) != 3 || permissions[0] != 'r' || permissions[1] != 'w'
-        || permissions[2] == 'x' || end - begin > size_t(1) * 1024 * 1024 || std::strchr(line, '/') || std::strchr(line, '['))
-      continue;
-    auto page = registerPageableAddress(runtime, begin);
-    if (page) pages.push_back(std::move(page));
-  }
-  std::fclose(maps);
-}
-
-void registerDispatchHostPointers(RuntimeState &runtime, const void *packet, size_t packet_size, std::vector<AllocationRef> &pages) {
-  if (!std::getenv("GEMSTONE_HSA_SYSTEM_PAGING")) return;
-  gemstone_hsa_aql_packet decoded{};
-  if (gemstone_hsa_decode_aql_packet(packet, packet_size, &decoded) != GEMSTONE_HSA_AQL_DECODE_SUCCESS
-      || decoded.type != GEMSTONE_HSA_AQL_KERNEL_DISPATCH)
-    return;
-  const auto &dispatch = decoded.value.kernel_dispatch;
-  uint32_t kernarg_size = 0, field_count = 0, explicit_count = 0;
-  if (gemstone_hsa_aql_runtime_describe_kernel(runtime.aql, dispatch.kernel_object, &kernarg_size, nullptr, 0, &field_count,
-                                               &explicit_count)
-      != 0)
-    return;
-  std::vector<gemstone_hsa_kernarg_field> fields(field_count);
-  if (field_count != 0
-      && gemstone_hsa_aql_runtime_describe_kernel(runtime.aql, dispatch.kernel_object, &kernarg_size, fields.data(), field_count,
-                                                  &field_count, &explicit_count)
-             != 0)
-    return;
-  {
-    std::lock_guard<std::mutex> guard(runtime.lock);
-    if (!findAllocation(runtime, reinterpret_cast<void *>(dispatch.kernarg_address), kernarg_size)) return;
-  }
-  const auto *kernarg = reinterpret_cast<const uint8_t *>(dispatch.kernarg_address);
-  std::vector<uint64_t> pending;
-  for (const auto &field : fields) {
-    if (field.kind == GEMSTONE_HSA_ARGUMENT_ALLOCATION) {
-      uint64_t address = 0;
-      std::memcpy(&address, kernarg + field.offset, sizeof(address));
-      pending.push_back(address);
-    } else if (field.contains_pointers != 0) {
-      for (size_t offset = 0; offset + sizeof(uint64_t) <= field.size; offset += alignof(uint64_t)) {
-        uint64_t address = 0;
-        std::memcpy(&address, kernarg + field.offset + offset, sizeof(address));
-        pending.push_back(address);
-      }
-    }
-  }
-  const size_t root_count = pending.size();
-  registerMainExecutablePages(runtime, pages);
-  registerWritableAnonymousPages(runtime, pages);
-  std::unordered_set<uint64_t> scanned_pages;
-  for (size_t current = 0; current < pending.size() && pages.size() < 64; ++current) {
-    const auto address = pending[current];
-    auto found = std::find_if(pages.begin(), pages.end(), [address](const auto &allocation) {
-      const auto base = reinterpret_cast<uint64_t>(allocation->base);
-      return address >= base && address - base < allocation->size;
-    });
-    AllocationRef page =
-        found == pages.end()
-            ? registerPageableAddress(runtime, address, current < root_count ? size_t(64) * 1024 * 1024 : size_t(1) * 1024 * 1024,
-                                      current >= root_count)
-            : *found;
-    if (!page) continue;
-    if (found == pages.end()) pages.push_back(page);
-    const uint64_t page_base = address & ~uint64_t(AllocationGranule - 1);
-    if (!scanned_pages.insert(page_base).second) continue;
-    const uint64_t base = reinterpret_cast<uint64_t>(page->base);
-    const uint64_t start = std::max(base, page_base);
-    const uint64_t end = std::min(base + page->size, page_base + AllocationGranule);
-    const auto *bytes = reinterpret_cast<const uint8_t *>(start);
-    for (size_t offset = 0; offset + sizeof(uint64_t) <= end - start; offset += sizeof(uint64_t)) {
-      uint64_t nested = 0;
-      std::memcpy(&nested, bytes + offset, sizeof(nested));
-      pending.push_back(nested);
-    }
-  }
 }
 
 gemstone_hsa_packet_result consume(uint64_t queue_id, uint64_t packet_id, const void *packet, size_t packet_size, void *opaque) {
@@ -899,29 +597,21 @@ gemstone_hsa_packet_result consume(uint64_t queue_id, uint64_t packet_id, const 
   std::vector<uint8_t> stable_packet(packet_size);
   std::memcpy(stable_packet.data(), packet, packet_size);
   const void *stable = stable_packet.data();
-  std::vector<AllocationRef> pageable;
-  registerDispatchHostPointers(runtime, stable, packet_size, pageable);
-  if (uploadDispatchAllocations(runtime, stable, packet_size) != 0) {
-    unregisterPageableAddresses(runtime, pageable);
-    failPacket(runtime, stable, packet_size, -3);
-    return GEMSTONE_HSA_PACKET_ACCEPTED;
-  }
+  // Device allocations remain remote-authoritative. Explicit copy/fill APIs
+  // publish host changes; a dispatch must not re-upload stale shadow bytes over
+  // another queue's in-flight device writes. CPU pools use exact host demand.
   DeferredSignalCompletion completion{&runtime};
   gemstone_hsa_packet_result result;
   {
     SignalCompletionScope scope(completion);
     result = gemstone_hsa_aql_runtime_consume(queue_id, packet_id, stable, packet_size, runtime.aql);
   }
-  // Publish completion only after every pageable write is visible and every
-  // temporary mapping is gone. The caller can reuse host addresses as soon as
-  // it observes the signal; the queue worker must no longer refer to them.
+  // Host-demand writes and allocation copy-back must precede the completion signal.
   if (result == GEMSTONE_HSA_PACKET_ACCEPTED && mirrorBack(runtime) != 0) {
-    unregisterPageableAddresses(runtime, pageable);
     if (completion.handle != 0) publicSignalFail(&runtime, completion.handle, -3);
     else failPacket(runtime, stable, packet_size, -3);
     return GEMSTONE_HSA_PACKET_FATAL;
   }
-  unregisterPageableAddresses(runtime, pageable);
   if (completion.handle != 0) {
     const int published = completion.failed || result != GEMSTONE_HSA_PACKET_ACCEPTED
                               ? publicSignalFail(&runtime, completion.handle, completion.failed ? completion.error : -3)
@@ -1028,10 +718,6 @@ bool awaitQueuedDispatches(RuntimeState &runtime) {
 
 hsa_status_t allocate(RuntimeState &runtime, uint64_t pool, size_t requested, void **result, bool owned) {
   if (!result || requested == 0) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-  // The host allocator may reuse an address inside a temporary pageable
-  // mirror from the preceding dispatch. Let that dispatch release its mirror
-  // before registering the new HSA allocation at the same address.
-  if (std::getenv("GEMSTONE_HSA_SYSTEM_PAGING") && !awaitQueuedDispatches(runtime)) return HSA_STATUS_ERROR;
   if (requested > std::numeric_limits<size_t>::max() - (AllocationGranule - 1U)) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   const size_t rounded = (requested + AllocationGranule - 1U) & ~(size_t(AllocationGranule) - 1U);
   // ROCr allocations are page-granular and several vendor kernels use the
@@ -1054,7 +740,7 @@ hsa_status_t allocate(RuntimeState &runtime, uint64_t pool, size_t requested, vo
     std::free(memory);
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
-  if (!registerAddress(*runtime.client, id, reinterpret_cast<uint64_t>(memory))
+  if (!registerAddress(*runtime.client, id, reinterpret_cast<uint64_t>(memory), pool == CpuPool)
       || gemstone_hsa_aql_runtime_register_allocation(runtime.aql, reinterpret_cast<uint64_t>(memory), size, id) != 0) {
     if (gemstone::hsa::traceEnabled("memory"))
       std::fprintf(stderr, "Gemstone HSA allocation alias failed id=%lu address=%p size=%zu error=%s\n", id, memory, size,
@@ -1558,34 +1244,36 @@ extern "C" hsa_status_t hsa_memory_copy(void *dst, const void *src, size_t size)
   if (const auto status = requireInitialized(runtime); status != HSA_STATUS_SUCCESS) return status;
   if ((!dst || !src) && size != 0) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   if (size == 0) return HSA_STATUS_SUCCESS;
-  AllocationRef destination;
-  AllocationRef source_allocation;
-  size_t source_offset = 0;
+  const gemstone::MemoryRange input{reinterpret_cast<uintptr_t>(src), size}, output{reinterpret_cast<uintptr_t>(dst), size};
+  if (!input.valid() || !output.valid()) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  std::vector<AllocationRef> sources, destinations;
   {
     std::lock_guard<std::mutex> guard(runtime.lock);
-    destination = findAllocation(runtime, dst, size);
-    source_allocation = findAllocation(runtime, src, size);
-    if (destination && destination->pageable) destination.reset();
-    if (source_allocation && source_allocation->pageable) source_allocation.reset();
-    if (!source_allocation && !destination) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
-    if (source_allocation) source_offset = reinterpret_cast<uintptr_t>(src) - reinterpret_cast<uintptr_t>(source_allocation->base);
+    if (!findAllocation(runtime, src, size) && !findAllocation(runtime, dst, size) && !runtime.registrations.find(input.base, size)
+        && !runtime.registrations.find(output.base, size))
+      return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+    for (const auto &[base, allocation] : runtime.allocations) {
+      const gemstone::MemoryRange backing{reinterpret_cast<uintptr_t>(base), allocation->size};
+      if (backing.overlaps(input) && allocation->pool == GpuPool) sources.push_back(allocation);
+      if (backing.overlaps(output)) destinations.push_back(allocation);
+    }
   }
-  // GPU-pool allocations are remote-authoritative after a dispatch.  Pull the
-  // source range back before exposing it through the ordinary host pointer;
-  // otherwise DtoH and DtoD copies observe stale malloc backing storage.
-  // Registered/pinned CPU storage is host-authoritative between commands. Downloading it
-  // here would erase the application's writes before an ordinary HtoD copy can consume them.
-  if (source_allocation && source_allocation->pool == GpuPool && download(runtime, source_allocation, source_offset, size) != 0)
-    return HSA_STATUS_ERROR;
+  const auto transfer = [&](const AllocationRef &allocation, gemstone::MemoryRange range, bool read) {
+    const auto base = reinterpret_cast<uintptr_t>(allocation->base);
+    const auto begin = std::max(base, range.base), end = std::min(base + allocation->size, range.end());
+    return read ? download(runtime, allocation, begin - base, end - begin) : upload(runtime, allocation, begin - base, end - begin);
+  };
+  // Only device-owned storage is remote-authoritative between commands.
+  for (const auto &allocation : sources)
+    if (transfer(allocation, input, true) != 0) return HSA_STATUS_ERROR;
   std::memmove(dst, src, size);
-  if (destination) {
-    if (upload(runtime, destination, reinterpret_cast<uintptr_t>(dst) - reinterpret_cast<uintptr_t>(destination->base), size) != 0)
-      return HSA_STATUS_ERROR;
-  }
+  for (const auto &allocation : destinations)
+    if (transfer(allocation, output, false) != 0) return HSA_STATUS_ERROR;
   return HSA_STATUS_SUCCESS;
 }
 
-extern "C" hsa_status_t hsa_memory_register(void *ptr, size_t size) {
+namespace {
+hsa_status_t registerHostSegment(void *ptr, size_t size) {
   auto &runtime = state();
   if (const auto status = requireInitialized(runtime); status != HSA_STATUS_SUCCESS) return status;
   if (!ptr || size == 0) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
@@ -1595,7 +1283,7 @@ extern "C" hsa_status_t hsa_memory_register(void *ptr, size_t size) {
   }
   uint64_t id = 0;
   if (!registerAllocation(*runtime.client, size, id)) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
-  if (!registerAddress(*runtime.client, id, reinterpret_cast<uint64_t>(ptr))
+  if (!registerAddress(*runtime.client, id, reinterpret_cast<uint64_t>(ptr), true)
       || gemstone_hsa_aql_runtime_register_allocation(runtime.aql, reinterpret_cast<uint64_t>(ptr), size, id) != 0) {
     releaseAllocation(*runtime.client, id);
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
@@ -1613,16 +1301,64 @@ extern "C" hsa_status_t hsa_memory_register(void *ptr, size_t size) {
   }
 }
 
+hsa_status_t registerHostView(RuntimeState &runtime, void *ptr, size_t size, bool allowOverlap) {
+  const gemstone::MemoryRange range{reinterpret_cast<uintptr_t>(ptr), size};
+  if (!range.valid()) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  std::lock_guard<std::mutex> transaction(runtime.registration_lock);
+  std::vector<gemstone::MemoryRange> covered;
+  {
+    std::lock_guard<std::mutex> guard(runtime.lock);
+    if (!allowOverlap && runtime.registrations.overlaps(range)) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+    for (const auto &[_, allocation] : runtime.allocations)
+      covered.push_back({reinterpret_cast<uintptr_t>(allocation->base), allocation->size});
+  }
+  std::vector<void *> created;
+  for (const auto missing : gemstone::missingMemoryRanges(range, covered)) {
+    auto *base = reinterpret_cast<void *>(missing.base);
+    const auto status = registerHostSegment(base, missing.size);
+    if (status != HSA_STATUS_SUCCESS) {
+      for (auto *rollback : created)
+        (void)freeAllocation(runtime, rollback, false);
+      return status;
+    }
+    created.push_back(base);
+  }
+  {
+    std::lock_guard<std::mutex> guard(runtime.lock);
+    runtime.registrations.add(range, gemstone::MemoryOwnership::Borrowed, 0, true);
+  }
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t releaseHostView(RuntimeState &runtime, void *ptr, size_t size) {
+  std::lock_guard<std::mutex> transaction(runtime.registration_lock);
+  std::vector<void *> unused;
+  {
+    std::lock_guard<std::mutex> guard(runtime.lock);
+    const auto view = runtime.registrations.exact(reinterpret_cast<uintptr_t>(ptr), size);
+    if (!view || (size && view->range.size != size)) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+    runtime.registrations.remove(reinterpret_cast<uintptr_t>(ptr), gemstone::MemoryOwnership::Borrowed, size);
+    for (const auto &[base, allocation] : runtime.allocations)
+      if (!allocation->owned && !runtime.registrations.overlaps({reinterpret_cast<uintptr_t>(base), allocation->size}))
+        unused.push_back(base);
+  }
+  for (auto *base : unused) {
+    const auto status = freeAllocation(runtime, base, false);
+    if (status != HSA_STATUS_SUCCESS) return status;
+  }
+  return HSA_STATUS_SUCCESS;
+}
+} // namespace
+
+extern "C" hsa_status_t hsa_memory_register(void *ptr, size_t size) {
+  auto &runtime = state();
+  if (const auto status = requireInitialized(runtime); status != HSA_STATUS_SUCCESS) return status;
+  return registerHostView(runtime, ptr, size, false);
+}
 extern "C" hsa_status_t hsa_memory_deregister(void *ptr, size_t size) {
   auto &runtime = state();
   if (const auto status = requireInitialized(runtime); status != HSA_STATUS_SUCCESS) return status;
-  {
-    std::lock_guard<std::mutex> guard(runtime.lock);
-    const auto found = runtime.allocations.find(ptr);
-    if (found == runtime.allocations.end() || found->second->owned || found->second->size < size)
-      return HSA_STATUS_ERROR_INVALID_ALLOCATION;
-  }
-  return freeAllocation(runtime, ptr, false);
+  return releaseHostView(runtime, ptr, size);
 }
 
 extern "C" hsa_status_t hsa_memory_assign_agent(void *ptr, hsa_agent_t agent, hsa_access_permission_t access) {
@@ -2715,17 +2451,22 @@ extern "C" hsa_status_t hsa_amd_memory_fill(void *ptr, uint32_t value, size_t co
   if (!ptr || (reinterpret_cast<uintptr_t>(ptr) & 3U) != 0 || count > std::numeric_limits<size_t>::max() / 4U)
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   const size_t bytes = count * 4U;
-  AllocationRef allocation;
+  const gemstone::MemoryRange range{reinterpret_cast<uintptr_t>(ptr), bytes};
+  if (bytes != 0 && !range.valid()) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  std::vector<AllocationRef> fragments;
   {
     std::lock_guard<std::mutex> guard(runtime.lock);
-    allocation = findAllocation(runtime, ptr, bytes);
+    if (!findAllocation(runtime, ptr, bytes) && !runtime.registrations.find(range.base, bytes)) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+    for (const auto &[base, allocation] : runtime.allocations)
+      if (gemstone::MemoryRange{reinterpret_cast<uintptr_t>(base), allocation->size}.overlaps(range)) fragments.push_back(allocation);
   }
-  if (!allocation) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
-  auto *destination = static_cast<uint32_t *>(ptr);
-  std::fill_n(destination, count, value);
-  return upload(runtime, allocation, reinterpret_cast<uintptr_t>(ptr) - reinterpret_cast<uintptr_t>(allocation->base), bytes) == 0
-             ? HSA_STATUS_SUCCESS
-             : HSA_STATUS_ERROR;
+  std::fill_n(static_cast<uint32_t *>(ptr), count, value);
+  for (const auto &allocation : fragments) {
+    const auto base = reinterpret_cast<uintptr_t>(allocation->base);
+    const auto begin = std::max(base, range.base), end = std::min(base + allocation->size, range.end());
+    if (upload(runtime, allocation, begin - base, end - begin) != 0) return HSA_STATUS_ERROR;
+  }
+  return HSA_STATUS_SUCCESS;
 }
 
 extern "C" hsa_status_t hsa_amd_memory_async_copy(void *dst, hsa_agent_t dst_agent, const void *src, hsa_agent_t src_agent, size_t size,
@@ -2739,13 +2480,14 @@ extern "C" hsa_status_t hsa_amd_memory_async_copy(void *dst, hsa_agent_t dst_age
     waitSignal(dependencies[index], HSA_SIGNAL_CONDITION_LT, 1, UINT64_MAX);
   AllocationRef destination;
   AllocationRef source_allocation;
+  bool source_registered = false;
   {
     std::lock_guard<std::mutex> guard(runtime.lock);
     source_allocation = findAllocation(runtime, src, size);
     destination = findAllocation(runtime, dst, size);
-    if (source_allocation && source_allocation->pageable) source_allocation.reset();
-    if (destination && destination->pageable) destination.reset();
-    if (size != 0 && !source_allocation && !destination) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+    source_registered = source_allocation || runtime.registrations.find(reinterpret_cast<uintptr_t>(src), size);
+    if (size != 0 && !source_registered && !destination && !runtime.registrations.find(reinterpret_cast<uintptr_t>(dst), size))
+      return HSA_STATUS_ERROR_INVALID_ALLOCATION;
     if (!findSignal(runtime, completion)) return HSA_STATUS_ERROR_INVALID_SIGNAL;
   }
   if (gemstone::hsa::traceEnabled("memory"))
@@ -2755,11 +2497,9 @@ extern "C" hsa_status_t hsa_amd_memory_async_copy(void *dst, hsa_agent_t dst_age
   // A device-to-host copy may be submitted while an earlier dispatch is still
   // executing. The queue's read index advances only after its writes have
   // been mirrored into native storage.
-  if (size != 0 && validGpu(src_agent) && source_allocation && !awaitQueuedDispatches(runtime)) return HSA_STATUS_ERROR;
-  if (size != 0) std::memmove(dst, src, size);
-  if (destination
-      && upload(runtime, destination, reinterpret_cast<uintptr_t>(dst) - reinterpret_cast<uintptr_t>(destination->base), size) != 0)
-    return HSA_STATUS_ERROR;
+  if (size != 0 && validGpu(src_agent) && source_registered && !awaitQueuedDispatches(runtime)) return HSA_STATUS_ERROR;
+  const auto copied = hsa_memory_copy(dst, src, size);
+  if (copied != HSA_STATUS_SUCCESS) return copied;
   return completeSignal(completion) == 0 ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_SIGNAL;
 }
 
@@ -2809,28 +2549,7 @@ extern "C" hsa_status_t hsa_amd_memory_lock(void *host_ptr, size_t size, hsa_age
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   for (int index = 0; index < num_agent; ++index)
     if (!validAgent(agents[index])) return HSA_STATUS_ERROR_INVALID_AGENT;
-  {
-    std::lock_guard<std::mutex> guard(runtime.lock);
-    if (const auto allocation = findAllocation(runtime, host_ptr, size)) {
-      if (!allocation->pageable) {
-        *agent_ptr = allocation->base;
-        return HSA_STATUS_SUCCESS;
-      }
-    }
-    // System paging already exposes ordinary host addresses to dispatches.
-    // Registering a lock separately can overlap a temporary page mirror,
-    // especially when the requested range crosses its split boundary.
-    if (std::getenv("GEMSTONE_HSA_SYSTEM_PAGING")) {
-      if (const auto existing = findAllocation(runtime, host_ptr, 1); existing && !existing->pageable)
-        return HSA_STATUS_ERROR_INVALID_ALLOCATION;
-      const auto lock = runtime.borrowed_pageable_locks.try_emplace(host_ptr, RuntimeState::BorrowedPageableLock{size, 0}).first;
-      lock->second.size = std::max(lock->second.size, size);
-      ++lock->second.references;
-      *agent_ptr = host_ptr;
-      return HSA_STATUS_SUCCESS;
-    }
-  }
-  const auto status = hsa_memory_register(host_ptr, size);
+  const auto status = registerHostView(runtime, host_ptr, size, true);
   if (status != HSA_STATUS_SUCCESS) return status;
   *agent_ptr = host_ptr;
   return HSA_STATUS_SUCCESS;
@@ -2846,15 +2565,7 @@ extern "C" hsa_status_t hsa_amd_memory_lock_to_pool(void *host_ptr, size_t size,
 extern "C" hsa_status_t hsa_amd_memory_unlock(void *host_ptr) {
   auto &runtime = state();
   if (const auto status = requireInitialized(runtime); status != HSA_STATUS_SUCCESS) return status;
-  {
-    std::lock_guard<std::mutex> guard(runtime.lock);
-    const auto lock = runtime.borrowed_pageable_locks.find(host_ptr);
-    if (lock != runtime.borrowed_pageable_locks.end()) {
-      if (--lock->second.references == 0) runtime.borrowed_pageable_locks.erase(lock);
-      return HSA_STATUS_SUCCESS;
-    }
-  }
-  return freeAllocation(runtime, host_ptr, false);
+  return releaseHostView(runtime, host_ptr, 0);
 }
 
 extern "C" hsa_status_t hsa_amd_pointer_info(const void *ptr, hsa_amd_pointer_info_t *info, void *(*alloc)(size_t),
@@ -2865,9 +2576,12 @@ extern "C" hsa_status_t hsa_amd_pointer_info(const void *ptr, hsa_amd_pointer_in
   const uint32_t requested_size = info->size;
   if (requested_size == 0) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   AllocationRef allocation;
+  std::optional<gemstone::MemoryRegistrations::View> view;
   {
     std::lock_guard<std::mutex> guard(runtime.lock);
     allocation = findAllocation(runtime, ptr);
+    if (const auto found = runtime.registrations.find(reinterpret_cast<uintptr_t>(ptr))) view = *found;
+    if (allocation && !allocation->owned && !view) allocation.reset();
   }
   const uint32_t supported_size = static_cast<uint32_t>(sizeof(hsa_amd_pointer_info_t));
   std::memset(info, 0, std::min<uint32_t>(requested_size, supported_size));
@@ -2877,9 +2591,9 @@ extern "C" hsa_status_t hsa_amd_pointer_info(const void *ptr, hsa_amd_pointer_in
     return HSA_STATUS_SUCCESS;
   }
   info->type = allocation->owned ? HSA_EXT_POINTER_TYPE_HSA : HSA_EXT_POINTER_TYPE_LOCKED;
-  info->agentBaseAddress = allocation->base;
-  info->hostBaseAddress = allocation->base;
-  info->sizeInBytes = allocation->size;
+  info->agentBaseAddress = view ? reinterpret_cast<void *>(view->range.base) : allocation->base;
+  info->hostBaseAddress = info->agentBaseAddress;
+  info->sizeInBytes = view ? view->range.size : allocation->size;
   info->agentOwner = hsa_agent_t{allocation->pool == GpuPool ? GpuAgent : CpuAgent};
   info->global_flags = HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_FINE_GRAINED;
   info->registered = true;

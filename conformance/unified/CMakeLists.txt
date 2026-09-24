@@ -12,10 +12,14 @@ if(NOT CONFORMANCE_BUILD_UNIFIED)
   return()
 endif()
 
+include("${CMAKE_CURRENT_LIST_DIR}/../cmake/ToolchainImages.cmake")
+
 add_executable(unified src/main.cpp)
 target_include_directories(unified PRIVATE src)
 target_link_libraries(unified PRIVATE Catch2::Catch2 conformance_device magic_enum::magic_enum fmt::fmt-header-only)
-target_compile_definitions(unified PRIVATE CONFORMANCE_BACKEND_NAME="${CONFORMANCE_BACKEND}")
+target_compile_definitions(unified PRIVATE
+  CONFORMANCE_BACKEND_NAME="${CONFORMANCE_BACKEND}")
+target_link_libraries(unified PRIVATE ${CMAKE_DL_LIBS})
 set_target_properties(unified PROPERTIES
   CXX_STANDARD 20
   CXX_STANDARD_REQUIRED YES
@@ -29,26 +33,26 @@ elseif(UNIX)
 endif()
 
 if(CONFORMANCE_BACKEND STREQUAL "opencl")
+  target_compile_definitions(unified PRIVATE UNIFIED_API_OPENCL=1)
   find_package(OpenCL REQUIRED)
-  target_sources(unified PRIVATE src/opencl/runtime.cpp)
+  target_sources(unified PRIVATE src/opencl/runtime.cpp src/opencl/memory.cpp)
   target_link_libraries(unified PRIVATE OpenCL::OpenCL)
 
 elseif(CONFORMANCE_BACKEND STREQUAL "hsa")
+  target_compile_definitions(unified PRIVATE UNIFIED_API_HSA=1)
   list(LENGTH CMAKE_HIP_ARCHITECTURES hsa_architecture_count)
   if(NOT hsa_architecture_count EQUAL 1)
     message(FATAL_ERROR "The HSA code-object backend requires exactly one CMAKE_HIP_ARCHITECTURES value")
   endif()
   find_path(HSA_INCLUDE_DIR hsa/hsa.h PATHS /opt/rocm/include REQUIRED)
   find_library(HSA_LIBRARY hsa-runtime64 PATHS /opt/rocm/lib REQUIRED)
-  find_program(AMDGPU_CLANG clang PATHS /opt/rocm/llvm/bin NO_DEFAULT_PATH REQUIRED)
-  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/dispatch.hsaco
-    COMMAND ${AMDGPU_CLANG} -x cl -target amdgcn-amd-amdhsa
-      -mcpu=${CMAKE_HIP_ARCHITECTURES} -cl-std=CL2.0 -mcode-object-version=4
-      -ffile-prefix-map=${CMAKE_SOURCE_DIR}=.
-      -ffile-prefix-map=${CMAKE_BINARY_DIR}=.build
-      -Xclang -finclude-default-header ${CMAKE_CURRENT_SOURCE_DIR}/src/vector_copy.cl
-      -o ${CMAKE_CURRENT_BINARY_DIR}/dispatch.hsaco
-    DEPENDS src/vector_copy.cl VERBATIM)
+  conformance_opencl_commands(hsa "${CMAKE_HIP_ARCHITECTURES}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/hsa/vector_copy.cl" "${CMAKE_CURRENT_BINARY_DIR}/dispatch.hsaco"
+    dispatch_compile unused_translate
+    "-ffile-prefix-map=${CMAKE_SOURCE_DIR}=." "-ffile-prefix-map=${CMAKE_BINARY_DIR}=.build")
+  add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/dispatch.hsaco"
+    COMMAND ${dispatch_compile}
+    DEPENDS src/hsa/vector_copy.cl "${CMAKE_CURRENT_LIST_DIR}/../cmake/ToolchainImages.cmake" VERBATIM)
   add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/dispatch_image.hpp
     COMMAND ${CMAKE_COMMAND}
       -DINPUT=${CMAKE_CURRENT_BINARY_DIR}/dispatch.hsaco
@@ -56,7 +60,7 @@ elseif(CONFORMANCE_BACKEND STREQUAL "hsa")
       -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedBinary.cmake
     DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/dispatch.hsaco
       ${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedBinary.cmake VERBATIM)
-  target_sources(unified PRIVATE src/hsa/runtime.cpp
+  target_sources(unified PRIVATE src/hsa/runtime.cpp src/hsa/memory.cpp
     ${CMAKE_CURRENT_BINARY_DIR}/dispatch_image.hpp)
   target_include_directories(unified PRIVATE ${HSA_INCLUDE_DIR} ${CMAKE_CURRENT_BINARY_DIR})
   target_compile_definitions(unified PRIVATE
@@ -68,6 +72,7 @@ elseif(CONFORMANCE_BACKEND STREQUAL "cuda")
   find_package(CUDAToolkit REQUIRED)
   target_compile_definitions(unified PRIVATE UNIFIED_API_CUDA=1)
   target_sources(unified PRIVATE
+    src/cuda/memory.cpp
     src/cuda/algorithms_i8.cu
     src/cuda/algorithms_i32.cu
     src/cuda/algorithms_i64.cu
@@ -113,6 +118,7 @@ elseif(CONFORMANCE_BACKEND STREQUAL "hip")
     endforeach()
   endif()
   target_sources(unified PRIVATE
+    src/hip/memory.cpp
     src/hip/algorithms_i8.hip
     src/hip/algorithms_i32.hip
     src/hip/algorithms_i64.hip
@@ -161,6 +167,7 @@ elseif(CONFORMANCE_BACKEND STREQUAL "sycl")
     message(WARNING "The SYCL target normally requires Intel oneAPI icpx")
   endif()
   target_sources(unified PRIVATE
+    src/sycl/memory.cpp
     src/sycl/algorithms_i8.cpp
     src/sycl/algorithms_i32.cpp
     src/sycl/algorithms_i64.cpp
@@ -183,8 +190,76 @@ elseif(CONFORMANCE_BACKEND STREQUAL "sycl")
   target_compile_options(unified PRIVATE -fsycl -fsycl-device-code-split=per_kernel)
   target_link_options(unified PRIVATE -fsycl -fsycl-device-code-split=per_kernel)
 
+elseif(CONFORMANCE_BACKEND STREQUAL "levelzero")
+  target_compile_definitions(unified PRIVATE UNIFIED_API_LEVELZERO=1)
+  target_sources(unified PRIVATE src/levelzero/memory.cpp)
+  target_link_libraries(unified PRIVATE conformance_levelzero)
+
 else()
   message(FATAL_ERROR "Unsupported unified backend: ${CONFORMANCE_BACKEND}")
+endif()
+
+# Embed memory kernels just like the HSA dispatch image above. SYCL embeds its
+# lambda kernels through the normal compiler pipeline.
+if(NOT CONFORMANCE_BACKEND STREQUAL "sycl")
+  set(memory_source "${CMAKE_CURRENT_SOURCE_DIR}/src")
+  set(memory_output "${CMAKE_CURRENT_BINARY_DIR}/memory")
+  file(MAKE_DIRECTORY "${memory_output}")
+  if(CONFORMANCE_BACKEND STREQUAL "cuda")
+    set(memory_image "${memory_source}/cuda/kernel.ptx")
+  else()
+    set(memory_options -O1)
+    if(CONFORMANCE_BACKEND MATCHES "^(hip|hsa)$")
+      set(memory_backend hsa)
+      set(memory_image "${memory_output}/kernel.hsaco")
+      # Retain one atomic operation per work-item, matching the native fixtures.
+      list(APPEND memory_options -nogpulib -mllvm -amdgpu-atomic-optimizer-strategy=None)
+      if(CONFORMANCE_BACKEND STREQUAL "hip")
+        target_include_directories(unified PRIVATE "${CONFORMANCE_HIP_INCLUDE}")
+      endif()
+    else()
+      list(APPEND memory_options -DUNIFIED_MEMORY_ATOMIC32=1)
+      set(memory_backend opencl)
+      set(memory_image "${memory_output}/kernel.spv")
+    endif()
+    conformance_opencl_commands("${memory_backend}" "${CMAKE_HIP_ARCHITECTURES}"
+      "${memory_source}/memory_kernel.cl" "${memory_image}" memory_compile memory_translate ${memory_options})
+    set(memory_commands COMMAND ${memory_compile})
+    set(memory_byproducts)
+    if(memory_translate)
+      list(APPEND memory_commands COMMAND ${memory_translate})
+      list(APPEND memory_byproducts "${memory_image}.bc")
+    endif()
+    add_custom_command(OUTPUT "${memory_image}"
+      ${memory_commands}
+      BYPRODUCTS ${memory_byproducts}
+      DEPENDS "${memory_source}/memory_kernel.cl" "${CMAKE_CURRENT_LIST_DIR}/../cmake/ToolchainImages.cmake" VERBATIM)
+  endif()
+  set(memory_images memory)
+  if(CONFORMANCE_BACKEND STREQUAL "cuda")
+    foreach(fixture IN ITEMS atomic fence contended)
+      list(APPEND memory_images "${fixture}")
+      set(${fixture}_image "${memory_source}/cuda/${fixture}.ptx")
+    endforeach()
+  elseif(CONFORMANCE_BACKEND MATCHES "^(opencl|levelzero)$")
+    set(memory64_image "${memory_output}/kernel64.spv")
+    conformance_opencl_commands(opencl "" "${memory_source}/memory_kernel.cl" "${memory64_image}"
+      memory64_compile memory64_translate -O1)
+    add_custom_command(OUTPUT "${memory64_image}"
+      COMMAND ${memory64_compile} COMMAND ${memory64_translate}
+      BYPRODUCTS "${memory64_image}.bc"
+      DEPENDS "${memory_source}/memory_kernel.cl" "${CMAKE_CURRENT_LIST_DIR}/../cmake/ToolchainImages.cmake" VERBATIM)
+    list(APPEND memory_images memory64)
+  endif()
+  foreach(fixture IN LISTS memory_images)
+    add_custom_command(OUTPUT "${memory_output}/${fixture}_image.hpp"
+      COMMAND "${CMAKE_COMMAND}" "-DINPUT=${${fixture}_image}"
+        "-DOUTPUT=${memory_output}/${fixture}_image.hpp" "-DSYMBOL=${fixture}_image"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedBinary.cmake"
+      DEPENDS "${${fixture}_image}" cmake/EmbedBinary.cmake VERBATIM)
+    target_sources(unified PRIVATE "${memory_output}/${fixture}_image.hpp")
+  endforeach()
+  target_include_directories(unified PRIVATE "${memory_output}")
 endif()
 
 conformance_register_test_program(unified 120)

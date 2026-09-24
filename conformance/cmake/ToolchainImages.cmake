@@ -46,9 +46,9 @@ function(conformance_toolchain backend architecture image_output dependency_outp
   string(SHA256 toolchain_namespace "${CONFORMANCE_SOURCE_DIRECTORY}")
   string(SUBSTRING "${toolchain_namespace}" 0 12 toolchain_namespace)
   if(backend STREQUAL "cuda")
-    set(tag "localhost/gemstone-conformance-${toolchain_namespace}-cuda:${cuda_package}")
+    set(tag "localhost/conformance-${toolchain_namespace}-cuda:${cuda_package}")
   else()
-    set(tag "localhost/gemstone-conformance-${toolchain_namespace}-${backend}:latest")
+    set(tag "localhost/conformance-${toolchain_namespace}-${backend}:latest")
   endif()
 
   set(stamp_key "${key}")
@@ -78,4 +78,30 @@ function(conformance_toolchain backend architecture image_output dependency_outp
   set(${image_output} "${tag}" PARENT_SCOPE)
   set(${dependency_output} "${stamp}" PARENT_SCOPE)
   set(${support_output} "${support}" PARENT_SCOPE)
+endfunction()
+
+# OpenCL C compiler commands in the pinned HSA/OpenCL images. Callers own the
+# build graph and may execute these directly or through conformance_container_command.
+# Additional compiler options follow the two output variable names. SPIR-V
+# translation uses <output>.bc as an intermediate; declare it as a byproduct.
+function(conformance_opencl_commands backend architecture source output compile_output translate_output)
+  if(backend STREQUAL "hsa")
+    if(NOT architecture)
+      message(FATAL_ERROR "An AMDGPU architecture is required for OpenCL C compilation")
+    endif()
+    set(compile /opt/rocm/llvm/bin/clang -x cl -target amdgcn-amd-amdhsa
+      "-mcpu=${architecture}" -cl-std=CL2.0 -mcode-object-version=4
+      -ffile-prefix-map=/source=. -Xclang -finclude-default-header
+      ${ARGN} "${source}" -o "${output}")
+    set(translate)
+  elseif(backend STREQUAL "opencl")
+    set(compiler /opt/intel/oneapi/compiler/latest/bin/compiler)
+    set(compile "${compiler}/clang" -cc1 -triple spir64 -cl-std=CL2.0
+      -finclude-default-header -emit-llvm-bc ${ARGN} "${source}" -o "${output}.bc")
+    set(translate "${compiler}/llvm-spirv" "${output}.bc" -o "${output}")
+  else()
+    message(FATAL_ERROR "Unsupported OpenCL C toolchain: ${backend}")
+  endif()
+  set(${compile_output} "${compile}" PARENT_SCOPE)
+  set(${translate_output} "${translate}" PARENT_SCOPE)
 endfunction()

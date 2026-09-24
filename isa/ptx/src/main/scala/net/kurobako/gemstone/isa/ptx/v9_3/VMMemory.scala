@@ -13,6 +13,14 @@ import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 
 private[v9_3] final class VMMemory(memory: Memory, addresses: AddressSpace) extends AddressMemory {
+  override def fence(): Either[MemoryError, Unit] =
+    memory.fenceHostMemory().left.map(error(GuestAddress(0), 0, _))
+  override def validateRange(address: GuestAddress, size: Int :| Positive0): Either[MemoryError, Unit] =
+    addresses.locate(address, size).map(_ => ()).left.map(error(address, size, _))
+
+  override def prepareReads(ranges: Vec[(GuestAddress, Int :| Positive0)]): Either[MemoryError, Unit] =
+    addresses.prepareReads(ranges).left.map(error(GuestAddress(0), 0, _))
+
   override def readInt8(address: GuestAddress): Either[MemoryError, Byte] =
     readValue(address, MemoryValueByteWidth(1)).map(_.toByte)
 

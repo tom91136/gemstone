@@ -38,6 +38,13 @@ gemstone_require_abi_implementations(
   PLATFORM hip)
 
 if(BUILD_TESTING)
+  gemstone_memory_client(hip gemstone_hip_runtime)
+  add_executable(gemstone_hip_fatbinary_exit_test test/fatbinary_exit.cpp)
+  target_include_directories(gemstone_hip_fatbinary_exit_test PRIVATE ${HIP_INCLUDE_DIR})
+  target_compile_definitions(gemstone_hip_fatbinary_exit_test PRIVATE __HIP_PLATFORM_AMD__=1)
+  target_link_libraries(gemstone_hip_fatbinary_exit_test PRIVATE gemstone_hip_runtime)
+  add_test(NAME hip/fatbinary-exit-lifetime COMMAND gemstone_hip_fatbinary_exit_test)
+  set_tests_properties(hip/fatbinary-exit-lifetime PROPERTIES TIMEOUT 10)
   add_executable(gemstone_hip_runtime_test test/hip_runtime_test.cpp)
   target_include_directories(gemstone_hip_runtime_test PRIVATE ${HIP_INCLUDE_DIR} include)
   target_compile_definitions(gemstone_hip_runtime_test PRIVATE __HIP_PLATFORM_AMD__=1)

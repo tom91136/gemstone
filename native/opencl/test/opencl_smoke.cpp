@@ -1,10 +1,12 @@
 #define CL_USE_DEPRECATED_OPENCL_1_1_APIS
 #include <algorithm>
 #include <array>
-#include <cstring>
+#include <chrono>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <future>
 #include <string>
 #include <vector>
 
@@ -209,8 +211,8 @@ TEST_CASE("OpenCL facade launch and memory smoke test", "[opencl]") {
   std::array<uint8_t, 4> hostSource{1, 2, 3, 4};
   std::array<uint8_t, 4> hostDestination{};
   cl_event hostCopyEvent = nullptr;
-  REQUIRE((clEnqueueSVMMemcpy(queue, CL_TRUE, hostDestination.data(), hostSource.data(), hostSource.size(), 0, nullptr,
-                              &hostCopyEvent) == CL_SUCCESS));
+  REQUIRE((clEnqueueSVMMemcpy(queue, CL_TRUE, hostDestination.data(), hostSource.data(), hostSource.size(), 0, nullptr, &hostCopyEvent)
+           == CL_SUCCESS));
   REQUIRE((hostDestination == hostSource));
   cl_command_type hostCopyType = 0;
   REQUIRE((clGetEventInfo(hostCopyEvent, CL_EVENT_COMMAND_TYPE, sizeof(hostCopyType), &hostCopyType, nullptr) == CL_SUCCESS));
@@ -220,8 +222,8 @@ TEST_CASE("OpenCL facade launch and memory smoke test", "[opencl]") {
   const void *migrationPointers[] = {svm + 8};
   const size_t migrationSizes[] = {16};
   cl_event migrationEvent = nullptr;
-  REQUIRE((clEnqueueSVMMigrateMem(queue, 1, migrationPointers, migrationSizes, CL_MIGRATE_MEM_OBJECT_HOST, 0, nullptr,
-                                  &migrationEvent) == CL_SUCCESS));
+  REQUIRE((clEnqueueSVMMigrateMem(queue, 1, migrationPointers, migrationSizes, CL_MIGRATE_MEM_OBJECT_HOST, 0, nullptr, &migrationEvent)
+           == CL_SUCCESS));
   cl_command_type migrationType = 0;
   REQUIRE((clGetEventInfo(migrationEvent, CL_EVENT_COMMAND_TYPE, sizeof(migrationType), &migrationType, nullptr) == CL_SUCCESS));
   REQUIRE((migrationType == CL_COMMAND_SVM_MIGRATE_MEM));
@@ -310,14 +312,19 @@ TEST_CASE("OpenCL facade launch and memory smoke test", "[opencl]") {
   REQUIRE((clReleaseProgram(program) == CL_SUCCESS));
   clSVMFree(context, memory);
 
-  const std::array<uint32_t, 26> specializationWords = {
-      0x07230203, 0x00010600, 0, 6, 0,
-      (4U << 16) | 71U, 3, 1, 101,
-      (4U << 16) | 71U, 5, 1, 102,
-      (4U << 16) | 21U, 2, 32, 1,
-      (2U << 16) | 20U, 4,
-      (4U << 16) | 50U, 2, 3, 7,
-      (3U << 16) | 49U, 4, 5};
+  const std::array<uint32_t, 26> specializationWords = {0x07230203, 0x00010600,
+                                                        0,          6,
+                                                        0,          (4U << 16) | 71U,
+                                                        3,          1,
+                                                        101,        (4U << 16) | 71U,
+                                                        5,          1,
+                                                        102,        (4U << 16) | 21U,
+                                                        2,          32,
+                                                        1,          (2U << 16) | 20U,
+                                                        4,          (4U << 16) | 50U,
+                                                        2,          3,
+                                                        7,          (3U << 16) | 49U,
+                                                        4,          5};
   cl_program specialized = clCreateProgramWithIL(context, specializationWords.data(), sizeof(specializationWords), &error);
   REQUIRE((specialized && error == CL_SUCCESS));
   cl_uint constantValue = 42;
@@ -380,4 +387,264 @@ TEST_CASE("OpenCL facade launch and memory smoke test", "[opencl]") {
   REQUIRE((clReleaseContext(context) == CL_SUCCESS));
   REQUIRE((server.launches() == 40));
   server.check();
+}
+
+TEST_CASE("OpenCL SVM allocation rejects contradictory and unsupported flags", "[opencl][unified-memory]") {
+  gemstone_test::RpcFixture fixture;
+  const auto port = std::to_string(fixture.port());
+  REQUIRE((setenv("GEMSTONE_RPC_PORT", port.c_str(), 1) == 0));
+  REQUIRE((setenv("GEMSTONE_RPC_CLIENT", "42", 1) == 0));
+  cl_platform_id platform = nullptr;
+  cl_device_id device = nullptr;
+  REQUIRE((clGetPlatformIDs(1, &platform, nullptr) == CL_SUCCESS));
+  REQUIRE((clGetDeviceIDs(platform, CL_DEVICE_TYPE_GPU, 1, &device, nullptr) == CL_SUCCESS));
+  cl_int error = CL_SUCCESS;
+  cl_context context = clCreateContext(nullptr, 1, &device, nullptr, nullptr, &error);
+  REQUIRE((context && error == CL_SUCCESS));
+  // The CTS "negative" SVM case only checks an oversized CL_MEM_USE_HOST_PTR buffer.
+  const cl_svm_mem_flags invalid[] = {CL_MEM_READ_WRITE | CL_MEM_READ_ONLY, CL_MEM_READ_ONLY | CL_MEM_WRITE_ONLY,
+                                      CL_MEM_READ_WRITE | CL_MEM_SVM_ATOMICS, // ATOMICS requires FINE_GRAIN_BUFFER.
+                                      CL_MEM_READ_WRITE | CL_MEM_USE_HOST_PTR, cl_svm_mem_flags{1} << 63};
+  for (const auto flags : invalid) {
+    CAPTURE(flags);
+    void *memory = clSVMAlloc(context, flags, 64, 0);
+    CHECK((memory == nullptr));
+    if (memory) clSVMFree(context, memory);
+  }
+  cl_device_svm_capabilities capabilities = 0;
+  REQUIRE((clGetDeviceInfo(device, CL_DEVICE_SVM_CAPABILITIES, sizeof(capabilities), &capabilities, nullptr) == CL_SUCCESS));
+  REQUIRE((capabilities & CL_DEVICE_SVM_ATOMICS));
+  void *memory = clSVMAlloc(context, CL_MEM_READ_WRITE | CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_SVM_ATOMICS, 64, 0);
+  REQUIRE((memory != nullptr));
+  clSVMFree(context, memory);
+  REQUIRE((clReleaseContext(context) == CL_SUCCESS));
+}
+
+TEST_CASE("Intel USM queries preserve allocation kind and interior identity", "[opencl][unified-memory]") {
+  gemstone_test::RpcFixture fixture;
+  const auto port = std::to_string(fixture.port());
+  REQUIRE((setenv("GEMSTONE_RPC_PORT", port.c_str(), 1) == 0));
+  REQUIRE((setenv("GEMSTONE_RPC_CLIENT", "42", 1) == 0));
+  cl_platform_id platform{};
+  cl_device_id device{};
+  REQUIRE((clGetPlatformIDs(1, &platform, nullptr) == CL_SUCCESS));
+  REQUIRE((clGetDeviceIDs(platform, CL_DEVICE_TYPE_GPU, 1, &device, nullptr) == CL_SUCCESS));
+  cl_int error{};
+  auto context = clCreateContext(nullptr, 1, &device, nullptr, nullptr, &error);
+  REQUIRE((context && error == CL_SUCCESS));
+  auto foreign = clCreateContext(nullptr, 1, &device, nullptr, nullptr, &error);
+  REQUIRE((foreign && error == CL_SUCCESS));
+  for (cl_unified_shared_memory_type_intel kind : {CL_MEM_TYPE_HOST_INTEL, CL_MEM_TYPE_DEVICE_INTEL, CL_MEM_TYPE_SHARED_INTEL}) {
+    CAPTURE(kind);
+    auto *base = kind == CL_MEM_TYPE_HOST_INTEL     ? clHostMemAllocINTEL(context, nullptr, 64, 0, &error)
+                 : kind == CL_MEM_TYPE_DEVICE_INTEL ? clDeviceMemAllocINTEL(context, device, nullptr, 64, 0, &error)
+                                                    : clSharedMemAllocINTEL(context, device, nullptr, 64, 0, &error);
+    REQUIRE((base && error == CL_SUCCESS));
+    for (size_t offset : {size_t{0}, size_t{13}, size_t{63}}) {
+      auto *pointer = static_cast<unsigned char *>(base) + offset;
+      cl_unified_shared_memory_type_intel actual{};
+      void *allocationBase{};
+      size_t size{};
+      REQUIRE((clGetMemAllocInfoINTEL(context, pointer, CL_MEM_ALLOC_TYPE_INTEL, sizeof(actual), &actual, nullptr) == CL_SUCCESS));
+      CHECK((actual == kind));
+      REQUIRE((clGetMemAllocInfoINTEL(context, pointer, CL_MEM_ALLOC_BASE_PTR_INTEL, sizeof(allocationBase), &allocationBase, nullptr)
+               == CL_SUCCESS));
+      REQUIRE((allocationBase == base));
+      REQUIRE((clGetMemAllocInfoINTEL(context, pointer, CL_MEM_ALLOC_SIZE_INTEL, sizeof(size), &size, nullptr) == CL_SUCCESS));
+      REQUIRE((size == 64));
+    }
+    cl_unified_shared_memory_type_intel unknown{};
+    REQUIRE((clGetMemAllocInfoINTEL(foreign, base, CL_MEM_ALLOC_TYPE_INTEL, sizeof(unknown), &unknown, nullptr) == CL_SUCCESS));
+    CHECK((unknown == CL_MEM_TYPE_UNKNOWN_INTEL));
+    auto *end = static_cast<unsigned char *>(base) + 64;
+    REQUIRE((clGetMemAllocInfoINTEL(context, end, CL_MEM_ALLOC_TYPE_INTEL, sizeof(unknown), &unknown, nullptr) == CL_SUCCESS));
+    CHECK((unknown == CL_MEM_TYPE_UNKNOWN_INTEL));
+    REQUIRE((clMemFreeINTEL(context, base) == CL_SUCCESS));
+    REQUIRE((clGetMemAllocInfoINTEL(context, base, CL_MEM_ALLOC_TYPE_INTEL, sizeof(unknown), &unknown, nullptr) == CL_SUCCESS));
+    CHECK((unknown == CL_MEM_TYPE_UNKNOWN_INTEL));
+  }
+  REQUIRE((clReleaseContext(foreign) == CL_SUCCESS));
+  REQUIRE((clReleaseContext(context) == CL_SUCCESS));
+}
+
+TEST_CASE("Intel blocking free waits for queued allocation uses", "[opencl][unified-memory]") {
+  gemstone_test::RpcFixture fixture;
+  const auto port = std::to_string(fixture.port());
+  REQUIRE((setenv("GEMSTONE_RPC_PORT", port.c_str(), 1) == 0));
+  REQUIRE((setenv("GEMSTONE_RPC_CLIENT", "42", 1) == 0));
+  cl_platform_id platform{};
+  cl_device_id device{};
+  REQUIRE((clGetPlatformIDs(1, &platform, nullptr) == CL_SUCCESS));
+  REQUIRE((clGetDeviceIDs(platform, CL_DEVICE_TYPE_GPU, 1, &device, nullptr) == CL_SUCCESS));
+  cl_int error{};
+  auto context = clCreateContext(nullptr, 1, &device, nullptr, nullptr, &error);
+  REQUIRE((context && error == CL_SUCCESS));
+  auto queue = clCreateCommandQueueWithProperties(context, device, nullptr, &error);
+  REQUIRE((queue && error == CL_SUCCESS));
+  for (bool failed : {false, true}) {
+    for (cl_unified_shared_memory_type_intel kind : {CL_MEM_TYPE_HOST_INTEL, CL_MEM_TYPE_DEVICE_INTEL, CL_MEM_TYPE_SHARED_INTEL}) {
+      CAPTURE(kind, failed);
+      auto *pointer = kind == CL_MEM_TYPE_HOST_INTEL     ? clHostMemAllocINTEL(context, nullptr, 64, 0, &error)
+                      : kind == CL_MEM_TYPE_DEVICE_INTEL ? clDeviceMemAllocINTEL(context, device, nullptr, 64, 0, &error)
+                                                         : clSharedMemAllocINTEL(context, device, nullptr, 64, 0, &error);
+      REQUIRE((pointer && error == CL_SUCCESS));
+      auto gate = clCreateUserEvent(context, &error);
+      REQUIRE((gate && error == CL_SUCCESS));
+      uint32_t pattern = 17;
+      cl_event completed{};
+      REQUIRE((clEnqueueMemFillINTEL(queue, pointer, &pattern, sizeof(pattern), 64, 1, &gate, &completed) == CL_SUCCESS));
+      std::promise<void> started;
+      auto freeing = std::async(std::launch::async, [&] {
+        started.set_value();
+        return clMemBlockingFreeINTEL(context, pointer);
+      });
+      started.get_future().wait();
+      const bool waited = freeing.wait_for(std::chrono::milliseconds(100)) == std::future_status::timeout;
+      // An early free is already wrong; cancel its command instead of touching freed storage.
+      REQUIRE((clSetUserEventStatus(gate, failed || !waited ? -1 : CL_COMPLETE) == CL_SUCCESS));
+      const auto completionStatus = clWaitForEvents(1, &completed);
+      CHECK((completionStatus == (failed || !waited ? CL_EXEC_STATUS_ERROR_FOR_EVENTS_IN_WAIT_LIST : CL_SUCCESS)));
+      CHECK((waited));
+      REQUIRE((freeing.wait_for(std::chrono::seconds(3)) == std::future_status::ready));
+      CHECK((freeing.get() == CL_SUCCESS));
+      cl_unified_shared_memory_type_intel type{};
+      REQUIRE((clGetMemAllocInfoINTEL(context, pointer, CL_MEM_ALLOC_TYPE_INTEL, sizeof(type), &type, nullptr) == CL_SUCCESS));
+      CHECK((type == CL_MEM_TYPE_UNKNOWN_INTEL));
+      REQUIRE((clReleaseEvent(completed) == CL_SUCCESS));
+      REQUIRE((clReleaseEvent(gate) == CL_SUCCESS));
+    }
+  }
+  REQUIRE((clReleaseCommandQueue(queue) == CL_SUCCESS));
+  REQUIRE((clReleaseContext(context) == CL_SUCCESS));
+}
+
+TEST_CASE("Intel blocking free accounts for kernel arguments and indirect declarations", "[opencl][unified-memory]") {
+  gemstone_test::RpcFixture fixture;
+  fixture.programCatalog({{"groups", "groups"}}, {});
+  const auto port = std::to_string(fixture.port());
+  REQUIRE((setenv("GEMSTONE_RPC_PORT", port.c_str(), 1) == 0));
+  REQUIRE((setenv("GEMSTONE_RPC_CLIENT", "42", 1) == 0));
+  cl_platform_id platform{};
+  cl_device_id device{};
+  REQUIRE((clGetPlatformIDs(1, &platform, nullptr) == CL_SUCCESS));
+  REQUIRE((clGetDeviceIDs(platform, CL_DEVICE_TYPE_GPU, 1, &device, nullptr) == CL_SUCCESS));
+  cl_int error{};
+  auto context = clCreateContext(nullptr, 1, &device, nullptr, nullptr, &error);
+  REQUIRE((context && error == CL_SUCCESS));
+  auto queue = clCreateCommandQueueWithProperties(context, device, nullptr, &error);
+  REQUIRE((queue && error == CL_SUCCESS));
+  auto program = clCreateProgramWithIL(context, fixture.spirv, sizeof(fixture.spirv), &error);
+  REQUIRE((program && error == CL_SUCCESS));
+  REQUIRE((clBuildProgram(program, 1, &device, nullptr, nullptr, nullptr) == CL_SUCCESS));
+  auto *other = clSVMAlloc(context, CL_MEM_READ_WRITE, 64, 0);
+  REQUIRE((other));
+  for (const std::string mode : {"direct", "indirect-list", "indirect-type", "unrelated"}) {
+    CAPTURE(mode);
+    auto *pointer = clHostMemAllocINTEL(context, nullptr, 64, 0, &error);
+    REQUIRE((pointer && error == CL_SUCCESS));
+    auto kernel = clCreateKernel(program, "groups", &error);
+    REQUIRE((kernel && error == CL_SUCCESS));
+    REQUIRE((clSetKernelArgMemPointerINTEL(kernel, 0, mode == "direct" ? pointer : other) == CL_SUCCESS));
+    uint32_t seed = 17;
+    REQUIRE((clSetKernelArg(kernel, 1, sizeof(seed), &seed) == CL_SUCCESS));
+    if (mode == "indirect-list")
+      REQUIRE((clSetKernelExecInfo(kernel, CL_KERNEL_EXEC_INFO_SVM_PTRS, sizeof(pointer), &pointer) == CL_SUCCESS));
+    if (mode == "indirect-type") {
+      cl_bool enabled = CL_TRUE;
+      REQUIRE((clSetKernelExecInfo(kernel, CL_KERNEL_EXEC_INFO_INDIRECT_HOST_ACCESS_INTEL, sizeof(enabled), &enabled) == CL_SUCCESS));
+    }
+    auto gate = clCreateUserEvent(context, &error);
+    REQUIRE((gate && error == CL_SUCCESS));
+    const size_t one = 1;
+    cl_event completed{};
+    REQUIRE((clEnqueueNDRangeKernel(queue, kernel, 1, nullptr, &one, &one, 1, &gate, &completed) == CL_SUCCESS));
+    // Drop all caller handles: queued snapshots still own the program/context and declarations.
+    REQUIRE((clReleaseKernel(kernel) == CL_SUCCESS));
+    std::promise<void> started;
+    auto freeing = std::async(std::launch::async, [&] {
+      started.set_value();
+      return clMemBlockingFreeINTEL(context, pointer);
+    });
+    started.get_future().wait();
+    const bool waited = freeing.wait_for(std::chrono::milliseconds(100)) == std::future_status::timeout;
+    REQUIRE((clSetUserEventStatus(gate, -1) == CL_SUCCESS));
+    CHECK((clWaitForEvents(1, &completed) == CL_EXEC_STATUS_ERROR_FOR_EVENTS_IN_WAIT_LIST));
+    CHECK((waited == (mode != "unrelated")));
+    REQUIRE((freeing.wait_for(std::chrono::seconds(3)) == std::future_status::ready));
+    CHECK((freeing.get() == CL_SUCCESS));
+    REQUIRE((clReleaseEvent(completed) == CL_SUCCESS));
+    REQUIRE((clReleaseEvent(gate) == CL_SUCCESS));
+  }
+  clSVMFree(context, other);
+  REQUIRE((clReleaseProgram(program) == CL_SUCCESS));
+  REQUIRE((clReleaseCommandQueue(queue) == CL_SUCCESS));
+  REQUIRE((clReleaseContext(context) == CL_SUCCESS));
+}
+
+TEST_CASE("OpenCL queued buffer uses reclaim storage after the last handle is released", "[opencl][unified-memory]") {
+  gemstone_test::RpcFixture fixture;
+  fixture.programCatalog({{"groups", "groups"}}, {});
+  const auto port = std::to_string(fixture.port());
+  const ScopedEnv rpcPort("GEMSTONE_RPC_PORT", port.c_str());
+  const ScopedEnv rpcClient("GEMSTONE_RPC_CLIENT", "42");
+  cl_platform_id platform{};
+  cl_device_id device{};
+  REQUIRE((clGetPlatformIDs(1, &platform, nullptr) == CL_SUCCESS));
+  REQUIRE((clGetDeviceIDs(platform, CL_DEVICE_TYPE_GPU, 1, &device, nullptr) == CL_SUCCESS));
+  cl_int error{};
+  auto context = clCreateContext(nullptr, 1, &device, nullptr, nullptr, &error);
+  REQUIRE((context && error == CL_SUCCESS));
+  auto queue = clCreateCommandQueueWithProperties(context, device, nullptr, &error);
+  REQUIRE((queue && error == CL_SUCCESS));
+  auto program = clCreateProgramWithIL(context, fixture.spirv, sizeof(fixture.spirv), &error);
+  REQUIRE((program && error == CL_SUCCESS));
+  REQUIRE((clBuildProgram(program, 1, &device, nullptr, nullptr, nullptr) == CL_SUCCESS));
+  for (bool failed : {false, true}) {
+    for (const auto mode : {"fill", "kernel-early", "kernel-late", "subbuffer"}) {
+      const bool launch = std::string_view(mode).starts_with("kernel");
+      CAPTURE(failed, mode);
+      const auto baseline = fixture.allocationCount();
+      auto buffer = clCreateBuffer(context, CL_MEM_READ_WRITE, 64, nullptr, &error);
+      REQUIRE((buffer && error == CL_SUCCESS));
+      if (std::string_view(mode) == "subbuffer") {
+        const cl_buffer_region region{0, 64};
+        auto child = clCreateSubBuffer(buffer, 0, CL_BUFFER_CREATE_TYPE_REGION, &region, &error);
+        REQUIRE((child && error == CL_SUCCESS));
+        REQUIRE((clReleaseMemObject(buffer) == CL_SUCCESS));
+        buffer = child;
+      }
+      auto gate = clCreateUserEvent(context, &error);
+      REQUIRE((gate && error == CL_SUCCESS));
+      cl_event completed{};
+      cl_kernel retainedKernel{};
+      uint32_t seed = 17;
+      if (launch) {
+        auto kernel = clCreateKernel(program, "groups", &error);
+        REQUIRE((kernel && error == CL_SUCCESS));
+        REQUIRE((clSetKernelArg(kernel, 0, sizeof(buffer), &buffer) == CL_SUCCESS));
+        REQUIRE((clSetKernelArg(kernel, 1, sizeof(seed), &seed) == CL_SUCCESS));
+        const size_t one = 1;
+        if (!failed) fixture.expect({1, 1, 1, 0, seed});
+        REQUIRE((clEnqueueNDRangeKernel(queue, kernel, 1, nullptr, &one, &one, 1, &gate, &completed) == CL_SUCCESS));
+        if (std::string_view(mode) == "kernel-late") retainedKernel = kernel;
+        else REQUIRE((clReleaseKernel(kernel) == CL_SUCCESS));
+      } else {
+        REQUIRE((clEnqueueFillBuffer(queue, buffer, &seed, sizeof(seed), 0, 64, 1, &gate, &completed) == CL_SUCCESS));
+      }
+      REQUIRE((clReleaseMemObject(buffer) == CL_SUCCESS));
+      CHECK((fixture.allocationCount() == baseline + 1));
+      REQUIRE((clSetUserEventStatus(gate, failed ? -1 : CL_COMPLETE) == CL_SUCCESS));
+      CHECK((clWaitForEvents(1, &completed) == (failed ? CL_EXEC_STATUS_ERROR_FOR_EVENTS_IN_WAIT_LIST : CL_SUCCESS)));
+      CHECK((fixture.allocationCount() == baseline));
+      if (retainedKernel) {
+        REQUIRE((clReleaseKernel(retainedKernel) == CL_SUCCESS));
+        CHECK((fixture.allocationCount() == baseline));
+      }
+      REQUIRE((clReleaseEvent(completed) == CL_SUCCESS));
+      REQUIRE((clReleaseEvent(gate) == CL_SUCCESS));
+    }
+  }
+  REQUIRE((clReleaseProgram(program) == CL_SUCCESS));
+  REQUIRE((clReleaseCommandQueue(queue) == CL_SUCCESS));
+  REQUIRE((clReleaseContext(context) == CL_SUCCESS));
 }

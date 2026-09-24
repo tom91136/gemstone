@@ -39,6 +39,7 @@ set_target_properties(gemstone_opencl PROPERTIES
 )
 
 if(BUILD_TESTING)
+  gemstone_memory_client(opencl gemstone_opencl)
   function(gemstone_opencl_test target source)
     add_executable("${target}" "${source}")
     target_include_directories("${target}" PRIVATE "${OPENCL_INCLUDE_DIR}")
@@ -57,4 +58,27 @@ if(BUILD_TESTING)
 
   gemstone_opencl_test(gemstone_opencl_deferred test/deferred.cpp)
   gemstone_discover_tests(gemstone_opencl_deferred TEST_PREFIX "opencl/" PROPERTIES TIMEOUT 8)
+
+  set(sycl_client "${CMAKE_BINARY_DIR}/gemstone_memory_sycl")
+  set(sycl_runtime "${CMAKE_BINARY_DIR}/opencl/memory-sycl/lib")
+  set(sycl_build "${CMAKE_BINARY_DIR}/artifact-builds/memory-sycl")
+  file(GENERATE OUTPUT "${CMAKE_BINARY_DIR}/gemstone_memory_sycl.library-path" CONTENT "${sycl_runtime}")
+  file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/memory-sycl.cmake" CONTENT [=[
+execute_process(COMMAND icpx -std=c++20 -fsycl -fsycl-device-code-split=per_kernel
+  -ffile-prefix-map=/source=. /source/native/opencl/test/memory_sycl.cpp
+  -o /output/gemstone_memory_sycl COMMAND_ERROR_IS_FATAL ANY)
+]=])
+  add_custom_target(gemstone_memory_sycl_client ALL
+    COMMAND "${CMAKE_COMMAND}" -S "${CONFORMANCE_ARTIFACT_PROJECT}" -B "${sycl_build}" -G Ninja
+      -DCONFORMANCE_ARTIFACT_KIND=command -DCONFORMANCE_BACKEND=sycl
+      "-DCONFORMANCE_ARTIFACT_DIRECTORY=${CMAKE_BINARY_DIR}"
+      "-DCONFORMANCE_COMMAND_SOURCE=${REPOSITORY_DIRECTORY}"
+      "-DCONFORMANCE_COMMAND_SCRIPT=${CMAKE_CURRENT_BINARY_DIR}/memory-sycl.cmake"
+      "-DCONFORMANCE_COMMAND_INPUTS=native/opencl/test/memory_sycl.cpp;native/rpc/test/memory_patterns.hpp;native/rpc/test/memory_test.hpp"
+      -DCONFORMANCE_COMMAND_OUTPUTS=gemstone_memory_sycl
+      -DCONFORMANCE_RUNTIME_DIRECTORY=opencl/memory-sycl/lib
+      "-DCONTAINER_EXECUTABLE=${CONTAINER_EXECUTABLE}" "-DROCM_VERSION=${ROCM_VERSION}"
+    COMMAND "${CMAKE_COMMAND}" --build "${sycl_build}" --target artifacts --parallel 1
+    BYPRODUCTS "${sycl_client}" "${sycl_runtime}/.complete"
+    JOB_POOL container_build VERBATIM)
 endif()

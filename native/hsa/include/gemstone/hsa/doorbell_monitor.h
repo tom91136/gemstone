@@ -43,7 +43,7 @@ typedef struct gemstone_hsa_queue_descriptor {
   void *user_data;
 } gemstone_hsa_queue_descriptor;
 
-// Creates one process-wide monitor. The implementation owns one polling thread,
+// Creates one process-wide monitor. The implementation owns two polling threads,
 // regardless of queue count. It sleeps without polling while no queues exist.
 gemstone_hsa_doorbell_monitor *gemstone_hsa_doorbell_monitor_create(const gemstone_hsa_doorbell_monitor_config *config);
 

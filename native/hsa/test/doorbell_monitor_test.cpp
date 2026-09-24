@@ -148,7 +148,7 @@ void wraparoundCannotConsumeStaleHeader(gemstone_hsa_doorbell_monitor *monitor) 
 }
 
 void queuesShareWorkerAndUnregisterIsQuiescent(gemstone_hsa_doorbell_monitor *monitor) {
-  REQUIRE((gemstone_hsa_doorbell_monitor_thread_count(monitor) == 1));
+  REQUIRE((gemstone_hsa_doorbell_monitor_thread_count(monitor) == 2));
   QueueFixture first(monitor, 5);
   QueueFixture second(monitor, 6);
   publish(first.ring[0], 50);

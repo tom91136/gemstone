@@ -13,11 +13,171 @@ get_filename_component(CONFORMANCE_SOURCE_DIRECTORY "${CMAKE_CURRENT_LIST_DIR}/.
 set(DEFAULT_ARTIFACT_DIRECTORY "${CMAKE_BINARY_DIR}/output")
 set(CONFORMANCE_ARTIFACT_DIRECTORY "${DEFAULT_ARTIFACT_DIRECTORY}" CACHE PATH "Conformance artifact output directory")
 
-if(NOT CONFORMANCE_TARGET_SET MATCHES "^[A-Za-z0-9_-]+$")
-  message(FATAL_ERROR "Invalid CONFORMANCE_TARGET_SET: ${CONFORMANCE_TARGET_SET}")
-endif()
 if(NOT ROCM_VERSION MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+$")
   message(FATAL_ERROR "Invalid ROCm version: ${ROCM_VERSION}")
+endif()
+
+# Public artifact entry points. Consumers invoke this project rather than
+# importing its CMake helpers or reaching into suite source directories.
+set(CONFORMANCE_ARTIFACT_KIND suite CACHE STRING "Artifact kind: suite, fixture, or command")
+set_property(CACHE CONFORMANCE_ARTIFACT_KIND PROPERTY STRINGS suite fixture command)
+if(NOT CONFORMANCE_ARTIFACT_KIND MATCHES "^(suite|fixture|command)$")
+  message(FATAL_ERROR "Unknown artifact kind: ${CONFORMANCE_ARTIFACT_KIND}")
+endif()
+if(NOT CONFORMANCE_ARTIFACT_KIND STREQUAL "suite")
+  set(CONFORMANCE_BACKEND "" CACHE STRING "Compiler toolchain for the artifact")
+  set(CONFORMANCE_ARCHITECTURE "" CACHE STRING "Target architecture, when required")
+  set_property(GLOBAL PROPERTY JOB_POOLS "container_build=1")
+  include("${CONFORMANCE_SOURCE_DIRECTORY}/cmake/ToolchainImages.cmake")
+  include("${CONFORMANCE_SOURCE_DIRECTORY}/cmake/ContainerBuild.cmake")
+  file(MAKE_DIRECTORY "${CONFORMANCE_ARTIFACT_DIRECTORY}")
+  execute_process(COMMAND id -u OUTPUT_VARIABLE uid OUTPUT_STRIP_TRAILING_WHITESPACE COMMAND_ERROR_IS_FATAL ANY)
+  execute_process(COMMAND id -g OUTPUT_VARIABLE gid OUTPUT_STRIP_TRAILING_WHITESPACE COMMAND_ERROR_IS_FATAL ANY)
+  if(CONTAINER_EXECUTABLE MATCHES "(^|/)podman$")
+    set(identity "--userns keep-id --user ${uid}:${gid}")
+  else()
+    set(identity "--user ${uid}:${gid}")
+  endif()
+
+  if(CONFORMANCE_ARTIFACT_KIND STREQUAL "fixture")
+    set(CONFORMANCE_FIXTURE "" CACHE STRING "Fixture family: memory or vector-copy")
+    if(CONFORMANCE_FIXTURE STREQUAL "memory" AND CONFORMANCE_BACKEND STREQUAL "cuda")
+      foreach(name IN ITEMS kernel atomic fence contended)
+        set(output "${CONFORMANCE_ARTIFACT_DIRECTORY}/${name}.ptx")
+        add_custom_command(OUTPUT "${output}"
+          COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+            "${CONFORMANCE_SOURCE_DIRECTORY}/unified/src/cuda/${name}.ptx" "${output}"
+          DEPENDS "${CONFORMANCE_SOURCE_DIRECTORY}/unified/src/cuda/${name}.ptx" VERBATIM)
+        list(APPEND outputs "${output}")
+      endforeach()
+      add_custom_target(artifacts ALL DEPENDS ${outputs})
+      return()
+    endif()
+    if(NOT CONFORMANCE_BACKEND MATCHES "^(hsa|opencl)$")
+      message(FATAL_ERROR "Compiled fixtures require the hsa or opencl backend")
+    endif()
+    if(CONFORMANCE_FIXTURE STREQUAL "memory")
+      set(source "${CONFORMANCE_SOURCE_DIRECTORY}/unified/src/memory_kernel.cl")
+      set(filename kernel)
+      set(options -O1)
+      if(CONFORMANCE_BACKEND STREQUAL "hsa")
+        # Preserve individual work-item atomics in the fixture.
+        list(APPEND options -nogpulib -mllvm -amdgpu-atomic-optimizer-strategy=None)
+      endif()
+    elseif(CONFORMANCE_FIXTURE STREQUAL "vector-copy" AND CONFORMANCE_BACKEND STREQUAL "hsa")
+      set(source "${CONFORMANCE_SOURCE_DIRECTORY}/unified/src/hsa/vector_copy.cl")
+      set(filename vector-copy)
+      set(options)
+    else()
+      message(FATAL_ERROR "Unsupported fixture/backend pair: ${CONFORMANCE_FIXTURE}/${CONFORMANCE_BACKEND}")
+    endif()
+    if(CONFORMANCE_BACKEND STREQUAL "hsa")
+      string(APPEND filename .hsaco)
+    else()
+      string(APPEND filename .spv)
+    endif()
+    conformance_toolchain("${CONFORMANCE_BACKEND}" "${CONFORMANCE_ARCHITECTURE}" image toolchain_stamp unused_support)
+    file(RELATIVE_PATH source_relative "${CONFORMANCE_SOURCE_DIRECTORY}" "${source}")
+    conformance_opencl_commands("${CONFORMANCE_BACKEND}" "${CONFORMANCE_ARCHITECTURE}"
+      "/source/conformance/${source_relative}" "/output/${filename}" compile translate ${options})
+    set(commands)
+    foreach(step IN ITEMS compile translate)
+      if(${step})
+        conformance_container_command(command
+          EXECUTABLE "${CONTAINER_EXECUTABLE}" IMAGE "${image}"
+          SOURCE "${CONFORMANCE_SOURCE_DIRECTORY}" ARTIFACTS "${CONFORMANCE_ARTIFACT_DIRECTORY}"
+          NETWORK none IDENTITY "${identity}" COMMAND ${${step}})
+        list(APPEND commands COMMAND ${command})
+      endif()
+    endforeach()
+    set(byproducts)
+    if(translate)
+      list(APPEND byproducts "${CONFORMANCE_ARTIFACT_DIRECTORY}/${filename}.bc")
+    endif()
+    add_custom_command(OUTPUT "${CONFORMANCE_ARTIFACT_DIRECTORY}/${filename}"
+      ${commands} BYPRODUCTS ${byproducts}
+      DEPENDS "${source}" "${toolchain_stamp}" "${CMAKE_CURRENT_LIST_FILE}"
+        "${CONFORMANCE_SOURCE_DIRECTORY}/cmake/ToolchainImages.cmake"
+        "${CONFORMANCE_SOURCE_DIRECTORY}/cmake/ContainerBuild.cmake"
+      JOB_POOL container_build VERBATIM)
+    add_custom_target(artifacts ALL DEPENDS "${CONFORMANCE_ARTIFACT_DIRECTORY}/${filename}")
+  else()
+    # The supplied recipe owns compilation. It runs with read-only input at
+    # /source and writable artifacts at /output, using the pinned toolchain PATH.
+    foreach(required IN ITEMS CONFORMANCE_COMMAND_SOURCE CONFORMANCE_COMMAND_SCRIPT CONFORMANCE_COMMAND_OUTPUTS)
+      if(NOT DEFINED ${required} OR "${${required}}" STREQUAL "")
+        message(FATAL_ERROR "${required} is required for command artifacts")
+      endif()
+    endforeach()
+    if(NOT CONFORMANCE_BACKEND MATCHES "^(cuda|hip|hsa|opencl|sycl|openacc)$")
+      message(FATAL_ERROR "Unsupported command toolchain: ${CONFORMANCE_BACKEND}")
+    endif()
+    conformance_toolchain("${CONFORMANCE_BACKEND}" "${CONFORMANCE_ARCHITECTURE}" image toolchain_stamp unused_support)
+    configure_file("${CONFORMANCE_COMMAND_SCRIPT}" "${CMAKE_BINARY_DIR}/command.cmake" COPYONLY)
+    set(outputs)
+    foreach(output IN LISTS CONFORMANCE_COMMAND_OUTPUTS)
+      if(IS_ABSOLUTE "${output}" OR output MATCHES "(^|/)\\.\\.(/|$)")
+        message(FATAL_ERROR "Command outputs must be relative to the artifact directory")
+      endif()
+      list(APPEND outputs "${CONFORMANCE_ARTIFACT_DIRECTORY}/${output}")
+    endforeach()
+    set(inputs)
+    foreach(input IN LISTS CONFORMANCE_COMMAND_INPUTS)
+      list(APPEND inputs "${CONFORMANCE_COMMAND_SOURCE}/${input}")
+    endforeach()
+    conformance_container_command(command
+      EXECUTABLE "${CONTAINER_EXECUTABLE}" IMAGE "${image}"
+      SOURCE "${CONFORMANCE_COMMAND_SOURCE}" SOURCE_TARGET /source
+      ARTIFACTS "${CONFORMANCE_ARTIFACT_DIRECTORY}" WORK "${CMAKE_BINARY_DIR}"
+      NETWORK none IDENTITY "${identity}"
+      COMMAND cmake ${CONFORMANCE_COMMAND_ARGUMENTS} -P /work/command.cmake)
+    set(commands COMMAND ${command})
+    set(bundle_inputs)
+    if(CONFORMANCE_RUNTIME_DIRECTORY)
+      if(NOT CONFORMANCE_BACKEND STREQUAL "sycl" OR IS_ABSOLUTE "${CONFORMANCE_RUNTIME_DIRECTORY}"
+          OR CONFORMANCE_RUNTIME_DIRECTORY MATCHES "(^|/)\\.\\.(/|$)")
+        message(FATAL_ERROR "Runtime bundling requires sycl and an artifact-relative runtime directory")
+      endif()
+      configure_file("${CONFORMANCE_SOURCE_DIRECTORY}/cmake/RuntimeDependencies.cmake"
+        "${CMAKE_BINARY_DIR}/RuntimeDependencies.cmake" COPYONLY)
+      set(executables)
+      foreach(output IN LISTS CONFORMANCE_COMMAND_OUTPUTS)
+        list(APPEND executables "/output/${output}")
+      endforeach()
+      file(WRITE "${CMAKE_BINARY_DIR}/bundle.cmake"
+        "include(/work/RuntimeDependencies.cmake)\n"
+        "set(executables [==[${executables}]==])\n"
+        "set(destination [==[/output/${CONFORMANCE_RUNTIME_DIRECTORY}]==])\n")
+      file(APPEND "${CMAKE_BINARY_DIR}/bundle.cmake" [=[
+file(GLOB directories /opt/intel/oneapi/compiler/*/lib /opt/intel/oneapi/umf/*/lib)
+file(GLOB plugins /opt/intel/oneapi/compiler/*/lib/libur_adapter*.so*
+  /opt/intel/oneapi/compiler/*/lib/libur_loader.so*)
+bundle_runtime_dependencies(DESTINATION "${destination}"
+  EXECUTABLE_PATTERNS ${executables} SEARCH_DIRECTORIES ${directories} PLUGINS ${plugins}
+  EXCLUDE_REGEXES "ld-linux.*" "libc\\.so.*" "libm\\.so.*" "libpthread\\.so.*"
+    "libdl\\.so.*" "librt\\.so.*" "libgcc_s\\.so.*" "libstdc\\+\\+\\.so.*")
+file(TOUCH "${destination}/.complete")
+]=])
+      conformance_container_command(bundle
+        EXECUTABLE "${CONTAINER_EXECUTABLE}" IMAGE "${image}"
+        ARTIFACTS "${CONFORMANCE_ARTIFACT_DIRECTORY}" WORK "${CMAKE_BINARY_DIR}"
+        NETWORK none IDENTITY "${identity}" COMMAND cmake -P /work/bundle.cmake)
+      list(APPEND commands COMMAND ${bundle})
+      list(APPEND outputs "${CONFORMANCE_ARTIFACT_DIRECTORY}/${CONFORMANCE_RUNTIME_DIRECTORY}/.complete")
+      list(APPEND bundle_inputs "${CONFORMANCE_SOURCE_DIRECTORY}/cmake/RuntimeDependencies.cmake")
+    endif()
+    add_custom_command(OUTPUT ${outputs}
+      ${commands}
+      DEPENDS ${inputs} ${bundle_inputs} "${CONFORMANCE_COMMAND_SCRIPT}" "${toolchain_stamp}"
+        "${CMAKE_CURRENT_LIST_FILE}" "${CONFORMANCE_SOURCE_DIRECTORY}/cmake/ContainerBuild.cmake"
+      JOB_POOL container_build VERBATIM)
+    add_custom_target(artifacts ALL DEPENDS ${outputs})
+  endif()
+  return()
+endif()
+
+if(NOT CONFORMANCE_TARGET_SET MATCHES "^[A-Za-z0-9_-]+$")
+  message(FATAL_ERROR "Invalid CONFORMANCE_TARGET_SET: ${CONFORMANCE_TARGET_SET}")
 endif()
 set(target_set "${CMAKE_CURRENT_LIST_DIR}/targets/${CONFORMANCE_TARGET_SET}.cmake")
 if(NOT EXISTS "${target_set}")

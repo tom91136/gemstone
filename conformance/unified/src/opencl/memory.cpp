@@ -1,0 +1,69 @@
+#include <catch2/catch_test_macros.hpp>
+
+#include "conformance/device.hpp"
+
+#include "memory_cases.hpp"
+#define CL_TARGET_OPENCL_VERSION 300
+#include "memory.hpp"
+
+namespace {
+using namespace memory_patterns;
+// Prerequisites apply only to the selected allocation and operation.
+uint64_t prerequisites(const std::string &kind, bool atomic, bool wide) {
+  auto selected = conformance::device_selection().native_handle;
+  auto device = reinterpret_cast<cl_device_id>(selected);
+  size_t size{};
+  check(clGetDeviceInfo(device, CL_DEVICE_IL_VERSION, 0, nullptr, &size));
+  std::string il(size, '\0');
+  check(clGetDeviceInfo(device, CL_DEVICE_IL_VERSION, size, il.data(), nullptr));
+  if (il.find("SPIR-V") == std::string::npos) SKIP("memory fixture requires SPIR-V program input");
+  if (wide) {
+    check(clGetDeviceInfo(device, CL_DEVICE_EXTENSIONS, 0, nullptr, &size));
+    std::string extensions(size, '\0');
+    check(clGetDeviceInfo(device, CL_DEVICE_EXTENSIONS, size, extensions.data(), nullptr));
+    if (extensions.find("cl_khr_int64_base_atomics") == std::string::npos) SKIP("64-bit atomics unavailable");
+  }
+  if (kind == "svm") {
+    cl_device_svm_capabilities flags{};
+    check(clGetDeviceInfo(device, CL_DEVICE_SVM_CAPABILITIES, sizeof(flags), &flags, nullptr));
+    const auto needed = CL_DEVICE_SVM_FINE_GRAIN_BUFFER | (atomic ? CL_DEVICE_SVM_ATOMICS : 0);
+    if ((flags & needed) != needed) SKIP("fine-grained SVM or SVM atomics unavailable");
+  } else {
+    check(clGetDeviceInfo(device, CL_DEVICE_EXTENSIONS, 0, nullptr, &size));
+    std::string extensions(size, '\0');
+    check(clGetDeviceInfo(device, CL_DEVICE_EXTENSIONS, size, extensions.data(), nullptr));
+    if (extensions.find("cl_intel_unified_shared_memory") == std::string::npos) SKIP("Intel USM extension unavailable");
+    cl_device_unified_shared_memory_capabilities_intel flags{};
+    const auto name = kind == "usm_host" ? CL_DEVICE_HOST_MEM_CAPABILITIES_INTEL : CL_DEVICE_SINGLE_DEVICE_SHARED_MEM_CAPABILITIES_INTEL;
+    check(clGetDeviceInfo(device, name, sizeof(flags), &flags, nullptr));
+    const auto needed = CL_UNIFIED_SHARED_MEMORY_ACCESS_INTEL
+                        | (atomic ? CL_UNIFIED_SHARED_MEMORY_CONCURRENT_ACCESS_INTEL | CL_UNIFIED_SHARED_MEMORY_ATOMIC_ACCESS_INTEL
+                                        | CL_UNIFIED_SHARED_MEMORY_CONCURRENT_ATOMIC_ACCESS_INTEL
+                                  : 0);
+    if ((flags & needed) != needed) SKIP("USM allocation lacks required capabilities");
+  }
+  return selected;
+}
+void execute(const char *kind, unsigned scenario) {
+  const bool wide = scenario >= 11;
+  const auto selected = prerequisites(kind, scenario >= 6, wide);
+  Backend backend(kind, selected, scenario >= 6, wide ? "kernel64.spv" : "kernel.spv");
+  runScenario(backend, scenario);
+}
+} // namespace
+
+#define UNIFIED_MEMORY_ALLOCATION "svm"
+#define UNIFIED_MEMORY_TAGS ""
+#include "cases/memory.inl"
+
+#undef UNIFIED_MEMORY_ALLOCATION
+#undef UNIFIED_MEMORY_TAGS
+#define UNIFIED_MEMORY_ALLOCATION "usm_host"
+#define UNIFIED_MEMORY_TAGS "[full-matrix]"
+#include "cases/memory.inl"
+
+#undef UNIFIED_MEMORY_ALLOCATION
+#undef UNIFIED_MEMORY_TAGS
+#define UNIFIED_MEMORY_ALLOCATION "usm_shared"
+#define UNIFIED_MEMORY_TAGS "[full-matrix]"
+#include "cases/memory.inl"

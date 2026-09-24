@@ -149,10 +149,11 @@ int gemstone_hsa_aql_runtime_unregister_allocation(gemstone_hsa_aql_runtime *run
 int gemstone_hsa_aql_runtime_dispatch_allocations(gemstone_hsa_aql_runtime *runtime, const void *packet, size_t packet_size,
                                                   uint64_t *allocation_ids, uint32_t capacity, uint32_t *count);
 
-// Returns exact executor-written ranges from successful kernel launches since
-// the previous successful take. A zero-capacity call reports the required
-// count without consuming it. The single process-wide AQL worker serializes
-// this handoff with packet completion and native mirror-back.
+// Takes up to capacity exact executor-written ranges in completion order and
+// reports the number taken. A zero-capacity call reports the pending count
+// without consuming it. New ranges appended after a count query stay queued
+// for the later completion. Callers serialize the count/take/copy-back handoff
+// across queue workers before publishing their packet completion signals.
 int gemstone_hsa_aql_runtime_take_dirty_ranges(gemstone_hsa_aql_runtime *runtime, gemstone_hsa_dirty_range *ranges, uint32_t capacity,
                                                uint32_t *count);
 

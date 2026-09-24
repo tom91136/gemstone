@@ -158,21 +158,7 @@ object Launcher {
         "GEMSTONE_RPC_PORT"   -> s"${port.value}",
         "GEMSTONE_RPC_CLIENT" -> s"${client.value}"
       )
-      val dynamic           = Map.newBuilder[String, String]
-      val conformanceTarget = for {
-        backend      <- inherited.get("CONFORMANCE_TARGET_BACKEND")
-        architecture <- inherited.get("CONFORMANCE_TARGET_ARCHITECTURE").filter(_.nonEmpty)
-      } yield backend -> architecture
-      conformanceTarget.foreach {
-        case ("cuda", architecture)
-            if apis(ComputeAPI.CUDA) && !inherited.contains("GEMSTONE_CUDA_TARGET") &&
-              !inherited.contains("GEMSTONE_CUDA_TARGET_ARCH") =>
-          dynamic += "GEMSTONE_CUDA_TARGET" -> architecture
-        case ("hip" | "hsa", architecture)
-            if (apis(ComputeAPI.HIP) || apis(ComputeAPI.HSA)) && !inherited.contains("GEMSTONE_AMDGPU_TARGET") =>
-          dynamic += "GEMSTONE_AMDGPU_TARGET" -> architecture
-        case _ =>
-      }
+      val dynamic = Map.newBuilder[String, String]
       if (preload.nonEmpty) dynamic += "LD_PRELOAD" -> (preload.map(path => s"$path") ++ inheritedPreload).mkString(":")
       if (directories.nonEmpty)
         dynamic += "LD_LIBRARY_PATH" -> (directories.map(path => s"$path") ++ inheritedLibraryPath).mkString(":")
@@ -204,7 +190,6 @@ object Launcher {
   }
 
   private val RemovedOverrides = Set(
-    "CONFORMANCE_DEVICE",
     "GEMSTONE_RECORD",
     "HSA_ENABLE_DTIF",
     "HSA_TOOLS_LIB",

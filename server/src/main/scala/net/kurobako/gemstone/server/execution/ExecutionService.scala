@@ -25,7 +25,7 @@ import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 
 import java.util.concurrent.atomic.AtomicReference
-import java.util.concurrent.locks.ReentrantLock
+import java.util.concurrent.locks.{ReentrantLock, ReentrantReadWriteLock}
 import scala.annotation.tailrec
 import scala.collection.mutable
 
@@ -35,7 +35,6 @@ final class ExecutionService(
     taskLimits: TaskLimits = TaskLimits.Default,
     scheduler: Scheduler = Scheduler.Sequential
 ) extends AutoCloseable {
-  private val DirtyChunkSize         = 64L * 1024L
   private val SyntheticAddressBase   = 0x400000000000L
   private val SyntheticAddressStride = 0x100000000L
 
@@ -46,7 +45,8 @@ final class ExecutionService(
   private final case class RemoteAllocation(
       kind: AllocationKind,
       bytes: Array[Byte],
-      address: Option[GuestAddress] = None
+      address: Option[GuestAddress] = None,
+      hostBacked: Boolean = false
   ) {
     val size: Int :| Positive = bytes.length.refineUnsafe[Positive]
   }
@@ -70,15 +70,31 @@ final class ExecutionService(
   private val state = AtomicReference(
     State(Map.empty, Map.empty, Map.empty, AllocationId(1L), ProgramId(1L), CompletionId(1L))
   )
+  // An acquire in one dispatch must not import another dispatch's unpublished
+  // writes or retain its in-flight read reply. Aliases within a dispatch share a view.
+  private val hostMemories                                   = mutable.Map.empty[CompletionId, HostMemoryMirror]
+  private def hostMemory(id: CompletionId): HostMemoryMirror = hostMemories.getOrElseUpdate(id, HostMemoryMirror())
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+  private final class HostSyncExchange(val request: HostMemorySync) {
+    var issued                 = false
+    var observed: Option[Long] = None
+  }
+  private val hostSyncLock      = ReentrantLock()
+  private val hostSyncs         = mutable.Map.empty[Long, HostSyncExchange]
+  private val nextHostSync      = java.util.concurrent.atomic.AtomicLong()
+  private val hostRequestsReady = mutable.Map.empty[Long, Int]
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+  @volatile private var hostMemoryEnabled = false
+
   private val stateLock    = ReentrantLock()
   private val stateChanged = stateLock.newCondition()
-  private val dirtyChunks  =
-    mutable.HashMap.empty[CompletionId, mutable.HashMap[AllocationId, mutable.LongMap[Unit]]]
+  private val dirtyWrites  =
+    mutable.HashMap.empty[CompletionId, mutable.HashMap[AllocationId, WrittenRanges]]
   private val pendingExecutions = mutable.Queue.empty[(CompletionId, RuntimeBackend.Program, KernelTask, TaskControl)]
-  private val programLifecycleLock = ReentrantLock()
+  private val programLifecycleLock = ReentrantReadWriteLock()
   private val observer             = CompletionObserver()
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  private var executionWorkerScheduled = false
+  private var executionWorkers = 0
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private var closed           = false
   private val boundAllocations = mutable.Map.empty[ProgramId, Set[AllocationId]]
@@ -106,7 +122,11 @@ final class ExecutionService(
   }
 
   /** Register an immutable client-address alias; storage and lifetime remain owned by the allocation. */
-  def registerAllocationAddress(id: AllocationId, address: GuestAddress): Either[ExecutionFailure, Unit] =
+  def registerAllocationAddress(
+      id: AllocationId,
+      address: GuestAddress,
+      hostBacked: Boolean = false
+  ): Either[ExecutionFailure, Unit] =
     stateLock.withLock {
       val current = state.get()
       if (closed) Left(ExecutionFailure.Failed("execution session is closed"))
@@ -116,7 +136,7 @@ final class ExecutionService(
           val size = allocation.size.toLong
           if (address.value <= 0 || address.value > Long.MaxValue - size)
             Left(ExecutionFailure.InvalidRequest("allocation address alias has an invalid or overflowing range"))
-          else if (allocation.address.contains(address)) Right(())
+          else if (allocation.address.contains(address) && allocation.hostBacked == hostBacked) Right(())
           else if (allocation.address.nonEmpty)
             Left(ExecutionFailure.InvalidRequest("allocation address alias cannot be remapped"))
           else if (
@@ -128,7 +148,7 @@ final class ExecutionService(
           ) Left(ExecutionFailure.InvalidRequest("allocation address aliases overlap"))
           else {
             state.set(current.copy(allocations =
-              current.allocations.updated(id, allocation.copy(address = Some(address)))
+              current.allocations.updated(id, allocation.copy(address = Some(address), hostBacked = hostBacked))
             ))
             Right(())
           }
@@ -166,7 +186,7 @@ final class ExecutionService(
     reserved match {
       case Left(error) => Left(error)
       case Right(id)   =>
-        val loaded = programLifecycleLock.withLock {
+        val loaded = programLifecycleLock.writeLock().withLock {
           backendFor(encoding).flatMap(backend => backend.load(RuntimeBackend.Services(observer, scheduler), image))
         }.left.map(runtimeFailure(_))
         loaded match {
@@ -184,7 +204,7 @@ final class ExecutionService(
             accepted match {
               case Right(_)    => Right(id)
               case Left(error) =>
-                programLifecycleLock.withLock(program.close())
+                programLifecycleLock.writeLock().withLock(program.close())
                 Left(error)
             }
         }
@@ -217,7 +237,7 @@ final class ExecutionService(
     reserved match {
       case Left(error)    => Left(error)
       case Right(program) =>
-        programLifecycleLock.withLock(program.close())
+        programLifecycleLock.writeLock().withLock(program.close())
         stateLock.withLock { val _ = boundAllocations.remove(id) }
         Right(())
     }
@@ -244,7 +264,7 @@ final class ExecutionService(
       allocation: AllocationId,
       offset: Long :| Positive0
   ): Either[ExecutionFailure, Unit] = {
-    val result = programLifecycleLock.withLock {
+    val result = programLifecycleLock.writeLock().withLock {
       val reserved = stateLock.withLock {
         val current = state.get()
         if (closed) Left(ExecutionFailure.Failed("execution session is closed"))
@@ -327,7 +347,7 @@ final class ExecutionService(
     }
     accepted match {
       case Left(error) => Left(error)
-      case Right(_)    => programLifecycleLock.withLock {
+      case Right(_)    => programLifecycleLock.writeLock().withLock {
           program(id).flatMap { loaded =>
             loaded.globals.toRight(ExecutionFailure.Unsupported("program globals are not writable"))
               .flatMap(_.write(
@@ -376,17 +396,17 @@ final class ExecutionService(
                   nextCompletion = current.nextCompletion.next
                 )
               )
-              dirtyChunks.update(id, mutable.HashMap.empty)
-              (id, loaded, task, control)
+              dirtyWrites.update(id, mutable.HashMap.empty)
+              pendingExecutions.enqueue((id, loaded, task, control))
+              id
           }
       }
     }
-    accepted.foreach { case (id, loaded, task, control) =>
+    accepted.foreach { _ =>
       val startWorker = stateLock.withLock {
-        pendingExecutions.enqueue((id, loaded, task, control))
-        if (executionWorkerScheduled) false
+        if (closed || pendingExecutions.isEmpty || executionWorkers >= scheduler.parallelism) false
         else {
-          executionWorkerScheduled = true
+          executionWorkers += 1
           true
         }
       }
@@ -400,13 +420,13 @@ final class ExecutionService(
             )
         }
     }
-    accepted.map(_._1)
+    accepted
   }
 
   private def runPendingExecutions(): Unit = {
     def dequeueLocked(): Option[(CompletionId, RuntimeBackend.Program, KernelTask, TaskControl)] = {
       val value = pendingExecutions.dequeueFirst(_ => true)
-      if (value.isEmpty) executionWorkerScheduled = false
+      if (value.isEmpty) executionWorkers -= 1
       value
     }
     @tailrec def loop(next: Option[(CompletionId, RuntimeBackend.Program, KernelTask, TaskControl)]): Unit =
@@ -415,7 +435,7 @@ final class ExecutionService(
         case Some((id, program, task, control)) =>
           val status =
             try
-              programLifecycleLock.withLock {
+              programLifecycleLock.readLock().withLock {
                 program.execute(task, completionMemory(id), control)
               }
                 .fold(error => CompletionStatus.Failed(runtimeFailure(error)), _ => CompletionStatus.Succeeded)
@@ -447,7 +467,7 @@ final class ExecutionService(
       val ids = pendingExecutions.map(_._1).toSet
       ids.foreach(id => observer.remove(ObservationContext(id.value)))
       pendingExecutions.clear()
-      executionWorkerScheduled = false
+      executionWorkers -= 1
       val current = state.get()
       state.set(current.copy(completions = current.completions.map { case (id, record) =>
         if (ids.contains(id)) id -> record.copy(status = CompletionStatus.Failed(error)) else id -> record
@@ -481,21 +501,175 @@ final class ExecutionService(
 
   private def cleanupClosedSession(): Unit = {
     val programs = stateLock.withLock {
-      if (!closed || executionWorkerScheduled || bindingPrograms.nonEmpty) None
+      if (!closed || executionWorkers != 0 || bindingPrograms.nonEmpty) None
       else {
         val current = state.get()
         state.set(current.copy(allocations = Map.empty, programs = Map.empty, completions = Map.empty))
-        dirtyChunks.clear()
+        dirtyWrites.clear()
+        hostMemories.clear()
         boundAllocations.clear()
         Some(current.programs.values.toVector)
       }
     }
-    programs.foreach(loaded => programLifecycleLock.withLock(loaded.foreach(_.close())))
+    programs.foreach(loaded => programLifecycleLock.writeLock().withLock(loaded.foreach(_.close())))
   }
 
   def completion(id: CompletionId): Either[ExecutionFailure, CompletionStatus] =
     state.get().completions.get(id).map(_.status)
       .toRight(ExecutionFailure.NotFound(s"completion ${id.value} does not exist"))
+
+  def enableHostMemory(): Either[ExecutionFailure, Unit] = stateLock.withLock {
+    if (closed) Left(ExecutionFailure.Failed("execution session is closed"))
+    else { hostMemoryEnabled = true; Right(()) }
+  }
+
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+  def pollHostMemory(id: CompletionId): Either[ExecutionFailure, HostMemoryBatch] = stateLock.withLock {
+    var result: Option[Either[ExecutionFailure, HostMemoryBatch]] = None
+    while (result.isEmpty)
+      completion(id) match {
+        case Left(error)                           => result = Some(Left(error))
+        case Right(CompletionStatus.Failed(error)) => result = Some(Left(error))
+        case Right(CompletionStatus.Succeeded)     =>
+          val writes = hostMemory(id).takeDirty(id.value)
+          result = Some(Right(HostMemoryBatch(Vec.empty, writes, !hostMemory(id).hasDirty(id.value))))
+        case Right(CompletionStatus.Pending) if closed =>
+          result = Some(Left(ExecutionFailure.Failed("execution session is closed")))
+        case Right(CompletionStatus.Pending) =>
+          hostSyncs.get(id.value) match {
+            case Some(exchange) if !exchange.issued =>
+              val writes = hostMemory(id).takeDirty(id.value)
+              val atomic = if (hostMemory(id).hasDirty(id.value)) None
+              else {
+                exchange.issued = true
+                Some(exchange.request)
+              }
+              result = Some(Right(HostMemoryBatch(Vec.empty, writes, false, atomic)))
+            case Some(_) => stateChanged.await()
+            case None    =>
+              val reads = hostMemory(id).requests(id.value)
+              if (hostRequestsReady.contains(id.value) && reads.nonEmpty)
+                result = Some(Right(HostMemoryBatch(reads, Vec.empty, false)))
+              else stateChanged.await()
+          }
+      }
+    result.get
+  }
+
+  def supplyHostMemory(id: CompletionId, ranges: Vec[HostMemoryBytes]): Either[ExecutionFailure, Unit] =
+    stateLock.withLock {
+      completion(id).flatMap {
+        case CompletionStatus.Pending =>
+          hostMemory(id).supply(id.value, ranges).left.map(ExecutionFailure.InvalidRequest(_)).map { _ =>
+            stateChanged.signalAll()
+          }
+        case _ => Left(ExecutionFailure.InvalidRequest("host memory completion is no longer pending"))
+      }
+    }
+
+  def supplyHostSync(id: CompletionId, ticket: Long, observed: Long): Either[ExecutionFailure, Unit] =
+    stateLock.withLock {
+      hostSyncs.get(id.value) match {
+        case Some(exchange) if exchange.issued && exchange.request.ticket == ticket && exchange.observed.isEmpty =>
+          exchange.observed = Some(observed)
+          stateChanged.signalAll()
+          Right(())
+        case _ =>
+          Left(ExecutionFailure.InvalidRequest("host synchronization reply has no matching outstanding request"))
+      }
+    }
+
+  private def hostBacked(id: AllocationId): Boolean = state.get().allocations.get(id).exists(_.hostBacked)
+  private def hostTransfers: Boolean = hostMemoryEnabled || state.get().allocations.values.exists(_.hostBacked)
+  private def hostAccessible(address: GuestAddress, size: Int): Boolean = hostMemoryEnabled ||
+    locateAddress(address, size.refineUnsafe[Positive0]).exists(location => hostBacked(allocationId(location.region)))
+
+  // All host atomics linearize in the native process with CPU atomics. CAS also
+  // supports arbitrary interpreter RMW functions without serializing Scala closures.
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+  private def atomicHostMemory(
+      id: CompletionId,
+      address: GuestAddress,
+      size: MemoryValueByteWidth
+  )(update: Long => Long): Either[Fault, Long] =
+    if ((size.value != 4 && size.value != 8) || address.value % size.value != 0)
+      Left(Fault.Memory("host atomics require aligned 32- or 64-bit storage"))
+    else if (address.value <= 0 || address.value > Long.MaxValue - size.value || !hostAccessible(address, size.value))
+      Left(Fault.Memory("host atomic address is unavailable or overflows"))
+    else hostSyncLock.withLock {
+      val mask                                = if (size.value == 4) 0xffffffffL else -1L
+      var expected                            = 0L
+      var result: Option[Either[Fault, Long]] = None
+      while (result.isEmpty) {
+        val desired  = update(expected) & mask
+        val observed = synchronizeHost(id, Some(HostMemoryAtomic(address, size.value, expected, desired))).map(_ & mask)
+        observed match {
+          case Left(error)                       => result = Some(Left(error))
+          case Right(value) if value == expected => result = Some(Right(value))
+          case Right(value)                      => expected = value
+        }
+      }
+      result.get
+    }
+
+  private def synchronizeHost(id: CompletionId, atomic: Option[HostMemoryAtomic]): Either[Fault, Long] =
+    stateLock.withLock {
+      val exchange = HostSyncExchange(HostMemorySync(nextHostSync.incrementAndGet(), atomic))
+      hostSyncs.update(id.value, exchange)
+      stateChanged.signalAll()
+      while (!closed && exchange.observed.isEmpty) stateChanged.await()
+      val _ = hostSyncs.remove(id.value)
+      hostMemory(id).invalidateClean()
+      // A poller can consume the acknowledgement wakeup before this worker does.
+      // Removing the exchange makes other workers' pending reads eligible again.
+      stateChanged.signalAll()
+      if (closed) Left(Fault.Cancelled) else Right(exchange.observed.get)
+    }
+
+  private def flushHostWrites(id: CompletionId): Either[Fault, Unit] = hostSyncLock.withLock {
+    if (stateLock.withLock(hostMemory(id).hasDirty(id.value))) synchronizeHost(id, None).map(_ => ())
+    else Right(())
+  }
+
+  private def flushHostMemory(id: CompletionId): Either[Fault, Unit] = stateLock.withLock {
+    hostRequestsReady.update(id.value, hostRequestsReady.getOrElse(id.value, 0) + 1)
+    stateChanged.signalAll()
+    while (!closed && hostMemory(id).hasPending(id.value)) stateChanged.await()
+    if (hostRequestsReady(id.value) == 1) { val _ = hostRequestsReady.remove(id.value) }
+    else hostRequestsReady.update(id.value, hostRequestsReady(id.value) - 1)
+    if (closed) Left(Fault.Cancelled) else Right(())
+  }
+
+  private def readHostMemory(
+      id: CompletionId,
+      address: GuestAddress,
+      size: Int :| Positive0,
+      defer: Boolean
+  ): Either[Fault, Vec[Byte]] = {
+    val result = stateLock.withLock {
+      if (!hostAccessible(address, size) || address.value <= 0 || address.value > Long.MaxValue - size.toLong)
+        Left(Fault.Memory("host memory address is unavailable or overflows"))
+      else hostMemory(id).read(id.value, address.value, size).toRight(Fault.PendingMemory)
+    }
+    result match {
+      case Left(Fault.PendingMemory) if !defer =>
+        flushHostMemory(id).flatMap(_ => readHostMemory(id, address, size, false))
+      case other => other
+    }
+  }
+
+  private def writeHostMemory(id: CompletionId, address: GuestAddress, bytes: Vec[Byte]): Either[Fault, Unit] =
+    stateLock.withLock {
+      if (
+        !hostAccessible(address, bytes.size) || address.value <= 0 || address.value > Long.MaxValue - bytes.size.toLong
+      )
+        Left(Fault.Memory("host memory address is unavailable or overflows"))
+      else {
+        val atomicWidth = if ((bytes.size == 4 || bytes.size == 8) && address.value % bytes.size == 0) bytes.size else 0
+        hostMemory(id).write(id.value, address.value, bytes, atomicWidth)
+        Right(())
+      }
+    }
 
   def awaitCompletion(id: CompletionId): Either[ExecutionFailure, Unit] = stateLock.withLock {
     try {
@@ -526,20 +700,14 @@ final class ExecutionService(
         Left(ExecutionFailure.InvalidRequest(s"completion ${id.value} is still pending"))
       case Some(CompletionStatus.Failed(error)) => Left(error)
       case Some(CompletionStatus.Succeeded)     =>
-        val ranges = dirtyChunks.get(id).toList.view
+        val ranges = dirtyWrites.get(id).toList.view
           .flatMap(_.view)
           .toArray
           .sortBy(_._1.value)
           .view
-          .flatMap { case (allocationId, chunks) =>
-            val allocationSize = current.allocations(allocationId).size
-            chunks.keys.toArray.sorted.view.map { chunk =>
-              val offset = chunk * DirtyChunkSize
-              DirtyRange(
-                allocationId,
-                offset.refineUnsafe[Positive0],
-                math.min(DirtyChunkSize, allocationSize.toLong - offset).toInt.refineUnsafe[Positive]
-              )
+          .flatMap { case (allocationId, written) =>
+            written.chunks.map { (offset, size) =>
+              DirtyRange(allocationId, offset.toLong.refineUnsafe[Positive0], size.refineUnsafe[Positive])
             }
           }
         Right(Vec.from(ranges))
@@ -580,7 +748,8 @@ final class ExecutionService(
         Left(ExecutionFailure.InvalidRequest(s"completion ${id.value} is still pending"))
       case Some(_) =>
         state.set(current.copy(completions = current.completions.removed(id)))
-        val _ = dirtyChunks.remove(id)
+        val _ = dirtyWrites.remove(id)
+        val _ = hostMemories.remove(id)
         Right(())
     }
   }
@@ -633,6 +802,46 @@ final class ExecutionService(
     atomicModifyValue(id, offset, size, None)(update)
 
   private final class CompletionMemory(completion: CompletionId) extends Memory with AddressSpace {
+    override def hasNativePointers(region: MemoryRegion): Boolean =
+      hostRegion(region) || state.get().allocations.get(allocationId(region)).exists(_.address.nonEmpty)
+
+    // The synchronization word can be device-owned while the ordered payload is
+    // host-owned. Publication/acquisition must cover both kinds of backing.
+    private def deviceAtomic(operation: => Either[Fault, Long]): Either[Fault, Long] =
+      if (!hostTransfers) operation
+      else flushHostWrites().flatMap(_ => operation).map { value =>
+        invalidateHostReads()
+        value
+      }
+
+    override def fenceHostMemory(): Either[Fault, Unit] =
+      if (hostTransfers) hostSyncLock.withLock(synchronizeHost(completion, None).map(_ => ()))
+      else Right(())
+    override def prepareReads(ranges: Vec[(GuestAddress, Int :| Positive0)]): Either[Fault, Unit] = {
+      val staged = ranges.flatMap((address, size) =>
+        if (locateAddress(address, size).exists(location => !hostBacked(allocationId(location.region))))
+          Vec.empty[(GuestAddress, Int :| Positive0)]
+        else segments(address, size)
+      ).foldLeft[Either[Fault, Unit]](Right(())) {
+        case (result, (address, size)) =>
+          result.flatMap(_ =>
+            withAllocation(address, size) { (id, _) =>
+              if (id.exists(value => !hostBacked(value))) Right(())
+              else readHostMemory(completion, address, size, true) match {
+                case Left(Fault.PendingMemory) => Right(())
+                case other                     => other.map(_ => ())
+              }
+            }
+          )
+      }
+      staged.flatMap(_ => flushHostReads())
+    }
+    override def flushHostWrites(): Either[Fault, Unit]   = ExecutionService.this.flushHostWrites(completion)
+    override def invalidateHostReads(): Unit              = stateLock.withLock(hostMemory(completion).invalidateClean())
+    override def defersHostReads: Boolean                 = hostTransfers
+    override def flushHostReads(): Either[Fault, Unit]    = flushHostMemory(completion)
+    private def hostRegion(region: MemoryRegion): Boolean = region.value == 0L
+
     @SuppressWarnings(Array(
       "scalafix:DisableSyntax.var",
       "scalafix:GemstoneNoAssume",
@@ -641,7 +850,7 @@ final class ExecutionService(
     private inline def withAllocation[A](
         address: GuestAddress,
         size: Int :| Positive0
-    )(inline operation: (AllocationId, Long :| Positive0) => Either[Fault, A]): Either[Fault, A] = {
+    )(inline operation: (Option[AllocationId], Long :| Positive0) => Either[Fault, A]): Either[Fault, A] = {
       val allocations = state.get().allocations.iterator
       var foundId     = 0L
       var foundOffset = 0L
@@ -657,63 +866,152 @@ final class ExecutionService(
           foundOffset = relative
         }
       }
-      if (foundId == 0L) Left(Fault.Memory(s"address ${address.value} is not bound"))
-      else operation(AllocationId.assume(foundId), foundOffset.assume[Positive0])
+      if (foundId == 0L && address.value > 0) operation(None, address.value.assume[Positive0])
+      else if (foundId == 0L) Left(Fault.Memory(s"address ${address.value} is not bound"))
+      else operation(Some(AllocationId.assume(foundId)), foundOffset.assume[Positive0])
     }
+
+    // Explicit registrations may share a view while using several non-overlapping
+    // backing allocations. Split only at known boundaries; unknown gaps remain exact.
+    private def segments(address: GuestAddress, size: Int :| Positive0): Vec[(GuestAddress, Int :| Positive0)] = {
+      val end = address.value + size.toLong
+      if (address.value <= 0 || end < address.value) Vec((address, size))
+      else {
+        val boundaries = state.get().allocations.toVector.flatMap { (id, allocation) =>
+          val base = allocation.address.getOrElse(syntheticAddress(id)).value
+          Vector(base, base + allocation.size)
+        }.filter(point => point > address.value && point < end)
+        val points = (Vector(address.value, end) ++ boundaries).distinct.sorted
+        Vec.from(points.zip(points.drop(1)).map { (begin, end) =>
+          (GuestAddress(begin), (end - begin).toInt.refineUnsafe[Positive0])
+        })
+      }
+    }
+
+    private def readSegments(address: GuestAddress, size: Int :| Positive0, defer: Boolean): Either[Fault, Vec[Byte]] =
+      segments(address, size).foldLeft[Either[Fault, Vec[Byte]]](Right(Vec.empty)) { case (result, (begin, length)) =>
+        result.flatMap(bytes =>
+          withAllocation(begin, length) { (id, offset) =>
+            val part = if (id.isEmpty || id.exists(hostBacked(_))) readHostMemory(completion, begin, length, defer)
+            else ExecutionService.this.read(id.get, offset, length).left.map(memoryFault(_))
+            part.map(bytes ++ _)
+          }
+        )
+      }
+
+    private def writeSegments(address: GuestAddress, bytes: Vec[Byte]): Either[Fault, Unit] =
+      segments(address, bytes.nonNegativeSize).foldLeft[Either[Fault, Unit]](Right(())) {
+        case (result, (begin, length)) =>
+          result.flatMap(_ =>
+            withAllocation(begin, length) { (id, offset) =>
+              val part = bytes.slice((begin.value - address.value).toInt, (begin.value - address.value).toInt + length)
+              if (id.isEmpty || id.exists(hostBacked(_))) writeHostMemory(completion, begin, part)
+              else ExecutionService.this.write(id.get, offset, part, Some(completion)).left.map(memoryFault(_))
+            }
+          )
+      }
+
+    // Device atomics serialize against every lane using this address space. Host
+    // CPU participation still requires a separate coherence/atomic protocol.
+    private def atomicAddress(address: GuestAddress, size: MemoryValueByteWidth, defer: Boolean)(
+        update: Long => Long
+    ): Either[Fault, Long] = {
+      val result = stateLock.withLock {
+        readSegments(address, size.nonNegative, true).flatMap { bytes =>
+          val previous = LittleEndian.decode(bytes, 0, size.scalarByteWidth)
+          writeSegments(address, LittleEndian.toVec(update(previous), size.scalarByteWidth)).map(_ => previous)
+        }
+      }
+      result match {
+        case Left(Fault.PendingMemory) if !defer =>
+          flushHostMemory(completion).flatMap(_ => atomicAddress(address, size, false)(update))
+        case other => other
+      }
+    }
+
+    private def crossesRegion(region: MemoryRegion, offset: Long :| Positive0, size: Int): Boolean =
+      !hostRegion(region) && state.get().allocations.get(allocationId(region))
+        .exists(allocation =>
+          allocation.address.nonEmpty && (size > allocation.size || offset > allocation.size - size)
+        )
 
     override def read(
         region: MemoryRegion,
         offset: Long :| Positive0,
         size: Int :| Positive0
     ): Either[Fault, Vec[Byte]] =
-      ExecutionService.this.read(allocationId(region), offset, size).left.map(memoryFault(_))
+      if (hostRegion(region)) readSegments(GuestAddress(offset), size, true)
+      else if (hostBacked(allocationId(region)) || crossesRegion(region, offset, size))
+        regionAddress(region, offset).flatMap(readSegments(_, size, true))
+      else ExecutionService.this.read(allocationId(region), offset, size).left.map(memoryFault(_))
 
     override def readValue(
         region: MemoryRegion,
         offset: Long :| Positive0,
         size: MemoryValueByteWidth
     ): Either[Fault, Long] =
-      ExecutionService.this.readValue(allocationId(region), offset, size).left.map(memoryFault(_))
+      if (hostRegion(region) || hostBacked(allocationId(region)) || crossesRegion(region, offset, size.value))
+        read(region, offset, size.nonNegative)
+          .map(bytes => LittleEndian.decode(bytes, 0, size.scalarByteWidth))
+      else ExecutionService.this.readValue(allocationId(region), offset, size).left.map(memoryFault(_))
 
     override def write(
         region: MemoryRegion,
         offset: Long :| Positive0,
         bytes: Vec[Byte]
     ): Either[Fault, Unit] =
-      ExecutionService.this.write(allocationId(region), offset, bytes, Some(completion)).left.map(memoryFault(_))
+      if (hostRegion(region)) writeSegments(GuestAddress(offset), bytes)
+      else if (hostBacked(allocationId(region)) || crossesRegion(region, offset, bytes.size))
+        regionAddress(region, offset).flatMap(writeSegments(_, bytes))
+      else ExecutionService.this.write(allocationId(region), offset, bytes, Some(completion)).left.map(memoryFault(_))
 
     override def writeValue(
         region: MemoryRegion,
         offset: Long :| Positive0,
         value: Long,
         size: MemoryValueByteWidth
-    ): Either[Fault, Unit] = ExecutionService.this.writeValue(
-      allocationId(region),
-      offset,
-      value,
-      size,
-      Some(completion)
-    ).left.map(memoryFault(_))
+    ): Either[Fault, Unit] =
+      if (hostRegion(region) || hostBacked(allocationId(region)) || crossesRegion(region, offset, size.value))
+        write(region, offset, LittleEndian.toVec(value, size.scalarByteWidth))
+      else ExecutionService.this.writeValue(
+        allocationId(region),
+        offset,
+        value,
+        size,
+        Some(completion)
+      ).left.map(memoryFault(_))
 
     override def atomicModifyValue(region: MemoryRegion, offset: Long :| Positive0, size: MemoryValueByteWidth)(
         update: Long => Long
     ): Either[Fault, Long] =
-      ExecutionService.this.atomicModifyValue(
+      if (hostRegion(region)) atomicHostMemory(completion, GuestAddress(offset), size)(update)
+      else if (hostBacked(allocationId(region)))
+        regionAddress(region, offset).flatMap(atomicHostMemory(completion, _, size)(update))
+      else if (crossesRegion(region, offset, size.value))
+        regionAddress(region, offset).flatMap(atomicAddress(_, size, true)(update))
+      else deviceAtomic(ExecutionService.this.atomicModifyValue(
         allocationId(region),
         offset,
         size,
         Some(completion)
-      )(update).left.map(memoryFault(_))
+      )(update).left.map(memoryFault(_)))
 
     override def address(region: MemoryRegion, offset: Long :| Positive0): Either[Fault, GuestAddress] =
-      regionAddress(region, offset)
+      if (hostRegion(region)) Right(GuestAddress(offset)) else regionAddress(region, offset)
 
     override def locate(address: GuestAddress, size: Int :| Positive0): Either[Fault, AddressSpace.Location] =
-      locateAddress(address, size)
+      locateAddress(address, size).orElse(
+        if (
+          address.value > 0 &&
+          (hostMemoryEnabled || segments(address, size).forall((begin, length) => locateAddress(begin, length).isRight))
+        ) Right(AddressSpace.Location(MemoryRegion(0), address.value.refineUnsafe[Positive0]))
+        else Left(Fault.Memory(s"address ${address.value} is not bound"))
+      )
 
     override def read(memory: Memory, address: GuestAddress, size: Int :| Positive0): Either[Fault, Vec[Byte]] =
       withAllocation(address, size)((id, offset) =>
-        ExecutionService.this.read(id, offset, size).left.map(memoryFault(_))
+        if (id.isEmpty || id.exists(hostBacked(_))) readSegments(address, size, false)
+        else ExecutionService.this.read(id.get, offset, size).left.map(memoryFault(_))
       )
 
     override def readValue(
@@ -722,12 +1020,16 @@ final class ExecutionService(
         size: MemoryValueByteWidth
     ): Either[Fault, Long] =
       withAllocation(address, size.nonNegative)((id, offset) =>
-        ExecutionService.this.readValue(id, offset, size).left.map(memoryFault(_))
+        if (id.isEmpty || id.exists(hostBacked(_))) readSegments(address, size.nonNegative, false).map(bytes =>
+          LittleEndian.decode(bytes, 0, size.scalarByteWidth)
+        )
+        else ExecutionService.this.readValue(id.get, offset, size).left.map(memoryFault(_))
       )
 
     override def write(memory: Memory, address: GuestAddress, bytes: Vec[Byte]): Either[Fault, Unit] =
       withAllocation(address, bytes.nonNegativeSize)((id, offset) =>
-        ExecutionService.this.write(id, offset, bytes, Some(completion)).left.map(memoryFault(_))
+        if (id.isEmpty || id.exists(hostBacked(_))) writeSegments(address, bytes)
+        else ExecutionService.this.write(id.get, offset, bytes, Some(completion)).left.map(memoryFault(_))
       )
 
     override def writeValue(
@@ -737,7 +1039,9 @@ final class ExecutionService(
         size: MemoryValueByteWidth
     ): Either[Fault, Unit] =
       withAllocation(address, size.nonNegative)((id, offset) =>
-        ExecutionService.this.writeValue(id, offset, value, size, Some(completion)).left.map(memoryFault(_))
+        if (id.isEmpty || id.exists(hostBacked(_)))
+          writeSegments(address, LittleEndian.toVec(value, size.scalarByteWidth))
+        else ExecutionService.this.writeValue(id.get, offset, value, size, Some(completion)).left.map(memoryFault(_))
       )
 
     override def atomicModifyValue(
@@ -746,7 +1050,13 @@ final class ExecutionService(
         size: MemoryValueByteWidth
     )(update: Long => Long): Either[Fault, Long] =
       withAllocation(address, size.nonNegative)((id, offset) =>
-        ExecutionService.this.atomicModifyValue(id, offset, size, Some(completion))(update).left.map(memoryFault(_))
+        if (id.isEmpty || id.exists(hostBacked(_))) atomicHostMemory(completion, address, size)(update)
+        else deviceAtomic(ExecutionService.this.atomicModifyValue(
+          id.get,
+          offset,
+          size,
+          Some(completion)
+        )(update).left.map(memoryFault(_)))
       )
   }
 
@@ -867,16 +1177,8 @@ final class ExecutionService(
       offset: Int,
       size: Int
   ): Unit = completion.foreach { completionId =>
-    val allocations = dirtyChunks.getOrElseUpdate(completionId, mutable.HashMap.empty)
-    val chunks      = allocations.getOrElseUpdate(id, mutable.LongMap.empty)
-    val first       = offset.toLong / DirtyChunkSize
-    val last        = (offset.toLong + size.toLong - 1L) / DirtyChunkSize
-    @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-    var chunk = first
-    while (chunk <= last) {
-      chunks.update(chunk, ())
-      chunk += 1L
-    }
+    val allocations = dirtyWrites.getOrElseUpdate(completionId, mutable.HashMap.empty)
+    allocations.getOrElseUpdate(id, WrittenRanges()).add(offset, size)
   }
 
   private def validateTask(task: KernelTask, current: State): Either[ExecutionFailure, Unit] =

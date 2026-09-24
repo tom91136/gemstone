@@ -10,6 +10,12 @@ import scala.annotation.nowarn
 
 /** Address-oriented view used by instruction sets whose pointer operands contain virtual device addresses. */
 trait AddressMemory {
+  def fence(): Either[MemoryError, Unit] = Right(())
+
+  /** Stage only resolved accesses from active lanes; implementations may merge adjacent ranges. */
+  @nowarn("msg=unused explicit parameter")
+  def prepareReads(ranges: Vec[(GuestAddress, Int :| Positive0)]): Either[MemoryError, Unit] = Right(())
+
   def readInt8(address: GuestAddress): Either[MemoryError, Byte]
   def readInt32(address: GuestAddress): Either[MemoryError, Int]
   def writeInt8(address: GuestAddress, value: Byte): Either[MemoryError, Unit]
@@ -46,7 +52,7 @@ trait AddressMemory {
         write(0)
     }
 
-  final def validateRange(address: GuestAddress, size: Int :| Positive0): Either[MemoryError, Unit] = {
+  def validateRange(address: GuestAddress, size: Int :| Positive0): Either[MemoryError, Unit] = {
     @scala.annotation.tailrec
     def validate(index: Int): Either[MemoryError, Unit] =
       if (index == size) Right(())
