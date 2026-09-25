@@ -558,13 +558,17 @@ TEST_CASE("algorithms/roc-thrust-semantic/async-for-each/i32/n11", "[unified][ro
   thrust::device_vector<TestType> device(input.begin(), input.end());
   std::vector<TestType> host(input.begin(), input.end());
   thrust::for_each(host.begin(), host.end(), Halve<TestType>{});
+  UNIFIED_THRUST_ASYNC_BEGIN
   auto future = thrust::async::for_each(device.begin(), device.end(), Halve<TestType>{});
+  UNIFIED_THRUST_ASYNC_END
   future.wait();
   {
     INFO("async-for-each");
     REQUIRE(((std::vector<TestType>(device.begin(), device.end())) == (host)));
   }
+  UNIFIED_THRUST_ASYNC_BEGIN
   auto via_policy = thrust::async::for_each(thrust::device, device.begin(), device.end(), Halve<TestType>{});
+  UNIFIED_THRUST_ASYNC_END
   via_policy.wait();
   for (auto &value : host)
     value /= TestType{2};
@@ -580,19 +584,23 @@ TEST_CASE("algorithms/roc-thrust-semantic/async-reduce/i32/n11", "[unified][roct
   TestType expected = TestType{};
   for (const auto value : input)
     expected += value;
+  UNIFIED_THRUST_ASYNC_BEGIN
   auto default_future = thrust::async::reduce(device.begin(), device.end());
+  UNIFIED_THRUST_ASYNC_END
   const TestType default_value = default_future.get();
   {
     INFO("async-reduce");
     REQUIRE((default_value == expected));
   }
+  UNIFIED_THRUST_ASYNC_BEGIN
   auto policy_future = thrust::async::reduce(thrust::device, device.begin(), device.end());
-  {
+  UNIFIED_THRUST_ASYNC_END {
     INFO("async-reduce-policy");
     REQUIRE((policy_future.get() == expected));
   }
+  UNIFIED_THRUST_ASYNC_BEGIN
   auto custom_future = thrust::async::reduce(device.begin(), device.end(), TestType{7}, unified::algorithms::Plus<TestType>{});
-  {
+  UNIFIED_THRUST_ASYNC_END {
     INFO("async-reduce-custom");
     REQUIRE((custom_future.get() == expected + TestType{7}));
   }
@@ -602,7 +610,9 @@ TEST_CASE("algorithms/roc-thrust-semantic/async-reduce-into/i32/n11", "[unified]
   const std::vector<TestType> input{TestType{3}, TestType{-4}, TestType{10}, TestType{1}, TestType{2}};
   thrust::device_vector<TestType> device(input.begin(), input.end());
   thrust::device_vector<TestType> output(1, TestType{0});
+  UNIFIED_THRUST_ASYNC_BEGIN
   auto done = thrust::async::reduce_into(device.begin(), device.end(), output.begin());
+  UNIFIED_THRUST_ASYNC_END
   done.wait();
   TestType expected = TestType{};
   for (const auto value : input)

@@ -78,8 +78,7 @@ bool appendArgument(std::string &output, const PrintArgument &argument, std::str
         if constexpr (std::is_same_v<T, PrintArgumentInteger>) {
           if (lane >= value.bits.size() || value.width <= 0 || value.width > 64) return false;
           const int32_t width = lengthSpecifier == "hh" ? 8 : lengthSpecifier == "h" ? 16 : lengthSpecifier == "l" ? 64 : value.width;
-          if (conversion == 'c')
-            return appendFormatted(output, spec + "c", static_cast<int>(value.bits[lane] & 0xff));
+          if (conversion == 'c') return appendFormatted(output, spec + "c", static_cast<int>(value.bits[lane] & 0xff));
           if (conversion == 'd' || conversion == 'i')
             return appendFormatted(output, spec + "lld", static_cast<long long>(signedValue(value.bits[lane], width)));
           if (conversion == 'o' || conversion == 'u' || conversion == 'x' || conversion == 'X')

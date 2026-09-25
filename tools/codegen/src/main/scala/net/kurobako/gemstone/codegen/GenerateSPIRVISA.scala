@@ -14,14 +14,13 @@ import ujson.Value
 object GenerateSPIRVISA {
   private sealed trait Request
   private final case class Instructions(
-      check: Boolean,
       grammar: Path,
       extinst: Path,
       sourceRoot: Path,
       packageVersion: String
   ) extends Request
   private final case class ExtendedInstructionSet(name: String, objectName: String, instructions: Vector[(String, Int)])
-  private final case class Tests(check: Boolean, grammar: Path, tests: Path, sourceRoot: Path, packageVersion: String)
+  private final case class Tests(grammar: Path, tests: Path, sourceRoot: Path, packageVersion: String)
       extends Request
   private final case class Operand(
       kind: String :| (MinLength[1] & NoNul),
@@ -64,26 +63,24 @@ object GenerateSPIRVISA {
   private val command = Command("GenerateSPIRVISA", "Generate SPIR-V ISA sources")(
     Opts.subcommands(
       Command("instructions", "Generate instruction sources")((
-        Opts.flag("check", help = "Verify the existing generated source").orFalse,
         Opts.argument[String]("grammar").map(Path.of(_)),
         Opts.argument[String]("extinst-directory").map(Path.of(_)),
         Opts.argument[String]("generated-source-root").map(Path.of(_)),
         Opts.argument[String]("package-version")
-      ).mapN(Instructions(_, _, _, _, _))),
+      ).mapN(Instructions(_, _, _, _))),
       Command("tests", "Generate reference tests")((
-        Opts.flag("check", help = "Verify the existing generated source").orFalse,
         Opts.argument[String]("grammar").map(Path.of(_)),
         Opts.argument[String]("tests").map(Path.of(_)),
         Opts.argument[String]("generated-source-root").map(Path.of(_)),
         Opts.argument[String]("package-version")
-      ).mapN(Tests(_, _, _, _, _)))
+      ).mapN(Tests(_, _, _, _)))
     )
   )
 
   def main(arguments: Array[String]): Unit = command.parse(arguments.toSeq).fold(
     help => throw IllegalArgumentException(help.toString),
     {
-      case Instructions(check, grammarPath, extinstDirectory, sourceRoot, packageVersion) =>
+      case Instructions(grammarPath, extinstDirectory, sourceRoot, packageVersion) =>
         val version  = checkedPackageVersion(packageVersion)
         val grammar  = readGrammar(grammarPath)
         val extended = readExtendedInstructions(extinstDirectory)
@@ -94,21 +91,20 @@ object GenerateSPIRVISA {
             base.resolve("Instruction.scala")         -> renderInstructions(grammar, version),
             base.resolve("ExtendedInstruction.scala") -> renderExtendedInstructions(extended, version),
             base.resolve("BuiltIn.scala")             -> renderBuiltIns(grammar, version)
-          ),
-          check
+          )
         )
         Console.out.println(
-          s"${if (check) "validated" else "generated"} ${grammar.entries.size} typed SPIR-V core instructions and ${extended.map(_.instructions.size).sum} extended instructions"
+          s"generated ${grammar.entries.size} typed SPIR-V core instructions and ${extended.map(_.instructions.size).sum} extended instructions"
         )
-      case Tests(check, grammarPath, testRoot, sourceRoot, packageVersion) =>
+      case Tests(grammarPath, testRoot, sourceRoot, packageVersion) =>
         val version  = checkedPackageVersion(packageVersion)
         val grammar  = readGrammar(grammarPath)
         val upstream = Vector("binary_parse_test.cpp", "binary_endianness_test.cpp", "val/val_opencl_test.cpp")
           .map(name => name -> discoveredTests(testRoot.resolve(name)))
         val output = sourceRoot.resolve(PackageRoot).resolve(version.value).resolve("ReferenceSuite.scala")
-        syncRoot(sourceRoot, Map(output -> renderTests(grammar.entries.size, upstream, version)), check)
+        syncRoot(sourceRoot, Map(output -> renderTests(grammar.entries.size, upstream, version)))
         Console.out.println(
-          s"${if (check) "validated" else "generated"} SPIR-V reference suite for ${grammar.entries.size} opcodes and ${upstream.map(_._2.size).sum} upstream tests"
+          s"generated SPIR-V reference suite for ${grammar.entries.size} opcodes and ${upstream.map(_._2.size).sum} upstream tests"
         )
     }
   )
@@ -617,9 +613,8 @@ object GenerateSPIRVISA {
       valid => valid
     )
 
-  private def sync(path: Path, content: String, check: Boolean): Unit = {
-    val formatted = GeneratedScalaFormatter(path, content)
-    GeneratedFiles.sync(path, formatted, check)
+  private def write(path: Path, content: String): Unit = {
+    val _ = GeneratedFiles.write(path, GeneratedScalaFormatter(path, content))
   }
 
   private def readExtendedInstructions(directory: Path): Vector[ExtendedInstructionSet] =
@@ -686,11 +681,10 @@ object GenerateSPIRVISA {
           |""".stripMargin
   }
 
-  private def syncRoot(root: Path, outputs: Map[Path, String], check: Boolean): Unit = {
-    outputs.foreach { case (path, content) => sync(path, content, check) }
+  private def syncRoot(root: Path, outputs: Map[Path, String]): Unit = {
+    outputs.foreach { case (path, content) => write(path, content) }
     val include = (path: Path) => path.getFileName.toString.endsWith(".scala")
-    if (check) GeneratedFiles.requireOnly(root, outputs.keySet, include)
-    else GeneratedFiles.removeUnexpected(root, outputs.keySet, include)
+    GeneratedFiles.removeUnexpected(root, outputs.keySet, include)
   }
 
 }

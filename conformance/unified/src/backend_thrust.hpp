@@ -77,6 +77,16 @@
   #define UNIFIED_HAS_THRUST_ASYNC 0
 #endif
 
+// CCCL 2.8 marks the whole thrust::async namespace deprecated while the conformance
+// cases still exercise it
+#if defined(__clang__) || defined(__GNUC__)
+  #define UNIFIED_THRUST_ASYNC_BEGIN _Pragma("GCC diagnostic push") _Pragma("GCC diagnostic ignored \"-Wdeprecated-declarations\"")
+  #define UNIFIED_THRUST_ASYNC_END _Pragma("GCC diagnostic pop")
+#else
+  #define UNIFIED_THRUST_ASYNC_BEGIN
+  #define UNIFIED_THRUST_ASYNC_END
+#endif
+
 #if defined(__HIPCC__)
   #include <rocprim/block/block_scan.hpp>
 #else
@@ -936,7 +946,9 @@ public:
     // Unlike the ordinary stream-policy overload, this is the vendor async
     // API: reduce returns a device future and get() is the completion point.
 #if UNIFIED_HAS_THRUST_ASYNC
+    UNIFIED_THRUST_ASYNC_BEGIN
     auto result = thrust::async::reduce(thrust_support::policy(stream.get()), source.begin(), source.end(), T{}, thrust::plus<T>{});
+    UNIFIED_THRUST_ASYNC_END
     return result.get();
 #else
     return thrust::reduce(thrust_support::policy(stream.get()), source.begin(), source.end(), T{}, thrust::plus<T>{});
@@ -958,7 +970,9 @@ public:
     const auto last = first + static_cast<ptrdiff_t>(size);
     thrust_support::StreamResource stream("HIP async inclusive counting stream create");
 #if UNIFIED_HAS_THRUST_ASYNC
+    UNIFIED_THRUST_ASYNC_BEGIN
     auto completion = thrust::async::inclusive_scan(thrust_support::policy(stream.get()), first, last, output.begin(), thrust::plus<T>{});
+    UNIFIED_THRUST_ASYNC_END
     completion.wait();
 #else
     thrust::inclusive_scan(thrust_support::policy(stream.get()), first, last, output.begin(), thrust::plus<T>{});
@@ -973,8 +987,10 @@ public:
     const auto last = first + static_cast<ptrdiff_t>(size);
     thrust_support::StreamResource stream("HIP async exclusive counting stream create");
 #if UNIFIED_HAS_THRUST_ASYNC
+    UNIFIED_THRUST_ASYNC_BEGIN
     auto completion =
         thrust::async::exclusive_scan(thrust_support::policy(stream.get()), first, last, output.begin(), T{}, thrust::plus<T>{});
+    UNIFIED_THRUST_ASYNC_END
     completion.wait();
 #else
     thrust::exclusive_scan(thrust_support::policy(stream.get()), first, last, output.begin(), T{}, thrust::plus<T>{});
@@ -987,8 +1003,10 @@ public:
     thrust::device_vector<T> source(input.begin(), input.end());
     thrust_support::StreamResource stream("HIP async inclusive discard stream create");
 #if UNIFIED_HAS_THRUST_ASYNC
+    UNIFIED_THRUST_ASYNC_BEGIN
     auto completion = thrust::async::inclusive_scan(thrust_support::policy(stream.get()), source.begin(), source.end(),
                                                     thrust::make_discard_iterator(), thrust::plus<T>{});
+    UNIFIED_THRUST_ASYNC_END
     completion.wait();
 #else
     thrust::inclusive_scan(thrust_support::policy(stream.get()), source.begin(), source.end(), thrust::make_discard_iterator(),
@@ -1001,8 +1019,10 @@ public:
     thrust::device_vector<T> source(input.begin(), input.end());
     thrust_support::StreamResource stream("HIP async exclusive discard stream create");
 #if UNIFIED_HAS_THRUST_ASYNC
+    UNIFIED_THRUST_ASYNC_BEGIN
     auto completion = thrust::async::exclusive_scan(thrust_support::policy(stream.get()), source.begin(), source.end(),
                                                     thrust::make_discard_iterator(), T{}, thrust::plus<T>{});
+    UNIFIED_THRUST_ASYNC_END
     completion.wait();
 #else
     thrust::exclusive_scan(thrust_support::policy(stream.get()), source.begin(), source.end(), thrust::make_discard_iterator(), T{},
@@ -1017,8 +1037,10 @@ public:
     thrust::device_vector<T> output(size);
     thrust_support::StreamResource stream("HIP async inclusive stateful stream create");
 #if UNIFIED_HAS_THRUST_ASYNC
+    UNIFIED_THRUST_ASYNC_BEGIN
     auto completion = thrust::async::inclusive_scan(thrust_support::policy(stream.get()), source.begin(), source.end(), output.begin(),
                                                     hip_async::StatefulOperator<T>{T{2}});
+    UNIFIED_THRUST_ASYNC_END
     completion.wait();
 #else
     thrust::inclusive_scan(thrust_support::policy(stream.get()), source.begin(), source.end(), output.begin(),
@@ -1034,8 +1056,10 @@ public:
     thrust::device_vector<T> output(size);
     thrust_support::StreamResource stream("HIP async exclusive stateful stream create");
 #if UNIFIED_HAS_THRUST_ASYNC
+    UNIFIED_THRUST_ASYNC_BEGIN
     auto completion = thrust::async::exclusive_scan(thrust_support::policy(stream.get()), source.begin(), source.end(), output.begin(),
                                                     T{42}, hip_async::StatefulOperator<T>{T{2}});
+    UNIFIED_THRUST_ASYNC_END
     completion.wait();
 #else
     thrust::exclusive_scan(thrust_support::policy(stream.get()), source.begin(), source.end(), output.begin(), T{42},

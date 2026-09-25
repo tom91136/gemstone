@@ -8,17 +8,8 @@ import java.nio.file.StandardCopyOption
 import scala.jdk.CollectionConverters.*
 import scala.util.Using
 
-/** Atomic updates and exact freshness checks for checked-in generator outputs. */
+/** Atomic updates for checked-in generator outputs. */
 object GeneratedFiles {
-  def sync(path: Path, content: String, check: Boolean): Unit =
-    if (check) {
-      if (!Files.isRegularFile(path)) throw IllegalStateException(s"generated file is absent: $path")
-      if (Files.readString(path, StandardCharsets.UTF_8) != content)
-        throw IllegalStateException(s"generated file is stale: $path")
-    } else {
-      val _ = write(path, content)
-    }
-
   def write(path: Path, content: String): Boolean = {
     val current = Option.when(Files.isRegularFile(path))(Files.readString(path, StandardCharsets.UTF_8))
     if (current.contains(content)) false
@@ -34,23 +25,6 @@ object GeneratedFiles {
         }
         true
       }
-    }
-  }
-
-  def requireOnly(directory: Path, expected: Set[Path], include: Path => Boolean): Unit = {
-    val normalized = expected.map(_.toAbsolutePath.normalize)
-    val actual     =
-      if (!Files.isDirectory(directory)) Set.empty[Path]
-      else {
-        Using.resource(Files.walk(directory)) { paths =>
-          paths.toList.asScala.view.filter(path => Files.isRegularFile(path) && include(path))
-            .map(_.toAbsolutePath.normalize).toSet
-        }
-      }
-    if (actual != normalized) {
-      val missing = normalized.diff(actual).toVector.sortBy(_.toString).mkString(", ")
-      val extra   = actual.diff(normalized).toVector.sortBy(_.toString).mkString(", ")
-      throw IllegalStateException(s"generated file set is stale under $directory; missing=[$missing], extra=[$extra]")
     }
   }
 

@@ -9,9 +9,19 @@ import scala.language.implicitConversions
 /** Small NIO vocabulary shared by the meta-build. */
 object Paths {
   given pathToFile: Conversion[Path, File] = _.toFile
+  given fileToPath: Conversion[File, Path] = _.toPath
 
   extension (context: StringContext) {
     def path(arguments: Any*): Path = Path.of(context.s(arguments*))
+  }
+
+  def containsPathSegments(path: Path, first: String, rest: String*): Boolean = {
+    val segments = first +: rest
+    (0 to path.getNameCount - segments.size).exists { start =>
+      segments.iterator.zipWithIndex.forall { case (segment, offset) =>
+        s"${path.getName(start + offset)}" == segment
+      }
+    }
   }
 
   extension (path: Path) {
@@ -26,7 +36,6 @@ object Paths {
     def exists: Boolean                      = Files.exists(path)
     def isDirectory: Boolean                 = Files.isDirectory(path)
     def isFile: Boolean                      = Files.isRegularFile(path)
-    def glob: Glob                           = Glob(path)
     def descendants(glob: String): Seq[Path] =
       FileTreeView.default.list(Glob(path = path, relative = s"**/$glob")).map(_._1)
   }

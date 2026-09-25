@@ -334,7 +334,7 @@ TargetExecution prepare_target(const RunOptions &configuration, const Workload &
                        configuration.launcher,
                        configuration.isolated_launcher ? std::vector<std::string>{} : configured_skips(environment),
                        workload.specs,
-                       target.deviceLock && !configuration.isolated_launcher};
+                       target.deviceLock};
   apply_device_probe(exec, probe_device(configuration, artifact, environment, target.id));
   // Re-probe with the exact child environment: selection must survive visibility remapping.
   const auto verified = probe_device(configuration, artifact, exec.environment, target.id);

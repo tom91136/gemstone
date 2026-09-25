@@ -17,7 +17,6 @@ import upickle.default.read
   */
 object GenerateAPISurfaces {
   private final case class Request(
-      check: Boolean,
       manifest: Path,
       sourceRoot: Path,
       cuda: String,
@@ -48,7 +47,6 @@ object GenerateAPISurfaces {
   )
 
   private val command = Command("GenerateAPISurfaces", "Generate Scala API surfaces")((
-    Opts.flag("check", help = "Verify existing generated sources").orFalse,
     Opts.argument[String]("manifest").map(Path.of(_)),
     Opts.argument[String]("api-source-root").map(Path.of(_)),
     Opts.argument[String]("cuda-version"),
@@ -57,7 +55,7 @@ object GenerateAPISurfaces {
     Opts.argument[String]("level-zero-version"),
     Opts.argument[String]("opencl-version"),
     Opts.argument[String]("vulkan-version")
-  ).mapN(Request(_, _, _, _, _, _, _, _, _)))
+  ).mapN(Request(_, _, _, _, _, _, _, _)))
 
   def main(arguments: Array[String]): Unit = CodegenCommand.run(command, arguments)(generate(_))
 
@@ -144,26 +142,12 @@ object GenerateAPISurfaces {
           functionCount
         )
       )
-      if (request.check) {
-        if (!Files.isRegularFile(target.output))
-          throw IllegalStateException(s"API surface is absent: ${target.output}")
-        if (Files.readString(target.output, StandardCharsets.UTF_8) != content)
-          throw IllegalStateException(s"API surface is stale: ${target.output}")
-        Console.out.println(s"validated ${renderedFunctions.size} ${target.traitName} declarations")
-      } else {
-        val _ = Files.createDirectories(target.output.getParent)
-        val _ = GeneratedFiles.write(target.output, content)
-        Console.out.println(s"generated ${renderedFunctions.size} ${target.traitName} declarations at ${target.output}")
-      }
+      val _ = Files.createDirectories(target.output.getParent)
+      val _ = GeneratedFiles.write(target.output, content)
+      Console.out.println(s"generated ${renderedFunctions.size} ${target.traitName} declarations at ${target.output}")
     }
     val include = (path: Path) => path.getFileName.toString.endsWith(".scala")
-    if (request.check) {
-      GeneratedFiles.requireOnly(
-        request.sourceRoot,
-        targets.map(_.output).toSet,
-        include
-      )
-    } else GeneratedFiles.removeUnexpected(
+    GeneratedFiles.removeUnexpected(
       request.sourceRoot,
       targets.map(_.output).toSet,
       include

@@ -370,7 +370,11 @@ static DeviceSelection discover_physical_device() {
   if (zeDriverGet(&driver_count, nullptr) != ZE_RESULT_SUCCESS) throw std::runtime_error("cannot list Level Zero drivers");
   std::vector<ze_driver_handle_t> drivers(driver_count);
   if (zeDriverGet(&driver_count, drivers.data()) != ZE_RESULT_SUCCESS) throw std::runtime_error("cannot get Level Zero drivers");
-  struct Candidate { PhysicalDevice physical; uint32_t driver, device; ze_device_handle_t handle; };
+  struct Candidate {
+    PhysicalDevice physical;
+    uint32_t driver, device;
+    ze_device_handle_t handle;
+  };
   std::vector<Candidate> candidates;
   std::vector<std::string> descriptions;
   for (uint32_t driver_index = 0; driver_index < driver_count; ++driver_index) {
@@ -396,8 +400,7 @@ static DeviceSelection discover_physical_device() {
   }
   const auto &candidate = candidates[select_device(descriptions)];
   return {candidate.physical,
-          {{"LZT_DEFAULT_DRIVER_IDX", fmt::to_string(candidate.driver)},
-           {"LZT_DEFAULT_DEVICE_IDX", fmt::to_string(candidate.device)}},
+          {{"LZT_DEFAULT_DRIVER_IDX", fmt::to_string(candidate.driver)}, {"LZT_DEFAULT_DEVICE_IDX", fmt::to_string(candidate.device)}},
           static_cast<uint64_t>(reinterpret_cast<uintptr_t>(candidate.handle))};
 #elif defined(CONFORMANCE_DEVICE_SYCL)
   const auto all = sycl::device::get_devices();

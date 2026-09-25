@@ -1209,7 +1209,8 @@ final class ExecutionService(
             s"pointer relocation refers to unregistered target allocation ${id.value}"
           )
         case KernelTask.PointerRelocation(KernelTask.RelocationSource.Memory(region), sourceOffset, _, _)
-            if sourceOffset > current.allocations(allocationId(region)).bytes.length.toLong - ABI.MachineWordSize.toLong =>
+            if sourceOffset >
+              current.allocations(allocationId(region)).bytes.length.toLong - ABI.MachineWordSize.toLong =>
           val source = allocationId(region)
           ExecutionFailure.InvalidRequest(
             s"pointer relocation source offset $sourceOffset exceeds allocation ${source.value}"

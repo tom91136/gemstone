@@ -4,7 +4,7 @@
 #define UNIFIED_HIP_ASYNC_CASE(name, check)                                                                                                \
   TEST_CASE("hip_async/" UNIFIED_HIP_ASYNC_NAME "/" UNIFIED_HIP_ASYNC_MATRIX "/" name,                                                     \
             "[unified][" UNIFIED_HIP_ASYNC_MATRIX "-matrix][async][" UNIFIED_HIP_ASYNC_NAME "]") {                                         \
-    const auto size = GENERATE(Catch::Generators::from_range(UNIFIED_HIP_ASYNC_SIZES));                                                   \
+    const auto size = GENERATE(Catch::Generators::from_range(UNIFIED_HIP_ASYNC_SIZES));                                                    \
     CAPTURE(size);                                                                                                                         \
     unified::backend::Async backend;                                                                                                       \
     check<UNIFIED_HIP_ASYNC_TYPE>(backend, size);                                                                                          \

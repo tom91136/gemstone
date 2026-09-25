@@ -4,7 +4,6 @@ import net.kurobako.gemstone.rpc.ExecutionRPC
 import net.kurobako.gemstone.rpc.Wire
 import net.kurobako.gemstone.rpc.Wire.{Alternative, Field, OperationShape, Shape}
 
-import cats.syntax.all.*
 import com.monovore.decline.{Command, Opts}
 
 import java.nio.file.Path
@@ -13,13 +12,12 @@ import scala.collection.mutable
 
 /** Derives the native execution client and codecs from the Scala operation enum. */
 object GenerateExecutionRPC {
-  private final case class Request(check: Boolean, output: Path)
+  private final case class Request(output: Path)
   private final case class Named(name: String, shape: Shape)
 
-  private val command = Command("GenerateExecutionRPC", "Generate the native typed execution RPC client")((
-    Opts.flag("check", help = "Verify existing generated RPC sources").orFalse,
-    Opts.argument[String]("output-directory").map(Path.of(_))
-  ).mapN(Request(_, _)))
+  private val command = Command("GenerateExecutionRPC", "Generate the native typed execution RPC client")(
+    Opts.argument[String]("output-directory").map(Path.of(_)).map(Request(_))
+  )
 
   def main(arguments: Array[String]): Unit = CodegenCommand.run(command, arguments) { request =>
     val protocol = ExecutionRPC.Schema
@@ -27,9 +25,9 @@ object GenerateExecutionRPC {
       request.output.resolve("gemstone_execution_rpc.hpp") -> header(protocol),
       request.output.resolve("gemstone_execution_rpc.cpp") -> source(protocol)
     )
-    files.foreach { case (path, content) => GeneratedFiles.sync(path, content, request.check) }
-    GeneratedFiles.requireOnly(request.output, files.map(_._1).toSet, _ => true)
-    Console.out.println(s"${if (request.check) "verified" else "generated"} ${files.size} execution RPC files")
+    files.foreach { case (path, content) => val _ = GeneratedFiles.write(path, content) }
+    GeneratedFiles.removeUnexpected(request.output, files.map(_._1).toSet, _ => true)
+    Console.out.println(s"generated ${files.size} execution RPC files")
   }
 
   private def hex(value: Long): String          = f"0x$value%016xULL"

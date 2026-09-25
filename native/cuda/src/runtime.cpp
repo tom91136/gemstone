@@ -637,7 +637,7 @@ extern "C" int32_t cuMemFreeHost(void *pointer) {
 }
 
 extern "C" int32_t cuMemHostAlloc(void **pointer, size_t size, uint32_t flags) {
-  if (flags & ~UINT32_C(7)) return CUDA_ERROR_INVALID_VALUE;
+  if (flags & ~static_cast<uint32_t>(7)) return CUDA_ERROR_INVALID_VALUE;
   return mirroredAllocate(reinterpret_cast<uint64_t *>(pointer), size, true, flags);
 }
 
@@ -661,7 +661,7 @@ extern "C" int32_t cuMemHostGetFlags(uint32_t *flags, void *host_pointer) {
 
 extern "C" int32_t cuMemHostRegister_v2(void *pointer, size_t size, uint32_t flags) {
   const gemstone::MemoryRange range{reinterpret_cast<uintptr_t>(pointer), size};
-  if (!range.valid() || (flags & ~UINT32_C(15))) return CUDA_ERROR_INVALID_VALUE;
+  if (!range.valid() || (flags & ~static_cast<uint32_t>(15))) return CUDA_ERROR_INVALID_VALUE;
   std::lock_guard lock{mirroredMutex};
   if (mirrorRegistrations.overlaps(range)) return CUDA_ERROR_INVALID_VALUE;
   const auto status = managedRegisterRemote(range.base, size, true);

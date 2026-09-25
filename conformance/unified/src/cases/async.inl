@@ -3,8 +3,8 @@
 // UNIFIED_ASYNC_MATRIX (string), and UNIFIED_ASYNC_SIZES first.
 #define UNIFIED_ASYNC_CASE(name, check)                                                                                                    \
   TEST_CASE("async/" UNIFIED_ASYNC_NAME "/" UNIFIED_ASYNC_MATRIX "/" name,                                                                 \
-            "[unified][" UNIFIED_ASYNC_MATRIX "-matrix][async][" UNIFIED_ASYNC_NAME "]") {                                                \
-    const auto size = GENERATE(Catch::Generators::from_range(UNIFIED_ASYNC_SIZES));                                                       \
+            "[unified][" UNIFIED_ASYNC_MATRIX "-matrix][async][" UNIFIED_ASYNC_NAME "]") {                                                 \
+    const auto size = GENERATE(Catch::Generators::from_range(UNIFIED_ASYNC_SIZES));                                                        \
     CAPTURE(size);                                                                                                                         \
     unified::backend::Async backend;                                                                                                       \
     check<UNIFIED_ASYNC_TYPE>(backend, unified::support::async_input_values<UNIFIED_ASYNC_TYPE>(size));                                    \

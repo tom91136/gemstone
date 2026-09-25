@@ -10,14 +10,14 @@ import sttp.model.Uri
 import Paths.{given, *}
 
 object Fetch {
-  final case class Request(
+  case class Request(
       id: String,
       fileName: String,
       url: String,
       expectedSha256: String
   )
 
-  final class Client(maximumDownloadBytes: Long) extends AutoCloseable {
+  class Client(maximumDownloadBytes: Long) extends AutoCloseable {
     require(maximumDownloadBytes > 0, "maximum download size must be positive")
     private val backend = DefaultSyncBackend()
 

@@ -23,7 +23,6 @@ object GeneratePTXISA {
       minor: Int :| Positive0
   )
   private final case class Request(
-      check: Boolean,
       tests: Boolean,
       input: Path,
       sourceRoot: Path,
@@ -88,13 +87,12 @@ object GeneratePTXISA {
   private val PackageRoot             = "net/kurobako/gemstone/isa/ptx"
 
   private def request(tests: Boolean): Opts[Request] = (
-    Opts.flag("check", help = "Verify the existing generated source").orFalse,
     Opts.argument[String]("ptx-html").map(Path.of(_)),
     Opts.argument[String]("generated-source-root").map(Path.of(_)),
     Opts.argument[String]("ptx-version"),
     Opts.argument[String]("package-version")
-  ).mapN((check, input, sourceRoot, version, packageVersion) =>
-    Request(check, tests, input, sourceRoot, version, packageVersion)
+  ).mapN((input, sourceRoot, version, packageVersion) =>
+    Request(tests, input, sourceRoot, version, packageVersion)
   )
 
   private val command = Command("GeneratePTXISA", "Generate PTX ISA sources")(
@@ -117,11 +115,10 @@ object GeneratePTXISA {
       val output               = request.sourceRoot.resolve(PackageRoot).resolve(packageVersion.value).resolve(fileName)
       if (request.tests) {
         val examples = checkedExamples(sections)
-        sync(output, renderTests(specificationVersion, packageVersion, examples), request.check)
-      } else sync(output, renderInstructions(specificationVersion, packageVersion, sections), request.check)
+        write(output, renderTests(specificationVersion, packageVersion, examples))
+      } else write(output, renderInstructions(specificationVersion, packageVersion, sections))
       val include = (path: Path) => path.getFileName.toString.endsWith(".scala")
-      if (request.check) GeneratedFiles.requireOnly(request.sourceRoot, Set(output), include)
-      else GeneratedFiles.removeUnexpected(request.sourceRoot, Set(output), include)
+      GeneratedFiles.removeUnexpected(request.sourceRoot, Set(output), include)
     }
   )
 
@@ -1171,8 +1168,7 @@ object GeneratePTXISA {
       case _ => throw IllegalArgumentException(s"invalid PTX version: $value")
     }
 
-  private def sync(output: Path, content: String, check: Boolean): Unit = {
-    val formatted = GeneratedScalaFormatter(output, content)
-    GeneratedFiles.sync(output, formatted, check)
+  private def write(output: Path, content: String): Unit = {
+    val _ = GeneratedFiles.write(output, GeneratedScalaFormatter(output, content))
   }
 }

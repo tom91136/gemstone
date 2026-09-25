@@ -1,6 +1,5 @@
 package net.kurobako.gemstone.codegen
 
-import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
 import cats.syntax.all.*
@@ -54,7 +53,7 @@ object GenerateOfficialAPIManifest {
     extension (surfaceName: SurfaceName) def text: String = surfaceName.value
   }
 
-  private final case class Request(clang: String, check: Boolean, references: Path, output: Path)
+  private final case class Request(clang: String, references: Path, output: Path)
   final case class Parameter(name: Option[CIdentifier], cType: CType) derives ReadWriter
   final case class Function(
       name: CIdentifier,
@@ -100,10 +99,9 @@ object GenerateOfficialAPIManifest {
 
   private val command = Command("GenerateOfficialAPIManifest", "Generate the official API manifest")((
     Opts.option[String]("clang", help = "Clang executable").withDefault("clang"),
-    Opts.flag("check", help = "Verify the existing manifest").orFalse,
     Opts.argument[String]("references").map(Path.of(_)),
     Opts.argument[String]("manifest").map(Path.of(_))
-  ).mapN(Request(_, _, _, _)))
+  ).mapN(Request(_, _, _)))
 
   def main(arguments: Array[String]): Unit = CodegenCommand.run(command, arguments)(generate(_))
 
@@ -113,19 +111,11 @@ object GenerateOfficialAPIManifest {
       surfaces = configurations(request.references).map(config => probe(config, request.clang))
     )
     val rendered = write(manifest, indent = 2) + "\n"
-    if (request.check) {
-      if (!Files.isRegularFile(request.output))
-        throw IllegalStateException(s"API validation manifest is absent: ${request.output}")
-      if (Files.readString(request.output, StandardCharsets.UTF_8) != rendered)
-        throw IllegalStateException(s"API validation manifest is stale: ${request.output}")
-      Console.out.println(s"validated ${manifest.surfaces.map(_.functions.size).sum} official API declarations")
-    } else {
-      val _ = Files.createDirectories(request.output.getParent)
-      val _ = GeneratedFiles.write(request.output, rendered)
-      manifest.surfaces.foreach(surface =>
-        Console.out.println(s"probed ${surface.functions.size} ${surface.name} declarations")
-      )
-    }
+    val _        = Files.createDirectories(request.output.getParent)
+    val _        = GeneratedFiles.write(request.output, rendered)
+    manifest.surfaces.foreach(surface =>
+      Console.out.println(s"probed ${surface.functions.size} ${surface.name} declarations")
+    )
   }
 
   private def configurations(root: Path): Vector[Config] = {

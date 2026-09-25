@@ -2,12 +2,12 @@
 // defines UNIFIED_ALGORITHM_TYPE, UNIFIED_ALGORITHM_NAME (string),
 // UNIFIED_ALGORITHM_MATRIX (string), and UNIFIED_ALGORITHM_SIZES first.
 #define UNIFIED_ALGORITHM_CASE(name, check)                                                                                                \
-  TEST_CASE("algorithms/" UNIFIED_ALGORITHM_NAME "/" UNIFIED_ALGORITHM_MATRIX "/" name,                                                     \
+  TEST_CASE("algorithms/" UNIFIED_ALGORITHM_NAME "/" UNIFIED_ALGORITHM_MATRIX "/" name,                                                    \
             "[unified][" UNIFIED_ALGORITHM_MATRIX "-matrix][algorithm][" UNIFIED_ALGORITHM_NAME "]") {                                     \
-    const auto size = GENERATE(Catch::Generators::from_range(UNIFIED_ALGORITHM_SIZES));                                                     \
-    CAPTURE(size);                                                                                                                          \
-    unified::backend::Algorithms backend;                                                                                                   \
-    check<UNIFIED_ALGORITHM_TYPE>(backend, size);                                                                                           \
+    const auto size = GENERATE(Catch::Generators::from_range(UNIFIED_ALGORITHM_SIZES));                                                    \
+    CAPTURE(size);                                                                                                                         \
+    unified::backend::Algorithms backend;                                                                                                  \
+    check<UNIFIED_ALGORITHM_TYPE>(backend, size);                                                                                          \
   }
 
 UNIFIED_ALGORITHM_CASE("copy", unified::algorithms::copy)

@@ -13,7 +13,6 @@ trait Memory {
 
   /** Pointer bytes use canonical addresses shared by all dispatches. Relocation metadata must not cache or replay them.
     */
-  @nowarn("msg=unused explicit parameter")
   def hasNativePointers(region: MemoryRegion): Boolean = false
 
   /** A full fence; remote backing owners acknowledge publication before returning. */

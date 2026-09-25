@@ -8,7 +8,6 @@ import net.kurobako.gemstone.rpc.ExecutionRPC.Operation
 import net.kurobako.gemstone.rpc.ExecutionProtocol.*
 import net.kurobako.gemstone.rpc.Wire
 import net.kurobako.gemstone.server.execution.ExecutionService
-import net.kurobako.gemstone.server.execution.RuntimeBackend
 import net.kurobako.gemstone.vm.{KernelTask, LaunchGeometry, MemoryRegion}
 
 import cats.syntax.all.*

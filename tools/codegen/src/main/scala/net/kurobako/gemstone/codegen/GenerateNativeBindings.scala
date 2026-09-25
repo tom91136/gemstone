@@ -14,7 +14,7 @@ import upickle.default.read
 
 /** Generates native ABI declarations and implementation checks. */
 object GenerateNativeBindings {
-  private final case class Request(check: Boolean, output: Path, manifest: Path)
+  private final case class Request(output: Path, manifest: Path)
   private type GeneratedFile = (path: Path, content: String)
   private final case class Platform(
       name: String,
@@ -298,16 +298,14 @@ object GenerateNativeBindings {
 
   private val command =
     Command("GenerateNativeBindings", "Generate native ABI declarations and implementation checks")((
-      Opts.flag("check", help = "Verify existing generated bindings").orFalse,
       Opts.argument[String]("output-directory").map(Path.of(_)),
       Opts.argument[String]("official-header-manifest").map(Path.of(_))
-    ).mapN(Request(_, _, _)))
+    ).mapN(Request(_, _)))
 
   def main(arguments: Array[String]): Unit = CodegenCommand.run(command, arguments) { request =>
     val manifest =
       read[GenerateOfficialAPIManifest.Manifest](Files.readString(request.manifest, StandardCharsets.UTF_8))
-    val generated = files(request.output, manifest)
-    if (request.check) verify(request.output, generated) else write(request.output, generated)
+    write(request.output, files(request.output, manifest))
   }
 
   private def files(
@@ -521,16 +519,5 @@ object GenerateNativeBindings {
       Console.out.println(s"generated ${file.path}")
     }
     GeneratedFiles.removeUnexpected(output, files.map(_.path).toSet, path => !path.startsWith(output.resolve("rpc")))
-  }
-
-  private def verify(output: Path, files: Vector[GeneratedFile]): Unit = {
-    val stale = files.collect {
-      case file
-          if !Files.exists(file.path) || Files.readString(file.path, StandardCharsets.UTF_8) != file.content =>
-        file.path
-    }
-    if (stale.nonEmpty) throw IllegalStateException(s"generated native ABI files are stale: ${stale.mkString(", ")}")
-    GeneratedFiles.requireOnly(output, files.map(_.path).toSet, path => !path.startsWith(output.resolve("rpc")))
-    Console.out.println(s"verified ${files.size} generated native ABI files")
   }
 }

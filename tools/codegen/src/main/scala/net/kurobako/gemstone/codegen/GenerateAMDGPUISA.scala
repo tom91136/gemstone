@@ -16,7 +16,6 @@ import scala.util.Using
 object GenerateAMDGPUISA {
   private final case class Request(
       python: String,
-      check: Boolean,
       references: Path,
       sourceRoot: Path,
       resourceRoot: Path
@@ -115,38 +114,32 @@ for name in sorted(module.instructions):
 
   private val command = Command("GenerateAMDGPUISA", "Generate AMDGPU ISA sources")((
     Opts.option[String]("python", help = "Python executable for the pinned ACO model").withDefault("python3"),
-    Opts.flag("check", help = "Verify the existing generated sources").orFalse,
     Opts.argument[String]("prepared-references").map(Path.of(_)),
     Opts.argument[String]("generated-source-root").map(Path.of(_)),
     Opts.argument[String]("generated-resource-root").map(Path.of(_))
-  ).mapN(Request(_, _, _, _, _)))
+  ).mapN(Request(_, _, _, _)))
 
   def main(arguments: Array[String]): Unit = CodegenCommand.run(command, arguments) { request =>
     val result          = extract(request.references, request.python)
     val instructionRoot = request.sourceRoot.resolve(PackageRoot)
     val constants       = instructionRoot.resolve("EncodingConstants.scala")
-    sync(constants, render(result.records, result.acoCount, result.xmlCount, result.sopp), request.check)
+    write(constants, render(result.records, result.acoCount, result.xmlCount, result.sopp))
     val instructions = renderInstructions(result.records)
-    sync(instructionRoot.resolve("Instruction.scala"), instructions.main, request.check)
+    write(instructionRoot.resolve("Instruction.scala"), instructions.main)
     val definitionsRoot = instructionRoot.resolve("definitions")
     val definitions     = instructions.definitions.map { case (name, content) =>
       definitionsRoot.resolve(name) -> content
     }
-    definitions.foreach { case (path, content) => sync(path, content, request.check) }
+    definitions.foreach { case (path, content) => write(path, content) }
     val architectures = instructionRoot.resolve("Architectures.scala")
-    sync(architectures, renderArchitectures(), request.check)
+    write(architectures, renderArchitectures())
     val metadataResource = request.resourceRoot.resolve(PackageRoot).resolve("metadata.json")
-    GeneratedFiles.sync(metadataResource, instructions.metadata, request.check)
-    val expected = definitions.map(_._1).toSet ++
+    val _                = GeneratedFiles.write(metadataResource, instructions.metadata)
+    val expected         = definitions.map(_._1).toSet ++
       Set(constants, instructionRoot.resolve("Instruction.scala"), architectures)
     val include = (path: Path) => path.getFileName.toString.endsWith(".scala")
-    if (request.check) {
-      GeneratedFiles.requireOnly(request.sourceRoot, expected, include)
-      GeneratedFiles.requireOnly(request.resourceRoot, Set(metadataResource), _ => true)
-    } else {
-      GeneratedFiles.removeUnexpected(request.sourceRoot, expected, include)
-      GeneratedFiles.removeUnexpected(request.resourceRoot, Set(metadataResource), _ => true)
-    }
+    GeneratedFiles.removeUnexpected(request.sourceRoot, expected, include)
+    GeneratedFiles.removeUnexpected(request.resourceRoot, Set(metadataResource), _ => true)
   }
 
   def generate(references: Path): String = {
@@ -891,9 +884,8 @@ for name in sorted(module.instructions):
     }
   }
 
-  private def sync(output: Path, content: String, check: Boolean): Unit = {
-    val formatted = GeneratedScalaFormatter(output, content)
-    GeneratedFiles.sync(output, formatted, check)
+  private def write(output: Path, content: String): Unit = {
+    val _ = GeneratedFiles.write(output, GeneratedScalaFormatter(output, content))
   }
 
 }

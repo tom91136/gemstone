@@ -10,6 +10,7 @@
 #elif defined(UNIFIED_API_OPENCL) || defined(UNIFIED_API_LEVELZERO)
   #include "memory64_image.hpp"
 #endif
+
 inline std::vector<char> image(const char *name) {
   auto select = [&]() -> std::vector<char> {
 #if defined(UNIFIED_API_CUDA)

@@ -43,8 +43,8 @@ development libraries. Building GPU conformance artifacts additionally requires 
 
 Use normal sbt scoping for focused work, for example `sbt ptx/test`, `sbt server/test`, or
 `sbt serverNative/nativeLink`. Apply Scala formatting and rewrites without the other lint checks with
-`sbt scalafmtAll scalafixAll`. Set `GEMSTONE_ISA_REFERENCES_OFFLINE=1` to require generation and freshness checks to
-use the local pinned-reference cache.
+`sbt scalafmtAll scalafixAll`. Set `GEMSTONE_OFFLINE=1` to require generation and freshness checks to
+use the local pinned-reference cache and to build conformance artifacts without network fetches.
 
 ## Running Gemstone
 

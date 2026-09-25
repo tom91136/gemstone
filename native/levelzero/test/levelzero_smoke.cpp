@@ -176,8 +176,8 @@ TEST_CASE("Level Zero facade smoke test", "[level-zero]") {
   // AppendMemoryCopyFromContext only requires the source context to be named and
   // both ranges to be accessible by the device, so a destination from another
   // context on the same driver is legal.
-  REQUIRE((zeCommandListAppendMemoryCopyFromContext(list, foreignDestination, context, source, 4, nullptr, 0, nullptr)
-           == ZE_RESULT_SUCCESS));
+  REQUIRE(
+      (zeCommandListAppendMemoryCopyFromContext(list, foreignDestination, context, source, 4, nullptr, 0, nullptr) == ZE_RESULT_SUCCESS));
   REQUIRE((zeMemFree(other_context, foreignDestination) == ZE_RESULT_SUCCESS));
   ze_command_queue_handle_t foreignQueue = nullptr;
   ze_command_list_handle_t foreignList = nullptr;

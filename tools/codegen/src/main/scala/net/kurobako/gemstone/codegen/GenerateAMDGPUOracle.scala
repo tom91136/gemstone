@@ -39,7 +39,7 @@ object GenerateAMDGPUOracle {
   private type EncodedByte = EncodedByte.T
   private object EncodedByte extends RefinedType[Int, Interval.Closed[0, 255]]
 
-  private final case class Request(check: Boolean, references: Path, resourceRoot: Path)
+  private final case class Request(references: Path, resourceRoot: Path)
   private final case class Golden(
       target: OracleTarget,
       assembly: OracleAssembly,
@@ -87,16 +87,15 @@ object GenerateAMDGPUOracle {
   private val OraclePath             = "net/kurobako/gemstone/isa/amdgpu/llvm-oracle"
 
   private val command = Command("GenerateAMDGPUOracle", "Generate the bounded AMDGPU oracle")((
-    Opts.flag("check", help = "Verify the existing generated oracle").orFalse,
     Opts.argument[String]("prepared-references").map(Path.of(_)),
     Opts.argument[String]("generated-resource-root").map(Path.of(_))
-  ).mapN(Request(_, _, _)))
+  ).mapN(Request(_, _)))
 
   def main(arguments: Array[String]): Unit = CodegenCommand.run(command, arguments)(request =>
-    generate(request.references, request.resourceRoot, request.check)
+    generate(request.references, request.resourceRoot)
   )
 
-  private def generate(references: Path, resourceRoot: Path, check: Boolean = false): Unit = {
+  private def generate(references: Path, resourceRoot: Path): Unit = {
     val output = resourceRoot.resolve(OraclePath)
     val root   = references.resolve("llvm/llvm/test/MC/AMDGPU")
     if (!Files.isDirectory(root)) throw IllegalArgumentException(s"missing LLVM AMDGPU tests: $root")
@@ -122,7 +121,7 @@ object GenerateAMDGPUOracle {
       throw IllegalStateException(s"diagnostic selection is unexpectedly small: ${selected.diagnostics.size}")
     if (selected.diagnostics.size > 2000)
       throw IllegalStateException(s"diagnostic selection is unexpectedly large: ${selected.diagnostics.size}")
-    write(resourceRoot, output, files.size, corpus, selected, check)
+    write(resourceRoot, output, files.size, corpus, selected)
   }
 
   private def extract(root: Path, files: Vector[Path]): Corpus =
@@ -287,8 +286,7 @@ object GenerateAMDGPUOracle {
       output: Path,
       sourceFileCount: Int,
       corpus: Corpus,
-      selected: Selection,
-      check: Boolean
+      selected: Selection
   ): Unit = {
     val grouped =
       (selected.positives.map(value => value.target -> Left(value)) ++
@@ -331,27 +329,20 @@ object GenerateAMDGPUOracle {
           |${files.map { case (name, _) => s"file=$name" }.mkString("\n")}
           |""".stripMargin
 
-    if (!check) {
-      val _ = Files.createDirectories(output)
-    }
-    syncText(output.resolve("manifest.txt"), manifest, check)
-    files.foreach { case (name, content) => syncText(output.resolve(name), content, check) }
+    val _ = Files.createDirectories(output)
+    syncText(output.resolve("manifest.txt"), manifest)
+    files.foreach { case (name, content) => syncText(output.resolve(name), content) }
     val expected = (files.map(_._1).toSet + "manifest.txt").map(output.resolve(_))
-    if (check)
-      GeneratedFiles.requireOnly(
-        resourceRoot,
-        expected,
-        _ => true
-      )
-    else GeneratedFiles.removeUnexpected(resourceRoot, expected, _ => true)
+    GeneratedFiles.removeUnexpected(resourceRoot, expected, _ => true)
     Console.out.println(
-      s"${if (check) "validated" else "selected"} ${selected.positives.size}/${corpus.positives.size.toLong} positive and " +
+      s"selected ${selected.positives.size}/${corpus.positives.size.toLong} positive and " +
         s"${selected.diagnostics.size}/${corpus.diagnostics.size.toLong} diagnostic LLVM AMDGPU cases"
     )
   }
 
-  private def syncText(output: Path, content: String, check: Boolean): Unit =
-    GeneratedFiles.sync(output, content, check)
+  private def syncText(output: Path, content: String): Unit = {
+    val _ = GeneratedFiles.write(output, content)
+  }
 
   private def targetsByCheckPrefix(lines: Vector[String]): Map[String, Set[OracleTarget]] = {
     val pairs = lines.flatMap {
