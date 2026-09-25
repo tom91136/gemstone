@@ -9,7 +9,9 @@ get_filename_component(REPOSITORY_DIRECTORY "${CMAKE_CURRENT_LIST_DIR}/../../.."
 set(CONFORMANCE_ARTIFACT_PROJECT "${REPOSITORY_DIRECTORY}/conformance/artifacts" CACHE PATH
   "Independent conformance artifact build entry point")
 set(CONTAINER_EXECUTABLE podman CACHE STRING "OCI container executable")
-set(ROCM_VERSION 7.1.1 CACHE STRING "ROCm toolchain version")
+if(NOT ROCM_VERSION)
+  message(FATAL_ERROR "ROCM_VERSION is required; pass -DROCM_VERSION=<major.minor.patch>")
+endif()
 set(BENCHMARK_FIXTURE_OUTPUT_DIRECTORY
   "${REPOSITORY_DIRECTORY}/tools/benchmarks/target/generated-fixtures" CACHE PATH
   "Generated benchmark fixture directory")

@@ -222,7 +222,7 @@ trait HSA {
       size: Pointer[size_t, ReadWrite, Opaque],
       ptr: Pointer[OpaquePointer, ReadWrite, Opaque],
       metadata_size: Pointer[size_t, ReadWrite, Opaque],
-      metadata: Pointer[OpaquePointer, Read, Opaque]
+      metadata: Pointer[Pointer[CVoid, Read, Opaque], ReadWrite, Opaque]
   ): hsa_status_t = unsupported
   def hsa_amd_interop_unmap_buffer(ptr: OpaquePointer): hsa_status_t = unsupported
   def hsa_amd_ipc_memory_attach(
@@ -764,10 +764,7 @@ trait HSA {
       sampler: Pointer[hsa_ext_sampler_t, ReadWrite, Opaque]
   ): hsa_status_t = unsupported
   def hsa_ext_sampler_destroy(agent: hsa_agent_t, sampler: hsa_ext_sampler_t): hsa_status_t = unsupported
-  def hsa_extension_get_name(
-      extension: uint16_t,
-      name: Pointer[Pointer[Byte, ReadWrite, Opaque], Read, Opaque]
-  ): hsa_status_t = unsupported
+  def hsa_extension_get_name(extension: uint16_t, name: Pointer[CString, ReadWrite, Opaque]): hsa_status_t = unsupported
   def hsa_init(): hsa_status_t = unsupported
   def hsa_isa_compatible(
       code_object_isa: hsa_isa_t,
@@ -1034,10 +1031,8 @@ trait HSA {
       doorbell_signal: hsa_signal_t,
       queue: Pointer[Pointer[hsa_queue_t, ReadWrite, Opaque], ReadWrite, Opaque]
   ): hsa_status_t = unsupported
-  def hsa_status_string(
-      status: hsa_status_t,
-      status_string: Pointer[Pointer[Byte, ReadWrite, Opaque], Read, Opaque]
-  ): hsa_status_t = unsupported
+  def hsa_status_string(status: hsa_status_t, status_string: Pointer[CString, ReadWrite, Opaque]): hsa_status_t =
+    unsupported
   def hsa_system_extension_supported(
       extension: uint16_t,
       version_major: uint16_t,

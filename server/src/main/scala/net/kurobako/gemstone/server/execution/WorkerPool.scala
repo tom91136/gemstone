@@ -90,32 +90,34 @@ final class WorkerPool(
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private def execute(work: (Job, Long, Int)): Unit = {
-    val (job, start, length) = work
-    val result               =
-      try {
-        var offset                       = 0
-        var outcome: Either[Fault, Unit] = Right(())
-        while (offset < length && outcome.isRight) {
-          outcome = job.task((start + offset.toLong).refineUnsafe[Positive0])
-          offset += 1
+    val (job, start, length)         = work
+    var outcome: Either[Fault, Unit] = Right(())
+    try {
+      var offset = 0
+      while (offset < length && outcome.isRight) {
+        outcome = job.task((start + offset.toLong).refineUnsafe[Positive0])
+        offset += 1
+      }
+    } catch {
+      case NonFatal(error) =>
+        val detail = Option(error.getMessage).filter(_.nonEmpty).getOrElse(error.getClass.getName)
+        outcome = Left(Fault.Backend(detail))
+    } finally {
+      // A task may throw a fatal error such as InterruptedException; the job
+      // still has to be accounted for or it never completes.
+      val completed = outcome
+      lock.withLock {
+        job.active -= 1
+        completed.left.toOption.foreach { error =>
+          if (job.failure.isEmpty) job.failure = Some(error)
+          queue.filterInPlace(_ ne job)
+          job.next = job.count
         }
-        outcome
-      } catch {
-        case NonFatal(error) =>
-          val detail = Option(error.getMessage).filter(_.nonEmpty).getOrElse(error.getClass.getName)
-          Left(Fault.Backend(detail))
-      }
-    lock.withLock {
-      job.active -= 1
-      result.left.toOption.foreach { error =>
-        if (job.failure.isEmpty) job.failure = Some(error)
-        queue.filterInPlace(_ ne job)
-        job.next = job.count
-      }
-      if (job.active == 0 && job.next == job.count) {
-        job.finished = true
-        jobComplete.signalAll()
-        workReady.signalAll()
+        if (job.active == 0 && job.next == job.count) {
+          job.finished = true
+          jobComplete.signalAll()
+          workReady.signalAll()
+        }
       }
     }
   }
@@ -148,16 +150,25 @@ final class WorkerPool(
   override def parallelFor(taskCount: Long :| Positive0)(
       task: Long :| Positive0 => Either[Fault, Unit]
   ): Either[Fault, Unit] = {
-    val started = if (trace) PlatformTime.monotonicNanos else 0L
-    val job     = enqueue(taskCount, task)
-    val result  = await(job)
-    job.observed.foreach { observed =>
-      scribe.info(
-        s"Gemstone parallel groups=$taskCount configured=$parallelism workers=${observed.size} elapsed_ns=${PlatformTime.monotonicNanos -
-            started}"
-      )
+    val started  = if (trace) PlatformTime.monotonicNanos else 0L
+    val enqueued =
+      try Right(enqueue(taskCount, task))
+      catch {
+        case error: java.util.concurrent.RejectedExecutionException =>
+          Left(Fault.Backend(Option(error.getMessage).getOrElse("execution pool is closed")))
+      }
+    enqueued match {
+      case Left(fault) => Left(fault)
+      case Right(job)  =>
+        val result = await(job)
+        job.observed.foreach { observed =>
+          scribe.info(
+            s"Gemstone parallel groups=$taskCount configured=$parallelism workers=${observed.size} elapsed_ns=${PlatformTime.monotonicNanos -
+                started}"
+          )
+        }
+        result
     }
-    result
   }
 
   override def close(): Unit = {

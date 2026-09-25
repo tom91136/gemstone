@@ -283,7 +283,6 @@ object CUDA {
   type unsigned_int = CValue["unsigned int"]
   type unsigned_long_long = CValue["unsigned long long"]
   type unsigned_short = CValue["unsigned short"]
-  type void_const = CValue["void *const"]
 
   val HeaderVersion: String :| (MinLength[1] & NoNul) = "13.3"
   val FunctionCount: Int :| Positive = 820
@@ -552,8 +551,7 @@ trait CUDA {
       hfunc: CUfunction
   ): CUresult = unsupported
   def cuFuncGetModule(hmod: Pointer[CUmodule, ReadWrite, Opaque], hfunc: CUfunction): CUresult = unsupported
-  def cuFuncGetName(name: Pointer[Pointer[Byte, ReadWrite, Opaque], Read, Opaque], hfunc: CUfunction): CUresult =
-    unsupported
+  def cuFuncGetName(name: Pointer[CString, ReadWrite, Opaque], hfunc: CUfunction): CUresult = unsupported
   def cuFuncGetParamCount(func: CUfunction, paramCount: Pointer[size_t, ReadWrite, Opaque]): CUresult = unsupported
   def cuFuncGetParamInfo(
       func: CUfunction,
@@ -569,12 +567,10 @@ trait CUDA {
   def cuFuncSetCacheConfig(hfunc: CUfunction, config: CUfunc_cache): CUresult = unsupported
   def cuFuncSetSharedMemConfig(hfunc: CUfunction, config: CUsharedconfig): CUresult = unsupported
   def cuFuncSetSharedSize(hfunc: CUfunction, bytes: unsigned_int): CUresult = unsupported
-  def cuGetErrorName(error: CUresult, pStr: Pointer[Pointer[Byte, ReadWrite, Opaque], Read, Opaque]): CUresult =
-    unsupported
-  def cuGetErrorString(error: CUresult, pStr: Pointer[Pointer[Byte, ReadWrite, Opaque], Read, Opaque]): CUresult =
-    unsupported
+  def cuGetErrorName(error: CUresult, pStr: Pointer[CString, ReadWrite, Opaque]): CUresult = unsupported
+  def cuGetErrorString(error: CUresult, pStr: Pointer[CString, ReadWrite, Opaque]): CUresult = unsupported
   def cuGetExportTable(
-      ppExportTable: Pointer[OpaquePointer, Read, Opaque],
+      ppExportTable: Pointer[Pointer[CVoid, Read, Opaque], ReadWrite, Opaque],
       pExportTableId: Pointer[CUuuid, Read, Opaque]
   ): CUresult = unsupported
   def cuGetProcAddress_v2(
@@ -992,8 +988,7 @@ trait CUDA {
   ): CUresult = unsupported
   def cuKernelGetFunction(pFunc: Pointer[CUfunction, ReadWrite, Opaque], kernel: CUkernel): CUresult = unsupported
   def cuKernelGetLibrary(pLib: Pointer[CUlibrary, ReadWrite, Opaque], kernel: CUkernel): CUresult = unsupported
-  def cuKernelGetName(name: Pointer[Pointer[Byte, ReadWrite, Opaque], Read, Opaque], hfunc: CUkernel): CUresult =
-    unsupported
+  def cuKernelGetName(name: Pointer[CString, ReadWrite, Opaque], hfunc: CUkernel): CUresult = unsupported
   def cuKernelGetParamCount(kernel: CUkernel, paramCount: Pointer[size_t, ReadWrite, Opaque]): CUresult = unsupported
   def cuKernelGetParamInfo(
       kernel: CUkernel,
@@ -1799,8 +1794,8 @@ trait CUDA {
       captureStatus_out: Pointer[CUstreamCaptureStatus, ReadWrite, Opaque],
       id_out: Pointer[cuuint64_t, ReadWrite, Opaque],
       graph_out: Pointer[CUgraph, ReadWrite, Opaque],
-      dependencies_out: Pointer[Pointer[CUgraphNode, ReadWrite, Opaque], Read, Opaque],
-      edgeData_out: Pointer[Pointer[CUgraphEdgeData, ReadWrite, Opaque], Read, Opaque],
+      dependencies_out: Pointer[Pointer[CUgraphNode, Read, Opaque], ReadWrite, Opaque],
+      edgeData_out: Pointer[Pointer[CUgraphEdgeData, Read, Opaque], ReadWrite, Opaque],
       numDependencies_out: Pointer[size_t, ReadWrite, Opaque]
   ): CUresult = unsupported
   def cuStreamGetCtx(hStream: CUstream, pctx: Pointer[CUcontext, ReadWrite, Opaque]): CUresult = unsupported
@@ -2202,10 +2197,8 @@ trait CUDA {
       attr: Pointer[struct_cudaFuncAttributes, ReadWrite, Opaque],
       func: Pointer[CVoid, Read, Opaque]
   ): cudaError_t = unsupported
-  def cudaFuncGetName(
-      name: Pointer[Pointer[Byte, ReadWrite, Opaque], Read, Opaque],
-      func: Pointer[CVoid, Read, Opaque]
-  ): cudaError_t = unsupported
+  def cudaFuncGetName(name: Pointer[CString, ReadWrite, Opaque], func: Pointer[CVoid, Read, Opaque]): cudaError_t =
+    unsupported
   def cudaFuncGetParamCount(
       func: Pointer[CVoid, Read, Opaque],
       paramCount: Pointer[size_t, ReadWrite, Opaque]
@@ -2247,7 +2240,7 @@ trait CUDA {
   def cudaGetErrorName(error: cudaError_t): CString = unsupported
   def cudaGetErrorString(error: cudaError_t): CString = unsupported
   def cudaGetExportTable(
-      ppExportTable: Pointer[OpaquePointer, Read, Opaque],
+      ppExportTable: Pointer[Pointer[CVoid, Read, Opaque], ReadWrite, Opaque],
       pExportTableId: Pointer[cudaUUID_t, Read, Opaque]
   ): cudaError_t = unsupported
   def cudaGetFuncBySymbol(
@@ -3167,8 +3160,8 @@ trait CUDA {
       stream: cudaStream_t
   ): cudaError_t = unsupported
   def cudaMemcpyBatchAsync(
-      dsts: Pointer[void_const, ReadWrite, Opaque],
-      srcs: Pointer[void_const, Read, Opaque],
+      dsts: Pointer[OpaquePointer, Read, Opaque],
+      srcs: Pointer[Pointer[CVoid, Read, Opaque], Read, Opaque],
       sizes: Pointer[size_t, Read, Opaque],
       count: size_t,
       attrs: Pointer[struct_cudaMemcpyAttributes, ReadWrite, Opaque],
@@ -3384,8 +3377,8 @@ trait CUDA {
       captureStatus_out: Pointer[enum_cudaStreamCaptureStatus, ReadWrite, Opaque],
       id_out: Pointer[unsigned_long_long, ReadWrite, Opaque],
       graph_out: Pointer[cudaGraph_t, ReadWrite, Opaque],
-      dependencies_out: Pointer[Pointer[cudaGraphNode_t, ReadWrite, Opaque], Read, Opaque],
-      edgeData_out: Pointer[Pointer[cudaGraphEdgeData, ReadWrite, Opaque], Read, Opaque],
+      dependencies_out: Pointer[Pointer[cudaGraphNode_t, Read, Opaque], ReadWrite, Opaque],
+      edgeData_out: Pointer[Pointer[cudaGraphEdgeData, Read, Opaque], ReadWrite, Opaque],
       numDependencies_out: Pointer[size_t, ReadWrite, Opaque]
   ): cudaError_t = unsupported
   def cudaStreamGetDevResource(

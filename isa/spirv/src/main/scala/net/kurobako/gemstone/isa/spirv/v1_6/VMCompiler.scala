@@ -17,6 +17,10 @@ import scala.util.control.NonFatal
 private[v1_6] object VMCompiler {
   import Operand.{id, operandBits, unsigned}
 
+  // OpSpecConstantOp can embed any pure opcode; the evaluator supports these two.
+  private val CompositeExtractOpcode = Instruction.Definition.CompositeExtract.opcodeNumber.value.toLong
+  private val UDivOpcode             = Instruction.Definition.UDiv.opcodeNumber.value.toLong
+
   private def isFunctionEnd(instruction: Instruction): Boolean = instruction match {
     case Instruction.FunctionEnd() => true
     case _                         => false
@@ -64,6 +68,7 @@ private[v1_6] object VMCompiler {
     val packedStructures        = mutable.HashSet.empty[Int]
     val byValueParameters       = mutable.HashSet.empty[Int]
     val saturatedConversions    = mutable.HashSet.empty[Int]
+    val roundingModes           = mutable.HashMap.empty[Int, Int]
     val extendedInstructionSets = mutable.HashMap.empty[Int, InstructionSetName]
     val entryPoints             = mutable.HashMap.empty[KernelName, Int]
     val entryPointInterfaces    = mutable.HashMap.empty[KernelName, Set[Int]]
@@ -157,25 +162,25 @@ private[v1_6] object VMCompiler {
           }
         case Instruction.SpecConstantOp(resultType, dest, instructionOpcode, srcs) =>
           val operands = srcs.map(unsigned(_))
-          val result   = unsigned(instructionOpcode) match {
-            case 81L if operands.size == 2 =>
+          val opcode   = unsigned(instructionOpcode)
+          val result   =
+            if (operands.size != 2) None
+            else if (opcode == CompositeExtractOpcode)
               constants.get(Math.toIntExact(operands(0))).flatMap {
                 case Constant.Bits(_, lanes) if operands(1) < lanes.size => Some(lanes(operands(1).toInt))
                 case _                                                   => None
               }
-            case 134L if operands.size == 2 =>
+            else if (opcode == UDivOpcode)
               for {
                 left  <- constants.get(Math.toIntExact(operands(0))).flatMap(scalarBits(_))
                 right <- constants.get(Math.toIntExact(operands(1))).flatMap(scalarBits(_))
                 if right != 0L
               } yield java.lang.Long.divideUnsigned(left, right)
-            case _ => None
-          }
+            else None
           result match {
             case Some(value) => constants.update(id(dest), Constant.Bits(id(resultType), Vec(value)))
-            case None        => return Left(Fault.Unsupported(
-                s"SPIR-V specialization constant operation ${unsigned(instructionOpcode)} is unsupported"
-              ))
+            case None        =>
+              return Left(Fault.Unsupported(s"SPIR-V specialization constant operation $opcode is unsupported"))
           }
         case Instruction.ConstantNull(resultType, dest) =>
           zeroValue(types, resultType, dest, "OpConstantNull") match {
@@ -207,6 +212,8 @@ private[v1_6] object VMCompiler {
           val _ = byValueParameters.add(id(target)) // FuncParamAttr ByVal
         case Instruction.Decorate(target, decoration) if unsigned(decoration) == 28L =>
           val _ = saturatedConversions.add(id(target))
+        case Instruction.Decorate(target, decoration) if decoration.words.size >= 2 && unsigned(decoration) == 39L =>
+          roundingModes.update(id(target), decoration.words(1).bits)
         case Instruction.MemberDecorate(structureType, member, decoration)
             if decoration.words.size >= 2 && unsigned(decoration) == 35L =>
           memberOffsets.update(
@@ -284,6 +291,7 @@ private[v1_6] object VMCompiler {
         packedStructures = packedStructures.toSet,
         byValueParameters = byValueParameters.toSet,
         saturatedConversions = saturatedConversions.toSet,
+        roundingModes = roundingModes.toMap,
         extendedInstructionSets = extendedInstructionSets.toMap,
         entryPoints = entryPoints.toMap,
         entryPointInterfaces = entryPointInterfaces.toMap,

@@ -268,6 +268,16 @@ final class ExecutionLayoutSuite extends munit.FunSuite with ExecutionTestSuppor
     assertEquals(executeUnchecked(numSubgroupsModule, dispatch, numSubgroupsMemory), Right(()))
     assertEquals(numSubgroupsMemory.bytes, Vec.fill(64)(LittleEndian.toVec(2L, ScalarByteWidth(4))).flatten)
 
+    val numEnqueuedSubgroupsModule = module.copy(instructions =
+      instructions.updated(
+        subgroupDecoration,
+        Instruction.Decorate(subgroupId, operand("Decoration", 11, 39))
+      )
+    )
+    val numEnqueuedSubgroupsMemory = ArrayMemory(allocation, 256)
+    assertEquals(executeUnchecked(numEnqueuedSubgroupsModule, dispatch, numEnqueuedSubgroupsMemory), Right(()))
+    assertEquals(numEnqueuedSubgroupsMemory.bytes, Vec.fill(64)(LittleEndian.toVec(2L, ScalarByteWidth(4))).flatten)
+
     val undefModule = module.copy(instructions =
       instructions.updated(22, Instruction.Store(destination, undefValue, None))
     )

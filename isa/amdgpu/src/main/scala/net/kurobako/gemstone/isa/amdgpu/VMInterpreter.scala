@@ -538,14 +538,14 @@ private[amdgpu] object VMInterpreter {
         }
       case other =>
         val value = other match {
-          case InstructionSource.Scalar(106)       => Bits.low32(carry.register)
-          case InstructionSource.Scalar(107)       => Bits.high32(carry.register)
-          case InstructionSource.Scalar(126)       => Bits.low32(active.register)
-          case InstructionSource.Scalar(127)       => Bits.high32(active.register)
-          case InstructionSource.Scalar(index)     => scalar(index)
-          case InstructionSource.Constant(raw)     => raw
-          case InstructionSource.Literal(raw)      => raw
-          case InstructionSource.VectorRegister(_) => 0L
+          case InstructionSource.Scalar(Decoding.VccLo)  => Bits.low32(carry.register)
+          case InstructionSource.Scalar(Decoding.VccHi)  => Bits.high32(carry.register)
+          case InstructionSource.Scalar(Decoding.ExecLo) => Bits.low32(active.register)
+          case InstructionSource.Scalar(Decoding.ExecHi) => Bits.high32(active.register)
+          case InstructionSource.Scalar(index)           => scalar(index)
+          case InstructionSource.Constant(raw)           => raw
+          case InstructionSource.Literal(raw)            => raw
+          case InstructionSource.VectorRegister(_)       => 0L
         }
         var lane = 0
         while (lane < lanes.value) {
@@ -964,7 +964,7 @@ private[amdgpu] object VMInterpreter {
       // VOP carry-producing instructions encode a discarded mask result as
       // the null SGPR (s[125:126]).  Do not read/write that pseudo-register:
       // s126 is the live EXEC mask in the emulator.
-      if (destination != 125) {
+      if (destination != Decoding.NullSgpr) {
         if (waveSize.value <= 32) {
           writeScalar32(destination, Bits.low32(result))
         } else {
@@ -979,40 +979,40 @@ private[amdgpu] object VMInterpreter {
       if (width == 32) writeScalar32(destination, value) else writeScalar64(destination, value)
 
     def source(value: InstructionSource, lane: Int): Long = value match {
-      case InstructionSource.Scalar(106)           => Bits.low32(carry.register)
-      case InstructionSource.Scalar(107)           => Bits.high32(carry.register)
-      case InstructionSource.Scalar(126)           => Bits.low32(active.register)
-      case InstructionSource.Scalar(127)           => Bits.high32(active.register)
-      case InstructionSource.Scalar(index)         => scalar(index)
-      case InstructionSource.VectorRegister(index) => vector(index)(lane)
-      case InstructionSource.Constant(raw)         => raw
-      case InstructionSource.Literal(raw)          => raw
+      case InstructionSource.Scalar(Decoding.VccLo)  => Bits.low32(carry.register)
+      case InstructionSource.Scalar(Decoding.VccHi)  => Bits.high32(carry.register)
+      case InstructionSource.Scalar(Decoding.ExecLo) => Bits.low32(active.register)
+      case InstructionSource.Scalar(Decoding.ExecHi) => Bits.high32(active.register)
+      case InstructionSource.Scalar(index)           => scalar(index)
+      case InstructionSource.VectorRegister(index)   => vector(index)(lane)
+      case InstructionSource.Constant(raw)           => raw
+      case InstructionSource.Literal(raw)            => raw
     }
 
     def sourceScalar64(value: InstructionSource): Long = value match {
-      case InstructionSource.Scalar(106)       => carry.register
-      case InstructionSource.Scalar(107)       => Bits.high32(carry.register)
-      case InstructionSource.Scalar(126)       => active.register
-      case InstructionSource.Scalar(127)       => Bits.high32(active.register)
-      case InstructionSource.Scalar(index)     => pair(scalar, index)
-      case InstructionSource.Constant(raw)     => raw
-      case InstructionSource.Literal(raw)      => raw
-      case InstructionSource.VectorRegister(_) => 0L
+      case InstructionSource.Scalar(Decoding.VccLo)  => carry.register
+      case InstructionSource.Scalar(Decoding.VccHi)  => Bits.high32(carry.register)
+      case InstructionSource.Scalar(Decoding.ExecLo) => active.register
+      case InstructionSource.Scalar(Decoding.ExecHi) => Bits.high32(active.register)
+      case InstructionSource.Scalar(index)           => pair(scalar, index)
+      case InstructionSource.Constant(raw)           => raw
+      case InstructionSource.Literal(raw)            => raw
+      case InstructionSource.VectorRegister(_)       => 0L
     }
 
     def writeScalar64(dest: Int, value: Long): Unit = dest match {
-      case 106 => carry.register = value
-      case 126 => active.register = value
-      case _   => setPair(scalar, dest, value)
+      case Decoding.VccLo  => carry.register = value
+      case Decoding.ExecLo => active.register = value
+      case _               => setPair(scalar, dest, value)
     }
 
     def writeScalar32(dest: Int, value: Long): Unit = dest match {
-      case 106 => carry.register = (carry.register & 0xffffffff00000000L) | Bits.low32(value)
-      case 107 =>
+      case Decoding.VccLo => carry.register = (carry.register & 0xffffffff00000000L) | Bits.low32(value)
+      case Decoding.VccHi =>
         carry.register = (carry.register & 0xffffffffL) | (Bits.low32(value) << 32)
-      case 126 => active.register = (active.register & 0xffffffff00000000L) | Bits.low32(value)
-      case 127 => active.register = (active.register & 0xffffffffL) | (Bits.low32(value) << 32)
-      case _   => scalar(dest) = Bits.low32(value)
+      case Decoding.ExecLo => active.register = (active.register & 0xffffffff00000000L) | Bits.low32(value)
+      case Decoding.ExecHi => active.register = (active.register & 0xffffffffL) | (Bits.low32(value) << 32)
+      case _               => scalar(dest) = Bits.low32(value)
     }
 
     def foreachLane(operation: Int => Unit): Unit = {
@@ -1549,7 +1549,7 @@ private[amdgpu] object VMInterpreter {
         val sourceValue = saveExecSource(src, width)
         val result      = if (width == 32) Bits.low32(previous) & sourceValue else previous & sourceValue
         saveExecWrite(dest, previous, width)
-        saveExecWrite(126, result, width)
+        saveExecWrite(Decoding.ExecLo, result, width)
         scalarCarry = result != 0L
         AdvanceStep
       case Instruction.SAndn2SaveExec(dest, src, width) =>
@@ -1561,7 +1561,7 @@ private[amdgpu] object VMInterpreter {
         val result = if (width == 32) Bits.low32(andn2SaveExecMask(Bits.low32(previous), sourceValue))
         else andn2SaveExecMask(previous, sourceValue)
         saveExecWrite(dest, previous, width)
-        saveExecWrite(126, result, width)
+        saveExecWrite(Decoding.ExecLo, result, width)
         scalarCarry = result != 0L
         AdvanceStep
       case Instruction.SOrSaveExec(dest, src, width) =>
@@ -1569,7 +1569,7 @@ private[amdgpu] object VMInterpreter {
         val result   = if (width == 32) Bits.low32(previous) | saveExecSource(src, width)
         else previous | saveExecSource(src, width)
         saveExecWrite(dest, previous, width)
-        saveExecWrite(126, result, width)
+        saveExecWrite(Decoding.ExecLo, result, width)
         scalarCarry = result != 0L
         AdvanceStep
       case Instruction.SXorSaveExec(dest, src, width) =>
@@ -1577,7 +1577,7 @@ private[amdgpu] object VMInterpreter {
         val result   = if (width == 32) Bits.low32(previous) ^ saveExecSource(src, width)
         else previous ^ saveExecSource(src, width)
         saveExecWrite(dest, previous, width)
-        saveExecWrite(126, result, width)
+        saveExecWrite(Decoding.ExecLo, result, width)
         scalarCarry = result != 0L
         AdvanceStep
       case Instruction.SUnary(operation, dest, src) =>
@@ -1764,7 +1764,7 @@ private[amdgpu] object VMInterpreter {
         executeVMove(dest, src, scalar, vector, carry, active, lanes)
         AdvanceStep
       case Instruction.VMoveRelative(dest, InstructionSource.VectorRegister(src)) =>
-        val indexed = src + (Bits.low32(scalar(124)) & 0xffL).toInt
+        val indexed = src + (Bits.low32(scalar(Decoding.M0)) & 0xffL).toInt
         if (indexed < 0 || indexed >= 256)
           Left(Fault.Backend(s"v_movrels_b32 indexed VGPR $indexed is out of range"))
         else {
@@ -1777,7 +1777,7 @@ private[amdgpu] object VMInterpreter {
           s"v_movrels_b32 requires a vector-register source, found $source"
         ))
       case Instruction.VMoveRelativeDestination(dest, src) =>
-        val indexed = dest + (Bits.low32(scalar(124)) & 0xffL).toInt
+        val indexed = dest + (Bits.low32(scalar(Decoding.M0)) & 0xffL).toInt
         if (indexed < 0 || indexed >= 256)
           Left(Fault.Backend(s"v_movreld_b32 indexed VGPR $indexed is out of range"))
         else {
@@ -2472,7 +2472,7 @@ private[amdgpu] object VMInterpreter {
           val right  = selectSubDword(source(srcB, lane), srcBSelection, srcBSignExtend)
           val result = operation match {
             case VectorSubDwordOperation.ConditionalMask32 =>
-              val conditionMask = Bits.low32(source(InstructionSource.Scalar(106), 0))
+              val conditionMask = Bits.low32(source(InstructionSource.Scalar(Decoding.VccLo), 0))
               if ((conditionMask & (1L << lane)) != 0L) right else left
             case VectorSubDwordOperation.AddU32 => Bits.low32(left + right)
             case VectorSubDwordOperation.AddU16 => Bits.low16(left + right)

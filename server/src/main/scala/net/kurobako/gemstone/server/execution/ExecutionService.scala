@@ -1,5 +1,7 @@
 package net.kurobako.gemstone.server.execution
 
+import net.kurobako.gemstone.abi.ABI
+
 import net.kurobako.gemstone.{NoNul, Vec}
 import net.kurobako.gemstone.Vec.*
 import net.kurobako.gemstone.binary.ByteRange
@@ -245,10 +247,10 @@ final class ExecutionService(
 
   def kernel(id: ProgramId, name: KernelName): Either[ExecutionFailure, KernelMetadata] =
     program(id).flatMap(_.kernel(net.kurobako.gemstone.isa.KernelName(name.value)).left.map(runtimeFailure(_)))
-      .map(toWireKernel(_))
+      .flatMap(toWireKernel(_))
 
   def catalog(id: ProgramId): Either[ExecutionFailure, ProgramCatalog] =
-    program(id).flatMap(_.symbols.left.map(runtimeFailure(_))).map(toWireCatalog(_))
+    program(id).flatMap(_.symbols.left.map(runtimeFailure(_))).flatMap(toWireCatalog(_))
 
   def global(id: ProgramId, name: GlobalName): Either[ExecutionFailure, ProgramGlobal] =
     program(id).flatMap { loaded =>
@@ -1207,7 +1209,7 @@ final class ExecutionService(
             s"pointer relocation refers to unregistered target allocation ${id.value}"
           )
         case KernelTask.PointerRelocation(KernelTask.RelocationSource.Memory(region), sourceOffset, _, _)
-            if sourceOffset > current.allocations(allocationId(region)).bytes.length.toLong - 8L =>
+            if sourceOffset > current.allocations(allocationId(region)).bytes.length.toLong - ABI.MachineWordSize.toLong =>
           val source = allocationId(region)
           ExecutionFailure.InvalidRequest(
             s"pointer relocation source offset $sourceOffset exceeds allocation ${source.value}"
@@ -1221,7 +1223,7 @@ final class ExecutionService(
         case KernelTask.PointerRelocation(KernelTask.RelocationSource.Argument(index), sourceOffset, _, _)
             if sourceOffset >
               (task.arguments(index) match {
-                case KernelTask.Argument.Scalar(bytes) => bytes.length.toLong - 8L
+                case KernelTask.Argument.Scalar(bytes) => bytes.length.toLong - ABI.MachineWordSize.toLong
                 case _                                 => -1L
               }) =>
           ExecutionFailure.InvalidRequest(
@@ -1323,7 +1325,8 @@ final class ExecutionService(
       case _ => Right(())
     }
 
-  private def toWireKernel(metadata: net.kurobako.gemstone.isa.KernelMetadata): KernelMetadata =
+  private def toWireKernel(metadata: net.kurobako.gemstone.isa.KernelMetadata)
+      : Either[ExecutionFailure, KernelMetadata] =
     KernelMetadata.validated(
       metadata.argumentBlockSize,
       metadata.explicitParameterCount,
@@ -1339,22 +1342,24 @@ final class ExecutionService(
           parameter.containsPointers
         )
       }
-    ).fold(message => throw IllegalStateException(message), identity)
+    ).left.map(ExecutionFailure.Failed(_))
 
-  private def toWireCatalog(symbols: net.kurobako.gemstone.isa.ProgramSymbols): ProgramCatalog =
-    ProgramCatalog(
-      symbols.kernels.map(kernel =>
-        ProgramKernel(KernelName(kernel.name.value), LinkageName(kernel.linkageName.value))
-      ),
-      symbols.globals.map { global =>
-        ProgramGlobalMetadata.validated(
-          GlobalName(global.name.value),
-          global.virtualAddress,
-          global.size,
-          global.pointerOffsets
-        ).fold(message => throw IllegalStateException(message), identity)
-      }
+  private def toWireCatalog(symbols: net.kurobako.gemstone.isa.ProgramSymbols)
+      : Either[ExecutionFailure, ProgramCatalog] = {
+    val kernels = symbols.kernels.map(kernel =>
+      ProgramKernel(KernelName(kernel.name.value), LinkageName(kernel.linkageName.value))
     )
+    symbols.globals
+      .foldLeft[Either[ExecutionFailure, Vec[ProgramGlobalMetadata]]](Right(Vec.empty)) { (accumulated, global) =>
+        for {
+          globals  <- accumulated
+          metadata <- ProgramGlobalMetadata
+            .validated(GlobalName(global.name.value), global.virtualAddress, global.size, global.pointerOffsets)
+            .left.map(ExecutionFailure.Failed(_))
+        } yield globals :+ metadata
+      }
+      .map(globals => ProgramCatalog(kernels, globals))
+  }
 
   private def checkedRange(
       length: Int,

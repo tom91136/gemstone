@@ -1158,6 +1158,21 @@ struct DetectWrongDifference {
   }
 };
 
+// Frees the single device flag even when the Thrust call throws.
+class DeviceFlag {
+public:
+  DeviceFlag() : pointer_(thrust::device_malloc<bool>(1)) {}
+  ~DeviceFlag() { thrust::device_free(pointer_); }
+  DeviceFlag(const DeviceFlag &) = delete;
+  DeviceFlag &operator=(const DeviceFlag &) = delete;
+
+  auto operator*() const { return *pointer_; }
+  bool *raw() const { return thrust::raw_pointer_cast(pointer_); }
+
+private:
+  thrust::device_ptr<bool> pointer_;
+};
+
 template <class T> struct TupleWidePairValue {
   template <class Tuple> __host__ __device__ int64_t operator()(const Tuple &value) const {
     return edge::WidePairValue<T>{}(thrust::get<0>(value), thrust::get<1>(value));
@@ -1199,12 +1214,10 @@ public:
     const auto begin = thrust::make_counting_iterator<uint64_t>(0);
     const auto end = begin + (1ULL << magnitude);
     if (end - begin != (1LL << magnitude)) throw std::runtime_error("for-each big-index distance mismatch");
-    auto flag = thrust::device_malloc<bool>(1);
+    thrust_edge_detail::DeviceFlag flag;
     *flag = false;
-    thrust::for_each(thrust::device, begin, end,
-                     thrust_edge_detail::SetExpectedFlagForEach{(1ULL << magnitude) - 1, thrust::raw_pointer_cast(flag)});
+    thrust::for_each(thrust::device, begin, end, thrust_edge_detail::SetExpectedFlagForEach{(1ULL << magnitude) - 1, flag.raw()});
     const bool observed = *flag;
-    thrust::device_free(flag);
     if (!observed) throw std::runtime_error("for-each big-index terminal value was not visited");
   }
 
@@ -1213,11 +1226,10 @@ public:
     const auto begin = thrust::make_counting_iterator<int64_t>(1);
     const auto end = begin + (1LL << magnitude);
     if (end - begin != (1LL << magnitude)) throw std::runtime_error("adjacent-difference big-index distance mismatch");
-    auto flag = thrust::device_malloc<bool>(1);
+    thrust_edge_detail::DeviceFlag flag;
     *flag = true;
-    thrust::adjacent_difference(thrust::device, begin, end, thrust_edge_detail::DetectWrongDifference{thrust::raw_pointer_cast(flag)});
+    thrust::adjacent_difference(thrust::device, begin, end, thrust_edge_detail::DetectWrongDifference{flag.raw()});
     const bool observed = *flag;
-    thrust::device_free(flag);
     if (!observed) throw std::runtime_error("adjacent-difference big-index produced a wrong difference");
   }
 

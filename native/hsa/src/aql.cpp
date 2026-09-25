@@ -9,8 +9,6 @@ namespace {
 
 using gemstone::readNative;
 
-constexpr size_t PacketSize = 64;
-
 gemstone_hsa_aql_header decodeHeader(uint16_t raw) {
   gemstone_hsa_aql_header result{};
   result.type = static_cast<gemstone_hsa_aql_packet_type>(raw & 0xffU);
@@ -24,7 +22,7 @@ gemstone_hsa_aql_header decodeHeader(uint16_t raw) {
 
 extern "C" gemstone_hsa_aql_decode_error gemstone_hsa_decode_aql_packet(const void *packet, size_t packet_size,
                                                                         gemstone_hsa_aql_packet *decoded) {
-  if (!packet || !decoded || packet_size < PacketSize) return GEMSTONE_HSA_AQL_DECODE_TRUNCATED;
+  if (!packet || !decoded || packet_size < GEMSTONE_HSA_AQL_PACKET_SIZE) return GEMSTONE_HSA_AQL_DECODE_TRUNCATED;
   const auto *bytes = static_cast<const unsigned char *>(packet);
   const uint16_t raw_header = readNative<uint16_t>(bytes, 0);
   if ((raw_header & 0xe000U) != 0) return GEMSTONE_HSA_AQL_DECODE_RESERVED_BITS;

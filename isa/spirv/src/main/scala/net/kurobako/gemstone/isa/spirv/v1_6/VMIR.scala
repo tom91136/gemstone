@@ -57,6 +57,7 @@ private[v1_6] object VMIR {
       packedStructures: Set[Int],
       byValueParameters: Set[Int],
       saturatedConversions: Set[Int],
+      roundingModes: Map[Int, Int],
       extendedInstructionSets: Map[Int, InstructionSetName],
       entryPoints: Map[KernelName, Int],
       entryPointInterfaces: Map[KernelName, Set[Int]],

@@ -8,7 +8,7 @@ add_library(gemstone_cuda SHARED
   src/unsupported.cpp
   src/cublas.cpp)
 set_target_properties(gemstone_cuda PROPERTIES OUTPUT_NAME cuda SOVERSION 1 CXX_STANDARD 17)
-target_include_directories(gemstone_cuda PRIVATE "${CUDA_INCLUDE_DIR}")
+target_include_directories(gemstone_cuda PRIVATE include "${CUDA_INCLUDE_DIR}")
 target_compile_options(gemstone_cuda PRIVATE -Wall -Wextra -Werror)
 set_source_files_properties(src/unsupported.cpp PROPERTIES
   COMPILE_OPTIONS "-Wno-deprecated-declarations")

@@ -136,7 +136,7 @@ foreach(category IN LISTS sycl_cts_categories)
       "$<$<COMPILE_LANG_AND_ID:CXX,IntelLLVM,Clang,AppleClang>:-Wno-return-type>"
       "$<$<COMPILE_LANG_AND_ID:CXX,IntelLLVM,Clang,AppleClang>:-Wno-cpp>")
   endif()
-  conformance_register_test_program("test_${category}" 120)
+  conformance_register_test_program("test_${category}" ${CONFORMANCE_TIMEOUT_CTS})
 endforeach()
 
 install(FILES "${staged_source}/LICENSE"

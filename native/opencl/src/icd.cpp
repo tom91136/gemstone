@@ -87,12 +87,38 @@ std::mutex eventsMutex;
 std::condition_variable eventsCondition;
 std::map<uintptr_t, std::shared_ptr<Allocation>> allocations;
 std::map<uintptr_t, std::shared_ptr<BufferMapping>> svmMappings;
-std::vector<_cl_event *> liveEvents;
 std::once_flag dispatchInitialized;
 cl_icd_dispatch dispatch{};
 _cl_platform_id platform;
 _cl_device_id device;
 std::atomic_uint64_t nextContextIdentity{1};
+
+constexpr const char *DeviceExtensionString = "cl_khr_icd cl_khr_il_program cl_khr_byte_addressable_store "
+                                              "cl_khr_fp16 cl_khr_fp64 cl_khr_pci_bus_info "
+                                              "cl_khr_global_int32_base_atomics cl_khr_global_int32_extended_atomics "
+                                              "cl_khr_local_int32_base_atomics cl_khr_local_int32_extended_atomics "
+                                              "cl_khr_int64_base_atomics cl_khr_int64_extended_atomics "
+                                              "cl_intel_subgroups cl_intel_spirv_subgroups cl_intel_device_attribute_query "
+                                              "cl_intel_required_subgroup_size "
+                                              "cl_intel_unified_shared_memory";
+
+constexpr cl_name_version DeviceExtensionVersions[] = {{CL_MAKE_VERSION(1, 0, 0), "cl_khr_icd"},
+                                                       {CL_MAKE_VERSION(1, 0, 0), "cl_khr_il_program"},
+                                                       {CL_MAKE_VERSION(1, 0, 0), "cl_khr_byte_addressable_store"},
+                                                       {CL_MAKE_VERSION(1, 0, 0), "cl_khr_fp16"},
+                                                       {CL_MAKE_VERSION(1, 0, 0), "cl_khr_fp64"},
+                                                       {CL_MAKE_VERSION(1, 0, 0), "cl_khr_pci_bus_info"},
+                                                       {CL_MAKE_VERSION(1, 0, 0), "cl_khr_global_int32_base_atomics"},
+                                                       {CL_MAKE_VERSION(1, 0, 0), "cl_khr_global_int32_extended_atomics"},
+                                                       {CL_MAKE_VERSION(1, 0, 0), "cl_khr_local_int32_base_atomics"},
+                                                       {CL_MAKE_VERSION(1, 0, 0), "cl_khr_local_int32_extended_atomics"},
+                                                       {CL_MAKE_VERSION(1, 0, 0), "cl_khr_int64_base_atomics"},
+                                                       {CL_MAKE_VERSION(1, 0, 0), "cl_khr_int64_extended_atomics"},
+                                                       {CL_MAKE_VERSION(1, 0, 0), "cl_intel_subgroups"},
+                                                       {CL_MAKE_VERSION(1, 0, 0), "cl_intel_spirv_subgroups"},
+                                                       {CL_MAKE_VERSION(0, 0, 0), "cl_intel_device_attribute_query"},
+                                                       {CL_MAKE_VERSION(1, 0, 0), "cl_intel_required_subgroup_size"},
+                                                       {CL_MAKE_VERSION(1, 0, 0), "cl_intel_unified_shared_memory"}};
 
 struct OpenCLIdentity {
   const char *platformName;
@@ -202,7 +228,7 @@ bool scanBufferPointerRelocations() {
 cl_ulong maxMemAllocSize() {
   // Keep the advertised limit below the remote service's practical per-allocation
   // envelope.  The environment override remains available for larger deployments.
-  constexpr cl_ulong defaultSize = UINT64_C(0x10000000);
+  constexpr cl_ulong defaultSize = static_cast<uint64_t>(0x10000000);
   const char *value = std::getenv("GEMSTONE_OPENCL_MAX_MEM_ALLOC_SIZE");
   if (!value || value[0] == '\0') return defaultSize;
   char *end = nullptr;
@@ -211,12 +237,32 @@ cl_ulong maxMemAllocSize() {
 }
 
 cl_ulong localMemSize() {
-  constexpr cl_ulong defaultSize = UINT64_C(0x10000);
+  constexpr cl_ulong defaultSize = static_cast<uint64_t>(0x10000);
   const char *value = std::getenv("GEMSTONE_OPENCL_LOCAL_MEM_SIZE");
   if (!value || value[0] == '\0') return defaultSize;
   char *end = nullptr;
   const auto parsed = std::strtoull(value, &end, 0);
   return end != value && *end == '\0' && parsed != 0 ? static_cast<cl_ulong>(parsed) : defaultSize;
+}
+
+// The emulator executes any work-group size but only at interpreter throughput,
+// and the OpenCL CTS scales its total work with the advertised bound. Sizes above
+// this make whole conformance tests exceed their per-test budget, so advertise
+// the largest size the emulated suite can complete. Enqueue enforces the bound.
+size_t maxWorkGroupSize() {
+  constexpr size_t defaultSize = 64;
+  const char *value = std::getenv("GEMSTONE_OPENCL_MAX_WORK_GROUP_SIZE");
+  if (!value || value[0] == '\0') return defaultSize;
+  char *end = nullptr;
+  const auto parsed = std::strtoull(value, &end, 0);
+  return end != value && *end == '\0' && parsed != 0 ? static_cast<size_t>(parsed) : defaultSize;
+}
+
+constexpr size_t MaxSubgroupSize = 32;
+
+std::array<size_t, 3> maxWorkItemSizes() {
+  const size_t maxGroup = maxWorkGroupSize();
+  return {maxGroup, maxGroup, std::min<size_t>(maxGroup, 64)};
 }
 
 std::shared_ptr<Allocation> findPointer(const void *pointer, size_t *offset = nullptr) {
@@ -435,7 +481,7 @@ bool hasBuildOption(const char *options, std::string_view option) {
   return options && (std::string_view(options) ^ contains_slice(option));
 }
 
-constexpr uint64_t ProgramBinaryMagic = UINT64_C(0x47454d4f434c4231);
+constexpr uint64_t ProgramBinaryMagic = static_cast<uint64_t>(0x47454d4f434c4231);
 constexpr size_t ProgramBinaryHeaderSize = 32;
 
 std::vector<uint8_t> programBinary(const _cl_program *program) {
@@ -577,10 +623,6 @@ _cl_event *makeEvent(_cl_command_queue *queue, cl_command_type command, cl_event
   event->ended = event->started + 1;
   retain(queue);
   retain(queue->context);
-  {
-    std::lock_guard lock(eventsMutex);
-    liveEvents.push_back(event);
-  }
   *output = reinterpret_cast<cl_event>(event);
   return event;
 }
@@ -1119,35 +1161,9 @@ CL_API_ENTRY cl_int CL_API_CALL clGetPlatformInfo(cl_platform_id value, cl_platf
     case CL_PLATFORM_NAME: return outputString(size, output, written, openclIdentity().platformName);
     case CL_PLATFORM_VENDOR: return outputString(size, output, written, openclIdentity().vendor);
     case CL_PLATFORM_ICD_SUFFIX_KHR: return outputString(size, output, written, "GEMSTONE");
-    case CL_PLATFORM_EXTENSIONS:
-      return outputString(size, output, written,
-                          "cl_khr_icd cl_khr_il_program cl_khr_byte_addressable_store "
-                          "cl_khr_fp16 cl_khr_fp64 cl_khr_pci_bus_info "
-                          "cl_khr_global_int32_base_atomics cl_khr_global_int32_extended_atomics "
-                          "cl_khr_local_int32_base_atomics cl_khr_local_int32_extended_atomics "
-                          "cl_khr_int64_base_atomics cl_khr_int64_extended_atomics "
-                          "cl_intel_subgroups cl_intel_spirv_subgroups cl_intel_device_attribute_query "
-                          "cl_intel_required_subgroup_size "
-                          "cl_intel_unified_shared_memory");
+    case CL_PLATFORM_EXTENSIONS: return outputString(size, output, written, DeviceExtensionString);
     case CL_PLATFORM_EXTENSIONS_WITH_VERSION: {
-      static const cl_name_version extensions[] = {{CL_MAKE_VERSION(1, 0, 0), "cl_khr_icd"},
-                                                   {CL_MAKE_VERSION(1, 0, 0), "cl_khr_il_program"},
-                                                   {CL_MAKE_VERSION(1, 0, 0), "cl_khr_byte_addressable_store"},
-                                                   {CL_MAKE_VERSION(1, 0, 0), "cl_khr_fp16"},
-                                                   {CL_MAKE_VERSION(1, 0, 0), "cl_khr_fp64"},
-                                                   {CL_MAKE_VERSION(1, 0, 0), "cl_khr_pci_bus_info"},
-                                                   {CL_MAKE_VERSION(1, 0, 0), "cl_khr_global_int32_base_atomics"},
-                                                   {CL_MAKE_VERSION(1, 0, 0), "cl_khr_global_int32_extended_atomics"},
-                                                   {CL_MAKE_VERSION(1, 0, 0), "cl_khr_local_int32_base_atomics"},
-                                                   {CL_MAKE_VERSION(1, 0, 0), "cl_khr_local_int32_extended_atomics"},
-                                                   {CL_MAKE_VERSION(1, 0, 0), "cl_khr_int64_base_atomics"},
-                                                   {CL_MAKE_VERSION(1, 0, 0), "cl_khr_int64_extended_atomics"},
-                                                   {CL_MAKE_VERSION(1, 0, 0), "cl_intel_subgroups"},
-                                                   {CL_MAKE_VERSION(1, 0, 0), "cl_intel_spirv_subgroups"},
-                                                   {CL_MAKE_VERSION(0, 0, 0), "cl_intel_device_attribute_query"},
-                                                   {CL_MAKE_VERSION(1, 0, 0), "cl_intel_required_subgroup_size"},
-                                                   {CL_MAKE_VERSION(1, 0, 0), "cl_intel_unified_shared_memory"}};
-      return outputBytes(size, output, written, extensions, sizeof(extensions));
+      return outputBytes(size, output, written, DeviceExtensionVersions, sizeof(DeviceExtensionVersions));
     }
     case CL_PLATFORM_HOST_TIMER_RESOLUTION: {
       cl_ulong value = 0;
@@ -1191,7 +1207,7 @@ CL_API_ENTRY cl_int CL_API_CALL clReleaseDevice(cl_device_id value) {
 
 CL_API_ENTRY cl_int CL_API_CALL clGetDeviceInfo(cl_device_id value, cl_device_info name, size_t size, void *output, size_t *written) {
   if (!validDevice(value)) return CL_INVALID_DEVICE;
-  static const size_t workSizes[] = {64, 64, 64};
+  static const auto workSizes = maxWorkItemSizes();
   // The provider completes each enqueue synchronously through the execution
   // RPC.  It therefore remains serialized even when an out-of-order queue is
   // requested, but it can still honor the OpenCL queue property: out-of-order
@@ -1248,10 +1264,10 @@ CL_API_ENTRY cl_int CL_API_CALL clGetDeviceInfo(cl_device_id value, cl_device_in
       return outputScalar(size, output, written, v);
     }
     case CL_DEVICE_MAX_WORK_GROUP_SIZE: {
-      size_t v = 64;
+      size_t v = maxWorkGroupSize();
       return outputScalar(size, output, written, v);
     }
-    case CL_DEVICE_MAX_WORK_ITEM_SIZES: return outputBytes(size, output, written, workSizes, sizeof(workSizes));
+    case CL_DEVICE_MAX_WORK_ITEM_SIZES: return outputBytes(size, output, written, workSizes.data(), sizeof(workSizes));
     case CL_DEVICE_PREFERRED_VECTOR_WIDTH_CHAR:
     case CL_DEVICE_PREFERRED_VECTOR_WIDTH_SHORT:
     case CL_DEVICE_PREFERRED_VECTOR_WIDTH_INT:
@@ -1368,11 +1384,11 @@ CL_API_ENTRY cl_int CL_API_CALL clGetDeviceInfo(cl_device_id value, cl_device_in
       return outputScalar(size, output, written, v);
     }
     case CL_DEVICE_GLOBAL_MEM_SIZE: {
-      cl_ulong v = UINT64_C(0x80000000);
+      cl_ulong v = static_cast<uint64_t>(0x80000000);
       return outputScalar(size, output, written, v);
     }
     case CL_DEVICE_MAX_CONSTANT_BUFFER_SIZE: {
-      cl_ulong v = UINT64_C(0x10000);
+      cl_ulong v = static_cast<uint64_t>(0x10000);
       return outputScalar(size, output, written, v);
     }
     case CL_DEVICE_MAX_CONSTANT_ARGS: {
@@ -1444,39 +1460,13 @@ CL_API_ENTRY cl_int CL_API_CALL clGetDeviceInfo(cl_device_id value, cl_device_in
     case CL_DEVICE_PROFILE: return outputString(size, output, written, "FULL_PROFILE");
     case CL_DEVICE_VERSION: return outputString(size, output, written, "OpenCL 3.0 Gemstone");
     case CL_DEVICE_OPENCL_C_VERSION: return outputString(size, output, written, "OpenCL C 1.2 Gemstone");
-    case CL_DEVICE_EXTENSIONS:
-      return outputString(size, output, written,
-                          "cl_khr_icd cl_khr_il_program cl_khr_byte_addressable_store "
-                          "cl_khr_fp16 cl_khr_fp64 cl_khr_pci_bus_info "
-                          "cl_khr_global_int32_base_atomics cl_khr_global_int32_extended_atomics "
-                          "cl_khr_local_int32_base_atomics cl_khr_local_int32_extended_atomics "
-                          "cl_khr_int64_base_atomics cl_khr_int64_extended_atomics "
-                          "cl_intel_subgroups cl_intel_spirv_subgroups cl_intel_device_attribute_query "
-                          "cl_intel_required_subgroup_size "
-                          "cl_intel_unified_shared_memory");
+    case CL_DEVICE_EXTENSIONS: return outputString(size, output, written, DeviceExtensionString);
     case CL_DEVICE_NUMERIC_VERSION: {
       cl_version v = CL_MAKE_VERSION(3, 0, 0);
       return outputScalar(size, output, written, v);
     }
     case CL_DEVICE_EXTENSIONS_WITH_VERSION: {
-      static const cl_name_version extensions[] = {{CL_MAKE_VERSION(1, 0, 0), "cl_khr_icd"},
-                                                   {CL_MAKE_VERSION(1, 0, 0), "cl_khr_il_program"},
-                                                   {CL_MAKE_VERSION(1, 0, 0), "cl_khr_byte_addressable_store"},
-                                                   {CL_MAKE_VERSION(1, 0, 0), "cl_khr_fp16"},
-                                                   {CL_MAKE_VERSION(1, 0, 0), "cl_khr_fp64"},
-                                                   {CL_MAKE_VERSION(1, 0, 0), "cl_khr_pci_bus_info"},
-                                                   {CL_MAKE_VERSION(1, 0, 0), "cl_khr_global_int32_base_atomics"},
-                                                   {CL_MAKE_VERSION(1, 0, 0), "cl_khr_global_int32_extended_atomics"},
-                                                   {CL_MAKE_VERSION(1, 0, 0), "cl_khr_local_int32_base_atomics"},
-                                                   {CL_MAKE_VERSION(1, 0, 0), "cl_khr_local_int32_extended_atomics"},
-                                                   {CL_MAKE_VERSION(1, 0, 0), "cl_khr_int64_base_atomics"},
-                                                   {CL_MAKE_VERSION(1, 0, 0), "cl_khr_int64_extended_atomics"},
-                                                   {CL_MAKE_VERSION(1, 0, 0), "cl_intel_subgroups"},
-                                                   {CL_MAKE_VERSION(1, 0, 0), "cl_intel_spirv_subgroups"},
-                                                   {CL_MAKE_VERSION(0, 0, 0), "cl_intel_device_attribute_query"},
-                                                   {CL_MAKE_VERSION(1, 0, 0), "cl_intel_required_subgroup_size"},
-                                                   {CL_MAKE_VERSION(1, 0, 0), "cl_intel_unified_shared_memory"}};
-      return outputBytes(size, output, written, extensions, sizeof(extensions));
+      return outputBytes(size, output, written, DeviceExtensionVersions, sizeof(DeviceExtensionVersions));
     }
     case CL_DEVICE_PCI_BUS_INFO_KHR: {
       const cl_device_pci_bus_info_khr v{.pci_domain = 0, .pci_bus = 0, .pci_device = 1, .pci_function = 0};
@@ -1538,7 +1528,7 @@ CL_API_ENTRY cl_int CL_API_CALL clGetDeviceInfo(cl_device_id value, cl_device_in
     case CL_DEVICE_SVM_CAPABILITIES: return outputScalar(size, output, written, svm);
     case CL_DEVICE_IL_VERSION: return outputString(size, output, written, "SPIR-V_1.0");
     case CL_DEVICE_MAX_NUM_SUB_GROUPS: {
-      cl_uint v = 32;
+      cl_uint v = static_cast<cl_uint>(maxWorkGroupSize() / MaxSubgroupSize);
       return outputScalar(size, output, written, v);
     }
     case CL_DEVICE_SUB_GROUP_SIZES_INTEL: {
@@ -2966,7 +2956,7 @@ CL_API_ENTRY cl_int CL_API_CALL clGetKernelWorkGroupInfo(cl_kernel value, cl_dev
   if (selected && !validDevice(selected)) return CL_INVALID_DEVICE;
   switch (name) {
     case CL_KERNEL_WORK_GROUP_SIZE: {
-      size_t v = 1024;
+      size_t v = maxWorkGroupSize();
       return outputScalar(size, output, written, v);
     }
     case CL_KERNEL_COMPILE_WORK_GROUP_SIZE:
@@ -3012,10 +3002,6 @@ CL_API_ENTRY cl_event CL_API_CALL clCreateUserEvent(cl_context value, cl_int *er
   event->status = CL_SUBMITTED;
   event->started = nowNanos();
   retain(context);
-  {
-    std::lock_guard lock(eventsMutex);
-    liveEvents.push_back(event);
-  }
   if (error) *error = CL_SUCCESS;
   return reinterpret_cast<cl_event>(event);
 }
@@ -3086,10 +3072,6 @@ CL_API_ENTRY cl_int CL_API_CALL clReleaseEvent(cl_event value) {
   if (release(event)) {
     auto *queue = event->queue;
     auto *context = event->context;
-    {
-      std::lock_guard lock(eventsMutex);
-      liveEvents ^= filter([event](const _cl_event *candidate) { return candidate != event; });
-    }
     unregisterLiveObject(event);
     delete event;
     if (queue) clReleaseCommandQueue(reinterpret_cast<cl_command_queue>(queue));
@@ -3565,6 +3547,18 @@ CL_API_ENTRY cl_int CL_API_CALL clEnqueueNDRangeKernel(cl_command_queue queueVal
     if (offset && offset[index] > std::numeric_limits<uint32_t>::max()) return CL_INVALID_GLOBAL_OFFSET;
     if (local && local[index] > std::numeric_limits<uint32_t>::max()) return CL_INVALID_WORK_GROUP_SIZE;
   }
+  if (local) {
+    // Enforce the advertised limits so callers cannot request a work-group the
+    // device claims it cannot run.
+    const auto limits = maxWorkItemSizes();
+    size_t total = 1;
+    for (cl_uint index = 0; index < workDimension; ++index) {
+      if (local[index] > limits[index]) return CL_INVALID_WORK_GROUP_SIZE;
+      if (local[index] != 0 && total > std::numeric_limits<size_t>::max() / local[index]) return CL_INVALID_WORK_GROUP_SIZE;
+      total *= local[index];
+    }
+    if (total > maxWorkGroupSize()) return CL_INVALID_WORK_GROUP_SIZE;
+  }
   if (local && global) {
     for (cl_uint index = 0; index < workDimension; ++index)
       if (local[index] == 0 || global[index] % local[index] != 0) return CL_INVALID_WORK_GROUP_SIZE;
@@ -4030,14 +4024,13 @@ CL_API_ENTRY cl_int CL_API_CALL clGetKernelSubGroupInfo(cl_kernel value, cl_devi
   if (!checked(reinterpret_cast<_cl_kernel *>(value), Kind::Kernel)) return CL_INVALID_KERNEL;
   // OpenCL permits a null device when the kernel's program has one device.
   if (selected && !validDevice(selected)) return CL_INVALID_DEVICE;
-  constexpr size_t subgroupSize = 32;
-  constexpr size_t maxWorkGroupSize = 1024;
+  constexpr size_t subgroupSize = MaxSubgroupSize;
   if (name == CL_KERNEL_MAX_SUB_GROUP_SIZE_FOR_NDRANGE) {
     size_t v = subgroupSize;
     return outputScalar(size, output, written, v);
   }
   if (name == CL_KERNEL_MAX_NUM_SUB_GROUPS) {
-    size_t v = maxWorkGroupSize / subgroupSize;
+    size_t v = maxWorkGroupSize() / subgroupSize;
     return outputScalar(size, output, written, v);
   }
   if (name == CL_KERNEL_COMPILE_NUM_SUB_GROUPS) {
@@ -4065,7 +4058,7 @@ CL_API_ENTRY cl_int CL_API_CALL clGetKernelSubGroupInfo(cl_kernel value, cl_devi
     size_t count = 0;
     std::memcpy(&count, input, sizeof(count));
     size_t local[3] = {0, 0, 0};
-    if (count != 0 && count <= maxWorkGroupSize / subgroupSize) {
+    if (count != 0 && count <= maxWorkGroupSize() / subgroupSize) {
       local[0] = count * subgroupSize;
       local[1] = 1;
       local[2] = 1;

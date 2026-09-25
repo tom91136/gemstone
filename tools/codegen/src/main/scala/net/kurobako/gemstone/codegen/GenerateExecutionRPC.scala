@@ -206,8 +206,8 @@ object GenerateExecutionRPC {
        |
        |namespace gemstone::execution {
        |
-       |inline constexpr uint32_t RequestMagic = UINT32_C(0x${ExecutionRPC.RequestMagic.toHexString});
-       |inline constexpr uint32_t ResponseMagic = UINT32_C(0x${ExecutionRPC.ResponseMagic.toHexString});
+       |inline constexpr uint32_t RequestMagic = static_cast<uint32_t>(0x${ExecutionRPC.RequestMagic.toHexString});
+       |inline constexpr uint32_t ResponseMagic = static_cast<uint32_t>(0x${ExecutionRPC.ResponseMagic.toHexString});
        |inline constexpr uint32_t MaximumPayload = ${ExecutionRPC.MaximumPayload}U;
        |inline constexpr uint32_t MaximumElements = ${ExecutionRPC.MaximumElements}U;
        |inline constexpr uint32_t MaximumTextBytes = ${ExecutionRPC.MaximumTextBytes}U;

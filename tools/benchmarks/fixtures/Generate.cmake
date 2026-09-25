@@ -3,6 +3,9 @@ cmake_minimum_required(VERSION 3.25)
 if(NOT FIXTURE MATCHES "^(cuda|hip|opencl)$")
   message(FATAL_ERROR "FIXTURE must be cuda, hip, or opencl")
 endif()
+if(NOT FIXTURE STREQUAL "opencl" AND ARCHITECTURE STREQUAL "")
+  message(FATAL_ERROR "ARCHITECTURE must be set for ${FIXTURE}")
+endif()
 
 set(source /source/tools/benchmarks/src/main/resources)
 set(output /output)
@@ -10,18 +13,18 @@ set(output /output)
 if(FIXTURE STREQUAL "cuda")
   set(temporary "${output}/.cloverleaf-flux.ptx.tmp")
   execute_process(
-    COMMAND nvcc -ptx -arch=sm_86 -O2 "${source}/cloverleaf-flux.cu" -o "${temporary}"
+    COMMAND nvcc -ptx -arch=${ARCHITECTURE} -O2 "${source}/cloverleaf-flux.cu" -o "${temporary}"
     COMMAND_ERROR_IS_FATAL ANY)
   file(RENAME "${temporary}" "${output}/cloverleaf-flux.ptx")
 elseif(FIXTURE STREQUAL "hip")
   set(bundle "${output}/.cloverleaf-flux.bundle.tmp")
   set(temporary "${output}/.cloverleaf-flux.hsaco.tmp")
   execute_process(
-    COMMAND hipcc --genco --offload-arch=gfx1030 -O2 "${source}/cloverleaf-flux.cu" -o "${bundle}"
+    COMMAND hipcc --genco --offload-arch=${ARCHITECTURE} -O2 "${source}/cloverleaf-flux.cu" -o "${bundle}"
     COMMAND_ERROR_IS_FATAL ANY)
   execute_process(
     COMMAND clang-offload-bundler -unbundle -type=o "-input=${bundle}"
-      "-output=${temporary}" -targets=hipv4-amdgcn-amd-amdhsa--gfx1030
+      "-output=${temporary}" -targets=hipv4-amdgcn-amd-amdhsa--${ARCHITECTURE}
     COMMAND_ERROR_IS_FATAL ANY)
   file(RENAME "${temporary}" "${output}/cloverleaf-flux.hsaco")
   file(REMOVE "${bundle}")

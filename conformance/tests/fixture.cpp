@@ -43,17 +43,11 @@ int main(int argc, char **argv) {
     }
     if (child < 0) return 2;
     std::cout << child << std::endl;
-    if (argc > 2 && std::string_view(argv[2]) == "exit") return 0;
     for (;;)
       pause();
 #else
     return 0;
 #endif
-  }
-  if (argc > 1 && std::string_view(argv[1]) == "--echo-arguments") {
-    for (int32_t i = 2; i < argc; ++i)
-      std::cout << argv[i] << '\n';
-    return 0;
   }
   return Catch::Session().run(argc, argv);
 }

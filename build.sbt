@@ -48,6 +48,12 @@ lazy val spirvToolsVersion    = "vulkan-sdk-1.4.357.0"
 lazy val ptxISAVersion        = "9.3"
 lazy val ptxISAPackage        = "v" + ptxISAVersion.replace('.', '_')
 lazy val spirvVersion         = "1.6"
+
+// Conformance workloads are much larger than interactive use, so the emulated
+// suite runs with a bigger budget than TaskLimits.Default. Keep the two in sync
+// if the interpreter's instruction accounting changes. The big-index thrust
+// cases alone need more than the old 1e9.
+lazy val conformanceMaxInstructions = "100000000000"
 lazy val spirvPackage         = "v" + spirvVersion.replace('.', '_')
 
 lazy val referenceArtifacts = Vector(
@@ -587,6 +593,14 @@ lazy val spirvReferenceBundle = ReferenceBundles.Bundle(
       (output / "khronos/spirv-tools/test/binary_parse_test.cpp").isFile,
       "SPIRV-Tools binary tests are absent"
     )
+    require(
+      (output / "khronos/spirv-headers/include/spirv/unified1/extinst.glsl.std.450.grammar.json").isFile,
+      "GLSL.std.450 extended instruction grammar is absent"
+    )
+    require(
+      (output / "khronos/spirv-headers/include/spirv/unified1/extinst.opencl.std.100.grammar.json").isFile,
+      "OpenCL.std extended instruction grammar is absent"
+    )
   }
 )
 
@@ -972,8 +986,9 @@ lazy val externalCodestyleSettings = Seq(
   nativeCodestyleCheck := Def.uncached {
     val forbidden =
       raw"\bstd::(?:size_t|ptrdiff_t|max_align_t|u?int(?:8|16|32|64)_t|u?int(?:ptr|max)_t|u?int_(?:least|fast)(?:8|16|32|64)_t)\b".r
-    val testCase = raw"^[A-Z_]*TEST_CASE[A-Z_]*\s*\(".r
-    val include  = raw"^\s*#\s*include\b".r
+    val integerConstant = raw"\bU?INT(?:8|16|32|64|MAX|PTR)_C\b".r
+    val testCase        = raw"^[A-Z_]*TEST_CASE[A-Z_]*\s*\(".r
+    val include         = raw"^\s*#\s*include\b".r
     def includeBlockNeedsSeparator(lines: Vector[String], includeIndex: Int): Boolean = {
       var index = includeIndex + 1
       while (index < lines.size && lines(index).trim.nonEmpty) {
@@ -989,6 +1004,8 @@ lazy val externalCodestyleSettings = Seq(
       lines.iterator.zipWithIndex.flatMap { case (line, index) =>
         val numericType =
           forbidden.findFirstIn(line).map(value => s"$source:${index + 1}: forbidden numeric type '$value'")
+        val constantMacro =
+          integerConstant.findFirstIn(line).map(value => s"$source:${index + 1}: forbidden integer constant macro '$value'; use static_cast")
         val testSpacing =
           Option.when(testCase.findPrefixOf(line).nonEmpty && index > 0 && lines(index - 1).trim.nonEmpty)(
             s"$source:${index + 1}: Catch test cases must be preceded by a blank line"
@@ -997,7 +1014,7 @@ lazy val externalCodestyleSettings = Seq(
           Option.when(include.findPrefixOf(line).nonEmpty && includeBlockNeedsSeparator(lines, index))(
             s"$source:${index + 2}: include blocks must be followed by a blank line"
           )
-        Iterator(numericType, testSpacing, includeSpacing).flatten
+        Iterator(numericType, constantMacro, testSpacing, includeSpacing).flatten
       }
     }
     violations.foreach(violation => streams.value.log.error(violation))
@@ -1298,7 +1315,8 @@ lazy val spirv = projectMatrix
     generateSPIRVSources := Def.uncached {
       val converter  = fileConverter.value
       val references = (codegenProject / prepareSPIRVReferences).value
-      val grammar    = references / "khronos/spirv-headers/include/spirv/unified1/spirv.core.grammar.json"
+      val unified    = references / "khronos/spirv-headers/include/spirv/unified1"
+      val grammar    = unified / "spirv.core.grammar.json"
       val sourceRoot = (Compile / checkedInGeneratedSourceDirectory).value
       val testRoot   = (Test / checkedInGeneratedSourceDirectory).value
       val tests      = references / "khronos/spirv-tools/test"
@@ -1311,6 +1329,7 @@ lazy val spirv = projectMatrix
         Seq(
           "instructions",
           s"$grammar",
+          s"$unified",
           s"$sourceRoot",
           spirvPackage
         ),
@@ -1331,7 +1350,8 @@ lazy val spirv = projectMatrix
       val references = (codegenProject / prepareSPIRVReferences).value
       val sourceRoot = (Compile / checkedInGeneratedSourceDirectory).value
       val testRoot   = (Test / checkedInGeneratedSourceDirectory).value
-      val grammar    = references / "khronos/spirv-headers/include/spirv/unified1/spirv.core.grammar.json"
+      val unified    = references / "khronos/spirv-headers/include/spirv/unified1"
+      val grammar    = unified / "spirv.core.grammar.json"
       val tests      = references / "khronos/spirv-tools/test"
       val classpath  = (codegenProject / Compile / fullClasspath).value.map(entry => converter.toPath(entry.data))
       val run        = (codegenProject / Compile / runner).value
@@ -1339,7 +1359,7 @@ lazy val spirv = projectMatrix
       run.run(
         s"$rootPackage.codegen.GenerateSPIRVISA",
         classpath,
-        Seq("instructions", "--check", s"$grammar", s"$sourceRoot", spirvPackage),
+        Seq("instructions", "--check", s"$grammar", s"$unified", s"$sourceRoot", spirvPackage),
         log
       ).get
       run.run(
@@ -1635,7 +1655,7 @@ lazy val conformance = project.in(file("conformance"))
         "GEMSTONE_NATIVE_DIRECTORY"           -> s"$nativeDirectory",
         "GEMSTONE_EXECUTION_MAX_INSTRUCTIONS" -> sys.env.getOrElse(
           "GEMSTONE_EXECUTION_MAX_INSTRUCTIONS",
-          "1000000000"
+          conformanceMaxInstructions
         )
       )
       withGemstoneServer(

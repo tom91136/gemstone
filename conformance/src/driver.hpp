@@ -16,6 +16,13 @@
 #include "profile.hpp"
 
 namespace conformance::driver {
+/// CTest return code that marks a machine-profile skip.
+inline constexpr int32_t SkipReturnCode = 4;
+/// Upper bound accepted by the `--timeout` option, in seconds.
+inline constexpr uint64_t MaximumTimeoutSeconds = 24 * 60 * 60;
+/// Extra CTest timeout granted for device-lock waiting, process teardown and reporting.
+inline constexpr uint32_t TimeoutMarginSeconds = 615;
+
 struct RunOptions {
   std::string workload = "compact";
   std::filesystem::path artifacts, output, profiles;

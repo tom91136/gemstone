@@ -92,7 +92,7 @@ install(TARGETS ${levelzero_device_helpers} RUNTIME DESTINATION device COMPONENT
 
 foreach(program IN LISTS levelzero_cts_programs)
   set_target_properties("${program}" PROPERTIES OUTPUT_NAME "levelzero_cts_${program}")
-  conformance_register_test_program("${program}" 120)
+  conformance_register_test_program("${program}" ${CONFORMANCE_TIMEOUT_CTS})
   # The upstream tests open SPIR-V files relative to their working directory.
   file(GLOB kernels "${staged_source}/conformance_tests/core/${program}/kernels/*.spv")
   if(kernels)

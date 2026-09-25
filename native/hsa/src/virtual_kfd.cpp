@@ -58,10 +58,10 @@ extern "C" gemstone_hsa_virtual_queue *gemstone_hsa_virtual_kfd_create_aql_queue
   descriptor.queue_id = queue->id;
   descriptor.ring_base = ring_base;
   descriptor.ring_size_packets = ring_size_packets;
-  descriptor.packet_size = 64;
+  descriptor.packet_size = GEMSTONE_HSA_AQL_PACKET_SIZE;
   descriptor.packet_header_offset = 0;
   descriptor.packet_type_mask = 0xff;
-  descriptor.invalid_packet_type = 1;
+  descriptor.invalid_packet_type = GEMSTONE_HSA_AQL_INVALID;
   descriptor.read_index = queue->read_pointer;
   descriptor.write_index = queue->write_pointer;
   descriptor.consume = consume;

@@ -1,7 +1,6 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
-#include <condition_variable>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -40,11 +39,11 @@ constexpr uint32_t GpuNode = 1;
 // The shared execution service currently mirrors allocations densely. Keep the
 // advertised virtual aperture below ROCr's eager scratch-reservation threshold;
 // actual dispatch scratch remains a separate execution-protocol milestone.
-constexpr uint64_t AvailableMemory = UINT64_C(1) * 1024 * 1024 * 1024;
+constexpr uint64_t AvailableMemory = static_cast<uint64_t>(1) * 1024 * 1024 * 1024;
 constexpr uint32_t PageSize = 4096;
 constexpr uint32_t TransferChunk = MaximumPayload / 2;
 constexpr uint32_t UploadChunk = 64U * 1024U;
-constexpr uint16_t InvalidPacketType = 1;
+constexpr uint16_t InvalidPacketType = GEMSTONE_HSA_AQL_INVALID;
 
 struct FileCloser {
   void operator()(std::FILE *file) const noexcept { std::fclose(file); }
@@ -79,7 +78,6 @@ struct Event {
   bool signaled = false;
   uint64_t age = 0;
   std::mutex lock;
-  std::condition_variable changed;
 };
 
 struct Queue {
@@ -275,7 +273,6 @@ bool notifySignalEvent(uint64_t signal) {
     event.signaled = true;
     ++event.age;
   }
-  event.changed.notify_all();
   if (trace_packets) std::fprintf(stderr, "Gemstone notified completion signal=%lu event=%u\n", signal, event_id);
   return true;
 }
@@ -294,7 +291,8 @@ gemstone_hsa_packet_result consumePacket(uint64_t queue_id, uint64_t packet_id, 
     std::lock_guard<std::mutex> guard(runtime.lock);
     aql = runtime.runtime;
     memory = runtime.memory;
-    if (packet_size == 64 && decode == GEMSTONE_HSA_AQL_DECODE_SUCCESS && decoded.type == GEMSTONE_HSA_AQL_KERNEL_DISPATCH) {
+    if (packet_size == GEMSTONE_HSA_AQL_PACKET_SIZE && decode == GEMSTONE_HSA_AQL_DECODE_SUCCESS
+        && decoded.type == GEMSTONE_HSA_AQL_KERNEL_DISPATCH) {
       retained.reserve(runtime.allocations.size());
       accessible.reserve(runtime.allocations.size());
       for (auto &[_, allocation] : runtime.allocations) {
@@ -312,7 +310,7 @@ gemstone_hsa_packet_result consumePacket(uint64_t queue_id, uint64_t packet_id, 
       }
     }
   }
-  if (packet_size != 64 || decode != GEMSTONE_HSA_AQL_DECODE_SUCCESS) {
+  if (packet_size != GEMSTONE_HSA_AQL_PACKET_SIZE || decode != GEMSTONE_HSA_AQL_DECODE_SUCCESS) {
     const auto result = gemstone_hsa_aql_runtime_consume(queue_id, packet_id, packet, packet_size, aql);
     if (trace_packets) {
       uint16_t header = 0;
@@ -351,7 +349,7 @@ gemstone_hsa_packet_result consumePacket(uint64_t queue_id, uint64_t packet_id, 
   // only after copy-back.  This establishes the same release/acquire ordering
   // promised by a physical GPU completion signal.
   DeferredSignal deferred;
-  std::array<unsigned char, 64> deferred_packet{};
+  std::array<unsigned char, GEMSTONE_HSA_AQL_PACKET_SIZE> deferred_packet{};
   std::memcpy(deferred_packet.data(), packet, deferred_packet.size());
   const uint64_t deferred_handle = reinterpret_cast<uint64_t>(&deferred);
   std::memcpy(deferred_packet.data() + 56, &deferred_handle, sizeof(deferred_handle));
@@ -810,11 +808,11 @@ extern "C" HSAKMT_STATUS hsaKmtGetNodeMemoryProperties(HSAuint32 node, HSAuint32
     properties[0].Width = 256;
     properties[0].MemoryClockMax = 1000;
     properties[1].HeapType = HSA_HEAPTYPE_GPU_LDS;
-    properties[1].SizeInBytes = UINT64_C(64) * 1024;
-    properties[1].VirtualBaseAddress = UINT64_C(0x100000000000);
+    properties[1].SizeInBytes = static_cast<uint64_t>(64) * 1024;
+    properties[1].VirtualBaseAddress = static_cast<uint64_t>(0x100000000000);
     properties[2].HeapType = HSA_HEAPTYPE_GPU_SCRATCH;
-    properties[2].SizeInBytes = UINT64_C(4) * 1024 * 1024 * 1024;
-    properties[2].VirtualBaseAddress = UINT64_C(0x200000000000);
+    properties[2].SizeInBytes = static_cast<uint64_t>(4) * 1024 * 1024 * 1024;
+    properties[2].VirtualBaseAddress = static_cast<uint64_t>(0x200000000000);
   }
   return HSAKMT_STATUS_SUCCESS;
 }
@@ -850,7 +848,7 @@ extern "C" HSAKMT_STATUS hsaKmtGetClockCounters(HSAuint32 node, HsaClockCounters
   counters->GPUClockCounter = now;
   counters->CPUClockCounter = now;
   counters->SystemClockCounter = now;
-  counters->SystemClockFrequencyHz = UINT64_C(1000000000);
+  counters->SystemClockFrequencyHz = static_cast<uint64_t>(1000000000);
   return HSAKMT_STATUS_SUCCESS;
 }
 
@@ -1045,7 +1043,6 @@ extern "C" HSAKMT_STATUS hsaKmtSetEvent(HsaEvent *event) {
     found->second->signaled = true;
     ++found->second->age;
   }
-  found->second->changed.notify_all();
   return HSAKMT_STATUS_SUCCESS;
 }
 
@@ -1089,7 +1086,8 @@ extern "C" HSAKMT_STATUS hsaKmtWaitOnMultipleEvents_Ext(HsaEvent *events[], HSAu
 
 extern "C" HSAKMT_STATUS hsaKmtCreateQueueExt(HSAuint32 node, HSA_QUEUE_TYPE type, HSAuint32, HSA_QUEUE_PRIORITY, HSAuint32, void *ring,
                                               HSAuint64 size, HsaEvent *, HsaQueueResource *resource) {
-  if (node != GpuNode || type != HSA_QUEUE_COMPUTE_AQL || !ring || size < 64 || size % 64 != 0 || !resource)
+  if (node != GpuNode || type != HSA_QUEUE_COMPUTE_AQL || !ring || size < GEMSTONE_HSA_AQL_PACKET_SIZE
+      || size % GEMSTONE_HSA_AQL_PACKET_SIZE != 0 || !resource)
     return HSAKMT_STATUS_NOT_SUPPORTED;
   auto record = std::make_unique<Queue>();
   record->ring = ring;
@@ -1106,12 +1104,13 @@ extern "C" HSAKMT_STATUS hsaKmtCreateQueueExt(HSAuint32 node, HSA_QUEUE_TYPE typ
   const uint64_t initial_read = !read_pointer ? 0 : __atomic_load_n(read_pointer, __ATOMIC_ACQUIRE);
   const uint64_t initial_write = !write_pointer ? 0 : __atomic_load_n(write_pointer, __ATOMIC_ACQUIRE);
   if (initial_read == initial_write) {
-    for (size_t index = 0; index < static_cast<size_t>(size / 64); ++index)
-      __atomic_store_n(reinterpret_cast<uint16_t *>(static_cast<uint8_t *>(ring) + index * 64), InvalidPacketType, __ATOMIC_RELAXED);
+    for (size_t index = 0; index < static_cast<size_t>(size / GEMSTONE_HSA_AQL_PACKET_SIZE); ++index)
+      __atomic_store_n(reinterpret_cast<uint16_t *>(static_cast<uint8_t *>(ring) + index * GEMSTONE_HSA_AQL_PACKET_SIZE), InvalidPacketType,
+                       __ATOMIC_RELAXED);
   }
   auto &runtime = state();
-  record->queue = gemstone_hsa_virtual_kfd_create_aql_queue(runtime.kfd, ring, static_cast<size_t>(size / 64), read_pointer, write_pointer,
-                                                            consumePacket, record.get(), &record->resource);
+  record->queue = gemstone_hsa_virtual_kfd_create_aql_queue(runtime.kfd, ring, static_cast<size_t>(size / GEMSTONE_HSA_AQL_PACKET_SIZE),
+                                                            read_pointer, write_pointer, consumePacket, record.get(), &record->resource);
   if (!record->queue) return HSAKMT_STATUS_OUT_OF_RESOURCES;
   const HSA_QUEUEID id = record->resource.queue_id;
   *resource = {};

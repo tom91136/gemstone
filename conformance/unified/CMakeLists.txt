@@ -262,7 +262,7 @@ if(NOT CONFORMANCE_BACKEND STREQUAL "sycl")
   target_include_directories(unified PRIVATE "${memory_output}")
 endif()
 
-conformance_register_test_program(unified 120)
+conformance_register_test_program(unified ${CONFORMANCE_TIMEOUT_UNIFIED})
 
 if(CONFORMANCE_BACKEND MATCHES "^(cuda|hip)$")
   install(FILES licenses/gpuocelot.txt

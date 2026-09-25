@@ -59,7 +59,12 @@ private:
 
 class TemporaryDirectory {
 public:
-  explicit TemporaryDirectory(std::string pattern) {
+  explicit TemporaryDirectory(std::string_view name) {
+    const char *configured = std::getenv("TMPDIR");
+    std::string base = configured && *configured ? configured : "/tmp";
+    while (base.size() > 1 && base.back() == '/')
+      base.pop_back();
+    const std::string pattern = base + "/" + std::string(name);
     std::vector<char> buffer(pattern.begin(), pattern.end());
     buffer.push_back('\0');
     if (const auto created = mkdtemp(buffer.data())) path_ = created;
@@ -289,6 +294,32 @@ std::vector<std::string> vectorBuiltinPointers(std::string_view source) {
   return result;
 }
 
+// Whether a source position falls inside a vload3/vstore3 argument list, whose
+// pointers must stay non-volatile.
+bool insideVectorBuiltin(std::string_view source, size_t position) {
+  for (const std::string_view builtin : {"vload3", "vstore3"}) {
+    size_t cursor = 0;
+    while ((cursor = source.find(builtin, cursor)) != std::string_view::npos) {
+      size_t open = cursor + builtin.size();
+      while (open < source.size() && std::isspace(static_cast<unsigned char>(source[open])))
+        ++open;
+      if (open == source.size() || source[open] != '(') {
+        cursor += builtin.size();
+        continue;
+      }
+      int depth = 1;
+      size_t close = open + 1;
+      for (; close < source.size() && depth != 0; ++close) {
+        if (source[close] == '(') ++depth;
+        else if (source[close] == ')') --depth;
+      }
+      if (position > open && position < close) return true;
+      cursor = close;
+    }
+  }
+  return false;
+}
+
 std::string makeGlobalMemoryVolatile(const std::string &source) {
   static constexpr const char marker[] = "__global";
   const auto builtinPointers = vectorBuiltinPointers(source);
@@ -316,9 +347,17 @@ std::string makeGlobalMemoryVolatile(const std::string &source) {
                                        || (!std::isalnum(static_cast<unsigned char>(source[next + sizeof("volatile") - 1]))
                                            && source[next + sizeof("volatile") - 1] != '_'));
       bool usedByVectorBuiltin = false;
+      bool castPointer = false;
       const size_t boundary = source.find_first_of(",;)", next);
       const size_t pointer = source.find('*', next);
       if (pointer != std::string::npos && (boundary == std::string::npos || pointer < boundary)) {
+        size_t afterPointer = pointer + 1;
+        while (afterPointer < source.size() && std::isspace(static_cast<unsigned char>(source[afterPointer])))
+          ++afterPointer;
+        // A cast such as (__global T*) declares no variable. Adding volatile
+        // there makes vload/vstore overload resolution ambiguous, but casts
+        // used for swizzled accesses still need it to keep the vector width.
+        castPointer = afterPointer < source.size() && source[afterPointer] == ')' && insideVectorBuiltin(source, found);
         const size_t end = boundary == std::string::npos ? source.size() : boundary;
         std::string variable;
         for (size_t cursor = pointer + 1; cursor < end;) {
@@ -333,7 +372,7 @@ std::string makeGlobalMemoryVolatile(const std::string &source) {
         }
         usedByVectorBuiltin = std::find(builtinPointers.begin(), builtinPointers.end(), variable) != builtinPointers.end();
       }
-      if (!alreadyVolatile && !usedByVectorBuiltin) result.append(" volatile");
+      if (!alreadyVolatile && !usedByVectorBuiltin && !castPointer) result.append(" volatile");
     }
     position = afterMarker;
   }
@@ -408,7 +447,7 @@ bool compileSourceToBitcode(const std::string &source, const std::string &option
     log = optionError;
     return false;
   }
-  const TemporaryDirectory directory("/tmp/gemstone-opencl-XXXXXX");
+  const TemporaryDirectory directory("gemstone-opencl-XXXXXX");
   if (!directory) {
     log = "cannot create temporary directory for OpenCL compilation";
     return false;
@@ -490,7 +529,7 @@ bool compileSource(const std::string &source, const std::string &options, std::v
                    std::vector<uint8_t> *bitcodeOutput) {
   std::vector<uint8_t> bitcode;
   if (!compileSourceToBitcode(source, options, bitcode, log)) return false;
-  const TemporaryDirectory directory("/tmp/gemstone-opencl-spirv-XXXXXX");
+  const TemporaryDirectory directory("gemstone-opencl-spirv-XXXXXX");
   if (!directory) {
     log += "cannot create temporary directory for SPIR-V conversion";
     return false;
@@ -541,7 +580,7 @@ bool compileSource(const std::string &source, const std::string &options, std::v
 }
 
 bool reverseSpirv(const std::vector<uint8_t> &il, std::vector<uint8_t> &bitcode, std::string &log) {
-  const TemporaryDirectory directory("/tmp/gemstone-opencl-reverse-XXXXXX");
+  const TemporaryDirectory directory("gemstone-opencl-reverse-XXXXXX");
   if (!directory) {
     log = "cannot create temporary directory for SPIR-V linking";
     return false;
@@ -574,7 +613,7 @@ bool linkBitcode(const std::vector<std::vector<uint8_t>> &modules, std::vector<u
     log = "no llvm-link found (set GEMSTONE_OPENCL_LLVM_LINK or install llvm-link)";
     return false;
   }
-  const TemporaryDirectory directory("/tmp/gemstone-opencl-link-XXXXXX");
+  const TemporaryDirectory directory("gemstone-opencl-link-XXXXXX");
   if (!directory) {
     log = "cannot create temporary directory for OpenCL linking";
     return false;
@@ -698,6 +737,27 @@ std::array<size_t, 3> sourceRequiredWorkGroupSize(const std::string &source) {
   return result;
 }
 
+namespace {
+// Byte size of an OpenCL C scalar or vector type name as written in a
+// __local declaration. Vector widths (char2, float4, ...) multiply the scalar.
+size_t openclElementSize(const std::string &type) {
+  std::string base = type;
+  size_t width = 0;
+  size_t scale = 1;
+  while (!base.empty() && std::isdigit(static_cast<unsigned char>(base.back()))) {
+    width += static_cast<size_t>(base.back() - '0') * scale;
+    scale *= 10;
+    base.pop_back();
+  }
+  if (width == 0) width = 1;
+  size_t baseSize = 4;
+  if (base.find("char") != std::string::npos) baseSize = 1;
+  else if (base.find("short") != std::string::npos || base == "half") baseSize = 2;
+  else if (base.find("long") != std::string::npos || base.find("double") != std::string::npos) baseSize = 8;
+  return baseSize * width;
+}
+} // namespace
+
 size_t sourceStaticLocalMemory(const std::string &source) {
   size_t total = 0;
   size_t position = 0;
@@ -718,10 +778,7 @@ size_t sourceStaticLocalMemory(const std::string &source) {
         ++typeStart;
       const size_t typeEnd = source.find_first_of(" \t\n\r", typeStart);
       const std::string type = source.substr(typeStart, typeEnd == std::string::npos ? open - typeStart : typeEnd - typeStart);
-      const size_t elementSize = type.find("char") != std::string::npos    ? 1
-                                 : type.find("short") != std::string::npos ? 2
-                                 : type.find("long") != std::string::npos  ? 8
-                                                                           : 4;
+      const size_t elementSize = openclElementSize(type);
       if (count != 0 && count <= (std::numeric_limits<size_t>::max() - total) / elementSize) total += count * elementSize;
     }
     position += 7;

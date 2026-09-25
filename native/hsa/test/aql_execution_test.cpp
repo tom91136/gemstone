@@ -16,6 +16,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include "gemstone/hsa/allocation.h"
 #include "gemstone/hsa/aql.h"
 #include "gemstone/hsa/virtual_kfd.h"
 #include <gemstone/bytes.hpp>
@@ -416,8 +417,8 @@ void execution_queue_dispatches_and_completes() {
                                                          dispatch_allocations.size(), &dispatch_allocation_count)
            == 0));
   REQUIRE((dispatch_allocations[0] == 100 && dispatch_allocations[1] == 99));
-  __atomic_store_n(resource.write_pointer, UINT64_C(1), __ATOMIC_RELEASE);
-  __atomic_store_n(resource.doorbell, UINT64_C(0), __ATOMIC_RELEASE);
+  __atomic_store_n(resource.write_pointer, static_cast<uint64_t>(1), __ATOMIC_RELEASE);
+  __atomic_store_n(resource.doorbell, static_cast<uint64_t>(0), __ATOMIC_RELEASE);
   {
     std::unique_lock<std::mutex> guard(executor.lock);
     REQUIRE((executor.launched.wait_for(guard, std::chrono::seconds(2), [&] { return executor.launches == 1; })));
@@ -455,8 +456,8 @@ void execution_queue_dispatches_and_completes() {
   executor.dirty_ranges.clear();
   set_signal(signals, 103, 1);
   ring[1] = kernel_packet(77, reinterpret_cast<uint64_t>(kernarg.data()), 103);
-  __atomic_store_n(resource.write_pointer, UINT64_C(2), __ATOMIC_RELEASE);
-  __atomic_store_n(resource.doorbell, UINT64_C(1), __ATOMIC_RELEASE);
+  __atomic_store_n(resource.write_pointer, static_cast<uint64_t>(2), __ATOMIC_RELEASE);
+  __atomic_store_n(resource.doorbell, static_cast<uint64_t>(1), __ATOMIC_RELEASE);
   REQUIRE(
       (gemstone_test::waitUntil([&] { return __atomic_load_n(resource.read_pointer, __ATOMIC_ACQUIRE) == 2; }, std::chrono::seconds(10))));
   REQUIRE((signal_value(signals, 103) == 0));
@@ -465,8 +466,8 @@ void execution_queue_dispatches_and_completes() {
 
   set_signal(signals, 101, 1);
   ring[2] = kernel_packet(999, reinterpret_cast<uint64_t>(kernarg.data()), 101);
-  __atomic_store_n(resource.write_pointer, UINT64_C(3), __ATOMIC_RELEASE);
-  __atomic_store_n(resource.doorbell, UINT64_C(2), __ATOMIC_RELEASE);
+  __atomic_store_n(resource.write_pointer, static_cast<uint64_t>(3), __ATOMIC_RELEASE);
+  __atomic_store_n(resource.doorbell, static_cast<uint64_t>(2), __ATOMIC_RELEASE);
   REQUIRE(
       (gemstone_test::waitUntil([&] { return __atomic_load_n(resource.read_pointer, __ATOMIC_ACQUIRE) == 3; }, std::chrono::seconds(10))));
   REQUIRE((signal_value(signals, 101) == -2));
@@ -474,8 +475,8 @@ void execution_queue_dispatches_and_completes() {
   executor.fail_await = true;
   set_signal(signals, 102, 1);
   ring[3] = kernel_packet(77, reinterpret_cast<uint64_t>(kernarg.data()), 102);
-  __atomic_store_n(resource.write_pointer, UINT64_C(4), __ATOMIC_RELEASE);
-  __atomic_store_n(resource.doorbell, UINT64_C(3), __ATOMIC_RELEASE);
+  __atomic_store_n(resource.write_pointer, static_cast<uint64_t>(4), __ATOMIC_RELEASE);
+  __atomic_store_n(resource.doorbell, static_cast<uint64_t>(3), __ATOMIC_RELEASE);
   REQUIRE(
       (gemstone_test::waitUntil([&] { return __atomic_load_n(resource.read_pointer, __ATOMIC_ACQUIRE) == 4; }, std::chrono::seconds(10))));
   REQUIRE((signal_value(signals, 102) == -3));
@@ -514,7 +515,7 @@ void one_code_object_binds_multiple_kernel_objects() {
   REQUIRE((gemstone_hsa_aql_runtime_write_global(runtime, 41, "device_global", 0, &native_pointer, sizeof(native_pointer)) == 0));
   uint64_t relocated = 0;
   std::memcpy(&relocated, executor.global_bytes.data(), sizeof(relocated));
-  REQUIRE((relocated == UINT64_C(0x400000000000) + UINT64_C(98) * UINT64_C(0x100000000) + 3));
+  REQUIRE((relocated == gemstone::hsa::AllocationBase + static_cast<uint64_t>(98) * gemstone::hsa::AllocationSpan + 3));
   REQUIRE((gemstone_hsa_aql_runtime_remove_kernel(runtime, 41) == 0));
   REQUIRE((executor.unloads == 0));
   REQUIRE((gemstone_hsa_aql_runtime_remove_kernel(runtime, 42) == 0));
@@ -605,8 +606,8 @@ void openmp_kernel_environment_sentinel_preserves_abi_without_pointer_resolution
   uint32_t allocation_count = 0;
   REQUIRE((gemstone_hsa_aql_runtime_dispatch_allocations(runtime, ring[0].data(), ring[0].size(), nullptr, 0, &allocation_count) == 0));
   REQUIRE((allocation_count == 1));
-  __atomic_store_n(resource.write_pointer, UINT64_C(1), __ATOMIC_RELEASE);
-  __atomic_store_n(resource.doorbell, UINT64_C(0), __ATOMIC_RELEASE);
+  __atomic_store_n(resource.write_pointer, static_cast<uint64_t>(1), __ATOMIC_RELEASE);
+  __atomic_store_n(resource.doorbell, static_cast<uint64_t>(0), __ATOMIC_RELEASE);
   {
     std::unique_lock<std::mutex> guard(executor.lock);
     REQUIRE((executor.launched.wait_for(guard, std::chrono::seconds(2), [&] { return executor.launches == 1; })));
@@ -640,8 +641,8 @@ void barriers_wait_and_complete() {
   set_signal(signals, 2, 1);
   set_signal(signals, 3, 1);
   ring[0] = barrier_packet(GEMSTONE_HSA_AQL_BARRIER_AND, {1, 2, 0, 0, 0}, 3);
-  __atomic_store_n(resource.write_pointer, UINT64_C(1), __ATOMIC_RELEASE);
-  __atomic_store_n(resource.doorbell, UINT64_C(0), __ATOMIC_RELEASE);
+  __atomic_store_n(resource.write_pointer, static_cast<uint64_t>(1), __ATOMIC_RELEASE);
+  __atomic_store_n(resource.doorbell, static_cast<uint64_t>(0), __ATOMIC_RELEASE);
   std::this_thread::sleep_for(std::chrono::milliseconds(5));
   REQUIRE((__atomic_load_n(resource.read_pointer, __ATOMIC_ACQUIRE) == 0));
   set_signal(signals, 2, 0);
@@ -653,8 +654,8 @@ void barriers_wait_and_complete() {
   set_signal(signals, 5, 0);
   set_signal(signals, 6, 1);
   ring[1] = barrier_packet(GEMSTONE_HSA_AQL_BARRIER_OR, {4, 5, 0, 0, 0}, 6);
-  __atomic_store_n(resource.write_pointer, UINT64_C(2), __ATOMIC_RELEASE);
-  __atomic_store_n(resource.doorbell, UINT64_C(1), __ATOMIC_RELEASE);
+  __atomic_store_n(resource.write_pointer, static_cast<uint64_t>(2), __ATOMIC_RELEASE);
+  __atomic_store_n(resource.doorbell, static_cast<uint64_t>(1), __ATOMIC_RELEASE);
   REQUIRE(
       (gemstone_test::waitUntil([&] { return __atomic_load_n(resource.read_pointer, __ATOMIC_ACQUIRE) == 2; }, std::chrono::seconds(10))));
   REQUIRE((signal_value(signals, 6) == 0));
@@ -691,10 +692,10 @@ void a_waiting_barrier_does_not_block_another_queue() {
   set_signal(signals, 22, 1);
   waiting_ring[0] = barrier_packet(GEMSTONE_HSA_AQL_BARRIER_AND, {20, 0, 0, 0, 0}, 21);
   ready_ring[0] = barrier_packet(GEMSTONE_HSA_AQL_BARRIER_AND, {0, 0, 0, 0, 0}, 22);
-  __atomic_store_n(waiting_resource.write_pointer, UINT64_C(1), __ATOMIC_RELEASE);
-  __atomic_store_n(waiting_resource.doorbell, UINT64_C(0), __ATOMIC_RELEASE);
-  __atomic_store_n(ready_resource.write_pointer, UINT64_C(1), __ATOMIC_RELEASE);
-  __atomic_store_n(ready_resource.doorbell, UINT64_C(0), __ATOMIC_RELEASE);
+  __atomic_store_n(waiting_resource.write_pointer, static_cast<uint64_t>(1), __ATOMIC_RELEASE);
+  __atomic_store_n(waiting_resource.doorbell, static_cast<uint64_t>(0), __ATOMIC_RELEASE);
+  __atomic_store_n(ready_resource.write_pointer, static_cast<uint64_t>(1), __ATOMIC_RELEASE);
+  __atomic_store_n(ready_resource.doorbell, static_cast<uint64_t>(0), __ATOMIC_RELEASE);
 
   REQUIRE((gemstone_test::waitUntil([&] { return __atomic_load_n(ready_resource.read_pointer, __ATOMIC_ACQUIRE) == 1; },
                                     std::chrono::seconds(10))));

@@ -19,14 +19,251 @@ object GenerateNativeBindings {
   private final case class Platform(
       name: String,
       surfaces: Vector[String],
-      preamble: Vector[String]
+      preamble: Vector[String],
+      layout: Option[LayoutSpec] = None
+  )
+  private final case class FieldLayout(mirror: String, vendor: String)
+  private final case class StructLayout(
+      mirror: String,
+      vendor: String,
+      fields: Vector[FieldLayout],
+      prefix: Boolean = false
+  )
+  private final case class LayoutSpec(header: String, defines: Vector[String], structs: Vector[StructLayout])
+
+  private def layoutFields(pairs: (String, String)*): Vector[FieldLayout] =
+    pairs.toVector.map { case (mirror, vendor) => FieldLayout(mirror, vendor) }
+
+  // The CUDA facade mirrors the driver ABI without including the vendor headers,
+  // so every mirrored field is asserted against the pinned header at build time.
+  private val CudaLayout = LayoutSpec(
+    header = "gemstone/cuda/abi_layout.hpp",
+    defines = Vector("__CUDA_API_VERSION_INTERNAL 1"),
+    structs = Vector(
+      StructLayout(
+        "gemstone::cuda::CudaArrayDescriptor",
+        "CUDA_ARRAY_DESCRIPTOR",
+        layoutFields("width" -> "Width", "height" -> "Height", "format" -> "Format", "channels" -> "NumChannels")
+      ),
+      StructLayout(
+        "gemstone::cuda::CudaArray3DDescriptor",
+        "CUDA_ARRAY3D_DESCRIPTOR",
+        layoutFields(
+          "width"    -> "Width",
+          "height"   -> "Height",
+          "depth"    -> "Depth",
+          "format"   -> "Format",
+          "channels" -> "NumChannels",
+          "flags"    -> "Flags"
+        )
+      ),
+      StructLayout(
+        "gemstone::cuda::CudaMemcpy2D",
+        "CUDA_MEMCPY2D",
+        layoutFields(
+          "src_x_in_bytes"  -> "srcXInBytes",
+          "src_y"           -> "srcY",
+          "src_memory_type" -> "srcMemoryType",
+          "src_host"        -> "srcHost",
+          "src_device"      -> "srcDevice",
+          "src_array"       -> "srcArray",
+          "src_pitch"       -> "srcPitch",
+          "dst_x_in_bytes"  -> "dstXInBytes",
+          "dst_y"           -> "dstY",
+          "dst_memory_type" -> "dstMemoryType",
+          "dst_host"        -> "dstHost",
+          "dst_device"      -> "dstDevice",
+          "dst_array"       -> "dstArray",
+          "dst_pitch"       -> "dstPitch",
+          "width_in_bytes"  -> "WidthInBytes",
+          "height"          -> "Height"
+        )
+      ),
+      StructLayout(
+        "gemstone::cuda::CudaMemcpy3D",
+        "CUDA_MEMCPY3D",
+        layoutFields(
+          "src_x_in_bytes"  -> "srcXInBytes",
+          "src_y"           -> "srcY",
+          "src_z"           -> "srcZ",
+          "src_lod"         -> "srcLOD",
+          "src_memory_type" -> "srcMemoryType",
+          "src_host"        -> "srcHost",
+          "src_device"      -> "srcDevice",
+          "src_array"       -> "srcArray",
+          "src_reserved"    -> "reserved0",
+          "src_pitch"       -> "srcPitch",
+          "src_height"      -> "srcHeight",
+          "dst_x_in_bytes"  -> "dstXInBytes",
+          "dst_y"           -> "dstY",
+          "dst_z"           -> "dstZ",
+          "dst_lod"         -> "dstLOD",
+          "dst_memory_type" -> "dstMemoryType",
+          "dst_host"        -> "dstHost",
+          "dst_device"      -> "dstDevice",
+          "dst_array"       -> "dstArray",
+          "dst_reserved"    -> "reserved1",
+          "dst_pitch"       -> "dstPitch",
+          "dst_height"      -> "dstHeight",
+          "width_in_bytes"  -> "WidthInBytes",
+          "height"          -> "Height",
+          "depth"           -> "Depth"
+        )
+      ),
+      StructLayout(
+        "gemstone::cuda::CudaArrayDescriptorV1",
+        "CUDA_ARRAY_DESCRIPTOR_v1",
+        layoutFields("width" -> "Width", "height" -> "Height", "format" -> "Format", "channels" -> "NumChannels")
+      ),
+      StructLayout(
+        "gemstone::cuda::CudaArray3DDescriptorV1",
+        "CUDA_ARRAY3D_DESCRIPTOR_v1",
+        layoutFields(
+          "width"    -> "Width",
+          "height"   -> "Height",
+          "depth"    -> "Depth",
+          "format"   -> "Format",
+          "channels" -> "NumChannels",
+          "flags"    -> "Flags"
+        )
+      ),
+      StructLayout(
+        "gemstone::cuda::CudaMemcpy2DV1",
+        "CUDA_MEMCPY2D_v1",
+        layoutFields(
+          "src_x_in_bytes"  -> "srcXInBytes",
+          "src_y"           -> "srcY",
+          "src_memory_type" -> "srcMemoryType",
+          "src_host"        -> "srcHost",
+          "src_device"      -> "srcDevice",
+          "src_array"       -> "srcArray",
+          "src_pitch"       -> "srcPitch",
+          "dst_x_in_bytes"  -> "dstXInBytes",
+          "dst_y"           -> "dstY",
+          "dst_memory_type" -> "dstMemoryType",
+          "dst_host"        -> "dstHost",
+          "dst_device"      -> "dstDevice",
+          "dst_array"       -> "dstArray",
+          "dst_pitch"       -> "dstPitch",
+          "width_in_bytes"  -> "WidthInBytes",
+          "height"          -> "Height"
+        )
+      ),
+      StructLayout(
+        "gemstone::cuda::CudaMemcpy3DV1",
+        "CUDA_MEMCPY3D_v1",
+        layoutFields(
+          "src_x_in_bytes"  -> "srcXInBytes",
+          "src_y"           -> "srcY",
+          "src_z"           -> "srcZ",
+          "src_lod"         -> "srcLOD",
+          "src_memory_type" -> "srcMemoryType",
+          "src_host"        -> "srcHost",
+          "src_device"      -> "srcDevice",
+          "src_array"       -> "srcArray",
+          "src_reserved"    -> "reserved0",
+          "src_pitch"       -> "srcPitch",
+          "src_height"      -> "srcHeight",
+          "dst_x_in_bytes"  -> "dstXInBytes",
+          "dst_y"           -> "dstY",
+          "dst_z"           -> "dstZ",
+          "dst_lod"         -> "dstLOD",
+          "dst_memory_type" -> "dstMemoryType",
+          "dst_host"        -> "dstHost",
+          "dst_device"      -> "dstDevice",
+          "dst_array"       -> "dstArray",
+          "dst_reserved"    -> "reserved1",
+          "dst_pitch"       -> "dstPitch",
+          "dst_height"      -> "dstHeight",
+          "width_in_bytes"  -> "WidthInBytes",
+          "height"          -> "Height",
+          "depth"           -> "Depth"
+        )
+      ),
+      StructLayout(
+        "gemstone::cuda::CudaLaunchConfig",
+        "CUlaunchConfig",
+        layoutFields(
+          "grid_x"              -> "gridDimX",
+          "grid_y"              -> "gridDimY",
+          "grid_z"              -> "gridDimZ",
+          "block_x"             -> "blockDimX",
+          "block_y"             -> "blockDimY",
+          "block_z"             -> "blockDimZ",
+          "shared_memory_bytes" -> "sharedMemBytes",
+          "stream"              -> "hStream",
+          "attributes"          -> "attrs",
+          "attribute_count"     -> "numAttrs"
+        )
+      ),
+      StructLayout("gemstone::cuda::Dim3", "dim3", layoutFields("x" -> "x", "y" -> "y", "z" -> "z")),
+      StructLayout(
+        "gemstone::cuda::DevicePropertiesPrefix",
+        "cudaDeviceProp",
+        layoutFields(
+          "name"                    -> "name",
+          "uuid"                    -> "uuid",
+          "luid"                    -> "luid",
+          "luid_device_node_mask"   -> "luidDeviceNodeMask",
+          "total_global_memory"     -> "totalGlobalMem",
+          "shared_memory_per_block" -> "sharedMemPerBlock",
+          "registers_per_block"     -> "regsPerBlock",
+          "warp_size"               -> "warpSize",
+          "memory_pitch"            -> "memPitch",
+          "max_threads_per_block"   -> "maxThreadsPerBlock",
+          "max_threads_dimension"   -> "maxThreadsDim",
+          "max_grid_size"           -> "maxGridSize",
+          "total_constant_memory"   -> "totalConstMem",
+          "major"                   -> "major",
+          "minor"                   -> "minor",
+          "texture_alignment"       -> "textureAlignment",
+          "texture_pitch_alignment" -> "texturePitchAlignment",
+          "multiprocessor_count"    -> "multiProcessorCount"
+        ),
+        prefix = true
+      ),
+      StructLayout(
+        "gemstone::cuda::FunctionAttributesPrefix",
+        "cudaFuncAttributes",
+        layoutFields(
+          "shared_size_bytes"                -> "sharedSizeBytes",
+          "constant_size_bytes"              -> "constSizeBytes",
+          "local_size_bytes"                 -> "localSizeBytes",
+          "max_threads_per_block"            -> "maxThreadsPerBlock",
+          "register_count"                   -> "numRegs",
+          "ptx_version"                      -> "ptxVersion",
+          "binary_version"                   -> "binaryVersion",
+          "cache_mode_ca"                    -> "cacheModeCA",
+          "max_dynamic_shared_size_bytes"    -> "maxDynamicSharedSizeBytes",
+          "preferred_shared_memory_carveout" -> "preferredShmemCarveout"
+        ),
+        prefix = true
+      ),
+      StructLayout(
+        "gemstone::cuda::LegacyDeviceProperties",
+        "CUdevprop",
+        layoutFields(
+          "max_threads_per_block"   -> "maxThreadsPerBlock",
+          "max_threads_dim"         -> "maxThreadsDim",
+          "max_grid_size"           -> "maxGridSize",
+          "shared_memory_per_block" -> "sharedMemPerBlock",
+          "total_constant_memory"   -> "totalConstantMemory",
+          "simd_width"              -> "SIMDWidth",
+          "memory_pitch"            -> "memPitch",
+          "registers_per_block"     -> "regsPerBlock",
+          "clock_rate"              -> "clockRate",
+          "texture_alignment"       -> "textureAlign"
+        )
+      )
+    )
   )
 
   private val platforms = Vector(
     Platform(
       "cuda",
       Vector("cuda-driver", "cuda-runtime", "cuda-cublas"),
-      Vector("#include <cuda.h>", "#include <cuda_runtime_api.h>")
+      Vector("#include <cuda.h>", "#include <cuda_runtime_api.h>", "#include <cublas_api.h>"),
+      layout = Some(CudaLayout)
     ),
     Platform(
       "hip",
@@ -90,14 +327,19 @@ object GenerateNativeBindings {
       if (conflicts.nonEmpty)
         throw IllegalStateException(s"${platform.name}: conflicting enum constants: ${conflicts.mkString("; ")}")
       val directory = output.resolve(platform.name)
+      val constants = enumConstants.distinctBy(_.name).sortBy(_.name.text)
+      val layout    = platform.layout.map { spec =>
+        directory.resolve(s"gemstone_${platform.name}_layout.cpp") ->
+          attributed(renderLayout(platform, spec), manifest)
+      }
       Vector(
         directory.resolve(s"gemstone_${platform.name}_api.h") ->
           attributed(renderPublicHeader(platform, functions), manifest),
         directory.resolve(s"gemstone_${platform.name}_constants.hpp") ->
-          attributed(renderConstants(platform.name, enumConstants.distinctBy(_.name).sortBy(_.name.text)), manifest),
+          attributed(renderConstants(platform.name, constants), manifest),
         directory.resolve(s"gemstone_${platform.name}_impl.cpp") ->
-          attributed(renderImplementationCheck(platform.name, functions), manifest)
-      )
+          attributed(renderImplementationCheck(platform.name, functions, constants), manifest)
+      ) ++ layout
     }
     val openCL                        = byName.getOrElse("opencl", missingSurface("opencl"))
     val openCLDispatch: GeneratedFile = output.resolve("opencl/gemstone_opencl_dispatch.hpp") ->
@@ -150,7 +392,8 @@ object GenerateNativeBindings {
 
   private def renderImplementationCheck(
       platform: String,
-      functions: Vector[GenerateOfficialAPIManifest.Function]
+      functions: Vector[GenerateOfficialAPIManifest.Function],
+      constants: Vector[GenerateOfficialAPIManifest.EnumConstant]
   ): String = {
     val references = functions.map { function =>
       val functionType = function.functionType.text
@@ -161,7 +404,14 @@ object GenerateNativeBindings {
         s"GEMSTONE_USED static const auto require_$functionName = " +
         s"static_cast<signature_$functionName>(&$functionName);"
     }.mkString("\n")
+    // Generated literals mirror the pinned headers, so assert each one back against
+    // the vendor enumerator to catch drift at compile time.
+    val constantChecks = constants.map { constant =>
+      val name = constant.name.text
+      s"static_assert(static_cast<long long>(gemstone::$platform::api::$name) == static_cast<long long>($name));"
+    }.mkString("\n")
     s"""#include "gemstone_${platform}_api.h"
+       |#include "gemstone_${platform}_constants.hpp"
        |
        |#if defined(__GNUC__) || defined(__clang__)
        |#define GEMSTONE_USED __attribute__((used))
@@ -172,6 +422,28 @@ object GenerateNativeBindings {
        |namespace {
        |$references
        |}
+       |
+       |$constantChecks
+       |""".stripMargin
+  }
+
+  private def renderLayout(platform: Platform, spec: LayoutSpec): String = {
+    val defines    = spec.defines.map(define => s"#define $define").mkString("\n")
+    val assertions = spec.structs.flatMap { layout =>
+      val size =
+        if (layout.prefix)
+          s"static_assert(sizeof(${layout.mirror}) <= sizeof(${layout.vendor}), \"${layout.vendor} prefix exceeds the vendor size\");"
+        else s"static_assert(sizeof(${layout.mirror}) == sizeof(${layout.vendor}), \"${layout.vendor} size drift\");"
+      size +: layout.fields.map { field =>
+        s"static_assert(offsetof(${layout.mirror}, ${field.mirror}) == offsetof(${layout.vendor}, ${field.vendor}), " +
+          s"\"${layout.vendor}.${field.vendor} offset drift\");"
+      }
+    }.mkString("\n")
+    s"""$defines
+       |${platform.preamble.mkString("\n")}
+       |#include "${spec.header}"
+       |
+       |$assertions
        |""".stripMargin
   }
 

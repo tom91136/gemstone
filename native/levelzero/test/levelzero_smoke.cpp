@@ -28,9 +28,8 @@ TEST_CASE("Level Zero facade smoke test", "[level-zero]") {
   REQUIRE((extensionCount >= 2));
   std::vector<ze_driver_extension_properties_t> extensions(extensionCount);
   REQUIRE((zeDriverGetExtensionProperties(driver, &extensionCount, extensions.data()) == ZE_RESULT_SUCCESS));
-  REQUIRE((std::any_of(extensions.begin(), extensions.end(), [](const auto &extension) {
-    return std::strcmp(extension.name, ZE_GLOBAL_OFFSET_EXP_NAME) == 0;
-  })));
+  REQUIRE((std::any_of(extensions.begin(), extensions.end(),
+                       [](const auto &extension) { return std::strcmp(extension.name, ZE_GLOBAL_OFFSET_EXP_NAME) == 0; })));
 
   void *import = nullptr;
   REQUIRE((zeDriverGetExtensionFunctionAddress(driver, "zexDriverImportExternalPointer", reinterpret_cast<void **>(&import))
@@ -174,8 +173,11 @@ TEST_CASE("Level Zero facade smoke test", "[level-zero]") {
   REQUIRE((zeContextDestroy(context) == ZE_RESULT_ERROR_HANDLE_OBJECT_IN_USE));
   void *foreignDestination = nullptr;
   REQUIRE((zeMemAllocDevice(other_context, &allocationDesc, 64, 16, device, &foreignDestination) == ZE_RESULT_SUCCESS));
+  // AppendMemoryCopyFromContext only requires the source context to be named and
+  // both ranges to be accessible by the device, so a destination from another
+  // context on the same driver is legal.
   REQUIRE((zeCommandListAppendMemoryCopyFromContext(list, foreignDestination, context, source, 4, nullptr, 0, nullptr)
-           == ZE_RESULT_ERROR_INVALID_ARGUMENT));
+           == ZE_RESULT_SUCCESS));
   REQUIRE((zeMemFree(other_context, foreignDestination) == ZE_RESULT_SUCCESS));
   ze_command_queue_handle_t foreignQueue = nullptr;
   ze_command_list_handle_t foreignList = nullptr;
@@ -262,8 +264,9 @@ TEST_CASE("Level Zero facade smoke test", "[level-zero]") {
   std::memset(destination, 0xa5, 64);
   ze_copy_region_t oneSliceSource{0, 0, 0, 4, 3, 1};
   ze_copy_region_t oneSliceDestination{2, 1, 0, 4, 3, 1};
-  REQUIRE((zeCommandListAppendMemoryCopyRegion(list, destination, &oneSliceDestination, 10, 30, source, &oneSliceSource, 8, 24,
-                                               nullptr, 0, nullptr) == ZE_RESULT_SUCCESS));
+  REQUIRE((zeCommandListAppendMemoryCopyRegion(list, destination, &oneSliceDestination, 10, 30, source, &oneSliceSource, 8, 24, nullptr, 0,
+                                               nullptr)
+           == ZE_RESULT_SUCCESS));
   for (uint32_t i = 0; i < 64; ++i) {
     const bool copied = i >= 12 && i < 36 && (i - 12) % 10 < 4;
     REQUIRE((destinationBytes[i] == (copied ? sourceBytes[((i - 12) / 10) * 8 + (i - 12) % 10] : 0xa5)));

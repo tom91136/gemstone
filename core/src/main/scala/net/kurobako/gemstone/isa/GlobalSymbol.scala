@@ -15,24 +15,13 @@ final case class GlobalSymbol private (
 )
 
 object GlobalSymbol {
-  private val PointerByteWidth = 8L
-
   def validated(
       name: GlobalName,
       virtualAddress: Option[GuestAddress],
       size: Long :| Positive0,
       pointerOffsets: Vec[Int :| Positive0]
   ): Either[String, GlobalSymbol] =
-    for {
-      _ <- Either.cond(
-        pointerOffsets.zip(pointerOffsets.drop(1)).forall { case (previous, current) => previous < current },
-        (),
-        "program-global pointer offsets must be sorted and unique"
-      )
-      _ <- Either.cond(
-        pointerOffsets.forall(offset => size >= PointerByteWidth && offset.toLong <= size - PointerByteWidth),
-        (),
-        "program-global pointer offset lies outside its 64-bit storage slot"
-      )
-    } yield GlobalSymbol(name, virtualAddress, size, pointerOffsets)
+    SymbolValidation.globalPointerOffsets(size, pointerOffsets).map(_ =>
+      GlobalSymbol(name, virtualAddress, size, pointerOffsets)
+    )
 }

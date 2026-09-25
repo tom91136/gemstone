@@ -1,6 +1,7 @@
 package net.kurobako.gemstone.rpc
 
 import net.kurobako.gemstone.Vec
+import net.kurobako.gemstone.isa.SymbolValidation
 import net.kurobako.gemstone.memory.GuestAddress
 import net.kurobako.gemstone.rpc.Wire.Codec
 
@@ -9,7 +10,8 @@ import io.github.iltotore.iron.constraint.all.*
 
 /** Process-neutral values carried by [[ExecutionRPC]]. */
 object ExecutionProtocol {
-  export net.kurobako.gemstone.rpc.{AllocationId, CompletionId, GlobalName, KernelName, LinkageName, ProgramId}
+  export net.kurobako.gemstone.isa.{GlobalName, KernelName, LinkageName}
+  export net.kurobako.gemstone.rpc.{AllocationId, CompletionId, ProgramId}
 
   final case class Dimensions(
       x: Int :| Positive,
@@ -115,27 +117,14 @@ object ExecutionProtocol {
         argumentBlockSize: Int :| Positive0,
         explicitParameterCount: Int :| Positive0,
         parameters: Vec[KernelParameterMetadata]
-    ): Either[String, KernelMetadata] = for {
-      _ <- Either.cond(
-        explicitParameterCount <= parameters.size,
-        (),
-        "explicit parameter count exceeds the parameter count"
-      )
-      _ <- Either.cond(
-        parameters.forall(parameter =>
-          parameter.offset.toLong + parameter.width.toLong <= argumentBlockSize.toLong
-        ),
-        (),
-        "kernel parameter lies outside the argument block"
-      )
-      _ <- Either.cond(
-        parameters.zip(parameters.drop(1)).forall { case (previous, current) =>
-          previous.offset.toLong + previous.width.toLong <= current.offset.toLong
-        },
-        (),
-        "kernel parameters must be ordered and non-overlapping"
-      )
-    } yield KernelMetadata(argumentBlockSize, explicitParameterCount, parameters)
+    ): Either[String, KernelMetadata] =
+      SymbolValidation
+        .kernelParameters(
+          argumentBlockSize,
+          explicitParameterCount,
+          parameters.map(parameter => parameter.offset -> parameter.width)
+        )
+        .map(_ => KernelMetadata(argumentBlockSize, explicitParameterCount, parameters))
 
     given Codec[KernelMetadata] = Codec.validated(Codec.derived[KernelMetadata])(value =>
       validated(value.argumentBlockSize, value.explicitParameterCount, value.parameters)
@@ -152,25 +141,15 @@ object ExecutionProtocol {
   )
 
   object ProgramGlobalMetadata {
-    private val PointerByteWidth = 8L
-
     def validated(
         name: GlobalName,
         virtualAddress: Option[GuestAddress],
         size: Long :| Positive0,
         pointerOffsets: Vec[Int :| Positive0]
-    ): Either[String, ProgramGlobalMetadata] = for {
-      _ <- Either.cond(
-        pointerOffsets.zip(pointerOffsets.drop(1)).forall { case (previous, current) => previous < current },
-        (),
-        "program-global pointer offsets must be sorted and unique"
-      )
-      _ <- Either.cond(
-        pointerOffsets.forall(offset => size >= PointerByteWidth && offset.toLong <= size - PointerByteWidth),
-        (),
-        "program-global pointer offset lies outside its 64-bit storage slot"
-      )
-    } yield ProgramGlobalMetadata(name, virtualAddress, size, pointerOffsets)
+    ): Either[String, ProgramGlobalMetadata] =
+      SymbolValidation
+        .globalPointerOffsets(size, pointerOffsets)
+        .map(_ => ProgramGlobalMetadata(name, virtualAddress, size, pointerOffsets))
 
     given Codec[ProgramGlobalMetadata] = Codec.validated(Codec.derived[ProgramGlobalMetadata])(value =>
       validated(value.name, value.virtualAddress, value.size, value.pointerOffsets)

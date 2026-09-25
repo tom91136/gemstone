@@ -85,10 +85,63 @@ private[v1_6] object VMInterpreter {
   }
 
   private val OpenCLUnaryFloatingOpcodes = Set(
-    0, 1, 2, 3, 4, 5, 6, 8, 9, 11, 12, 14, 15, 16, 19, 20, 21, 22, 23, 25, 37, 38, 39, 40, 41,
-    53, 55, 56, 57, 59, 60, 61, 62, 63, 64, 66, 81, 83, 84, 85, 86, 87, 88, 90, 91, 92, 93, 94
+    ExtendedInstruction.OpenClStd.acos,
+    ExtendedInstruction.OpenClStd.acosh,
+    ExtendedInstruction.OpenClStd.acospi,
+    ExtendedInstruction.OpenClStd.asin,
+    ExtendedInstruction.OpenClStd.asinh,
+    ExtendedInstruction.OpenClStd.asinpi,
+    ExtendedInstruction.OpenClStd.atan,
+    ExtendedInstruction.OpenClStd.atanh,
+    ExtendedInstruction.OpenClStd.atanpi,
+    ExtendedInstruction.OpenClStd.cbrt,
+    ExtendedInstruction.OpenClStd.ceil,
+    ExtendedInstruction.OpenClStd.cos,
+    ExtendedInstruction.OpenClStd.cosh,
+    ExtendedInstruction.OpenClStd.cospi,
+    ExtendedInstruction.OpenClStd.exp,
+    ExtendedInstruction.OpenClStd.exp2,
+    ExtendedInstruction.OpenClStd.exp10,
+    ExtendedInstruction.OpenClStd.expm1,
+    ExtendedInstruction.OpenClStd.fabs,
+    ExtendedInstruction.OpenClStd.floor,
+    ExtendedInstruction.OpenClStd.log,
+    ExtendedInstruction.OpenClStd.log2,
+    ExtendedInstruction.OpenClStd.log10,
+    ExtendedInstruction.OpenClStd.log1p,
+    ExtendedInstruction.OpenClStd.logb,
+    ExtendedInstruction.OpenClStd.rint,
+    ExtendedInstruction.OpenClStd.round,
+    ExtendedInstruction.OpenClStd.rsqrt,
+    ExtendedInstruction.OpenClStd.sin,
+    ExtendedInstruction.OpenClStd.sinh,
+    ExtendedInstruction.OpenClStd.sinpi,
+    ExtendedInstruction.OpenClStd.sqrt,
+    ExtendedInstruction.OpenClStd.tan,
+    ExtendedInstruction.OpenClStd.tanh,
+    ExtendedInstruction.OpenClStd.tanpi,
+    ExtendedInstruction.OpenClStd.trunc,
+    ExtendedInstruction.OpenClStd.native_cos,
+    ExtendedInstruction.OpenClStd.native_exp,
+    ExtendedInstruction.OpenClStd.native_exp2,
+    ExtendedInstruction.OpenClStd.native_exp10,
+    ExtendedInstruction.OpenClStd.native_log,
+    ExtendedInstruction.OpenClStd.native_log2,
+    ExtendedInstruction.OpenClStd.native_log10,
+    ExtendedInstruction.OpenClStd.native_recip,
+    ExtendedInstruction.OpenClStd.native_rsqrt,
+    ExtendedInstruction.OpenClStd.native_sin,
+    ExtendedInstruction.OpenClStd.native_sqrt,
+    ExtendedInstruction.OpenClStd.native_tan
   )
-  private val OpenCLBinaryFloatingOpcodes = Set(7, 10, 24, 29, 32, 50)
+  private val OpenCLBinaryFloatingOpcodes = Set(
+    ExtendedInstruction.OpenClStd.atan2,
+    ExtendedInstruction.OpenClStd.atan2pi,
+    ExtendedInstruction.OpenClStd.fdim,
+    ExtendedInstruction.OpenClStd.fmod,
+    ExtendedInstruction.OpenClStd.hypot,
+    ExtendedInstruction.OpenClStd.powr
+  )
 
   def kernelNames(program: Program): Vec[KernelName] =
     Vec.from(program.entryPoints.keys.toSeq.sortBy(_.value))
@@ -336,9 +389,10 @@ private[v1_6] object VMInterpreter {
       case Left(message) => return Left(Fault.InvalidTask(message))
       case Right(value)  => value
     }
-    val subgroup       = program.subgroupSizes.getOrElse(function.id, math.max(1, math.min(32, totalLocal)))
-    val hasCollectives = program.collectiveFunctions.contains(function.id) || memory.defersHostReads
-    val baseScalars    = BaseScalarValues(program.constants, globalValues, program.module.header.bound.toUnsigned)
+    val subgroup          = program.subgroupSizes.getOrElse(function.id, math.max(1, math.min(32, totalLocal)))
+    val enqueuedSubgroups = (totalLocal.toLong + subgroup.toLong - 1L) / subgroup.toLong
+    val hasCollectives    = program.collectiveFunctions.contains(function.id) || memory.defersHostReads
+    val baseScalars       = BaseScalarValues(program.constants, globalValues, program.module.header.bound.toUnsigned)
     metrics.recordDispatch(hasCollectives)
     val groupCount = dispatch.geometry.groupCount.volume match {
       case Left(message) => return Left(Fault.InvalidTask(message))
@@ -470,6 +524,7 @@ private[v1_6] object VMInterpreter {
                 subgroupSize = subgroupSize,
                 maxSubgroupSize = subgroup,
                 numSubgroups = numSubgroups,
+                enqueuedSubgroups = enqueuedSubgroups,
                 subgroupIndex = subgroupIndex,
                 subgroupLocal = linearLocal % subgroup
               )
@@ -484,6 +539,7 @@ private[v1_6] object VMInterpreter {
                 subgroupSize,
                 subgroup,
                 numSubgroups,
+                enqueuedSubgroups,
                 subgroupIndex,
                 linearLocal % subgroup
               )
@@ -5718,13 +5774,14 @@ private[v1_6] object VMInterpreter {
     program.extendedInstructionSets.get(setId).map(_.value) match {
       case None =>
         Left(Fault.InvalidTask(s"OpExtInst references undefined import %$setId"))
-      case Some("GLSL.std.450") if opcode == 4 || opcode == 13 || opcode == 14 || opcode == 31 =>
+      case Some("GLSL.std.450")
+          if opcode == ExtendedInstruction.GlslStd450.FAbs || opcode == ExtendedInstruction.GlslStd450.Sin || opcode == ExtendedInstruction.GlslStd450.Cos || opcode == ExtendedInstruction.GlslStd450.Sqrt =>
         glslUnaryFloating(program, values, resultType, destination, opcode, sources)
-      case Some("GLSL.std.450") if opcode == 26 =>
+      case Some("GLSL.std.450") if opcode == ExtendedInstruction.GlslStd450.Pow =>
         if (sources.size != 2)
           Left(Fault.InvalidTask("GLSL.std.450 Pow expects two operands"))
         else openCLPow(program, values, resultType, destination, sources(0), sources(1))
-      case Some("OpenCL.std") if opcode == 13 =>
+      case Some("OpenCL.std") if opcode == ExtendedInstruction.OpenClStd.copysign =>
         if (sources.size != 2)
           Left(Fault.InvalidTask(
             s"OpenCL.std copysign expects 2 operands, received ${sources.size}"
@@ -5763,31 +5820,42 @@ private[v1_6] object VMInterpreter {
             case (_, None) => Left(undefined(sources(1)))
             case _         => Left(Fault.InvalidTask("OpenCL.std copysign operands are not floating-point"))
           }
-      case Some("OpenCL.std") if opcode == 26 || opcode == 42 =>
-        val name = if (opcode == 26) "fma" else "mad"
+      case Some("OpenCL.std")
+          if opcode == ExtendedInstruction.OpenClStd.fma || opcode == ExtendedInstruction.OpenClStd.mad =>
+        val name = if (opcode == ExtendedInstruction.OpenClStd.fma) "fma" else "mad"
         if (sources.size != 3)
           Left(Fault.InvalidTask(
             s"OpenCL.std $name expects 3 operands, received ${sources.size}"
           ))
-        else openCLMad(program, values, resultType, destination, sources(0), sources(1), sources(2), opcode == 26)
-      case Some("OpenCL.std") if opcode == 43 =>
+        else openCLMad(
+          program,
+          values,
+          resultType,
+          destination,
+          sources(0),
+          sources(1),
+          sources(2),
+          opcode == ExtendedInstruction.OpenClStd.fma
+        )
+      case Some("OpenCL.std") if opcode == ExtendedInstruction.OpenClStd.maxmag =>
         if (sources.size != 2)
           Left(Fault.InvalidTask(
             s"OpenCL.std maxmag expects 2 operands, received ${sources.size}"
           ))
         else openCLMaxMag(program, values, resultType, destination, sources(0), sources(1))
-      case Some("OpenCL.std") if opcode == 48 =>
+      case Some("OpenCL.std") if opcode == ExtendedInstruction.OpenClStd.pow =>
         if (sources.size != 2)
           Left(Fault.InvalidTask(
             s"OpenCL.std pow expects 2 operands, received ${sources.size}"
           ))
         else openCLPow(program, values, resultType, destination, sources(0), sources(1))
-      case Some("OpenCL.std") if opcode >= 156 && opcode <= 159 =>
+      case Some("OpenCL.std")
+          if opcode >= ExtendedInstruction.OpenClStd.s_max && opcode <= ExtendedInstruction.OpenClStd.u_min =>
         val name = opcode match {
-          case 156 => "s_max"
-          case 157 => "u_max"
-          case 158 => "s_min"
-          case _   => "u_min"
+          case ExtendedInstruction.OpenClStd.s_max => "s_max"
+          case ExtendedInstruction.OpenClStd.u_max => "u_max"
+          case ExtendedInstruction.OpenClStd.s_min => "s_min"
+          case _                                   => "u_min"
         }
         val width = integerShape(program, id(resultType)).map(_._1).getOrElse(BitWidth(64))
         if (sources.size != 2)
@@ -5798,22 +5866,26 @@ private[v1_6] object VMInterpreter {
           integerBitwise(program, values, resultType, destination, sources(0), sources(1), s"OpenCL.std $name") {
             (left, right) =>
               opcode match {
-                case 156 => if (signExtend(left, width) >= signExtend(right, width)) left else right
-                case 157 => if (java.lang.Long.compareUnsigned(left, right) >= 0) left else right
-                case 158 => if (signExtend(left, width) <= signExtend(right, width)) left else right
-                case _   => if (java.lang.Long.compareUnsigned(left, right) <= 0) left else right
+                case ExtendedInstruction.OpenClStd.s_max =>
+                  if (signExtend(left, width) >= signExtend(right, width)) left else right
+                case ExtendedInstruction.OpenClStd.u_max =>
+                  if (java.lang.Long.compareUnsigned(left, right) >= 0) left else right
+                case ExtendedInstruction.OpenClStd.s_min =>
+                  if (signExtend(left, width) <= signExtend(right, width)) left else right
+                case _ => if (java.lang.Long.compareUnsigned(left, right) <= 0) left else right
               }
           }
-      case Some("OpenCL.std") if opcode == 58 =>
+      case Some("OpenCL.std") if opcode == ExtendedInstruction.OpenClStd.sincos =>
         if (sources.size != 2)
           Left(Fault.InvalidTask(
             s"OpenCL.std sincos expects 2 operands, received ${sources.size}"
           ))
         else openCLSinCos(program, values, memory, resultType, destination, sources(0), sources(1))
-      case Some("OpenCL.std") if opcode == 184 =>
+      case Some("OpenCL.std") if opcode == ExtendedInstruction.OpenClStd.printf =>
         openCLPrintf(program, values, memory, resultType, destination, sources)
-      case Some("OpenCL.std") if opcode == 27 || opcode == 28 =>
-        val name = if (opcode == 27) "fmax" else "fmin"
+      case Some("OpenCL.std")
+          if opcode == ExtendedInstruction.OpenClStd.fmax || opcode == ExtendedInstruction.OpenClStd.fmin =>
+        val name = if (opcode == ExtendedInstruction.OpenClStd.fmax) "fmax" else "fmin"
         if (sources.size != 2)
           Left(Fault.InvalidTask(
             s"OpenCL.std $name expects 2 operands, received ${sources.size}"
@@ -5826,9 +5898,9 @@ private[v1_6] object VMInterpreter {
             destination,
             sources(0),
             sources(1),
-            if (opcode == 27) FloatingOperation.Maximum else FloatingOperation.Minimum
+            if (opcode == ExtendedInstruction.OpenClStd.fmax) FloatingOperation.Maximum else FloatingOperation.Minimum
           )
-      case Some("OpenCL.std") if opcode == 34 =>
+      case Some("OpenCL.std") if opcode == ExtendedInstruction.OpenClStd.ldexp =>
         if (sources.size != 2)
           Left(Fault.InvalidTask(
             s"OpenCL.std ldexp expects 2 operands, received ${sources.size}"
@@ -5837,54 +5909,54 @@ private[v1_6] object VMInterpreter {
       case Some("OpenCL.std")
           if OpenCLUnaryFloatingOpcodes.contains(opcode) =>
         val name = opcode match {
-          case 0  => "acos"
-          case 1  => "acosh"
-          case 2  => "acospi"
-          case 3  => "asin"
-          case 4  => "asinh"
-          case 5  => "asinpi"
-          case 6  => "atan"
-          case 8  => "atanh"
-          case 9  => "atanpi"
-          case 11 => "cbrt"
-          case 12 => "ceil"
-          case 14 => "cos"
-          case 15 => "cosh"
-          case 16 => "cospi"
-          case 19 => "exp"
-          case 20 => "exp2"
-          case 21 => "exp10"
-          case 22 => "expm1"
-          case 23 => "fabs"
-          case 25 => "floor"
-          case 37 => "log"
-          case 38 => "log2"
-          case 39 => "log10"
-          case 40 => "log1p"
-          case 41 => "logb"
-          case 53 => "rint"
-          case 55 => "round"
-          case 56 => "rsqrt"
-          case 57 => "sin"
-          case 59 => "sinh"
-          case 60 => "sinpi"
-          case 61 => "sqrt"
-          case 62 => "tan"
-          case 63 => "tanh"
-          case 64 => "tanpi"
-          case 66 => "trunc"
-          case 81 => "native_cos"
-          case 83 => "native_exp"
-          case 84 => "native_exp2"
-          case 85 => "native_exp10"
-          case 86 => "native_log"
-          case 87 => "native_log2"
-          case 88 => "native_log10"
-          case 90 => "native_recip"
-          case 91 => "native_rsqrt"
-          case 92 => "native_sin"
-          case 93 => "native_sqrt"
-          case 94 => "native_tan"
+          case ExtendedInstruction.OpenClStd.acos         => "acos"
+          case ExtendedInstruction.OpenClStd.acosh        => "acosh"
+          case ExtendedInstruction.OpenClStd.acospi       => "acospi"
+          case ExtendedInstruction.OpenClStd.asin         => "asin"
+          case ExtendedInstruction.OpenClStd.asinh        => "asinh"
+          case ExtendedInstruction.OpenClStd.asinpi       => "asinpi"
+          case ExtendedInstruction.OpenClStd.atan         => "atan"
+          case ExtendedInstruction.OpenClStd.atanh        => "atanh"
+          case ExtendedInstruction.OpenClStd.atanpi       => "atanpi"
+          case ExtendedInstruction.OpenClStd.cbrt         => "cbrt"
+          case ExtendedInstruction.OpenClStd.ceil         => "ceil"
+          case ExtendedInstruction.OpenClStd.cos          => "cos"
+          case ExtendedInstruction.OpenClStd.cosh         => "cosh"
+          case ExtendedInstruction.OpenClStd.cospi        => "cospi"
+          case ExtendedInstruction.OpenClStd.exp          => "exp"
+          case ExtendedInstruction.OpenClStd.exp2         => "exp2"
+          case ExtendedInstruction.OpenClStd.exp10        => "exp10"
+          case ExtendedInstruction.OpenClStd.expm1        => "expm1"
+          case ExtendedInstruction.OpenClStd.fabs         => "fabs"
+          case ExtendedInstruction.OpenClStd.floor        => "floor"
+          case ExtendedInstruction.OpenClStd.log          => "log"
+          case ExtendedInstruction.OpenClStd.log2         => "log2"
+          case ExtendedInstruction.OpenClStd.log10        => "log10"
+          case ExtendedInstruction.OpenClStd.log1p        => "log1p"
+          case ExtendedInstruction.OpenClStd.logb         => "logb"
+          case ExtendedInstruction.OpenClStd.rint         => "rint"
+          case ExtendedInstruction.OpenClStd.round        => "round"
+          case ExtendedInstruction.OpenClStd.rsqrt        => "rsqrt"
+          case ExtendedInstruction.OpenClStd.sin          => "sin"
+          case ExtendedInstruction.OpenClStd.sinh         => "sinh"
+          case ExtendedInstruction.OpenClStd.sinpi        => "sinpi"
+          case ExtendedInstruction.OpenClStd.sqrt         => "sqrt"
+          case ExtendedInstruction.OpenClStd.tan          => "tan"
+          case ExtendedInstruction.OpenClStd.tanh         => "tanh"
+          case ExtendedInstruction.OpenClStd.tanpi        => "tanpi"
+          case ExtendedInstruction.OpenClStd.trunc        => "trunc"
+          case ExtendedInstruction.OpenClStd.native_cos   => "native_cos"
+          case ExtendedInstruction.OpenClStd.native_exp   => "native_exp"
+          case ExtendedInstruction.OpenClStd.native_exp2  => "native_exp2"
+          case ExtendedInstruction.OpenClStd.native_exp10 => "native_exp10"
+          case ExtendedInstruction.OpenClStd.native_log   => "native_log"
+          case ExtendedInstruction.OpenClStd.native_log2  => "native_log2"
+          case ExtendedInstruction.OpenClStd.native_log10 => "native_log10"
+          case ExtendedInstruction.OpenClStd.native_recip => "native_recip"
+          case ExtendedInstruction.OpenClStd.native_rsqrt => "native_rsqrt"
+          case ExtendedInstruction.OpenClStd.native_sin   => "native_sin"
+          case ExtendedInstruction.OpenClStd.native_sqrt  => "native_sqrt"
+          case ExtendedInstruction.OpenClStd.native_tan   => "native_tan"
         }
         if (sources.size != 1)
           Left(Fault.InvalidTask(
@@ -5898,64 +5970,66 @@ private[v1_6] object VMInterpreter {
                     if sourceWidth == resultWidth && sourceLanes == resultLanes =>
                   val result = lanes.map { raw =>
                     def evaluate(value: Double): Double = opcode match {
-                      case 0  => Math.acos(value)
-                      case 1  => Math.log(value + Math.sqrt(value * value - 1.0))
-                      case 2  => Math.acos(value) / Math.PI
-                      case 3  => Math.asin(value)
-                      case 4  => Math.log(value + Math.sqrt(value * value + 1.0))
-                      case 5  => Math.asin(value) / Math.PI
-                      case 6  => Math.atan(value)
-                      case 8  => 0.5 * Math.log((1.0 + value) / (1.0 - value))
-                      case 9  => Math.atan(value) / Math.PI
-                      case 11 => Math.cbrt(value)
-                      case 12 => Math.ceil(value)
-                      case 14 => Math.cos(value)
-                      case 15 => Math.cosh(value)
-                      case 16 => openCLCosPi(value)
-                      case 19 => Math.exp(value)
-                      case 20 => Math.pow(2.0, value)
-                      case 21 => Math.pow(10.0, value)
-                      case 22 => Math.expm1(value)
-                      case 23 => Math.abs(value)
-                      case 25 => Math.floor(value)
-                      case 37 => Math.log(value)
-                      case 38 => Math.log(value) / Math.log(2.0)
-                      case 39 => Math.log10(value)
-                      case 40 => Math.log1p(value)
-                      case 41 =>
+                      case ExtendedInstruction.OpenClStd.acos   => Math.acos(value)
+                      case ExtendedInstruction.OpenClStd.acosh  => Math.log(value + Math.sqrt(value * value - 1.0))
+                      case ExtendedInstruction.OpenClStd.acospi => Math.acos(value) / Math.PI
+                      case ExtendedInstruction.OpenClStd.asin   => Math.asin(value)
+                      case ExtendedInstruction.OpenClStd.asinh  => Math.log(value + Math.sqrt(value * value + 1.0))
+                      case ExtendedInstruction.OpenClStd.asinpi => Math.asin(value) / Math.PI
+                      case ExtendedInstruction.OpenClStd.atan   => Math.atan(value)
+                      case ExtendedInstruction.OpenClStd.atanh  => 0.5 * Math.log((1.0 + value) / (1.0 - value))
+                      case ExtendedInstruction.OpenClStd.atanpi => Math.atan(value) / Math.PI
+                      case ExtendedInstruction.OpenClStd.cbrt   => Math.cbrt(value)
+                      case ExtendedInstruction.OpenClStd.ceil   => Math.ceil(value)
+                      case ExtendedInstruction.OpenClStd.cos    => Math.cos(value)
+                      case ExtendedInstruction.OpenClStd.cosh   => Math.cosh(value)
+                      case ExtendedInstruction.OpenClStd.cospi  => openCLCosPi(value)
+                      case ExtendedInstruction.OpenClStd.exp    => Math.exp(value)
+                      case ExtendedInstruction.OpenClStd.exp2   => Math.pow(2.0, value)
+                      case ExtendedInstruction.OpenClStd.exp10  => Math.pow(10.0, value)
+                      case ExtendedInstruction.OpenClStd.expm1  => Math.expm1(value)
+                      case ExtendedInstruction.OpenClStd.fabs   => Math.abs(value)
+                      case ExtendedInstruction.OpenClStd.floor  => Math.floor(value)
+                      case ExtendedInstruction.OpenClStd.log    => Math.log(value)
+                      case ExtendedInstruction.OpenClStd.log2   => Math.log(value) / Math.log(2.0)
+                      case ExtendedInstruction.OpenClStd.log10  => Math.log10(value)
+                      case ExtendedInstruction.OpenClStd.log1p  => Math.log1p(value)
+                      case ExtendedInstruction.OpenClStd.logb   =>
                         if (value.isNaN) Double.NaN
                         else if (value == 0.0) Double.NegativeInfinity
                         else if (value.isInfinite) Double.PositiveInfinity
                         else Math.getExponent(value).toDouble
-                      case 53 => Math.rint(value)
-                      case 55 => if (value < 0.0) Math.ceil(value - 0.5) else Math.floor(value + 0.5)
-                      case 56 => 1.0 / Math.sqrt(value)
-                      case 57 => Math.sin(value)
-                      case 59 => Math.sinh(value)
-                      case 60 => openCLSinPi(value)
-                      case 61 => Math.sqrt(value)
-                      case 62 => Math.tan(value)
-                      case 63 => Math.tanh(value)
-                      case 64 => openCLTanPi(value)
-                      case 66 => if (value < 0.0) Math.ceil(value) else Math.floor(value)
-                      case 81 => Math.cos(value)
-                      case 83 => Math.exp(value)
-                      case 84 => Math.pow(2.0, value)
-                      case 85 => Math.pow(10.0, value)
-                      case 86 => Math.log(value)
-                      case 87 => Math.log(value) / Math.log(2.0)
-                      case 88 => Math.log10(value)
-                      case 90 => 1.0 / value
-                      case 91 => 1.0 / Math.sqrt(value)
-                      case 92 => Math.sin(value)
-                      case 93 => Math.sqrt(value)
-                      case 94 => Math.tan(value)
+                      case ExtendedInstruction.OpenClStd.rint  => Math.rint(value)
+                      case ExtendedInstruction.OpenClStd.round =>
+                        if (value < 0.0) Math.ceil(value - 0.5) else Math.floor(value + 0.5)
+                      case ExtendedInstruction.OpenClStd.rsqrt => 1.0 / Math.sqrt(value)
+                      case ExtendedInstruction.OpenClStd.sin   => Math.sin(value)
+                      case ExtendedInstruction.OpenClStd.sinh  => Math.sinh(value)
+                      case ExtendedInstruction.OpenClStd.sinpi => openCLSinPi(value)
+                      case ExtendedInstruction.OpenClStd.sqrt  => Math.sqrt(value)
+                      case ExtendedInstruction.OpenClStd.tan   => Math.tan(value)
+                      case ExtendedInstruction.OpenClStd.tanh  => Math.tanh(value)
+                      case ExtendedInstruction.OpenClStd.tanpi => openCLTanPi(value)
+                      case ExtendedInstruction.OpenClStd.trunc =>
+                        if (value < 0.0) Math.ceil(value) else Math.floor(value)
+                      case ExtendedInstruction.OpenClStd.native_cos   => Math.cos(value)
+                      case ExtendedInstruction.OpenClStd.native_exp   => Math.exp(value)
+                      case ExtendedInstruction.OpenClStd.native_exp2  => Math.pow(2.0, value)
+                      case ExtendedInstruction.OpenClStd.native_exp10 => Math.pow(10.0, value)
+                      case ExtendedInstruction.OpenClStd.native_log   => Math.log(value)
+                      case ExtendedInstruction.OpenClStd.native_log2  => Math.log(value) / Math.log(2.0)
+                      case ExtendedInstruction.OpenClStd.native_log10 => Math.log10(value)
+                      case ExtendedInstruction.OpenClStd.native_recip => 1.0 / value
+                      case ExtendedInstruction.OpenClStd.native_rsqrt => 1.0 / Math.sqrt(value)
+                      case ExtendedInstruction.OpenClStd.native_sin   => Math.sin(value)
+                      case ExtendedInstruction.OpenClStd.native_sqrt  => Math.sqrt(value)
+                      case ExtendedInstruction.OpenClStd.native_tan   => Math.tan(value)
                     }
                     resultWidth.value match {
-                      case 16 if opcode == 23 => raw & 0x7fffL
-                      case 32 if opcode == 23 => raw & 0x7fffffffL
-                      case 64 if opcode == 23 => raw & 0x7fffffffffffffffL
-                      case 16                 =>
+                      case 16 if opcode == ExtendedInstruction.OpenClStd.fabs => raw & 0x7fffL
+                      case 32 if opcode == ExtendedInstruction.OpenClStd.fabs => raw & 0x7fffffffL
+                      case 64 if opcode == ExtendedInstruction.OpenClStd.fabs => raw & 0x7fffffffffffffffL
+                      case 16                                                 =>
                         IEEE754.floatToBinary16(
                           evaluate(IEEE754.binary16ToFloat(Binary16.low(raw)).toDouble).toFloat
                         ).value
@@ -5982,108 +6056,146 @@ private[v1_6] object VMInterpreter {
           }
       case Some("OpenCL.std") if OpenCLBinaryFloatingOpcodes.contains(opcode) =>
         val name = opcode match {
-          case 7  => "atan2"
-          case 10 => "atan2pi"
-          case 24 => "fdim"
-          case 29 => "fmod"
-          case 32 => "hypot"
-          case _  => "powr"
+          case ExtendedInstruction.OpenClStd.atan2   => "atan2"
+          case ExtendedInstruction.OpenClStd.atan2pi => "atan2pi"
+          case ExtendedInstruction.OpenClStd.fdim    => "fdim"
+          case ExtendedInstruction.OpenClStd.fmod    => "fmod"
+          case ExtendedInstruction.OpenClStd.hypot   => "hypot"
+          case _                                     => "powr"
         }
         if (sources.size != 2)
           Left(Fault.InvalidTask(
             s"OpenCL.std $name expects 2 operands, received ${sources.size}"
           ))
-        else if (opcode == 7 || opcode == 32)
-          openCLAtan2OrHypot(program, values, resultType, destination, sources(0), sources(1), opcode == 32)
+        else if (opcode == ExtendedInstruction.OpenClStd.atan2 || opcode == ExtendedInstruction.OpenClStd.hypot)
+          openCLAtan2OrHypot(
+            program,
+            values,
+            resultType,
+            destination,
+            sources(0),
+            sources(1),
+            opcode == ExtendedInstruction.OpenClStd.hypot
+          )
         else
           openCLFloatingElementwise(program, values, resultType, destination, sources, name) { operands =>
             opcode match {
-              case 10 => Math.atan2(operands(0), operands(1)) / Math.PI
-              case 24 => Math.max(operands(0) - operands(1), 0.0)
-              case 29 => operands(0) % operands(1)
-              case _  => openCLPowr(operands(0), operands(1))
+              case ExtendedInstruction.OpenClStd.atan2pi => Math.atan2(operands(0), operands(1)) / Math.PI
+              case ExtendedInstruction.OpenClStd.fdim    => Math.max(operands(0) - operands(1), 0.0)
+              case ExtendedInstruction.OpenClStd.fmod    => operands(0) % operands(1)
+              case _                                     => openCLPowr(operands(0), operands(1))
             }
           }
-      case Some("OpenCL.std") if opcode == 46 =>
+      case Some("OpenCL.std") if opcode == ExtendedInstruction.OpenClStd.nan =>
         if (sources.size != 1)
           Left(Fault.InvalidTask(
             s"OpenCL.std nan expects 1 operand, received ${sources.size}"
           ))
         else openCLNan(program, values, resultType, destination, sources.head)
-      case Some("OpenCL.std") if opcode == 49 || opcode == 54 =>
-        val name = if (opcode == 49) "pown" else "rootn"
+      case Some("OpenCL.std")
+          if opcode == ExtendedInstruction.OpenClStd.pown || opcode == ExtendedInstruction.OpenClStd.rootn =>
+        val name = if (opcode == ExtendedInstruction.OpenClStd.pown) "pown" else "rootn"
         if (sources.size != 2)
           Left(Fault.InvalidTask(
             s"OpenCL.std $name expects 2 operands, received ${sources.size}"
           ))
-        else openCLIntegerPower(program, values, resultType, destination, sources(0), sources(1), opcode == 54)
-      case Some("OpenCL.std") if opcode == 47 =>
+        else openCLIntegerPower(
+          program,
+          values,
+          resultType,
+          destination,
+          sources(0),
+          sources(1),
+          opcode == ExtendedInstruction.OpenClStd.rootn
+        )
+      case Some("OpenCL.std") if opcode == ExtendedInstruction.OpenClStd.nextafter =>
         if (sources.size != 2)
           Left(Fault.InvalidTask(
             s"OpenCL.std nextafter expects 2 operands, received ${sources.size}"
           ))
         else openCLNextAfter(program, values, resultType, destination, sources(0), sources(1))
-      case Some("OpenCL.std") if opcode == 145 =>
+      case Some("OpenCL.std") if opcode == ExtendedInstruction.OpenClStd.s_hadd =>
         if (sources.size != 2)
           Left(Fault.InvalidTask(
             s"OpenCL.std hadd expects 2 operands, received ${sources.size}"
           ))
         else openCLSignedHalfAdd(program, values, resultType, destination, sources(0), sources(1))
-      case Some("OpenCL.std") if opcode == 141 =>
+      case Some("OpenCL.std") if opcode == ExtendedInstruction.OpenClStd.s_abs =>
         if (sources.size != 1)
           Left(Fault.InvalidTask(
             s"OpenCL.std s_abs expects 1 operand, received ${sources.size}"
           ))
         else openCLSignedAbs(program, values, resultType, destination, sources.head)
-      case Some("OpenCL.std") if opcode == 151 =>
+      case Some("OpenCL.std") if opcode == ExtendedInstruction.OpenClStd.clz =>
         if (sources.size != 1)
           Left(Fault.InvalidTask(
             s"OpenCL.std clz expects 1 operand, received ${sources.size}"
           ))
         else openCLCountLeadingZeros(program, values, resultType, destination, sources.head)
-      case Some("OpenCL.std") if opcode == 152 =>
+      case Some("OpenCL.std") if opcode == ExtendedInstruction.OpenClStd.ctz =>
         if (sources.size != 1)
           Left(Fault.InvalidTask(
             s"OpenCL.std ctz expects 1 operand, received ${sources.size}"
           ))
         else openCLCountTrailingZeros(program, values, resultType, destination, sources.head)
-      case Some("OpenCL.std") if opcode == 166 =>
+      case Some("OpenCL.std") if opcode == ExtendedInstruction.OpenClStd.popcount =>
         if (sources.size != 1)
           Left(Fault.InvalidTask(
             s"OpenCL.std popcount expects 1 operand, received ${sources.size}"
           ))
         else openCLPopulationCount(program, values, resultType, destination, sources.head)
-      case Some("OpenCL.std") if opcode >= 95 && opcode <= 103 =>
+      case Some("OpenCL.std")
+          if opcode >= ExtendedInstruction.OpenClStd.fclamp && opcode <= ExtendedInstruction.OpenClStd.sign =>
         openCLCommon(program, values, resultType, destination, opcode, sources)
-      case Some("OpenCL.std") if opcode >= 104 && opcode <= 110 =>
+      case Some("OpenCL.std")
+          if opcode >= ExtendedInstruction.OpenClStd.cross && opcode <= ExtendedInstruction.OpenClStd.fast_normalize =>
         openCLGeometric(program, values, resultType, destination, opcode, sources)
-      case Some("OpenCL.std") if opcode == 173 || opcode == 174 || opcode == 179 =>
-        openCLHalfLoad(program, values, memory, resultType, destination, sources, aligned = opcode == 179)
-      case Some("OpenCL.std") if opcode >= 175 && opcode <= 181 =>
+      case Some("OpenCL.std")
+          if opcode == ExtendedInstruction.OpenClStd.vload_half || opcode == ExtendedInstruction.OpenClStd.vload_halfn || opcode == ExtendedInstruction.OpenClStd.vloada_halfn =>
+        openCLHalfLoad(
+          program,
+          values,
+          memory,
+          resultType,
+          destination,
+          sources,
+          aligned = opcode == ExtendedInstruction.OpenClStd.vloada_halfn
+        )
+      case Some("OpenCL.std")
+          if opcode >= ExtendedInstruction.OpenClStd.vstore_half && opcode <= ExtendedInstruction.OpenClStd.vstorea_halfn_r =>
         openCLHalfStore(
           program,
           values,
           memory,
           sources,
-          aligned = opcode >= 180,
-          rounded = opcode == 176 || opcode == 178 || opcode == 181
+          aligned = opcode >= ExtendedInstruction.OpenClStd.vstorea_halfn,
+          rounded =
+            opcode == ExtendedInstruction.OpenClStd.vstore_half_r || opcode == ExtendedInstruction.OpenClStd.vstore_halfn_r || opcode == ExtendedInstruction.OpenClStd.vstorea_halfn_r
         )
-      case Some("OpenCL.std") if opcode == 171 =>
+      case Some("OpenCL.std") if opcode == ExtendedInstruction.OpenClStd.vloadn =>
         openCLVectorLoad(program, values, memory, resultType, destination, sources)
-      case Some("OpenCL.std") if opcode == 172 =>
+      case Some("OpenCL.std") if opcode == ExtendedInstruction.OpenClStd.vstoren =>
         if (sources.size != 3)
           Left(Fault.InvalidTask(
             s"OpenCL.std vstoren expects 3 operands, received ${sources.size}"
           ))
         else
           openCLVectorStore(program, values, memory, sources.head, Vec(sources(1), sources(2)))
-      case Some("OpenCL.std") if opcode == 182 || opcode == 183 =>
-        openCLShuffle(program, values, resultType, destination, sources, opcode == 183)
-      case Some("OpenCL.std") if opcode == 186 =>
+      case Some("OpenCL.std")
+          if opcode == ExtendedInstruction.OpenClStd.shuffle || opcode == ExtendedInstruction.OpenClStd.shuffle2 =>
+        openCLShuffle(
+          program,
+          values,
+          resultType,
+          destination,
+          sources,
+          opcode == ExtendedInstruction.OpenClStd.shuffle2
+        )
+      case Some("OpenCL.std") if opcode == ExtendedInstruction.OpenClStd.bitselect =>
         openCLBitselect(program, values, resultType, destination, sources)
-      case Some("OpenCL.std") if opcode == 187 =>
+      case Some("OpenCL.std") if opcode == ExtendedInstruction.OpenClStd.select =>
         openCLSelect(program, values, resultType, destination, sources)
-      case Some("OpenCL.std") if opcode == 185 =>
+      case Some("OpenCL.std") if opcode == ExtendedInstruction.OpenClStd.prefetch =>
         if (sources.isEmpty)
           Left(Fault.InvalidTask("OpenCL.std prefetch is missing its pointer operand"))
         else address(values, sources.head).map(_ => ())
@@ -6109,7 +6221,7 @@ private[v1_6] object VMInterpreter {
           case (Some((sourceWidth, sourceLanes)), Some((resultWidth, resultLanes)))
               if sourceWidth == resultWidth && sourceLanes == resultLanes =>
             val result = lanes.map { raw =>
-              if (opcode == 4) resultWidth.value match {
+              if (opcode == ExtendedInstruction.GlslStd450.FAbs) resultWidth.value match {
                 case 16 => raw & 0x7fffL
                 case 32 => raw & 0x7fffffffL
                 case 64 => raw & 0x7fffffffffffffffL
@@ -6117,9 +6229,9 @@ private[v1_6] object VMInterpreter {
               else {
                 val value    = floatingToDouble(sourceWidth, raw)
                 val computed = opcode match {
-                  case 13 => Math.sin(value)
-                  case 14 => Math.cos(value)
-                  case 31 => Math.sqrt(value)
+                  case ExtendedInstruction.GlslStd450.Sin  => Math.sin(value)
+                  case ExtendedInstruction.GlslStd450.Cos  => Math.cos(value)
+                  case ExtendedInstruction.GlslStd450.Sqrt => Math.sqrt(value)
                 }
                 resultWidth.value match {
                   case 16 => IEEE754.floatToBinary16(computed.toFloat).value
@@ -6243,15 +6355,15 @@ private[v1_6] object VMInterpreter {
       sources: Vec[Operand]
   ): Either[Fault, Unit] = {
     val (name, arity) = opcode match {
-      case 95  => "clamp"      -> 3
-      case 96  => "degrees"    -> 1
-      case 97  => "fmax"       -> 2
-      case 98  => "fmin"       -> 2
-      case 99  => "mix"        -> 3
-      case 100 => "radians"    -> 1
-      case 101 => "step"       -> 2
-      case 102 => "smoothstep" -> 3
-      case _   => "sign"       -> 1
+      case ExtendedInstruction.OpenClStd.fclamp      => "clamp"      -> 3
+      case ExtendedInstruction.OpenClStd.degrees     => "degrees"    -> 1
+      case ExtendedInstruction.OpenClStd.fmax_common => "fmax"       -> 2
+      case ExtendedInstruction.OpenClStd.fmin_common => "fmin"       -> 2
+      case ExtendedInstruction.OpenClStd.mix         => "mix"        -> 3
+      case ExtendedInstruction.OpenClStd.radians     => "radians"    -> 1
+      case ExtendedInstruction.OpenClStd.step        => "step"       -> 2
+      case ExtendedInstruction.OpenClStd.smoothstep  => "smoothstep" -> 3
+      case _                                         => "sign"       -> 1
     }
     if (sources.size != arity)
       Left(Fault.InvalidTask(
@@ -6260,14 +6372,15 @@ private[v1_6] object VMInterpreter {
     else
       openCLFloatingElementwise(program, values, resultType, destination, sources, name) { operands =>
         opcode match {
-          case 95  => floatingMinimum(floatingMaximum(operands(0), operands(1)), operands(2))
-          case 96  => operands(0) * (180.0 / Math.PI)
-          case 97  => floatingMaximum(operands(0), operands(1))
-          case 98  => floatingMinimum(operands(0), operands(1))
-          case 99  => operands(0) + (operands(1) - operands(0)) * operands(2)
-          case 100 => operands(0) * (Math.PI / 180.0)
-          case 101 => if (operands(1) < operands(0)) 0.0 else 1.0
-          case 102 =>
+          case ExtendedInstruction.OpenClStd.fclamp =>
+            floatingMinimum(floatingMaximum(operands(0), operands(1)), operands(2))
+          case ExtendedInstruction.OpenClStd.degrees     => operands(0) * (180.0 / Math.PI)
+          case ExtendedInstruction.OpenClStd.fmax_common => floatingMaximum(operands(0), operands(1))
+          case ExtendedInstruction.OpenClStd.fmin_common => floatingMinimum(operands(0), operands(1))
+          case ExtendedInstruction.OpenClStd.mix         => operands(0) + (operands(1) - operands(0)) * operands(2)
+          case ExtendedInstruction.OpenClStd.radians     => operands(0) * (Math.PI / 180.0)
+          case ExtendedInstruction.OpenClStd.step        => if (operands(1) < operands(0)) 0.0 else 1.0
+          case ExtendedInstruction.OpenClStd.smoothstep  =>
             val ratio = (operands(2) - operands(0)) / (operands(1) - operands(0))
             val t     = floatingMinimum(floatingMaximum(ratio, 0.0), 1.0)
             t * t * (3.0 - 2.0 * t)
@@ -6290,15 +6403,19 @@ private[v1_6] object VMInterpreter {
       sources: Vec[Operand]
   ): Either[Fault, Unit] = {
     val name = opcode match {
-      case 104 => "cross"
-      case 105 => "distance"
-      case 106 => "length"
-      case 107 => "normalize"
-      case 108 => "fast_distance"
-      case 109 => "fast_length"
-      case _   => "fast_normalize"
+      case ExtendedInstruction.OpenClStd.cross         => "cross"
+      case ExtendedInstruction.OpenClStd.distance      => "distance"
+      case ExtendedInstruction.OpenClStd.length        => "length"
+      case ExtendedInstruction.OpenClStd.normalize     => "normalize"
+      case ExtendedInstruction.OpenClStd.fast_distance => "fast_distance"
+      case ExtendedInstruction.OpenClStd.fast_length   => "fast_length"
+      case _                                           => "fast_normalize"
     }
-    val arity = if (opcode == 104 || opcode == 105 || opcode == 108) 2 else 1
+    val arity =
+      if (
+        opcode == ExtendedInstruction.OpenClStd.cross || opcode == ExtendedInstruction.OpenClStd.distance || opcode == ExtendedInstruction.OpenClStd.fast_distance
+      ) 2
+      else 1
     if (sources.size != arity)
       return Left(
         Fault.InvalidTask(
@@ -6345,7 +6462,7 @@ private[v1_6] object VMInterpreter {
       length
     }
     opcode match {
-      case 104 =>
+      case ExtendedInstruction.OpenClStd.cross =>
         if (count != 3 && count != 4)
           Left(
             Fault.InvalidTask("OpenCL.std cross requires 3- or 4-component vectors")
@@ -6363,7 +6480,7 @@ private[v1_6] object VMInterpreter {
           values.update(id(destination), RuntimeValue.Bits(id(resultType), result))
           Right(())
         }
-      case 105 | 108 =>
+      case ExtendedInstruction.OpenClStd.distance | ExtendedInstruction.OpenClStd.fast_distance =>
         if (!floatingShape(program, id(resultType)).contains((commonWidth, 1)))
           Left(Fault.InvalidTask(
             s"OpenCL.std $name result is not a matching floating scalar"
@@ -6381,7 +6498,7 @@ private[v1_6] object VMInterpreter {
           )
           Right(())
         }
-      case 106 | 109 =>
+      case ExtendedInstruction.OpenClStd.length | ExtendedInstruction.OpenClStd.fast_length =>
         if (!floatingShape(program, id(resultType)).contains((commonWidth, 1)))
           Left(Fault.InvalidTask(
             s"OpenCL.std $name result is not a matching floating scalar"
@@ -7087,38 +7204,32 @@ private[v1_6] object VMInterpreter {
       invocation: Invocation
   ): Either[Fault, RuntimeValue] = {
     val lanes: Either[Fault, Array[Long]] = builtin match {
-      case 24 => Right(invocation.numWorkgroups)
-      case 25 => Right(invocation.workgroupSize)
-      case 26 => Right(invocation.group)
-      case 27 => Right(invocation.local)
-      case 28 => Right(invocation.global)
-      case 29 => Right(Array(
+      case BuiltIn.NumWorkgroups        => Right(invocation.numWorkgroups)
+      case BuiltIn.WorkgroupSize        => Right(invocation.workgroupSize)
+      case BuiltIn.WorkgroupId          => Right(invocation.group)
+      case BuiltIn.LocalInvocationId    => Right(invocation.local)
+      case BuiltIn.GlobalInvocationId   => Right(invocation.global)
+      case BuiltIn.LocalInvocationIndex => Right(Array(
           (invocation.localZ * invocation.workgroupSizeY + invocation.localY) * invocation.workgroupSizeX + invocation.localX
         ))
-      case 30 => Right(Array(invocation.workDim.toLong))
-      case 31 => Right(invocation.globalSize)
-      case 32 => Right(invocation.enqueuedWorkgroupSize)
-      case 33 => Right(invocation.globalOffset)
-      case 34 => Right(
+      case BuiltIn.WorkDim               => Right(Array(invocation.workDim.toLong))
+      case BuiltIn.GlobalSize            => Right(invocation.globalSize)
+      case BuiltIn.EnqueuedWorkgroupSize => Right(invocation.enqueuedWorkgroupSize)
+      case BuiltIn.GlobalOffset          => Right(invocation.globalOffset)
+      case BuiltIn.GlobalLinearId        => Right(
           Array(
             (invocation.globalX - invocation.globalOffsetX) + invocation.globalSizeX *
               ((invocation.globalY - invocation.globalOffsetY) +
                 invocation.globalSizeY * (invocation.globalZ - invocation.globalOffsetZ))
           )
         )
-      case 35 => Right(
-          Array(
-            invocation.groupX + invocation.numWorkgroupsX *
-              (invocation.groupY + invocation.numWorkgroupsY * invocation.groupZ)
-          )
-        )
-      case 36    => Right(Array(invocation.subgroupSize.toLong))
-      case 37    => Right(Array(invocation.maxSubgroupSize.toLong))
-      case 38    => Right(Array(invocation.numSubgroups))
-      case 39    => Right(Array(invocation.numSubgroups))
-      case 40    => Right(Array(invocation.subgroupIndex.toLong))
-      case 41    => Right(Array(invocation.subgroupLocal.toLong))
-      case value => Left(Fault.Unsupported(s"SPIR-V BuiltIn $value is not implemented"))
+      case BuiltIn.SubgroupSize              => Right(Array(invocation.subgroupSize.toLong))
+      case BuiltIn.SubgroupMaxSize           => Right(Array(invocation.maxSubgroupSize.toLong))
+      case BuiltIn.NumSubgroups              => Right(Array(invocation.numSubgroups))
+      case BuiltIn.NumEnqueuedSubgroups      => Right(Array(invocation.enqueuedSubgroups))
+      case BuiltIn.SubgroupId                => Right(Array(invocation.subgroupIndex.toLong))
+      case BuiltIn.SubgroupLocalInvocationId => Right(Array(invocation.subgroupLocal.toLong))
+      case value                             => Left(Fault.Unsupported(s"SPIR-V BuiltIn $value is not implemented"))
     }
     lanes.flatMap(values =>
       integerShape(program, typeId) match {
@@ -7961,6 +8072,15 @@ private[v1_6] object VMInterpreter {
     case None => Left(undefined(source))
   }
 
+  /** FPRoundingMode decoration values: RTE, RTZ, RTP, RTN. */
+  private def roundedToLong(value: Double, mode: Option[Int]): Long = mode match {
+    case Some(0) => math.rint(value).toLong
+    case Some(1) => if (value < 0) math.ceil(value).toLong else math.floor(value).toLong
+    case Some(2) => math.ceil(value).toLong
+    case Some(3) => math.floor(value).toLong
+    case _       => value.toLong
+  }
+
   private def convertFloatToSigned(
       program: Program,
       values: InvocationValues,
@@ -7971,6 +8091,7 @@ private[v1_6] object VMInterpreter {
     case Some(RuntimeValue.Bits(sourceType, lanes)) =>
       (floatingShape(program, sourceType), integerShape(program, id(resultType))) match {
         case (Some((sourceWidth, sourceLanes)), Some((resultWidth, resultLanes))) if sourceLanes == resultLanes =>
+          val mode      = program.ir.roundingModes.get(id(destination))
           val converted = lanes.map { raw =>
             val floating = floatingToDouble(sourceWidth, raw)
             val signed   =
@@ -7980,8 +8101,8 @@ private[v1_6] object VMInterpreter {
                 if (floating.isNaN) 0L
                 else if (floating <= minimum.toDouble) minimum
                 else if (floating >= maximum.toDouble) maximum
-                else floating.toLong
-              } else floating.toLong
+                else roundedToLong(floating, mode)
+              } else roundedToLong(floating, mode)
             signed & mask(resultWidth)
           }
           values.update(id(destination), RuntimeValue.Bits(id(resultType), converted))
@@ -8022,18 +8143,31 @@ private[v1_6] object VMInterpreter {
     case Some(RuntimeValue.Bits(sourceType, lanes)) =>
       (floatingShape(program, sourceType), integerShape(program, id(resultType))) match {
         case (Some((sourceWidth, sourceLanes)), Some((resultWidth, resultLanes))) if sourceLanes == resultLanes =>
+          val saturate  = program.saturatedConversions.contains(id(destination))
+          val mode      = program.ir.roundingModes.get(id(destination))
           val converted = Array.ofDim[Long](lanes.length)
           var index     = 0
           while (index < lanes.length) {
-            floatingToUnsigned(lanes(index), sourceWidth, resultWidth) match {
-              case Left(detail) =>
-                return Left(
-                  Fault.InvalidTask(
-                    s"OpConvertFToU source lane $index cannot be represented as an unsigned $resultWidth-bit integer: $detail"
+            if (saturate) {
+              val floating  = floatingToDouble(sourceWidth, lanes(index))
+              val saturated =
+                if (floating.isNaN || floating <= 0.0) 0L
+                else if (resultWidth.value >= 64) roundedToLong(floating, mode)
+                else {
+                  val maximum = (1L << resultWidth.value) - 1L
+                  if (floating >= maximum.toDouble) maximum else roundedToLong(floating, mode)
+                }
+              converted(index) = saturated & mask(resultWidth)
+            } else
+              floatingToUnsigned(lanes(index), sourceWidth, resultWidth) match {
+                case Left(detail) =>
+                  return Left(
+                    Fault.InvalidTask(
+                      s"OpConvertFToU source lane $index cannot be represented as an unsigned $resultWidth-bit integer: $detail"
+                    )
                   )
-                )
-              case Right(value) => converted(index) = value
-            }
+                case Right(value) => converted(index) = value
+              }
             index += 1
           }
           values.update(id(destination), RuntimeValue.Bits(id(resultType), converted))

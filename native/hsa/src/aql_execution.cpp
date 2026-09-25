@@ -17,6 +17,7 @@
 #include <aspartame/unordered_map.hpp>
 #include <aspartame/vector.hpp>
 
+#include "gemstone/hsa/allocation.h"
 #include "gemstone/hsa/trace.hpp"
 #include <gemstone/bytes.hpp>
 
@@ -24,9 +25,6 @@ namespace {
 
 using namespace aspartame;
 using gemstone::readNative;
-
-constexpr uint64_t AllocationBase = UINT64_C(0x400000000000);
-constexpr uint64_t AllocationSpan = UINT64_C(0x000100000000);
 
 struct KernelBinding {
   uint64_t program_id = 0;
@@ -502,8 +500,11 @@ extern "C" int gemstone_hsa_aql_runtime_write_global(gemstone_hsa_aql_runtime *r
     const auto pointer = readNative<uint64_t>(relocated.data(), position);
     gemstone_hsa_argument allocation{};
     if (!resolveAllocation(*runtime, pointer, allocation)) continue;
-    if (allocation.allocation_id == 0 || allocation.allocation_id - 1 > (UINT64_MAX - AllocationBase) / AllocationSpan) continue;
-    const uint64_t virtual_pointer = AllocationBase + (allocation.allocation_id - 1) * AllocationSpan + allocation.allocation_offset;
+    if (allocation.allocation_id == 0
+        || allocation.allocation_id - 1 > (UINT64_MAX - gemstone::hsa::AllocationBase) / gemstone::hsa::AllocationSpan)
+      continue;
+    const uint64_t virtual_pointer =
+        gemstone::hsa::AllocationBase + (allocation.allocation_id - 1) * gemstone::hsa::AllocationSpan + allocation.allocation_offset;
     std::memcpy(relocated.data() + position, &virtual_pointer, sizeof(virtual_pointer));
     position += sizeof(uint64_t) - 1;
   }
@@ -760,7 +761,7 @@ int rocrLoad(void *, uint64_t signal, int64_t *value) {
 int rocrComplete(void *, uint64_t signal) {
   if (signal == 0) return -1;
   auto *address = reinterpret_cast<int64_t *>(static_cast<uintptr_t>(signal) + 8);
-  __atomic_fetch_sub(address, INT64_C(1), __ATOMIC_RELEASE);
+  __atomic_fetch_sub(address, static_cast<int64_t>(1), __ATOMIC_RELEASE);
   return 0;
 }
 

@@ -22,7 +22,21 @@ namespace gemstone::levelzero {
 
 inline constexpr uint64_t Magic = 0x47454d53544f4e45ULL;
 
-enum class Kind : uint32_t { Driver, Device, Context, Queue, List, EventPool, Event, Fence, Module, BuildLog, Kernel, PhysicalMemory };
+enum class Kind : uint32_t {
+  Driver,
+  Device,
+  Context,
+  Queue,
+  List,
+  EventPool,
+  Event,
+  Fence,
+  Module,
+  BuildLog,
+  Kernel,
+  PhysicalMemory,
+  Sampler
+};
 
 inline std::mutex liveHandlesMutex;
 inline std::unordered_set<const void *> liveHandles;
@@ -236,6 +250,12 @@ struct Fence final : Handle {
   ze_result_t completionResult = ZE_RESULT_SUCCESS;
 };
 
+struct Sampler final : Handle {
+  explicit Sampler(Context *contextValue) : Handle(Kind::Sampler), context(contextValue) {}
+  HandleUse<Context> context;
+  ze_sampler_desc_t descriptor{};
+};
+
 struct BuildLog final : Handle {
   explicit BuildLog(std::string value) : Handle(Kind::BuildLog), text(std::move(value)) {}
   std::string text;
@@ -249,13 +269,15 @@ struct ModuleGlobalsSnapshot {
 };
 
 struct Module final : Handle {
-  Module(Context *contextValue, std::vector<uint8_t> value, uint64_t programValue, ModuleBackend backendValue)
+  Module(Context *contextValue, std::vector<uint8_t> value, uint64_t programValue, ModuleBackend backendValue,
+         std::string buildFlagsValue = {})
       : Handle(Kind::Module), context(contextValue), bytes(std::move(value)), programId(programValue), backend(backendValue),
-        globalAllocations(std::make_shared<ModuleGlobalsSnapshot>()) {}
+        buildFlags(std::move(buildFlagsValue)), globalAllocations(std::make_shared<ModuleGlobalsSnapshot>()) {}
   HandleUse<Context> context;
   std::vector<uint8_t> bytes;
   uint64_t programId;
   ModuleBackend backend;
+  std::string buildFlags;
   std::shared_ptr<ModuleGlobalsSnapshot> globalAllocations;
   struct Global {
     std::string name;

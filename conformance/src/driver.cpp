@@ -17,9 +17,9 @@
 #include <glaze/toml.hpp>
 
 #include "conformance/device.hpp"
-#include "device_selector.hpp"
 
 #include "device_lock.hpp"
+#include "device_selector.hpp"
 #include "environment.hpp"
 #include "suite_policy.hpp"
 #include <fmt/format.h>
@@ -28,6 +28,15 @@ namespace conformance::driver {
 using namespace aspartame;
 namespace fs = std::filesystem;
 using namespace std::chrono_literals;
+// Program timeouts are recorded for a reference host; emulated work
+// parallelises across host cores, so a host with fewer cores gets more time and
+// one with more keeps at least the recorded budget.
+inline constexpr uint32_t TimeoutReferenceCores = 32;
+uint32_t scaled_timeout(uint32_t seconds) {
+  const auto cores = static_cast<uint32_t>(std::max(1u, std::thread::hardware_concurrency()));
+  const auto scale = std::clamp(static_cast<double>(TimeoutReferenceCores) / static_cast<double>(cores), 0.5, 4.0);
+  return std::max(1u, static_cast<uint32_t>(static_cast<double>(seconds) * scale + 0.5));
+}
 struct ArtifactMetadata {
   std::string backend, architecture, support;
 };
@@ -185,10 +194,10 @@ Workload load_workload(const RunOptions &configuration) {
   return workload;
 }
 uint32_t parse_timeout(std::string_view value, const fs::path &manifest) {
-  constexpr uint64_t maximum_timeout_seconds = 24 * 60 * 60;
+
   uint64_t result = 0;
   const auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), result);
-  if (error != std::errc{} || end != value.data() + value.size() || result == 0 || result > maximum_timeout_seconds)
+  if (error != std::errc{} || end != value.data() + value.size() || result == 0 || result > MaximumTimeoutSeconds)
     throw std::runtime_error(fmt::format("invalid timeout in {}", manifest.string()));
   return static_cast<uint32_t>(result);
 }
@@ -277,27 +286,25 @@ std::vector<ScheduledCase> discover_cases(const RunOptions &configuration, const
   std::vector<ScheduledCase> tests;
   for (const auto &program : test_programs(artifact)) {
     if (std::ranges::find(workload.exclude_programs, program.name) != workload.exclude_programs.end()) continue;
-    const bool gtest = program.name.starts_with("levelzero_cts_");
+    const bool gtest = suite_uses_gtest(program.name);
     auto command = gtest ? std::vector<std::string>{program.path.string(), "--gtest_list_tests"}
                          : std::vector<std::string>{program.path.string(), "--list-tests", "--reporter", "json", "--order", "lex"};
     if (!gtest) command.insert(command.end(), workload.specs.begin(), workload.specs.end());
     const auto listing = run_process(launched(configuration.launcher, std::move(command)), artifact, environment, 10min,
                                      fmt::format("[{}/{} discovery] ", id, program.name), true);
-    if (listing.status != 0)
-      throw std::runtime_error(fmt::format("test discovery failed for {}/{}: {}", id, program.name, listing.error));
+    if (listing.status != 0) throw std::runtime_error(fmt::format("test discovery failed for {}/{}: {}", id, program.name, listing.error));
     auto names = gtest ? gtest_case_names(listing.output, program.name) : catch_case_names(listing.output, program.name);
     if (gtest && !workload.levelzero_cases.empty())
       std::erase_if(names, [&](const std::string &name) {
-        return std::ranges::none_of(workload.levelzero_cases, [&](const std::string &pattern) {
-          return glob_matches(pattern.c_str(), name.c_str());
-        });
+        return std::ranges::none_of(workload.levelzero_cases,
+                                    [&](const std::string &pattern) { return glob_matches(pattern.c_str(), name.c_str()); });
       });
     if (names.size() > UINT32_MAX) throw std::runtime_error("test inventory is too large");
     const auto count = static_cast<uint32_t>(names.size());
-    auto timeout = program.timeout_seconds;
+    auto timeout = scaled_timeout(program.timeout_seconds);
     if (const auto key = suite_timeout_environment(program.name); !key.empty()) {
       if (const auto found = environment.find(std::string(key)); found != environment.end())
-        timeout = parse_timeout(found->second, artifact / "test-programs.txt");
+        timeout = scaled_timeout(parse_timeout(found->second, artifact / "test-programs.txt"));
     }
     for (uint32_t index = 0; index < count; ++index)
       tests.push_back({std::move(names[index]), program.name, timeout, index, count});
@@ -362,7 +369,7 @@ void materialize_ctest(const fs::path &directory, const fs::path &driver, const 
     file << "set_tests_properties(";
     for (const auto &name : names)
       file << name << ' ';
-    file << "PROPERTIES SKIP_RETURN_CODE 4 TIMEOUT " << (timeout + 615);
+    file << "PROPERTIES SKIP_RETURN_CODE " << SkipReturnCode << " TIMEOUT " << (timeout + TimeoutMarginSeconds);
     if (!device.empty()) file << " RESOURCE_LOCK " << bracket_quote(device);
     file << ")\n";
   }
@@ -375,9 +382,9 @@ int32_t execute_case(const fs::path &path, const ScheduledCase &test) {
   if (std::ranges::find(config.skips, test.program) != config.skips.end()
       || std::ranges::find(config.skips, test.identity) != config.skips.end()) {
     std::cout << "SKIP " << test.identity << ": machine profile\n";
-    return 4;
+    return SkipReturnCode;
   }
-  const bool gtest = test.program.starts_with("levelzero_cts_");
+  const bool gtest = suite_uses_gtest(test.program);
   const bool sharded = suite_uses_catch_sharding(test.program);
   auto arguments = gtest ? std::vector<std::string>{"--gtest_filter=" + test.identity}
                          : catch_shard_arguments(config.specs, sharded ? test.index : 0, sharded ? test.count : 1);
@@ -393,9 +400,8 @@ int32_t execute_case(const fs::path &path, const ScheduledCase &test) {
   environment["CONFORMANCE_REPORT_DIRECTORY"] = report.string();
   std::unique_ptr<DeviceLock> lock;
   if (config.deviceLock) lock = std::make_unique<DeviceLock>(physical_device_from_key(config.device), 10min);
-  const auto result =
-      run_process(launched(config.launcher, std::move(arguments)), gtest ? fs::path(config.directory) : report,
-                  environment, std::chrono::seconds(test.timeout_seconds));
+  const auto result = run_process(launched(config.launcher, std::move(arguments)), gtest ? fs::path(config.directory) : report, environment,
+                                  std::chrono::seconds(test.timeout_seconds));
   return result.status;
 }
 int32_t run(RunOptions configuration, const fs::path &driver) {

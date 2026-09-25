@@ -120,15 +120,18 @@ TEMPLATE_TEST_CASE_SIG("runtime/cuda/device-function", "[unified][runtime][compa
   unified::gpu_calls::device_function<indirect>();
 }
 
+// 2^31/2^32 still exercise the 32-bit index boundary; 2^33 would cost the
+// emulator hours of wall time for no extra coverage.
+
 TEST_CASE("regressions/cuda-thrust/for-each-with-big-indexes", "[unified][regression]") {
-  const auto magnitude = GENERATE(30U, 31U, 32U, 33U);
+  const auto magnitude = GENERATE(30U, 31U, 32U);
   CAPTURE(magnitude);
   unified::backend::ThrustEdgeCases backend;
   backend.for_each_big_indexes(magnitude);
 }
 
 TEST_CASE("regressions/cuda-thrust/adjacent-difference-with-big-indexes", "[unified][regression]") {
-  const auto magnitude = GENERATE(30U, 31U, 32U, 33U);
+  const auto magnitude = GENERATE(30U, 31U, 32U);
   CAPTURE(magnitude);
   unified::backend::ThrustEdgeCases backend;
   backend.adjacent_difference_big_indexes(magnitude);

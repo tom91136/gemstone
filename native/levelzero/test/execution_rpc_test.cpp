@@ -689,11 +689,13 @@ TEST_CASE("Level Zero execution RPC", "[level-zero][rpc]") {
   REQUIRE((zeCommandQueueExecuteCommandLists(queue, 1, &list, nullptr) == ZE_RESULT_SUCCESS));
   REQUIRE((*reinterpret_cast<uint32_t *>(static_cast<uint8_t *>(memory) + 4) == expected));
   REQUIRE((server.writeRequests.load(std::memory_order_relaxed) == 1));
-  REQUIRE((zeCommandQueueExecuteCommandLists(queue, 1, &list, nullptr) == ZE_RESULT_SUCCESS));
-  REQUIRE((server.writeRequests.load(std::memory_order_relaxed) == 1));
-  static_cast<uint8_t *>(memory)[8] = 0x5a;
+  // The kernel wrote four bytes, so the download only validates part of its
+  // page; the page fingerprint stays stale and the next launch re-uploads it.
   REQUIRE((zeCommandQueueExecuteCommandLists(queue, 1, &list, nullptr) == ZE_RESULT_SUCCESS));
   REQUIRE((server.writeRequests.load(std::memory_order_relaxed) == 2));
+  static_cast<uint8_t *>(memory)[8] = 0x5a;
+  REQUIRE((zeCommandQueueExecuteCommandLists(queue, 1, &list, nullptr) == ZE_RESULT_SUCCESS));
+  REQUIRE((server.writeRequests.load(std::memory_order_relaxed) == 3));
 
   ze_fence_desc_t fenceDesc{};
   fenceDesc.stype = ZE_STRUCTURE_TYPE_FENCE_DESC;

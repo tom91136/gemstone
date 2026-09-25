@@ -28,6 +28,7 @@
 #include "gemstone_execution_rpc.hpp"
 #include <gemstone/bytes.hpp>
 #include <gemstone/command_queue.hpp>
+#include <gemstone/cuda/abi_layout.hpp>
 #include <gemstone/export.h>
 #include <gemstone/lz4.hpp>
 #include <gemstone/memory.hpp>
@@ -36,6 +37,7 @@
 #include "completion.hpp"
 
 using namespace aspartame;
+using namespace gemstone::cuda;
 using namespace gemstone::cuda::api;
 using gemstone::readNative;
 
@@ -65,6 +67,90 @@ struct FatBinaryWrapper {
 };
 
 constexpr size_t MaximumImageSize = 64u * 1024u * 1024u;
+
+// Version reported by the driver and runtime queries; the pinned headers ship
+// the same 13.3 generation.
+constexpr int32_t CudaVersion = 13030;
+
+constexpr char DeviceName[] = "Gemstone PTX emulator";
+constexpr char DevicePciBusId[] = "0000:01:00.0";
+constexpr size_t ContextCapacity = 64;
+
+// The emulator exposes one synthetic device. These are the limits it enforces;
+// both the attribute and property queries read from this one definition so the
+// two views cannot drift apart.
+namespace device_limits {
+constexpr size_t TotalGlobalMemoryBytes = static_cast<uint64_t>(8) * 1024 * 1024 * 1024;
+constexpr int32_t MaxThreadsPerBlock = 1024;
+constexpr int32_t MaxBlockDimX = 1024;
+constexpr int32_t MaxBlockDimY = 1024;
+constexpr int32_t MaxBlockDimZ = 64;
+constexpr int32_t MaxGridDimX = std::numeric_limits<int32_t>::max();
+constexpr int32_t MaxGridDimY = 65535;
+constexpr int32_t MaxGridDimZ = 65535;
+constexpr int32_t MaxPitch = std::numeric_limits<int32_t>::max();
+constexpr int32_t MaxSharedMemoryPerBlock = 49152;
+constexpr int32_t MaxSharedMemoryPerBlockOptin = 98304;
+constexpr int32_t MaxSharedMemoryPerMultiprocessor = 98304;
+constexpr int32_t TotalConstantMemory = 65536;
+constexpr int32_t WarpSize = 32;
+constexpr int32_t MaxRegistersPerBlock = 65536;
+constexpr int32_t MaxRegistersPerMultiprocessor = 65536;
+constexpr int32_t MultiprocessorCount = 1;
+constexpr int32_t MaxThreadsPerMultiprocessor = 1536;
+constexpr int32_t MaxBlocksPerMultiprocessor = 32;
+constexpr int32_t ClockRateKhz = 1500000;
+constexpr int32_t MemoryClockRateKhz = 1500000;
+constexpr int32_t GlobalMemoryBusWidth = 128;
+constexpr int32_t L2CacheSize = 4194304;
+constexpr int32_t MaxPersistingL2CacheSize = 4194304;
+constexpr int32_t MaxAccessPolicyWindowSize = 4096;
+constexpr int32_t TextureAlignment = 256;
+constexpr int32_t TexturePitchAlignment = 32;
+constexpr int32_t SurfaceAlignment = 256;
+constexpr int32_t SingleToDoublePrecisionPerfRatio = 32;
+constexpr int32_t AsyncEngineCount = 2;
+constexpr int32_t PciBusId = 1;
+constexpr int32_t PciDeviceId = 1;
+constexpr int32_t PciDomainId = 0;
+constexpr int32_t MaxTexture1DWidth = 131072;
+constexpr int32_t MaxTexture2DWidth = 131072;
+constexpr int32_t MaxTexture2DHeight = 65536;
+constexpr int32_t MaxTexture3DWidth = 16384;
+constexpr int32_t MaxTexture3DHeight = 16384;
+constexpr int32_t MaxTexture3DDepth = 16384;
+constexpr int32_t MaxTexture2DLayeredWidth = 32768;
+constexpr int32_t MaxTexture2DLayeredHeight = 32768;
+constexpr int32_t MaxTexture2DLayeredLayers = 2048;
+constexpr int32_t MaxTexture1DLayeredWidth = 32768;
+constexpr int32_t MaxTexture1DLayeredLayers = 2048;
+constexpr int32_t MaxTexture2DGatherWidth = 32768;
+constexpr int32_t MaxTexture2DGatherHeight = 32768;
+constexpr int32_t MaxTextureCubemapWidth = 32768;
+constexpr int32_t MaxTextureCubemapLayeredWidth = 32768;
+constexpr int32_t MaxTextureCubemapLayeredLayers = 2048;
+constexpr int32_t MaxTexture1DLinearWidth = 134217728;
+constexpr int32_t MaxTexture2DLinearWidth = 131072;
+constexpr int32_t MaxTexture2DLinearHeight = 65536;
+constexpr int32_t MaxTexture2DLinearPitch = std::numeric_limits<int32_t>::max();
+constexpr int32_t MaxTexture2DMipmappedWidth = 32768;
+constexpr int32_t MaxTexture2DMipmappedHeight = 32768;
+constexpr int32_t MaxTexture1DMipmappedWidth = 32768;
+constexpr int32_t MaxSurface1DWidth = 16384;
+constexpr int32_t MaxSurface2DWidth = 16384;
+constexpr int32_t MaxSurface2DHeight = 16384;
+constexpr int32_t MaxSurface3DWidth = 16384;
+constexpr int32_t MaxSurface3DHeight = 16384;
+constexpr int32_t MaxSurface3DDepth = 16384;
+constexpr int32_t MaxSurface1DLayeredWidth = 16384;
+constexpr int32_t MaxSurface1DLayeredLayers = 2048;
+constexpr int32_t MaxSurface2DLayeredWidth = 16384;
+constexpr int32_t MaxSurface2DLayeredHeight = 16384;
+constexpr int32_t MaxSurface2DLayeredLayers = 2048;
+constexpr int32_t MaxSurfaceCubemapWidth = 32768;
+constexpr int32_t MaxSurfaceCubemapLayeredWidth = 32768;
+constexpr int32_t MaxSurfaceCubemapLayeredLayers = 2048;
+} // namespace device_limits
 
 using HostCallback = void (*)(void *);
 using StreamCallback = void (*)(void *, int32_t, void *);
@@ -141,7 +227,7 @@ std::optional<std::string_view> findPtxText(std::string_view payload) {
 }
 
 bool appendFatbinPtx(const uint8_t *data) {
-  if (!data || readNative<uint32_t>(data) != UINT32_C(0xba55ed50)) return false;
+  if (!data || readNative<uint32_t>(data) != static_cast<uint32_t>(0xba55ed50)) return false;
   const uint16_t outer_header_size = readNative<uint16_t>(data + 6);
   const uint64_t content_size = readNative<uint64_t>(data + 8);
   if (outer_header_size < 16 || content_size > MaximumImageSize) return false;
@@ -150,7 +236,7 @@ bool appendFatbinPtx(const uint8_t *data) {
   /* nvcc can wrap the actual fatbin in an empty outer header followed by a
    * second header carrying the real payload size.  The payload records begin
    * after that inner header, not immediately after the outer one. */
-  if (content_size == 0 && readNative<uint32_t>(data + offset) == UINT32_C(0xba55ed50)) {
+  if (content_size == 0 && readNative<uint32_t>(data + offset) == static_cast<uint32_t>(0xba55ed50)) {
     const uint16_t inner_header_size = readNative<uint16_t>(data + offset + 6);
     const uint64_t inner_content_size = readNative<uint64_t>(data + offset + 8);
     if (inner_header_size < 16 || inner_content_size > MaximumImageSize) return false;
@@ -171,10 +257,10 @@ bool appendFatbinPtx(const uint8_t *data) {
       return false;
     const auto payload = std::string_view(reinterpret_cast<const char *>(entry + header_size), stored_size);
     std::optional<std::string_view> content = payload;
-    if ((flags & UINT64_C(0x2000)) != 0) {
+    if ((flags & static_cast<uint64_t>(0x2000)) != 0) {
       content = decompressLz4(payload.data(), compressed_size,
                               uncompressed_payload == 0 ? payload_size : static_cast<size_t>(uncompressed_payload));
-    } else if ((flags & UINT64_C(0x8000)) != 0) {
+    } else if ((flags & static_cast<uint64_t>(0x8000)) != 0) {
       content = decompressPtx(payload.data(), compressed_size);
     }
     if ((kind & 1u) != 0 && content)
@@ -187,10 +273,10 @@ bool appendFatbinPtx(const uint8_t *data) {
 const char *findUncompressedPtx(const void *fat_binary) {
   if (!fat_binary) return nullptr;
   const FatBinaryWrapper *wrapper = static_cast<const FatBinaryWrapper *>(fat_binary);
-  const int is_wrapper = wrapper->magic == INT32_C(0x466243b1);
+  const int is_wrapper = wrapper->magic == static_cast<int32_t>(0x466243b1);
   const uint8_t *data = is_wrapper ? static_cast<const uint8_t *>(wrapper->data) : static_cast<const uint8_t *>(fat_binary);
   if (!data) return nullptr;
-  if (readNative<uint32_t>(data) != UINT32_C(0xba55ed50)) return nullptr;
+  if (readNative<uint32_t>(data) != static_cast<uint32_t>(0xba55ed50)) return nullptr;
   combinedPtx.clear();
   if (!appendFatbinPtx(data)) {
     combinedPtx.clear();
@@ -205,7 +291,7 @@ const char *findUncompressedPtx(const void *fat_binary) {
     const void *const *prelinked = static_cast<const void *const *>(wrapper->filename);
     for (size_t index = 0; index < 64 && prelinked[index]; ++index) {
       const uint8_t *candidate = static_cast<const uint8_t *>(prelinked[index]);
-      if (readNative<uint32_t>(candidate) != UINT32_C(0xba55ed50) || !appendFatbinPtx(candidate)) {
+      if (readNative<uint32_t>(candidate) != static_cast<uint32_t>(0xba55ed50) || !appendFatbinPtx(candidate)) {
         combinedPtx.clear();
         return nullptr;
       }
@@ -229,7 +315,7 @@ int32_t managedUnregisterRemote(uint64_t pointer) noexcept;
 extern thread_local void *currentContext;
 void *activeContext();
 bool systemPagingEnabled() noexcept;
-thread_local void *contextStack[64];
+thread_local void *contextStack[ContextCapacity];
 thread_local size_t contextStackSize = 0;
 
 /* Allocation metadata is populated by successful driver RPC lifecycle hooks and
@@ -268,7 +354,7 @@ bool contextIsLive(void *context) {
 
 int32_t activateCreatedContext(void *context) {
   if (!contextIsLive(context)) return CUDA_ERROR_INVALID_VALUE;
-  if (contextStackSize == 64) return CUDA_ERROR_UNKNOWN;
+  if (contextStackSize == ContextCapacity) return CUDA_ERROR_UNKNOWN;
   contextStack[contextStackSize++] = currentContext;
   currentContext = context;
   return CUDA_SUCCESS;
@@ -353,9 +439,12 @@ int32_t pointerGetAttribute(void *data, int32_t attribute, uint64_t pointer) {
   const auto &metadata = *found;
   switch (attribute) {
     case CU_POINTER_ATTRIBUTE_CONTEXT: *static_cast<void **>(data) = metadata.context; return CUDA_SUCCESS;
-    case CU_POINTER_ATTRIBUTE_MEMORY_TYPE: *static_cast<uint32_t *>(data) = metadata.host ? 1U : 2U; return CUDA_SUCCESS;
+    case CU_POINTER_ATTRIBUTE_MEMORY_TYPE:
+      *static_cast<uint32_t *>(data) =
+          metadata.host ? static_cast<uint32_t>(CU_MEMORYTYPE_HOST) : static_cast<uint32_t>(CU_MEMORYTYPE_DEVICE);
+      return CUDA_SUCCESS;
     case CU_POINTER_ATTRIBUTE_DEVICE_POINTER:
-      if (!currentContext) return 201; /* CUDA_ERROR_INVALID_CONTEXT */
+      if (!currentContext) return CUDA_ERROR_INVALID_CONTEXT;
       *static_cast<uint64_t *>(data) = pointer;
       return CUDA_SUCCESS;
     case CU_POINTER_ATTRIBUTE_HOST_POINTER:
@@ -369,10 +458,11 @@ int32_t pointerGetAttribute(void *data, int32_t attribute, uint64_t pointer) {
     case CU_POINTER_ATTRIBUTE_ALLOWED_HANDLE_TYPES:
     case CU_POINTER_ATTRIBUTE_ACCESS_FLAGS:
     case CU_POINTER_ATTRIBUTE_IS_HW_DECOMPRESS_CAPABLE:
-      *static_cast<uint32_t *>(data) = attribute == CU_POINTER_ATTRIBUTE_MAPPED         ? 1U
-                                       : attribute == CU_POINTER_ATTRIBUTE_IS_MANAGED   ? static_cast<uint32_t>(metadata.managed)
-                                       : attribute == CU_POINTER_ATTRIBUTE_ACCESS_FLAGS ? 3U
-                                                                                        : 0U;
+      *static_cast<uint32_t *>(data) = attribute == CU_POINTER_ATTRIBUTE_MAPPED       ? 1U
+                                       : attribute == CU_POINTER_ATTRIBUTE_IS_MANAGED ? static_cast<uint32_t>(metadata.managed)
+                                       : attribute == CU_POINTER_ATTRIBUTE_ACCESS_FLAGS
+                                           ? static_cast<uint32_t>(CU_POINTER_ATTRIBUTE_ACCESS_FLAG_READWRITE)
+                                           : 0U;
       return CUDA_SUCCESS;
     case CU_POINTER_ATTRIBUTE_BUFFER_ID:
     case CU_POINTER_ATTRIBUTE_RANGE_START_ADDR:
@@ -397,24 +487,24 @@ int32_t pointerGetAttributes(uint32_t count, int32_t *attributes, void **data, u
     if (!data[index]) return CUDA_ERROR_INVALID_VALUE;
     if (!found || (attributes[index] == CU_POINTER_ATTRIBUTE_HOST_POINTER && !found->host && !found->managed)) {
       switch (attributes[index]) {
-        case 1:
-        case 4:
-        case 17: *static_cast<void **>(data[index]) = nullptr; break;
-        case 3:
-        case 7:
-        case 11:
-        case 12:
-        case 18:
-        case 19:
-        case 20: *static_cast<uint64_t *>(data[index]) = 0; break;
-        case 2:
-        case 6:
-        case 8:
-        case 9:
-        case 13:
-        case 14:
-        case 16:
-        case 21: *static_cast<uint32_t *>(data[index]) = 0; break;
+        case CU_POINTER_ATTRIBUTE_CONTEXT:
+        case CU_POINTER_ATTRIBUTE_HOST_POINTER:
+        case CU_POINTER_ATTRIBUTE_MEMPOOL_HANDLE: *static_cast<void **>(data[index]) = nullptr; break;
+        case CU_POINTER_ATTRIBUTE_DEVICE_POINTER:
+        case CU_POINTER_ATTRIBUTE_BUFFER_ID:
+        case CU_POINTER_ATTRIBUTE_RANGE_START_ADDR:
+        case CU_POINTER_ATTRIBUTE_RANGE_SIZE:
+        case CU_POINTER_ATTRIBUTE_MAPPING_SIZE:
+        case CU_POINTER_ATTRIBUTE_MAPPING_BASE_ADDR:
+        case CU_POINTER_ATTRIBUTE_MEMORY_BLOCK_ID: *static_cast<uint64_t *>(data[index]) = 0; break;
+        case CU_POINTER_ATTRIBUTE_MEMORY_TYPE:
+        case CU_POINTER_ATTRIBUTE_SYNC_MEMOPS:
+        case CU_POINTER_ATTRIBUTE_IS_MANAGED:
+        case CU_POINTER_ATTRIBUTE_DEVICE_ORDINAL:
+        case CU_POINTER_ATTRIBUTE_MAPPED:
+        case CU_POINTER_ATTRIBUTE_ALLOWED_HANDLE_TYPES:
+        case CU_POINTER_ATTRIBUTE_ACCESS_FLAGS:
+        case CU_POINTER_ATTRIBUTE_IS_HW_DECOMPRESS_CAPABLE: *static_cast<uint32_t *>(data[index]) = 0; break;
         default: return CUDA_ERROR_INVALID_VALUE;
       }
       continue;
@@ -610,132 +700,6 @@ struct CudaArray {
   uint32_t format;
   uint32_t channels;
   uint32_t flags;
-};
-
-struct CudaArrayDescriptor {
-  size_t width;
-  size_t height;
-  uint32_t format;
-  uint32_t channels;
-};
-
-struct CudaArray3DDescriptor {
-  size_t width;
-  size_t height;
-  size_t depth;
-  uint32_t format;
-  uint32_t channels;
-  uint32_t flags;
-};
-
-struct CudaMemcpy2D {
-  size_t src_x_in_bytes;
-  size_t src_y;
-  uint32_t src_memory_type;
-  const void *src_host;
-  uint64_t src_device;
-  void *src_array;
-  size_t src_pitch;
-  size_t dst_x_in_bytes;
-  size_t dst_y;
-  uint32_t dst_memory_type;
-  void *dst_host;
-  uint64_t dst_device;
-  void *dst_array;
-  size_t dst_pitch;
-  size_t width_in_bytes;
-  size_t height;
-};
-
-struct CudaMemcpy3D {
-  size_t src_x_in_bytes;
-  size_t src_y;
-  size_t src_z;
-  size_t src_lod;
-  uint32_t src_memory_type;
-  const void *src_host;
-  uint64_t src_device;
-  void *src_array;
-  void *src_reserved;
-  size_t src_pitch;
-  size_t src_height;
-  size_t dst_x_in_bytes;
-  size_t dst_y;
-  size_t dst_z;
-  size_t dst_lod;
-  uint32_t dst_memory_type;
-  void *dst_host;
-  uint64_t dst_device;
-  void *dst_array;
-  void *dst_reserved;
-  size_t dst_pitch;
-  size_t dst_height;
-  size_t width_in_bytes;
-  size_t height;
-  size_t depth;
-};
-
-struct CudaArrayDescriptorV1 {
-  uint32_t width;
-  uint32_t height;
-  uint32_t format;
-  uint32_t channels;
-};
-
-struct CudaArray3DDescriptorV1 {
-  uint32_t width;
-  uint32_t height;
-  uint32_t depth;
-  uint32_t format;
-  uint32_t channels;
-  uint32_t flags;
-};
-
-struct CudaMemcpy2DV1 {
-  uint32_t src_x_in_bytes;
-  uint32_t src_y;
-  uint32_t src_memory_type;
-  const void *src_host;
-  uint32_t src_device;
-  void *src_array;
-  uint32_t src_pitch;
-  uint32_t dst_x_in_bytes;
-  uint32_t dst_y;
-  uint32_t dst_memory_type;
-  void *dst_host;
-  uint32_t dst_device;
-  void *dst_array;
-  uint32_t dst_pitch;
-  uint32_t width_in_bytes;
-  uint32_t height;
-};
-
-struct CudaMemcpy3DV1 {
-  uint32_t src_x_in_bytes;
-  uint32_t src_y;
-  uint32_t src_z;
-  uint32_t src_lod;
-  uint32_t src_memory_type;
-  const void *src_host;
-  uint32_t src_device;
-  void *src_array;
-  void *src_reserved;
-  uint32_t src_pitch;
-  uint32_t src_height;
-  uint32_t dst_x_in_bytes;
-  uint32_t dst_y;
-  uint32_t dst_z;
-  uint32_t dst_lod;
-  uint32_t dst_memory_type;
-  void *dst_host;
-  uint32_t dst_device;
-  void *dst_array;
-  void *dst_reserved;
-  uint32_t dst_pitch;
-  uint32_t dst_height;
-  uint32_t width_in_bytes;
-  uint32_t height;
-  uint32_t depth;
 };
 
 bool sizeAdd(size_t left, size_t right, size_t *result) {
@@ -1183,7 +1147,7 @@ extern "C" int32_t cuModuleGetGlobal(uint32_t *pointer, uint32_t *bytes, void *m
 extern "C" int32_t cuFuncGetAttribute(int32_t *value, int32_t attribute, void *function) {
   if (!value || !function) return CUDA_ERROR_INVALID_VALUE;
   switch (attribute) {
-    case CU_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK: *value = 1024; return CUDA_SUCCESS;
+    case CU_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK: *value = device_limits::MaxThreadsPerBlock; return CUDA_SUCCESS;
     case CU_FUNC_ATTRIBUTE_PTX_VERSION:
     case CU_FUNC_ATTRIBUTE_BINARY_VERSION: {
       const auto version = registeredPtxVersion(function);
@@ -1191,7 +1155,7 @@ extern "C" int32_t cuFuncGetAttribute(int32_t *value, int32_t attribute, void *f
       *value = *version;
       return CUDA_SUCCESS;
     }
-    case CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES: *value = 49152; return CUDA_SUCCESS;
+    case CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES: *value = device_limits::MaxSharedMemoryPerBlock; return CUDA_SUCCESS;
     case CU_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES:
     case CU_FUNC_ATTRIBUTE_CONST_SIZE_BYTES:
     case CU_FUNC_ATTRIBUTE_LOCAL_SIZE_BYTES:
@@ -1242,8 +1206,8 @@ extern "C" int32_t cuFuncSetSharedMemConfig(void *function, int32_t config) {
 namespace {
 
 int32_t occupancyMaxBlocks(int32_t *blocks, int32_t blockSize) {
-  if (!blocks || blockSize <= 0 || blockSize > 1024) return CUDA_ERROR_INVALID_VALUE;
-  *blocks = 1024 / blockSize;
+  if (!blocks || blockSize <= 0 || blockSize > device_limits::MaxThreadsPerBlock) return CUDA_ERROR_INVALID_VALUE;
+  *blocks = device_limits::MaxThreadsPerBlock / blockSize;
   if (*blocks == 0) *blocks = 1;
   return CUDA_SUCCESS;
 }
@@ -1323,19 +1287,6 @@ extern "C" int32_t cuLaunchKernel_ptsz(void *function, uint32_t grid_x, uint32_t
  * private so the compatibility object does not depend on a particular CUDA
  * header revision; the generated implementation check supplies the pinned vendor
  * declaration at the ABI-validation boundary. */
-struct CudaLaunchConfig {
-  uint32_t grid_x;
-  uint32_t grid_y;
-  uint32_t grid_z;
-  uint32_t block_x;
-  uint32_t block_y;
-  uint32_t block_z;
-  uint32_t shared_memory_bytes;
-  void *stream;
-  void *attributes;
-  uint32_t attribute_count;
-};
-
 extern "C" int32_t cuLaunchKernelEx(const CudaLaunchConfig *config, void *function, void **kernel_params, void **extra) {
   if (!config) return CUDA_ERROR_INVALID_VALUE;
   return cuLaunchKernel(function, config->grid_x, config->grid_y, config->grid_z, config->block_x, config->block_y, config->block_z,
@@ -1503,9 +1454,10 @@ extern "C" int32_t cudaFree(void *pointer) {
 extern "C" int32_t cudaMemcpy(void *destination, const void *source, size_t size, int32_t kind) {
   if (const auto pending = commands().waitAll(); pending != CUDA_SUCCESS) return pending;
   switch (kind) {
-    case 1: return cuMemcpyHtoD_v2(reinterpret_cast<uintptr_t>(destination), source, size);
-    case 2: return cuMemcpyDtoH_v2(destination, reinterpret_cast<uintptr_t>(source), size);
-    case 3: return cuMemcpyDtoD_v2(reinterpret_cast<uintptr_t>(destination), reinterpret_cast<uintptr_t>(source), size);
+    case cudaMemcpyHostToDevice: return cuMemcpyHtoD_v2(reinterpret_cast<uintptr_t>(destination), source, size);
+    case cudaMemcpyDeviceToHost: return cuMemcpyDtoH_v2(destination, reinterpret_cast<uintptr_t>(source), size);
+    case cudaMemcpyDeviceToDevice:
+      return cuMemcpyDtoD_v2(reinterpret_cast<uintptr_t>(destination), reinterpret_cast<uintptr_t>(source), size);
     default: return CUDA_ERROR_INVALID_VALUE;
   }
 }
@@ -1550,7 +1502,7 @@ extern "C" int32_t cudaDriverGetVersion(int32_t *version) { return cuDriverGetVe
 
 extern "C" int32_t cudaRuntimeGetVersion(int32_t *version) {
   if (!version) return CUDA_ERROR_INVALID_VALUE;
-  *version = 13030;
+  *version = CudaVersion;
   return CUDA_SUCCESS;
 }
 
@@ -1563,119 +1515,120 @@ extern "C" int32_t cudaStreamSynchronize(void *stream) {
 
 extern "C" int32_t cudaDeviceGetAttribute(int32_t *value, int32_t attribute, int32_t device) {
   if (!value || device != 0) return CUDA_ERROR_INVALID_VALUE;
+  using namespace device_limits;
   switch (attribute) {
-    case 1: *value = 1024; break;
-    case 2: *value = 1024; break;
-    case 3: *value = 1024; break;
-    case 4: *value = 64; break;
-    case 5: *value = 2147483647; break;
-    case 6: *value = 65535; break;
-    case 7: *value = 65535; break;
-    case 8: *value = 49152; break;
-    case 9: *value = 65536; break;
-    case 10: *value = 32; break;
-    case 11: *value = 2147483647; break;
-    case 12: *value = 65536; break;
-    case 13: *value = 1500000; break;
-    case 14: *value = 256; break;
-    case 15: *value = 1; break;
-    case 16: *value = 1; break;
-    case 17: *value = 0; break;
-    case 18: *value = 0; break;
-    case 19: *value = 1; break;
-    case 20: *value = 0; break;
-    case 21: *value = 131072; break;
-    case 22: *value = 131072; break;
-    case 23: *value = 65536; break;
-    case 24: *value = 16384; break;
-    case 25: *value = 16384; break;
-    case 26: *value = 16384; break;
-    case 27: *value = 32768; break;
-    case 28: *value = 32768; break;
-    case 29: *value = 2048; break;
-    case 30: *value = 256; break;
-    case 31: *value = 1; break;
-    case 32: *value = 0; break;
-    case 33: *value = 1; break;
-    case 34: *value = 1; break;
-    case 35: *value = 0; break;
-    case 36: *value = 1500000; break;
-    case 37: *value = 128; break;
-    case 38: *value = 4194304; break;
-    case 39: *value = 1536; break;
-    case 40: *value = 2; break;
-    case 41: *value = 1; break;
-    case 42: *value = 32768; break;
-    case 43: *value = 2048; break;
-    case 45: *value = 32768; break;
-    case 46: *value = 32768; break;
-    case 47: *value = 16384; break;
-    case 48: *value = 16384; break;
-    case 49: *value = 16384; break;
-    case 50: *value = 0; break;
-    case 51: *value = 32; break;
-    case 52: *value = 32768; break;
-    case 53: *value = 32768; break;
-    case 54: *value = 2048; break;
-    case 55: *value = 16384; break;
-    case 56: *value = 16384; break;
-    case 57: *value = 16384; break;
-    case 58: *value = 16384; break;
-    case 59: *value = 16384; break;
-    case 60: *value = 16384; break;
-    case 61: *value = 16384; break;
-    case 62: *value = 2048; break;
-    case 63: *value = 16384; break;
-    case 64: *value = 16384; break;
-    case 65: *value = 2048; break;
-    case 66: *value = 32768; break;
-    case 67: *value = 32768; break;
-    case 68: *value = 2048; break;
-    case 69: *value = 134217728; break;
-    case 70: *value = 131072; break;
-    case 71: *value = 65536; break;
-    case 72: *value = 2147483647; break;
-    case 73: *value = 32768; break;
-    case 74: *value = 32768; break;
-    case 75: {
+    case cudaDevAttrMaxThreadsPerBlock: *value = MaxThreadsPerBlock; break;
+    case cudaDevAttrMaxBlockDimX: *value = MaxBlockDimX; break;
+    case cudaDevAttrMaxBlockDimY: *value = MaxBlockDimY; break;
+    case cudaDevAttrMaxBlockDimZ: *value = MaxBlockDimZ; break;
+    case cudaDevAttrMaxGridDimX: *value = MaxGridDimX; break;
+    case cudaDevAttrMaxGridDimY: *value = MaxGridDimY; break;
+    case cudaDevAttrMaxGridDimZ: *value = MaxGridDimZ; break;
+    case cudaDevAttrMaxSharedMemoryPerBlock: *value = MaxSharedMemoryPerBlock; break;
+    case cudaDevAttrTotalConstantMemory: *value = TotalConstantMemory; break;
+    case cudaDevAttrWarpSize: *value = WarpSize; break;
+    case cudaDevAttrMaxPitch: *value = MaxPitch; break;
+    case cudaDevAttrMaxRegistersPerBlock: *value = MaxRegistersPerBlock; break;
+    case cudaDevAttrClockRate: *value = ClockRateKhz; break;
+    case cudaDevAttrTextureAlignment: *value = TextureAlignment; break;
+    case cudaDevAttrGpuOverlap: *value = 1; break;
+    case cudaDevAttrMultiProcessorCount: *value = MultiprocessorCount; break;
+    case cudaDevAttrKernelExecTimeout: *value = 0; break;
+    case cudaDevAttrIntegrated: *value = 0; break;
+    case cudaDevAttrCanMapHostMemory: *value = 1; break;
+    case cudaDevAttrComputeMode: *value = 0; break;
+    case cudaDevAttrMaxTexture1DWidth: *value = MaxTexture1DWidth; break;
+    case cudaDevAttrMaxTexture2DWidth: *value = MaxTexture2DWidth; break;
+    case cudaDevAttrMaxTexture2DHeight: *value = MaxTexture2DHeight; break;
+    case cudaDevAttrMaxTexture3DWidth: *value = MaxTexture3DWidth; break;
+    case cudaDevAttrMaxTexture3DHeight: *value = MaxTexture3DHeight; break;
+    case cudaDevAttrMaxTexture3DDepth: *value = MaxTexture3DDepth; break;
+    case cudaDevAttrMaxTexture2DLayeredWidth: *value = MaxTexture2DLayeredWidth; break;
+    case cudaDevAttrMaxTexture2DLayeredHeight: *value = MaxTexture2DLayeredHeight; break;
+    case cudaDevAttrMaxTexture2DLayeredLayers: *value = MaxTexture2DLayeredLayers; break;
+    case cudaDevAttrSurfaceAlignment: *value = SurfaceAlignment; break;
+    case cudaDevAttrConcurrentKernels: *value = 1; break;
+    case cudaDevAttrEccEnabled: *value = 0; break;
+    case cudaDevAttrPciBusId: *value = PciBusId; break;
+    case cudaDevAttrPciDeviceId: *value = PciDeviceId; break;
+    case cudaDevAttrTccDriver: *value = 0; break;
+    case cudaDevAttrMemoryClockRate: *value = MemoryClockRateKhz; break;
+    case cudaDevAttrGlobalMemoryBusWidth: *value = GlobalMemoryBusWidth; break;
+    case cudaDevAttrL2CacheSize: *value = L2CacheSize; break;
+    case cudaDevAttrMaxThreadsPerMultiProcessor: *value = MaxThreadsPerMultiprocessor; break;
+    case cudaDevAttrAsyncEngineCount: *value = AsyncEngineCount; break;
+    case cudaDevAttrUnifiedAddressing: *value = 1; break;
+    case cudaDevAttrMaxTexture1DLayeredWidth: *value = MaxTexture1DLayeredWidth; break;
+    case cudaDevAttrMaxTexture1DLayeredLayers: *value = MaxTexture1DLayeredLayers; break;
+    case cudaDevAttrMaxTexture2DGatherWidth: *value = MaxTexture2DGatherWidth; break;
+    case cudaDevAttrMaxTexture2DGatherHeight: *value = MaxTexture2DGatherHeight; break;
+    case cudaDevAttrMaxTexture3DWidthAlt: *value = MaxTexture3DWidth; break;
+    case cudaDevAttrMaxTexture3DHeightAlt: *value = MaxTexture3DHeight; break;
+    case cudaDevAttrMaxTexture3DDepthAlt: *value = MaxTexture3DDepth; break;
+    case cudaDevAttrPciDomainId: *value = PciDomainId; break;
+    case cudaDevAttrTexturePitchAlignment: *value = TexturePitchAlignment; break;
+    case cudaDevAttrMaxTextureCubemapWidth: *value = MaxTextureCubemapWidth; break;
+    case cudaDevAttrMaxTextureCubemapLayeredWidth: *value = MaxTextureCubemapLayeredWidth; break;
+    case cudaDevAttrMaxTextureCubemapLayeredLayers: *value = MaxTextureCubemapLayeredLayers; break;
+    case cudaDevAttrMaxSurface1DWidth: *value = MaxSurface1DWidth; break;
+    case cudaDevAttrMaxSurface2DWidth: *value = MaxSurface2DWidth; break;
+    case cudaDevAttrMaxSurface2DHeight: *value = MaxSurface2DHeight; break;
+    case cudaDevAttrMaxSurface3DWidth: *value = MaxSurface3DWidth; break;
+    case cudaDevAttrMaxSurface3DHeight: *value = MaxSurface3DHeight; break;
+    case cudaDevAttrMaxSurface3DDepth: *value = MaxSurface3DDepth; break;
+    case cudaDevAttrMaxSurface1DLayeredWidth: *value = MaxSurface1DLayeredWidth; break;
+    case cudaDevAttrMaxSurface1DLayeredLayers: *value = MaxSurface1DLayeredLayers; break;
+    case cudaDevAttrMaxSurface2DLayeredWidth: *value = MaxSurface2DLayeredWidth; break;
+    case cudaDevAttrMaxSurface2DLayeredHeight: *value = MaxSurface2DLayeredHeight; break;
+    case cudaDevAttrMaxSurface2DLayeredLayers: *value = MaxSurface2DLayeredLayers; break;
+    case cudaDevAttrMaxSurfaceCubemapWidth: *value = MaxSurfaceCubemapWidth; break;
+    case cudaDevAttrMaxSurfaceCubemapLayeredWidth: *value = MaxSurfaceCubemapLayeredWidth; break;
+    case cudaDevAttrMaxSurfaceCubemapLayeredLayers: *value = MaxSurfaceCubemapLayeredLayers; break;
+    case cudaDevAttrMaxTexture1DLinearWidth: *value = MaxTexture1DLinearWidth; break;
+    case cudaDevAttrMaxTexture2DLinearWidth: *value = MaxTexture2DLinearWidth; break;
+    case cudaDevAttrMaxTexture2DLinearHeight: *value = MaxTexture2DLinearHeight; break;
+    case cudaDevAttrMaxTexture2DLinearPitch: *value = MaxTexture2DLinearPitch; break;
+    case cudaDevAttrMaxTexture2DMipmappedWidth: *value = MaxTexture2DMipmappedWidth; break;
+    case cudaDevAttrMaxTexture2DMipmappedHeight: *value = MaxTexture2DMipmappedHeight; break;
+    case cudaDevAttrComputeCapabilityMajor: {
       const auto capability = computeCapability();
       if (!capability) return CUDA_ERROR_NOT_INITIALIZED;
       *value = capability->first;
       break;
     }
-    case 76: {
+    case cudaDevAttrComputeCapabilityMinor: {
       const auto capability = computeCapability();
       if (!capability) return CUDA_ERROR_NOT_INITIALIZED;
       *value = capability->second;
       break;
     }
-    case 77: *value = 32768; break;
-    case 78: *value = 1; break;
-    case 79: *value = 1; break;
-    case 80: *value = 1; break;
-    case 81: *value = 49152; break;
-    case 82: *value = 65536; break;
-    case 83: *value = 1; break;
-    case 84: *value = 0; break;
-    case 85: *value = 0; break;
-    case 86: *value = 1; break;
-    case 87: *value = 32; break;
+    case cudaDevAttrMaxTexture1DMipmappedWidth: *value = MaxTexture1DMipmappedWidth; break;
+    case cudaDevAttrStreamPrioritiesSupported: *value = 1; break;
+    case cudaDevAttrGlobalL1CacheSupported: *value = 1; break;
+    case cudaDevAttrLocalL1CacheSupported: *value = 1; break;
+    case cudaDevAttrMaxSharedMemoryPerMultiprocessor: *value = 49152; break;
+    case cudaDevAttrMaxRegistersPerMultiprocessor: *value = MaxRegistersPerMultiprocessor; break;
+    case cudaDevAttrManagedMemory: *value = 1; break;
+    case cudaDevAttrIsMultiGpuBoard: *value = 0; break;
+    case cudaDevAttrMultiGpuBoardGroupID: *value = 0; break;
+    case cudaDevAttrHostNativeAtomicSupported: *value = 1; break;
+    case cudaDevAttrSingleToDoublePrecisionPerfRatio: *value = SingleToDoublePrecisionPerfRatio; break;
     // Managed, pinned and registered allocations share the native atomic path.
     // Ordinary pageable memory remains an experimental opt-in path.
     // GEMSTONE_CUDA_SYSTEM_PAGING remains an explicit experimental access path.
-    case 88: *value = 0; break;
-    case 89: *value = 1; break;
-    case 90: *value = 1; break;
-    case 91: *value = 1; break;
-    case 95: *value = 1; break;
-    case 96: *value = 0; break;
-    case 97: *value = 98304; break;
-    case 100: *value = 0; break;
-    case 101: *value = 0; break;
-    case 108: *value = 4194304; break;
-    case 109: *value = 4096; break;
-    case 115: *value = 1; break;
-    case 106: *value = 32; break;
+    case cudaDevAttrPageableMemoryAccess: *value = 0; break;
+    case cudaDevAttrConcurrentManagedAccess: *value = 1; break;
+    case cudaDevAttrComputePreemptionSupported: *value = 1; break;
+    case cudaDevAttrCanUseHostPointerForRegisteredMem: *value = 1; break;
+    case cudaDevAttrCooperativeLaunch: *value = 1; break;
+    case cudaDevAttrReserved96: *value = 0; break;
+    case cudaDevAttrMaxSharedMemoryPerBlockOptin: *value = MaxSharedMemoryPerBlockOptin; break;
+    case cudaDevAttrPageableMemoryAccessUsesHostPageTables: *value = 0; break;
+    case cudaDevAttrDirectManagedMemAccessFromHost: *value = 0; break;
+    case cudaDevAttrMaxPersistingL2CacheSize: *value = MaxPersistingL2CacheSize; break;
+    case cudaDevAttrMaxAccessPolicyWindowSize: *value = MaxAccessPolicyWindowSize; break;
+    case cudaDevAttrMemoryPoolsSupported: *value = 1; break;
+    case cudaDevAttrMaxBlocksPerMultiprocessor: *value = MaxBlocksPerMultiprocessor; break;
     default: *value = 0; break;
   }
   return CUDA_SUCCESS;
@@ -1683,71 +1636,37 @@ extern "C" int32_t cudaDeviceGetAttribute(int32_t *value, int32_t attribute, int
 
 namespace {
 
-struct DevicePropertiesPrefix {
-  char name[256];
-  uint8_t uuid[16];
-  char luid[8];
-  uint32_t luid_device_node_mask;
-  size_t total_global_memory;
-  size_t shared_memory_per_block;
-  int32_t registers_per_block;
-  int32_t warp_size;
-  size_t memory_pitch;
-  int32_t max_threads_per_block;
-  int32_t max_threads_dimension[3];
-  int32_t max_grid_size[3];
-  size_t total_constant_memory;
-  int32_t major;
-  int32_t minor;
-  size_t texture_alignment;
-  size_t texture_pitch_alignment;
-  int32_t multiprocessor_count;
-};
-
 } // namespace
 
 extern "C" int32_t cudaGetDeviceProperties(void *properties, int32_t device) {
   if (!properties || device != 0) return CUDA_ERROR_INVALID_VALUE;
   auto *value = static_cast<DevicePropertiesPrefix *>(properties);
   *value = {};
-  memcpy(value->name, "Gemstone PTX emulator", sizeof("Gemstone PTX emulator"));
-  value->total_global_memory = UINT64_C(8) * 1024 * 1024 * 1024;
-  value->shared_memory_per_block = 49152;
-  value->registers_per_block = 65536;
-  value->warp_size = 32;
+  memcpy(value->name, DeviceName, sizeof(DeviceName));
+  value->total_global_memory = device_limits::TotalGlobalMemoryBytes;
+  value->shared_memory_per_block = device_limits::MaxSharedMemoryPerBlock;
+  value->registers_per_block = device_limits::MaxRegistersPerBlock;
+  value->warp_size = device_limits::WarpSize;
   value->memory_pitch = SIZE_MAX;
-  value->max_threads_per_block = 1024;
-  value->max_threads_dimension[0] = 1024;
-  value->max_threads_dimension[1] = 1024;
-  value->max_threads_dimension[2] = 64;
-  value->max_grid_size[0] = INT_MAX;
-  value->max_grid_size[1] = 65535;
-  value->max_grid_size[2] = 65535;
-  value->total_constant_memory = 65536;
+  value->max_threads_per_block = device_limits::MaxThreadsPerBlock;
+  value->max_threads_dimension[0] = device_limits::MaxBlockDimX;
+  value->max_threads_dimension[1] = device_limits::MaxBlockDimY;
+  value->max_threads_dimension[2] = device_limits::MaxBlockDimZ;
+  value->max_grid_size[0] = device_limits::MaxGridDimX;
+  value->max_grid_size[1] = device_limits::MaxGridDimY;
+  value->max_grid_size[2] = device_limits::MaxGridDimZ;
+  value->total_constant_memory = device_limits::TotalConstantMemory;
   const auto capability = computeCapability();
   if (!capability) return CUDA_ERROR_NOT_INITIALIZED;
   value->major = capability->first;
   value->minor = capability->second;
-  value->texture_alignment = 256;
-  value->texture_pitch_alignment = 32;
-  value->multiprocessor_count = 1;
+  value->texture_alignment = device_limits::TextureAlignment;
+  value->texture_pitch_alignment = device_limits::TexturePitchAlignment;
+  value->multiprocessor_count = device_limits::MultiprocessorCount;
   return CUDA_SUCCESS;
 }
 
 namespace {
-
-struct FunctionAttributesPrefix {
-  size_t shared_size_bytes;
-  size_t constant_size_bytes;
-  size_t local_size_bytes;
-  int32_t max_threads_per_block;
-  int32_t register_count;
-  int32_t ptx_version;
-  int32_t binary_version;
-  int32_t cache_mode_ca;
-  int32_t max_dynamic_shared_size_bytes;
-  int32_t preferred_shared_memory_carveout;
-};
 
 } // namespace
 
@@ -1755,12 +1674,12 @@ extern "C" int32_t cudaFuncGetAttributes(void *attributes, const void *function)
   if (!attributes || !function) return CUDA_ERROR_INVALID_VALUE;
   auto *value = static_cast<FunctionAttributesPrefix *>(attributes);
   *value = {};
-  value->max_threads_per_block = 1024;
+  value->max_threads_per_block = device_limits::MaxThreadsPerBlock;
   const auto version = registeredPtxVersion(function);
   if (!version) return CUDA_ERROR_NOT_FOUND;
   value->ptx_version = *version;
   value->binary_version = *version;
-  value->max_dynamic_shared_size_bytes = 49152;
+  value->max_dynamic_shared_size_bytes = device_limits::MaxSharedMemoryPerBlock;
   return CUDA_SUCCESS;
 }
 
@@ -1769,8 +1688,8 @@ extern "C" int32_t cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(int32_
   (void)function;
   (void)dynamic_shared_memory;
   (void)flags;
-  if (!blocks || block_size <= 0 || block_size > 1024) return CUDA_ERROR_INVALID_VALUE;
-  *blocks = 1024 / block_size;
+  if (!blocks || block_size <= 0 || block_size > device_limits::MaxThreadsPerBlock) return CUDA_ERROR_INVALID_VALUE;
+  *blocks = device_limits::MaxThreadsPerBlock / block_size;
   if (*blocks == 0) *blocks = 1;
   return CUDA_SUCCESS;
 }
@@ -1796,7 +1715,7 @@ extern "C" int32_t cudaMallocManaged(void **pointer, size_t size, uint32_t flags
   (void)flags;
   const int32_t initialized = ensureRuntimeContext();
   if (initialized != CUDA_SUCCESS) return initialized;
-  return mirroredAllocate(reinterpret_cast<uint64_t *>(pointer), size, 1);
+  return managedAllocate(reinterpret_cast<uint64_t *>(pointer), size);
 }
 
 extern "C" int32_t cudaMemcpyAsync(void *destination, const void *source, size_t size, int32_t kind, void *stream) {
@@ -1824,12 +1743,6 @@ struct RegisteredFunction {
   void *device_function = nullptr;
   std::string device_name;
   FatBinary *fat_binary = nullptr;
-};
-
-struct Dim3 {
-  uint32_t x;
-  uint32_t y;
-  uint32_t z;
 };
 
 struct LaunchConfiguration {
@@ -2044,18 +1957,17 @@ namespace {
 int32_t deviceGetAttribute(int32_t *value, int32_t attribute, int32_t device) { return cudaDeviceGetAttribute(value, attribute, device); }
 
 int32_t deviceGetName(char *name, int32_t length, int32_t device) {
-  static const char device_name[] = "Gemstone PTX emulator";
   if (!name || length <= 0 || device != 0) return CUDA_ERROR_INVALID_VALUE;
-  const size_t source_size = sizeof(device_name) - 1;
+  const size_t source_size = sizeof(DeviceName) - 1;
   const size_t copy_size = source_size < static_cast<size_t>(length) - 1 ? source_size : static_cast<size_t>(length) - 1;
-  memcpy(name, device_name, copy_size);
+  memcpy(name, DeviceName, copy_size);
   name[copy_size] = '\0';
   return CUDA_SUCCESS;
 }
 
 int32_t deviceTotalMemV2(uint64_t *bytes, int32_t device) {
   if (!bytes || device != 0) return CUDA_ERROR_INVALID_VALUE;
-  *bytes = UINT64_C(8) * 1024 * 1024 * 1024;
+  *bytes = device_limits::TotalGlobalMemoryBytes;
   return CUDA_SUCCESS;
 }
 
@@ -2096,7 +2008,7 @@ int32_t ctxSetCurrent(void *context) {
  * cover the v2 names and return NOT_SUPPORTED. */
 int32_t ctxPushCurrent(void *context) {
   if (!contextIsLive(context)) return CUDA_ERROR_INVALID_VALUE;
-  if (contextStackSize == 64) return CUDA_ERROR_UNKNOWN;
+  if (contextStackSize == ContextCapacity) return CUDA_ERROR_UNKNOWN;
   contextStack[contextStackSize++] = currentContext;
   currentContext = context;
   return CUDA_SUCCESS;
@@ -2174,7 +2086,7 @@ int32_t devicePrimaryCtxSetFlagsV2(int32_t device, uint32_t flags) {
 
 int32_t deviceGetByPciBusId(int32_t *device, const char *busId) {
   if (!device || !busId) return CUDA_ERROR_INVALID_VALUE;
-  if (strcmp(busId, "0000:01:00.0") != 0) return CUDA_ERROR_INVALID_VALUE;
+  if (strcmp(busId, DevicePciBusId) != 0) return CUDA_ERROR_INVALID_VALUE;
   *device = 0;
   return CUDA_SUCCESS;
 }
@@ -2183,13 +2095,13 @@ int32_t deviceGetTexture1DLinearMaxWidth(size_t *width, int32_t format, uint32_t
   (void)format;
   (void)channels;
   if (!width || device != 0) return CUDA_ERROR_INVALID_VALUE;
-  *width = 134217728;
+  *width = device_limits::MaxTexture1DLinearWidth;
   return CUDA_SUCCESS;
 }
 
 int32_t deviceGetP2PAttribute(int32_t *value, int32_t attribute, int32_t source, int32_t destination) {
   if (!value || source != 0 || destination != 0) return CUDA_ERROR_INVALID_VALUE;
-  *value = attribute == 1 ? 1 : 0;
+  *value = attribute == CU_DEVICE_P2P_ATTRIBUTE_PERFORMANCE_RANK ? 1 : 0;
   return CUDA_SUCCESS;
 }
 
@@ -2312,38 +2224,25 @@ extern "C" int32_t cuDeviceCanAccessPeer(int32_t *value, int32_t source, int32_t
 
 namespace {
 
-struct LegacyDeviceProperties {
-  int32_t max_threads_per_block;
-  int32_t max_threads_dim[3];
-  int32_t max_grid_size[3];
-  int32_t shared_memory_per_block;
-  int32_t total_constant_memory;
-  int32_t simd_width;
-  int32_t memory_pitch;
-  int32_t registers_per_block;
-  int32_t clock_rate;
-  int32_t texture_alignment;
-};
-
 } // namespace
 
 extern "C" int32_t cuDeviceGetProperties(void *properties, int32_t device) {
   if (!properties || device != 0) return CUDA_ERROR_INVALID_VALUE;
   auto *value = static_cast<LegacyDeviceProperties *>(properties);
-  value->max_threads_per_block = 1024;
-  value->max_threads_dim[0] = 1024;
-  value->max_threads_dim[1] = 1024;
-  value->max_threads_dim[2] = 64;
-  value->max_grid_size[0] = INT32_MAX;
-  value->max_grid_size[1] = 65535;
-  value->max_grid_size[2] = 65535;
-  value->shared_memory_per_block = 49152;
-  value->total_constant_memory = 65536;
-  value->simd_width = 32;
-  value->memory_pitch = INT32_MAX;
-  value->registers_per_block = 65536;
-  value->clock_rate = 1500000;
-  value->texture_alignment = 256;
+  value->max_threads_per_block = device_limits::MaxThreadsPerBlock;
+  value->max_threads_dim[0] = device_limits::MaxBlockDimX;
+  value->max_threads_dim[1] = device_limits::MaxBlockDimY;
+  value->max_threads_dim[2] = device_limits::MaxBlockDimZ;
+  value->max_grid_size[0] = device_limits::MaxGridDimX;
+  value->max_grid_size[1] = device_limits::MaxGridDimY;
+  value->max_grid_size[2] = device_limits::MaxGridDimZ;
+  value->shared_memory_per_block = device_limits::MaxSharedMemoryPerBlock;
+  value->total_constant_memory = device_limits::TotalConstantMemory;
+  value->simd_width = device_limits::WarpSize;
+  value->memory_pitch = device_limits::MaxPitch;
+  value->registers_per_block = device_limits::MaxRegistersPerBlock;
+  value->clock_rate = device_limits::ClockRateKhz;
+  value->texture_alignment = device_limits::TextureAlignment;
   return CUDA_SUCCESS;
 }
 
@@ -2447,7 +2346,7 @@ namespace {
 
 int32_t deviceGetDefaultMemPool(void **pool, int32_t device) {
   if (!pool || device != 0) return CUDA_ERROR_INVALID_VALUE;
-  *pool = reinterpret_cast<void *>(static_cast<uintptr_t>(UINT64_C(0x300000000)));
+  *pool = reinterpret_cast<void *>(static_cast<uintptr_t>(static_cast<uint64_t>(0x300000000)));
   return CUDA_SUCCESS;
 }
 
@@ -2462,7 +2361,7 @@ int32_t memGetDefaultMemPool(void **pool, void *location, int32_t allocationType
   (void)location;
   (void)allocationType;
   if (!pool) return CUDA_ERROR_INVALID_VALUE;
-  *pool = reinterpret_cast<void *>(static_cast<uintptr_t>(UINT64_C(0x300000000)));
+  *pool = reinterpret_cast<void *>(static_cast<uintptr_t>(static_cast<uint64_t>(0x300000000)));
   return CUDA_SUCCESS;
 }
 
@@ -2501,7 +2400,7 @@ int32_t memAllocPitchV2(uint64_t *pointer, size_t *pitch, size_t width, size_t h
 
 int32_t memGetInfoV2(size_t *freeBytes, size_t *totalBytes) {
   if (!freeBytes || !totalBytes) return CUDA_ERROR_INVALID_VALUE;
-  *totalBytes = static_cast<size_t>(UINT64_C(8)) * 1024 * 1024 * 1024;
+  *totalBytes = device_limits::TotalGlobalMemoryBytes;
   *freeBytes = *totalBytes;
   return CUDA_SUCCESS;
 }
@@ -2520,7 +2419,7 @@ int32_t ctxGetFlags(uint32_t *flags) {
 int32_t ctxGetApiVersion(void *context, uint32_t *version) {
   (void)context;
   if (!version) return CUDA_ERROR_INVALID_VALUE;
-  *version = 13030;
+  *version = CudaVersion;
   return CUDA_SUCCESS;
 }
 
@@ -2551,11 +2450,10 @@ int32_t deviceGetUuid(void *uuid, int32_t device) {
 }
 
 int32_t deviceGetPciBusId(char *busId, int32_t length, int32_t device) {
-  static const char value[] = "0000:01:00.0";
   if (!busId || length <= 0 || device != 0) return CUDA_ERROR_INVALID_VALUE;
-  const size_t source_size = sizeof(value) - 1;
+  const size_t source_size = sizeof(DevicePciBusId) - 1;
   const size_t copy_size = source_size < static_cast<size_t>(length) - 1 ? source_size : static_cast<size_t>(length) - 1;
-  memcpy(busId, value, copy_size);
+  memcpy(busId, DevicePciBusId, copy_size);
   busId[copy_size] = '\0';
   return CUDA_SUCCESS;
 }
@@ -2723,12 +2621,12 @@ int32_t streamQuery(void *stream) { return commands().query(commands().snapshot(
 
 std::mutex eventMutex;
 std::map<void *, gemstone::CommandQueue::Ticket> events;
-std::atomic_uint64_t nextEvent{UINT64_C(0x500000000)};
+std::atomic_uint64_t nextEvent{static_cast<uint64_t>(0x500000000)};
 
 int32_t eventCreate(void **event, uint32_t flags) {
   (void)flags;
   if (!event) return CUDA_ERROR_INVALID_VALUE;
-  *event = reinterpret_cast<void *>(static_cast<uintptr_t>(nextEvent.fetch_add(UINT64_C(1), std::memory_order_relaxed)));
+  *event = reinterpret_cast<void *>(static_cast<uintptr_t>(nextEvent.fetch_add(static_cast<uint64_t>(1), std::memory_order_relaxed)));
   std::lock_guard lock(eventMutex);
   events.emplace(*event, gemstone::CommandQueue::Ticket{});
   return CUDA_SUCCESS;
@@ -2787,14 +2685,14 @@ int32_t streamWaitEvent(void *stream, void *event, uint32_t flags) {
   return CUDA_SUCCESS;
 }
 
-std::atomic_uint64_t nextStream{UINT64_C(0x400000000)};
+std::atomic_uint64_t nextStream{static_cast<uint64_t>(0x400000000)};
 
 } // namespace
 
 extern "C" int32_t cuStreamCreate(void **stream, uint32_t flags) {
   (void)flags;
   if (!stream) return CUDA_ERROR_INVALID_VALUE;
-  *stream = reinterpret_cast<void *>(static_cast<uintptr_t>(nextStream.fetch_add(UINT64_C(1), std::memory_order_relaxed)));
+  *stream = reinterpret_cast<void *>(static_cast<uintptr_t>(nextStream.fetch_add(static_cast<uint64_t>(1), std::memory_order_relaxed)));
   commands().configure(*stream, (flags & 1) != 0);
   return CUDA_SUCCESS;
 }
@@ -2811,11 +2709,11 @@ extern "C" int32_t cuStreamDestroy(void *stream) { return cuStreamDestroy_v2(str
 extern "C" int32_t cudaStreamCreate(void **stream) { return cuStreamCreate(stream, 0); }
 
 extern "C" int32_t cudaStreamCreateWithFlags(void **stream, uint32_t flags) {
-  return (flags & ~UINT32_C(1)) == 0 ? cuStreamCreate(stream, flags) : CUDA_ERROR_INVALID_VALUE;
+  return (flags & ~static_cast<uint32_t>(1)) == 0 ? cuStreamCreate(stream, flags) : CUDA_ERROR_INVALID_VALUE;
 }
 
 extern "C" int32_t cudaStreamCreateWithPriority(void **stream, uint32_t flags, int32_t priority) {
-  return (flags & ~UINT32_C(1)) == 0 ? cuStreamCreateWithPriority(stream, flags, priority) : CUDA_ERROR_INVALID_VALUE;
+  return (flags & ~static_cast<uint32_t>(1)) == 0 ? cuStreamCreateWithPriority(stream, flags, priority) : CUDA_ERROR_INVALID_VALUE;
 }
 
 extern "C" int32_t cudaStreamDestroy(void *stream) { return cuStreamDestroy(stream); }
@@ -2853,7 +2751,7 @@ uint64_t memPoolReleaseThreshold = 0;
 extern "C" int32_t cuMemPoolCreate(void **pool, const void *properties) {
   (void)properties;
   if (!pool) return CUDA_ERROR_INVALID_VALUE;
-  *pool = reinterpret_cast<void *>(static_cast<uintptr_t>(UINT64_C(0x300000000)));
+  *pool = reinterpret_cast<void *>(static_cast<uintptr_t>(static_cast<uint64_t>(0x300000000)));
   return CUDA_SUCCESS;
 }
 
@@ -2865,7 +2763,7 @@ extern "C" int32_t cuMemPoolDestroy(void *pool) {
 extern "C" int32_t cuMemPoolGetAttribute(void *pool, int32_t attribute, void *value) {
   (void)pool;
   if (!value) return CUDA_ERROR_INVALID_VALUE;
-  if (attribute == 0) *static_cast<uint64_t *>(value) = memPoolReleaseThreshold;
+  if (attribute == CU_MEMPOOL_ATTR_RELEASE_THRESHOLD) *static_cast<uint64_t *>(value) = memPoolReleaseThreshold;
   else *static_cast<uint64_t *>(value) = 0;
   return CUDA_SUCCESS;
 }
@@ -2873,7 +2771,7 @@ extern "C" int32_t cuMemPoolGetAttribute(void *pool, int32_t attribute, void *va
 extern "C" int32_t cuMemPoolSetAttribute(void *pool, int32_t attribute, void *value) {
   (void)pool;
   if (!value) return CUDA_ERROR_INVALID_VALUE;
-  if (attribute == 0) memPoolReleaseThreshold = *static_cast<const uint64_t *>(value);
+  if (attribute == CU_MEMPOOL_ATTR_RELEASE_THRESHOLD) memPoolReleaseThreshold = *static_cast<const uint64_t *>(value);
   return CUDA_SUCCESS;
 }
 
@@ -2947,17 +2845,21 @@ const unsigned char contextChecksId[16] = {0x26, 0x3e, 0x88, 0x60, 0x7c, 0xd2, 0
 const unsigned char driverMetadataInterfaceId[16] = {0x21, 0x31, 0x8c, 0x60, 0x97, 0x14, 0x32, 0x48,
                                                      0x8c, 0xa6, 0x41, 0xff, 0x73, 0x24, 0xc8, 0xf2};
 
-uint32_t toolsRuntimeCallbackBuffer1[1024];
-uint32_t toolsRuntimeCallbackBuffer2[14];
+// Buffer sizes are fixed by the CUDA tools-runtime callback ABI.
+constexpr size_t ToolsRuntimeCallbackBuffer1Words = 1024;
+constexpr size_t ToolsRuntimeCallbackBuffer2Words = 14;
+
+uint32_t toolsRuntimeCallbackBuffer1[ToolsRuntimeCallbackBuffer1Words];
+uint32_t toolsRuntimeCallbackBuffer2[ToolsRuntimeCallbackBuffer2Words];
 
 void toolsRuntimeCallbackGetBuffer1(void **pointer, size_t *size) {
   if (pointer) *pointer = toolsRuntimeCallbackBuffer1;
-  if (size) *size = 1024;
+  if (size) *size = ToolsRuntimeCallbackBuffer1Words;
 }
 
 void toolsRuntimeCallbackGetBuffer2(void **pointer, size_t *size) {
   if (pointer) *pointer = toolsRuntimeCallbackBuffer2;
-  if (size) *size = 14;
+  if (size) *size = ToolsRuntimeCallbackBuffer2Words;
 }
 
 const void *cudartInterfaceTable[13] = {reinterpret_cast<const void *>(static_cast<uintptr_t>(13 * sizeof(void *))),
@@ -3117,16 +3019,16 @@ void cudartHandshakeTransform(uint32_t version, uint64_t unix_seconds, uint32_t 
 int32_t cudartHandshakeCheck(uint32_t version, uint64_t unix_seconds, uint64_t *result) {
   if (!result) return CUDA_ERROR_INVALID_VALUE;
   if (version % 10 == 0) {
-    result[0] = UINT64_C(0x3341181c03cb675c);
-    result[1] = UINT64_C(0x8ed383aa1f4cd1e8);
+    result[0] = static_cast<uint64_t>(0x3341181c03cb675c);
+    result[1] = static_cast<uint64_t>(0x8ed383aa1f4cd1e8);
     return CUDA_SUCCESS;
   }
   if (version % 10 == 1) {
-    result[0] = UINT64_C(0x1841181c03cb675c);
-    result[1] = UINT64_C(0x8ed383aa1f4cd1e8);
+    result[0] = static_cast<uint64_t>(0x1841181c03cb675c);
+    result[1] = static_cast<uint64_t>(0x8ed383aa1f4cd1e8);
     return CUDA_SUCCESS;
   }
-  cudartHandshakeTransform(version, unix_seconds, 13030, cudartHandshakeCheckTable,
+  cudartHandshakeTransform(version, unix_seconds, CudaVersion, cudartHandshakeCheckTable,
                            reinterpret_cast<const void *>(reinterpret_cast<uintptr_t>(cudartHandshakeCheck)),
                            reinterpret_cast<uint8_t *>(result));
   return CUDA_SUCCESS;
@@ -3164,7 +3066,7 @@ struct ContextStorage {
   void *value;
   ContextStorageDestructor destructor;
 };
-ContextStorage contextStorage[64];
+ContextStorage contextStorage[ContextCapacity];
 
 void *storageContext(void *context) { return !context ? currentContext : context; }
 
@@ -3634,7 +3536,7 @@ std::vector<std::unique_ptr<Module>> modules;
 std::vector<std::unique_ptr<Function>> functions;
 std::vector<Allocation> allocations;
 std::atomic<uint64_t> nextContext{1};
-uint64_t nextDeviceAddress = UINT64_C(0x0000400000000000);
+uint64_t nextDeviceAddress = static_cast<uint64_t>(0x0000400000000000);
 
 int32_t executionReady() noexcept {
   try {
@@ -3756,7 +3658,7 @@ int32_t cuInit(uint32_t flags) noexcept {
 
 int32_t cuDriverGetVersion(int32_t *version) noexcept {
   if (!version) return CUDA_ERROR_INVALID_VALUE;
-  *version = 13030;
+  *version = CudaVersion;
   return CUDA_SUCCESS;
 }
 
@@ -3768,7 +3670,7 @@ int32_t cuDeviceGetCount(int32_t *count) noexcept {
 
 int32_t cuDeviceGet(int32_t *device, int32_t ordinal) noexcept {
   if (!device) return CUDA_ERROR_INVALID_VALUE;
-  if (ordinal != 0) return 101;
+  if (ordinal != 0) return CUDA_ERROR_INVALID_DEVICE;
   *device = 0;
   return CUDA_SUCCESS;
 }
@@ -3864,7 +3766,7 @@ int32_t allocate(uint64_t *pointer, size_t size, void *module) noexcept {
 
   const size_t allocationSize = size == 0 ? 1 : size;
   if (allocationSize > UINT64_MAX - 255) return CUDA_ERROR_INVALID_VALUE;
-  const uint64_t span = (static_cast<uint64_t>(allocationSize) + 255) & ~UINT64_C(255);
+  const uint64_t span = (static_cast<uint64_t>(allocationSize) + 255) & ~static_cast<uint64_t>(255);
   uint64_t address = 0;
   {
     const std::lock_guard lock(stateMutex);
@@ -4039,7 +3941,7 @@ int32_t cuModuleGetFunction(void **function, void *module, const char *name) noe
   try {
     if (!function || !name) return CUDA_ERROR_INVALID_VALUE;
     Module *owner = findModule(module);
-    if (!owner) return 201;
+    if (!owner) return CUDA_ERROR_INVALID_CONTEXT;
     {
       const std::lock_guard lock(stateMutex);
       const auto existing = std::find_if(functions.begin(), functions.end(),
@@ -4077,7 +3979,7 @@ int32_t cuModuleGetGlobal_v2(uint64_t *pointer, size_t *bytes, void *module, con
   try {
     if ((!pointer && !bytes) || !name) return CUDA_ERROR_INVALID_VALUE;
     Module *owner = findModule(module);
-    if (!owner) return 201;
+    if (!owner) return CUDA_ERROR_INVALID_CONTEXT;
 
     const std::lock_guard lock(owner->mutex);
     const auto existing =

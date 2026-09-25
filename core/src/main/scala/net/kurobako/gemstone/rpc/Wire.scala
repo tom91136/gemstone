@@ -791,10 +791,13 @@ object Wire {
     val fingerprint: Long = hash64(canonical)
   }
 
+  private val FnvOffsetBasis = 0xcbf29ce484222325L
+  private val FnvPrime       = 0x100000001b3L
+
   def hash64(value: String): Long = {
     val bytes = value.getBytes(StandardCharsets.UTF_8)
-    bytes.foldLeft(0xcbf29ce484222325L) { (hash, byte) =>
-      (hash ^ (byte & 0xffL)) * 0x100000001b3L
+    bytes.foldLeft(FnvOffsetBasis) { (hash, byte) =>
+      (hash ^ (byte & 0xffL)) * FnvPrime
     }
   }
 }

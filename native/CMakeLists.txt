@@ -16,6 +16,9 @@ if(GEMSTONE_ENABLE_CUDA OR GEMSTONE_ENABLE_HSA OR GEMSTONE_ENABLE_HIP OR
   include(cmake/Aspartame.cmake)
 endif()
 
+# The execution client is always built, so fmt is fetched unconditionally.
+include(cmake/Fmt.cmake)
+
 if(GEMSTONE_ENABLE_CUDA OR GEMSTONE_ENABLE_HIP)
   set(ZSTD_BUILD_STATIC ON CACHE BOOL "" FORCE)
   set(ZSTD_BUILD_SHARED OFF CACHE BOOL "" FORCE)
@@ -129,7 +132,11 @@ function(gemstone_require_abi_implementations)
 
   set(generated_directory "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/generated/${ARG_PLATFORM}")
   set(implementation_check "${generated_directory}/gemstone_${ARG_PLATFORM}_impl.cpp")
+  set(layout_check "${generated_directory}/gemstone_${ARG_PLATFORM}_layout.cpp")
   target_sources("${ARG_TARGET}" PRIVATE "${implementation_check}")
+  if(EXISTS "${layout_check}")
+    target_sources("${ARG_TARGET}" PRIVATE "${layout_check}")
+  endif()
   target_include_directories("${ARG_TARGET}" PRIVATE
     "${GEMSTONE_NATIVE_INCLUDE_DIRECTORY}"
     "${generated_directory}")
@@ -140,6 +147,10 @@ function(gemstone_require_abi_implementations)
   if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
     set_source_files_properties("${implementation_check}" PROPERTIES
       COMPILE_OPTIONS "-Wno-deprecated-declarations")
+    if(EXISTS "${layout_check}")
+      set_source_files_properties("${layout_check}" PROPERTIES
+        COMPILE_OPTIONS "-Wno-deprecated-declarations")
+    endif()
   endif()
   if(ARG_FORCE_INCLUDE)
     set(public_header "${generated_directory}/gemstone_${ARG_PLATFORM}_api.h")

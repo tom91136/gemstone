@@ -13,8 +13,14 @@ import ujson.Value
 
 object GenerateSPIRVISA {
   private sealed trait Request
-  private final case class Instructions(check: Boolean, grammar: Path, sourceRoot: Path, packageVersion: String)
-      extends Request
+  private final case class Instructions(
+      check: Boolean,
+      grammar: Path,
+      extinst: Path,
+      sourceRoot: Path,
+      packageVersion: String
+  ) extends Request
+  private final case class ExtendedInstructionSet(name: String, objectName: String, instructions: Vector[(String, Int)])
   private final case class Tests(check: Boolean, grammar: Path, tests: Path, sourceRoot: Path, packageVersion: String)
       extends Request
   private final case class Operand(
@@ -22,7 +28,11 @@ object GenerateSPIRVISA {
       name: Option[String :| (MinLength[1] & NoNul)],
       quantifier: Option[String :| (MinLength[1] & NoNul)]
   )
-  private final case class Enumerant(value: Long, parameters: Vector[String :| (MinLength[1] & NoNul)])
+  private final case class Enumerant(
+      value: Long,
+      name: String :| (MinLength[1] & NoNul),
+      parameters: Vector[String :| (MinLength[1] & NoNul)]
+  )
   private final case class OperandKind(
       kind: String :| (MinLength[1] & NoNul),
       category: String :| (MinLength[1] & NoNul),
@@ -46,14 +56,20 @@ object GenerateSPIRVISA {
   private final case class Field(name: String, operand: Operand)
   private val PackageRoot = "net/kurobako/gemstone/isa/spirv"
 
+  private val ExtendedInstructionGrammars = Vector(
+    ("extinst.glsl.std.450.grammar.json", "GLSL.std.450", "GlslStd450"),
+    ("extinst.opencl.std.100.grammar.json", "OpenCL.std", "OpenClStd")
+  )
+
   private val command = Command("GenerateSPIRVISA", "Generate SPIR-V ISA sources")(
     Opts.subcommands(
       Command("instructions", "Generate instruction sources")((
         Opts.flag("check", help = "Verify the existing generated source").orFalse,
         Opts.argument[String]("grammar").map(Path.of(_)),
+        Opts.argument[String]("extinst-directory").map(Path.of(_)),
         Opts.argument[String]("generated-source-root").map(Path.of(_)),
         Opts.argument[String]("package-version")
-      ).mapN(Instructions(_, _, _, _))),
+      ).mapN(Instructions(_, _, _, _, _))),
       Command("tests", "Generate reference tests")((
         Opts.flag("check", help = "Verify the existing generated source").orFalse,
         Opts.argument[String]("grammar").map(Path.of(_)),
@@ -67,13 +83,22 @@ object GenerateSPIRVISA {
   def main(arguments: Array[String]): Unit = command.parse(arguments.toSeq).fold(
     help => throw IllegalArgumentException(help.toString),
     {
-      case Instructions(check, grammarPath, sourceRoot, packageVersion) =>
-        val version = checkedPackageVersion(packageVersion)
-        val grammar = readGrammar(grammarPath)
-        val output  = sourceRoot.resolve(PackageRoot).resolve(version.value).resolve("Instruction.scala")
-        syncRoot(sourceRoot, output, renderInstructions(grammar, version), check)
+      case Instructions(check, grammarPath, extinstDirectory, sourceRoot, packageVersion) =>
+        val version  = checkedPackageVersion(packageVersion)
+        val grammar  = readGrammar(grammarPath)
+        val extended = readExtendedInstructions(extinstDirectory)
+        val base     = sourceRoot.resolve(PackageRoot).resolve(version.value)
+        syncRoot(
+          sourceRoot,
+          Map(
+            base.resolve("Instruction.scala")         -> renderInstructions(grammar, version),
+            base.resolve("ExtendedInstruction.scala") -> renderExtendedInstructions(extended, version),
+            base.resolve("BuiltIn.scala")             -> renderBuiltIns(grammar, version)
+          ),
+          check
+        )
         Console.out.println(
-          s"${if (check) "validated" else "generated"} ${grammar.entries.size} typed SPIR-V core instructions"
+          s"${if (check) "validated" else "generated"} ${grammar.entries.size} typed SPIR-V core instructions and ${extended.map(_.instructions.size).sum} extended instructions"
         )
       case Tests(check, grammarPath, testRoot, sourceRoot, packageVersion) =>
         val version  = checkedPackageVersion(packageVersion)
@@ -81,12 +106,19 @@ object GenerateSPIRVISA {
         val upstream = Vector("binary_parse_test.cpp", "binary_endianness_test.cpp", "val/val_opencl_test.cpp")
           .map(name => name -> discoveredTests(testRoot.resolve(name)))
         val output = sourceRoot.resolve(PackageRoot).resolve(version.value).resolve("ReferenceSuite.scala")
-        syncRoot(sourceRoot, output, renderTests(grammar.entries.size, upstream, version), check)
+        syncRoot(sourceRoot, Map(output -> renderTests(grammar.entries.size, upstream, version)), check)
         Console.out.println(
           s"${if (check) "validated" else "generated"} SPIR-V reference suite for ${grammar.entries.size} opcodes and ${upstream.map(_._2.size).sum} upstream tests"
         )
     }
   )
+
+  // OpSpecConstantOp's trailing operands depend on the embedded opcode and are
+  // not listed in the core grammar, so append a repeated single-word tail. Every
+  // permitted operand there (IdRef or LiteralInteger) is one word wide.
+  private def grammarOverride(opname: String): Vector[Operand] =
+    if (opname == "OpSpecConstantOp") Vector(Operand("LiteralInteger", Some("operands"), Some("*")))
+    else Vector.empty
 
   private def readGrammar(path: Path): Grammar = {
     val root = ujson.read(Files.readString(path, StandardCharsets.UTF_8)) match {
@@ -107,10 +139,7 @@ object GenerateSPIRVISA {
               optionalString(operand, "name"),
               optionalString(operand, "quantifier")
             )
-          } ++
-            (if (stringField(obj, "opname") == "OpSpecConstantOp")
-               Vector(Operand("LiteralInteger", Some("operands"), Some("*")))
-             else Vector.empty)
+          } ++ grammarOverride(stringField(obj, "opname"))
         )
       case _ => throw IllegalArgumentException("instruction entry is not an object")
     }.sortBy(_.opcode).refineEither[MinLength[1]].fold(error => throw IllegalArgumentException(error), value => value)
@@ -122,6 +151,7 @@ object GenerateSPIRVISA {
           enumerants = optionalObjectArray(obj, "enumerants").map { enumerant =>
             Enumerant(
               parseUnsigned(valueField(enumerant, "value")),
+              stringField(enumerant, "enumerant"),
               optionalObjectArray(enumerant, "parameters").map(parameter => stringField(parameter, "kind"))
             )
           }.groupBy(_.value).values.map(_.head).toVector.sortBy(_.value)
@@ -592,11 +622,75 @@ object GenerateSPIRVISA {
     GeneratedFiles.sync(path, formatted, check)
   }
 
-  private def syncRoot(root: Path, output: Path, content: String, check: Boolean): Unit = {
-    sync(output, content, check)
+  private def readExtendedInstructions(directory: Path): Vector[ExtendedInstructionSet] =
+    ExtendedInstructionGrammars.map { case (file, name, objectName) =>
+      val root = ujson.read(Files.readString(directory.resolve(file), StandardCharsets.UTF_8)) match {
+        case value: ujson.Obj => value
+        case _                => throw IllegalArgumentException(s"$file root is not an object")
+      }
+      val instructions = arrayField(root, "instructions").map {
+        case obj: ujson.Obj =>
+          val opname: String = stringField(obj, "opname")
+          val opcode: Int    = opcodeField(obj, "opcode")
+          opname -> opcode
+        case _ => throw IllegalArgumentException(s"$file instruction entry is not an object")
+      }
+      require(
+        instructions.map(_._1).distinct.size == instructions.size,
+        s"$file has duplicate extended instruction names"
+      )
+      require(
+        instructions.map(_._2).distinct.size == instructions.size,
+        s"$file has duplicate extended instruction opcodes"
+      )
+      ExtendedInstructionSet(name, objectName, instructions)
+    }
+
+  private def renderExtendedInstructions(
+      sets: Vector[ExtendedInstructionSet],
+      packageVersion: ScalaPackageVersion
+  ): String = {
+    val objects = sets.map { set =>
+      val values = set.instructions.map { case (name, opcode) =>
+        val safe = if (ScalaKeywords(name)) s"`$name`" else name
+        s"    final val $safe = $opcode"
+      }.mkString("\n")
+      s"""|  /** ${escape(set.name)} */
+          |  object ${set.objectName} {
+          |$values
+          |  }""".stripMargin
+    }.mkString("\n\n")
+    GeneratedHeader.scala("from the pinned Khronos SPIR-V extended instruction grammars") +
+      s"""|package net.kurobako.gemstone.isa.spirv.${packageVersion.value}
+          |
+          |${GeneratedHeader.annotation()}object ExtendedInstruction {
+          |$objects
+          |}
+          |""".stripMargin
+  }
+
+  private def renderBuiltIns(grammar: Grammar, packageVersion: ScalaPackageVersion): String = {
+    val builtins = grammar.kinds.find(_.kind == "BuiltIn").map(_.enumerants).getOrElse(Vector.empty)
+    require(builtins.nonEmpty, "SPIR-V grammar declares no BuiltIn enumerants")
+    val values = builtins.map { enumerant =>
+      val name: String = enumerant.name
+      val safe         = if (ScalaKeywords(name)) s"`$name`" else name
+      s"    final val $safe: Int = ${enumerant.value}"
+    }.mkString("\n")
+    GeneratedHeader.scala("from the pinned Khronos SPIR-V core grammar") +
+      s"""|package net.kurobako.gemstone.isa.spirv.${packageVersion.value}
+          |
+          |${GeneratedHeader.annotation()}object BuiltIn {
+          |$values
+          |}
+          |""".stripMargin
+  }
+
+  private def syncRoot(root: Path, outputs: Map[Path, String], check: Boolean): Unit = {
+    outputs.foreach { case (path, content) => sync(path, content, check) }
     val include = (path: Path) => path.getFileName.toString.endsWith(".scala")
-    if (check) GeneratedFiles.requireOnly(root, Set(output), include)
-    else GeneratedFiles.removeUnexpected(root, Set(output), include)
+    if (check) GeneratedFiles.requireOnly(root, outputs.keySet, include)
+    else GeneratedFiles.removeUnexpected(root, outputs.keySet, include)
   }
 
 }

@@ -10,7 +10,7 @@ import net.kurobako.gemstone.abi.ABI.*
 object Vulkan {
   type PFN_vkVoidFunction = CallbackTypedef["PFN_vkVoidFunction", EmptyTuple, Unit]
   type VkAccelerationStructureBuildGeometryInfoKHR = CValue["VkAccelerationStructureBuildGeometryInfoKHR"]
-  type VkAccelerationStructureBuildRangeInfoKHR_const = CValue["VkAccelerationStructureBuildRangeInfoKHR *const"]
+  type VkAccelerationStructureBuildRangeInfoKHR = CValue["VkAccelerationStructureBuildRangeInfoKHR"]
   type VkAccelerationStructureBuildSizesInfoKHR = CValue["VkAccelerationStructureBuildSizesInfoKHR"]
   type VkAccelerationStructureBuildTypeKHR = CValue["VkAccelerationStructureBuildTypeKHR"]
   type VkAccelerationStructureCaptureDescriptorDataInfoEXT =
@@ -502,7 +502,6 @@ object Vulkan {
   type size_t = CValue["size_t"]
   type uint16_t = CValue["uint16_t"]
   type uint32_t = CValue["uint32_t"]
-  type uint32_t_const = CValue["uint32_t *const"]
   type uint64_t = CValue["uint64_t"]
 
   val HeaderVersion: String :| (MinLength[1] & NoNul) = "v1.4.341"
@@ -622,7 +621,7 @@ trait Vulkan {
       deferredOperation: VkDeferredOperationKHR,
       infoCount: uint32_t,
       pInfos: Pointer[VkAccelerationStructureBuildGeometryInfoKHR, Read, Opaque],
-      ppBuildRangeInfos: Pointer[VkAccelerationStructureBuildRangeInfoKHR_const, Read, Opaque]
+      ppBuildRangeInfos: Pointer[Pointer[VkAccelerationStructureBuildRangeInfoKHR, Read, Opaque], Read, Opaque]
   ): VkResult = unsupported
   def vkBuildMicromapsEXT(
       device: VkDevice,
@@ -851,13 +850,13 @@ trait Vulkan {
       pInfos: Pointer[VkAccelerationStructureBuildGeometryInfoKHR, Read, Opaque],
       pIndirectDeviceAddresses: Pointer[VkDeviceAddress, Read, Opaque],
       pIndirectStrides: Pointer[uint32_t, Read, Opaque],
-      ppMaxPrimitiveCounts: Pointer[uint32_t_const, Read, Opaque]
+      ppMaxPrimitiveCounts: Pointer[Pointer[uint32_t, Read, Opaque], Read, Opaque]
   ): Unit = unsupported
   def vkCmdBuildAccelerationStructuresKHR(
       commandBuffer: VkCommandBuffer,
       infoCount: uint32_t,
       pInfos: Pointer[VkAccelerationStructureBuildGeometryInfoKHR, Read, Opaque],
-      ppBuildRangeInfos: Pointer[VkAccelerationStructureBuildRangeInfoKHR_const, Read, Opaque]
+      ppBuildRangeInfos: Pointer[Pointer[VkAccelerationStructureBuildRangeInfoKHR, Read, Opaque], Read, Opaque]
   ): Unit = unsupported
   def vkCmdBuildClusterAccelerationStructureIndirectNV(
       commandBuffer: VkCommandBuffer,

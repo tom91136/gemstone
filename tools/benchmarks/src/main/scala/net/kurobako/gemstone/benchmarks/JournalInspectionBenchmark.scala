@@ -18,14 +18,18 @@ object JournalInspectionBenchmark {
     .find(_.request.name == "WriteAllocation")
     .fold(throw IllegalStateException("execution RPC schema has no WriteAllocation operation"))(_.request.id)
 
+  // Request and response header sizes mirror the wire layout in the generated RPC code.
+  private val RequestHeaderBytes  = 48
+  private val ResponseHeaderBytes = 20
+
   private def execution(operation: Long, payload: Array[Byte]): Array[Byte] =
     ByteBuffer.allocate(
-      48 + payload.length
+      RequestHeaderBytes + payload.length
     ).putInt(ExecutionRPC.RequestMagic).putLong(ExecutionRPC.Schema.fingerprint)
       .putLong(23L).putLong(42L).putLong(17L)
       .putLong(operation).putInt(payload.length).put(payload).array()
   private def response(): Array[Byte] =
-    ByteBuffer.allocate(20).putInt(ExecutionRPC.ResponseMagic).putLong(ExecutionRPC.Schema.fingerprint)
+    ByteBuffer.allocate(ResponseHeaderBytes).putInt(ExecutionRPC.ResponseMagic).putLong(ExecutionRPC.Schema.fingerprint)
       .putInt(0).putInt(0).array()
 
   def run(arguments: Array[String]): Unit = {

@@ -1,6 +1,6 @@
 package net.kurobako.gemstone.rpc
 
-import net.kurobako.gemstone.{NoNul, Vec}
+import net.kurobako.gemstone.{NoNul, Vec, WorkDimension}
 import net.kurobako.gemstone.memory.{AllocationKind, GuestAddress}
 import net.kurobako.gemstone.rpc.ExecutionProtocol.*
 import net.kurobako.gemstone.rpc.Wire.Codec
@@ -84,7 +84,7 @@ object ExecutionRPC {
         groupSize: Dimensions,
         groupCount: Dimensions,
         globalSize: GlobalDimensions,
-        workDim: Int :| Interval.Closed[1, 3],
+        workDim: WorkDimension,
         globalOffset: Coordinates,
         privateSegmentBytes: Int :| Positive0,
         groupSegmentBytes: Int :| Positive0,

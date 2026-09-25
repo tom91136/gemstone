@@ -182,8 +182,13 @@ ProcessResult run_process(const std::vector<std::string> &command, const std::fi
 #if defined(_WIN32)
   SECURITY_ATTRIBUTES attributes{sizeof(SECURITY_ATTRIBUTES), nullptr, TRUE};
   HANDLE output_read = nullptr, output_write = nullptr, error_read = nullptr, error_write = nullptr;
-  if (!CreatePipe(&output_read, &output_write, &attributes, 0) || !CreatePipe(&error_read, &error_write, &attributes, 0))
+  if (!CreatePipe(&output_read, &output_write, &attributes, 0))
     throw std::runtime_error("cannot create output pipes for " + command.front());
+  if (!CreatePipe(&error_read, &error_write, &attributes, 0)) {
+    CloseHandle(output_read);
+    CloseHandle(output_write);
+    throw std::runtime_error("cannot create error pipes for " + command.front());
+  }
   SetHandleInformation(output_read, HANDLE_FLAG_INHERIT, 0);
   SetHandleInformation(error_read, HANDLE_FLAG_INHERIT, 0);
   const auto devnull = CreateFileW(L"NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, &attributes, OPEN_EXISTING, 0, nullptr);
@@ -273,6 +278,8 @@ ProcessResult run_process(const std::vector<std::string> &command, const std::fi
     WaitForSingleObject(information.hProcess, INFINITE);
     DWORD ignored = 0;
     GetExitCodeProcess(information.hProcess, &ignored);
+    if (output_open) CloseHandle(output_read);
+    if (error_open) CloseHandle(error_read);
     if (job) CloseHandle(job);
     CloseHandle(information.hProcess);
     return timed_out();
@@ -284,7 +291,12 @@ ProcessResult run_process(const std::vector<std::string> &command, const std::fi
   return {static_cast<int32_t>(status), std::move(output), std::move(error_output)};
 #else
   int output_pipe[2], error_pipe[2];
-  if (::pipe(output_pipe) != 0 || ::pipe(error_pipe) != 0) throw std::runtime_error("cannot create output pipes for " + command.front());
+  if (::pipe(output_pipe) != 0) throw std::runtime_error("cannot create output pipes for " + command.front());
+  if (::pipe(error_pipe) != 0) {
+    ::close(output_pipe[0]);
+    ::close(output_pipe[1]);
+    throw std::runtime_error("cannot create error pipes for " + command.front());
+  }
 
   const auto pid = ::fork();
   if (pid < 0) {
@@ -327,6 +339,22 @@ ProcessResult run_process(const std::vector<std::string> &command, const std::fi
   bool open[2]{true, true};
   std::array<uint8_t, 4096> buffer{};
   bool expired = false;
+  const auto terminate = [&] {
+    ::kill(-pid, SIGTERM);
+    ::kill(pid, SIGTERM);
+    if (wait_for_exit(pid, std::chrono::steady_clock::now() + std::chrono::seconds(1)) == -2) {
+      ::kill(-pid, SIGKILL);
+      ::kill(pid, SIGKILL);
+      (void)wait_for_exit(pid, std::chrono::steady_clock::now() + std::chrono::seconds(2));
+    }
+  };
+  const auto closeStreams = [&] {
+    for (int stream = 0; stream < 2; ++stream)
+      if (open[stream]) {
+        open[stream] = false;
+        ::close(descriptors[stream].fd);
+      }
+  };
   while (open[0] || open[1]) {
     const auto now = std::chrono::steady_clock::now();
     if (now >= deadline) {
@@ -346,6 +374,7 @@ ProcessResult run_process(const std::vector<std::string> &command, const std::fi
     const auto ready = ::poll(active, static_cast<nfds_t>(count), static_cast<int>(std::min<int64_t>(remaining, INT32_MAX)));
     if (ready < 0) {
       if (errno == EINTR) continue;
+      closeStreams();
       throw std::runtime_error("cannot read " + command.front() + ": " + std::strerror(errno));
     }
     if (ready == 0) {
@@ -370,24 +399,14 @@ ProcessResult run_process(const std::vector<std::string> &command, const std::fi
   stdout_sink.finish();
   stderr_sink.finish();
   if (expired) {
-    ::kill(-pid, SIGTERM);
-    ::kill(pid, SIGTERM);
-    if (wait_for_exit(pid, std::chrono::steady_clock::now() + std::chrono::seconds(1)) == -2) {
-      ::kill(-pid, SIGKILL);
-      ::kill(pid, SIGKILL);
-      (void)wait_for_exit(pid, std::chrono::steady_clock::now() + std::chrono::seconds(2));
-    }
+    terminate();
+    closeStreams();
     return timed_out();
   }
   const auto status = wait_for_exit(pid, deadline);
   if (status == -2) {
-    ::kill(-pid, SIGTERM);
-    ::kill(pid, SIGTERM);
-    if (wait_for_exit(pid, std::chrono::steady_clock::now() + std::chrono::seconds(1)) == -2) {
-      ::kill(-pid, SIGKILL);
-      ::kill(pid, SIGKILL);
-      (void)wait_for_exit(pid, std::chrono::steady_clock::now() + std::chrono::seconds(2));
-    }
+    terminate();
+    closeStreams();
     return timed_out();
   }
   if (interrupted) return {128 + interrupted, std::move(output), std::move(error_output)};

@@ -292,8 +292,8 @@ void run() {
         for (unsigned block = 0; block < groupCount; ++block) {
           const uint64_t first = host[6 + block * 4] | (static_cast<uint64_t>(host[7 + block * 4]) << 32);
           const uint64_t second = host[8 + block * 4] | (static_cast<uint64_t>(host[9 + block * 4]) << 32);
-          REQUIRE((first == UINT64_C(0x1122334455667788)));
-          REQUIRE((second == UINT64_C(0x1020304050607080)));
+          REQUIRE((first == static_cast<uint64_t>(0x1122334455667788)));
+          REQUIRE((second == static_cast<uint64_t>(0x1020304050607080)));
         }
         host.fill(0);
         check(copyHostToDevice(memory, host.data(), sizeof(host)));
@@ -452,6 +452,52 @@ void runSystemPaging() {
   check(memoryFree(managed));
   check(moduleUnload(module));
   check(contextDestroy(context));
+}
+
+void runManagedRuntime() {
+  const char *configuredPath = std::getenv("GEMSTONE_CUDA_TEST_LIBRARY");
+  const SharedLibrary library{configuredPath ? configuredPath : "libcuda.so.1"};
+  const auto mallocManaged = library.load<int32_t (*)(void **, size_t, unsigned)>("cudaMallocManaged");
+  const auto malloc = library.load<int32_t (*)(void **, size_t)>("cudaMalloc");
+  const auto free = library.load<int32_t (*)(void *)>("cudaFree");
+  const auto copy = library.load<int32_t (*)(void *, const void *, size_t, int32_t)>("cudaMemcpy");
+  const auto deviceSynchronize = library.load<int32_t (*)()>("cudaDeviceSynchronize");
+
+  constexpr int32_t success = 0;
+  constexpr int32_t hostToDevice = 1;
+  constexpr int32_t deviceToHost = 2;
+  constexpr unsigned attachGlobal = 1;
+  constexpr size_t bytes = 64 * sizeof(uint32_t);
+
+  void *managed = nullptr;
+  REQUIRE((mallocManaged(&managed, bytes, attachGlobal) == success));
+  REQUIRE((managed != nullptr));
+  void *device = nullptr;
+  REQUIRE((malloc(&device, bytes) == success));
+
+  // Host writes reach the device directly, since the managed allocation is the host buffer.
+  auto *words = static_cast<uint32_t *>(managed);
+  for (unsigned index = 0; index < 64; ++index)
+    words[index] = index * 7U + 1U;
+  REQUIRE((copy(device, managed, bytes, hostToDevice) == success));
+
+  // Device writes copied back land in the same host buffer the caller already holds.
+  std::array<uint32_t, 64> replacement{};
+  for (unsigned index = 0; index < replacement.size(); ++index)
+    replacement[index] = 0xdead0000U | index;
+  REQUIRE((copy(device, replacement.data(), bytes, hostToDevice) == success));
+  REQUIRE((copy(managed, device, bytes, deviceToHost) == success));
+  for (unsigned index = 0; index < replacement.size(); ++index)
+    REQUIRE((words[index] == replacement[index]));
+
+  REQUIRE((deviceSynchronize() == success));
+  REQUIRE((copy(managed, device, bytes, deviceToHost) == success));
+  for (unsigned index = 0; index < replacement.size(); ++index)
+    REQUIRE((words[index] == replacement[index]));
+
+  REQUIRE((free(managed) == success));
+  REQUIRE((free(managed) != success));
+  REQUIRE((free(device) == success));
 }
 
 } // namespace
@@ -657,3 +703,5 @@ TEST_CASE("CUDA free waits for queued memory uses", "[cuda][integration]") {
       [&](void *p) { return library.load<decltype(&cuMemFree_v2)>("cuMemFree_v2")(devicePointer(p)); });
   check(library.load<decltype(&cuCtxDestroy_v2)>("cuCtxDestroy_v2")(context));
 }
+
+TEST_CASE("CUDA managed runtime allocation round-trips host and device", "[cuda][integration]") { runManagedRuntime(); }

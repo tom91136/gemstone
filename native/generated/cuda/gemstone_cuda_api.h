@@ -5,6 +5,7 @@
 #include <gemstone/export.h>
 #include <cuda.h>
 #include <cuda_runtime_api.h>
+#include <cublas_api.h>
 
 #ifdef __cplusplus
 extern "C" {

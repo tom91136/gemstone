@@ -13,8 +13,8 @@
 
 namespace gemstone::execution {
 
-inline constexpr uint32_t RequestMagic = UINT32_C(0x474d4532);
-inline constexpr uint32_t ResponseMagic = UINT32_C(0x474d4632);
+inline constexpr uint32_t RequestMagic = static_cast<uint32_t>(0x474d4532);
+inline constexpr uint32_t ResponseMagic = static_cast<uint32_t>(0x474d4632);
 inline constexpr uint32_t MaximumPayload = 134217728U;
 inline constexpr uint32_t MaximumElements = 16384U;
 inline constexpr uint32_t MaximumTextBytes = 8192U;

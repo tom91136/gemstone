@@ -4,6 +4,9 @@
 #include <stddef.h>
 #include <stdint.h>
 
+/* Every AQL packet occupies this fixed stride in the ring. */
+#define GEMSTONE_HSA_AQL_PACKET_SIZE 64
+
 #ifdef __cplusplus
 extern "C" {
 #endif

@@ -504,7 +504,7 @@ trait LevelZero {
       hCommandList: ze_command_list_handle_t,
       numRanges: uint32_t,
       pRangeSizes: Pointer[size_t, Read, Opaque],
-      pRanges: Pointer[OpaquePointer, Read, Opaque],
+      pRanges: Pointer[Pointer[CVoid, Read, Opaque], ReadWrite, Opaque],
       hSignalEvent: ze_event_handle_t,
       numWaitEvents: uint32_t,
       phWaitEvents: Pointer[ze_event_handle_t, ReadWrite, Opaque]
@@ -856,7 +856,7 @@ trait LevelZero {
   ): ze_result_t = unsupported
   def zeDeviceGetRuntimeRequirementsKey(
       hDevice: ze_device_handle_t,
-      pKey: Pointer[Pointer[Byte, ReadWrite, Opaque], Read, Opaque]
+      pKey: Pointer[CString, ReadWrite, Opaque]
   ): ze_result_t = unsupported
   def zeDeviceGetStatus(hDevice: ze_device_handle_t): ze_result_t = unsupported
   def zeDeviceGetSubDevices(
@@ -921,7 +921,7 @@ trait LevelZero {
   ): ze_result_t = unsupported
   def zeDriverGetLastErrorDescription(
       hDriver: ze_driver_handle_t,
-      ppString: Pointer[Pointer[Byte, ReadWrite, Opaque], Read, Opaque]
+      ppString: Pointer[CString, ReadWrite, Opaque]
   ): ze_result_t = unsupported
   def zeDriverGetProperties(
       hDriver: ze_driver_handle_t,
@@ -1358,7 +1358,7 @@ trait LevelZero {
   def zeModuleGetKernelNames(
       hModule: ze_module_handle_t,
       pCount: Pointer[uint32_t, ReadWrite, Opaque],
-      pNames: Pointer[Pointer[Byte, ReadWrite, Opaque], Read, Opaque]
+      pNames: Pointer[CString, ReadWrite, Opaque]
   ): ze_result_t = unsupported
   def zeModuleGetNativeBinary(
       hModule: ze_module_handle_t,

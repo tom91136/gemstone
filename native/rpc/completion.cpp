@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cctype>
+#include <charconv>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -10,17 +11,19 @@
 #include <string_view>
 #include <type_traits>
 
+#include <fmt/printf.h>
+
 namespace gemstone::execution {
 
 namespace {
 
 template <class T> bool appendFormatted(std::string &output, const std::string &format, T value) {
-  const int size = std::snprintf(nullptr, 0, format.c_str(), value);
-  if (size < 0) return false;
-  std::vector<char> buffer(static_cast<size_t>(size) + 1);
-  if (std::snprintf(buffer.data(), buffer.size(), format.c_str(), value) != size) return false;
-  output.append(buffer.data(), static_cast<size_t>(size));
-  return true;
+  try {
+    output += fmt::sprintf(format, value);
+    return true;
+  } catch (const fmt::format_error &) {
+    return false;
+  }
 }
 
 uint64_t widthMask(int32_t width) { return width >= 64 ? std::numeric_limits<uint64_t>::max() : (uint64_t{1} << width) - 1; }
@@ -68,6 +71,7 @@ double floatingValue(int64_t bits, int32_t width) {
 
 bool appendArgument(std::string &output, const PrintArgument &argument, std::string_view flagsAndSize, std::string_view lengthSpecifier,
                     char conversion, size_t lane) {
+  const std::string spec = "%" + std::string(flagsAndSize);
   return std::visit(
       [&](const auto &value) {
         using T = std::decay_t<decltype(value)>;
@@ -75,25 +79,23 @@ bool appendArgument(std::string &output, const PrintArgument &argument, std::str
           if (lane >= value.bits.size() || value.width <= 0 || value.width > 64) return false;
           const int32_t width = lengthSpecifier == "hh" ? 8 : lengthSpecifier == "h" ? 16 : lengthSpecifier == "l" ? 64 : value.width;
           if (conversion == 'c')
-            return appendFormatted(output, "%" + std::string(flagsAndSize) + "c", static_cast<int>(value.bits[lane] & 0xff));
+            return appendFormatted(output, spec + "c", static_cast<int>(value.bits[lane] & 0xff));
           if (conversion == 'd' || conversion == 'i')
-            return appendFormatted(output, "%" + std::string(flagsAndSize) + "lld",
-                                   static_cast<long long>(signedValue(value.bits[lane], width)));
+            return appendFormatted(output, spec + "lld", static_cast<long long>(signedValue(value.bits[lane], width)));
           if (conversion == 'o' || conversion == 'u' || conversion == 'x' || conversion == 'X')
-            return appendFormatted(output, "%" + std::string(flagsAndSize) + "ll" + conversion,
+            return appendFormatted(output, spec + "ll" + conversion,
                                    static_cast<unsigned long long>(static_cast<uint64_t>(value.bits[lane]) & widthMask(width)));
           return false;
         } else if constexpr (std::is_same_v<T, PrintArgumentFloating>) {
           if (lane >= value.bits.size() || (value.width != 16 && value.width != 32 && value.width != 64)) return false;
           if (std::string_view("aAeEfFgG").find(conversion) == std::string_view::npos) return false;
-          return appendFormatted(output, "%" + std::string(flagsAndSize) + conversion, floatingValue(value.bits[lane], value.width));
+          return appendFormatted(output, spec + conversion, floatingValue(value.bits[lane], value.width));
         } else if constexpr (std::is_same_v<T, PrintArgumentPointer>) {
           if (lane != 0 || conversion != 'p') return false;
-          return appendFormatted(output, "%" + std::string(flagsAndSize) + "p",
-                                 reinterpret_cast<void *>(static_cast<uintptr_t>(value.address)));
+          return appendFormatted(output, spec + "p", reinterpret_cast<void *>(static_cast<uintptr_t>(value.address)));
         } else {
           if (lane != 0 || conversion != 's') return false;
-          return appendFormatted(output, "%" + std::string(flagsAndSize) + "s", value.value.c_str());
+          return appendFormatted(output, spec + "s", value.value.c_str());
         }
       },
       argument);
@@ -142,7 +144,8 @@ bool render(const PrintEvent &event, std::string &output) {
       while (index < event.format.size() && std::isdigit(static_cast<unsigned char>(event.format[index])))
         ++index;
       if (widthStart == index) return false;
-      vectorWidth = static_cast<size_t>(std::stoul(event.format.substr(widthStart, index - widthStart)));
+      const auto [widthEnd, widthError] = std::from_chars(event.format.data() + widthStart, event.format.data() + index, vectorWidth);
+      if (widthError != std::errc{} || widthEnd != event.format.data() + index) return false;
     }
     const size_t lengthStart = index;
     while (index < event.format.size() && (event.format[index] == 'h' || event.format[index] == 'l'))

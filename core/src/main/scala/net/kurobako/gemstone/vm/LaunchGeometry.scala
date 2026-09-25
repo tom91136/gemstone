@@ -2,13 +2,15 @@ package net.kurobako.gemstone.vm
 
 import LaunchGeometry.*
 
+import net.kurobako.gemstone.WorkDimension
+
 import io.github.iltotore.iron.*
 import io.github.iltotore.iron.constraint.all.*
 
 final case class LaunchGeometry private (
     groupSize: Dimensions,
     groupCount: Dimensions,
-    workDim: Int :| Interval.Closed[1, 3],
+    workDim: WorkDimension,
     globalOffset: Coordinates,
     globalExtent: GlobalDimensions
 ) {
@@ -161,7 +163,7 @@ object LaunchGeometry {
       groupSize: Dimensions,
       groupCount: Dimensions,
       globalSize: Option[GlobalDimensions] = None,
-      workDim: Int :| Interval.Closed[1, 3] = 3,
+      workDim: WorkDimension = 3,
       globalOffset: Coordinates = Coordinates(0, 0, 0)
   ): Either[String, LaunchGeometry] =
     for {
@@ -177,7 +179,7 @@ object LaunchGeometry {
   def virtual(
       groupSize: Dimensions,
       groupCount: Dimensions,
-      workDim: Int :| Interval.Closed[1, 3] = 3,
+      workDim: WorkDimension = 3,
       globalOffset: Coordinates = Coordinates(0, 0, 0)
   ): Either[String, LaunchGeometry] =
     paddedExtent(groupSize, groupCount).map(extent =>

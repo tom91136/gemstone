@@ -4,6 +4,14 @@ import io.github.iltotore.iron.*
 
 /** Raw IEEE-754 interchange encodings used by ISA registers and memory. */
 private[gemstone] object IEEE754 {
+  private inline val Binary16Bias        = 15
+  private inline val Binary16ExponentMax = 0x1f
+  private inline val Binary32Bias        = 127
+  private inline val Binary64Bias        = 1023
+  private inline val Binary16Infinity    = 0x7c00
+  private inline val Binary16NaN         = 0x7e00
+  private inline val Binary32Infinity    = 0x7f800000
+
   inline def binary32ToFloat(bits: Binary32): Float = java.lang.Float.intBitsToFloat(bits.value.toInt)
 
   inline def floatToBinary32(value: Float): Binary32 =
@@ -29,10 +37,10 @@ private[gemstone] object IEEE754 {
             mantissa <<= 1
             shift += 1
           }
-          sign | ((127 - 14 - shift) << 23) | ((mantissa & 0x3ff) << 13)
+          sign | ((Binary32Bias - 14 - shift) << 23) | ((mantissa & 0x3ff) << 13)
         }
-      } else if (exponent == 0x1f) sign | 0x7f800000 | (fraction << 13)
-      else sign | ((exponent - 15 + 127) << 23) | (fraction << 13)
+      } else if (exponent == Binary16ExponentMax) sign | Binary32Infinity | (fraction << 13)
+      else sign | ((exponent - Binary16Bias + Binary32Bias) << 23) | (fraction << 13)
     java.lang.Float.intBitsToFloat(bits32)
   }
 
@@ -42,10 +50,10 @@ private[gemstone] object IEEE754 {
     val exponent = (bits >>> 23) & 0xff
     val fraction = bits & 0x7fffff
     val encoded  =
-      if (exponent == 0xff) sign | (if (fraction == 0) 0x7c00 else 0x7e00)
+      if (exponent == 0xff) sign | (if (fraction == 0) Binary16Infinity else Binary16NaN)
       else {
-        val halfExponent = exponent - 127 + 15
-        if (halfExponent >= 0x1f) sign | 0x7c00
+        val halfExponent = exponent - Binary32Bias + Binary16Bias
+        if (halfExponent >= Binary16ExponentMax) sign | Binary16Infinity
         else if (halfExponent <= 0) {
           if (halfExponent < -10) sign
           else {
@@ -58,7 +66,7 @@ private[gemstone] object IEEE754 {
           val rounded = fraction + 0xfff + ((fraction >>> 13) & 1)
           if ((rounded & 0x800000) != 0) {
             val nextExponent = halfExponent + 1
-            if (nextExponent >= 0x1f) sign | 0x7c00 else sign | (nextExponent << 10)
+            if (nextExponent >= Binary16ExponentMax) sign | Binary16Infinity else sign | (nextExponent << 10)
           } else sign | (halfExponent << 10) | (rounded >>> 13)
         }
       }
@@ -71,10 +79,10 @@ private[gemstone] object IEEE754 {
     val sign        = (bits >>> 48) & 0x8000L
     val rawExponent = ((bits >>> 52) & 0x7ffL).toInt
     val fraction    = bits & 0x000fffffffffffffL
-    val exponent    = rawExponent - 1023
+    val exponent    = rawExponent - Binary64Bias
     val encoded     =
-      if (rawExponent == 0x7ff) sign | (if (fraction == 0L) 0x7c00L else 0x7e00L)
-      else if (exponent > 15) sign | 0x7c00L
+      if (rawExponent == 0x7ff) sign | (if (fraction == 0L) Binary16Infinity.toLong else Binary16NaN.toLong)
+      else if (exponent > Binary16Bias) sign | Binary16Infinity.toLong
       else if (exponent < -25) sign
       else {
         val significand = fraction | 0x0010000000000000L

@@ -44,9 +44,7 @@ object GenerateAPISurfaces {
       packageName: String,
       traitName: String,
       output: Path,
-      versions: Vector[(String, String :| (MinLength[1] & NoNul))],
-      excludedFunctions: Set[String] = Set.empty,
-      excludedTypes: Set[String] = Set.empty
+      versions: Vector[(String, String :| (MinLength[1] & NoNul))]
   )
 
   private val command = Command("GenerateAPISurfaces", "Generate Scala API surfaces")((
@@ -132,7 +130,7 @@ object GenerateAPISurfaces {
       val callbackTypedefs: Map[String, String] = typedefs.view.map { case (name, definitions) =>
         (name: String) -> (definitions.head.cType.value: String)
       }.toMap
-      val renderedFunctions = functions.filterNot(function => target.excludedFunctions(function.name.value))
+      val renderedFunctions = functions
       val functionCount     = renderedFunctions.size.refineEither[Positive].fold(
         message => throw IllegalArgumentException(s"${target.traitName} has no declarations: $message"),
         value => value
@@ -197,7 +195,7 @@ object GenerateAPISurfaces {
       } yield s"  def ${identifier(function.name.value)}(${parameters.mkString(", ")}): $returnType = unsupported"
     }
     val (aliases, declarations) = rendered.run(Aliases.empty).value
-    val aliasLines              = aliases.entries.filterNot(entry => target.excludedTypes(entry._1)).sortBy(_._1).map {
+    val aliasLines              = aliases.entries.sortBy(_._1).map {
       case (name, definition) =>
         s"  type ${identifier(name)} = $definition"
     }
@@ -236,9 +234,18 @@ object GenerateAPISurfaces {
           resultType     <- mapType(result, callbackTypedefs)
         } yield s"Callback[${callbackArguments(parameterTypes)}, $resultType]"
       case None if value.endsWith("*") =>
-        val pointee0 = value.dropRight(1).trim
-        val readOnly = pointee0.startsWith("const ") || pointee0.endsWith(" const")
-        val pointee  = pointee0.stripPrefix("const ").stripSuffix(" const").trim
+        // Clang spells a const pointer as `*const`. When the element is itself a
+        // pointer, a leading `const` qualifies its pointee and is preserved for
+        // the recursive call; only the trailing `const` marks the pointer itself
+        // read-only. For a scalar element the leading `const` is the read-only
+        // qualifier.
+        val pointee0       = value.dropRight(1).trim.replace("*const", "* const")
+        val pointerElement = pointee0.contains("*")
+        val trailingConst  = pointee0.endsWith(" const")
+        val readOnly       = if (pointerElement) trailingConst else pointee0.startsWith("const ") || trailingConst
+        val pointee        =
+          if (pointerElement) if (trailingConst) pointee0.stripSuffix(" const").trim else pointee0
+          else pointee0.stripPrefix("const ").stripSuffix(" const").trim
         if (readOnly && pointee == "char") State.pure("CString")
         else if (!readOnly && pointee == "void") State.pure("OpaquePointer")
         else {
@@ -327,58 +334,7 @@ object GenerateAPISurfaces {
 
   private def typeIdentifier(value: String): String = identifier(identifierName(value))
 
-  private val keywords = Set(
-    "abstract",
-    "case",
-    "catch",
-    "class",
-    "def",
-    "do",
-    "else",
-    "enum",
-    "export",
-    "extends",
-    "false",
-    "final",
-    "finally",
-    "for",
-    "forSome",
-    "given",
-    "if",
-    "implicit",
-    "import",
-    "inline",
-    "lazy",
-    "match",
-    "new",
-    "null",
-    "object",
-    "opaque",
-    "open",
-    "override",
-    "package",
-    "private",
-    "protected",
-    "return",
-    "sealed",
-    "super",
-    "then",
-    "this",
-    "throw",
-    "trait",
-    "transparent",
-    "true",
-    "try",
-    "type",
-    "using",
-    "val",
-    "var",
-    "while",
-    "with",
-    "yield"
-  )
-
-  private def identifier(value: String): String = if (keywords(value)) s"`$value`" else value
+  private def identifier(value: String): String = if (ScalaKeywords(value)) s"`$value`" else value
 
   private def literal(value: String): String =
     "\"" + value.flatMap {

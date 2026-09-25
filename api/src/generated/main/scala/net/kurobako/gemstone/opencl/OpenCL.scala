@@ -118,7 +118,7 @@ trait OpenCL {
       options: CString,
       num_input_headers: cl_uint,
       input_headers: Pointer[cl_program, Read, Opaque],
-      header_include_names: Pointer[Pointer[Byte, ReadWrite, Opaque], Read, Opaque],
+      header_include_names: Pointer[CString, ReadWrite, Opaque],
       pfn_notify: Callback[(cl_program, OpaquePointer), Unit],
       user_data: OpaquePointer
   ): cl_int = unsupported
@@ -303,7 +303,7 @@ trait OpenCL {
       num_devices: cl_uint,
       device_list: Pointer[cl_device_id, Read, Opaque],
       lengths: Pointer[size_t, Read, Opaque],
-      binaries: Pointer[Pointer[unsigned_char, ReadWrite, Opaque], Read, Opaque],
+      binaries: Pointer[Pointer[unsigned_char, Read, Opaque], ReadWrite, Opaque],
       binary_status: Pointer[cl_int, ReadWrite, Opaque],
       errcode_ret: Pointer[cl_int, ReadWrite, Opaque]
   ): cl_program = unsupported
@@ -329,7 +329,7 @@ trait OpenCL {
   def clCreateProgramWithSource(
       context: cl_context,
       count: cl_uint,
-      strings: Pointer[Pointer[Byte, ReadWrite, Opaque], Read, Opaque],
+      strings: Pointer[CString, ReadWrite, Opaque],
       lengths: Pointer[size_t, Read, Opaque],
       errcode_ret: Pointer[cl_int, ReadWrite, Opaque]
   ): cl_program = unsupported
@@ -627,7 +627,7 @@ trait OpenCL {
       cb_args: size_t,
       num_mem_objects: cl_uint,
       mem_list: Pointer[cl_mem, Read, Opaque],
-      args_mem_loc: Pointer[OpaquePointer, Read, Opaque],
+      args_mem_loc: Pointer[Pointer[CVoid, Read, Opaque], ReadWrite, Opaque],
       num_events_in_wait_list: cl_uint,
       event_wait_list: Pointer[cl_event, Read, Opaque],
       event: Pointer[cl_event, ReadWrite, Opaque]
@@ -804,7 +804,7 @@ trait OpenCL {
   def clEnqueueSVMMigrateMem(
       command_queue: cl_command_queue,
       num_svm_pointers: cl_uint,
-      svm_pointers: Pointer[OpaquePointer, Read, Opaque],
+      svm_pointers: Pointer[Pointer[CVoid, Read, Opaque], ReadWrite, Opaque],
       sizes: Pointer[size_t, Read, Opaque],
       flags: cl_mem_migration_flags,
       num_events_in_wait_list: cl_uint,

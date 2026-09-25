@@ -217,6 +217,10 @@ object ABI {
   sealed trait CVoid
   type OpaquePointer = Pointer[CVoid, ReadWrite, Opaque]
 
+  /** A by-value ABI value wider than this is not a machine word. */
+  type MachineWordBytes = 8
+  final val MachineWordSize: Int = 8
+
   /** Process-neutral bytes for a C typedef, enum, record, or other by-value ABI type. The literal C spelling keeps
     * unrelated vendor types distinct even when they have the same machine representation.
     *
@@ -229,7 +233,7 @@ object ABI {
 
     /** Narrow a by-value ABI value to the machine-word representation used by enums, flags, and handles. */
     def scalar: Option[ScalarCValue[Name]] =
-      bytes.refineFurtherOption[MaxLength[8]].map(value => ScalarCValue.fromBytes(value))
+      bytes.refineFurtherOption[MaxLength[MachineWordBytes]].map(value => ScalarCValue.fromBytes(value))
 
     override def equals(other: Any): Boolean = other match {
       case value: CValue[?] => Vec.sameElements(bytes, value.bytes)
@@ -242,19 +246,20 @@ object ABI {
   }
 
   final class ScalarCValue[Name <: String & Singleton] private[abi] (
-      val scalarBytes: Vec[Byte] :| (MinLength[1] & MaxLength[8])
+      val scalarBytes: Vec[Byte] :| (MinLength[1] & MaxLength[MachineWordBytes])
   ) extends CValue[Name](scalarBytes) {
-    def scalarByteSize: Int :| Interval.Closed[1, 8] = scalarBytes.length.refineUnsafe[Interval.Closed[1, 8]]
+    def scalarByteSize: Int :| Interval.Closed[1, MachineWordBytes] =
+      scalarBytes.length.refineUnsafe[Interval.Closed[1, MachineWordBytes]]
 
     def toUnsignedLong: Long = LittleEndian.decode(scalarBytes, 0, ScalarByteWidth.fromPositive(scalarByteSize))
   }
 
   object ScalarCValue {
     def fromBytes[Name <: String & Singleton](
-        bytes: Vec[Byte] :| (MinLength[1] & MaxLength[8])
+        bytes: Vec[Byte] :| (MinLength[1] & MaxLength[MachineWordBytes])
     ): ScalarCValue[Name] = {
       val copied: Vec[Byte] = Vec.from(bytes)
-      ScalarCValue(copied.refineUnsafe[MinLength[1] & MaxLength[8]])
+      ScalarCValue(copied.refineUnsafe[MinLength[1] & MaxLength[MachineWordBytes]])
     }
   }
 
@@ -266,10 +271,10 @@ object ABI {
 
     def fromUnsignedLong[Name <: String & Singleton](
         value: Long,
-        byteSize: Int :| Interval.Closed[1, 8]
+        byteSize: Int :| Interval.Closed[1, MachineWordBytes]
     ): ScalarCValue[Name] = {
       val bytes: Vec[Byte] = LittleEndian.toVec(value, ScalarByteWidth.fromPositive(byteSize))
-      ScalarCValue(bytes.refineUnsafe[MinLength[1] & MaxLength[8]])
+      ScalarCValue(bytes.refineUnsafe[MinLength[1] & MaxLength[MachineWordBytes]])
     }
   }
 

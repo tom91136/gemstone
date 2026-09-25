@@ -243,6 +243,7 @@ private[v1_6] object VMInvocation {
       var subgroupSize: Int,
       var maxSubgroupSize: Int,
       var numSubgroups: Long,
+      var enqueuedSubgroups: Long,
       var subgroupIndex: Int,
       var subgroupLocal: Int
   ) {
@@ -266,6 +267,7 @@ private[v1_6] object VMInvocation {
         nextSubgroupSize: Int,
         nextMaxSubgroupSize: Int,
         nextNumSubgroups: Long,
+        nextEnqueuedSubgroups: Long,
         nextSubgroupIndex: Int,
         nextSubgroupLocal: Int
     ): Unit = {
@@ -297,6 +299,7 @@ private[v1_6] object VMInvocation {
       subgroupSize = nextSubgroupSize
       maxSubgroupSize = nextMaxSubgroupSize
       numSubgroups = nextNumSubgroups
+      enqueuedSubgroups = nextEnqueuedSubgroups
       subgroupIndex = nextSubgroupIndex
       subgroupLocal = nextSubgroupLocal
       group(0) = groupX

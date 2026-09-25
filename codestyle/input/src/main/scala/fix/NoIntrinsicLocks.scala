@@ -9,8 +9,9 @@ object NoIntrinsicLocks {
   private val monitor = Object()
   private val lock    = ReentrantLock()
 
-  def rejected(): Unit = monitor.synchronized(()) // assert: GemstoneNoIntrinsicLocks.intrinsic-lock
-  def accepted(): Unit = {
+  def rejected(): Unit            = monitor.synchronized(()) // assert: GemstoneNoIntrinsicLocks.intrinsic-lock
+  def rejectedUnqualified(): Unit = synchronized(())         // assert: GemstoneNoIntrinsicLocks.intrinsic-lock
+  def accepted(): Unit            = {
     lock.lock()
     try ()
     finally lock.unlock()

@@ -22,7 +22,7 @@
 
 #include "compiler.hpp"
 
-inline constexpr uint64_t Magic = UINT64_C(0x47454d53544f4e45);
+inline constexpr uint64_t Magic = static_cast<uint64_t>(0x47454d53544f4e45);
 
 enum class Kind : uint32_t { Platform, Device, Context, Queue, Memory, Program, Kernel, Event };
 

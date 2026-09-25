@@ -1,5 +1,7 @@
 package net.kurobako.gemstone.vm
 
+import net.kurobako.gemstone.WorkDimension
+
 import net.kurobako.gemstone.Vec
 import net.kurobako.gemstone.isa.KernelName
 
@@ -43,7 +45,7 @@ object KernelTask {
       privateSegmentBytes: Int :| Positive0 = 0,
       groupSegmentBytes: Int :| Positive0 = 0,
       pointerRelocations: Vec[PointerRelocation] = Vec.empty,
-      workDim: Int :| Interval.Closed[1, 3] = 3,
+      workDim: WorkDimension = 3,
       globalOffset: LaunchGeometry.Coordinates = LaunchGeometry.Coordinates(0, 0, 0)
   ): Either[String, KernelTask] =
     for {

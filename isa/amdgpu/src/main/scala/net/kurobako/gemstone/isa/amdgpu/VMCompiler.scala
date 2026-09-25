@@ -220,7 +220,7 @@ private[amdgpu] object VMCompiler {
     case VMaxF16                   => Some(VectorBinaryOperation.MaximumF16)
     case VLdexpF32                 => Some(VectorBinaryOperation.LoadExponentF32)
     case VAddF32                   => Some(VectorBinaryOperation.AddF32)
-    case VMulF32                   => Some(VectorBinaryOperation.MultiplyF32)
+    case VMulF32 | VMulLegacyF32   => Some(VectorBinaryOperation.MultiplyF32)
     case VMacF32 | VFmacF32        => Some(VectorBinaryOperation.MultiplyAccumulateF32)
     case VAddF16                   => Some(VectorBinaryOperation.AddF16)
     case VMulF16                   => Some(VectorBinaryOperation.MultiplyF16)
@@ -234,14 +234,14 @@ private[amdgpu] object VMCompiler {
   }
 
   private def vectorF32BinaryOperation(opcode: VendorInstruction): Option[VectorF32BinaryOperation] = opcode match {
-    case VAddF32    => Some(VectorF32BinaryOperation.Add)
-    case VSubF32    => Some(VectorF32BinaryOperation.Subtract)
-    case VSubrevF32 => Some(VectorF32BinaryOperation.ReverseSubtract)
-    case VMulF32    => Some(VectorF32BinaryOperation.Multiply)
-    case VLdexpF32  => Some(VectorF32BinaryOperation.LoadExponent)
-    case VMaxF32    => Some(VectorF32BinaryOperation.Maximum)
-    case VMinF32    => Some(VectorF32BinaryOperation.Minimum)
-    case _          => None
+    case VAddF32                 => Some(VectorF32BinaryOperation.Add)
+    case VSubF32                 => Some(VectorF32BinaryOperation.Subtract)
+    case VSubrevF32              => Some(VectorF32BinaryOperation.ReverseSubtract)
+    case VMulF32 | VMulLegacyF32 => Some(VectorF32BinaryOperation.Multiply)
+    case VLdexpF32               => Some(VectorF32BinaryOperation.LoadExponent)
+    case VMaxF32                 => Some(VectorF32BinaryOperation.Maximum)
+    case VMinF32                 => Some(VectorF32BinaryOperation.Minimum)
+    case _                       => None
   }
 
   private def vectorSubDwordOperation(opcode: VendorInstruction): Option[VectorSubDwordOperation] = opcode match {
@@ -489,6 +489,7 @@ private[amdgpu] object VMCompiler {
     VSubF32,
     VSubrevF32,
     VMulF32,
+    VMulLegacyF32,
     VAddF64,
     VAddF64E64,
     VMulF64,
@@ -766,19 +767,21 @@ private[amdgpu] object VMCompiler {
     // GFX6--9 use the 0x30 SMEM prefix; GFX10+ moved the same scalar-memory
     // encoding to 0x3d.  The operand fields and literal layout are otherwise
     // identical for the subset interpreted here.
-    if (high6Bits == 0x30L || high6Bits == 0x3dL) decodeSMEM(bytes, offset, word, target)
-    else if (high9Bits == 0x17dL) decodeSOP1(bytes, offset, word, target)
-    else if (high9Bits == 0x17eL) decodeSOPC(bytes, offset, word, target)
-    else if (high9Bits == 0x17fL) decodeSOPP(word, target)
-    else if (high4Bits == 0xbL) decodeSOPK(word, target)
-    else if (high2Bits == 2L) decodeSOP2(bytes, offset, word, target)
-    else if (high6Bits == 0x33L) decodeVOP3P(bytes, offset, word, target)
-    else if (high6Bits == 0x34L || high6Bits == 0x35L) decodeVOP3(bytes, offset, word, target)
-    else if (high6Bits == 0x36L) decodeDS(bytes, offset, word, target)
-    else if (high6Bits == 0x37L) decodeGlobalOrFlat(bytes, offset, word, target)
-    else if (high6Bits == 0x38L) decodeMUBUF(bytes, offset, word, target)
-    else if (high7Bits == 0x3fL) decodeVOP1(bytes, offset, word, target)
-    else if (high7Bits == 0x3eL) decodeVOPC(bytes, offset, word, target)
+    if (high6Bits == Decoding.SmemGfx6Prefix || high6Bits == Decoding.SmemGfx10Prefix)
+      decodeSMEM(bytes, offset, word, target)
+    else if (high9Bits == Decoding.Sop1Prefix) decodeSOP1(bytes, offset, word, target)
+    else if (high9Bits == Decoding.SopCPrefix) decodeSOPC(bytes, offset, word, target)
+    else if (high9Bits == Decoding.SopPPrefix) decodeSOPP(word, target)
+    else if (high4Bits == Decoding.SopKPrefix) decodeSOPK(word, target)
+    else if (high2Bits == Decoding.Sop2Prefix) decodeSOP2(bytes, offset, word, target)
+    else if (high6Bits == Decoding.Vop3PPrefix) decodeVOP3P(bytes, offset, word, target)
+    else if (high6Bits == Decoding.Vop3Prefix || high6Bits == Decoding.Vop3LiteralPrefix)
+      decodeVOP3(bytes, offset, word, target)
+    else if (high6Bits == Decoding.DsPrefix) decodeDS(bytes, offset, word, target)
+    else if (high6Bits == Decoding.GlobalFlatPrefix) decodeGlobalOrFlat(bytes, offset, word, target)
+    else if (high6Bits == Decoding.MubufPrefix) decodeMUBUF(bytes, offset, word, target)
+    else if (high7Bits == Decoding.Vop1Prefix) decodeVOP1(bytes, offset, word, target)
+    else if (high7Bits == Decoding.VopCPrefix) decodeVOPC(bytes, offset, word, target)
     else decodeVOP2(bytes, offset, word, target)
   }
 
@@ -806,7 +809,7 @@ private[amdgpu] object VMCompiler {
       second    = unsignedWord(bytes, offset + 4)
       immediate = target.family match {
         case Family.GFX10 | Family.GFX11 | Family.GFX12 =>
-          Bits.unsignedField(second, 25, BitWidth(7)) == 0x7dL
+          Bits.unsignedField(second, 25, BitWidth(7)) == Decoding.NullOffset
         case _ => Bits.isSet(word, 17)
       }
     } yield Decoded(
@@ -828,7 +831,7 @@ private[amdgpu] object VMCompiler {
   ): Either[String, Decoded] =
     for {
       opcode <- opcodeDefinition("SOP1", Bits.unsignedIntField(word, 8, IntFieldWidth(8)), target)
-      literal = Option.when(Bits.unsignedField(word, 0, BitWidth(8)) == 255L)(())
+      literal = Option.when(Bits.unsignedField(word, 0, BitWidth(8)) == Decoding.LiteralSource.toLong)(())
       _   <- requireBytes(bytes, offset, if (literal.nonEmpty) 8 else 4)
       src <- scalarSource(
         Bits.unsignedIntField(word, 0, IntFieldWidth(8)),
@@ -876,7 +879,7 @@ private[amdgpu] object VMCompiler {
   ): Either[String, Decoded] = {
     val srcAEncoding = Bits.unsignedIntField(word, 0, IntFieldWidth(8))
     val srcBEncoding = Bits.unsignedIntField(word, 8, IntFieldWidth(8))
-    val hasLiteral   = srcAEncoding == 255 || srcBEncoding == 255
+    val hasLiteral   = srcAEncoding == Decoding.LiteralSource || srcBEncoding == Decoding.LiteralSource
     for {
       _      <- requireBytes(bytes, offset, if (hasLiteral) 8 else 4)
       opcode <- opcodeDefinition("SOP2", Bits.unsignedIntField(word, 23, IntFieldWidth(7)), target)
@@ -948,7 +951,7 @@ private[amdgpu] object VMCompiler {
   ): Either[String, Decoded] = {
     val srcAEncoding = Bits.low8Int(word)
     val srcBEncoding = Bits.unsignedIntField(word, 8, IntFieldWidth(8))
-    val hasLiteral   = srcAEncoding == 255 || srcBEncoding == 255
+    val hasLiteral   = srcAEncoding == Decoding.LiteralSource || srcBEncoding == Decoding.LiteralSource
     for {
       _      <- requireBytes(bytes, offset, if (hasLiteral) 8 else 4)
       opcode <- opcodeDefinition("SOPC", Bits.unsignedIntField(word, 16, IntFieldWidth(7)), target)
@@ -1014,10 +1017,10 @@ private[amdgpu] object VMCompiler {
   ): Either[String, Decoded] = {
     val srcAEncoding = Bits.unsignedIntField(word, 0, IntFieldWidth(9))
     val opcodeResult = opcodeDefinition("VOP2", Bits.unsignedIntField(word, 25, IntFieldWidth(7)), target)
-    val hasLiteral   = srcAEncoding == 255 || opcodeResult.exists(opcode =>
+    val hasLiteral   = srcAEncoding == Decoding.LiteralSource || opcodeResult.exists(opcode =>
       opcode == VMadmkF32 || opcode == VFmamkF32 || opcode == VFmaakF32
     )
-    val hasSDWA = srcAEncoding == 249
+    val hasSDWA = srcAEncoding == Decoding.SdwaSource
     for {
       _      <- requireBytes(bytes, offset, if (hasLiteral || hasSDWA) 8 else 4)
       opcode <- opcodeResult.leftMap(error => s"$error (word=0x${word.toHexString})")
@@ -1096,7 +1099,7 @@ private[amdgpu] object VMCompiler {
             dest = dest,
             srcA = srcA,
             srcB = srcB,
-            condition = InstructionSource.Scalar(106),
+            condition = InstructionSource.Scalar(Decoding.VccLo),
             absA = false,
             absB = false,
             negateA = false,
@@ -1105,7 +1108,7 @@ private[amdgpu] object VMCompiler {
         case VAddCoU32 =>
           Right(Instruction.VAddCarry(
             dest = dest,
-            carryDest = 106,
+            carryDest = Decoding.VccLo,
             srcA = srcA,
             srcB = srcB,
             carryIn = None
@@ -1113,15 +1116,15 @@ private[amdgpu] object VMCompiler {
         case VAddCoCiU32 | VAddcCoU32 =>
           Right(Instruction.VAddCarry(
             dest = dest,
-            carryDest = 106,
+            carryDest = Decoding.VccLo,
             srcA = srcA,
             srcB = srcB,
-            carryIn = Some(InstructionSource.Scalar(106))
+            carryIn = Some(InstructionSource.Scalar(Decoding.VccLo))
           ))
         case VSubCoU32 =>
           Right(Instruction.VSubCarry(
             dest = dest,
-            carryDest = 106,
+            carryDest = Decoding.VccLo,
             srcA = srcA,
             srcB = srcB,
             carryIn = None
@@ -1129,15 +1132,15 @@ private[amdgpu] object VMCompiler {
         case VSubCoCiU32 | VSubbCoU32 =>
           Right(Instruction.VSubCarry(
             dest = dest,
-            carryDest = 106,
+            carryDest = Decoding.VccLo,
             srcA = srcA,
             srcB = srcB,
-            carryIn = Some(InstructionSource.Scalar(106))
+            carryIn = Some(InstructionSource.Scalar(Decoding.VccLo))
           ))
         case VSubrevCoU32 =>
           Right(Instruction.VSubReverseCarry(
             dest = dest,
-            carryDest = 106,
+            carryDest = Decoding.VccLo,
             srcA = srcA,
             srcB = srcB,
             carryIn = None
@@ -1145,10 +1148,10 @@ private[amdgpu] object VMCompiler {
         case VSubbrevCoU32 | VSubrevCoCiU32 =>
           Right(Instruction.VSubReverseCarry(
             dest = dest,
-            carryDest = 106,
+            carryDest = Decoding.VccLo,
             srcA = srcA,
             srcB = srcB,
-            carryIn = Some(InstructionSource.Scalar(106))
+            carryIn = Some(InstructionSource.Scalar(Decoding.VccLo))
           ))
         case other =>
           vectorBinaryOperation(other)
@@ -1173,9 +1176,9 @@ private[amdgpu] object VMCompiler {
       target: Target
   ): Either[String, Decoded] = {
     val sourceEncoding = Bits.unsignedIntField(word, 0, IntFieldWidth(9))
-    val hasLiteral     = sourceEncoding == 255
-    val hasDPP         = sourceEncoding == 250
-    val hasSDWA        = sourceEncoding == 249
+    val hasLiteral     = sourceEncoding == Decoding.LiteralSource
+    val hasDPP         = sourceEncoding == Decoding.DppSource
+    val hasSDWA        = sourceEncoding == Decoding.SdwaSource
     for {
       _      <- requireBytes(bytes, offset, if (hasLiteral || hasDPP || hasSDWA) 8 else 4)
       opcode <- opcodeDefinition("VOP1", Bits.unsignedIntField(word, 9, IntFieldWidth(8)), target)
@@ -1246,8 +1249,8 @@ private[amdgpu] object VMCompiler {
       target: Target
   ): Either[String, Decoded] = {
     val srcAEncoding = Bits.unsignedIntField(word, 0, IntFieldWidth(9))
-    val hasLiteral   = srcAEncoding == 255
-    val hasSDWA      = srcAEncoding == 249
+    val hasLiteral   = srcAEncoding == Decoding.LiteralSource
+    val hasSDWA      = srcAEncoding == Decoding.SdwaSource
     for {
       _      <- requireBytes(bytes, offset, if (hasLiteral || hasSDWA) 8 else 4)
       opcode <- opcodeDefinition("VOPC", Bits.unsignedIntField(word, 17, IntFieldWidth(8)), target)
@@ -1316,7 +1319,8 @@ private[amdgpu] object VMCompiler {
       srcAEncoding = Bits.unsignedIntField(second, 0, IntFieldWidth(9))
       srcBEncoding = Bits.unsignedIntField(second, 9, IntFieldWidth(9))
       srcCEncoding = Bits.unsignedIntField(second, 18, IntFieldWidth(9))
-      hasLiteral   = srcAEncoding == 255 || srcBEncoding == 255 || srcCEncoding == 255
+      hasLiteral   = srcAEncoding == Decoding.LiteralSource || srcBEncoding == Decoding.LiteralSource ||
+        srcCEncoding == Decoding.LiteralSource
       _ <- requireBytes(bytes, offset, if (hasLiteral) 12 else 8)
       literal = Option.when(hasLiteral)(unsignedWord(bytes, offset + 8))
       srcA <- vectorSource(srcAEncoding, literal).leftMap(error =>
@@ -1629,7 +1633,7 @@ private[amdgpu] object VMCompiler {
             srcB = srcB,
             srcC = srcC
           ))
-        case VAddF32 | VSubF32 | VSubrevF32 | VMulF32 | VLdexpF32 | VMaxF32 | VMinF32 =>
+        case VAddF32 | VSubF32 | VSubrevF32 | VMulF32 | VMulLegacyF32 | VLdexpF32 | VMaxF32 | VMinF32 =>
           vectorF32BinaryOperation(opcode)
             .map(operation =>
               Instruction.VBinaryF32Modified(
@@ -1680,7 +1684,8 @@ private[amdgpu] object VMCompiler {
       srcAEncoding = Bits.unsignedIntField(second, 0, IntFieldWidth(9))
       srcBEncoding = Bits.unsignedIntField(second, 9, IntFieldWidth(9))
       srcCEncoding = Bits.unsignedIntField(second, 18, IntFieldWidth(9))
-      hasLiteral   = srcAEncoding == 255 || srcBEncoding == 255 || srcCEncoding == 255
+      hasLiteral   = srcAEncoding == Decoding.LiteralSource || srcBEncoding == Decoding.LiteralSource ||
+        srcCEncoding == Decoding.LiteralSource
       _      <- requireBytes(bytes, offset, if (hasLiteral) 12 else 8)
       opcode <- opcodeDefinition("VOP3P", opcodeId, target)
         .orElse(opcodeDefinition("VOP3", opcodeId, target))
@@ -1895,7 +1900,7 @@ private[amdgpu] object VMCompiler {
         // GFX10 encodes the absent scalar address as 0x7d (the disassembler
         // prints it as `null`); older encodings use 0x7f.  Neither is an
         // actual SGPR pair for the flat/global operations we interpret.
-        val scalar = Option.when(scalarAddress != 0x7d && scalarAddress != 0x7e && scalarAddress != 0x7f)(scalarAddress)
+        val scalar = Option.when(!Decoding.isAbsentScalarOffset(scalarAddress))(scalarAddress)
         opcodeDefinition("GLOBAL", Bits.unsignedIntField(word, 18, IntFieldWidth(7)), target).flatMap {
           case GlobalLoadDword =>
             Right(Instruction.GlobalLoad(
@@ -2111,7 +2116,7 @@ private[amdgpu] object VMCompiler {
             ))
           case other => Left(s"$other GLOBAL execution is not implemented")
         }
-      } else if (scalarAddress == 0 || scalarAddress == 0x7d || scalarAddress == 0x7e || scalarAddress == 0x7f) {
+      } else if (scalarAddress == 0 || Decoding.isAbsentScalarOffset(scalarAddress)) {
         opcodeDefinition("FLAT", Bits.unsignedIntField(word, 18, IntFieldWidth(7)), target).flatMap {
           case FlatLoadUbyte =>
             Right(Instruction.FlatLoad(
@@ -2471,110 +2476,7 @@ private[amdgpu] object VMCompiler {
     modeDefinitions match {
       case Vec(name)                                                 => Right(name)
       case Vec() if format == "VOP3" && target.family == Family.GFX9 =>
-        Map(
-          16  -> VCmpClassF32,
-          18  -> VCmpClassF64,
-          257 -> VAddF32,
-          258 -> VSubF32,
-          259 -> VSubrevF32,
-          260 -> VMulF32,
-          261 -> VMulF32,
-          71  -> VCmpOF32,
-          72  -> VCmpUF32,
-          202 -> VCmpEqU32,
-          66  -> VCmpEqF32,
-          67  -> VCmpLeF32,
-          98  -> VCmpEqF64,
-          204 -> VCmpGtU32,
-          205 -> VCmpNeU32,
-          201 -> VCmpLtU32,
-          225 -> VCmpLtI64,
-          233 -> VCmpLtU64,
-          235 -> VCmpLeU64,
-          238 -> VCmpGeU64,
-          173 -> VCmpNeU16,
-          174 -> VCmpGeU16,
-          228 -> VCmpGtI64,
-          109 -> VCmpNeqF64,
-          110 -> VCmpNltF64,
-          108 -> VCmpNleF64,
-          77  -> VCmpNeqF32,
-          65  -> VCmpLtF32,
-          68  -> VCmpGtF32,
-          70  -> VCmpGeF32,
-          97  -> VCmpLtF64,
-          101 -> VCmpLgF64,
-          105 -> VCmpNgeF64,
-          106 -> VCmpNlgF64,
-          107 -> VCmpNgtF64,
-          103 -> VCmpOF64,
-          104 -> VCmpUF64,
-          99  -> VCmpLeF64,
-          100 -> VCmpGtF64,
-          75  -> VCmpNgtF32,
-          76  -> VCmpNleF32,
-          78  -> VCmpNltF32,
-          193 -> VCmpLtI32,
-          196 -> VCmpGtI32,
-          198 -> VCmpGeI32,
-          161 -> VCmpLtI16,
-          166 -> VCmpGeI16,
-          163 -> VCmpLeI16,
-          164 -> VCmpGtI16,
-          170 -> VCmpEqU16,
-          169 -> VCmpLtU16,
-          171 -> VCmpLeU16,
-          172 -> VCmpGtU16,
-          236 -> VCmpGtU64,
-          203 -> VCmpLeU32,
-          234 -> VCmpEqU64,
-          230 -> VCmpGeI64,
-          195 -> VCmpLeI32,
-          206 -> VCmpGeU32,
-          227 -> VCmpLeI64,
-          237 -> VCmpNeU64,
-          456 -> VBfeU32,
-          354 -> VRcpF32,
-          369 -> VFrexpMantF64,
-          642 -> VMinF64,
-          643 -> VMaxF64,
-          266 -> VMinF32,
-          267 -> VMaxF32,
-          309 -> VSubU32,
-          282 -> VSubCoU32,
-          283 -> VSubrevCoU32,
-          284 -> VAddcCoU32,
-          285 -> VSubbCoU32,
-          286 -> VSubbrevCoU32,
-          272 -> VLshrrevB32,
-          298 -> VLshlrevB16,
-          308 -> VAddU32,
-          45  -> VCmpNeqF16,
-          34  -> VCmpEqF16,
-          73  -> VCmpNgeF32,
-          102 -> VCmpGeF64,
-          910 -> VPkFmaF16,
-          911 -> VPkAddF16,
-          912 -> VPkMulF16,
-          914 -> VPkMaxF16,
-          913 -> VPkMinF16,
-          256 -> VCndmaskB32,
-          274 -> VLshlrevB32,
-          281 -> VAddCoU32,
-          284 -> VAddcCoU32,
-          493 -> VPermB32,
-          509 -> VLshlAddU32,
-          510 -> VAddLshlU32,
-          512 -> VLshlOrB32,
-          651 -> VAndOrB32,
-          458 -> VBfiB32,
-          897 -> VPkMulLoU16,
-          899 -> VPkSubI16,
-          906 -> VPkAddU16,
-          640 -> VAddF64,
-          658 -> VTrigPreopF64,
-          901 -> VPkLshrrevB16
-        ).get(opcode).toRight(s"unknown $format opcode $opcode for ${target.name}")
+        Gfx9Vop3Aliases.byOpcode.get(opcode).toRight(s"unknown $format opcode $opcode for ${target.name}")
       case Vec() => Left(s"unknown $format opcode $opcode for ${target.name}")
       case aliases if aliases.toSet == Set(VMulLoI32, VMulLoU32) =>
         Right(VMulLoU32)
@@ -2614,7 +2516,8 @@ private[amdgpu] object VMCompiler {
           )(encoding - 240)
         )
       )
-    else if (encoding == 255) literal.map(raw => InstructionSource.Literal(raw)).toRight("missing literal dword")
+    else if (encoding == Decoding.LiteralSource)
+      literal.map(raw => InstructionSource.Literal(raw)).toRight("missing literal dword")
     else Left(s"source encoding $encoding is not implemented")
 
   private def subDwordSelection(encoding: Int): Either[String, SubDwordSelection] =

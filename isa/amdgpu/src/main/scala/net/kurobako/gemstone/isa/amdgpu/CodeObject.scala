@@ -425,7 +425,7 @@ object CodeObject {
           )
           .map(_ -> symbol)
       }.map(_.toMap)
-      globalRelocations = readGlobalRelocations(bytes, sections)
+      globalRelocations <- readGlobalRelocations(bytes, sections)
     } yield Index(
       target,
       bytes,
@@ -528,9 +528,10 @@ object CodeObject {
       }.sequence
   }
 
-  private val RelocationSection = 4
-  private val RelocationAbs64   = 3L
-  private val SymbolEntrySize   = 24
+  private val RelocationSection   = 4
+  private val RelocationAbs64     = 3L
+  private val SymbolEntrySize     = 24
+  private val RelocationEntrySize = 24
 
   /** Absolute 64-bit relocations a linked HIP code object still carries. HIP resolves a device global that is reached
     * through a GOT slot (internal-linkage statics, for example) by storing the symbol address in `.got` at load time,
@@ -538,25 +539,31 @@ object CodeObject {
     */
   // Decode fixed-width relocation records directly from the ELF image.
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  private def readGlobalRelocations(bytes: Array[Byte], sections: Vec[Section]): Vec[(Long, Long)] = {
+  private def readGlobalRelocations(
+      bytes: Array[Byte],
+      sections: Vec[Section]
+  ): Either[CodeObjectError, Vec[(Long, Long)]] = {
     val buffer  = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
     val builder = Vec.newBuilder[(Long, Long)]
+    var failure = Option.empty[CodeObjectError]
     sections.view.filter(section => section.sectionType == RelocationSection).foreach { section =>
-      val stride = math.max(24, section.entrySize)
+      val stride = math.max(RelocationEntrySize, section.entrySize)
       var index  = 0
-      while (index + stride <= section.size) {
+      while (failure.isEmpty && index + stride <= section.size) {
         val start  = section.offset + index
         val target = buffer.getLong(start)
         val info   = buffer.getLong(start + 8)
         val addend = buffer.getLong(start + 16)
         val symbol = (info >>> 32).toInt
-        val value  = symbolValue(bytes, sections, section.link, symbol)
         if ((info & 0xffffffffL) == RelocationAbs64)
-          value.foreach(resolved => builder += (target -> (resolved + addend)))
+          symbolValue(bytes, sections, section.link, symbol) match {
+            case Some(resolved) => builder += (target -> (resolved + addend))
+            case None => failure = Some(CodeObjectError.Invalid(s"unresolved AMDGPU relocation symbol $symbol"))
+          }
         index += stride
       }
     }
-    builder.result()
+    failure.toLeft(builder.result())
   }
 
   private def symbolValue(bytes: Array[Byte], sections: Vec[Section], table: Int, index: Int): Option[Long] =
@@ -590,7 +597,7 @@ object CodeObject {
         for {
           strings <- sections.lift(table.link).toRight(CodeObjectError.Invalid("invalid ELF symbol string table"))
           _       <- Either.cond(
-            table.entrySize >= 24 && table.size % table.entrySize == 0,
+            table.entrySize >= SymbolEntrySize && table.size % table.entrySize == 0,
             (),
             CodeObjectError.Invalid("invalid ELF symbol-table entry size")
           )

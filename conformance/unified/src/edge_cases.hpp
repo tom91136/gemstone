@@ -24,7 +24,7 @@ using support::ValueAt;
 using support::WidePairValue;
 using support::Xor64;
 
-inline constexpr uint64_t biased_base = UINT64_C(0x100000005);
+inline constexpr uint64_t biased_base = static_cast<uint64_t>(0x100000005);
 inline constexpr size_t guard_size = 4;
 inline constexpr size_t primitive_block_size = 32;
 

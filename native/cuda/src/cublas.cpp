@@ -28,6 +28,9 @@ namespace {
 using namespace gemstone::cuda::api;
 using gemstone::readNative;
 
+// CUBLAS_VERSION from the pinned cublas_api.h (13.6.0).
+constexpr int32_t CublasVersion = 130600;
+
 using Status = int32_t;
 struct CublasHandleState {
   int32_t pointerMode = 0;
@@ -48,14 +51,16 @@ Status copyOut(void *pointer, const void *host, size_t size) {
 /* Scalar location follows the handle mode, never the pointer's numeric range. */
 Status scalarIn(CublasHandle handle, void *host, const void *pointer, size_t size) {
   if (!pointer) return CUBLAS_STATUS_INVALID_VALUE;
-  if (handle->pointerMode == 1) return cuMemcpyDtoH_v2(host, static_cast<uint64_t>(reinterpret_cast<uintptr_t>(pointer)), size);
+  if (handle->pointerMode == CUBLAS_POINTER_MODE_DEVICE)
+    return cuMemcpyDtoH_v2(host, static_cast<uint64_t>(reinterpret_cast<uintptr_t>(pointer)), size);
   memcpy(host, pointer, size);
   return CUBLAS_STATUS_SUCCESS;
 }
 
 Status scalarOut(CublasHandle handle, void *pointer, const void *host, size_t size) {
   if (!pointer) return CUBLAS_STATUS_INVALID_VALUE;
-  if (handle->pointerMode == 1) return cuMemcpyHtoD_v2(static_cast<uint64_t>(reinterpret_cast<uintptr_t>(pointer)), host, size);
+  if (handle->pointerMode == CUBLAS_POINTER_MODE_DEVICE)
+    return cuMemcpyHtoD_v2(static_cast<uint64_t>(reinterpret_cast<uintptr_t>(pointer)), host, size);
   memcpy(pointer, host, size);
   return CUBLAS_STATUS_SUCCESS;
 }
@@ -98,13 +103,13 @@ extern "C" GEMSTONE_PUBLIC_API int cublasDestroy_v2(CublasHandle handle) {
 extern "C" GEMSTONE_PUBLIC_API int cublasGetVersion_v2(CublasHandle handle, int *version) {
   if (!handle) return CUBLAS_STATUS_NOT_INITIALIZED;
   if (!version) return CUBLAS_STATUS_INVALID_VALUE;
-  *version = 13000;
+  *version = CublasVersion;
   return CUBLAS_STATUS_SUCCESS;
 }
 
 extern "C" GEMSTONE_PUBLIC_API int cublasSetPointerMode_v2(CublasHandle handle, int mode) {
   if (!handle) return CUBLAS_STATUS_NOT_INITIALIZED;
-  if (mode < 0 || mode > 1) return CUBLAS_STATUS_INVALID_VALUE;
+  if (mode != CUBLAS_POINTER_MODE_HOST && mode != CUBLAS_POINTER_MODE_DEVICE) return CUBLAS_STATUS_INVALID_VALUE;
   handle->pointerMode = mode;
   return CUBLAS_STATUS_SUCCESS;
 }
@@ -355,8 +360,8 @@ uint16_t floatToHalf(float value) {
     const uint32_t source = mantissa | 0x800000U;
     const unsigned shift = static_cast<unsigned>(14 - exponent);
     const uint32_t shifted = source >> shift;
-    const uint32_t remainder = source & ((UINT32_C(1) << shift) - 1U);
-    const uint32_t halfway = UINT32_C(1) << (shift - 1U);
+    const uint32_t remainder = source & ((static_cast<uint32_t>(1) << shift) - 1U);
+    const uint32_t halfway = static_cast<uint32_t>(1) << (shift - 1U);
     return static_cast<uint16_t>(sign | static_cast<uint16_t>(shifted + (remainder > halfway || (remainder == halfway && (shifted & 1U)))));
   }
   if (exponent >= 31) {

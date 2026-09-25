@@ -28,6 +28,7 @@
 #include <aspartame/string.hpp>
 #include <aspartame/vector.hpp>
 
+#include "gemstone/hsa/allocation.h"
 #include "gemstone/hsa/aql.h"
 #include "gemstone/hsa/aql_execution.h"
 #include "gemstone/hsa/executable_metadata.hpp"
@@ -58,7 +59,7 @@ constexpr uint64_t GroupPool = 3;
 constexpr size_t GroupMemorySize = 64 * 1024;
 constexpr uint32_t QueueMinimum = 1;
 constexpr uint32_t QueueMaximum = 4096;
-constexpr uint64_t VirtualMemorySize = UINT64_C(1) * 1024 * 1024 * 1024;
+constexpr uint64_t VirtualMemorySize = static_cast<uint64_t>(1) * 1024 * 1024 * 1024;
 constexpr uint32_t AllocationGranule = 4096;
 constexpr uint32_t TransferChunk = 64U * 1024U;
 
@@ -161,7 +162,7 @@ struct RuntimeState {
   std::mutex mirrorLock;
   uint32_t references = 0;
   uint64_t next_handle = 1;
-  uint64_t next_kernel = UINT64_C(0x10000);
+  uint64_t next_kernel = static_cast<uint64_t>(0x10000);
   std::unique_ptr<Client> client;
   gemstone_hsa_aql_runtime *aql = nullptr;
   gemstone_hsa_virtual_kfd *kfd = nullptr;
@@ -368,7 +369,7 @@ int publicSignalComplete(void *context, uint64_t handle) {
     __atomic_store_n(&signal->value, failure, __ATOMIC_RELEASE);
     return 0;
   }
-  __atomic_fetch_sub(&signal->value, INT64_C(1), __ATOMIC_RELEASE);
+  __atomic_fetch_sub(&signal->value, static_cast<int64_t>(1), __ATOMIC_RELEASE);
   runtime.async_changed.notify_all();
   return 0;
 }
@@ -380,7 +381,7 @@ int releaseDeferredSignal(RuntimeState &runtime, uint64_t handle) {
     signal = findSignal(runtime, hsa_signal_t{handle});
   }
   if (!signal) return -1;
-  __atomic_fetch_sub(&signal->value, INT64_C(1), __ATOMIC_RELEASE);
+  __atomic_fetch_sub(&signal->value, static_cast<int64_t>(1), __ATOMIC_RELEASE);
   runtime.async_changed.notify_all();
   return 0;
 }
@@ -433,7 +434,7 @@ uint64_t nativeGlobalPointer(RuntimeState &runtime, const GlobalStorage &storage
     if (pointer - target->elf_address <= target->size)
       return reinterpret_cast<uint64_t>(target->allocation->base) + pointer - target->elf_address;
   }
-  constexpr uint64_t base = UINT64_C(0x400000000000), span = UINT64_C(0x100000000);
+  constexpr uint64_t base = gemstone::hsa::AllocationBase, span = gemstone::hsa::AllocationSpan;
   if (pointer >= base) {
     const uint64_t id = (pointer - base) / span + 1;
     const uint64_t offset = (pointer - base) % span;
@@ -677,7 +678,7 @@ int completeSignal(hsa_signal_t signal) {
   std::lock_guard<std::mutex> guard(runtime.lock);
   const auto value = findSignal(runtime, signal);
   if (!value) return -1;
-  __atomic_fetch_sub(&value->value, INT64_C(1), __ATOMIC_RELEASE);
+  __atomic_fetch_sub(&value->value, static_cast<int64_t>(1), __ATOMIC_RELEASE);
   return 0;
 }
 
@@ -1709,11 +1710,12 @@ extern "C" hsa_status_t hsa_queue_create(hsa_agent_t agent, uint32_t size, hsa_q
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   try {
     auto queue = std::make_shared<Queue>();
-    queue->ring_bytes = static_cast<size_t>(size) * 64U;
+    queue->ring_bytes = static_cast<size_t>(size) * GEMSTONE_HSA_AQL_PACKET_SIZE;
     if (posix_memalign(&queue->ring, 64, queue->ring_bytes) != 0 || !queue->ring) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
     std::memset(queue->ring, 0, queue->ring_bytes);
     for (uint32_t index = 0; index < size; ++index)
-      *reinterpret_cast<uint16_t *>(static_cast<uint8_t *>(queue->ring) + static_cast<size_t>(index) * 64U) = HSA_PACKET_TYPE_INVALID;
+      *reinterpret_cast<uint16_t *>(static_cast<uint8_t *>(queue->ring) + static_cast<size_t>(index) * GEMSTONE_HSA_AQL_PACKET_SIZE) =
+          HSA_PACKET_TYPE_INVALID;
     {
       std::lock_guard<std::mutex> guard(runtime.lock);
       queue->virtual_queue =
@@ -1766,7 +1768,7 @@ extern "C" hsa_status_t hsa_queue_inactivate(hsa_queue_t *queue) {
   auto &runtime = state();
   if (const auto status = requireInitialized(runtime); status != HSA_STATUS_SUCCESS) return status;
   std::lock_guard<std::mutex> guard(runtime.lock);
-  return runtime.queues.count(queue) == 1 ? HSA_STATUS_ERROR : HSA_STATUS_ERROR_INVALID_QUEUE;
+  return runtime.queues.count(queue) == 1 ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_QUEUE;
 }
 
 extern "C" uint64_t hsa_queue_load_read_index_scacquire(const hsa_queue_t *queue) {

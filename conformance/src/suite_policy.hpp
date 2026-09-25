@@ -4,13 +4,20 @@
 #include <string>
 #include <string_view>
 
+// Supplied by CMake from conformance/cmake/TestTimeouts.cmake.
+#ifndef CONFORMANCE_OPENCL_CTS_TIMEOUT_SECONDS
+  #define CONFORMANCE_OPENCL_CTS_TIMEOUT_SECONDS "600"
+#endif
+
 namespace conformance::driver {
 
 // Execution policy for programs that are not plain Catch executables. Keeping
 // these conventions in one place stops one suite's quirks leaking into the
 // generic discovery and execution paths.
+inline bool suite_uses_gtest(std::string_view program) { return program.starts_with("levelzero_cts_"); }
+
 inline bool suite_uses_catch_sharding(std::string_view program) {
-  return !program.starts_with("opencl_cts_") && !program.starts_with("levelzero_cts_");
+  return !program.starts_with("opencl_cts_") && !suite_uses_gtest(program);
 }
 
 inline std::string_view suite_timeout_environment(std::string_view program) {
@@ -21,7 +28,7 @@ inline void apply_suite_isolated_environment(std::map<std::string, std::string> 
   if (backend != "opencl") return;
   environment["CONFORMANCE_OPENCL_CTS_ELEMENTS"] = "1024";
   environment["CONFORMANCE_OPENCL_CTS_WIMPY"] = "1";
-  environment["CONFORMANCE_OPENCL_CTS_TIMEOUT"] = "600";
+  environment["CONFORMANCE_OPENCL_CTS_TIMEOUT"] = CONFORMANCE_OPENCL_CTS_TIMEOUT_SECONDS;
 }
 
 inline bool suite_environment_key(std::string_view key) {

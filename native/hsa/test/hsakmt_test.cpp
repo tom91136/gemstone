@@ -261,27 +261,27 @@ void bootstrap_memory_events_and_direct_queue() {
   REQUIRE((hsaKmtGetRuntimeCapabilities(&runtime_capabilities) == HSAKMT_STATUS_SUCCESS));
   REQUIRE((runtime_capabilities == 0));
   const auto code_object = gemstone::hsa::test::codeObjectFixture();
-  const gemstone_hsakmt_test_loaded_kernel loaded{UINT64_C(0x123400), "add", 20};
+  const gemstone_hsakmt_test_loaded_kernel loaded{static_cast<uint64_t>(0x123400), "add", 20};
   const std::array<gemstone_hsa_kernarg_field, 3> internal_fields{{
       {GEMSTONE_HSA_ARGUMENT_ALLOCATION, 0, 8, 0},
       {GEMSTONE_HSA_ARGUMENT_ALLOCATION, 8, 8, 0},
       {GEMSTONE_HSA_ARGUMENT_SCALAR, 16, 4, 0},
   }};
-  REQUIRE((gemstone_hsakmt_test_install_internal_kernel(code_object.data(), code_object.size(), UINT64_C(0x123300), "gfx900",
+  REQUIRE((gemstone_hsakmt_test_install_internal_kernel(code_object.data(), code_object.size(), static_cast<uint64_t>(0x123300), "gfx900",
                                                         "internal_add", 20, 0, 0, 0x80, 0x8, internal_fields.data(), internal_fields.size())
            == -1));
   REQUIRE((std::strcmp(gemstone_hsakmt_test_loader_error(), "execution is deliberately absent") == 0));
   REQUIRE((gemstone_hsakmt_test_install_code_object(code_object.data(), code_object.size(), &loaded, 1) == -1));
   REQUIRE((std::strcmp(gemstone_hsakmt_test_loader_error(), "execution is deliberately absent") == 0));
   executor_context.reject_load = false;
-  REQUIRE((gemstone_hsakmt_test_install_internal_kernel(code_object.data(), code_object.size(), UINT64_C(0x123300), "gfx900",
+  REQUIRE((gemstone_hsakmt_test_install_internal_kernel(code_object.data(), code_object.size(), static_cast<uint64_t>(0x123300), "gfx900",
                                                         "internal_add", 20, 0, 0, 0x80, 0x8, internal_fields.data(), internal_fields.size())
            == 0));
   REQUIRE((executor_context.loads == 1));
   REQUIRE((executor_context.loaded_image == code_object));
   // Repeated internal registration is idempotent, as ROCr may initialize the
   // same helper while multiple blit paths share the virtual agent.
-  REQUIRE((gemstone_hsakmt_test_install_internal_kernel(code_object.data(), code_object.size(), UINT64_C(0x123300), "gfx900",
+  REQUIRE((gemstone_hsakmt_test_install_internal_kernel(code_object.data(), code_object.size(), static_cast<uint64_t>(0x123300), "gfx900",
                                                         "internal_add", 20, 0, 0, 0x80, 0x8, internal_fields.data(), internal_fields.size())
            == 0));
   REQUIRE((executor_context.loads == 1));
@@ -372,8 +372,8 @@ void bootstrap_memory_events_and_direct_queue() {
   std::memcpy(bytes + output_offset, &poison, sizeof(poison));
   // Exercise the internal-helper binding before the ordinary public-loader
   // binding. This is the ordering used by ROCr's own BlitKernel queue.
-  ring[0] = kernel_packet(UINT64_C(0x123300), reinterpret_cast<uint64_t>(bytes), completion);
-  __atomic_store_n(queue.Queue_write_ptr_aql, UINT64_C(1), __ATOMIC_RELEASE);
+  ring[0] = kernel_packet(static_cast<uint64_t>(0x123300), reinterpret_cast<uint64_t>(bytes), completion);
+  __atomic_store_n(queue.Queue_write_ptr_aql, static_cast<uint64_t>(1), __ATOMIC_RELEASE);
   // This is deliberately the same ordinary writable-memory store used by the
   // normal ROCr AQL producer path. There is no producer call or DTIF hook.
   *queue.Queue_DoorBell_aql = 0;
@@ -416,8 +416,8 @@ void bootstrap_memory_events_and_direct_queue() {
     std::lock_guard<std::mutex> guard(transport.lock);
     writes_after_first = transport.writes.size();
   }
-  ring[1] = kernel_packet(UINT64_C(0x123400), reinterpret_cast<uint64_t>(bytes), repeated);
-  __atomic_store_n(queue.Queue_write_ptr_aql, UINT64_C(2), __ATOMIC_RELEASE);
+  ring[1] = kernel_packet(static_cast<uint64_t>(0x123400), reinterpret_cast<uint64_t>(bytes), repeated);
+  __atomic_store_n(queue.Queue_write_ptr_aql, static_cast<uint64_t>(2), __ATOMIC_RELEASE);
   *queue.Queue_DoorBell_aql = 1;
   REQUIRE((gemstone_test::waitUntil([&] { return __atomic_load_n(queue.Queue_read_ptr_aql, __ATOMIC_ACQUIRE) == 2; },
                                     std::chrono::seconds(10))));
@@ -441,8 +441,8 @@ void bootstrap_memory_events_and_direct_queue() {
   const int32_t changed_input = 91;
   std::memcpy(bytes + input_offset, &changed_input, sizeof(changed_input));
   SignalStorage changed;
-  ring[2] = kernel_packet(UINT64_C(0x123400), reinterpret_cast<uint64_t>(bytes), changed);
-  __atomic_store_n(queue.Queue_write_ptr_aql, UINT64_C(3), __ATOMIC_RELEASE);
+  ring[2] = kernel_packet(static_cast<uint64_t>(0x123400), reinterpret_cast<uint64_t>(bytes), changed);
+  __atomic_store_n(queue.Queue_write_ptr_aql, static_cast<uint64_t>(3), __ATOMIC_RELEASE);
   *queue.Queue_DoorBell_aql = 2;
   REQUIRE((gemstone_test::waitUntil([&] { return __atomic_load_n(queue.Queue_read_ptr_aql, __ATOMIC_ACQUIRE) == 3; },
                                     std::chrono::seconds(10))));
@@ -460,8 +460,8 @@ void bootstrap_memory_events_and_direct_queue() {
   }
 
   SignalStorage rejected;
-  ring[3] = kernel_packet(UINT64_C(0xdeadbeef), 0, rejected);
-  __atomic_store_n(queue.Queue_write_ptr_aql, UINT64_C(4), __ATOMIC_RELEASE);
+  ring[3] = kernel_packet(static_cast<uint64_t>(0xdeadbeef), 0, rejected);
+  __atomic_store_n(queue.Queue_write_ptr_aql, static_cast<uint64_t>(4), __ATOMIC_RELEASE);
   *queue.Queue_DoorBell_aql = 3;
   REQUIRE((gemstone_test::waitUntil([&] { return __atomic_load_n(queue.Queue_read_ptr_aql, __ATOMIC_ACQUIRE) == 4; },
                                     std::chrono::seconds(10))));
@@ -474,7 +474,7 @@ void bootstrap_memory_events_and_direct_queue() {
   }
   SignalStorage barrier_completion;
   ring[4] = barrier_packet(barrier_completion);
-  __atomic_store_n(queue.Queue_write_ptr_aql, UINT64_C(5), __ATOMIC_RELEASE);
+  __atomic_store_n(queue.Queue_write_ptr_aql, static_cast<uint64_t>(5), __ATOMIC_RELEASE);
   *queue.Queue_DoorBell_aql = 4;
   REQUIRE((gemstone_test::waitUntil([&] { return __atomic_load_n(queue.Queue_read_ptr_aql, __ATOMIC_ACQUIRE) == 5; },
                                     std::chrono::seconds(10))));
@@ -495,8 +495,8 @@ void bootstrap_memory_events_and_direct_queue() {
   executor_context.completion_waiting.store(false, std::memory_order_release);
   executor_context.allow_completion.store(false, std::memory_order_release);
   SignalStorage retained;
-  ring[5] = kernel_packet(UINT64_C(0x123400), reinterpret_cast<uint64_t>(bytes), retained);
-  __atomic_store_n(queue.Queue_write_ptr_aql, UINT64_C(6), __ATOMIC_RELEASE);
+  ring[5] = kernel_packet(static_cast<uint64_t>(0x123400), reinterpret_cast<uint64_t>(bytes), retained);
+  __atomic_store_n(queue.Queue_write_ptr_aql, static_cast<uint64_t>(6), __ATOMIC_RELEASE);
   *queue.Queue_DoorBell_aql = 5;
   REQUIRE((gemstone_test::waitUntil([&] { return executor_context.completion_waiting.load(std::memory_order_acquire); },
                                     std::chrono::seconds(10))));
@@ -540,7 +540,7 @@ void bootstrap_memory_events_and_direct_queue() {
             executor_context.completion_waiting.store(false, std::memory_order_release);
             executor_context.allow_completion.store(false, std::memory_order_release);
             SignalStorage matrix_completion;
-            auto packet = kernel_packet(UINT64_C(0x123400), reinterpret_cast<uint64_t>(bytes), matrix_completion);
+            auto packet = kernel_packet(static_cast<uint64_t>(0x123400), reinterpret_cast<uint64_t>(bytes), matrix_completion);
             gemstone::writeNative<uint16_t>(packet.data(), 4, static_cast<uint16_t>(width));
             gemstone::writeNative<uint32_t>(packet.data(), 12, count);
             ring[packet_index % ring.size()] = packet;

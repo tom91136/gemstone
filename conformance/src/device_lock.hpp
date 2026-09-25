@@ -22,9 +22,22 @@
   #include <unistd.h>
 
   #include <sys/file.h>
+  #include <sys/resource.h>
 #endif
 
 namespace conformance {
+
+#if !defined(_WIN32)
+// The lock descriptor is duplicated high so a later descriptor sweep in the
+// runtime cannot close it and release the lock. Place it near the process soft
+// limit rather than a fixed floor, so it stays clear on any descriptor table.
+inline int deviceLockDescriptorFloor() {
+  rlimit limit{};
+  if (::getrlimit(RLIMIT_NOFILE, &limit) == 0 && limit.rlim_cur != RLIM_INFINITY && limit.rlim_cur >= 1024)
+    return static_cast<int>(limit.rlim_cur / 2);
+  return 900;
+}
+#endif
 
 inline std::filesystem::path device_lock_path(const PhysicalDevice &device) {
   return std::filesystem::temp_directory_path() / ("gpu-conformance-" + physical_device_key(device) + ".lock");
@@ -60,7 +73,7 @@ public:
       }
       std::this_thread::sleep_for(std::chrono::milliseconds(20));
     }
-    if (const int high_file = ::fcntl(file, F_DUPFD_CLOEXEC, 900); high_file >= 0) {
+    if (const int high_file = ::fcntl(file, F_DUPFD_CLOEXEC, deviceLockDescriptorFloor()); high_file >= 0) {
       ::close(file);
       file_ = high_file;
     } else {

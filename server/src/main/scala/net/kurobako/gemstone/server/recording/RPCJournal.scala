@@ -23,12 +23,17 @@ import scala.util.control.NonFatal
   * Record checksums detect accidental corruption; they are not security boundaries.
   */
 object RPCJournal {
-  private val Format              = "gemstone-rpc-journal"
-  val Version                     = 1
-  private val RecordFramingBytes  = 8L
-  private val RecordOverheadBytes = 4096
-  private val MetadataRecordLimit = 4096
-  private val FooterReserve       = MetadataRecordLimit.toLong + RecordFramingBytes
+  private val Format                 = "gemstone-rpc-journal"
+  val Version                        = 1
+  private val RecordFramingBytes     = 8L
+  private val RecordOverheadBytes    = 4096
+  private val MetadataRecordLimit    = 4096
+  private val FooterReserve          = MetadataRecordLimit.toLong + RecordFramingBytes
+  private val FailureReasonMaxLength = 512
+
+  private type MaximumFrameBytes   = 2147479551
+  private type MinimumArchiveBytes = 4104L
+  private type FailureReasonLength = 512
 
   type ProtocolIdentity = ProtocolIdentity.T
   object ProtocolIdentity extends RefinedType[String, Match["[!-~]{1,128}"]]
@@ -49,13 +54,12 @@ object RPCJournal {
   }
 
   type FailureReason = FailureReason.T
-  object FailureReason extends RefinedType[String, MinLength[1] & MaxLength[512] & NoNul]
+  object FailureReason extends RefinedType[String, MinLength[1] & MaxLength[FailureReasonLength] & NoNul]
 
   final case class Limits(
-      maxFrameBytes: Int :| Interval.Closed[1, 2147479551] = (ExecutionRPC.MaximumPayload + 4096).refineUnsafe[
-        Interval.Closed[1, 2147479551]
-      ],
-      maxArchiveBytes: Long :| Greater[4104L] = 8L * 1024 * 1024 * 1024,
+      maxFrameBytes: Int :| Interval.Closed[1, MaximumFrameBytes] = (ExecutionRPC.MaximumPayload + RecordOverheadBytes)
+        .refineUnsafe[Interval.Closed[1, MaximumFrameBytes]],
+      maxArchiveBytes: Long :| Greater[MinimumArchiveBytes] = 8L * 1024 * 1024 * 1024,
       maxEvents: Int :| Positive = 1000000
   )
   final case class ExecutionProfile(
@@ -97,7 +101,7 @@ object RPCJournal {
     def normalized(
         kind: Kind,
         bytes: Array[Byte],
-        maximum: Int :| Interval.Closed[1, 2147479551]
+        maximum: Int :| Interval.Closed[1, MaximumFrameBytes]
     ): Array[Byte] = {
       validate(kind, bytes, maximum, normalized = false)
       if (kind != Kind.Request) bytes
@@ -111,7 +115,7 @@ object RPCJournal {
     def validate(
         kind: Kind,
         bytes: Array[Byte],
-        maximum: Int :| Interval.Closed[1, 2147479551],
+        maximum: Int :| Interval.Closed[1, MaximumFrameBytes],
         normalized: Boolean
     ): Unit =
       validatePrefix(kind, bytes, bytes.length, maximum, normalized)
@@ -120,7 +124,7 @@ object RPCJournal {
         kind: Kind,
         bytes: Array[Byte],
         frameSize: Int,
-        maximum: Int :| Interval.Closed[1, 2147479551],
+        maximum: Int :| Interval.Closed[1, MaximumFrameBytes],
         normalized: Boolean
     ): Unit = {
       def check(value: Boolean): Unit = if (!value) throw IOException("RPC journal: invalid RPC frame")
@@ -361,7 +365,7 @@ object RPCJournal {
     }
     def markUnreplayable(reason: String): Unit = lock.withLock {
       if (failure.isEmpty) {
-        val sanitized = reason.filterNot(_ == '\u0000').take(512)
+        val sanitized = reason.filterNot(_ == '\u0000').take(FailureReasonMaxLength)
         val detail    = Option.when(sanitized.nonEmpty)(sanitized).getOrElse("unspecified recording failure")
         failure = Some(FailureReason.either(detail)
           .fold(message => invalid(s"invalid failure reason: $message"), value => value))
@@ -483,9 +487,9 @@ object RPCJournal {
         case _                              => invalid("archive does not start with a header")
       }
       ensure(headerRecord.format == Format && headerRecord.version == Version, "unknown archive format/version")
-      val maxFrameBytes = headerRecord.maxFrameBytes.refineEither[Interval.Closed[1, 2147479551]]
+      val maxFrameBytes = headerRecord.maxFrameBytes.refineEither[Interval.Closed[1, MaximumFrameBytes]]
         .fold(message => invalid(s"invalid frame byte limit: $message"), value => value)
-      val maxArchiveBytes = headerRecord.maxArchiveBytes.refineEither[Greater[4104L]]
+      val maxArchiveBytes = headerRecord.maxArchiveBytes.refineEither[Greater[MinimumArchiveBytes]]
         .fold(message => invalid(s"invalid archive byte limit: $message"), value => value)
       val maxEvents = headerRecord.maxEvents.refineEither[Positive]
         .fold(message => invalid(s"invalid event limit: $message"), value => value)

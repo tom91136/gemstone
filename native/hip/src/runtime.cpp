@@ -60,6 +60,10 @@ hipError_t enqueueCommand(hipStream_t stream, std::function<int32_t()> work) {
 
 constexpr uint32_t MaxBlockThreads = 1024;
 constexpr uint32_t MaxGridDimension = std::numeric_limits<int32_t>::max();
+constexpr size_t DeviceTotalMemoryBytes = size_t(1) << 30U;
+constexpr size_t DeviceSharedMemoryPerBlock = 64U * 1024U;
+constexpr uint32_t DeviceWarpSize = 64;
+constexpr uint32_t DeviceThreadsPerMultiprocessor = 1024;
 
 bool traceHip(std::string_view category) { return gemstone::traceEnabled("GEMSTONE_HIP_TRACE", category); }
 
@@ -863,14 +867,14 @@ extern "C" hipError_t hipDeviceGetName(char *name, int length, hipDevice_t devic
 
 extern "C" hipError_t hipDeviceTotalMem(size_t *bytes, hipDevice_t device) {
   if (!bytes || device != 0) return remember(hipErrorInvalidValue);
-  *bytes = size_t(1) << 30U;
+  *bytes = DeviceTotalMemoryBytes;
   return remember(hipSuccess);
 }
 
 extern "C" hipError_t hipMemGetInfo(size_t *free, size_t *total) {
   if (!free || !total) return remember(hipErrorInvalidValue);
   if (!ensureInitialized()) return remember(hipErrorNoDevice);
-  *total = size_t(1) << 30U;
+  *total = DeviceTotalMemoryBytes;
   *free = *total;
   return remember(hipSuccess);
 }
@@ -892,14 +896,17 @@ extern "C" hipError_t hipMemPoolTrimTo(hipMemPool_t pool, size_t) { return remem
 extern "C" hipError_t hipDeviceGetAttribute(int *value, hipDeviceAttribute_t attribute, int device) {
   if (!value || device != 0) return remember(hipErrorInvalidValue);
   switch (attribute) {
-    case hipDeviceAttributeMaxThreadsPerBlock: *value = 1024; break;
-    case hipDeviceAttributeWarpSize: *value = 64; break;
-    case hipDeviceAttributeMaxBlockDimX: *value = 1024; break;
-    case hipDeviceAttributeMaxBlockDimY: *value = 1024; break;
-    case hipDeviceAttributeMaxBlockDimZ: *value = 1024; break;
-    case hipDeviceAttributeMaxGridDimX: *value = std::numeric_limits<int>::max(); break;
-    case hipDeviceAttributeMaxGridDimY: *value = std::numeric_limits<int>::max(); break;
-    case hipDeviceAttributeMaxGridDimZ: *value = std::numeric_limits<int>::max(); break;
+    case hipDeviceAttributeMaxThreadsPerBlock: *value = MaxBlockThreads; break;
+    case hipDeviceAttributeWarpSize: *value = DeviceWarpSize; break;
+    case hipDeviceAttributeMaxBlockDimX: *value = MaxBlockThreads; break;
+    case hipDeviceAttributeMaxBlockDimY: *value = MaxBlockThreads; break;
+    case hipDeviceAttributeMaxBlockDimZ: *value = MaxBlockThreads; break;
+    case hipDeviceAttributeMaxGridDimX: *value = static_cast<int>(MaxGridDimension); break;
+    case hipDeviceAttributeMaxGridDimY: *value = static_cast<int>(MaxGridDimension); break;
+    case hipDeviceAttributeMaxGridDimZ: *value = static_cast<int>(MaxGridDimension); break;
+    case hipDeviceAttributeMaxThreadsPerMultiProcessor: *value = static_cast<int>(DeviceThreadsPerMultiprocessor); break;
+    case hipDeviceAttributeMaxSharedMemoryPerMultiprocessor: *value = static_cast<int>(DeviceSharedMemoryPerBlock); break;
+    case hipDeviceAttributeTotalGlobalMem: *value = static_cast<int>(DeviceTotalMemoryBytes); break;
     case hipDeviceAttributeUnifiedAddressing:
     case hipDeviceAttributeCanMapHostMemory:
     case hipDeviceAttributeHostNativeAtomicSupported:
@@ -918,12 +925,12 @@ extern "C" hipError_t hipGetDevicePropertiesR0600(hipDeviceProp_tR0600 *properti
   const std::string name = std::string("Gemstone ") + target;
   std::strncpy(properties->name, name.c_str(), sizeof(properties->name) - 1U);
   std::strncpy(properties->gcnArchName, target.c_str(), sizeof(properties->gcnArchName) - 1U);
-  properties->totalGlobalMem = size_t(1) << 30U;
-  properties->sharedMemPerBlock = 64U * 1024U;
-  properties->warpSize = 64;
+  properties->totalGlobalMem = DeviceTotalMemoryBytes;
+  properties->sharedMemPerBlock = DeviceSharedMemoryPerBlock;
+  properties->warpSize = static_cast<int>(DeviceWarpSize);
   properties->maxThreadsPerBlock = MaxBlockThreads;
-  properties->maxThreadsPerMultiProcessor = 1024;
-  properties->maxSharedMemoryPerMultiProcessor = 64U * 1024U;
+  properties->maxThreadsPerMultiProcessor = static_cast<int>(DeviceThreadsPerMultiprocessor);
+  properties->maxSharedMemoryPerMultiProcessor = DeviceSharedMemoryPerBlock;
   properties->maxThreadsDim[0] = MaxBlockThreads;
   properties->maxThreadsDim[1] = MaxBlockThreads;
   properties->maxThreadsDim[2] = MaxBlockThreads;
@@ -987,9 +994,9 @@ extern "C" GEMSTONE_PUBLIC_API hipError_t hipGetDeviceProperties(void *propertie
   std::strncpy(reinterpret_cast<char *>(bytes + Name), name.c_str(), NameSize - 1);
   std::strncpy(reinterpret_cast<char *>(bytes + ArchName), target.c_str(), 255);
   const auto write = [bytes](size_t offset, auto value) { std::memcpy(bytes + offset, &value, sizeof(value)); };
-  write(TotalGlobalMem, size_t(1) << 30U);
-  write(SharedMemPerBlock, size_t(64) * 1024U);
-  write(WarpSize, int(64));
+  write(TotalGlobalMem, DeviceTotalMemoryBytes);
+  write(SharedMemPerBlock, DeviceSharedMemoryPerBlock);
+  write(WarpSize, static_cast<int>(DeviceWarpSize));
   write(MaxThreadsPerBlock, int(MaxBlockThreads));
   for (size_t axis = 0; axis < 3; ++axis) {
     write(MaxThreadsDim + axis * sizeof(int), int(MaxBlockThreads));
@@ -1000,7 +1007,7 @@ extern "C" GEMSTONE_PUBLIC_API hipError_t hipGetDeviceProperties(void *propertie
   write(Minor, int(version.minor));
   write(MultiProcessorCount, int(1));
   write(Arch, uint32_t((1U << 5) | (1U << 7))); // global int64 atomics and doubles
-  write(MaxSharedMemoryPerMultiProcessor, size_t(64) * 1024U);
+  write(MaxSharedMemoryPerMultiProcessor, DeviceSharedMemoryPerBlock);
   write(GcnArch, int(std::atoi(target.c_str() + 3)));
   write(ManagedMemory, int(1));
   write(ConcurrentManagedAccess, int(1));

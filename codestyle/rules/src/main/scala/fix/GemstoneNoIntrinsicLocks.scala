@@ -15,5 +15,13 @@ final class GemstoneNoIntrinsicLocks extends SyntacticRule("GemstoneNoIntrinsicL
           position = select.name.pos
         )
       )
+    case Term.Apply(name @ Term.Name("synchronized"), _) =>
+      Patch.lint(
+        Diagnostic(
+          id = "intrinsic-lock",
+          message = "use an explicit java.util.concurrent lock",
+          position = name.pos
+        )
+      )
   }.asPatch
 }

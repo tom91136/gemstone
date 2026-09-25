@@ -34,6 +34,10 @@ struct MatrixShape {
 inline constexpr std::array<size_t, 17> algorithm_sizes{0, 1, 7, 15, 31, 32, 33, 63, 64, 65, 127, 128, 129, 257, 1023, 1024, 4096};
 inline constexpr std::array<size_t, 8> blas_sizes{1, 2, 7, 31, 32, 64, 257, 1024};
 inline constexpr std::array<size_t, 13> edge_sizes{0, 1, 2, 7, 15, 31, 32, 33, 63, 64, 257, 1023, 1024};
+// GEMM is cubic: 1024 already needs ~1.8e8 multiply-adds, which exhausts the
+// emulator instruction budget. Cap the padded layouts at a prime so the
+// non-power-of-two leading dimensions are still exercised.
+inline constexpr std::array<size_t, 12> gemm_edge_sizes{0, 1, 2, 7, 15, 31, 32, 33, 63, 64, 257, 509};
 inline constexpr std::array<size_t, 3> stress_sizes{257, 4096, 16384};
 inline constexpr std::array<MatrixShape, 5> matrix_shapes{{{1, 1, 1}, {2, 2, 3}, {3, 5, 7}, {7, 5, 9}, {17, 13, 19}}};
 // Compact and full workloads select separate native Catch cases. No environment-dependent inventory.
@@ -146,11 +150,11 @@ template <class T> struct WidePairValue {
 
 template <class T> struct BiasedHash {
   UNIFIED_HOST_DEVICE uint64_t operator()(uint64_t index) const {
-    auto value = index ^ (UINT64_C(0x9e3779b97f4a7c15) + sizeof(T));
+    auto value = index ^ (static_cast<uint64_t>(0x9e3779b97f4a7c15) + sizeof(T));
     value ^= value >> 30;
-    value *= UINT64_C(0xbf58476d1ce4e5b9);
+    value *= static_cast<uint64_t>(0xbf58476d1ce4e5b9);
     value ^= value >> 27;
-    value *= UINT64_C(0x94d049bb133111eb);
+    value *= static_cast<uint64_t>(0x94d049bb133111eb);
     return value ^ (value >> 31);
   }
 };

@@ -31,6 +31,7 @@
     #define CL_TARGET_OPENCL_VERSION 120
   #endif
   #include <CL/cl.h>
+  #include <CL/cl_ext.h>
 #elif defined(CONFORMANCE_DEVICE_SYCL)
   #include <sycl/sycl.hpp>
 #elif defined(CONFORMANCE_DEVICE_LEVELZERO)
@@ -339,15 +340,14 @@ static DeviceSelection discover_physical_device() {
   const auto selection = [&](PhysicalDevice device) {
     return DeviceSelection{device, execution, static_cast<uint64_t>(reinterpret_cast<uintptr_t>(candidate.device))};
   };
-  constexpr cl_device_info pci_bus_info_khr = 0x410f;
   struct PciBusInfo {
     cl_uint domain, bus, device, function;
   } pci{};
-  if (clGetDeviceInfo(candidate.device, pci_bus_info_khr, sizeof(pci), &pci, nullptr) == CL_SUCCESS
+  if (clGetDeviceInfo(candidate.device, CL_DEVICE_PCI_BUS_INFO_KHR, sizeof(pci), &pci, nullptr) == CL_SUCCESS
       && (pci.domain != 0 || pci.bus != 0 || pci.device != 0 || pci.function != 0))
     return selection(
         make_pci_device(pci.domain, static_cast<uint8_t>(pci.bus), static_cast<uint8_t>(pci.device), static_cast<uint8_t>(pci.function)));
-  constexpr cl_device_info topology_amd = 0x4037;
+  // The pinned OpenCL headers do not ship cl_amd_device_topology.h.
   constexpr cl_uint topology_type_pcie_amd = 1;
   struct AmdTopology {
     cl_uint type;
@@ -355,13 +355,12 @@ static DeviceSelection discover_physical_device() {
     cl_char bus, device, function;
   } topology{};
   static_assert(sizeof(AmdTopology) == 24);
-  if (clGetDeviceInfo(candidate.device, topology_amd, sizeof(topology), &topology, nullptr) == CL_SUCCESS
+  if (clGetDeviceInfo(candidate.device, CL_DEVICE_TOPOLOGY_AMD, sizeof(topology), &topology, nullptr) == CL_SUCCESS
       && topology.type == topology_type_pcie_amd)
     return selection(make_pci_device(0, static_cast<uint8_t>(topology.bus), static_cast<uint8_t>(topology.device),
                                      static_cast<uint8_t>(topology.function)));
-  constexpr cl_device_info uuid_khr = 0x106a;
   uint8_t uuid[16]{};
-  if (clGetDeviceInfo(candidate.device, uuid_khr, sizeof(uuid), uuid, nullptr) == CL_SUCCESS
+  if (clGetDeviceInfo(candidate.device, CL_DEVICE_UUID_KHR, sizeof(uuid), uuid, nullptr) == CL_SUCCESS
       && std::ranges::any_of(uuid, [](uint8_t byte) { return byte != 0; }))
     return selection(make_uuid_device(uuid));
   return selection(make_registry_device(fmt::format("{}:{}:{}", candidate.description, candidate.platform_index, candidate.device_index)));
@@ -389,8 +388,8 @@ static DeviceSelection discover_physical_device() {
       ze_pci_ext_properties_t pci{ZE_STRUCTURE_TYPE_PCI_EXT_PROPERTIES};
       PhysicalDevice physical = make_uuid_device(properties.uuid.id);
       if (zeDevicePciGetPropertiesExt(devices[device_index], &pci) == ZE_RESULT_SUCCESS)
-        physical = make_pci_device(pci.address.domain, static_cast<uint8_t>(pci.address.bus),
-                                   static_cast<uint8_t>(pci.address.device), static_cast<uint8_t>(pci.address.function));
+        physical = make_pci_device(pci.address.domain, static_cast<uint8_t>(pci.address.bus), static_cast<uint8_t>(pci.address.device),
+                                   static_cast<uint8_t>(pci.address.function));
       descriptions.push_back(fmt::format("levelzero:{}:{}:{}", driver_index, device_index, properties.name));
       candidates.push_back({physical, driver_index, device_index, devices[device_index]});
     }

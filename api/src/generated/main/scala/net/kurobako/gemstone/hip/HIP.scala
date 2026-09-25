@@ -293,14 +293,10 @@ trait HIP {
   def hipDeviceSynchronize(): hipError_t = unsupported
   def hipDeviceTotalMem(bytes: Pointer[size_t, ReadWrite, Opaque], device: hipDevice_t): hipError_t = unsupported
   def hipDriverGetVersion(driverVersion: Pointer[Int, ReadWrite, Opaque]): hipError_t = unsupported
-  def hipDrvGetErrorName(
-      hipError: hipError_t,
-      errorString: Pointer[Pointer[Byte, ReadWrite, Opaque], Read, Opaque]
-  ): hipError_t = unsupported
-  def hipDrvGetErrorString(
-      hipError: hipError_t,
-      errorString: Pointer[Pointer[Byte, ReadWrite, Opaque], Read, Opaque]
-  ): hipError_t = unsupported
+  def hipDrvGetErrorName(hipError: hipError_t, errorString: Pointer[CString, ReadWrite, Opaque]): hipError_t =
+    unsupported
+  def hipDrvGetErrorString(hipError: hipError_t, errorString: Pointer[CString, ReadWrite, Opaque]): hipError_t =
+    unsupported
   def hipDrvGraphAddMemFreeNode(
       phGraphNode: Pointer[hipGraphNode_t, ReadWrite, Opaque],
       hGraph: hipGraph_t,
@@ -499,7 +495,7 @@ trait HIP {
       textureObject: hipTextureObject_t
   ): hipError_t = unsupported
   def hipGetTextureReference(
-      texref: Pointer[Pointer[textureReference, ReadWrite, Opaque], Read, Opaque],
+      texref: Pointer[Pointer[textureReference, Read, Opaque], ReadWrite, Opaque],
       symbol: Pointer[CVoid, Read, Opaque]
   ): hipError_t = unsupported
   def hipGraphAddBatchMemOpNode(
@@ -1935,7 +1931,7 @@ trait HIP {
       captureStatus_out: Pointer[hipStreamCaptureStatus, ReadWrite, Opaque],
       id_out: Pointer[unsigned_long_long, ReadWrite, Opaque],
       graph_out: Pointer[hipGraph_t, ReadWrite, Opaque],
-      dependencies_out: Pointer[Pointer[hipGraphNode_t, ReadWrite, Opaque], Read, Opaque],
+      dependencies_out: Pointer[Pointer[hipGraphNode_t, Read, Opaque], ReadWrite, Opaque],
       numDependencies_out: Pointer[size_t, ReadWrite, Opaque]
   ): hipError_t = unsupported
   def hipStreamGetCaptureInfo_v2_spt(
@@ -1943,7 +1939,7 @@ trait HIP {
       captureStatus_out: Pointer[hipStreamCaptureStatus, ReadWrite, Opaque],
       id_out: Pointer[unsigned_long_long, ReadWrite, Opaque],
       graph_out: Pointer[hipGraph_t, ReadWrite, Opaque],
-      dependencies_out: Pointer[Pointer[hipGraphNode_t, ReadWrite, Opaque], Read, Opaque],
+      dependencies_out: Pointer[Pointer[hipGraphNode_t, Read, Opaque], ReadWrite, Opaque],
       numDependencies_out: Pointer[size_t, ReadWrite, Opaque]
   ): hipError_t = unsupported
   def hipStreamGetDevice(stream: hipStream_t, device: Pointer[hipDevice_t, ReadWrite, Opaque]): hipError_t = unsupported
