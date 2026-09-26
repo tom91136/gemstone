@@ -5,6 +5,7 @@ import Program.*
 import VMIR.*
 import VMExecution.*
 
+import net.kurobako.gemstone.NonNegativeInt
 import net.kurobako.gemstone.binary.Binary32
 import net.kurobako.gemstone.binary.Bits
 import net.kurobako.gemstone.binary.IEEE754
@@ -14,8 +15,6 @@ import net.kurobako.gemstone.memory.GuestAddress
 import net.kurobako.gemstone.memory.MemoryValueByteWidth
 
 import cats.syntax.all.*
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
 
 @SuppressWarnings(Array("scalafix:DisableSyntax.null", "scalafix:DisableSyntax.var"))
 private[v9_3] final class VMStateEffects {
@@ -53,7 +52,7 @@ private[v9_3] final class VMStateEffects {
     kinds(pendingSize) = MemoryWrite
     writes(pendingSize) = null
     lanes(pendingSize) = lane
-    addresses(pendingSize) = address.value
+    addresses(pendingSize) = address.raw
     widths(pendingSize) = width
     values(pendingSize) = value
     pendingSize += 1
@@ -101,11 +100,11 @@ private[v9_3] final class VMStateEffects {
       else if (kinds(index) == MemoryWrite)
         memory.validateRange(
           GuestAddress(addresses(index)),
-          VMStateEffects.byteCount(widths(index)).value.refineUnsafe[Positive0]
+          NonNegativeInt.unsafe(VMStateEffects.byteCount(widths(index)).raw)
         ) match {
           case Left(error) =>
             clear()
-            return Left(ExecutionFault.Memory(s"pc ${pc.value}, lane ${lanes(index)}: ${error.message}"))
+            return Left(ExecutionFault.Memory(s"pc ${pc.raw}, lane ${lanes(index)}: ${error.message}"))
           case Right(()) => ()
         }
       index += 1
@@ -140,47 +139,47 @@ private object VMStateEffects {
 
   @SuppressWarnings(Array("scalafix:GemstoneNoAssume"))
   private inline def memoryByteCount(width: BitWidth): MemoryValueByteWidth =
-    MemoryValueByteWidth.assume(byteCount(width).value)
+    MemoryValueByteWidth.unsafe(byteCount(width).raw)
 
   @SuppressWarnings(Array("scalafix:GemstoneNoAssume"))
   private inline def floatMemoryByteCount(width: FloatWidth): MemoryValueByteWidth =
-    MemoryValueByteWidth.assume(floatByteCount(width).value)
+    MemoryValueByteWidth.unsafe(floatByteCount(width).raw)
 
   def validateWrite(memory: AddressMemory, pc: Pc)(write: VMStateWrite): Either[ExecutionFault, Unit] =
     write match {
       case VMStateWrite.MemoryVector(lane, address, width, values) =>
-        val size = Math.multiplyExact(byteCount(width).value, values.size).refineUnsafe[Positive0]
+        val size = NonNegativeInt.unsafe(Math.multiplyExact(byteCount(width).raw, values.size))
         memory.validateRange(address, size).leftMap(error =>
-          ExecutionFault.Memory(s"pc ${pc.value}, lane $lane: ${error.message}")
+          ExecutionFault.Memory(s"pc ${pc.raw}, lane $lane: ${error.message}")
         )
       case VMStateWrite.Memory(lane, address, width, _) =>
-        val result = memory.validateRange(address, byteCount(width).value.refineUnsafe[Positive0]).leftMap(error =>
-          ExecutionFault.Memory(s"pc ${pc.value}, lane $lane: ${error.message}")
+        val result = memory.validateRange(address, NonNegativeInt.unsafe(byteCount(width).raw)).leftMap(error =>
+          ExecutionFault.Memory(s"pc ${pc.raw}, lane $lane: ${error.message}")
         )
         result
       case VMStateWrite.AtomicMemoryAdd(lane, _, address, width, _) =>
-        memory.validateRange(address, byteCount(width).value.refineUnsafe[Positive0]).leftMap(error =>
-          ExecutionFault.Memory(s"pc ${pc.value}, lane $lane: ${error.message}")
+        memory.validateRange(address, NonNegativeInt.unsafe(byteCount(width).raw)).leftMap(error =>
+          ExecutionFault.Memory(s"pc ${pc.raw}, lane $lane: ${error.message}")
         )
       case VMStateWrite.AtomicMemoryCompareExchange(lane, _, address, width, _, _) =>
-        memory.validateRange(address, byteCount(width).value.refineUnsafe[Positive0]).leftMap(error =>
-          ExecutionFault.Memory(s"pc ${pc.value}, lane $lane: ${error.message}")
+        memory.validateRange(address, NonNegativeInt.unsafe(byteCount(width).raw)).leftMap(error =>
+          ExecutionFault.Memory(s"pc ${pc.raw}, lane $lane: ${error.message}")
         )
       case VMStateWrite.AtomicMemoryExchange(lane, _, address, width, _) =>
-        memory.validateRange(address, byteCount(width).value.refineUnsafe[Positive0]).leftMap(error =>
-          ExecutionFault.Memory(s"pc ${pc.value}, lane $lane: ${error.message}")
+        memory.validateRange(address, NonNegativeInt.unsafe(byteCount(width).raw)).leftMap(error =>
+          ExecutionFault.Memory(s"pc ${pc.raw}, lane $lane: ${error.message}")
         )
       case VMStateWrite.AtomicMemoryBinary(lane, _, address, width, _, _) =>
-        memory.validateRange(address, byteCount(width).value.refineUnsafe[Positive0]).leftMap(error =>
-          ExecutionFault.Memory(s"pc ${pc.value}, lane $lane: ${error.message}")
+        memory.validateRange(address, NonNegativeInt.unsafe(byteCount(width).raw)).leftMap(error =>
+          ExecutionFault.Memory(s"pc ${pc.raw}, lane $lane: ${error.message}")
         )
       case VMStateWrite.AtomicMemoryMin(lane, _, address, width, _) =>
-        memory.validateRange(address, byteCount(width).value.refineUnsafe[Positive0]).leftMap(error =>
-          ExecutionFault.Memory(s"pc ${pc.value}, lane $lane: ${error.message}")
+        memory.validateRange(address, NonNegativeInt.unsafe(byteCount(width).raw)).leftMap(error =>
+          ExecutionFault.Memory(s"pc ${pc.raw}, lane $lane: ${error.message}")
         )
       case VMStateWrite.AtomicMemoryAddFloat(lane, _, address, width, _) =>
-        memory.validateRange(address, floatByteCount(width).value.refineUnsafe[Positive0]).leftMap(error =>
-          ExecutionFault.Memory(s"pc ${pc.value}, lane $lane: ${error.message}")
+        memory.validateRange(address, NonNegativeInt.unsafe(floatByteCount(width).raw)).leftMap(error =>
+          ExecutionFault.Memory(s"pc ${pc.raw}, lane $lane: ${error.message}")
         )
       case _ => Right(())
     }
@@ -195,7 +194,7 @@ private object VMStateEffects {
       state.writeParameterBytes(lane, name, offset, width, value)
     case VMStateWrite.FunctionParameter(lane, name, value)   => state.functionParameters(lane)(name) = value
     case VMStateWrite.ParameterBuffer(address, width, value) =>
-      state.parameterBufferRange(address, byteCount(width).value).foreach { case (bytes, offset) =>
+      state.parameterBufferRange(address, byteCount(width).raw).foreach { case (bytes, offset) =>
         LittleEndian.write(value, bytes, offset, byteCount(width))
       }
     case VMStateWrite.Shared(_, address, width, value)        => state.writeShared(address, width, value)
@@ -226,7 +225,7 @@ private object VMStateEffects {
     case VMStateWrite.AtomicSharedMin(lane, destination, address, width, value) =>
       val previous = state.readShared(address, width)
       state.registers(lane)(destination) = Bits.truncate(previous, width.asBitWidth)
-      val mask   = if (width.value >= 64) -1L else (1L << width.value) - 1L
+      val mask   = if (width.raw >= 64) -1L else (1L << width.raw) - 1L
       val result =
         if (java.lang.Long.compareUnsigned(previous & mask, value & mask) <= 0) previous & mask else value & mask
       state.writeShared(address, width, result)
@@ -253,18 +252,18 @@ private object VMStateEffects {
       }.fold(error => throw IllegalStateException(error.message), value => value)
       state.registers(lane)(destination) = Bits.truncate(previous, width.asBitWidth)
     case VMStateWrite.AtomicMemoryMin(lane, destination, address, width, value) =>
-      val mask     = if (width.value >= 64) -1L else (1L << width.value) - 1L
+      val mask     = if (width.raw >= 64) -1L else (1L << width.raw) - 1L
       val previous = memory.atomicModifyLittleEndian(address, memoryByteCount(width)) { current =>
         if (java.lang.Long.compareUnsigned(current & mask, value & mask) <= 0) current & mask else value & mask
       }.fold(error => throw IllegalStateException(error.message), value => value)
       state.registers(lane)(destination) = Bits.truncate(previous, width.asBitWidth)
     case VMStateWrite.AtomicMemoryAddFloat(lane, destination, address, width, value) =>
       val previous = memory.atomicModifyLittleEndian(address, floatMemoryByteCount(width)) { current =>
-        if (width.value == 32)
+        if (width.raw == 32)
           IEEE754.floatToBinary32(
             IEEE754.binary32ToFloat(Binary32.low(current)) +
               IEEE754.binary32ToFloat(Binary32.low(value))
-          ).value
+          ).raw
         else IEEE754.doubleToBinary64(IEEE754.binary64ToDouble(current) + IEEE754.binary64ToDouble(value))
       }.fold(error => throw IllegalStateException(error.message), value => value)
       state.registers(lane)(destination) = Bits.truncate(previous, width.asBitWidth)

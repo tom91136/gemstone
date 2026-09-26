@@ -1,10 +1,9 @@
 package net.kurobako.gemstone.isa.amdgpu
 
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
-
-import net.kurobako.gemstone.NoNul
 import net.kurobako.gemstone.ByteKey
+import net.kurobako.gemstone.NonEmptyString
+import net.kurobako.gemstone.NonNegativeInt
+import net.kurobako.gemstone.PositiveInt
 import net.kurobako.gemstone.Vec
 import net.kurobako.gemstone.Vec.*
 import net.kurobako.gemstone.LRUCache
@@ -75,8 +74,8 @@ object CodeObject {
   final case class CodeObjectGlobal(
       name: GlobalName,
       address: GuestAddress,
-      size: Int :| Positive0,
-      pointerOffsets: Vec[Int :| Positive0]
+      size: NonNegativeInt,
+      pointerOffsets: Vec[NonNegativeInt]
   )
 
   private final case class Section(
@@ -197,10 +196,10 @@ object CodeObject {
         CodeObjectGlobal(
           name,
           GuestAddress(symbol.value),
-          symbol.size.refineUnsafe[Positive0],
-          pointerOffsets.map(_.refineUnsafe[Positive0])
+          NonNegativeInt.unsafe(symbol.size),
+          pointerOffsets.map(NonNegativeInt.unsafe)
         )
-      }.toSeq.sortBy(global => (global.address.value, global.name.value))
+      }.toSeq.sortBy(global => (global.address.raw, global.name.raw))
     )
 
     /** Make a session-local view over the immutable parsed index. Mutable global images and lazy kernel materialization
@@ -221,14 +220,14 @@ object CodeObject {
       )
 
     /** Returns the device address and size of a mutable HIP/HSA-visible global. */
-    def global(name: GlobalName): Option[(GuestAddress, Int :| Positive0)] =
+    def global(name: GlobalName): Option[(GuestAddress, NonNegativeInt)] =
       globalSymbols.get(name).flatMap { symbol =>
         globalSections.get(symbol.section).flatMap { section =>
           Option.when(
             symbol.value >= section.address &&
               symbol.value - section.address <= section.size.toLong &&
               symbol.size.toLong <= section.size.toLong - (symbol.value - section.address)
-          )(GuestAddress(symbol.value) -> symbol.size.refineUnsafe[Positive0])
+          )(GuestAddress(symbol.value) -> NonNegativeInt.unsafe(symbol.size))
         }
       }
 
@@ -240,9 +239,9 @@ object CodeObject {
         case (address, size) =>
           val symbol  = globalSymbols(name)
           val section = globalSections(symbol.section)
-          val start   = (address.value - section.address).toInt
+          val start   = (address.raw - section.address).toInt
           address ->
-            Vec.unsafeFromArray(java.util.Arrays.copyOfRange(globalImages(symbol.section), start, start + size))
+            Vec.unsafeFromArray(java.util.Arrays.copyOfRange(globalImages(symbol.section), start, start + size.raw))
       }
     }
 
@@ -296,7 +295,7 @@ object CodeObject {
   }
 
   private val TargetPrefix = "amdgcn-amd-amdhsa--".getBytes(StandardCharsets.US_ASCII)
-  private val indexCache   = LRUCache[ByteKey, Either[CodeObjectError, Index]](capacity = 4)
+  private val indexCache   = LRUCache[ByteKey, Either[CodeObjectError, Index]](capacity = PositiveInt(4))
 
   private val EmulatedCallKinds = Vec(
     "logIf",
@@ -664,13 +663,13 @@ object CodeObject {
           s"kernel ${symbol.name} has no descriptor symbol"
         ))
       descriptor       <- symbolBytes(bytes, sections, descriptorSymbol, 64, s"kernel ${symbol.name} descriptor")
-      kernargSize      <- intValue(Bits.unsigned32(littleInt(descriptor, 8)), s"${symbol.name} kernarg size")
+      kernargSize      <- intValue(Bits.unsigned32(littleInt(descriptor, 8)).raw, s"${symbol.name} kernarg size")
       groupSegmentSize <- intValue(
-        Bits.unsigned32(littleInt(descriptor, 0)),
+        Bits.unsigned32(littleInt(descriptor, 0)).raw,
         s"${symbol.name} group-segment size"
       )
       privateSegmentSize <- intValue(
-        Bits.unsigned32(littleInt(descriptor, 4)),
+        Bits.unsigned32(littleInt(descriptor, 4)).raw,
         s"${symbol.name} private-segment size"
       )
       computePgmRsrc2      = littleInt(descriptor, 52)
@@ -738,9 +737,9 @@ object CodeObject {
       }
       val name = String(bytes, valueStart, valueEnd - valueStart, StandardCharsets.US_ASCII)
       Target.either(name.toLowerCase(java.util.Locale.ROOT)).leftMap(message =>
-        CodeObjectError.Unsupported(message.refineEither[MinLength[1] & NoNul].getOrElse(
-          "unsupported AMDGPU target"
-        ))
+        CodeObjectError.Unsupported(
+          NonEmptyString.either(message).fold(_ => "unsupported AMDGPU target", _.raw)
+        )
       )
     }
   }

@@ -17,7 +17,7 @@ final class IntegerMultiplyAddSuite extends munit.FunSuite {
 
   private def unsigned(value: Long, width: BitWidth): BigInt = {
     val bits = BigInt(java.lang.Long.toUnsignedString(value))
-    bits & ((BigInt(1) << width.value) - 1)
+    bits & ((BigInt(1) << width.raw) - 1)
   }
 
   private def reference(
@@ -34,10 +34,10 @@ final class IntegerMultiplyAddSuite extends munit.FunSuite {
         (operandWidth, resultWidth, usesCarry, true)
     }
     val product  = unsigned(left, operandWidth) * unsigned(right, operandWidth)
-    val selected = if (high) product >> operandWidth.value else product
+    val selected = if (high) product >> operandWidth.raw else product
     val sum      = selected + unsigned(addend, resultWidth) + (if (usesCarry && carryIn) 1 else 0)
-    val mask     = (BigInt(1) << resultWidth.value) - 1
-    (sum & mask).longValue -> ((sum >> resultWidth.value) != 0)
+    val mask     = (BigInt(1) << resultWidth.raw) - 1
+    (sum & mask).longValue -> ((sum >> resultWidth.raw) != 0)
   }
 
   test("primitive multiply-add matches unsigned wide arithmetic") {

@@ -1,6 +1,7 @@
 package net.kurobako.gemstone.server
 
 import net.kurobako.gemstone.concurrent.withLock
+import net.kurobako.gemstone.{NonNegativeLong, PositiveInt}
 import net.kurobako.gemstone.launcher.EnvironmentNames
 import net.kurobako.gemstone.rpc.ExecutionRPC
 import net.kurobako.gemstone.rpc.ExecutionProtocol.ExecutionFailure
@@ -10,9 +11,6 @@ import net.kurobako.gemstone.server.transport.ExecutionRPCProtocol
 import net.kurobako.gemstone.server.transport.ServerControl
 import net.kurobako.gemstone.server.transport.Transport.*
 import net.kurobako.gemstone.vm.TaskLimits
-
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
 
 import java.io.PushbackInputStream
 import java.io.DataInputStream
@@ -32,12 +30,12 @@ import java.util.concurrent.locks.ReentrantLock
 import scala.util.Using
 
 object GemstoneRPCServer {
-  private val SocketTimeoutMillis: Int :| Positive = 300000
-  private val RootClient: ClientId                 = ClientId(1L)
+  private val SocketTimeoutMillis: PositiveInt = PositiveInt(300000)
+  private val RootClient: ClientId             = ClientId(1L)
 
   private final case class ExecutionSessionEntry(
       service: ExecutionService,
-      connections: Int :| Positive
+      connections: PositiveInt
   )
 
   final class ExecutionSessions(
@@ -65,7 +63,7 @@ object GemstoneRPCServer {
             entries.set(current.updated(
               session,
               entry.copy(
-                connections = Math.addExact(entry.connections, 1).refineUnsafe[Positive]
+                connections = PositiveInt.unsafe(Math.addExact(entry.connections.raw, 1))
               )
             ))
             entry
@@ -75,7 +73,7 @@ object GemstoneRPCServer {
               taskLimits = taskLimits,
               scheduler = executionPool
             )
-            val entry = ExecutionSessionEntry(service, 1)
+            val entry = ExecutionSessionEntry(service, PositiveInt(1))
             entries.set(current.updated(session, entry))
             entry
         })
@@ -85,13 +83,13 @@ object GemstoneRPCServer {
     private def release(session: ExecutionRPCProtocol.SessionId): Unit = lock.withLock {
       val current = entries.get()
       current.get(session).foreach { entry =>
-        if (entry.connections == 1) {
+        if (entry.connections.raw == 1) {
           entries.set(current.removed(session))
           entry.service.close()
         } else
           entries.set(current.updated(
             session,
-            entry.copy(connections = (entry.connections - 1).refineUnsafe[Positive])
+            entry.copy(connections = PositiveInt.unsafe(entry.connections.raw - 1))
           ))
       }
     }
@@ -128,8 +126,11 @@ object GemstoneRPCServer {
     def countUsage(): Unit = usage.increment()
 
     def executionCount: Long =
-      usage.sum().refineEither[Positive0]
-        .fold(message => throw IllegalStateException(s"execution request counter overflowed: $message"), value => value)
+      NonNegativeLong.either(usage.sum())
+        .fold(
+          message => throw IllegalStateException(s"execution request counter overflowed: $message"),
+          value => value.raw
+        )
 
     def close(): Unit = executions.close()
   }
@@ -142,16 +143,16 @@ object GemstoneRPCServer {
   ) {
     val root                               = Client(RootClient, ExecutionSessions(backends, limits, pool))
     private val clients                    = ConcurrentHashMap[java.lang.Long, Client]()
-    private val next                       = AtomicLong(RootClient.value + 1L)
+    private val next                       = AtomicLong(RootClient.raw + 1L)
     def find(id: ClientId): Option[Client] =
-      if (id == RootClient) Some(root) else Option(clients.get(id.value))
+      if (id == RootClient) Some(root) else Option(clients.get(id.raw))
     def register(): ClientId = {
       val id = clientId(next.getAndIncrement())
-      clients.put(id.value, Client(id, ExecutionSessions(backends, limits, pool)))
+      clients.put(id.raw, Client(id, ExecutionSessions(backends, limits, pool)))
       id
     }
     def usage(id: ClientId): Long   = find(id).fold(0L)(_.executionCount)
-    def release(id: ClientId): Unit = if (id != RootClient) Option(clients.remove(id.value)).foreach { client =>
+    def release(id: ClientId): Unit = if (id != RootClient) Option(clients.remove(id.raw)).foreach { client =>
       client.close(); journal.foreach(_.clientClosed(client))
     }
     else ()
@@ -226,7 +227,7 @@ object GemstoneRPCServer {
   private[server] def startWith(
       backends: List[RuntimeBackend],
       taskLimits: TaskLimits,
-      socketTimeoutMillis: Int :| Positive,
+      socketTimeoutMillis: PositiveInt,
       environment: Map[String, String] = sys.env
   ): RunningServer = {
     // Resolve the actual pool before recording its profile, so replay does not inherit another machine's default.
@@ -239,7 +240,7 @@ object GemstoneRPCServer {
             taskLimits.quantum,
             executionPool.parallelism
           )
-          val protocolIdentity = RPCJournal.ProtocolIdentity.either(ExecutionRPC.Identity)
+          val protocolIdentity = RPCJournal.ProtocolIdentity.either(ExecutionRPC.Identity.raw)
             .fold(
               message => throw IllegalStateException(s"invalid execution protocol identity: $message"),
               value => value
@@ -291,7 +292,7 @@ object GemstoneRPCServer {
       server: ServerSocket,
       clients: ClientRegistry,
       connections: ClientConnections,
-      socketTimeoutMillis: Int :| Positive,
+      socketTimeoutMillis: PositiveInt,
       journal: Option[RPCJournal.Writer]
   ): Unit =
     try
@@ -314,7 +315,7 @@ object GemstoneRPCServer {
       socket: Socket,
       clients: ClientRegistry,
       connections: ClientConnections,
-      socketTimeoutMillis: Int :| Positive,
+      socketTimeoutMillis: PositiveInt,
       journal: Option[RPCJournal.Writer],
       shutdown: () => Unit
   ): Unit = {
@@ -347,13 +348,13 @@ object GemstoneRPCServer {
             }
           }
           socket.setTcpNoDelay(true)
-          socket.setSoTimeout(socketTimeoutMillis)
+          socket.setSoTimeout(socketTimeoutMillis.raw)
           def exchange(): Boolean = try {
             recording.foreach(_.begin())
             input.readInt() match {
               case ServerControl.Magic =>
                 input.readInt() match {
-                  case ServerControl.RegisterClient => output.writeLong(clients.register().value)
+                  case ServerControl.RegisterClient => output.writeLong(clients.register().raw)
                   case ServerControl.ReleaseClient  =>
                     clients.release(readClientId(input))
                     output.writeInt(0)

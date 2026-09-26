@@ -1,24 +1,22 @@
 package net.kurobako.gemstone.isa.spirv.v1_6
 
-import net.kurobako.gemstone.NoNul
 import net.kurobako.gemstone.Vec
 import net.kurobako.gemstone.isa.KernelName
 import net.kurobako.gemstone.vm.*
 
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
+import net.kurobako.gemstone.{NonEmptyVec, NonNegativeInt, NonNegativeLong, PositiveInt, PositiveLong}
 
 final class VirtualMachineSuite extends munit.FunSuite {
   private object EmptyMemory extends Memory {
     override def read(
         region: MemoryRegion,
-        offset: Long :| Positive0,
-        size: Int :| Positive0
+        offset: NonNegativeLong,
+        size: NonNegativeInt
     ): Either[Fault, Vec[Byte]] = Left(Fault.Memory("unexpected read"))
 
     override def write(
         region: MemoryRegion,
-        offset: Long :| Positive0,
+        offset: NonNegativeLong,
         bytes: Vec[Byte]
     ): Either[Fault, Unit] = Left(Fault.Memory("unexpected write"))
   }
@@ -52,11 +50,11 @@ final class VirtualMachineSuite extends munit.FunSuite {
     ).fold(message => fail(message), value => value)
     val result = machine.execute(loaded, task, EmptyMemory, TaskControl.default)
       .fold(error => fail(error.message), value => value)
-    assert(result.instructions > 0L)
+    assert(result.instructions.raw > 0L)
   }
 
-  private def operand(kind: String :| (MinLength[1] & NoNul), value: Int): Operand =
-    Operand(SPIRVOperandKind(kind), Vec(Word(value)).refineUnsafe[MinLength[1]])
+  private def operand(kind: String, value: Int): Operand =
+    Operand(SPIRVOperandKind.unsafe(kind), NonEmptyVec(Word(value)))
 
   private def stringOperand(value: String): Operand = {
     val bytes = value.getBytes(java.nio.charset.StandardCharsets.UTF_8) ++ Array(0.toByte)
@@ -65,6 +63,6 @@ final class VirtualMachineSuite extends munit.FunSuite {
         word | ((byte & 0xff) << (index * 8))
       })
     }.toSeq
-    Operand(SPIRVOperandKind("LiteralString"), Vec.from(words).refineUnsafe[MinLength[1]])
+    Operand(SPIRVOperandKind("LiteralString"), NonEmptyVec.unsafeFromVec(Vec.from(words)))
   }
 }

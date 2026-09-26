@@ -108,13 +108,13 @@ private[execution] object PrintRenderer {
   }
 
   @SuppressWarnings(Array("scalafix:GemstoneNoAssume"))
-  private def widthMask(width: Int): Long = Bits.mask(BitWidth.assume(width))
+  private def widthMask(width: Int): Long = Bits.mask(BitWidth.unsafe(width))
 
   @SuppressWarnings(Array("scalafix:GemstoneNoAssume"))
-  private def signedValue(bits: Long, width: Int): Long = Bits.signExtend(bits, BitWidth.assume(width))
+  private def signedValue(bits: Long, width: Int): Long = Bits.signExtend(bits, BitWidth.unsafe(width))
 
   @SuppressWarnings(Array("scalafix:GemstoneNoAssume"))
-  private def floatingValue(bits: Long, width: Int): Double = IEEE754.toDouble(bits, FloatingPointWidth.assume(width))
+  private def floatingValue(bits: Long, width: Int): Double = IEEE754.toDouble(bits, FloatingPointWidth.unsafe(width))
 
   private def append(output: StringBuilder, result: Either[String, String]): Either[String, Unit] =
     result.map { rendered => output.append(rendered); () }

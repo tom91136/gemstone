@@ -3,7 +3,7 @@ package net.kurobako.gemstone.isa.ptx.v9_3
 import Program.*
 import VMIR.*
 
-import net.kurobako.gemstone.PlatformTime
+import net.kurobako.gemstone.{NonNegativeInt, PlatformTime, PositiveInt}
 import net.kurobako.gemstone.benchmarks.BenchmarkArguments
 import net.kurobako.gemstone.benchmarks.BenchmarkName
 import net.kurobako.gemstone.benchmarks.PlatformMetrics
@@ -12,8 +12,6 @@ import net.kurobako.gemstone.vm.LaunchGeometry
 import net.kurobako.gemstone.vm.LaunchGeometry.Dimensions
 import cats.syntax.all.*
 import com.monovore.decline.Opts
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
 
 import java.nio.file.Path
 import scala.util.Using
@@ -26,9 +24,9 @@ object PTXExecutionBenchmark {
 
   private final case class Options(
       mode: GeometryMode,
-      measured: Int :| Positive,
-      warmup: Int :| Positive0,
-      rounds: Int :| Positive,
+      measured: PositiveInt,
+      warmup: NonNegativeInt,
+      rounds: PositiveInt,
       recording: Option[Path]
   )
 
@@ -37,11 +35,11 @@ object PTXExecutionBenchmark {
       .validate("mode must be vector or tiny")(value => value == "vector" || value == "tiny")
       .map(value => if (value == "tiny") GeometryMode.Tiny else GeometryMode.Vector),
     Opts.option[Int]("measured", help = "Launches per measured round").withDefault(100)
-      .validate("measured launches must be positive")(_ > 0).map(_.refineUnsafe[Positive]),
+      .validate("measured launches must be positive")(_ > 0).map(PositiveInt.unsafe),
     Opts.option[Int]("warmup", help = "Warmup launches").withDefault(1000)
-      .validate("warmup launches must be non-negative")(_ >= 0).map(_.refineUnsafe[Positive0]),
+      .validate("warmup launches must be non-negative")(_ >= 0).map(NonNegativeInt.unsafe),
     Opts.option[Int]("rounds", help = "Measured rounds").withDefault(5)
-      .validate("measured rounds must be positive")(_ > 0).map(_.refineUnsafe[Positive]),
+      .validate("measured rounds must be positive")(_ > 0).map(PositiveInt.unsafe),
     Opts.option[String]("recording", help = "JFR output path").map(Path.of(_)).orNone
   ).mapN(Options(_, _, _, _, _))
   private val source = """.version 8.0
@@ -71,41 +69,41 @@ object PTXExecutionBenchmark {
   // Setup, warmup and sample loops use counters so collection allocation is not part of the measurement.
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   def run(args: Array[String]): Unit = {
-    val parsed                  = BenchmarkArguments.parse(BenchmarkName("ptx-execution"), args.toSeq, options)
-    val mode                    = parsed.mode
-    val measured                = parsed.measured
-    val warmup                  = parsed.warmup
-    val rounds                  = parsed.rounds
-    val lanes: Int :| Positive  = if (mode == GeometryMode.Tiny) 1 else 256
-    val groups: Int :| Positive = if (mode == GeometryMode.Tiny) 1 else 16
-    val size: Int :| Positive   = (lanes * groups).refineUnsafe[Positive]
+    val parsed              = BenchmarkArguments.parse(BenchmarkName("ptx-execution"), args.toSeq, options)
+    val mode                = parsed.mode
+    val measured            = parsed.measured
+    val warmup              = parsed.warmup
+    val rounds              = parsed.rounds
+    val lanes: PositiveInt  = if (mode == GeometryMode.Tiny) PositiveInt.One else PositiveInt(256)
+    val groups: PositiveInt = if (mode == GeometryMode.Tiny) PositiveInt.One else PositiveInt(16)
+    val size: PositiveInt   = lanes * groups
     val kernel   = VMCompiler.compile(source).fold(e => throw IllegalArgumentException(e.message), value => value)
     val geometry = LaunchGeometry.forLaunch(
       dimensions(lanes),
       dimensions(groups)
     ).fold(error => throw IllegalArgumentException(error), value => value)
-    val memory = ArrayCheckedMemory.allocate((size * 12).refineUnsafe[Positive0])
+    val memory = ArrayCheckedMemory.allocate(NonNegativeInt.unsafe(size.raw * 12))
     val base   = memory.allocation.start
     var i      = 0
-    while (i < size) {
+    while (i < size.raw) {
       memory.writeInt32(base.offset(i.toLong * 4), i * 97 - 11)
         .fold(error => throw IllegalStateException(error.toString), value => value)
-      memory.writeInt32(base.offset(size.toLong * 4 + i.toLong * 4), i * 3 + 7)
+      memory.writeInt32(base.offset(size.raw.toLong * 4 + i.toLong * 4), i * 3 + 7)
         .fold(error => throw IllegalStateException(error.toString), value => value)
       i += 1
     }
     val parameters = Map(
-      ParameterName("input_a") -> Argument(base.value),
-      ParameterName("input_b") -> Argument(base.value + size.toLong * 4),
-      ParameterName("output")  -> Argument(base.value + size.toLong * 8)
+      ParameterName("input_a") -> Argument.fromLong(base.raw),
+      ParameterName("input_b") -> Argument.fromLong(base.raw + size.raw.toLong * 4),
+      ParameterName("output")  -> Argument.fromLong(base.raw + size.raw.toLong * 8)
     )
     def execute(): Unit =
       VMInterpreter.execute(kernel, geometry, parameters, memory)
         .fold(e => throw IllegalStateException(e.message), _ => ())
     def verify(): Unit = {
       var n = 0
-      while (n < size) {
-        val observed = memory.readInt32(base.offset(size.toLong * 8 + n.toLong * 4))
+      while (n < size.raw) {
+        val observed = memory.readInt32(base.offset(size.raw.toLong * 8 + n.toLong * 4))
           .fold(error => throw IllegalStateException(error.toString), value => value)
         if (observed != n * 100 - 4)
           throw IllegalStateException(s"unexpected result at index $n")
@@ -113,30 +111,30 @@ object PTXExecutionBenchmark {
       }
     }
     i = 0
-    while (i < warmup) { execute(); i += 1 }
-    if (warmup > 0) verify()
+    while (i < warmup.raw) { execute(); i += 1 }
+    if (warmup.raw > 0) verify()
     Using.resource(PlatformMetrics.startRecording(parsed.recording)) { _ =>
       var round = 0
-      while (round < rounds) {
+      while (round < rounds.raw) {
         val before = PlatformMetrics.allocatedBytes
         val start  = PlatformTime.monotonicNanos
         i = 0
-        while (i < measured) { execute(); i += 1 }
+        while (i < measured.raw) { execute(); i += 1 }
         val elapsed   = PlatformTime.monotonicNanos - start
         val allocated = for {
           start <- before
           end   <- PlatformMetrics.allocatedBytes
           if end >= start
-        } yield (end - start).refineUnsafe[Positive0]
+        } yield (end - start).raw
         verify()
         Console.out.println(
           s"mode=${mode.toString.toLowerCase(java.util.Locale.ROOT)} round=$round launches=$measured nsPerLaunch=${elapsed.toDouble /
-              measured} bytesPerLaunch=${allocated.fold(Double.NaN)(_.toDouble / measured)} verified=$size"
+              measured.raw} bytesPerLaunch=${allocated.fold(Double.NaN)(_.toDouble / measured.raw)} verified=$size"
         )
         round += 1
       }
     }
   }
 
-  private def dimensions(x: Int :| Positive): Dimensions = Dimensions(x, 1, 1)
+  private def dimensions(x: PositiveInt): Dimensions = Dimensions(x, PositiveInt.One, PositiveInt.One)
 }

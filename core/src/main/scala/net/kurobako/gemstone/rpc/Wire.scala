@@ -1,11 +1,20 @@
 package net.kurobako.gemstone.rpc
 
-import net.kurobako.gemstone.{NoNul, Vec}
+import net.kurobako.gemstone.{
+  NoNulString,
+  NonEmptyString,
+  NonNegativeInt,
+  NonNegativeLong,
+  PositiveInt,
+  PositiveLong,
+  Vec,
+  WorkDimension
+}
+import net.kurobako.gemstone.isa.{GlobalName, KernelName, LinkageName}
+import net.kurobako.gemstone.memory.{DeviceAllocationByteSize, GuestAddress, MemoryValueByteWidth}
+import net.kurobako.gemstone.rpc.{AllocationId, CompletionId, ProgramId}
 
 import java.nio.charset.StandardCharsets
-
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
 
 import scala.compiletime.{constValue, erasedValue, summonInline}
 import scala.util.NotGiven
@@ -18,9 +27,9 @@ object Wire {
   private val InitialCapacity = 256
 
   final case class Limits(
-      maximumElements: Int :| Positive,
-      maximumBytes: Int :| Positive,
-      maximumTextBytes: Int :| Positive
+      maximumElements: PositiveInt,
+      maximumBytes: PositiveInt,
+      maximumTextBytes: PositiveInt
   )
 
   enum Constraint {
@@ -51,7 +60,7 @@ object Wire {
 
   private[rpc] final class Writer(val limits: Limits) {
     @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-    private var mutableBytes = Array.ofDim[Byte](math.min(InitialCapacity, limits.maximumBytes))
+    private var mutableBytes = Array.ofDim[Byte](math.min(InitialCapacity, limits.maximumBytes.raw))
     @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
     private var length = 0
     @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
@@ -90,13 +99,13 @@ object Wire {
 
     private def ensure(additional: Int): Boolean =
       if (failure.nonEmpty) false
-      else if (additional < 0 || additional > limits.maximumBytes - length) {
-        reject(s"wire value exceeds the ${limits.maximumBytes}-byte limit")
+      else if (additional < 0 || additional > limits.maximumBytes.raw - length) {
+        reject(s"wire value exceeds the ${limits.maximumBytes.raw}-byte limit")
         false
       } else {
         val required = length + additional
         if (required > mutableBytes.length) {
-          val doubled = math.min(limits.maximumBytes.toLong, math.max(1L, mutableBytes.length.toLong * 2L)).toInt
+          val doubled = math.min(limits.maximumBytes.raw.toLong, math.max(1L, mutableBytes.length.toLong * 2L)).toInt
           mutableBytes = java.util.Arrays.copyOf(mutableBytes, math.max(required, doubled))
         }
         true
@@ -130,12 +139,12 @@ object Wire {
       else take(size).map(offset => java.util.Arrays.copyOfRange(bytes, offset, offset + size))
 
     def readCount(
-        description: String :| MinLength[1],
-        maximum: Int :| Positive
+        description: String,
+        maximum: PositiveInt
     ): Either[String, Int] =
       readInt().flatMap { count =>
         Either.cond(
-          count >= 0 && count <= maximum,
+          count >= 0 && count <= maximum.raw,
           count,
           s"invalid $description count: $count"
         )
@@ -190,7 +199,7 @@ object Wire {
 
   trait Protocol[F[_]] {
     def shape: Shape.Sum
-    def operations: Vector[OperationShape] :| MinLength[1]
+    def operations: Vector[OperationShape]
     def encodePayload[A](value: F[A], limits: Limits): Either[String, (Long, Array[Byte])]
     def decodePayload(
         id: Long,
@@ -198,7 +207,7 @@ object Wire {
         limits: Limits
     ): Either[String, Decoded[F]]
 
-    final def schema[Failure: Codec](name: String :| (MinLength[1] & NoNul)): ProtocolShape =
+    final def schema[Failure: Codec](name: NonEmptyString): ProtocolShape =
       ProtocolShape(name, operations, Codec[Failure].shape)
   }
 
@@ -278,7 +287,7 @@ object Wire {
             }
         }
       }
-      '{ Protocol.runtime[F](${ Expr(name) }, Vector(${ Expr.ofSeq(cases) }*).assume[MinLength[1]]) }
+      '{ Protocol.runtime[F](${ Expr(name) }, Vector(${ Expr.ofSeq(cases) }*)) }
     }
 
     private final class DecodedValue[F[_], A](override val value: F[A]) extends Decoded[F] {
@@ -287,11 +296,10 @@ object Wire {
 
     private final class ProtocolImpl[F[_]](
         name: String,
-        cases: Vector[ProtocolCase[F]] :| MinLength[1]
+        cases: Vector[ProtocolCase[F]]
     ) extends Protocol[F] {
-      override val operations: Vector[OperationShape] :| MinLength[1] =
+      override val operations: Vector[OperationShape] =
         cases.map(value => OperationShape(Alternative(value.name, value.id, value.codec.shape), value.reply))
-          .refineUnsafe[MinLength[1]]
 
       override val shape: Shape.Sum = Shape.Sum(name, operations.map(_.request))
 
@@ -340,7 +348,7 @@ object Wire {
     @publicInBinary
     private[Wire] def runtime[F[_]](
         name: String,
-        cases: Vector[ProtocolCase[F]] :| MinLength[1]
+        cases: Vector[ProtocolCase[F]]
     ): Protocol[F] = ProtocolImpl(name, cases)
 
     @publicInBinary
@@ -365,78 +373,6 @@ object Wire {
   }
 
   object Codec {
-    trait ConstraintShape[A, C] {
-      def values: Vector[Constraint]
-    }
-
-    object ConstraintShape {
-      given ConstraintShape[Int, Positive] with {
-        override val values: Vector[Constraint] = Vector(Constraint.Positive)
-      }
-
-      given ConstraintShape[Int, Positive0] with {
-        override val values: Vector[Constraint] = Vector(Constraint.Positive0)
-      }
-
-      given ConstraintShape[Long, Positive] with {
-        override val values: Vector[Constraint] = Vector(Constraint.Positive)
-      }
-
-      given ConstraintShape[Long, Positive0] with {
-        override val values: Vector[Constraint] = Vector(Constraint.Positive0)
-      }
-
-      given [A]: ConstraintShape[A, Pure] with {
-        override val values: Vector[Constraint] = Vector.empty
-      }
-
-      given intInterval[Minimum <: Int & Singleton, Maximum <: Int & Singleton](using
-          minimum: ValueOf[Minimum],
-          maximum: ValueOf[Maximum]
-      ): ConstraintShape[Int, Interval.Closed[Minimum, Maximum]] with {
-        override val values: Vector[Constraint] =
-          Vector(Constraint.IntInterval(minimum.value, maximum.value))
-      }
-
-      given longInterval[Minimum <: Long & Singleton, Maximum <: Long & Singleton](using
-          minimum: ValueOf[Minimum],
-          maximum: ValueOf[Maximum]
-      ): ConstraintShape[Long, Interval.Closed[Minimum, Maximum]] with {
-        override val values: Vector[Constraint] =
-          Vector(Constraint.LongInterval(minimum.value, maximum.value))
-      }
-
-      given minimumLength[Minimum <: Int & Singleton](using
-          minimum: ValueOf[Minimum]
-      ): ConstraintShape[String, MinLength[Minimum]] with {
-        override val values: Vector[Constraint] = Vector(Constraint.MinimumLength(minimum.value))
-      }
-
-      given notContains[Value <: String & Singleton](using
-          value: ValueOf[Value]
-      ): ConstraintShape[String, Not[Contain[Value]]] with {
-        override val values: Vector[Constraint] = Vector(Constraint.NotContains(value.value))
-      }
-
-      given noNul: ConstraintShape[String, NoNul] with {
-        override val values: Vector[Constraint] = Vector(Constraint.NotContains("\u0000"))
-      }
-
-      given minimumLengthNoNul[Minimum <: Int & Singleton](using
-          minimum: ValueOf[Minimum]
-      ): ConstraintShape[String, MinLength[Minimum] & NoNul] with {
-        override val values: Vector[Constraint] =
-          Vector(Constraint.MinimumLength(minimum.value), Constraint.NotContains("\u0000"))
-      }
-
-      given intersection[A, Left, Right](using
-          left: ConstraintShape[A, Left],
-          right: ConstraintShape[A, Right]
-      ): ConstraintShape[A, Left & Right] with {
-        override val values: Vector[Constraint] = left.values ++ right.values
-      }
-    }
-
     private final class CodecImpl[A](
         valueShape: Shape,
         writeValue: (Writer, A) => Unit,
@@ -454,8 +390,6 @@ object Wire {
         writeValue: (Writer, A) => Unit,
         readValue: Reader => Either[String, A]
     ): Codec[A] = CodecImpl(valueShape, writeValue, readValue)
-
-    private def erase[A](codec: Codec[A]): Codec[Any] = codec.erased
 
     def validated[A](underlying: Codec[A])(
         validate: A => Either[String, A]
@@ -482,57 +416,92 @@ object Wire {
     given Codec[Int]  = instance(Shape.Int32, _.writeInt(_), _.readInt())
     given Codec[Long] = instance(Shape.Int64, _.writeLong(_), _.readLong())
 
-    given positiveInt: Codec[Int :| Positive]     = refinedInt[Positive](Vector(Constraint.Positive))
-    given nonNegativeInt: Codec[Int :| Positive0] = refinedInt[Positive0](Vector(Constraint.Positive0))
-    inline given intInterval[Minimum <: Int & Singleton, Maximum <: Int & Singleton](using
-        runtime: RuntimeConstraint[Int, Interval.Closed[Minimum, Maximum]],
-        minimum: ValueOf[Minimum],
-        maximum: ValueOf[Maximum]
-    ): Codec[Int :| Interval.Closed[Minimum, Maximum]] =
-      refinedInt[Interval.Closed[Minimum, Maximum]](
-        Vector(Constraint.IntInterval(minimum.value, maximum.value))
-      )(using runtime)
-
-    given positiveLong: Codec[Long :| Positive]     = refinedLong[Positive](Vector(Constraint.Positive))
-    given nonNegativeLong: Codec[Long :| Positive0] = refinedLong[Positive0](Vector(Constraint.Positive0))
-    inline given longInterval[Minimum <: Long & Singleton, Maximum <: Long & Singleton](using
-        runtime: RuntimeConstraint[Long, Interval.Closed[Minimum, Maximum]],
-        minimum: ValueOf[Minimum],
-        maximum: ValueOf[Maximum]
-    ): Codec[Long :| Interval.Closed[Minimum, Maximum]] =
-      refinedLong[Interval.Closed[Minimum, Maximum]](
-        Vector(Constraint.LongInterval(minimum.value, maximum.value))
-      )(using runtime)
-
-    inline given minimumLength[Minimum <: Int & Singleton](using
-        runtime: RuntimeConstraint[String, MinLength[Minimum]],
-        minimum: ValueOf[Minimum]
-    ): Codec[String :| MinLength[Minimum]] =
-      refinedString[MinLength[Minimum]](Vector(Constraint.MinimumLength(minimum.value)))(using runtime)
-
-    inline given refinedType[A](using mirror: RefinedType.Mirror[A]): Codec[A] = {
-      val base        = erase(summonInline[Codec[mirror.BaseType]])
-      val constraints = summonInline[ConstraintShape[mirror.BaseType, mirror.ConstraintType]]
+    /** A codec for a domain type backed by a primitive base, carrying the wire constraints of the original refinement.
+      */
+    def domain[A, B](name: String, base: Codec[B], constraints: Vector[Constraint])(
+        embed: B => Either[String, A],
+        extract: A => B
+    ): Codec[A] =
       instance(
-        Shape.Alias(refinedTypeName[A], base.shape, constraints.values),
-        (writer, value) => base.write(writer, value),
-        reader =>
-          base.read(reader).flatMap {
-            case value: mirror.BaseType @unchecked =>
-              mirror.ops.either(value)
-                .left.map(message => s"invalid refined value: $message")
-                .map { case refined: A @unchecked => refined }
-          }
+        Shape.Alias(name, base.shape, constraints),
+        (writer, value) => base.write(writer, extract(value)),
+        reader => base.read(reader).flatMap(embed)
       )
-    }
+
+    given positiveInt: Codec[PositiveInt] =
+      domain("Int", Codec[Int], Vector(Constraint.Positive))(PositiveInt.either, _.raw)
+
+    given nonNegativeInt: Codec[NonNegativeInt] =
+      domain("Int", Codec[Int], Vector(Constraint.Positive0))(NonNegativeInt.either, _.raw)
+
+    given positiveLong: Codec[PositiveLong] =
+      domain("Long", Codec[Long], Vector(Constraint.Positive))(PositiveLong.either, _.raw)
+
+    given nonNegativeLong: Codec[NonNegativeLong] =
+      domain("Long", Codec[Long], Vector(Constraint.Positive0))(NonNegativeLong.either, _.raw)
+
+    given programId: Codec[ProgramId] =
+      domain("ProgramId", Codec[Long], Vector(Constraint.Positive))(ProgramId.either, _.raw)
+
+    given allocationId: Codec[AllocationId] =
+      domain("AllocationId", Codec[Long], Vector(Constraint.Positive))(AllocationId.either, _.raw)
+
+    given completionId: Codec[CompletionId] =
+      domain("CompletionId", Codec[Long], Vector(Constraint.Positive))(CompletionId.either, _.raw)
+
+    given workDimension: Codec[WorkDimension] =
+      domain("Int", Codec[Int], Vector(Constraint.IntInterval(1, 3)))(WorkDimension.either, _.raw)
+
+    given deviceAllocationByteSize: Codec[DeviceAllocationByteSize] =
+      domain("Int", Codec[Int], Vector(Constraint.Positive))(
+        DeviceAllocationByteSize.either,
+        _.raw
+      )
+
+    given memoryValueByteWidth: Codec[MemoryValueByteWidth] =
+      domain(
+        "Int",
+        Codec[Int],
+        Vector(Constraint.IntInterval(1, 8))
+      )(MemoryValueByteWidth.either, _.raw)
+
+    given guestAddress: Codec[GuestAddress] =
+      domain("GuestAddress", Codec[Long], Vector.empty)(value => Right(GuestAddress(value)), _.raw)
+
+    given nonEmptyString: Codec[NonEmptyString] = domain(
+      "NonEmptyString",
+      Codec[String],
+      Vector(Constraint.MinimumLength(1), Constraint.NotContains("\u0000"))
+    )(NonEmptyString.either, _.raw)
+
+    given noNulString: Codec[NoNulString] =
+      domain("NoNulString", Codec[String], Vector(Constraint.NotContains("\u0000")))(NoNulString.either, _.raw)
+
+    given kernelName: Codec[KernelName] =
+      domain("KernelName", Codec[String], Vector(Constraint.MinimumLength(1), Constraint.NotContains("\u0000")))(
+        KernelName.either,
+        _.raw
+      )
+
+    given globalName: Codec[GlobalName] =
+      domain("GlobalName", Codec[String], Vector(Constraint.MinimumLength(1), Constraint.NotContains("\u0000")))(
+        GlobalName.either,
+        _.raw
+      )
+
+    given linkageName: Codec[LinkageName] =
+      domain("LinkageName", Codec[String], Vector(Constraint.MinimumLength(1), Constraint.NotContains("\u0000")))(
+        LinkageName.either,
+        _.raw
+      )
 
     given Codec[String] = instance(
       Shape.Text,
       (writer, value) => {
         val bytes = value.getBytes(StandardCharsets.UTF_8)
-        if (bytes.length > writer.limits.maximumTextBytes)
+        if (bytes.length > writer.limits.maximumTextBytes.raw)
           writer.reject(
-            s"UTF-8 value exceeds the ${writer.limits.maximumTextBytes}-byte text limit"
+            s"UTF-8 value exceeds the ${writer.limits.maximumTextBytes.raw}-byte text limit"
           )
         else {
           writer.writeInt(bytes.length)
@@ -549,9 +518,9 @@ object Wire {
     given Codec[Vec[Byte]] = instance(
       Shape.Sequence(Shape.Int8),
       (writer, values) =>
-        if (values.length > writer.limits.maximumBytes)
+        if (values.length > writer.limits.maximumBytes.raw)
           writer.reject(
-            s"byte collection exceeds the ${writer.limits.maximumBytes}-byte limit"
+            s"byte collection exceeds the ${writer.limits.maximumBytes.raw}-byte limit"
           )
         else {
           writer.writeInt(values.length)
@@ -567,9 +536,9 @@ object Wire {
     given [A: ClassTag](using element: Codec[A], notByte: NotGiven[A =:= Byte]): Codec[Vec[A]] = instance(
       Shape.Sequence(element.shape),
       (writer, values) =>
-        if (values.length > writer.limits.maximumElements)
+        if (values.length > writer.limits.maximumElements.raw)
           writer.reject(
-            s"collection exceeds the ${writer.limits.maximumElements}-element limit"
+            s"collection exceeds the ${writer.limits.maximumElements.raw}-element limit"
           )
         else {
           writer.writeInt(values.length)
@@ -644,51 +613,6 @@ object Wire {
       )
     }
 
-    private inline def refinedInt[C](shapeConstraints: Vector[Constraint])(using
-        constraint: RuntimeConstraint[Int, C]
-    ): Codec[Int :| C] =
-      instance(
-        Shape.Alias("Int", Shape.Int32, shapeConstraints),
-        (writer, value) => writer.writeInt(value),
-        reader =>
-          reader.readInt().flatMap(value =>
-            value.refineEither[C].left.map(message => s"invalid refined value: $message")
-          )
-      )
-
-    private inline def refinedLong[C](shapeConstraints: Vector[Constraint])(using
-        constraint: RuntimeConstraint[Long, C]
-    ): Codec[Long :| C] =
-      instance(
-        Shape.Alias("Long", Shape.Int64, shapeConstraints),
-        (writer, value) => writer.writeLong(value),
-        reader =>
-          reader.readLong().flatMap(value =>
-            value.refineEither[C].left.map(message => s"invalid refined value: $message")
-          )
-      )
-
-    private inline def refinedString[C](shapeConstraints: Vector[Constraint])(using
-        constraint: RuntimeConstraint[String, C]
-    ): Codec[String :| C] =
-      instance(
-        Shape.Alias("String", Shape.Text, shapeConstraints),
-        (writer, value) => summonInline[Codec[String]].write(writer, value),
-        reader =>
-          summonInline[Codec[String]].read(reader).flatMap(value =>
-            value.refineEither[C].left.map(message => s"invalid refined value: $message")
-          )
-      )
-
-    @publicInBinary
-    private[Codec] inline def refinedTypeName[A]: String = ${ refinedTypeNameImpl[A] }
-
-    private def refinedTypeNameImpl[A: Type](using Quotes): Expr[String] = {
-      val parts = Type.show[A].split('.')
-      val name  = if (parts.lastOption.contains("T")) parts(parts.length - 2) else parts.last
-      Expr(name)
-    }
-
     private inline def sumCodec[A](mirror: Mirror.SumOf[A]): Codec[A] = {
       val name  = constValue[mirror.MirroredLabel].toString
       val cases = casesOf[mirror.MirroredElemTypes](name)
@@ -750,11 +674,11 @@ object Wire {
 
   final case class OperationShape(request: Alternative, reply: Shape)
   final case class ProtocolShape(
-      name: String :| (MinLength[1] & NoNul),
-      operations: Vector[OperationShape] :| MinLength[1],
+      name: NonEmptyString,
+      operations: Vector[OperationShape],
       failure: Shape
   ) {
-    val canonical: String :| MinLength[1] = {
+    val canonical: String = {
       def render(shape: Shape): String = shape match {
         case Shape.UnitValue                        => "unit"
         case Shape.BooleanValue                     => "bool"
@@ -785,7 +709,7 @@ object Wire {
       }
       operations.map(operation =>
         s"${operation.request.name}@${java.lang.Long.toUnsignedString(operation.request.id, 16)}:${render(operation.request.shape)}=>${render(operation.reply)}"
-      ).mkString(s"protocol($name){", ",", s"};failure=${render(failure)}").refineUnsafe[MinLength[1]]
+      ).mkString(s"protocol($name){", ",", s"};failure=${render(failure)}")
     }
 
     val fingerprint: Long = hash64(canonical)

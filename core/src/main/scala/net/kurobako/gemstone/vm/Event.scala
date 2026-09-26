@@ -1,9 +1,6 @@
 package net.kurobako.gemstone.vm
 
-import net.kurobako.gemstone.Vec
-
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
+import net.kurobako.gemstone.{NonNegativeLong, Vec}
 
 trait Event
 
@@ -11,9 +8,9 @@ object Event {
   final case class Print(format: String, arguments: Vec[PrintArgument]) extends Event
   final case class PointerRelocation(
       source: MemoryRegion,
-      sourceOffset: Long :| Positive0,
+      sourceOffset: NonNegativeLong,
       target: MemoryRegion,
-      targetOffset: Long :| Positive0
+      targetOffset: NonNegativeLong
   ) extends Event
 
   enum PrintArgument {

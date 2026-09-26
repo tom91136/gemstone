@@ -2,9 +2,6 @@ package net.kurobako.gemstone.isa.amdgpu
 
 import Program.*
 
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
-
 final class ArchitectureSuite extends munit.FunSuite {
   private final case class GfxGeneration(name: String, family: Family, isa: ISA, target: Target)
 
@@ -41,7 +38,7 @@ final class ArchitectureSuite extends munit.FunSuite {
     assertEquals(
       Architectures.gfx10.instructions.flatMap(
         _.meta.encodings
-      ).filter(_.family == Family.GFX10).map(_.target).distinct.sortBy(_.value).map(_.value).toSeq,
+      ).filter(_.family == Family.GFX10).map(_.target).distinct.sortBy(_.raw).map(_.raw).toSeq,
       Seq("rdna1", "rdna2")
     )
   }
@@ -52,10 +49,10 @@ final class ArchitectureSuite extends munit.FunSuite {
     val rdna3 = Target("gfx1103")
     val cdna3 = Target("gfx942")
 
-    assertEquals((rdna1.family, rdna1.metadataTarget.value), (Family.GFX10, "rdna1"))
-    assertEquals((rdna2.family, rdna2.metadataTarget.value), (Family.GFX10, "rdna2"))
-    assertEquals((rdna3.family, rdna3.metadataTarget.value), (Family.GFX11, "rdna3"))
-    assertEquals((cdna3.family, cdna3.metadataTarget.value), (Family.CDNA3, "cdna3"))
+    assertEquals((rdna1.family, rdna1.metadataTarget.raw), (Family.GFX10, "rdna1"))
+    assertEquals((rdna2.family, rdna2.metadataTarget.raw), (Family.GFX10, "rdna2"))
+    assertEquals((rdna3.family, rdna3.metadataTarget.raw), (Family.GFX11, "rdna3"))
+    assertEquals((cdna3.family, cdna3.metadataTarget.raw), (Family.CDNA3, "cdna3"))
     assert(Target.either("gfx1099").isLeft)
     assert(Target.either("gfx1159").isLeft)
   }

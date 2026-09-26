@@ -1,13 +1,13 @@
 package net.kurobako.gemstone.vm
 
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
+import net.kurobako.gemstone.{PositiveInt, PositiveLong}
 
 final case class TaskLimits(
-    maxInstructions: Long :| Positive,
-    quantum: Int :| Positive
+    maxInstructions: PositiveLong,
+    quantum: PositiveInt
 )
 
 object TaskLimits {
-  val Default: TaskLimits = TaskLimits(maxInstructions = 100000000L, quantum = 4096)
+  val Default: TaskLimits =
+    TaskLimits(maxInstructions = PositiveLong(100000000L), quantum = PositiveInt(4096))
 }

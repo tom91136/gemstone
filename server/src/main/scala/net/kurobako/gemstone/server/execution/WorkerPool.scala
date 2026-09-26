@@ -3,11 +3,8 @@ package net.kurobako.gemstone.server.execution
 import net.kurobako.gemstone.concurrent.withLock
 import net.kurobako.gemstone.launcher.EnvironmentNames
 import net.kurobako.gemstone.server.Throwables
-import net.kurobako.gemstone.PlatformTime
+import net.kurobako.gemstone.{NonNegativeLong, PlatformTime, PositiveInt}
 import net.kurobako.gemstone.vm.{Fault, Scheduler}
-
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
 
 import java.util.concurrent.locks.ReentrantLock
 import scala.collection.mutable
@@ -18,15 +15,15 @@ import scala.util.control.NonFatal
   * threshold low.
   */
 final class WorkerPool(
-    val parallelism: Int :| Positive,
+    val parallelism: PositiveInt,
     minGroups: Long = 16L,
     minWorkItems: Long = 64L,
     trace: Boolean = EnvironmentNames.traceEnabled(sys.env, "perf")
 ) extends Scheduler with AutoCloseable {
   private final class Job(
-      val count: Long :| Positive0,
+      val count: NonNegativeLong,
       val grain: Int,
-      val task: Long :| Positive0 => Either[Fault, Unit]
+      val task: NonNegativeLong => Either[Fault, Unit]
   ) {
     @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
     var next = 0L
@@ -35,7 +32,7 @@ final class WorkerPool(
     @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
     var failure: Option[Fault] = None
     @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-    @volatile var finished                    = count == 0L
+    @volatile var finished                    = count.raw == 0L
     val observed: Option[mutable.Set[String]] = Option.when(trace)(mutable.Set.empty)
   }
   private val lock        = ReentrantLock()
@@ -45,7 +42,7 @@ final class WorkerPool(
   private val inWorker    = ThreadLocal.withInitial[Boolean](() => false)
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   @volatile private var closed = false
-  private val threads          = Array.tabulate(parallelism) { index =>
+  private val threads          = Array.tabulate(parallelism.raw) { index =>
     val thread = Thread(() => workerLoop(), s"gemstone-worker-$index")
     thread.setDaemon(true)
     thread.start()
@@ -54,18 +51,18 @@ final class WorkerPool(
 
   /** Roughly four claims per worker keeps the queue touched a bounded number of times without starving a worker. */
   private def grainFor(count: Long): Int = {
-    val perWorker = parallelism.toLong * 4L
+    val perWorker = parallelism.raw.toLong * 4L
     val grain     = if (count <= perWorker) 1L else (count - 1L) / perWorker + 1L
     math.max(1L, math.min(count, math.min(grain, Int.MaxValue.toLong))).toInt
   }
 
   private def enqueue(
-      count: Long :| Positive0,
-      task: Long :| Positive0 => Either[Fault, Unit]
+      count: NonNegativeLong,
+      task: NonNegativeLong => Either[Fault, Unit]
   ): Job = lock.withLock {
     if (closed) throw java.util.concurrent.RejectedExecutionException("execution pool is closed")
-    val job = Job(count, grainFor(count), task)
-    if (count > 0L) {
+    val job = Job(count, grainFor(count.raw), task)
+    if (count.raw > 0L) {
       queue.append(job)
       workReady.signal()
     }
@@ -78,11 +75,11 @@ final class WorkerPool(
     else {
       val job   = queue.removeHead()
       val start = job.next
-      val end   = math.min(job.count, start + job.grain.toLong)
+      val end   = math.min(job.count.raw, start + job.grain.toLong)
       job.next = end
       job.active += 1
       job.observed.foreach(_ += Thread.currentThread().getName)
-      if (job.next < job.count) {
+      if (job.next < job.count.raw) {
         queue.append(job)
         workReady.signal()
       }
@@ -97,7 +94,7 @@ final class WorkerPool(
     try {
       var offset = 0
       while (offset < length && outcome.isRight) {
-        outcome = job.task((start + offset.toLong).refineUnsafe[Positive0])
+        outcome = job.task(NonNegativeLong.unsafe(start + offset.toLong))
         offset += 1
       }
     } catch {
@@ -113,9 +110,9 @@ final class WorkerPool(
         completed.left.toOption.foreach { error =>
           if (job.failure.isEmpty) job.failure = Some(error)
           queue.filterInPlace(_ ne job)
-          job.next = job.count
+          job.next = job.count.raw
         }
-        if (job.active == 0 && job.next == job.count) {
+        if (job.active == 0 && job.next == job.count.raw) {
           job.finished = true
           jobComplete.signalAll()
           workReady.signalAll()
@@ -143,14 +140,15 @@ final class WorkerPool(
   }
 
   override def schedule(runnable: Runnable): Unit = {
-    val _ = enqueue(1L, _ => { runnable.run(); Right(()) })
+    val _ = enqueue(NonNegativeLong(1L), _ => { runnable.run(); Right(()) })
   }
 
-  override def shouldParallel(taskCount: Long :| Positive0, workItemsPerTask: Long :| Positive0): Boolean =
-    parallelism > 1 && taskCount > 1L && (taskCount >= minGroups || workItemsPerTask >= minWorkItems)
+  override def shouldParallel(taskCount: NonNegativeLong, workItemsPerTask: NonNegativeLong): Boolean =
+    parallelism.raw > 1 && taskCount.raw > 1L &&
+      (taskCount.raw >= minGroups || workItemsPerTask.raw >= minWorkItems)
 
-  override def parallelFor(taskCount: Long :| Positive0)(
-      task: Long :| Positive0 => Either[Fault, Unit]
+  override def parallelFor(taskCount: NonNegativeLong)(
+      task: NonNegativeLong => Either[Fault, Unit]
   ): Either[Fault, Unit] = {
     val started  = if (trace) PlatformTime.monotonicNanos else 0L
     val enqueued =
@@ -186,35 +184,34 @@ final class WorkerPool(
 }
 
 object WorkerPool {
-  val EnvironmentName                                 = EnvironmentNames.ExecutionParallelism
-  private val Maximum                                 = 64
-  private given (Interval.Closed[1, 64] ==> Positive) = Implication()
+  val EnvironmentName = EnvironmentNames.ExecutionParallelism
+  private val Maximum = 64
 
   def fromEnvironment(environment: Map[String, String]): WorkerPool = {
-    val available                   = hostBound
-    val configured: Int :| Positive = environment.get(EnvironmentName) match {
+    val available               = hostBound
+    val configured: PositiveInt = environment.get(EnvironmentName) match {
       // Leave a small amount of host capacity for RPC, launcher, and GC work;
       // the remaining logical CPUs are available to the bounded interpreter.
       case None        => defaultParallelism
       case Some(value) =>
         value.toIntOption
           .toRight(s"$EnvironmentName must be a positive integer: $value")
-          .flatMap(_.refineEither[Positive].left.map(_ => s"$EnvironmentName must be positive: $value"))
+          .flatMap(PositiveInt.either(_).left.map(_ => s"$EnvironmentName must be positive: $value"))
           .fold(message => throw IllegalArgumentException(message), value => value)
     }
-    if (configured > available)
+    if (configured.raw > available.raw)
       throw IllegalArgumentException(s"$EnvironmentName=$configured exceeds host bound $available")
     WorkerPool(
       configured,
-      minGroups = configured.toLong,
+      minGroups = configured.raw.toLong,
       minWorkItems = 32L,
       trace = EnvironmentNames.traceEnabled(environment, "perf")
     )
   }
 
-  private def hostBound: Int :| Interval.Closed[1, 64] =
-    math.max(1, math.min(Maximum, sys.runtime.availableProcessors())).refineUnsafe[Interval.Closed[1, 64]]
+  private def hostBound: PositiveInt =
+    PositiveInt.unsafe(math.max(1, math.min(Maximum, sys.runtime.availableProcessors())))
 
-  private def defaultParallelism: Int :| Interval.Closed[1, 64] =
-    math.max(1, hostBound - 2).refineUnsafe[Interval.Closed[1, 64]]
+  private def defaultParallelism: PositiveInt =
+    PositiveInt.unsafe(math.max(1, hostBound.raw - 2))
 }

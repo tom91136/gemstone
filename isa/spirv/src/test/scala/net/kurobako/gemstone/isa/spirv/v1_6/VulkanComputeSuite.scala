@@ -4,8 +4,7 @@ import net.kurobako.gemstone.Vec
 import net.kurobako.gemstone.isa.{KernelMetadata, KernelName}
 import net.kurobako.gemstone.binary.{LittleEndian, ScalarByteWidth}
 import net.kurobako.gemstone.vm.{Event, KernelTask, LaunchGeometry, MemoryRegion, Observer, Scheduler, TaskControl}
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
+import net.kurobako.gemstone.{NonEmptyVec, NonNegativeInt, NonNegativeLong, PositiveInt, PositiveLong}
 
 final class VulkanComputeSuite extends munit.FunSuite with ExecutionTestSupport {
   private def resource(name: String): Vec[Byte] =
@@ -59,7 +58,7 @@ final class VulkanComputeSuite extends munit.FunSuite with ExecutionTestSupport 
     val machine  = VirtualMachine(Validation.Environment.VulkanCompute, Observer.discard[Event], Scheduler.Sequential)
     val loaded   = machine.load(module).fold(error => fail(error.message), identity)
     val metadata = machine.kernel(loaded, KernelName("main")).fold(error => fail(error.message), identity)
-    assertEquals(metadata.explicitParameterCount, 2)
+    assertEquals(metadata.explicitParameterCount.raw, 2)
     assertEquals(
       metadata.parameters.map(_.kind),
       Vec(KernelMetadata.ParameterKind.Memory, KernelMetadata.ParameterKind.Memory)
@@ -75,14 +74,17 @@ final class VulkanComputeSuite extends munit.FunSuite with ExecutionTestSupport 
     val memory     = ArrayMemory(allocation, 16)
     for ((offset, bits) <- Vec(4L -> 0x40000000L, 8L -> 0x40400000L, 12L -> 0x40800000L))
       assertEquals(
-        memory.write(allocation, offset.refineUnsafe[Positive0], LittleEndian.toVec(bits, ScalarByteWidth.Dword)),
+        memory.write(allocation, NonNegativeLong.unsafe(offset), LittleEndian.toVec(bits, ScalarByteWidth(4))),
         Right(())
       )
     val task = KernelTask.validated(
       KernelName("main"),
       LaunchGeometry.Dimensions.One,
       LaunchGeometry.Dimensions.One,
-      Vec(KernelTask.Argument.Memory(allocation, 0L), KernelTask.Argument.Memory(allocation, 4L))
+      Vec(
+        KernelTask.Argument.Memory(allocation, NonNegativeLong(0L)),
+        KernelTask.Argument.Memory(allocation, NonNegativeLong(4L))
+      )
     ).fold(message => fail(message), identity)
     val _ = machine.execute(loaded, task, memory, TaskControl.default).fold(error => fail(error.message), identity)
     assertEquals(memory.bytes.take(4), LittleEndian.toVec(0x41200000L, ScalarByteWidth.Dword))
@@ -97,14 +99,17 @@ final class VulkanComputeSuite extends munit.FunSuite with ExecutionTestSupport 
     val memory     = ArrayMemory(allocation, 16)
     for ((offset, bits) <- Vec(4L -> 0x40000000L, 8L -> 0x40400000L, 12L -> 0x40800000L))
       assertEquals(
-        memory.write(allocation, offset.refineUnsafe[Positive0], LittleEndian.toVec(bits, ScalarByteWidth.Dword)),
+        memory.write(allocation, NonNegativeLong.unsafe(offset), LittleEndian.toVec(bits, ScalarByteWidth(4))),
         Right(())
       )
     val task = KernelTask.validated(
       KernelName("main"),
       LaunchGeometry.Dimensions.One,
       LaunchGeometry.Dimensions.One,
-      Vec(KernelTask.Argument.Memory(allocation, 0L), KernelTask.Argument.Memory(allocation, 4L))
+      Vec(
+        KernelTask.Argument.Memory(allocation, NonNegativeLong(0L)),
+        KernelTask.Argument.Memory(allocation, NonNegativeLong(4L))
+      )
     ).fold(message => fail(message), identity)
     val _      = machine.execute(loaded, task, memory, TaskControl.default).fold(error => fail(error.message), identity)
     val result = java.lang.Float.intBitsToFloat(LittleEndian.decode(memory.bytes, 0, ScalarByteWidth.Dword).toInt)
@@ -120,14 +125,17 @@ final class VulkanComputeSuite extends munit.FunSuite with ExecutionTestSupport 
     val memory     = ArrayMemory(allocation, 16)
     for ((offset, bits) <- Vec(4L -> 0x40000000L, 8L -> 0x40400000L, 12L -> 0x40800000L))
       assertEquals(
-        memory.write(allocation, offset.refineUnsafe[Positive0], LittleEndian.toVec(bits, ScalarByteWidth.Dword)),
+        memory.write(allocation, NonNegativeLong.unsafe(offset), LittleEndian.toVec(bits, ScalarByteWidth(4))),
         Right(())
       )
     val task = KernelTask.validated(
       KernelName("main"),
       LaunchGeometry.Dimensions.One,
       LaunchGeometry.Dimensions.One,
-      Vec(KernelTask.Argument.Memory(allocation, 0L), KernelTask.Argument.Memory(allocation, 4L))
+      Vec(
+        KernelTask.Argument.Memory(allocation, NonNegativeLong(0L)),
+        KernelTask.Argument.Memory(allocation, NonNegativeLong(4L))
+      )
     ).fold(message => fail(message), identity)
     val _      = machine.execute(loaded, task, memory, TaskControl.default).fold(error => fail(error.message), identity)
     val result = java.lang.Float.intBitsToFloat(LittleEndian.decode(memory.bytes, 0, ScalarByteWidth.Dword).toInt)

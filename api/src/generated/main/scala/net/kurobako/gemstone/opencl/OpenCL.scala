@@ -1,9 +1,7 @@
 // Generated from pinned official headers by GenerateAPISurfaces. Regenerate with: sbt codegen
 package net.kurobako.gemstone.opencl
 
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
-import net.kurobako.gemstone.NoNul
+import net.kurobako.gemstone.{NonEmptyString, PositiveInt}
 import net.kurobako.gemstone.abi.ABI.*
 
 @javax.annotation.processing.Generated(Array("sbt codegen"))
@@ -94,8 +92,8 @@ object OpenCL {
   type size_t = CValue["size_t"]
   type unsigned_char = CValue["unsigned char"]
 
-  val HeaderVersion: String :| (MinLength[1] & NoNul) = "2026.05.29"
-  val FunctionCount: Int :| Positive = 195
+  val HeaderVersion: NonEmptyString = NonEmptyString("2026.05.29")
+  val FunctionCount: PositiveInt = PositiveInt(195)
 }
 
 import OpenCL.*

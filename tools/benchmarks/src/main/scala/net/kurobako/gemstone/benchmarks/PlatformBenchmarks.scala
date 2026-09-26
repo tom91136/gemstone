@@ -13,11 +13,10 @@ import net.kurobako.gemstone.isa.ptx.v9_3.PTXRegisterIndexBenchmark
 import net.kurobako.gemstone.server.execution.OpenCLCTSCopyBenchmark
 import net.kurobako.gemstone.server.execution.SPIRVExecutionBenchmark
 
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
+import net.kurobako.gemstone.{NonEmptyVec, Vec}
 
 object PlatformBenchmarks {
-  val names: Vector[BenchmarkName] :| MinLength[1] = Vector(
+  val names: NonEmptyVec[BenchmarkName] = NonEmptyVec.unsafeFromVec(Vec(
     BenchmarkName("ptx-execution"),
     BenchmarkName("cuda-cloverleaf-flux"),
     BenchmarkName("ptx-program-lifecycle"),
@@ -32,9 +31,9 @@ object PlatformBenchmarks {
     BenchmarkName("amdgpu-atomic"),
     BenchmarkName("amdgpu-vector-memory"),
     BenchmarkName("journal-inspection")
-  ).refineUnsafe[MinLength[1]]
+  ))
 
-  def run(invocation: BenchmarkInvocation): Unit = invocation.name.value match {
+  def run(invocation: BenchmarkInvocation): Unit = invocation.name.raw match {
     case "ptx-execution"         => PTXExecutionBenchmark.run(invocation.arguments.toArray)
     case "cuda-cloverleaf-flux"  => CUDACloverleafFluxBenchmark.run(invocation.arguments.toArray)
     case "ptx-program-lifecycle" => PTXProgramLifecycleBenchmark.run(invocation.arguments.toArray)

@@ -2,14 +2,12 @@ package net.kurobako.gemstone.binary
 
 import net.kurobako.gemstone.Vec
 
-import io.github.iltotore.iron.*
-
 private[gemstone] object LittleEndian {
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   inline def decode(size: ScalarByteWidth)(inline byteAt: Int => Byte): Long = {
     var result = 0L
     var index  = 0
-    while (index < size.value) {
+    while (index < size.raw) {
       result |= (byteAt(index).toLong & 0xffL) << (index * 8)
       index += 1
     }
@@ -38,7 +36,7 @@ private[gemstone] object LittleEndian {
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   inline def write(value: Long, size: ScalarByteWidth)(inline writeByte: (Int, Byte) => Unit): Unit = {
     var index = 0
-    while (index < size.value) {
+    while (index < size.raw) {
       writeByte(index, (value >>> (index * 8)).toByte)
       index += 1
     }
@@ -57,13 +55,13 @@ private[gemstone] object LittleEndian {
   }
 
   def toArray(value: Long, size: ScalarByteWidth): Array[Byte] = {
-    val mutableBytes = Array.ofDim[Byte](size.value)
+    val mutableBytes = Array.ofDim[Byte](size.raw)
     write(value, mutableBytes, 0, size)
     mutableBytes
   }
 
   def toVec(value: Long, size: ScalarByteWidth): Vec[Byte] =
-    Vec.tabulate(size.value)(index => (value >>> (index * 8)).toByte)
+    Vec.tabulate(size.raw)(index => (value >>> (index * 8)).toByte)
 
   private def requireRange(
       length: Int,
@@ -72,7 +70,7 @@ private[gemstone] object LittleEndian {
   ): Unit =
     // Validate the complete dependent range once; a non-negative offset alone could not prove that the access fits.
     require(
-      ByteRange.contains(length, offset.toLong, size.value.toLong),
-      s"byte range [$offset, ${offset.toLong + size.value}) exceeds $length"
+      ByteRange.contains(length, offset.toLong, size.raw.toLong),
+      s"byte range [$offset, ${offset.toLong + size.raw}) exceeds $length"
     )
 }

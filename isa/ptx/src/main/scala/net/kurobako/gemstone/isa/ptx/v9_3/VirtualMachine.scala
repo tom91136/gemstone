@@ -1,5 +1,7 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
+import net.kurobako.gemstone.NonNegativeLong
+import net.kurobako.gemstone.PositiveLong
 import net.kurobako.gemstone.Vec
 import net.kurobako.gemstone.isa.GlobalName
 import net.kurobako.gemstone.isa.KernelMetadata
@@ -15,9 +17,6 @@ import net.kurobako.gemstone.vm.Observer
 import net.kurobako.gemstone.vm.Result
 import net.kurobako.gemstone.vm.Scheduler
 import net.kurobako.gemstone.vm.TaskControl
-
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
 
 final class VirtualMachine(
     override val observer: Observer[Event],
@@ -44,14 +43,14 @@ final class VirtualMachine(
   def global(
       program: LoadedProgram,
       name: GlobalName
-  ): Either[Fault, (Long :| Positive0, Vec[Byte])] = program.globalImage(name)
+  ): Either[Fault, (NonNegativeLong, Vec[Byte])] = program.globalImage(name)
 
   def bindGlobal(
       program: LoadedProgram,
       name: GlobalName,
       region: MemoryRegion,
-      offset: Long :| Positive0,
-      regionSize: Long :| Positive,
+      offset: NonNegativeLong,
+      regionSize: PositiveLong,
       addresses: AddressSpace
   ): Either[Fault, Unit] = program.bindGlobal(name, region, offset, regionSize, addresses)
 

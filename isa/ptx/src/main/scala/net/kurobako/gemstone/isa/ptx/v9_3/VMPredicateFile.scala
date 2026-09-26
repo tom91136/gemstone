@@ -13,11 +13,11 @@ private[v9_3] final class VMPredicateFile {
   private var bits: Array[Long] | Null                   = null
   private var named: mutable.Map[String, Boolean] | Null = null
 
-  def get(name: RegisterName): Option[Boolean] = predicateSlot(name.value) match {
+  def get(name: RegisterName): Option[Boolean] = predicateSlot(name.raw) match {
     case Some(index) => getSlot(index)
     case None        => named match {
         case null   => None
-        case values => values.get(name.value)
+        case values => values.get(name.raw)
       }
   }
 
@@ -33,7 +33,7 @@ private[v9_3] final class VMPredicateFile {
 
   def apply(name: RegisterName): Boolean = get(name).getOrElse(false)
 
-  def update(name: RegisterName, value: Boolean): Unit = predicateSlot(name.value) match {
+  def update(name: RegisterName, value: Boolean): Unit = predicateSlot(name.raw) match {
     case Some(index) => updateSlot(index, value)
     case None        =>
       val values = named match {
@@ -43,7 +43,7 @@ private[v9_3] final class VMPredicateFile {
           allocated
         case existing => existing
       }
-      values(name.value) = value
+      values(name.raw) = value
   }
 
   def updateSlot(index: Int, value: Boolean): Unit = {
@@ -79,7 +79,7 @@ private[v9_3] final class VMPredicateFile {
 }
 
 private[v9_3] object VMPredicateFile {
-  def index(name: RegisterName): Int = indexRaw(name.value)
+  def index(name: RegisterName): Int = indexRaw(name.raw)
 
   def indexRaw(name: String): Int = {
     val index = VMRegisterFile.indexRaw(name)

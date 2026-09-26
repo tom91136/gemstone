@@ -2,20 +2,17 @@ package net.kurobako.gemstone.isa.amdgpu
 
 import VMLoader.AMDGPUKernelVariants
 
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
-
-import net.kurobako.gemstone.Vec
+import net.kurobako.gemstone.{NonNegativeInt, NonNegativeLong, Vec}
 import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.Dimensions
 
 final class VMLoaderSuite extends munit.FunSuite with CodeObjectTestSupport {
   private object EmptyMemory extends Memory with TestAddressSpace {
-    override protected val regionSizes: Iterable[(MemoryRegion, Long)]                     = Seq.empty
-    override def read(id: MemoryRegion, offset: Long :| Positive0, size: Int :| Positive0) =
+    override protected val regionSizes: Iterable[(MemoryRegion, Long)]                 = Seq.empty
+    override def read(id: MemoryRegion, offset: NonNegativeLong, size: NonNegativeInt) =
       Right(Vec.empty[Byte])
-    override def write(id: MemoryRegion, offset: Long :| Positive0, bytes: Vec[Byte]) = Right(())
+    override def write(id: MemoryRegion, offset: NonNegativeLong, bytes: Vec[Byte]) = Right(())
   }
 
   test("AMDGPU kernel aliases select the indexed implementation matching the code-object target") {

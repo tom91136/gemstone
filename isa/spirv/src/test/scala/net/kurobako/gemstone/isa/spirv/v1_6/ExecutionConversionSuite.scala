@@ -8,8 +8,7 @@ import net.kurobako.gemstone.Vec
 import net.kurobako.gemstone.binary.ByteRange
 import net.kurobako.gemstone.binary.LittleEndian
 import net.kurobako.gemstone.binary.ScalarByteWidth
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
+import net.kurobako.gemstone.{NonEmptyVec, NonNegativeInt, NonNegativeLong, PositiveInt, PositiveLong}
 
 import java.util.concurrent.atomic.AtomicReference
 final class ExecutionConversionSuite extends munit.FunSuite with ExecutionTestSupport {
@@ -56,7 +55,8 @@ final class ExecutionConversionSuite extends munit.FunSuite with ExecutionTestSu
       Instruction.Return(),
       Instruction.FunctionEnd()
     )
-    val module     = Module(Header(ISA.version, Word(0), Word(20), Word(0)), instructions, Endianness.Little)
+    val module =
+      Module(Header(ISA.version, Word(0), Word(20), Word(0)), instructions, Endianness.Little)
     val allocation = MemoryRegion(4L)
     val memory     = ArrayMemory(allocation, 8)
     val dispatch   = KernelTask
@@ -65,9 +65,9 @@ final class ExecutionConversionSuite extends munit.FunSuite with ExecutionTestSu
         Dimensions.One,
         Dimensions.One,
         Vec(
-          KernelTask.Argument.Memory(allocation, 0L),
-          KernelTask.Argument.Scalar(LittleEndian.toVec(0xfffffffeL, ScalarByteWidth.Dword) ++
-            LittleEndian.toVec(3L, ScalarByteWidth.Dword)),
+          KernelTask.Argument.Memory(allocation, NonNegativeLong(0L)),
+          KernelTask.Argument.Scalar(LittleEndian.toVec(0xfffffffeL, ScalarByteWidth(4)) ++
+            LittleEndian.toVec(3L, ScalarByteWidth(4))),
           KernelTask.Argument.Scalar(
             LittleEndian.toVec(java.lang.Float.floatToRawIntBits(0.5f).toLong, ScalarByteWidth.Dword) ++
               LittleEndian.toVec(java.lang.Float.floatToRawIntBits(1.5f).toLong, ScalarByteWidth.Dword)
@@ -169,11 +169,11 @@ final class ExecutionConversionSuite extends munit.FunSuite with ExecutionTestSu
         Dimensions.One,
         Dimensions.One,
         Vec(
-          KernelTask.Argument.Memory(halfAllocation, 0L),
-          KernelTask.Argument.Scalar(LittleEndian.toVec(0L, ScalarByteWidth.Word) ++
-            LittleEndian.toVec(3L, ScalarByteWidth.Word)),
-          KernelTask.Argument.Scalar(LittleEndian.toVec(0x0001L, ScalarByteWidth.Word) ++
-            LittleEndian.toVec(0x3e00L, ScalarByteWidth.Word))
+          KernelTask.Argument.Memory(halfAllocation, NonNegativeLong(0L)),
+          KernelTask.Argument.Scalar(LittleEndian.toVec(0L, ScalarByteWidth(2)) ++
+            LittleEndian.toVec(3L, ScalarByteWidth(2))),
+          KernelTask.Argument.Scalar(LittleEndian.toVec(0x0001L, ScalarByteWidth(2)) ++
+            LittleEndian.toVec(0x3e00L, ScalarByteWidth(2)))
         )
       )
       .toOption
@@ -216,7 +216,8 @@ final class ExecutionConversionSuite extends munit.FunSuite with ExecutionTestSu
       Instruction.Return(),
       Instruction.FunctionEnd()
     )
-    val module     = Module(Header(ISA.version, Word(0), Word(16), Word(0)), instructions, Endianness.Little)
+    val module =
+      Module(Header(ISA.version, Word(0), Word(16), Word(0)), instructions, Endianness.Little)
     val allocation = MemoryRegion(6L)
     val memory     = ArrayMemory(allocation, 4)
     val dispatch   = KernelTask
@@ -225,9 +226,9 @@ final class ExecutionConversionSuite extends munit.FunSuite with ExecutionTestSu
         Dimensions.One,
         Dimensions.One,
         Vec(
-          KernelTask.Argument.Memory(allocation, 0L),
-          KernelTask.Argument.Scalar(LittleEndian.toVec(0xfffffff9L, ScalarByteWidth.Dword)),
-          KernelTask.Argument.Scalar(LittleEndian.toVec(3L, ScalarByteWidth.Dword))
+          KernelTask.Argument.Memory(allocation, NonNegativeLong(0L)),
+          KernelTask.Argument.Scalar(LittleEndian.toVec(0xfffffff9L, ScalarByteWidth(4))),
+          KernelTask.Argument.Scalar(LittleEndian.toVec(3L, ScalarByteWidth(4)))
         )
       )
       .toOption
@@ -344,9 +345,10 @@ final class ExecutionConversionSuite extends munit.FunSuite with ExecutionTestSu
       Instruction.Return(),
       Instruction.FunctionEnd()
     )
-    val module = Module(Header(ISA.version, Word(0), Word(16), Word(0)), instructions, Endianness.Little)
+    val module =
+      Module(Header(ISA.version, Word(0), Word(16), Word(0)), instructions, Endianness.Little)
 
-    def run(id: Long :| Positive, leftBits: Long, rightBits: Long): Vec[Byte] = {
+    def run(id: Long, leftBits: Long, rightBits: Long): Vec[Byte] = {
       val allocation = MemoryRegion(id)
       val memory     = ArrayMemory(allocation, 4)
       val dispatch   = KernelTask
@@ -355,9 +357,9 @@ final class ExecutionConversionSuite extends munit.FunSuite with ExecutionTestSu
           Dimensions.One,
           Dimensions.One,
           Vec(
-            KernelTask.Argument.Memory(allocation, 0L),
-            KernelTask.Argument.Scalar(LittleEndian.toVec(leftBits, ScalarByteWidth.Dword)),
-            KernelTask.Argument.Scalar(LittleEndian.toVec(rightBits, ScalarByteWidth.Dword))
+            KernelTask.Argument.Memory(allocation, NonNegativeLong(0L)),
+            KernelTask.Argument.Scalar(LittleEndian.toVec(leftBits, ScalarByteWidth(4))),
+            KernelTask.Argument.Scalar(LittleEndian.toVec(rightBits, ScalarByteWidth(4)))
           )
         )
         .toOption
@@ -383,9 +385,9 @@ final class ExecutionConversionSuite extends munit.FunSuite with ExecutionTestSu
         Dimensions.One,
         Dimensions.One,
         Vec(
-          KernelTask.Argument.Memory(allocation, 0L),
-          KernelTask.Argument.Scalar(LittleEndian.toVec(0L, ScalarByteWidth.Dword)),
-          KernelTask.Argument.Scalar(LittleEndian.toVec(0L, ScalarByteWidth.Dword))
+          KernelTask.Argument.Memory(allocation, NonNegativeLong(0L)),
+          KernelTask.Argument.Scalar(LittleEndian.toVec(0L, ScalarByteWidth(4))),
+          KernelTask.Argument.Scalar(LittleEndian.toVec(0L, ScalarByteWidth(4)))
         )
       )
       .toOption
@@ -435,9 +437,10 @@ final class ExecutionConversionSuite extends munit.FunSuite with ExecutionTestSu
       Instruction.Return(),
       Instruction.FunctionEnd()
     )
-    val module = Module(Header(ISA.version, Word(0), Word(11), Word(0)), instructions, Endianness.Little)
+    val module =
+      Module(Header(ISA.version, Word(0), Word(11), Word(0)), instructions, Endianness.Little)
 
-    def run(id: Long :| Positive, value: Double): Either[Fault, Vec[Byte]] = {
+    def run(id: Long, value: Double): Either[Fault, Vec[Byte]] = {
       val allocation = MemoryRegion(id)
       val memory     = ArrayMemory(allocation, 8)
       val dispatch   = KernelTask
@@ -446,7 +449,7 @@ final class ExecutionConversionSuite extends munit.FunSuite with ExecutionTestSu
           Dimensions.One,
           Dimensions.One,
           Vec(
-            KernelTask.Argument.Memory(allocation, 0L),
+            KernelTask.Argument.Memory(allocation, NonNegativeLong(0L)),
             KernelTask.Argument.Scalar(LittleEndian.toVec(
               java.lang.Double.doubleToRawLongBits(value),
               ScalarByteWidth.Qword
@@ -458,10 +461,10 @@ final class ExecutionConversionSuite extends munit.FunSuite with ExecutionTestSu
       executeUnchecked(module, dispatch, memory).map(_ => memory.bytes)
     }
 
-    assertEquals(run(13L, 255.75), Right(LittleEndian.toVec(255L, ScalarByteWidth.Qword)))
+    assertEquals(run(13L, 255.75), Right(LittleEndian.toVec(255L, ScalarByteWidth(8))))
     assertEquals(
       run(14L, java.lang.Math.scalb(1.0, 63)),
-      Right(LittleEndian.toVec(Long.MinValue, ScalarByteWidth.Qword))
+      Right(LittleEndian.toVec(Long.MinValue, ScalarByteWidth(8)))
     )
     run(15L, -1.0) match {
       case Left(Fault.InvalidTask(message)) =>
@@ -477,10 +480,10 @@ final class ExecutionConversionSuite extends munit.FunSuite with ExecutionTestSu
         Dimensions.One,
         Dimensions.One,
         Vec(
-          KernelTask.Argument.Memory(allocation, 0L),
+          KernelTask.Argument.Memory(allocation, NonNegativeLong(0L)),
           KernelTask.Argument.Scalar(LittleEndian.toVec(
             java.lang.Double.doubleToRawLongBits(1.0),
-            ScalarByteWidth.Qword
+            ScalarByteWidth(8)
           ))
         )
       )
@@ -532,7 +535,7 @@ final class ExecutionConversionSuite extends munit.FunSuite with ExecutionTestSu
         Dimensions.One,
         Dimensions.One,
         Vec(
-          KernelTask.Argument.Memory(allocation, 0L),
+          KernelTask.Argument.Memory(allocation, NonNegativeLong(0L)),
           KernelTask.Argument.Scalar(
             LittleEndian.toVec(java.lang.Float.floatToRawIntBits(Float.NaN).toLong, ScalarByteWidth.Dword)
           )
@@ -587,7 +590,7 @@ final class ExecutionConversionSuite extends munit.FunSuite with ExecutionTestSu
         Dimensions.One,
         Dimensions.One,
         Vec(
-          KernelTask.Argument.Memory(allocation, 0L),
+          KernelTask.Argument.Memory(allocation, NonNegativeLong(0L)),
           KernelTask.Argument.Scalar(bits(2.0f) ++ bits(-3.0f)),
           KernelTask.Argument.Scalar(bits(-2.0f))
         )

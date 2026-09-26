@@ -1,10 +1,7 @@
 package net.kurobako.gemstone.memory
 
-import net.kurobako.gemstone.Vec
+import net.kurobako.gemstone.{NonNegativeInt, Vec}
 import net.kurobako.gemstone.Vec.*
-
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
 
 import scala.annotation.nowarn
 
@@ -14,7 +11,7 @@ trait AddressMemory {
 
   /** Stage only resolved accesses from active lanes; implementations may merge adjacent ranges. */
   @nowarn("msg=unused explicit parameter")
-  def prepareReads(ranges: Vec[(GuestAddress, Int :| Positive0)]): Either[MemoryError, Unit] = Right(())
+  def prepareReads(ranges: Vec[(GuestAddress, NonNegativeInt)]): Either[MemoryError, Unit] = Right(())
 
   def readInt8(address: GuestAddress): Either[MemoryError, Byte]
   def readInt32(address: GuestAddress): Either[MemoryError, Int]
@@ -24,11 +21,11 @@ trait AddressMemory {
   /** A byte-range fallback for implementations without a bulk operation. Atomic bulk access belongs to the backing
     * owner and must be provided by overriding this method.
     */
-  def readBytes(address: GuestAddress, size: Int :| Positive0): Either[MemoryError, Vec[Byte]] = {
+  def readBytes(address: GuestAddress, size: NonNegativeInt): Either[MemoryError, Vec[Byte]] = {
     val mutableBytes = Vec.newBuilder[Byte]
     @scala.annotation.tailrec
     def read(index: Int): Either[MemoryError, Vec[Byte]] =
-      if (index == size) Right(mutableBytes.result())
+      if (index == size.raw) Right(mutableBytes.result())
       else readInt8(address.offset(index.toLong)) match {
         case Left(error) => Left(error)
         case Right(byte) =>
@@ -52,10 +49,10 @@ trait AddressMemory {
         write(0)
     }
 
-  def validateRange(address: GuestAddress, size: Int :| Positive0): Either[MemoryError, Unit] = {
+  def validateRange(address: GuestAddress, size: NonNegativeInt): Either[MemoryError, Unit] = {
     @scala.annotation.tailrec
     def validate(index: Int): Either[MemoryError, Unit] =
-      if (index == size) Right(())
+      if (index == size.raw) Right(())
       else readInt8(address.offset(index.toLong)) match {
         case Left(error) => Left(error)
         case Right(_)    => validate(index + 1)
@@ -67,7 +64,7 @@ trait AddressMemory {
   def readLittleEndian(address: GuestAddress, size: MemoryValueByteWidth): Either[MemoryError, Long] = {
     @scala.annotation.tailrec
     def read(index: Int, value: Long): Either[MemoryError, Long] =
-      if (index == size.value) Right(value)
+      if (index == size.raw) Right(value)
       else readInt8(address.offset(index.toLong)) match {
         case Left(error) => Left(error)
         case Right(byte) => read(index + 1, value | ((byte.toLong & 0xffL) << (index * 8)))
@@ -81,7 +78,7 @@ trait AddressMemory {
       case Right(())   =>
         @scala.annotation.tailrec
         def write(index: Int): Either[MemoryError, Unit] =
-          if (index == size.value) Right(())
+          if (index == size.raw) Right(())
           else writeInt8(address.offset(index.toLong), (value >>> (index * 8)).toByte) match {
             case Left(error) => Left(error)
             case Right(())   => write(index + 1)

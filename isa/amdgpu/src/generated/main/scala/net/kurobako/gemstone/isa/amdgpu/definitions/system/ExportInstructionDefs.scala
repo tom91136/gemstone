@@ -1,5 +1,4 @@
 // Generated from the pinned Mesa ACO and AMD machine-readable ISA inputs. Regenerate with: sbt codegen
-// scalafix:off GemstoneNoAssume; values were validated by the generator
 package net.kurobako.gemstone.isa.amdgpu
 
 import net.kurobako.gemstone.Vec
@@ -9,14 +8,14 @@ import Program.*
 @javax.annotation.processing.Generated(Array("sbt codegen"))
 private[amdgpu] object ExportInstructionDefs {
   case object Exp extends Definition(
-        Opcode.assume("exp"),
+        Opcode("exp"),
         decoder(form(5)((operands, mods) =>
           Instruction.Exp(operands(0), operands(1), operands(2), operands(3), operands(4), mods)
         )),
         402
       )
   case object Export extends Definition(
-        Opcode.assume("export"),
+        Opcode("export"),
         decoder(form(5)((operands, mods) =>
           Instruction.Export(operands(0), operands(1), operands(2), operands(3), operands(4), mods)
         )),

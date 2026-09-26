@@ -1,6 +1,6 @@
 package net.kurobako.gemstone.isa.spirv.v1_6
 
-import net.kurobako.gemstone.Vec
+import net.kurobako.gemstone.{NonNegativeLong, PositiveLong, Vec}
 import net.kurobako.gemstone.isa.{GlobalName, KernelMetadata, KernelName}
 import net.kurobako.gemstone.vm.{
   Event,
@@ -13,9 +13,6 @@ import net.kurobako.gemstone.vm.{
   Scheduler,
   TaskControl
 }
-
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
 
 final class VirtualMachine(
     environment: Validation.Environment,
@@ -47,24 +44,24 @@ final class VirtualMachine(
   ): Either[Fault, KernelMetadata] =
     VMInterpreter.kernelMetadata(program, name)
 
-  def global(program: LoadedProgram, name: GlobalName): Either[Fault, (Long :| Positive0, Vec[Byte])] =
-    VMInterpreter.globalImage(program, name.value).map { case (_, bytes) =>
-      bytes.length.toLong.refineUnsafe[Positive0] -> Vec.from(bytes)
+  def global(program: LoadedProgram, name: GlobalName): Either[Fault, (NonNegativeLong, Vec[Byte])] =
+    VMInterpreter.globalImage(program, name.raw).map { case (_, bytes) =>
+      NonNegativeLong.unsafe(bytes.length.toLong) -> Vec.from(bytes)
     }
 
   def bindGlobal(
       program: LoadedProgram,
       name: GlobalName,
       region: MemoryRegion,
-      offset: Long :| Positive0,
-      regionSize: Long :| Positive,
+      offset: NonNegativeLong,
+      regionSize: PositiveLong,
       memory: Memory
   ): Either[Fault, Unit] =
-    VMInterpreter.globalImage(program, name.value).flatMap { case (id, initial) =>
-      if (offset > regionSize || initial.length.toLong > regionSize - offset)
+    VMInterpreter.globalImage(program, name.raw).flatMap { case (id, initial) =>
+      if (offset.raw > regionSize.raw || initial.length.toLong > (regionSize.toNonNegative - offset).raw)
         Left(Fault.Memory(s"SPIR-V global '$name' exceeds the bound allocation"))
       else memory.write(region, offset, Vec.from(initial)).map { _ =>
-        val _ = program.boundGlobals.put(id, program.GlobalBinding(region, offset, memory))
+        val _ = program.boundGlobals.put(id, program.GlobalBinding(region, offset.raw, memory))
         ()
       }
     }
@@ -72,14 +69,14 @@ final class VirtualMachine(
   def writeGlobal(
       program: LoadedProgram,
       name: GlobalName,
-      offset: Long :| Positive0,
+      offset: NonNegativeLong,
       bytes: Vec[Byte]
   ): Either[Fault, Unit] =
-    VMInterpreter.globalImage(program, name.value).flatMap { case (id, initial) =>
+    VMInterpreter.globalImage(program, name.raw).flatMap { case (id, initial) =>
       program.boundGlobals.get(id).toRight(Fault.Memory(s"SPIR-V global '$name' is not bound")).flatMap { binding =>
-        if (offset > initial.length || bytes.length > initial.length - offset)
+        if (offset.raw > initial.length || bytes.length > initial.length - offset.raw)
           Left(Fault.Memory(s"SPIR-V global '$name' write exceeds its storage"))
-        else binding.memory.write(binding.region, (binding.offset + offset).refineUnsafe[Positive0], bytes)
+        else binding.memory.write(binding.region, NonNegativeLong.unsafe(binding.offset + offset.raw), bytes)
       }
     }
 

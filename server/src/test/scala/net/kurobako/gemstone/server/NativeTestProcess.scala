@@ -1,10 +1,8 @@
 package net.kurobako.gemstone.server
 
-import net.kurobako.gemstone.NoNul
-import net.kurobako.gemstone.launcher.Environment
+import net.kurobako.gemstone.*
 
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
+import net.kurobako.gemstone.launcher.Environment
 
 import java.nio.charset.StandardCharsets
 import java.nio.file.{Files, Path}
@@ -42,13 +40,13 @@ private object NativeTestProcess {
   }
 
   final case class Result(
-      command: Vector[String :| NoNul] :| MinLength[1],
+      command: NonEmptyVec[NoNulString],
       exit: Int,
       stdout: String,
       stderr: String
   ) {
     def diagnostic: String =
-      s"command exited with $exit: ${command.mkString(" ")}\nstdout:\n$stdout\nstderr:\n$stderr"
+      s"command exited with $exit: ${command.toVector.mkString(" ")}\nstdout:\n$stdout\nstderr:\n$stderr"
 
   }
 
@@ -67,13 +65,13 @@ private object NativeTestProcess {
   )
 
   def run(
-      command: Vector[String :| NoNul] :| MinLength[1],
+      command: NonEmptyVec[NoNulString],
       directory: Path,
       environment: Environment,
       timeout: FiniteDuration
   ): Result =
     Using.resource(temporaryOutput()) { output =>
-      val builder = ProcessBuilder(command*).directory(directory.toFile)
+      val builder = ProcessBuilder(command.toVector.map(_.raw)*).directory(directory.toFile)
         .redirectOutput(output.stdout.toFile).redirectError(output.stderr.toFile)
       environment.applyTo(builder.environment())
       Using.resource(RunningProcess(builder.start())) { running =>

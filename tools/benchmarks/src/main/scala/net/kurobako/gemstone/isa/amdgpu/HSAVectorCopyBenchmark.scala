@@ -1,6 +1,6 @@
 package net.kurobako.gemstone.isa.amdgpu
 
-import net.kurobako.gemstone.{PlatformTime, Vec}
+import net.kurobako.gemstone.{NonNegativeInt, NonNegativeLong, PlatformTime, PositiveInt, Vec}
 import net.kurobako.gemstone.benchmarks.{BenchmarkArguments, BenchmarkName, BenchmarkResources, PlatformMetrics}
 import net.kurobako.gemstone.binary.{ByteRange, LittleEndian, ScalarByteWidth}
 import net.kurobako.gemstone.isa.KernelName
@@ -10,18 +10,16 @@ import net.kurobako.gemstone.vm.LaunchGeometry.Dimensions
 
 import cats.syntax.all.*
 import com.monovore.decline.Opts
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
 
 /** The exported HSA vector-copy fixture, dispatched without the HSA queue. */
 object HSAVectorCopyBenchmark {
-  private final case class Options(groups: Int :| Positive, iterations: Int :| Positive)
+  private final case class Options(groups: PositiveInt, iterations: PositiveInt)
   private val name    = BenchmarkName("hsa-vector-copy")
   private val options = (
     Opts.option[Int]("groups", help = "64-item workgroups per dispatch").withDefault(1)
-      .validate("groups must be positive")(_ > 0).map(_.refineUnsafe[Positive]),
+      .validate("groups must be positive")(_ > 0).map(PositiveInt.unsafe),
     Opts.option[Int]("iterations", help = "Dispatches per sample").withDefault(5)
-      .validate("iterations must be positive")(_ > 0).map(_.refineUnsafe[Positive])
+      .validate("iterations must be positive")(_ > 0).map(PositiveInt.unsafe)
   ).mapN(Options(_, _))
 
   private final class CopyMemory(elements: Int) extends Memory with BenchmarkAddressSpace {
@@ -44,51 +42,51 @@ object HSAVectorCopyBenchmark {
 
     override def read(
         region: MemoryRegion,
-        offset: Long :| Positive0,
-        size: Int :| Positive0
+        offset: NonNegativeLong,
+        size: NonNegativeInt
     ): Either[Fault, Vec[Byte]] =
       array(region).flatMap { bytes =>
         Either.cond(
-          ByteRange.contains(bytes.length, offset, size.toLong),
-          Vec.unsafeFromArray(java.util.Arrays.copyOfRange(bytes, offset.toInt, offset.toInt + size)),
+          ByteRange.contains(bytes.length, offset.raw, size.raw.toLong),
+          Vec.unsafeFromArray(java.util.Arrays.copyOfRange(bytes, offset.raw.toInt, offset.raw.toInt + size.raw)),
           Fault.InvalidTask("HSA benchmark read outside allocation")
         )
       }
 
-    override def write(region: MemoryRegion, offset: Long :| Positive0, bytes: Vec[Byte]): Either[Fault, Unit] =
+    override def write(region: MemoryRegion, offset: NonNegativeLong, bytes: Vec[Byte]): Either[Fault, Unit] =
       array(region).flatMap { target =>
-        if (!ByteRange.contains(target.length, offset, bytes.length.toLong))
+        if (!ByteRange.contains(target.length, offset.raw, bytes.length.toLong))
           Left(Fault.InvalidTask("HSA benchmark write outside allocation"))
         else {
-          val _ = bytes.copyToArray(target, offset.toInt, bytes.length)
+          val _ = bytes.copyToArray(target, offset.raw.toInt, bytes.length)
           Right(())
         }
       }
 
     override def readValue(
         region: MemoryRegion,
-        offset: Long :| Positive0,
+        offset: NonNegativeLong,
         size: MemoryValueByteWidth
     ): Either[Fault, Long] =
       array(region).flatMap { bytes =>
         Either.cond(
-          ByteRange.contains(bytes.length, offset, size.value.toLong),
-          LittleEndian.decode(bytes, offset.toInt, size.scalarByteWidth),
+          ByteRange.contains(bytes.length, offset.raw, size.raw.toLong),
+          LittleEndian.decode(bytes, offset.raw.toInt, size.scalarByteWidth),
           Fault.InvalidTask("HSA benchmark read outside allocation")
         )
       }
 
     override def writeValue(
         region: MemoryRegion,
-        offset: Long :| Positive0,
+        offset: NonNegativeLong,
         value: Long,
         size: MemoryValueByteWidth
     ): Either[Fault, Unit] =
       array(region).flatMap { bytes =>
-        if (!ByteRange.contains(bytes.length, offset, size.value.toLong))
+        if (!ByteRange.contains(bytes.length, offset.raw, size.raw.toLong))
           Left(Fault.InvalidTask("HSA benchmark write outside allocation"))
         else {
-          LittleEndian.write(value, bytes, offset.toInt, size.scalarByteWidth)
+          LittleEndian.write(value, bytes, offset.raw.toInt, size.scalarByteWidth)
           Right(())
         }
       }
@@ -124,7 +122,7 @@ object HSAVectorCopyBenchmark {
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   def run(arguments: Array[String]): Unit = {
     val parsed   = BenchmarkArguments.parse(name, arguments.toSeq, options)
-    val elements = Math.multiplyExact(parsed.groups, 64)
+    val elements = Math.multiplyExact(parsed.groups.raw, 64)
     val memory   = CopyMemory(elements)
     memory.initialise()
     val image    = Vec.unsafeFromArray(BenchmarkResources.bytes("hsa-vector-copy.hsaco"))
@@ -135,19 +133,19 @@ object HSAVectorCopyBenchmark {
     } yield compiled).fold(error => throw IllegalArgumentException(error.message), identity)
     val task = KernelTask.validated(
       KernelName("vector_copy"),
-      Dimensions(64, 1, 1),
-      Dimensions(parsed.groups, 1, 1),
+      Dimensions(PositiveInt(64), PositiveInt.One, PositiveInt.One),
+      Dimensions(parsed.groups, PositiveInt.One, PositiveInt.One),
       Vec(
-        KernelTask.Argument.Memory(MemoryRegion(1), 0L),
-        KernelTask.Argument.Memory(MemoryRegion(2), 0L),
-        KernelTask.Argument.Memory(MemoryRegion(3), 0L),
+        KernelTask.Argument.Memory(MemoryRegion(1), NonNegativeLong.Zero),
+        KernelTask.Argument.Memory(MemoryRegion(2), NonNegativeLong.Zero),
+        KernelTask.Argument.Memory(MemoryRegion(3), NonNegativeLong.Zero),
         KernelTask.Argument.Scalar(Vec.fill(56)(0.toByte))
       )
     ).fold(error => throw IllegalArgumentException(error), identity)
     val before    = PlatformMetrics.allocatedBytes
     val started   = PlatformTime.monotonicNanos
     var iteration = 0
-    while (iteration < parsed.iterations) {
+    while (iteration < parsed.iterations.raw) {
       VMInterpreter.execute(prepared, task, memory, memory, TaskControl.default, Scheduler.Sequential, Vec.empty)
         .fold(error => throw IllegalStateException(error.message), _ => ())
       iteration += 1
@@ -157,11 +155,12 @@ object HSAVectorCopyBenchmark {
       start <- before
       end   <- PlatformMetrics.allocatedBytes
       if end >= start
-    } yield end - start
+    } yield (end - start).raw
     val checksum = memory.verify()
     Console.out.println(
-      s"groups=${parsed.groups} iterations=${parsed.iterations} nsPerDispatch=${elapsed.toDouble / parsed.iterations} " +
-        s"bytesPerDispatch=${allocated.fold(Double.NaN)(_.toDouble / parsed.iterations)} checksum=$checksum"
+      s"groups=${parsed.groups} iterations=${parsed.iterations} nsPerDispatch=${elapsed.toDouble /
+          parsed.iterations.raw} " +
+        s"bytesPerDispatch=${allocated.fold(Double.NaN)(_.toDouble / parsed.iterations.raw)} checksum=$checksum"
     )
   }
 }

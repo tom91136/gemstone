@@ -1,6 +1,6 @@
 package net.kurobako.gemstone.isa.amdgpu
 
-import net.kurobako.gemstone.{PlatformTime, Vec}
+import net.kurobako.gemstone.{NonNegativeInt, NonNegativeLong, PlatformTime, PositiveInt, Vec}
 import net.kurobako.gemstone.benchmarks.{
   BenchmarkArguments,
   BenchmarkName,
@@ -16,20 +16,18 @@ import net.kurobako.gemstone.vm.LaunchGeometry.Dimensions
 
 import cats.syntax.all.*
 import com.monovore.decline.Opts
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
 
 /** HIP code-object form of the bounded CloverLeaf flux calculation. */
 object HIPCloverleafFluxBenchmark {
-  private final case class Options(cells: Int :| Positive, iterations: Int :| Positive)
+  private final case class Options(cells: PositiveInt, iterations: PositiveInt)
   private val name                  = BenchmarkName("hip-cloverleaf-flux")
   private val explicitArgumentBytes = 8 * 8 + 4 + 4 + 8
   private val options               = (
     Opts.option[Int]("cells", help = "Cells per dispatch").withDefault(64)
       .validate("cells must be positive")(_ > 0)
-      .map(_.refineUnsafe[Positive]),
+      .map(PositiveInt.unsafe),
     Opts.option[Int]("iterations", help = "Dispatches per sample").withDefault(20)
-      .validate("iterations must be positive")(_ > 0).map(_.refineUnsafe[Positive])
+      .validate("iterations must be positive")(_ > 0).map(PositiveInt.unsafe)
   ).mapN(Options(_, _))
 
   private final class FluxMemory(length: Int) extends Memory with BenchmarkAddressSpace {
@@ -43,57 +41,66 @@ object HIPCloverleafFluxBenchmark {
 
     override def read(
         region: MemoryRegion,
-        offset: Long :| Positive0,
-        size: Int :| Positive0
+        offset: NonNegativeLong,
+        size: NonNegativeInt
     ): Either[Fault, Vec[Byte]] =
       array(region).flatMap { source =>
         Either.cond(
-          ByteRange.contains(source.length, offset, size.toLong),
-          Vec.unsafeFromArray(java.util.Arrays.copyOfRange(source, offset.toInt, offset.toInt + size)),
+          ByteRange.contains(source.length, offset.raw, size.raw.toLong),
+          Vec.unsafeFromArray(java.util.Arrays.copyOfRange(
+            source,
+            offset.raw.toInt,
+            offset.raw.toInt + size.raw
+          )),
           Fault.InvalidTask("CloverLeaf read outside allocation")
         )
       }
 
-    override def write(region: MemoryRegion, offset: Long :| Positive0, bytes: Vec[Byte]): Either[Fault, Unit] =
+    override def write(region: MemoryRegion, offset: NonNegativeLong, bytes: Vec[Byte]): Either[Fault, Unit] =
       array(region).flatMap { destination =>
-        if (!ByteRange.contains(destination.length, offset, bytes.length.toLong))
+        if (!ByteRange.contains(destination.length, offset.raw, bytes.length.toLong))
           Left(Fault.InvalidTask("CloverLeaf write outside allocation"))
         else {
-          val _ = bytes.copyToArray(destination, offset.toInt, bytes.length)
+          val _ = bytes.copyToArray(destination, offset.raw.toInt, bytes.length)
           Right(())
         }
       }
 
     override def readValue(
         region: MemoryRegion,
-        offset: Long :| Positive0,
+        offset: NonNegativeLong,
         size: MemoryValueByteWidth
     ): Either[Fault, Long] =
       array(region).flatMap { source =>
         Either.cond(
-          ByteRange.contains(source.length, offset, size.value.toLong),
-          LittleEndian.decode(source, offset.toInt, size.scalarByteWidth),
+          ByteRange.contains(source.length, offset.raw, size.raw.toLong),
+          LittleEndian.decode(source, offset.raw.toInt, size.scalarByteWidth),
           Fault.InvalidTask("CloverLeaf read outside allocation")
         )
       }
 
     override def writeValue(
         region: MemoryRegion,
-        offset: Long :| Positive0,
+        offset: NonNegativeLong,
         value: Long,
         size: MemoryValueByteWidth
     ): Either[Fault, Unit] =
       array(region).flatMap { destination =>
-        if (!ByteRange.contains(destination.length, offset, size.value.toLong))
+        if (!ByteRange.contains(destination.length, offset.raw, size.raw.toLong))
           Left(Fault.InvalidTask("CloverLeaf write outside allocation"))
         else {
-          LittleEndian.write(value, destination, offset.toInt, size.scalarByteWidth)
+          LittleEndian.write(value, destination, offset.raw.toInt, size.scalarByteWidth)
           Right(())
         }
       }
 
     def put(array: Int, index: Int, value: Double): Unit =
-      LittleEndian.write(java.lang.Double.doubleToRawLongBits(value), arrays(array), index * 8, ScalarByteWidth(8))
+      LittleEndian.write(
+        java.lang.Double.doubleToRawLongBits(value),
+        arrays(array),
+        index * 8,
+        ScalarByteWidth(8)
+      )
 
     def get(array: Int, index: Int): Double =
       java.lang.Double.longBitsToDouble(LittleEndian.decode(arrays(array), index * 8, ScalarByteWidth(8)))
@@ -102,16 +109,16 @@ object HIPCloverleafFluxBenchmark {
   private def hiddenArguments(image: Vec[Byte], kernargSize: Int, cells: Int, groups: Int): Vec[Byte] = {
     val manifest = CodeObjectMetadata.decode(image)
       .fold(error => throw IllegalArgumentException(error.message), identity)
-      .find(_.name.value == "clover_flux")
+      .find(_.name.raw == "clover_flux")
       .getOrElse(throw IllegalArgumentException("missing HIP CloverLeaf kernel metadata"))
-    if (manifest.metadata.argumentBlockSize != kernargSize || kernargSize < explicitArgumentBytes)
+    if (manifest.metadata.argumentBlockSize.raw != kernargSize || kernargSize < explicitArgumentBytes)
       throw IllegalArgumentException("HIP CloverLeaf kernarg layout differs from its code-object metadata")
     val hidden = Array.ofDim[Byte](kernargSize - explicitArgumentBytes)
     def write(name: String, value: Long, width: ScalarByteWidth): Unit = {
       val field = manifest.hiddenArguments.find(_.valueKind == name)
         .getOrElse(throw IllegalArgumentException(s"missing HIP kernarg field $name"))
       val offset = field.offset - explicitArgumentBytes
-      if (field.width != width.value || !ByteRange.contains(hidden.length, offset, width.value.toLong))
+      if (field.width != width.raw || !ByteRange.contains(hidden.length, offset, width.raw.toLong))
         throw IllegalArgumentException(s"invalid HIP kernarg field $name layout")
       LittleEndian.write(value, hidden, offset, width)
     }
@@ -129,7 +136,7 @@ object HIPCloverleafFluxBenchmark {
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   def run(arguments: Array[String]): Unit = {
     val parsed = BenchmarkArguments.parse(name, arguments.toSeq, options)
-    val length = CloverleafFluxFixture.length(parsed.cells)
+    val length = CloverleafFluxFixture.length(parsed.cells.raw)
     val memory = FluxMemory(length)
     var array  = 0
     while (array < CloverleafFluxFixture.inputs) {
@@ -146,15 +153,18 @@ object HIPCloverleafFluxBenchmark {
       kernel     <- codeObject.kernel("clover_flux")
       compiled   <- VMCompiler.compile(kernel).left.map(error => CodeObject.CodeObjectError.Invalid(error.message))
     } yield compiled).fold(error => throw IllegalArgumentException(error.message), identity)
-    val groups = ((parsed.cells.toLong + 63L) / 64L).toInt.refineUnsafe[Positive]
-    val hidden = hiddenArguments(image, prepared.source.kernargSize, parsed.cells, groups)
+    val groups = PositiveInt.unsafe(((parsed.cells.raw.toLong + 63L) / 64L).toInt)
+    val hidden = hiddenArguments(image, prepared.source.kernargSize, parsed.cells.raw, groups.raw)
     val task   = KernelTask.validated(
       KernelName("clover_flux"),
-      Dimensions(64, 1, 1),
-      Dimensions(groups, 1, 1),
-      Vec.from((1L to 8L).map(id => KernelTask.Argument.Memory(MemoryRegion(id), 0L))) ++ Vec(
-        KernelTask.Argument.Scalar(LittleEndian.toVec(parsed.cells.toLong, ScalarByteWidth(4))),
-        KernelTask.Argument.Scalar(LittleEndian.toVec(CloverleafFluxFixture.rowStride.toLong, ScalarByteWidth(4))),
+      Dimensions(PositiveInt(64), PositiveInt.One, PositiveInt.One),
+      Dimensions(groups, PositiveInt.One, PositiveInt.One),
+      Vec.from((1L to 8L).map(id => KernelTask.Argument.Memory(MemoryRegion(id), NonNegativeLong.Zero))) ++ Vec(
+        KernelTask.Argument.Scalar(LittleEndian.toVec(parsed.cells.raw.toLong, ScalarByteWidth(4))),
+        KernelTask.Argument.Scalar(LittleEndian.toVec(
+          CloverleafFluxFixture.rowStride.toLong,
+          ScalarByteWidth(4)
+        )),
         KernelTask.Argument.Scalar(LittleEndian.toVec(
           java.lang.Double.doubleToRawLongBits(CloverleafFluxFixture.dt),
           ScalarByteWidth(8)
@@ -165,7 +175,7 @@ object HIPCloverleafFluxBenchmark {
     val before    = PlatformMetrics.allocatedBytes
     val started   = PlatformTime.monotonicNanos
     var iteration = 0
-    while (iteration < parsed.iterations) {
+    while (iteration < parsed.iterations.raw) {
       VMInterpreter.execute(prepared, task, memory, memory, TaskControl.default, Scheduler.Sequential, Vec.empty)
         .fold(error => throw IllegalStateException(error.message), _ => ())
       iteration += 1
@@ -175,16 +185,16 @@ object HIPCloverleafFluxBenchmark {
       start <- before
       end   <- PlatformMetrics.allocatedBytes
       if end >= start
-    } yield end - start
+    } yield (end - start).raw
     var checksum = 0L
     var index    = 0
-    while (index < parsed.cells) {
+    while (index < parsed.cells.raw) {
       checksum ^= CloverleafFluxFixture.verify(index, memory.get(6, index), memory.get(7, index))
       index += 1
     }
     Console.out.println(
-      s"cells=${parsed.cells} iterations=${parsed.iterations} nsPerDispatch=${elapsed.toDouble / parsed.iterations} " +
-        s"bytesPerDispatch=${allocated.fold(Double.NaN)(_.toDouble / parsed.iterations)} checksum=$checksum"
+      s"cells=${parsed.cells} iterations=${parsed.iterations} nsPerDispatch=${elapsed.toDouble / parsed.iterations.raw} " +
+        s"bytesPerDispatch=${allocated.fold(Double.NaN)(_.toDouble / parsed.iterations.raw)} checksum=$checksum"
     )
   }
 }

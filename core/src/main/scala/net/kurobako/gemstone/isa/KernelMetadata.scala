@@ -1,19 +1,16 @@
 package net.kurobako.gemstone.isa
 
-import net.kurobako.gemstone.Vec
-
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
+import net.kurobako.gemstone.{NonNegativeInt, PositiveInt, Vec}
 
 /** Format-neutral information needed by a native facade to marshal a kernel launch. */
 final case class KernelMetadata private (
-    argumentBlockSize: Int :| Positive0,
-    explicitParameterCount: Int :| Positive0,
+    argumentBlockSize: NonNegativeInt,
+    explicitParameterCount: NonNegativeInt,
     parameters: Vec[KernelMetadata.Parameter],
     requiredWorkGroupSize: Option[KernelMetadata.WorkGroupSize],
     workGroupSizeHint: Option[KernelMetadata.WorkGroupSize],
-    bindingIndices: Vec[Int :| Positive0],
-    entryPointId: Option[Int :| Positive0]
+    bindingIndices: Vec[NonNegativeInt],
+    entryPointId: Option[NonNegativeInt]
 )
 
 object KernelMetadata {
@@ -23,23 +20,23 @@ object KernelMetadata {
     case Local
   }
 
-  final case class WorkGroupSize(x: Int :| Positive, y: Int :| Positive, z: Int :| Positive)
+  final case class WorkGroupSize(x: PositiveInt, y: PositiveInt, z: PositiveInt)
 
   final case class Parameter(
-      width: Int :| Positive,
-      offset: Int :| Positive0,
+      width: PositiveInt,
+      offset: NonNegativeInt,
       kind: ParameterKind,
       containsPointers: Boolean
   )
 
   def validated(
-      argumentBlockSize: Int :| Positive0,
-      explicitParameterCount: Int :| Positive0,
+      argumentBlockSize: NonNegativeInt,
+      explicitParameterCount: NonNegativeInt,
       parameters: Vec[Parameter],
       requiredWorkGroupSize: Option[WorkGroupSize] = None,
       workGroupSizeHint: Option[WorkGroupSize] = None,
-      bindingIndices: Vec[Int :| Positive0] = Vec.empty,
-      entryPointId: Option[Int :| Positive0] = None
+      bindingIndices: Vec[NonNegativeInt] = Vec.empty,
+      entryPointId: Option[NonNegativeInt] = None
   ): Either[String, KernelMetadata] =
     SymbolValidation
       .kernelParameters(

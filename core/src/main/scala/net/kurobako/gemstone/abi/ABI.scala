@@ -1,27 +1,31 @@
 package net.kurobako.gemstone.abi
 
-import net.kurobako.gemstone.Vec
-import net.kurobako.gemstone.Vec.*
+import net.kurobako.gemstone.{NonEmptyVec, NonNegativeInt, PositiveInt, Vec}
+import net.kurobako.gemstone.NonEmptyVec.positiveSize
 import net.kurobako.gemstone.binary.{LittleEndian, ScalarByteWidth}
-
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
+import net.kurobako.gemstone.memory.MemoryValueByteWidth
 
 import scala.reflect.ClassTag
 import scala.util.NotGiven
 
 object ABI {
 
-  final class EndsInNul
-  object EndsInNul {
-    inline given Constraint[Vec[Byte], EndsInNul] with {
-      override inline def test(inline bytes: Vec[Byte]): Boolean = bytes.nonEmpty && bytes.last == 0.toByte
-      override inline def message: String                        = "Should be non-empty and end in a NUL byte"
+  /** A byte sequence that is non-empty and ends in a NUL terminator. */
+  opaque type NulTerminatedBytes = Vec[Byte]
+
+  object NulTerminatedBytes {
+    def either(bytes: Vec[Byte]): Either[String, NulTerminatedBytes] =
+      if (!bytes.nonEmpty) Left("NUL-terminated bytes must not be empty")
+      else if (bytes.last != 0.toByte) Left("NUL-terminated bytes must end in a NUL byte")
+      else Right(bytes)
+
+    def unsafe(bytes: Vec[Byte]): NulTerminatedBytes =
+      either(bytes).fold(message => throw IllegalArgumentException(message), identity)
+
+    extension (bytes: NulTerminatedBytes) {
+      inline def raw: Vec[Byte] = bytes
     }
   }
-
-  type NulTerminatedBytes = NulTerminatedBytes.T
-  object NulTerminatedBytes extends RefinedType[Vec[Byte], EndsInNul]
 
   /** C pointer access is part of the API type system rather than an unchecked convention in the generated marshaller.
     */
@@ -120,7 +124,7 @@ object ABI {
 
   enum PointerError(val message: String) {
     case InvalidExtent(detail: String) extends PointerError(detail)
-    case OutOfBounds(index: Int :| Positive0, length: Int :| Positive0)
+    case OutOfBounds(index: NonNegativeInt, length: NonNegativeInt)
         extends PointerError(s"pointer index $index is outside [0, $length)")
   }
 
@@ -133,17 +137,17 @@ object ABI {
       private val extent: ExtentEvidence[A, Size],
       private val elementTag: ClassTag[A]
   ) {
-    def length: Int :| Positive0 = mutableElements.length.refineUnsafe[Positive0]
+    def length: NonNegativeInt = NonNegativeInt.unsafe(mutableElements.length)
 
-    private def checkedIndex(index: Int :| Positive0): Either[PointerError, Int] =
-      if (index >= mutableElements.length) Left(PointerError.OutOfBounds(index, length)) else Right(index)
+    private def checkedIndex(index: NonNegativeInt): Either[PointerError, Int] =
+      if (index.raw >= mutableElements.length) Left(PointerError.OutOfBounds(index, length)) else Right(index.raw)
 
-    def read(index: Int :| Positive0 = 0)(using
+    def read(index: NonNegativeInt = NonNegativeInt.Zero)(using
         CanRead[Mode],
         CanDereference[Size]
     ): Either[PointerError, A] = checkedIndex(index).map(mutableElements(_))
 
-    def write(value: A, index: Int :| Positive0 = 0)(using
+    def write(value: A, index: NonNegativeInt = NonNegativeInt.Zero)(using
         CanWrite[Mode],
         CanDereference[Size]
     ): Either[PointerError, Unit] =
@@ -170,12 +174,14 @@ object ABI {
       extent.validateInput(elements)
         .map(_ => Pointer[A, Read, Size](copy(elements), Array.fill(elements.length)(true), extent, elementTag))
 
-    private[gemstone] def output[A, Size <: Extent](length: Int :| Positive0)(using
+    private[gemstone] def output[A, Size <: Extent](length: NonNegativeInt)(using
         extent: ExtentEvidence[A, Size],
         elementTag: ClassTag[A]
     ): Either[PointerError, Pointer[A, Write, Size]] =
-      extent.validateOutput(length)
-        .map(_ => Pointer[A, Write, Size](Array.ofDim[A](length), Array.fill(length)(false), extent, elementTag))
+      extent.validateOutput(length.raw)
+        .map(_ =>
+          Pointer[A, Write, Size](Array.ofDim[A](length.raw), Array.fill(length.raw)(false), extent, elementTag)
+        )
 
     private[gemstone] def inputOutput[A, Size <: Extent](elements: Vec[A])(using
         extent: ExtentEvidence[A, Size],
@@ -186,7 +192,8 @@ object ABI {
         .map(_ => Pointer[A, ReadWrite, Size](copy(elements), Array.fill(elements.length)(true), extent, elementTag))
 
     private[gemstone] def cString(elements: NulTerminatedBytes): CString = {
-      val bytes  = elements.value
+      import NulTerminatedBytes.raw
+      val bytes  = elements.raw
       val extent = summon[ExtentEvidence[Byte, NulTerminated]]
       Pointer[Byte, Read, NulTerminated](copy(bytes), Array.fill(bytes.length)(true), extent, summon[ClassTag[Byte]])
     }
@@ -227,53 +234,49 @@ object ABI {
     * generated surfaces executable on the JVM and Scala Native without pretending that every vendor record is a machine
     * word.
     */
-  sealed class CValue[Name <: String & Singleton] private[abi] (val bytes: Vec[Byte] :| MinLength[1]) {
-    def byteSize: Int :| Positive = bytes.positiveSize
+  sealed class CValue[Name <: String & Singleton] private[abi] (val bytes: NonEmptyVec[Byte]) {
+    def byteSize: PositiveInt = bytes.positiveSize
 
     /** Narrow a by-value ABI value to the machine-word representation used by enums, flags, and handles. */
     def scalar: Option[ScalarCValue[Name]] =
-      bytes.refineFurtherOption[MaxLength[MachineWordBytes]].map(value => ScalarCValue.fromBytes(value))
+      Option.when(bytes.length <= MachineWordSize)(ScalarCValue.unsafe(bytes))
 
     override def equals(other: Any): Boolean = other match {
-      case value: CValue[?] => Vec.sameElements(bytes, value.bytes)
+      case value: CValue[?] => Vec.sameElements(Vec.from(bytes.toVector), Vec.from(value.bytes.toVector))
       case _                => false
     }
 
-    override def hashCode(): Int = bytes.hashCode()
+    override def hashCode(): Int = bytes.toVector.hashCode()
 
     override def toString: String = s"CValue(${bytes.length} bytes)"
   }
 
   final class ScalarCValue[Name <: String & Singleton] private[abi] (
-      val scalarBytes: Vec[Byte] :| (MinLength[1] & MaxLength[MachineWordBytes])
+      val scalarBytes: NonEmptyVec[Byte]
   ) extends CValue[Name](scalarBytes) {
-    def scalarByteSize: Int :| Interval.Closed[1, MachineWordBytes] =
-      scalarBytes.length.refineUnsafe[Interval.Closed[1, MachineWordBytes]]
+    def scalarByteSize: PositiveInt = scalarBytes.positiveSize
 
-    def toUnsignedLong: Long = LittleEndian.decode(scalarBytes, 0, ScalarByteWidth.fromPositive(scalarByteSize))
+    def toUnsignedLong: Long =
+      LittleEndian.decode(Vec.from(scalarBytes.toVector), 0, ScalarByteWidth.fromPositive(scalarByteSize.raw))
   }
 
   object ScalarCValue {
-    def fromBytes[Name <: String & Singleton](
-        bytes: Vec[Byte] :| (MinLength[1] & MaxLength[MachineWordBytes])
-    ): ScalarCValue[Name] = {
-      val copied: Vec[Byte] = Vec.from(bytes)
-      ScalarCValue(copied.refineUnsafe[MinLength[1] & MaxLength[MachineWordBytes]])
-    }
+    def either[Name <: String & Singleton](bytes: NonEmptyVec[Byte]): Either[String, ScalarCValue[Name]] =
+      MemoryValueByteWidth.either(bytes.length).map(_ => ScalarCValue(bytes))
+
+    private[abi] def unsafe[Name <: String & Singleton](bytes: NonEmptyVec[Byte]): ScalarCValue[Name] =
+      ScalarCValue(bytes)
   }
 
   object CValue {
-    def fromBytes[Name <: String & Singleton](bytes: Vec[Byte] :| MinLength[1]): CValue[Name] = {
-      val copied: Vec[Byte] = Vec.from(bytes)
-      CValue(copied.refineUnsafe[MinLength[1]])
-    }
+    def unsafe[Name <: String & Singleton](bytes: NonEmptyVec[Byte]): CValue[Name] = CValue(bytes)
 
     def fromUnsignedLong[Name <: String & Singleton](
         value: Long,
-        byteSize: Int :| Interval.Closed[1, MachineWordBytes]
+        byteSize: MemoryValueByteWidth
     ): ScalarCValue[Name] = {
-      val bytes: Vec[Byte] = LittleEndian.toVec(value, ScalarByteWidth.fromPositive(byteSize))
-      ScalarCValue(bytes.refineUnsafe[MinLength[1] & MaxLength[MachineWordBytes]])
+      val bytes: Vec[Byte] = LittleEndian.toVec(value, ScalarByteWidth.fromPositive(byteSize.raw))
+      ScalarCValue(NonEmptyVec.unsafeFromVec(bytes))
     }
   }
 
@@ -291,7 +294,7 @@ object ABI {
     */
   trait Callback[-Args <: Tuple, +Result] extends (Args => Either[CallbackFailure, Result])
 
-  /** A named C callback typedef. Scala retains the callable argument/result types while C declarations retain the
+  /** A named C callback typedef. Scala retains the callable argument and result types while C declarations retain the
     * vendor's exact typedef name.
     */
   trait CallbackTypedef[Name <: String & Singleton, -Args <: Tuple, +Result] extends Callback[Args, Result]

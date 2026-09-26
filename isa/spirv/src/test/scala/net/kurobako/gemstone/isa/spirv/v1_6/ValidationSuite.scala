@@ -2,8 +2,7 @@ package net.kurobako.gemstone.isa.spirv.v1_6
 
 import net.kurobako.gemstone.Vec
 import net.kurobako.gemstone.isa.ValidationOutcome
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
+import net.kurobako.gemstone.{NonEmptyVec, NonNegativeInt, NonNegativeLong, PositiveInt, PositiveLong}
 
 final class ValidationSuite extends munit.FunSuite {
   test("OpenCL compute environment is accepted") {
@@ -44,9 +43,10 @@ final class ValidationSuite extends munit.FunSuite {
   }
 
   test("non-compute module fails closed") {
-    val module = Module(Header(ISA.version, Word(0), Word(1), Word(0)), Vec.empty, Endianness.Little)
+    val module =
+      Module(Header(ISA.version, Word(0), Word(1), Word(0)), Vec.empty, Endianness.Little)
     Validation.validate(module, Validation.Environment.OpenCLCompute) match {
-      case ValidationOutcome.Rejected(issues) => assertEquals(issues.size, 3)
+      case ValidationOutcome.Rejected(issues) => assertEquals(issues.length, 3)
       case other                              => fail(s"expected invalid, found $other")
     }
   }
@@ -72,7 +72,7 @@ final class ValidationSuite extends munit.FunSuite {
     )
     assertEquals(
       ISA.decode(raw),
-      Left(ModuleDecodeError.Instruction(0, InstructionDecodeError.UnknownOpcode(unknownOpcode)))
+      Left(ModuleDecodeError.Instruction(NonNegativeInt.Zero, InstructionDecodeError.UnknownOpcode(unknownOpcode)))
     )
   }
 

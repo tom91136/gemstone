@@ -13,11 +13,11 @@ private[v9_3] final class VMRegisterFile(chunkCount: Int = 96) {
   private val values                                  = Array.ofDim[Array[Long] | Null](chunkCount)
   private var named: mutable.Map[String, Long] | Null = null
 
-  def get(name: RegisterName): Long = slot(name.value) match {
+  def get(name: RegisterName): Long = slot(name.raw) match {
     case Some(index) => getSlot(index)
     case None        => named match {
         case null   => 0L
-        case values => values.getOrElse(name.value, 0L)
+        case values => values.getOrElse(name.raw, 0L)
       }
   }
 
@@ -29,7 +29,7 @@ private[v9_3] final class VMRegisterFile(chunkCount: Int = 96) {
 
   def apply(name: RegisterName): Long = get(name)
 
-  def update(name: RegisterName, value: Long): Unit = slot(name.value) match {
+  def update(name: RegisterName, value: Long): Unit = slot(name.raw) match {
     case Some(index) => updateSlot(index, value)
     case None        =>
       val values = named match {
@@ -39,7 +39,7 @@ private[v9_3] final class VMRegisterFile(chunkCount: Int = 96) {
           allocated
         case existing => existing
       }
-      values(name.value) = value
+      values(name.raw) = value
   }
 
   def updateSlot(index: Int, value: Long): Unit = {
@@ -104,10 +104,10 @@ private[v9_3] object VMRegisterFile {
     value + offset
   }
 
-  def index(name: RegisterName): Int = indexRaw(name.value)
+  def index(name: RegisterName): Int = indexRaw(name.raw)
 
   def name(index: Int): RegisterName =
-    RegisterName.applyUnsafe(
+    RegisterName.unsafe(
       if (index >= 0 && index < 1024) s"%rd$index"
       else if (index < 2048) s"%rs${index - 1024}"
       else if (index < 3072) s"%r${index - 2048}"

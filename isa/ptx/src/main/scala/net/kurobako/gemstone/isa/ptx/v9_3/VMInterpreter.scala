@@ -5,9 +5,8 @@ import Program.*
 import VMIR.*
 import VMExecution.*
 
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
-
+import net.kurobako.gemstone.NonNegativeLong
+import net.kurobako.gemstone.PositiveInt
 import net.kurobako.gemstone.Vec
 
 import net.kurobako.gemstone.memory.AddressMemory
@@ -52,14 +51,14 @@ private[v9_3] object VMInterpreter {
       case Left(message) => return Left(ExecutionFault.InvalidState(message))
       case Right(value)  => value
     }
-    val allLanes = VMLaneMask.all(laneCount) match {
+    val allLanes = VMLaneMask.all(laneCount.raw) match {
       case Left(fault)  => return Left(fault)
       case Right(value) => value
     }
     val everyGroupFull =
-      geometry.globalExtent.x == geometry.groupSize.x.toLong * geometry.groupCount.x.toLong &&
-        geometry.globalExtent.y == geometry.groupSize.y.toLong * geometry.groupCount.y.toLong &&
-        geometry.globalExtent.z == geometry.groupSize.z.toLong * geometry.groupCount.z.toLong
+      geometry.globalExtent.x == (geometry.groupSize.x.toLong * geometry.groupCount.x.toLong) &&
+        geometry.globalExtent.y == (geometry.groupSize.y.toLong * geometry.groupCount.y.toLong) &&
+        geometry.globalExtent.z == (geometry.groupSize.z.toLong * geometry.groupCount.z.toLong)
     def liveLanes(group: Coordinates): Either[ExecutionFault, VMLaneMask] =
       if (everyGroupFull) Right(allLanes)
       else geometry.activeGroupSize(group) match {
@@ -88,7 +87,7 @@ private[v9_3] object VMInterpreter {
           }
       }
     def runBlock(block: Int): Either[ExecutionFault, Unit] =
-      if (block < 0 || block >= groupCount)
+      if (block < 0 || block >= groupCount.raw)
         Left(ExecutionFault.InvalidState(s"selected PTX block is outside the launch: $block"))
       else
         geometry.groupCoordinates(block.toLong) match {
@@ -112,14 +111,14 @@ private[v9_3] object VMInterpreter {
                 ).map(_ => ())
             }
         }
-    val selectedCount                  = blockIndices.fold(groupCount)(_.size)
+    val selectedCount                  = blockIndices.fold(groupCount.raw)(_.size)
     def selectedBlock(index: Int): Int = blockIndices.fold(index)(_(index))
-    val selectedTasks                  = selectedCount.toLong.assume[Positive0]
-    val workItems                      = laneCount.toLong.assume[Positive0]
+    val selectedTasks                  = NonNegativeLong.unsafe(selectedCount.toLong)
+    val workItems                      = laneCount.toLong.toNonNegative
     val parallelBlocks                 = scheduler.shouldParallel(selectedTasks, workItems)
     val executionFailure               = AtomicReference(Option.empty[ExecutionFault])
     scheduler.forEach(selectedTasks, parallel = parallelBlocks) { index =>
-      runBlock(selectedBlock(index.toInt)).left.map { error =>
+      runBlock(selectedBlock(index.raw.toInt)).left.map { error =>
         val _ = executionFailure.compareAndSet(None, Some(error))
         error.toFault
       }
@@ -166,7 +165,7 @@ private[v9_3] object VMInterpreter {
   ): Either[ExecutionFault, VMState] = {
     val laneCount =
       geometry.groupSize.volumeInt.fold(message => throw IllegalArgumentException(message), value => value)
-    val state    = initialState.getOrElse(borrowState(laneCount, initialLive, kernel.registerChunkCount))
+    val state    = initialState.getOrElse(borrowState(laneCount.raw, initialLive, kernel.registerChunkCount))
     val reusable = initialState.isEmpty
     try
       executeBlockWithState(
@@ -209,7 +208,7 @@ private[v9_3] object VMInterpreter {
     state.importParameterBuffers(initialParameterBuffers)
     kernel.parameters.foreach { parameter =>
       arguments.get(parameter.name).foreach(argument =>
-        state.bindParameterBuffer(parameter.name, Vec.toArray(argument.bytes))
+        state.bindParameterBuffer(parameter.name, argument.bytes.toVector.toArray)
       )
     }
     val ready                                    = mutable.ArrayBuffer.empty[Cohort]
@@ -352,7 +351,7 @@ private[v9_3] object VMInterpreter {
       val executable = kernel.program.at(cohort.pc) match {
         case None =>
           return Left(ExecutionFault.InvalidProgram(
-            s"program counter ${cohort.pc.value} is outside a ${kernel.program.size}-instruction program"
+            s"program counter ${cohort.pc.raw} is outside a ${kernel.program.size}-instruction program"
           ))
         case Some(value) => value
       }
@@ -370,7 +369,7 @@ private[v9_3] object VMInterpreter {
           cohort = cohort.copy(lanes = runnable)
       }
       if (cohort.lanes.nonEmpty) {
-        control.checkpoint(cohort.lanes.size.assume[Positive]) match {
+        control.checkpoint(PositiveInt.unsafe(cohort.lanes.size)) match {
           case Left(fault) => return Left(ExecutionFault.fromControl(fault))
           case Right(())   => ()
         }

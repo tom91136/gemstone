@@ -97,7 +97,7 @@ private[execution] object BlasMath {
       resolve: AllocationId => Option[Array[Byte]],
       allocation: AllocationId
   ): Either[String, Array[Byte]] =
-    resolve(allocation).toRight(s"BLAS allocation ${allocation.value} is absent")
+    resolve(allocation).toRight(s"BLAS allocation ${allocation.raw} is absent")
 
   private def indexOf(index: Int, count: Int, increment: Int): Int =
     if (increment < 0) (count - 1 - index) * -increment else index * increment
@@ -124,8 +124,8 @@ private[execution] object BlasMath {
       _     = if (request.count > 0) {
         var index = 0
         while (index < request.count) {
-          val xi = elementOffset(x.offset, indexOf(index, request.count, x.increment), ops)
-          val yi = elementOffset(y.offset, indexOf(index, request.count, y.increment), ops)
+          val xi = elementOffset(x.offset.raw, indexOf(index, request.count, x.increment), ops)
+          val yi = elementOffset(y.offset.raw, indexOf(index, request.count, y.increment), ops)
           ops.write(ys, yi, N.plus(ops.read(ys, yi), N.times(alpha, ops.read(xs, xi))))
           index += 1
         }
@@ -142,7 +142,7 @@ private[execution] object BlasMath {
       _     = if (request.count > 0) {
         var index = 0
         while (index < request.count) {
-          val xi = elementOffset(x.offset, indexOf(index, request.count, x.increment), ops)
+          val xi = elementOffset(x.offset.raw, indexOf(index, request.count, x.increment), ops)
           ops.write(xs, xi, N.times(alpha, ops.read(xs, xi)))
           index += 1
         }
@@ -162,8 +162,8 @@ private[execution] object BlasMath {
       _ = if (request.count > 0) {
         var index = 0
         while (index < request.count) {
-          val xi = elementOffset(x.offset, indexOf(index, request.count, x.increment), ops)
-          val yi = elementOffset(y.offset, indexOf(index, request.count, y.increment), ops)
+          val xi = elementOffset(x.offset.raw, indexOf(index, request.count, x.increment), ops)
+          val yi = elementOffset(y.offset.raw, indexOf(index, request.count, y.increment), ops)
           ops.write(ys, yi, ops.read(xs, xi))
           index += 1
         }
@@ -183,8 +183,8 @@ private[execution] object BlasMath {
         var sum   = N.zero
         var index = 0
         while (index < request.count) {
-          val xi = elementOffset(x.offset, indexOf(index, request.count, x.increment), ops)
-          val yi = elementOffset(y.offset, indexOf(index, request.count, y.increment), ops)
+          val xi = elementOffset(x.offset.raw, indexOf(index, request.count, x.increment), ops)
+          val yi = elementOffset(y.offset.raw, indexOf(index, request.count, y.increment), ops)
           sum = N.plus(sum, N.times(ops.read(xs, xi), ops.read(ys, yi)))
           index += 1
         }
@@ -205,7 +205,8 @@ private[execution] object BlasMath {
         var sum   = 0.0
         var index = 0
         while (index < request.count) {
-          val at = ops.toDouble(ops.read(xs, elementOffset(x.offset, indexOf(index, request.count, x.increment), ops)))
+          val at =
+            ops.toDouble(ops.read(xs, elementOffset(x.offset.raw, indexOf(index, request.count, x.increment), ops)))
           sum += at * at
           index += 1
         }
@@ -224,7 +225,8 @@ private[execution] object BlasMath {
         var sum   = N.zero
         var index = 0
         while (index < request.count) {
-          val at = ops.toDouble(ops.read(xs, elementOffset(x.offset, indexOf(index, request.count, x.increment), ops)))
+          val at =
+            ops.toDouble(ops.read(xs, elementOffset(x.offset.raw, indexOf(index, request.count, x.increment), ops)))
           sum = N.plus(sum, ops.fromDouble(math.abs(at)))
           index += 1
         }
@@ -253,12 +255,12 @@ private[execution] object BlasMath {
           var col = 0
           while (col < xCount) {
             val matrixIndex = if (request.transposeA) col + row * a.leading else row + col * a.leading
-            val matrix      = ops.read(as, elementOffset(a.offset, matrixIndex, ops))
-            val vector      = ops.read(xs, elementOffset(x.offset, indexOf(col, xCount, x.increment), ops))
+            val matrix      = ops.read(as, elementOffset(a.offset.raw, matrixIndex, ops))
+            val vector      = ops.read(xs, elementOffset(x.offset.raw, indexOf(col, xCount, x.increment), ops))
             sum = N.plus(sum, N.times(matrix, vector))
             col += 1
           }
-          val output = elementOffset(y.offset, indexOf(row, yCount, y.increment), ops)
+          val output = elementOffset(y.offset.raw, indexOf(row, yCount, y.increment), ops)
           ops.write(
             ys,
             output,
@@ -286,9 +288,9 @@ private[execution] object BlasMath {
       cs <- buffer(resolve, c.allocation)
       alpha = scalar(request.alpha, ops)
       beta  = scalar(request.beta, ops)
-      aBase = a.offset + aShift * ops.width
-      bBase = b.offset + bShift * ops.width
-      cBase = c.offset + cShift * ops.width
+      aBase = a.offset.raw + aShift * ops.width
+      bBase = b.offset.raw + bShift * ops.width
+      cBase = c.offset.raw + cShift * ops.width
       _     = if (request.rows > 0 && request.columns > 0 && request.inner > 0) {
         var column = 0
         while (column < request.columns) {
@@ -323,5 +325,5 @@ private[execution] object BlasMath {
 
   private def halfToFloat(bits: Int): Float = IEEE754.binary16ToFloat(Binary16.low(bits.toLong))
 
-  private def floatToHalf(value: Float): Int = IEEE754.floatToBinary16(value).value.toInt
+  private def floatToHalf(value: Float): Int = IEEE754.floatToBinary16(value).raw.toInt
 }

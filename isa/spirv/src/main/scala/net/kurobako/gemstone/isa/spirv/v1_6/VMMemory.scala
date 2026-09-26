@@ -3,15 +3,13 @@ package net.kurobako.gemstone.isa.spirv.v1_6
 import net.kurobako.gemstone.vm.AddressSpace
 import net.kurobako.gemstone.memory.GuestAddress
 
-import net.kurobako.gemstone.Vec
+import net.kurobako.gemstone.{NonNegativeInt, NonNegativeLong, Vec}
 import net.kurobako.gemstone.binary.{ByteRange, LittleEndian}
 import net.kurobako.gemstone.concurrent.withLock
 import net.kurobako.gemstone.memory.MemoryValueByteWidth
 import net.kurobako.gemstone.vm.*
 
 import cats.syntax.all.*
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
 
 import java.util.concurrent.locks.ReentrantLock
 import scala.collection.mutable
@@ -97,7 +95,7 @@ private[v1_6] object VMMemory {
               target,
               targetOffset
             ) =>
-          (source -> (sourceOffset: Long)) -> (target -> (targetOffset: Long))
+          (source -> sourceOffset.raw) -> (target -> targetOffset.raw)
       })
     private val argumentRelocations = {
       val result = mutable.HashMap.empty[Int, mutable.LongMap[(MemoryRegion, Long)]]
@@ -109,8 +107,8 @@ private[v1_6] object VMMemory {
               targetOffset
             ) =>
           result
-            .getOrElseUpdate(argument, mutable.LongMap.empty)
-            .update(sourceOffset, target -> targetOffset)
+            .getOrElseUpdate(argument.raw, mutable.LongMap.empty)
+            .update(sourceOffset.raw, target -> targetOffset.raw)
         case _ => ()
       }
       result
@@ -125,7 +123,7 @@ private[v1_6] object VMMemory {
     def pointerInteger(pointer: Pointer): Either[Fault, Long] = {
       (memory, pointer.region) match {
         case (addresses: AddressSpace, Region.External(id)) if pointer.offset >= 0 =>
-          return addresses.address(id, pointer.offset.refineUnsafe[Positive0]).map(_.value)
+          return addresses.address(id, NonNegativeLong.unsafe(pointer.offset)).map(_.raw)
         case _ => ()
       }
       val base = pointer.region match {
@@ -201,13 +199,13 @@ private[v1_6] object VMMemory {
       destination.region match {
         case Region.External(destinationAllocation)
             if destinationAllocation.value != 0 && !memory.hasNativePointers(destinationAllocation) =>
-          destination.offset.refineEither[Positive0] match {
+          NonNegativeLong.either(destination.offset) match {
             case Left(_) => Left(Fault.InvalidTask(
                 s"negative SPIR-V pointer relocation destination offset ${destination.offset}"
               ))
             case Right(sourceOffset) => pointer.region match {
                 case Region.External(pointerAllocation) if pointerAllocation.value != 0 =>
-                  pointer.offset.refineEither[Positive0] match {
+                  NonNegativeLong.either(pointer.offset) match {
                     case Left(_) => Left(Fault.InvalidTask(
                         s"negative SPIR-V pointer relocation target offset ${pointer.offset}"
                       ))
@@ -274,8 +272,9 @@ private[v1_6] object VMMemory {
                 )
               )
             case _ => memory match {
-                case addresses: AddressSpace => addresses.locate(GuestAddress(address), 0).map(location =>
-                    Pointer(Region.External(location.region), location.offset, pointee, storageClass)
+                case addresses: AddressSpace =>
+                  addresses.locate(GuestAddress(address), NonNegativeInt.Zero).map(location =>
+                    Pointer(Region.External(location.region), location.offset.raw, pointee, storageClass)
                   ).orElse(Right(Pointer(Region.Opaque(address), 0L, pointee, storageClass)))
                 case _ => Right(Pointer(Region.Opaque(address), 0L, pointee, storageClass))
               }
@@ -290,14 +289,14 @@ private[v1_6] object VMMemory {
     }
 
     @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-    def read(pointer: Pointer, size: Int :| Positive0): Either[Fault, Array[Byte]] =
+    def read(pointer: Pointer, size: NonNegativeInt): Either[Fault, Array[Byte]] =
       pointer.region match {
         case Region.Internal(internal) =>
-          checkedRange(internal.bytes.length, pointer.offset, size).map(start =>
-            java.util.Arrays.copyOfRange(internal.bytes, start, start + size)
+          checkedRange(internal.bytes.length, pointer.offset, size.raw).map(start =>
+            java.util.Arrays.copyOfRange(internal.bytes, start, start + size.raw)
           )
         case Region.External(id) =>
-          pointer.offset.refineEither[Positive0]
+          NonNegativeLong.either(pointer.offset)
             .leftMap(_ =>
               Fault.InvalidTask(s"invalid external read offset ${pointer.offset}")
             )
@@ -323,7 +322,7 @@ private[v1_6] object VMMemory {
 
     def readScalar(pointer: Pointer, size: MemoryValueByteWidth): Either[Fault, Long] = {
       val relocation =
-        if (size.value != 8) None
+        if (size.raw != 8) None
         else
           pointer.region match {
             case Region.External(source) => allocationRelocation(source, pointer.offset)
@@ -344,10 +343,10 @@ private[v1_6] object VMMemory {
         size: MemoryValueByteWidth
     ): Either[Fault, Long] = pointer.region match {
       case Region.Internal(internal) =>
-        checkedRange(internal.bytes.length, pointer.offset, size.value)
+        checkedRange(internal.bytes.length, pointer.offset, size.raw)
           .map(start => LittleEndian.decode(internal.bytes, start, size.scalarByteWidth))
       case Region.External(id) =>
-        pointer.offset.refineEither[Positive0]
+        NonNegativeLong.either(pointer.offset)
           .leftMap(_ =>
             Fault.InvalidTask(
               s"invalid external scalar read offset ${pointer.offset}"
@@ -359,7 +358,7 @@ private[v1_6] object VMMemory {
             var value = source
             writes.get(id).foreach { pages =>
               var index = 0
-              while (index < size.value) {
+              while (index < size.raw) {
                 val absolute   = pointer.offset + index.toLong
                 val pageOffset = (absolute & 4095L).toInt
                 pages.get(absolute >>> 12) match {
@@ -418,12 +417,12 @@ private[v1_6] object VMMemory {
     def writeScalar(pointer: Pointer, value: Long, size: MemoryValueByteWidth): Either[Fault, Unit] =
       pointer.region match {
         case Region.Internal(internal) =>
-          checkedRange(internal.bytes.length, pointer.offset, size.value)
+          checkedRange(internal.bytes.length, pointer.offset, size.raw)
             .map(start =>
               LittleEndian.write(value, internal.bytes, start, size.scalarByteWidth)
             )
         case Region.External(id) =>
-          if (pointer.offset < 0L || pointer.offset > Long.MaxValue - size.value.toLong)
+          if (pointer.offset < 0L || pointer.offset > Long.MaxValue - size.raw.toLong)
             Left(
               Fault.InvalidTask(s"invalid external write offset ${pointer.offset}")
             )
@@ -480,7 +479,7 @@ private[v1_6] object VMMemory {
       pointer.region match {
         case Region.Internal(internal) => internal.lock.withLock(readExternalScalar(pointer, size))
         case Region.External(id)       =>
-          pointer.offset.refineEither[Positive0]
+          NonNegativeLong.either(pointer.offset)
             .leftMap(_ =>
               Fault.InvalidTask(
                 s"invalid external atomic read offset ${pointer.offset}"
@@ -509,7 +508,7 @@ private[v1_6] object VMMemory {
         size: MemoryValueByteWidth
     )(update: Long => Long): Either[Fault, Long] = pointer.region match {
       case Region.Internal(internal) => internal.lock.withLock {
-          checkedRange(internal.bytes.length, pointer.offset, size.value) match {
+          checkedRange(internal.bytes.length, pointer.offset, size.raw) match {
             case Left(error)  => Left(error)
             case Right(start) =>
               val scalarSize = size.scalarByteWidth
@@ -519,7 +518,7 @@ private[v1_6] object VMMemory {
           }
         }
       case Region.External(id) =>
-        pointer.offset.refineEither[Positive0]
+        NonNegativeLong.either(pointer.offset)
           .leftMap(_ =>
             Fault.InvalidTask(s"invalid external atomic offset ${pointer.offset}")
           )
@@ -545,7 +544,7 @@ private[v1_6] object VMMemory {
               offset = page.nextCleanByte(start)
               memory.write(
                 id,
-                ((number << 12) + start.toLong).refineUnsafe[Positive0],
+                NonNegativeLong.unsafe((number << 12) + start.toLong),
                 Vec.from(java.util.Arrays.copyOfRange(page.bytes, start, offset))
               ) match {
                 case Left(error) => return Left(error)

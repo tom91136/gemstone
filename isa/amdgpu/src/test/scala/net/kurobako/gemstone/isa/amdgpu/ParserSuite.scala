@@ -2,9 +2,6 @@ package net.kurobako.gemstone.isa.amdgpu
 
 import Program.*
 
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
-
 import net.kurobako.gemstone.Vec
 
 final class ParserSuite extends munit.FunSuite {
@@ -18,7 +15,7 @@ final class ParserSuite extends munit.FunSuite {
   test("parse and canonically print typed operands") {
     val instruction =
       Parser.parseInstruction("V_ADD_F32_e32 v0, |v1|, -v2 clamp").fold(error => fail(error.toString), value => value)
-    assertEquals(instruction.opcode.value, "v_add_f32")
+    assertEquals(instruction.opcode.raw, "v_add_f32")
     assertEquals(instruction.operands.size, 3)
     assertEquals(
       instruction.mods.toSeq,

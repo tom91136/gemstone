@@ -1,11 +1,9 @@
 package net.kurobako.gemstone.isa.spirv.v1_6
 
-import net.kurobako.gemstone.Vec
+import net.kurobako.gemstone.{NonEmptyVec, Vec}
 import net.kurobako.gemstone.binary.{BitWidth, Bits}
 
 import cats.data.Chain
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
 
 private[v1_6] object OperandDecoder {
   final case class DecodedOperands(fields: Vec[Vec[Operand]]) {
@@ -50,7 +48,7 @@ private[v1_6] object OperandDecoder {
       val targets  = (2 until words.size by 3).map(index =>
         Operand(
           SPIRVOperandKind("PairLiteralIntegerIdRef"),
-          words.slice(index, index + 3).refineUnsafe[MinLength[1]]
+          NonEmptyVec.unsafeFromVec(words.slice(index, index + 3))
         )
       )
       Right(DecodedOperands(Vec(Vec(selector), Vec(default), Vec.from(targets))))
@@ -124,8 +122,8 @@ private[v1_6] object OperandDecoder {
     }
 
   private def minimumOperand(kind: SPIRVOperandKind, kinds: Map[SPIRVOperandKind, OperandKindInfo]): Vec[Word] =
-    if (kind.value == "LiteralString") Vec(Word(0))
-    else if (kind.value.startsWith("Pair")) Vec(Word(0), Word(0))
+    if (kind.raw == "LiteralString") Vec(Word(0))
+    else if (kind.raw.startsWith("Pair")) Vec(Word(0), Word(0))
     else kinds.get(kind) match {
       case Some(info) if info.enumerants.nonEmpty =>
         val selected = info.enumerants.minBy(enumerant => (enumerant.parameterKinds.size, enumerant.value))
@@ -144,16 +142,16 @@ private[v1_6] object OperandDecoder {
   ): Either[InstructionDecodeError, (Operand, Int)] =
     if (offset >= words.size)
       Left(InstructionDecodeError.InvalidOperandCount(opcode, s"missing $kind at word $offset"))
-    else if (kind.value == "LiteralString") decodeString(opcode, kind, words, offset)
-    else if (kind.value == "LiteralContextDependentNumber")
-      Right(Operand(kind, words.drop(offset).refineUnsafe[MinLength[1]]) -> words.size)
-    else if (kind.value.startsWith("Pair")) {
+    else if (kind.raw == "LiteralString") decodeString(opcode, kind, words, offset)
+    else if (kind.raw == "LiteralContextDependentNumber")
+      Right(Operand(kind, NonEmptyVec.unsafeFromVec(words.drop(offset))) -> words.size)
+    else if (kind.raw.startsWith("Pair")) {
       if (offset + 2 > words.size)
         Left(InstructionDecodeError.InvalidOperandCount(opcode, s"short $kind at word $offset"))
-      else Right(Operand(kind, words.slice(offset, offset + 2).refineUnsafe[MinLength[1]]) -> (offset + 2))
+      else Right(Operand(kind, NonEmptyVec.unsafeFromVec(words.slice(offset, offset + 2))) -> (offset + 2))
     } else kinds.get(kind) match {
-      case Some(info) if info.category == "ValueEnum" => decodeValueEnum(opcode, info, words, offset, kinds)
-      case Some(info) if info.category == "BitEnum"   => decodeBitEnum(opcode, info, words, offset, kinds)
+      case Some(info) if info.category.raw == "ValueEnum" => decodeValueEnum(opcode, info, words, offset, kinds)
+      case Some(info) if info.category.raw == "BitEnum"   => decodeBitEnum(opcode, info, words, offset, kinds)
       case _ => Right(Operand(kind, Vec.nonEmpty(words(offset))) -> (offset + 1))
     }
 
@@ -164,11 +162,11 @@ private[v1_6] object OperandDecoder {
       offset: Int
   ): Either[InstructionDecodeError, (Operand, Int)] =
     words.indexWhere(
-      word => (0 until 4).exists(byte => Bits.unsignedField(word.toUnsigned, byte * 8, BitWidth(8)) == 0L),
+      word => (0 until 4).exists(byte => Bits.unsignedField(word.toUnsigned.raw, byte * 8, BitWidth(8)) == 0L),
       offset
     ) match {
       case -1  => Left(InstructionDecodeError.UnterminatedString(opcode))
-      case end => Right(Operand(kind, words.slice(offset, end + 1).refineUnsafe[MinLength[1]]) -> (end + 1))
+      case end => Right(Operand(kind, NonEmptyVec.unsafeFromVec(words.slice(offset, end + 1))) -> (end + 1))
     }
 
   private def decodeValueEnum(
@@ -178,7 +176,7 @@ private[v1_6] object OperandDecoder {
       offset: Int,
       kinds: Map[SPIRVOperandKind, OperandKindInfo]
   ): Either[InstructionDecodeError, (Operand, Int)] = {
-    val value = words(offset).toUnsigned
+    val value = words(offset).toUnsigned.raw
     info.enumerants.find(_.value == value) match {
       case None            => Left(InstructionDecodeError.InvalidEnumerant(info.kind, value))
       case Some(enumerant) => decodeParameters(opcode, info.kind, words, offset, enumerant.parameterKinds, kinds)
@@ -192,7 +190,7 @@ private[v1_6] object OperandDecoder {
       offset: Int,
       kinds: Map[SPIRVOperandKind, OperandKindInfo]
   ): Either[InstructionDecodeError, (Operand, Int)] = {
-    val value       = words(offset).toUnsigned
+    val value       = words(offset).toUnsigned.raw
     val allowedMask = info.enumerants.foldLeft(0L)(_ | _.value)
     if ((value & ~allowedMask) != 0L) Left(InstructionDecodeError.InvalidEnumerant(info.kind, value))
     else {
@@ -215,5 +213,5 @@ private[v1_6] object OperandDecoder {
       .foldLeft[Either[InstructionDecodeError, Int]](Right(offset + 1)) { (next, parameterKind) =>
         next.flatMap(current => decodeOne(opcode, parameterKind, words, current, kinds).map(_._2))
       }
-      .map(next => Operand(outerKind, words.slice(offset, next).refineUnsafe[MinLength[1]]) -> next)
+      .map(next => Operand(outerKind, NonEmptyVec.unsafeFromVec(words.slice(offset, next))) -> next)
 }

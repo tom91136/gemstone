@@ -3,9 +3,6 @@ package net.kurobako.gemstone.isa.spirv.v1_6
 
 import net.kurobako.gemstone.Vec
 
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
-
 @javax.annotation.processing.Generated(Array("sbt codegen"))
 final class ReferenceSuite extends munit.FunSuite {
   private val upstreamTestCounts: Map[String, Int] = Map(
@@ -46,7 +43,8 @@ final class ReferenceSuite extends munit.FunSuite {
 
   test("SPIRV-Tools endian oracle is represented") {
     assert(upstreamTestCounts("binary_endianness_test.cpp") > 0)
-    val module = RawModule(Header(ISA.version, Word(7), Word(2), Word(0)), Vec.empty, Endianness.Big)
+    val module =
+      RawModule(Header(ISA.version, Word(7), Word(2), Word(0)), Vec.empty, Endianness.Big)
     val bytes = Binary.encode(module).fold(error => fail(error.message), value => value)
     assert(Binary.decode(bytes).exists(same(_, module)))
   }
@@ -67,7 +65,8 @@ final class ReferenceSuite extends munit.FunSuite {
     val unknownOpcode = SPIRVOpcodeNumber(65535)
     val raw = RawInstruction(unknownOpcode, Vec(Word(7)))
     assertEquals(Instruction.decode(raw), Left(InstructionDecodeError.UnknownOpcode(unknownOpcode)))
-    val module = RawModule(Header(ISA.version, Word(0), Word(1), Word(0)), Vec(raw), Endianness.Little)
+    val module =
+      RawModule(Header(ISA.version, Word(0), Word(1), Word(0)), Vec(raw), Endianness.Little)
     val bytes = Binary.encode(module).fold(error => fail(error.message), value => value)
     assert(Binary.decode(bytes).exists(same(_, module)))
   }

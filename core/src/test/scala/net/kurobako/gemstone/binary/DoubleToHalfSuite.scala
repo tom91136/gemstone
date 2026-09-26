@@ -1,8 +1,5 @@
 package net.kurobako.gemstone.binary
 
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
-
 final class DoubleToHalfSuite extends munit.FunSuite {
   private val halfWidth = FloatingPointWidth(16)
 

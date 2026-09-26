@@ -2,9 +2,6 @@ package net.kurobako.gemstone.isa.amdgpu
 
 import VMIR.*
 
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
-
 import net.kurobako.gemstone.Vec
 import net.kurobako.gemstone.binary.{Bits, ByteRange}
 import net.kurobako.gemstone.binary.IEEE754
@@ -25,7 +22,7 @@ final class AMDGPUMemorySuite extends munit.FunSuite with CodeObjectTestSupport 
         Vec[Byte](0x07, 0x00, 0x60, 0xe0.toByte, 0x00, 0x02, 0x00, 0x80.toByte),
         Target("gfx1030")
       ),
-      Right(Instruction.BufferStore(None, 0, None, 2, 1, 7))
+      Right(Instruction.BufferStore(None, 0, None, 2, TransferByteCount(1), 7))
     )
   }
 
@@ -35,7 +32,7 @@ final class AMDGPUMemorySuite extends munit.FunSuite with CodeObjectTestSupport 
         Vec[Byte](0x07, 0x00, 0x20, 0xe0.toByte, 0x00, 0x02, 0x00, 0x80.toByte),
         Target("gfx1030")
       ),
-      Right(Instruction.BufferLoad(2, None, 0, None, 1, 7))
+      Right(Instruction.BufferLoad(2, None, 0, None, TransferByteCount(1), 7))
     )
   }
 
@@ -45,14 +42,14 @@ final class AMDGPUMemorySuite extends munit.FunSuite with CodeObjectTestSupport 
         Vec[Byte](0x00, 0x90.toByte, 0x6c, 0xd8.toByte, 0x00, 0x00, 0x00, 0x00),
         Target("gfx900")
       ),
-      Right(Instruction.DSRead(0, 0, 4, 36864, None))
+      Right(Instruction.DSRead(0, 0, TransferByteCount(4), 36864, None))
     )
     assertEquals(
       VMCompiler.decodeInstruction(
         Vec[Byte](0xff.toByte, 0xff.toByte, 0xbe.toByte, 0xd9.toByte, 0x00, 0x01, 0x00, 0x00),
         Target("gfx900")
       ),
-      Right(Instruction.DSWrite(0, 1, None, 16, 65535, None))
+      Right(Instruction.DSWrite(0, 1, None, TransferByteCount(16), 65535, None))
     )
   }
 
@@ -108,7 +105,7 @@ final class AMDGPUMemorySuite extends munit.FunSuite with CodeObjectTestSupport 
         Vec[Byte](0x00, 0x10, 0x50, 0xe0.toByte, 0x12, 0x13, 0x05, 0x80.toByte),
         Target("gfx900")
       ),
-      Right(Instruction.BufferLoad(19, Some(18), 20, None, 4, 0))
+      Right(Instruction.BufferLoad(19, Some(18), 20, None, TransferByteCount(4), 0))
     )
   }
 
@@ -118,14 +115,14 @@ final class AMDGPUMemorySuite extends munit.FunSuite with CodeObjectTestSupport 
         Vec[Byte](0x10, 0x10, 0x90.toByte, 0xe0.toByte, 0x03, 0x07, 0x05, 0x80.toByte),
         Target("gfx900")
       ),
-      Right(Instruction.BufferLoadD16(7, Some(3), 20, None, 2, 16, high = false))
+      Right(Instruction.BufferLoadD16(7, Some(3), 20, None, NarrowTransferByteCount(2), 16, high = false))
     )
     assertEquals(
       VMCompiler.decodeInstruction(
         Vec[Byte](0x10, 0x10, 0x94.toByte, 0xe0.toByte, 0x03, 0x07, 0x05, 0x80.toByte),
         Target("gfx900")
       ),
-      Right(Instruction.BufferLoadD16(7, Some(3), 20, None, 2, 16, high = true))
+      Right(Instruction.BufferLoadD16(7, Some(3), 20, None, NarrowTransferByteCount(2), 16, high = true))
     )
   }
 
@@ -486,7 +483,7 @@ final class AMDGPUMemorySuite extends munit.FunSuite with CodeObjectTestSupport 
     val positive = IEEE754.floatToBinary16(1.5f)
     val negative = IEEE754.floatToBinary16(-2.0f)
     assertEquals(
-      IEEE754.binary16ToFloat(VMInterpreter.minimumF16(positive.value, negative.value)),
+      IEEE754.binary16ToFloat(VMInterpreter.minimumF16(positive.raw, negative.raw)),
       -2.0f
     )
   }
@@ -552,9 +549,9 @@ final class AMDGPUMemorySuite extends munit.FunSuite with CodeObjectTestSupport 
       relation = VectorComparisonRelation.NotLess,
       updateExec = false
     )
-    assert(!VMInterpreter.compare(notLess, one.value, two.value))
-    assert(VMInterpreter.compare(notLess, two.value, one.value))
-    assert(VMInterpreter.compare(notLess, 0x7e00L, one.value))
+    assert(!VMInterpreter.compare(notLess, one.raw, two.raw))
+    assert(VMInterpreter.compare(notLess, two.raw, one.raw))
+    assert(VMInterpreter.compare(notLess, 0x7e00L, one.raw))
   }
 
 }

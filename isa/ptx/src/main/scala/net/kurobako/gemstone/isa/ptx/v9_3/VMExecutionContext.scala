@@ -37,7 +37,7 @@ private[v9_3] final class VMExecutionContext(
     case Value.Symbol(name) =>
       state.parameterAddresses.get(
         name
-      ).orElse(kernel.sharedSymbols.get(name)).orElse(kernel.globalSymbols.get(name).map(_.value)).toRight(
+      ).orElse(kernel.sharedSymbols.get(name)).orElse(kernel.globalSymbols.get(name).map(_.raw)).toRight(
         ExecutionFault.InvalidState(s"unknown shared symbol $name")
       )
     case Value.Immediate(immediate)  => Right(immediate)
@@ -51,10 +51,10 @@ private[v9_3] final class VMExecutionContext(
     case Value.LaneMaskEqual         => Right(1L << (lane & 31))
     case Value.ThreadId(axis)        => geometry.localCoordinates(lane)
         .left.map(error => ExecutionFault.InvalidState(error))
-        .map(coordinates => axis.select(coordinates).toLong)
-    case Value.BlockId(axis)  => Right(axis.select(group).toLong)
-    case Value.BlockDim(axis) => Right(axis.select(geometry.groupSize).toLong)
-    case Value.GridDim(axis)  => Right(axis.select(geometry.groupCount).toLong)
+        .map(coordinates => axis.select(coordinates).raw.toLong)
+    case Value.BlockId(axis)  => Right(axis.select(group).raw.toLong)
+    case Value.BlockDim(axis) => Right(axis.select(geometry.groupSize).raw.toLong)
+    case Value.GridDim(axis)  => Right(axis.select(geometry.groupCount).raw.toLong)
   }
 
   def functionName(lane: Int, value: Value): Either[ExecutionFault, FunctionName] = value match {

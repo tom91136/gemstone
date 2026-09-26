@@ -1,9 +1,6 @@
 package net.kurobako.gemstone.isa
 
-import net.kurobako.gemstone.Vec
-
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
+import net.kurobako.gemstone.{NonEmptyVec, Vec}
 
 import scala.annotation.unchecked.uncheckedVariance
 
@@ -14,14 +11,14 @@ import scala.annotation.unchecked.uncheckedVariance
   */
 enum ValidationOutcome[+Issue] {
   case Accepted
-  case Rejected(issues: Vec[Issue @uncheckedVariance] :| MinLength[1])
-  case Incomplete(issues: Vec[Issue @uncheckedVariance] :| MinLength[1])
+  case Rejected(issues: NonEmptyVec[Issue @uncheckedVariance])
+  case Incomplete(issues: NonEmptyVec[Issue @uncheckedVariance])
 }
 
 object ValidationOutcome {
   def combineAll[Issue](outcomes: Vec[ValidationOutcome[Issue]]): ValidationOutcome[Issue] = {
-    def issuesOf(select: ValidationOutcome[Issue] => Option[Vec[Issue]]): Option[Vec[Issue] :| MinLength[1]] =
-      outcomes.flatMap(select).flatten.refineOption[MinLength[1]]
+    def issuesOf(select: ValidationOutcome[Issue] => Option[NonEmptyVec[Issue]]): Option[NonEmptyVec[Issue]] =
+      NonEmptyVec.fromVec(outcomes.flatMap(select).flatMap(_.toVector)).toOption
     issuesOf { case Rejected(values) => Some(values); case _ => None } match {
       case Some(issues) => Rejected(issues)
       case None         => issuesOf { case Incomplete(values) => Some(values); case _ => None } match {

@@ -2,12 +2,12 @@ package net.kurobako.gemstone.isa.ptx.v9_3
 
 import Program.*
 
-import net.kurobako.gemstone.NoNul
+import net.kurobako.gemstone.NonEmptyString
+import net.kurobako.gemstone.NonEmptyVec
+import net.kurobako.gemstone.NonNegativeInt
+import net.kurobako.gemstone.PositiveInt
 import net.kurobako.gemstone.Vec
 import net.kurobako.gemstone.isa.KernelName
-
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
 
 import scala.collection.mutable
 import scala.util.control.NoStackTrace
@@ -17,27 +17,26 @@ import scala.util.control.NoStackTrace
   */
 object Parser extends net.kurobako.gemstone.isa.Decoder[String, Program] {
   override type Error = ParseError
-  private type Name   = String :| (MinLength[1] & NoNul)
 
   private final case class Token(text: String, offset: Int, line: Int, column: Int, quoted: Boolean = false)
 
   private final case class Failure(token: Token, expectation: String) extends RuntimeException with NoStackTrace
 
-  @SuppressWarnings(Array("scalafix:GemstoneNoAssume"))
-  private def name(value: String): Name = value.assume[MinLength[1] & NoNul]
+  private def name(value: String): String = NonEmptyString.unsafe(value).raw
 
   def parse(source: String): Either[ParseError, Program] = {
     val trimmed = source.trim
     if (trimmed.isEmpty) Right(Program(Vec.empty))
-    else if (trimmed.indexOf('\u0000') >= 0) Left(ParseError(0, 1, 1, Vec("PTX source without NUL characters")))
+    else if (trimmed.indexOf('\u0000') >= 0)
+      Left(ParseError(NonNegativeInt.Zero, PositiveInt.One, PositiveInt.One, Vec("PTX source without NUL characters")))
     else
       try Right(Cursor(tokenize(trimmed), trimmed.length).program())
       catch {
         case Failure(token, expectation) =>
           Left(ParseError(
-            token.offset.refineUnsafe[Positive0],
-            token.line.refineUnsafe[Positive],
-            token.column.refineUnsafe[Positive],
+            NonNegativeInt.unsafe(token.offset),
+            PositiveInt.unsafe(token.line),
+            PositiveInt.unsafe(token.column),
             Vec(expectation)
           ))
       }
@@ -48,7 +47,12 @@ object Parser extends net.kurobako.gemstone.isa.Decoder[String, Program] {
   def parseStatement(source: String): Either[ParseError, Statement] =
     parse(source).flatMap {
       case Program(Vec(value)) => Right(value)
-      case Program(values)     => Left(ParseError(0, 1, 1, Vec(s"one statement, found ${values.size}")))
+      case Program(values)     => Left(ParseError(
+          NonNegativeInt.Zero,
+          PositiveInt.One,
+          PositiveInt.One,
+          Vec(s"one statement, found ${values.size}")
+        ))
     }
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
@@ -277,15 +281,15 @@ object Parser extends net.kurobako.gemstone.isa.Decoder[String, Program] {
       Statement.Directive(path, Vec.from(arguments), DirectiveTerminator.Semicolon)
     }
 
-    private def dottedPath(): Vec[DirectiveName] :| MinLength[1] = {
+    private def dottedPath(): NonEmptyVec[DirectiveName] = {
       val parts = mutable.ArrayBuffer.empty[DirectiveName]
       expect(".")
-      parts += DirectiveName(name(segment(allowSingleColon = false)))
+      parts += DirectiveName.unsafe(name(segment(allowSingleColon = false)))
       while (at(".") && adjacent) {
         expect(".")
-        parts += DirectiveName(name(segment(allowSingleColon = false)))
+        parts += DirectiveName.unsafe(name(segment(allowSingleColon = false)))
       }
-      Vec.from(parts).refineUnsafe[MinLength[1]]
+      NonEmptyVec.unsafeFromVec(Vec.from(parts))
     }
 
     private def dataDeclaration(): Statement = {
@@ -298,12 +302,13 @@ object Parser extends net.kurobako.gemstone.isa.Decoder[String, Program] {
       val address =
         DataAddressSpace.values.find(value => parts.contains(value.mnemonic)).getOrElse(fail("data address space"))
       val kind   = DataType.values.find(value => parts.contains(value.mnemonic)).getOrElse(fail("data type"))
-      val symbol = SymbolName(name(word()))
+      val symbol = SymbolName.unsafe(name(word()))
       val count  =
         if (accept("[")) {
           val value = if (accept("]")) None
           else {
-            val parsed = word().toIntOption.flatMap(_.refineOption[Positive]).getOrElse(fail("positive element count"))
+            val parsed =
+              word().toIntOption.flatMap(PositiveInt.either(_).toOption).getOrElse(fail("positive element count"))
             expect("]")
             Some(parsed)
           }
@@ -335,15 +340,15 @@ object Parser extends net.kurobako.gemstone.isa.Decoder[String, Program] {
         val value = parts(position)
         if (excluded(value)) position += 1
         else if (value == "align" && position + 1 < parts.size) {
-          val alignment = parts(position + 1).toIntOption.flatMap(_.refineOption[Positive])
+          val alignment = parts(position + 1).toIntOption.flatMap(PositiveInt.either(_).toOption)
             .getOrElse(fail("positive alignment"))
           qualifiers += DeclarationQualifier.Alignment(alignment)
           position += 2
         } else if (value.headOption.exists(character => character.isDigit || character == '+' || character == '-')) {
-          qualifiers += DeclarationQualifier.Value(ImmediateText(name(value)))
+          qualifiers += DeclarationQualifier.Value(ImmediateText.unsafe(name(value)))
           position += 1
         } else {
-          qualifiers += DeclarationQualifier.Attribute(QualifierName(name(value)))
+          qualifiers += DeclarationQualifier.Attribute(QualifierName.unsafe(name(value)))
           position += 1
         }
       }
@@ -379,12 +384,12 @@ object Parser extends net.kurobako.gemstone.isa.Decoder[String, Program] {
             return if (isEntry)
               Statement.Entry(
                 visible,
-                KernelName(name(functionName)),
+                KernelName.unsafe(name(functionName)),
                 functionParameters,
                 body.getOrElse(Vec.empty[Statement])
               )
             else
-              Statement.Function(visible, FunctionName(name(functionName)), returns, functionParameters, body)
+              Statement.Function(visible, FunctionName.unsafe(name(functionName)), returns, functionParameters, body)
           case _ => fail(".entry or .func")
         }
       }
@@ -410,7 +415,7 @@ object Parser extends net.kurobako.gemstone.isa.Decoder[String, Program] {
         if (parts.last == "align" && !eof && current.text.toIntOption.nonEmpty) parts += word()
       }
       val kind = DataType.values.find(value => parts.contains(value.mnemonic)).getOrElse(fail("parameter data type"))
-      val parameterName = ParameterName(name(word()))
+      val parameterName = ParameterName.unsafe(name(word()))
       val dimensions    = mutable.ArrayBuffer.empty[Operand]
       while (accept("[")) {
         if (!at("]")) dimensions ++= operandsUntil("]")
@@ -425,11 +430,11 @@ object Parser extends net.kurobako.gemstone.isa.Decoder[String, Program] {
       if (at(".") && index + 1 < tokens.length && tokens(index + 1).text == "callprototype") {
         while (!eof && !accept(";")) index += 1
         Statement.Directive(
-          Vec(DirectiveName(name("callprototype"))).refineUnsafe[MinLength[1]],
+          NonEmptyVec.unsafeFromVec(Vec(DirectiveName.unsafe(name("callprototype")))),
           Vec.empty,
           DirectiveTerminator.Semicolon
         )
-      } else Statement.Label(LabelName(name(label)))
+      } else Statement.Label(LabelName.unsafe(name(label)))
     }
 
     private def instruction(): Statement = {
@@ -442,20 +447,20 @@ object Parser extends net.kurobako.gemstone.isa.Decoder[String, Program] {
       val modifiers = mutable.ArrayBuffer.empty[Modifier]
       while (at(".") && adjacent) {
         expect(".")
-        modifiers += Modifier(ModifierName(name(segment(allowSingleColon = true))))
+        modifiers += Modifier(ModifierName.unsafe(name(segment(allowSingleColon = true))))
       }
       val operands   = operandsUntil(";")
       val _          = accept(";")
       val normalized = {
         val values = Vec.from(modifiers)
-        if (operation == "vote" && values.exists(_.name.value == "sync") && values.exists(_.name.value == "ballot"))
-          Vec(Modifier(ModifierName(name("sync")))) ++ values.filterNot(_.name.value == "sync")
+        if (operation == "vote" && values.exists(_.name.raw == "sync") && values.exists(_.name.raw == "ballot"))
+          Vec(Modifier(ModifierName.unsafe(name("sync")))) ++ values.filterNot(_.name.raw == "sync")
         else values
       }
       Instruction.decodeParsed(name(operation), operands, normalized, predicate) match {
         case Right(value)                                   => Statement.Instruction(value)
         case Left(Instruction.DecodeError.UnknownOpcode(_)) =>
-          Statement.UnsupportedInstruction(Opcode(name(operation)), operands, normalized, predicate)
+          Statement.UnsupportedInstruction(Opcode.unsafe(name(operation)), operands, normalized, predicate)
         case Left(error) => fail(error.toString)
       }
     }
@@ -496,13 +501,13 @@ object Parser extends net.kurobako.gemstone.isa.Decoder[String, Program] {
         if (looksLikeRegisterPart(part))
           value = value match {
             case Operand.Symbol(symbol) =>
-              Operand.Register(RegisterName(name(symbol.value)), Some(RegisterPart(name(part))))
+              Operand.Register(RegisterName.unsafe(name(symbol.raw)), Some(RegisterPart.unsafe(name(part))))
             case _ => index = mark; suffix = false; value
           }
         else
           value match {
             case Operand.Address(_) | Operand.Qualified(_, _) =>
-              value = Operand.Qualified(value, QualifierName(name(part)))
+              value = Operand.Qualified(value, QualifierName.unsafe(name(part)))
             case _ => index = mark; suffix = false
           }
       }
@@ -535,12 +540,12 @@ object Parser extends net.kurobako.gemstone.isa.Decoder[String, Program] {
         expect("]")
         Operand.Address(values)
       } else if (accept(".")) {
-        val values = mutable.ArrayBuffer(QualifierName(name(segment(allowSingleColon = false))))
+        val values = mutable.ArrayBuffer(QualifierName.unsafe(name(segment(allowSingleColon = false))))
         while (at(".") && adjacent) {
           expect(".")
-          values += QualifierName(name(segment(allowSingleColon = false)))
+          values += QualifierName.unsafe(name(segment(allowSingleColon = false)))
         }
-        Operand.Qualifier(Vec.from(values).refineUnsafe[MinLength[1]])
+        Operand.Qualifier(NonEmptyVec.unsafeFromVec(Vec.from(values)))
       } else {
         val value = word()
         if (value.startsWith("%")) {
@@ -552,12 +557,12 @@ object Parser extends net.kurobako.gemstone.isa.Decoder[String, Program] {
           val part = segments.indexWhere(looksLikeRegisterPart(_), 1)
           if (part > 0 && part == segments.size - 1)
             Operand.Register(
-              RegisterName(name(segments.take(part).mkString("."))),
-              Some(RegisterPart(name(segments.last)))
+              RegisterName.unsafe(name(segments.take(part).mkString("."))),
+              Some(RegisterPart.unsafe(name(segments.last)))
             )
-          else Operand.Register(RegisterName(name(segments.mkString("."))), None)
-        } else if (number(value)) Operand.Immediate(ImmediateText(name(value)))
-        else Operand.Symbol(SymbolName(name(value)))
+          else Operand.Register(RegisterName.unsafe(name(segments.mkString("."))), None)
+        } else if (number(value)) Operand.Immediate(ImmediateText.unsafe(name(value)))
+        else Operand.Symbol(SymbolName.unsafe(name(value)))
       }
 
     private def segment(allowSingleColon: Boolean): String = {

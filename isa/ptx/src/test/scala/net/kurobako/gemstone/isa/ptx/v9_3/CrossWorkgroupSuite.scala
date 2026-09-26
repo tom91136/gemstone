@@ -1,11 +1,10 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
+import net.kurobako.gemstone.{NonEmptyString, NonEmptyVec, NonNegativeInt, NonNegativeLong, PositiveInt, PositiveLong}
+
 import Program.*
 
 import VMIR.*
-
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
 
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.binary.ScalarByteWidth
@@ -21,19 +20,19 @@ final class CrossWorkgroupSuite extends munit.FunSuite {
   private val header      = ".version 8.0\n.target sm_80\n.address_size 64\n"
 
   private final class Workers extends Scheduler with AutoCloseable {
-    private val executor                                                            = Executors.newFixedThreadPool(4)
-    override val parallelism: Int :| Positive                                       = 4
-    override def shouldParallel(tasks: Long :| Positive0, lanes: Long :| Positive0) = tasks > 1
+    private val executor                                                        = Executors.newFixedThreadPool(4)
+    override val parallelism: PositiveInt                                       = PositiveInt(4)
+    override def shouldParallel(tasks: NonNegativeLong, lanes: NonNegativeLong) = tasks.raw > 1
     private final class Work(
-        index: Long :| Positive0,
-        task: Long :| Positive0 => Either[Fault, Unit]
+        index: NonNegativeLong,
+        task: NonNegativeLong => Either[Fault, Unit]
     ) extends Callable[Either[Fault, Unit]] {
       override def call() = task(index)
     }
     override def parallelFor(
-        tasks: Long :| Positive0
-    )(task: Long :| Positive0 => Either[Fault, Unit]) = {
-      val futures = (0L until tasks).map(index => executor.submit(Work(index.refineUnsafe[Positive0], task)))
+        tasks: NonNegativeLong
+    )(task: NonNegativeLong => Either[Fault, Unit]) = {
+      val futures = (0L until tasks.raw).map(index => executor.submit(Work(NonNegativeLong.unsafe(index), task)))
       futures.view.map(_.get(15, TimeUnit.SECONDS)).collectFirst { case Left(error) => Left(error) }
         .getOrElse(Right(()))
     }
@@ -48,7 +47,7 @@ final class CrossWorkgroupSuite extends munit.FunSuite {
   private final class Memory(size: Int) extends AddressMemory {
     private val lock = ReentrantLock()
     val backing      = ArrayCheckedMemory.allocate(
-      size.refineEither[Positive0].fold(error => throw IllegalArgumentException(error), value => value),
+      NonNegativeInt.either(size).fold(error => throw IllegalArgumentException(error), value => value),
       GuestAddress(0x10000000000L)
     )
     val base                                                   = backing.allocation.start
@@ -114,7 +113,7 @@ final class CrossWorkgroupSuite extends munit.FunSuite {
       geometry(groups, lanes, count),
       arguments,
       memory,
-      TaskControl.forScheduler(TaskLimits(1000000, 32), scheduler = workers),
+      TaskControl.forScheduler(TaskLimits(PositiveLong(1000000L), PositiveInt(32)), scheduler = workers),
       workers
     )
     assert(result.isRight, result.toString)
@@ -251,7 +250,7 @@ final class CrossWorkgroupSuite extends munit.FunSuite {
               lanes,
               groups * lanes - lanes / 2,
               memory,
-              Map(ParameterName("memory") -> Argument(memory.base.value)),
+              Map(ParameterName("memory") -> Argument.fromLong(memory.base.raw)),
               workers
             )
             (0 until groups).foreach { group =>
@@ -282,12 +281,13 @@ final class CrossWorkgroupSuite extends munit.FunSuite {
               count,
               memory,
               Map(
-                ParameterName("descriptors") -> Argument(memory.base.value),
-                ParameterName("output")      -> Argument(memory.base.value + groups * 8L),
+                ParameterName("descriptors") -> Argument.fromLong(memory.base.raw),
+                ParameterName("output")      -> Argument.fromLong(memory.base.raw + groups * 8L),
                 ParameterName("count")       -> Argument(
-                  net.kurobako.gemstone.binary.LittleEndian
-                    .toVec(count, ScalarByteWidth.Dword)
-                    .refineUnsafe[MinLength[1]]
+                  NonEmptyVec.unsafeFromVec(net.kurobako.gemstone.binary.LittleEndian.toVec(
+                    count,
+                    ScalarByteWidth(4)
+                  ))
                 )
               ),
               workers
@@ -343,12 +343,13 @@ final class CrossWorkgroupSuite extends munit.FunSuite {
               groups * 32,
               memory,
               Map(
-                ParameterName("descriptors") -> Argument(memory.base.value),
-                ParameterName("output")      -> Argument(memory.base.value + groups * 8L),
+                ParameterName("descriptors") -> Argument.fromLong(memory.base.raw),
+                ParameterName("output")      -> Argument.fromLong(memory.base.raw + groups * 8L),
                 ParameterName("count")       -> Argument(
-                  net.kurobako.gemstone.binary.LittleEndian
-                    .toVec(count, ScalarByteWidth.Dword)
-                    .refineUnsafe[MinLength[1]]
+                  NonEmptyVec.unsafeFromVec(net.kurobako.gemstone.binary.LittleEndian.toVec(
+                    count,
+                    ScalarByteWidth(4)
+                  ))
                 )
               ),
               workers
@@ -375,11 +376,12 @@ final class CrossWorkgroupSuite extends munit.FunSuite {
               count,
               memory,
               Map(
-                ParameterName("memory") -> Argument(memory.base.value),
+                ParameterName("memory") -> Argument.fromLong(memory.base.raw),
                 ParameterName("epoch")  -> Argument(
-                  net.kurobako.gemstone.binary.LittleEndian
-                    .toVec((epoch + 10) * 1000, ScalarByteWidth.Dword)
-                    .refineUnsafe[MinLength[1]]
+                  NonEmptyVec.unsafeFromVec(net.kurobako.gemstone.binary.LittleEndian.toVec(
+                    (epoch + 10) * 1000,
+                    ScalarByteWidth(4)
+                  ))
                 )
               ),
               workers
@@ -394,11 +396,12 @@ final class CrossWorkgroupSuite extends munit.FunSuite {
               count,
               memory,
               Map(
-                ParameterName("memory") -> Argument(memory.base.value),
+                ParameterName("memory") -> Argument.fromLong(memory.base.raw),
                 ParameterName("epoch")  -> Argument(
-                  net.kurobako.gemstone.binary.LittleEndian
-                    .toVec(epoch * 1000, ScalarByteWidth.Dword)
-                    .refineUnsafe[MinLength[1]]
+                  NonEmptyVec.unsafeFromVec(net.kurobako.gemstone.binary.LittleEndian.toVec(
+                    epoch * 1000,
+                    ScalarByteWidth(4)
+                  ))
                 )
               ),
               workers

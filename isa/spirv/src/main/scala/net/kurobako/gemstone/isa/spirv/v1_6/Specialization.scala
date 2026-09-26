@@ -12,14 +12,14 @@ import net.kurobako.gemstone.binary.{LittleEndian, ScalarByteWidth}
 object Specialization {
   final case class Constant(specId: Int, byteSize: Int)
 
-  private val DecorateOpcode           = Instruction.Definition.Decorate.opcodeNumber.value
+  private val DecorateOpcode           = Instruction.Definition.Decorate.opcodeNumber.raw
   private val SpecIdDecoration         = 1
-  private val TypeBoolOpcode           = Instruction.Definition.TypeBool.opcodeNumber.value
-  private val TypeIntOpcode            = Instruction.Definition.TypeInt.opcodeNumber.value
-  private val TypeFloatOpcode          = Instruction.Definition.TypeFloat.opcodeNumber.value
-  private val SpecConstantTrueOpcode   = Instruction.Definition.SpecConstantTrue.opcodeNumber.value
-  private val SpecConstantFalseOpcode  = Instruction.Definition.SpecConstantFalse.opcodeNumber.value
-  private val SpecConstantNumberOpcode = Instruction.Definition.SpecConstant.opcodeNumber.value
+  private val TypeBoolOpcode           = Instruction.Definition.TypeBool.opcodeNumber.raw
+  private val TypeIntOpcode            = Instruction.Definition.TypeInt.opcodeNumber.raw
+  private val TypeFloatOpcode          = Instruction.Definition.TypeFloat.opcodeNumber.raw
+  private val SpecConstantTrueOpcode   = Instruction.Definition.SpecConstantTrue.opcodeNumber.raw
+  private val SpecConstantFalseOpcode  = Instruction.Definition.SpecConstantFalse.opcodeNumber.raw
+  private val SpecConstantNumberOpcode = Instruction.Definition.SpecConstant.opcodeNumber.raw
 
   private final case class TypeInfo(byteSize: Int, boolean: Boolean)
   private final case class Declaration(offset: Int, words: Int, typeId: Int, opcode: Int)

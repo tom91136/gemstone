@@ -1,15 +1,12 @@
 package net.kurobako.gemstone.isa.amdgpu
 
-import net.kurobako.gemstone.Vec
+import net.kurobako.gemstone.{NonNegativeInt, NonNegativeLong, PositiveInt, Vec}
 import net.kurobako.gemstone.binary.{Bits, ByteRange, ScalarByteWidth}
 import net.kurobako.gemstone.binary.IEEE754
 import net.kurobako.gemstone.binary.LittleEndian
 import net.kurobako.gemstone.memory.GuestAddress
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.Dimensions
-
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
 
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -38,33 +35,40 @@ private trait CodeObjectTestSupport { self: munit.FunSuite =>
 
     final override def address(
         region: MemoryRegion,
-        offset: Long :| Positive0
+        offset: NonNegativeLong
     ): Either[Fault, GuestAddress] =
       regionSizes.find(_._1 == region).toRight(Fault.Memory("test allocation")).flatMap { case (_, size) =>
         Either.cond(
-          offset <= size,
-          GuestAddress(regionAddress(region).value + offset),
+          offset.raw <= size,
+          GuestAddress(regionAddress(region).raw + offset.raw),
           Fault.InvalidTask("test address range")
         )
       }
 
     final override def locate(
         address: GuestAddress,
-        size: Int :| Positive0
+        size: NonNegativeInt
     ): Either[Fault, AddressSpace.Location] =
       regionSizes.view.collectFirst(Function.unlift { case (region, regionSize) =>
-        val relative = address.value - regionAddress(region).value
-        Option.when(relative >= 0L && relative <= regionSize - size.toLong)(
-          AddressSpace.Location(region, relative.refineUnsafe[Positive0])
+        val relative = address.raw - regionAddress(region).raw
+        Option.when(relative >= 0L && relative <= regionSize - size.raw.toLong)(
+          AddressSpace.Location(region, NonNegativeLong.unsafe(relative))
         )
       }).toRight(Fault.Memory("test address"))
   }
 
   protected final def testDimensions(x: Int, y: Int = 1, z: Int = 1): Dimensions =
     Dimensions(
-      x.refineEither[Positive].fold(message => throw IllegalArgumentException(message), value => value),
-      y.refineEither[Positive].fold(message => throw IllegalArgumentException(message), value => value),
-      z.refineEither[Positive].fold(message => throw IllegalArgumentException(message), value => value)
+      PositiveInt.either(x).fold(message => throw IllegalArgumentException(message), value => value),
+      PositiveInt.either(y).fold(message => throw IllegalArgumentException(message), value => value),
+      PositiveInt.either(z).fold(message => throw IllegalArgumentException(message), value => value)
+    )
+
+  protected final def testCoordinates(x: Int, y: Int, z: Int): LaunchGeometry.Coordinates =
+    LaunchGeometry.Coordinates(
+      NonNegativeInt.unsafe(x),
+      NonNegativeInt.unsafe(y),
+      NonNegativeInt.unsafe(z)
     )
 
   // Mutable allocations are confined to this final in-memory execution fixture.
@@ -76,34 +80,36 @@ private trait CodeObjectTestSupport { self: munit.FunSuite =>
 
     def allocate(id: MemoryRegion, size: Int): Unit = allocations(id) = Array.ofDim[Byte](size)
 
-    def putInt(id: MemoryRegion, offset: Int :| Positive0, value: Int): Unit =
-      LittleEndian.write(value.toLong, allocations(id), offset, ScalarByteWidth.Dword)
+    def putInt(id: MemoryRegion, offset: NonNegativeInt, value: Int): Unit =
+      LittleEndian.write(value.toLong, allocations(id), offset.raw, ScalarByteWidth(4))
 
-    def getInt(id: MemoryRegion, offset: Int :| Positive0): Int =
-      LittleEndian.decodeInt32(allocations(id), offset)
+    def getInt(id: MemoryRegion, offset: NonNegativeInt): Int =
+      LittleEndian.decodeInt32(allocations(id), offset.raw)
 
     override def read(
         id: MemoryRegion,
-        offset: Long :| Positive0,
-        size: Int :| Positive0
+        offset: NonNegativeLong,
+        size: NonNegativeInt
     ): Either[Fault, Vec[Byte]] =
       allocations.get(id).toRight(Fault.Memory("test allocation")).flatMap { bytes =>
         Either.cond(
-          ByteRange.contains(bytes.length, offset, size.toLong),
-          Vec.unsafeFromArray(java.util.Arrays.copyOfRange(bytes, offset.toInt, offset.toInt + size)),
+          ByteRange.contains(bytes.length, offset.raw, size.raw.toLong),
+          Vec.unsafeFromArray(
+            java.util.Arrays.copyOfRange(bytes, offset.raw.toInt, offset.raw.toInt + size.raw)
+          ),
           Fault.InvalidTask("test read range")
         )
       }
 
     override def write(
         id: MemoryRegion,
-        offset: Long :| Positive0,
+        offset: NonNegativeLong,
         bytes: Vec[Byte]
     ): Either[Fault, Unit] =
       allocations.get(id).toRight(Fault.Memory("test allocation")).flatMap { destination =>
         Either.cond(
-          ByteRange.contains(destination.length, offset, bytes.length.toLong), {
-            val copied = bytes.copyToArray(destination, offset.toInt, bytes.length)
+          ByteRange.contains(destination.length, offset.raw, bytes.length.toLong), {
+            val copied = bytes.copyToArray(destination, offset.raw.toInt, bytes.length)
             assertEquals(copied, bytes.length)
             ()
           },
@@ -151,14 +157,14 @@ private trait CodeObjectTestSupport { self: munit.FunSuite =>
     buffer.putShort(62, 1.toShort)
     Array.copy(sectionNames, 0, bytes, sectionNameOffset, sectionNames.length)
     Array.copy(symbolNames, 0, bytes, symbolNameOffset, symbolNames.length)
-    val textByteOffset     = textOffset.refineEither[Positive0].fold(fail(_), value => value)
-    val readOnlyByteOffset = readOnlyOffset.refineEither[Positive0].fold(fail(_), value => value)
-    LittleEndian.write(0xbf810000L, bytes, textByteOffset, ScalarByteWidth.Dword)
-    LittleEndian.write(16L, bytes, readOnlyByteOffset, ScalarByteWidth.Dword)
-    LittleEndian.write(8L, bytes, readOnlyByteOffset + 4, ScalarByteWidth.Dword)
-    LittleEndian.write(24L, bytes, readOnlyByteOffset + 8, ScalarByteWidth.Dword)
-    LittleEndian.write(0x80L, bytes, readOnlyByteOffset + 52, ScalarByteWidth.Dword)
-    LittleEndian.write(0x0aL, bytes, readOnlyByteOffset + 56, ScalarByteWidth.Word)
+    val textByteOffset     = NonNegativeInt.either(textOffset).fold(fail(_), value => value.raw)
+    val readOnlyByteOffset = NonNegativeInt.either(readOnlyOffset).fold(fail(_), value => value.raw)
+    LittleEndian.write(0xbf810000L, bytes, textByteOffset, ScalarByteWidth(4))
+    LittleEndian.write(16L, bytes, readOnlyByteOffset, ScalarByteWidth(4))
+    LittleEndian.write(8L, bytes, readOnlyByteOffset + 4, ScalarByteWidth(4))
+    LittleEndian.write(24L, bytes, readOnlyByteOffset + 8, ScalarByteWidth(4))
+    LittleEndian.write(0x80L, bytes, readOnlyByteOffset + 52, ScalarByteWidth(4))
+    LittleEndian.write(0x0aL, bytes, readOnlyByteOffset + 56, ScalarByteWidth(2))
     Array.copy(target, 0, bytes, readOnlyOffset + 64, target.length)
 
     def section(

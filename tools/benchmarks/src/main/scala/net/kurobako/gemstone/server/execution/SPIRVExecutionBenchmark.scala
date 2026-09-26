@@ -1,6 +1,6 @@
 package net.kurobako.gemstone.server.execution
 
-import net.kurobako.gemstone.{PlatformTime, Vec}
+import net.kurobako.gemstone.{NonEmptyVec, NonNegativeInt, NonNegativeLong, PlatformTime, PositiveInt, Vec}
 import net.kurobako.gemstone.benchmarks.BenchmarkArguments
 import net.kurobako.gemstone.benchmarks.BenchmarkName
 import net.kurobako.gemstone.benchmarks.PlatformMetrics
@@ -12,8 +12,6 @@ import net.kurobako.gemstone.vm.{Fault, KernelTask, LaunchGeometry, Memory, Memo
 
 import cats.syntax.all.*
 import com.monovore.decline.Opts
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
 
 import java.nio.charset.StandardCharsets
 import java.nio.file.Path
@@ -22,24 +20,24 @@ import scala.util.Using
 /** Concurrent arithmetic dispatches representative of the SPIR-V interpreter's instruction loop. */
 object SPIRVExecutionBenchmark {
   private final case class Options(
-      iterations: Int :| Positive,
-      groups: Int :| Positive,
-      instructions: Int :| Positive,
-      parallelism: Int :| Positive,
+      iterations: PositiveInt,
+      groups: PositiveInt,
+      instructions: PositiveInt,
+      parallelism: PositiveInt,
       recording: Option[Path]
   )
 
   private object EmptyMemory extends Memory {
     override def read(
         region: MemoryRegion,
-        offset: Long :| Positive0,
-        size: Int :| Positive0
+        offset: NonNegativeLong,
+        size: NonNegativeInt
     ): Either[Fault, Vec[Byte]] =
       Left(Fault.Unsupported("benchmark kernel attempted a memory read"))
 
     override def write(
         region: MemoryRegion,
-        offset: Long :| Positive0,
+        offset: NonNegativeLong,
         bytes: Vec[Byte]
     ): Either[Fault, Unit] =
       Left(Fault.Unsupported("benchmark kernel attempted a memory write"))
@@ -48,14 +46,14 @@ object SPIRVExecutionBenchmark {
   private val name    = BenchmarkName("spirv-execution")
   private val options = (
     Opts.option[Int]("iterations", help = "Measured dispatches").withDefault(20)
-      .validate("iterations must be positive")(_ > 0).map(_.refineUnsafe[Positive]),
+      .validate("iterations must be positive")(_ > 0).map(PositiveInt.unsafe),
     Opts.option[Int]("groups", help = "Workgroups per dispatch").withDefault(256)
-      .validate("groups must be positive")(_ > 0).map(_.refineUnsafe[Positive]),
+      .validate("groups must be positive")(_ > 0).map(PositiveInt.unsafe),
     Opts.option[Int]("instructions", help = "Integer additions per invocation").withDefault(64)
-      .validate("instructions must be positive")(_ > 0).map(_.refineUnsafe[Positive]),
+      .validate("instructions must be positive")(_ > 0).map(PositiveInt.unsafe),
     Opts.option[Int]("parallelism", help = "VMInterpreter worker count")
       .withDefault(sys.runtime.availableProcessors())
-      .validate("parallelism must be positive")(_ > 0).map(_.refineUnsafe[Positive]),
+      .validate("parallelism must be positive")(_ > 0).map(PositiveInt.unsafe),
     Opts.option[String]("recording", help = "JFR output path").map(Path.of(_)).orNone
   ).mapN(Options(_, _, _, _, _))
 
@@ -66,7 +64,7 @@ object SPIRVExecutionBenchmark {
     val task   = KernelTask.validated(
       kernelName = KernelName("arithmetic"),
       groupSize = LaunchGeometry.Dimensions.One,
-      groupCount = LaunchGeometry.Dimensions(parsed.groups, 1, 1),
+      groupCount = LaunchGeometry.Dimensions(parsed.groups, PositiveInt.One, PositiveInt.One),
       arguments = Vec.empty
     ).fold(error => throw IllegalArgumentException(error), value => value)
 
@@ -79,7 +77,7 @@ object SPIRVExecutionBenchmark {
       val allocatedBefore = PlatformMetrics.allocatedBytes
       val started         = PlatformTime.monotonicNanos
       var iteration       = 0
-      while (iteration < parsed.iterations) {
+      while (iteration < parsed.iterations.raw) {
         val control = TaskControl.forScheduler(scheduler = scheduler)
         machine.execute(program, task, EmptyMemory, control)
           .fold(error => throw IllegalStateException(error.message), _ => ())
@@ -90,11 +88,11 @@ object SPIRVExecutionBenchmark {
         before <- allocatedBefore
         after  <- PlatformMetrics.allocatedBytes
         if after >= before
-      } yield after - before
+      } yield (after - before).raw
       Console.out.println(
         s"iterations=${parsed.iterations} groups=${parsed.groups} instructions=${parsed.instructions} " +
-          s"parallelism=${parsed.parallelism} nsPerDispatch=${elapsed.toDouble / parsed.iterations} " +
-          s"bytesPerDispatch=${allocated.fold(Double.NaN)(_.toDouble / parsed.iterations)}"
+          s"parallelism=${parsed.parallelism} nsPerDispatch=${elapsed.toDouble / parsed.iterations.raw} " +
+          s"bytesPerDispatch=${allocated.fold(Double.NaN)(_.toDouble / parsed.iterations.raw)}"
       )
     }
   }
@@ -102,7 +100,7 @@ object SPIRVExecutionBenchmark {
   private def operand(kind: String, values: Int*): Operand =
     Operand(
       SPIRVOperandKind.either(kind).fold(message => throw IllegalArgumentException(message), value => value),
-      Vec.from(values.map(Word(_))).refineUnsafe[MinLength[1]]
+      NonEmptyVec.unsafeFromVec(Vec.from(values.map(Word(_))))
     )
 
   private def id(value: Int): Operand = operand("IdRef", value)
@@ -111,17 +109,17 @@ object SPIRVExecutionBenchmark {
     val bytes = value.getBytes(StandardCharsets.UTF_8) :+ 0.toByte
     Operand(
       SPIRVOperandKind("LiteralString"),
-      Vec.from(bytes.grouped(4).map { group =>
+      NonEmptyVec.unsafeFromVec(Vec.from(bytes.grouped(4).map { group =>
         val width = ScalarByteWidth.either(group.length)
           .fold(message => throw IllegalArgumentException(message), value => value)
         Word(LittleEndian.decode(group, 0, width).toInt)
-      }).refineUnsafe[MinLength[1]]
+      }))
     )
   }
 
-  private def module(instructionCount: Int :| Positive): Module = {
+  private def module(instructionCount: PositiveInt): Module = {
     import Instruction.*
-    val arithmetic = Vector.tabulate(instructionCount) { index =>
+    val arithmetic = Vector.tabulate(instructionCount.raw) { index =>
       val destination = index + 7
       val source      = if (index == 0) 4 else destination - 1
       IAdd(id(2), id(destination), id(source), id(4))
@@ -138,7 +136,7 @@ object SPIRVExecutionBenchmark {
       Label(id(6))
     ) ++ Vec.from(arithmetic) ++ Vec[Instruction](Return(), FunctionEnd())
     Module(
-      Header(ISA.version, Word(0), Word(instructionCount + 7), Word(0)),
+      Header(ISA.version, Word(0), Word(instructionCount.raw + 7), Word(0)),
       instructions,
       Endianness.Little
     )

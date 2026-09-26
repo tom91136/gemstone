@@ -1,12 +1,11 @@
 package net.kurobako.gemstone.server.execution
-import net.kurobako.gemstone.Vec
+import net.kurobako.gemstone.{NonNegativeLong, PositiveLong, Vec}
 import net.kurobako.gemstone.isa.KernelName as ISAKernelName
 import net.kurobako.gemstone.memory.AllocationKind
 import net.kurobako.gemstone.binary.{LittleEndian, ScalarByteWidth}
 import net.kurobako.gemstone.rpc.ExecutionProtocol.*
+import net.kurobako.gemstone.rpc.AllocationId.raw
 import net.kurobako.gemstone.vm.{KernelTask, LaunchGeometry, MemoryRegion}
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
 import java.nio.{ByteBuffer, ByteOrder}
 import java.nio.charset.StandardCharsets
 import scala.util.Using
@@ -20,28 +19,28 @@ final class ProgramGlobalBindingSuite extends munit.FunSuite {
     0x7e02020aL, 0xdc708000L, 0x00060100L, 0x880a0804L, 0x880b0905L, 0x870a0b0aL, 0xbf06800aL, 0x850a8081L, 0x7e02020aL,
     0x7e000284L, 0xdc708000L, 0x00060100L, 0xbf810000L
   ).flatMap(value => LittleEndian.toVec(value, ScalarByteWidth.Dword))
-  private val global                                      = AllocationId(1)
-  private val output                                      = AllocationId(2)
+  private val global                                      = AllocationId(1L)
+  private val output                                      = AllocationId(2L)
   private def service()                                   = ExecutionService(RuntimeBackend.defaults)
   private def setup(service: ExecutionService): ProgramId = {
-    assertEquals(service.registerAllocation(32, AllocationKind.Shared), Right(global))
-    assertEquals(service.registerAllocation(16, AllocationKind.Shared), Right(output))
+    assertEquals(service.registerAllocation(PositiveLong.unsafe(32), AllocationKind.Shared), Right(global))
+    assertEquals(service.registerAllocation(PositiveLong.unsafe(16), AllocationKind.Shared), Right(output))
     service.load(HSARuntimeBackend.encoding, Vec.from(image())).toOption.get
   }
   private def read(
       service: ExecutionService,
       id: AllocationId,
-      offset: Long :| Positive0,
+      offset: Long,
       size: ScalarByteWidth = ScalarByteWidth.Dword
   ): Long =
-    service.read(id, offset, size.nonNegative)
+    service.read(id, NonNegativeLong.unsafe(offset), size.nonNegative)
       .map(bytes => LittleEndian.decode(bytes, 0, size)).toOption.get
   private def launch(service: ExecutionService, program: ProgramId, pointer: KernelTask.Argument): CompletionId = {
     val task = KernelTask.validated(
       ISAKernelName("kernel"),
       LaunchGeometry.Dimensions.One,
       LaunchGeometry.Dimensions.One,
-      Vec(pointer, KernelTask.Argument.Memory(MemoryRegion(output.value), 0))
+      Vec(pointer, KernelTask.Argument.Memory(MemoryRegion(output.raw), NonNegativeLong.Zero))
     ).toOption.get
     val completion = service.launch(program, task).toOption.get
     assertEquals(service.completion(completion), Right(CompletionStatus.Succeeded))
@@ -52,17 +51,22 @@ final class ProgramGlobalBindingSuite extends munit.FunSuite {
     Using.resource(service()) { s =>
       val program = setup(s)
       assertEquals(
-        s.writeGlobal(program, GlobalName("device_global"), 0, LittleEndian.toVec(41, ScalarByteWidth.Dword)),
+        s.writeGlobal(
+          program,
+          GlobalName("device_global"),
+          NonNegativeLong.Zero,
+          LittleEndian.toVec(41, ScalarByteWidth.Dword)
+        ),
         Right(())
       )
-      assertEquals(s.bindGlobal(program, GlobalName("device_global"), global, 8), Right(()))
+      assertEquals(s.bindGlobal(program, GlobalName("device_global"), global, NonNegativeLong.unsafe(8)), Right(()))
       assertEquals(read(s, global, 8), 41L)
-      val first = launch(s, program, KernelTask.Argument.Memory(MemoryRegion(global.value), 8))
+      val first = launch(s, program, KernelTask.Argument.Memory(MemoryRegion(global.raw), NonNegativeLong.unsafe(8)))
       assertEquals(read(s, global, 8), 42L)
       assertEquals(read(s, output, 0), 42L)
       assertEquals(read(s, output, 4), 1L)
       assertEquals(s.releaseCompletion(first), Right(()))
-      assertEquals(s.write(global, 8, LittleEndian.toVec(70, ScalarByteWidth.Dword)), Right(()))
+      assertEquals(s.write(global, NonNegativeLong.unsafe(8), LittleEndian.toVec(70, ScalarByteWidth.Dword)), Right(()))
       val synthetic = 0x400000000000L + 8L
       val second = launch(s, program, KernelTask.Argument.Scalar(LittleEndian.toVec(synthetic, ScalarByteWidth.Qword)))
       assertEquals(read(s, global, 8), 71L)
@@ -85,36 +89,41 @@ final class ProgramGlobalBindingSuite extends munit.FunSuite {
       val a  = use(service())
       val b  = use(service())
       val pa = setup(a); val pb = setup(b)
-      assertEquals(a.bindGlobal(pa, GlobalName("device_global"), global, 8), Right(()))
-      assertEquals(a.write(global, 8, LittleEndian.toVec(99, ScalarByteWidth.Dword)), Right(()))
-      assertEquals(a.bindGlobal(pa, GlobalName("device_alias"), global, 8), Right(()))
-      assertEquals(a.bindGlobal(pa, GlobalName("device_global"), global, 8), Right(()))
+      assertEquals(a.bindGlobal(pa, GlobalName("device_global"), global, NonNegativeLong.unsafe(8)), Right(()))
+      assertEquals(a.write(global, NonNegativeLong.unsafe(8), LittleEndian.toVec(99, ScalarByteWidth.Dword)), Right(()))
+      assertEquals(a.bindGlobal(pa, GlobalName("device_alias"), global, NonNegativeLong.unsafe(8)), Right(()))
+      assertEquals(a.bindGlobal(pa, GlobalName("device_global"), global, NonNegativeLong.unsafe(8)), Right(()))
       assertEquals(read(a, global, 8), 99L, "alias/idempotent bind must not reset live storage")
       assertEquals(
-        a.writeGlobal(pa, GlobalName("device_alias"), 0, LittleEndian.toVec(123, ScalarByteWidth.Dword)),
+        a.writeGlobal(
+          pa,
+          GlobalName("device_alias"),
+          NonNegativeLong.Zero,
+          LittleEndian.toVec(123, ScalarByteWidth.Dword)
+        ),
         Right(())
       )
       assertEquals(read(a, global, 8), 123L)
-      assertEquals(a.bindGlobal(pa, GlobalName("device_pointer"), output, 0), Right(()))
+      assertEquals(a.bindGlobal(pa, GlobalName("device_pointer"), output, NonNegativeLong.unsafe(0)), Right(()))
       assertEquals(
         read(a, output, 0, ScalarByteWidth.Qword),
         0x3000L,
         "initializer must contain relocated ELF global address"
       )
-      assertEquals(b.bindGlobal(pb, GlobalName("device_global"), global, 8), Right(()))
+      assertEquals(b.bindGlobal(pb, GlobalName("device_global"), global, NonNegativeLong.unsafe(8)), Right(()))
       assertEquals(read(b, global, 8), 0L)
       assertEquals(read(a, global, 8), 123L)
-      assert(a.bindGlobal(pa, GlobalName("device_global"), output, 0).isLeft)
-      assert(a.bindGlobal(pa, GlobalName("device_alias"), global, 9).isLeft)
-      assert(a.bindGlobal(pa, GlobalName("missing"), global, 0).isLeft)
-      assert(a.bindGlobal(pa, GlobalName("device_global"), global, 32).isLeft)
+      assert(a.bindGlobal(pa, GlobalName("device_global"), output, NonNegativeLong.unsafe(0)).isLeft)
+      assert(a.bindGlobal(pa, GlobalName("device_alias"), global, NonNegativeLong.unsafe(9)).isLeft)
+      assert(a.bindGlobal(pa, GlobalName("missing"), global, NonNegativeLong.unsafe(0)).isLeft)
+      assert(a.bindGlobal(pa, GlobalName("device_global"), global, NonNegativeLong.unsafe(32)).isLeft)
     }.get
   }
 
   test("unsupported and failed bindings roll back allocation retention") {
     Using.resource(service()) { s =>
       val p = setup(s)
-      assert(s.bindGlobal(p, GlobalName("missing"), output, 0).isLeft)
+      assert(s.bindGlobal(p, GlobalName("missing"), output, NonNegativeLong.unsafe(0)).isLeft)
       assertEquals(s.releaseAllocation(output), Right(()))
       val ptx = s.load(
         PTXRuntimeBackend.encoding,
@@ -122,7 +131,7 @@ final class ProgramGlobalBindingSuite extends munit.FunSuite {
           ".version 8.0\n.target sm_80\n.address_size 64\n.visible .entry k(){ret;}".getBytes(StandardCharsets.UTF_8)
         )
       ).toOption.get
-      assert(s.bindGlobal(ptx, GlobalName("global"), global, 0).left.exists {
+      assert(s.bindGlobal(ptx, GlobalName("global"), global, NonNegativeLong.unsafe(0)).left.exists {
         case ExecutionFailure.NotFound(_) => true
         case _                            => false
       })
@@ -146,9 +155,9 @@ final class ProgramGlobalBindingSuite extends munit.FunSuite {
       // PROGBITS uses an existing zero-filled area; NOBITS ignores its file offset.
       buffer.putLong(table + 6 * 64 + 24, table.toLong)
       Using.resource(service()) { s =>
-        assertEquals(s.registerAllocation(32, AllocationKind.Shared), Right(global))
+        assertEquals(s.registerAllocation(PositiveLong.unsafe(32), AllocationKind.Shared), Right(global))
         val p = s.load(HSARuntimeBackend.encoding, Vec.from(bytes)).toOption.get
-        assertEquals(s.bindGlobal(p, GlobalName("device_global"), global, 8).isRight, allocated)
+        assertEquals(s.bindGlobal(p, GlobalName("device_global"), global, NonNegativeLong.unsafe(8)).isRight, allocated)
       }
     }
   }

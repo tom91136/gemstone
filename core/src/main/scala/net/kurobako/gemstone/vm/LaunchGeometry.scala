@@ -2,10 +2,7 @@ package net.kurobako.gemstone.vm
 
 import LaunchGeometry.*
 
-import net.kurobako.gemstone.WorkDimension
-
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
+import net.kurobako.gemstone.{NonNegativeInt, NonNegativeLong, PositiveInt, PositiveLong, WorkDimension}
 
 final case class LaunchGeometry private (
     groupSize: Dimensions,
@@ -22,9 +19,9 @@ final case class LaunchGeometry private (
 
   def activeGroupSize(group: Coordinates): Either[String, Dimensions] =
     for {
-      activeX <- activeSize(Axis.X, group, group.x, groupSize.x, groupCount.x, globalExtent.x)
-      activeY <- activeSize(Axis.Y, group, group.y, groupSize.y, groupCount.y, globalExtent.y)
-      activeZ <- activeSize(Axis.Z, group, group.z, groupSize.z, groupCount.z, globalExtent.z)
+      activeX <- activeSize(Axis.X, group, group.x.raw, groupSize.x.raw, groupCount.x.raw, globalExtent.x.raw)
+      activeY <- activeSize(Axis.Y, group, group.y.raw, groupSize.y.raw, groupCount.y.raw, globalExtent.y.raw)
+      activeZ <- activeSize(Axis.Z, group, group.z.raw, groupSize.z.raw, groupCount.z.raw, globalExtent.z.raw)
     } yield Dimensions(activeX, activeY, activeZ)
 
   def globalCoordinatesLong(
@@ -34,18 +31,24 @@ final case class LaunchGeometry private (
     try
       Right(
         LongCoordinates(
-          Math.addExact(
-            globalOffset.x.toLong,
-            Math.addExact(Math.multiplyExact(group.x.toLong, groupSize.x), local.x.toLong)
-          ).refineUnsafe[Positive0],
-          Math.addExact(
-            globalOffset.y.toLong,
-            Math.addExact(Math.multiplyExact(group.y.toLong, groupSize.y), local.y.toLong)
-          ).refineUnsafe[Positive0],
-          Math.addExact(
-            globalOffset.z.toLong,
-            Math.addExact(Math.multiplyExact(group.z.toLong, groupSize.z), local.z.toLong)
-          ).refineUnsafe[Positive0]
+          NonNegativeLong.unsafe(
+            Math.addExact(
+              globalOffset.x.raw,
+              Math.addExact(Math.multiplyExact(group.x.raw.toLong, groupSize.x.raw.toLong), local.x.raw.toLong)
+            )
+          ),
+          NonNegativeLong.unsafe(
+            Math.addExact(
+              globalOffset.y.raw,
+              Math.addExact(Math.multiplyExact(group.y.raw.toLong, groupSize.y.raw.toLong), local.y.raw.toLong)
+            )
+          ),
+          NonNegativeLong.unsafe(
+            Math.addExact(
+              globalOffset.z.raw,
+              Math.addExact(Math.multiplyExact(group.z.raw.toLong, groupSize.z.raw.toLong), local.z.raw.toLong)
+            )
+          )
         )
       )
     catch {
@@ -54,9 +57,9 @@ final case class LaunchGeometry private (
     }
 
   def containsGlobal(coordinates: LongCoordinates): Boolean =
-    contains(coordinates.x, globalOffset.x.toLong, globalExtent.x) &&
-      contains(coordinates.y, globalOffset.y.toLong, globalExtent.y) &&
-      contains(coordinates.z, globalOffset.z.toLong, globalExtent.z)
+    contains(coordinates.x.raw, globalOffset.x.raw.toLong, globalExtent.x.raw) &&
+      contains(coordinates.y.raw, globalOffset.y.raw.toLong, globalExtent.y.raw) &&
+      contains(coordinates.z.raw, globalOffset.z.raw.toLong, globalExtent.z.raw)
 
   private def activeSize(
       axis: Axis,
@@ -65,14 +68,14 @@ final case class LaunchGeometry private (
       nominalSize: Int,
       groupLimit: Int,
       globalSize: Long
-  ): Either[String, Int :| Positive] =
+  ): Either[String, PositiveInt] =
     if (groupIndex >= groupLimit)
       Left(s"work-group coordinate $group is outside group count $groupCount")
     else
       try {
         val origin    = Math.multiplyExact(groupIndex.toLong, nominalSize.toLong)
         val remaining = Math.subtractExact(globalSize, origin)
-        math.min(nominalSize.toLong, remaining).toInt.refineEither[Positive].left.map { _ =>
+        PositiveInt.either(math.min(nominalSize.toLong, remaining).toInt).left.map { _ =>
           s"work-group coordinate $group has no active work-items on axis $axis"
         }
       } catch {
@@ -86,42 +89,41 @@ final case class LaunchGeometry private (
 
 object LaunchGeometry {
   final case class Dimensions(
-      x: Int :| Positive,
-      y: Int :| Positive,
-      z: Int :| Positive
+      x: PositiveInt,
+      y: PositiveInt,
+      z: PositiveInt
   ) {
     def toGlobalDimensions: GlobalDimensions =
-      GlobalDimensions(
-        x.toLong.refineUnsafe[Positive],
-        y.toLong.refineUnsafe[Positive],
-        z.toLong.refineUnsafe[Positive]
-      )
+      GlobalDimensions(x.toLong, y.toLong, z.toLong)
 
-    def volume: Either[String, Long :| Positive] =
-      try Math.multiplyExact(Math.multiplyExact(x.toLong, y.toLong), z.toLong).refineEither[Positive]
+    def volume: Either[String, PositiveLong] =
+      try Right(PositiveLong.unsafe(Math.multiplyExact(
+          Math.multiplyExact(x.raw.toLong, y.raw.toLong),
+          z.raw.toLong
+        )))
       catch {
         case _: ArithmeticException =>
           Left(s"dimension volume overflows 64 bits: ($x, $y, $z)")
       }
 
-    def volumeInt: Either[String, Int :| Positive] =
+    def volumeInt: Either[String, PositiveInt] =
       volume.flatMap(size =>
-        if (size <= Int.MaxValue.toLong) size.toInt.refineEither[Positive]
+        if (size.raw <= Int.MaxValue.toLong) PositiveInt.either(size.raw.toInt)
         else Left(s"dimension volume exceeds Int range: $size")
       )
 
     def coordinates(index: Long): Either[String, Coordinates] =
       volume.flatMap { size =>
         Either.cond(
-          index >= 0L && index < size, {
-            val coordinateX  = (index        % x.toLong).toInt
-            val coordinateYZ = index / x.toLong
-            val coordinateY  = (coordinateYZ % y.toLong).toInt
-            val coordinateZ  = (coordinateYZ / y.toLong).toInt
+          index >= 0L && index < size.raw, {
+            val coordinateX  = (index        % x.raw.toLong).toInt
+            val coordinateYZ = index / x.raw.toLong
+            val coordinateY  = (coordinateYZ % y.raw.toLong).toInt
+            val coordinateZ  = (coordinateYZ / y.raw.toLong).toInt
             for {
-              refinedX <- coordinateX.refineEither[Positive0]
-              refinedY <- coordinateY.refineEither[Positive0]
-              refinedZ <- coordinateZ.refineEither[Positive0]
+              refinedX <- NonNegativeInt.either(coordinateX)
+              refinedY <- NonNegativeInt.either(coordinateY)
+              refinedZ <- NonNegativeInt.either(coordinateZ)
             } yield Coordinates(refinedX, refinedY, refinedZ)
           },
           s"linear index $index is outside dimensions $this"
@@ -130,29 +132,33 @@ object LaunchGeometry {
   }
 
   object Dimensions {
-    val One: Dimensions = Dimensions(1, 1, 1)
+    val One: Dimensions = Dimensions(PositiveInt.One, PositiveInt.One, PositiveInt.One)
   }
 
-  final case class Coordinates(x: Int :| Positive0, y: Int :| Positive0, z: Int :| Positive0)
+  final case class Coordinates(x: NonNegativeInt, y: NonNegativeInt, z: NonNegativeInt)
+
+  object Coordinates {
+    val origin: Coordinates = Coordinates(NonNegativeInt.Zero, NonNegativeInt.Zero, NonNegativeInt.Zero)
+  }
 
   final case class GlobalDimensions(
-      x: Long :| Positive,
-      y: Long :| Positive,
-      z: Long :| Positive
+      x: PositiveLong,
+      y: PositiveLong,
+      z: PositiveLong
   )
 
-  final case class LongCoordinates(x: Long :| Positive0, y: Long :| Positive0, z: Long :| Positive0)
+  final case class LongCoordinates(x: NonNegativeLong, y: NonNegativeLong, z: NonNegativeLong)
 
   enum Axis {
     case X, Y, Z
 
-    def select(value: Coordinates): Int :| Positive0 = this match {
+    def select(value: Coordinates): NonNegativeInt = this match {
       case X => value.x
       case Y => value.y
       case Z => value.z
     }
 
-    def select(value: Dimensions): Int :| Positive = this match {
+    def select(value: Dimensions): PositiveInt = this match {
       case X => value.x
       case Y => value.y
       case Z => value.z
@@ -163,14 +169,14 @@ object LaunchGeometry {
       groupSize: Dimensions,
       groupCount: Dimensions,
       globalSize: Option[GlobalDimensions] = None,
-      workDim: WorkDimension = 3,
-      globalOffset: Coordinates = Coordinates(0, 0, 0)
+      workDim: WorkDimension = WorkDimension.Three,
+      globalOffset: Coordinates = Coordinates.origin
   ): Either[String, LaunchGeometry] =
     for {
       padded <- paddedExtent(groupSize, groupCount)
       exact = globalSize.getOrElse(padded)
       _ <- Either.cond(
-        exact.x <= padded.x && exact.y <= padded.y && exact.z <= padded.z,
+        exact.x.raw <= padded.x.raw && exact.y.raw <= padded.y.raw && exact.z.raw <= padded.z.raw,
         (),
         s"global size $exact exceeds padded dispatch size $padded"
       )
@@ -179,8 +185,8 @@ object LaunchGeometry {
   def virtual(
       groupSize: Dimensions,
       groupCount: Dimensions,
-      workDim: WorkDimension = 3,
-      globalOffset: Coordinates = Coordinates(0, 0, 0)
+      workDim: WorkDimension = WorkDimension.Three,
+      globalOffset: Coordinates = Coordinates.origin
   ): Either[String, LaunchGeometry] =
     paddedExtent(groupSize, groupCount).map(extent =>
       LaunchGeometry(groupSize, groupCount, workDim, globalOffset, extent)
@@ -190,9 +196,9 @@ object LaunchGeometry {
     try
       Right(
         GlobalDimensions(
-          Math.multiplyExact(groupSize.x.toLong, groupCount.x.toLong).refineUnsafe[Positive],
-          Math.multiplyExact(groupSize.y.toLong, groupCount.y.toLong).refineUnsafe[Positive],
-          Math.multiplyExact(groupSize.z.toLong, groupCount.z.toLong).refineUnsafe[Positive]
+          PositiveLong.unsafe(Math.multiplyExact(groupSize.x.raw.toLong, groupCount.x.raw.toLong)),
+          PositiveLong.unsafe(Math.multiplyExact(groupSize.y.raw.toLong, groupCount.y.raw.toLong)),
+          PositiveLong.unsafe(Math.multiplyExact(groupSize.z.raw.toLong, groupCount.z.raw.toLong))
         )
       )
     catch {

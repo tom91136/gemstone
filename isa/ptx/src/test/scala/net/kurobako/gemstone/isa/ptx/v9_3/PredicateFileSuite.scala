@@ -1,11 +1,10 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
+import net.kurobako.gemstone.{NonEmptyString, NonEmptyVec, NonNegativeInt, NonNegativeLong, PositiveInt, PositiveLong}
+
 import Program.*
 
 import VMIR.*
-
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
 
 import net.kurobako.gemstone.vm.LaunchGeometry
 
@@ -18,11 +17,11 @@ final class PredicateFileSuite extends munit.FunSuite {
       predicates.updateSlot(index, false)
       assertEquals(predicates.getSlot(index), Some(false))
       predicates.updateSlot(index, true)
-      assertEquals(predicates.get(RegisterName.applyUnsafe(s"%p$index")), Some(true))
+      assertEquals(predicates.get(RegisterName.unsafe(s"%p$index")), Some(true))
     }
     assertEquals(predicates.getSlot(66), None)
     indices.foreach { index =>
-      predicates.update(RegisterName.applyUnsafe(s"%p$index"), false)
+      predicates.update(RegisterName.unsafe(s"%p$index"), false)
       assertEquals(predicates.getSlot(index), Some(false))
     }
     assertEquals(predicates.getSlot(66), None)
@@ -31,13 +30,13 @@ final class PredicateFileSuite extends munit.FunSuite {
   test("named predicates and dense predicates do not alias") {
     val predicates = VMPredicateFile()
     Seq("%ready", "%p", "%p1024", "%p-1").foreach { name =>
-      assertEquals(predicates.get(RegisterName.applyUnsafe(name)), None)
-      predicates.update(RegisterName.applyUnsafe(name), true)
+      assertEquals(predicates.get(RegisterName.unsafe(name)), None)
+      predicates.update(RegisterName.unsafe(name), true)
     }
     assertEquals(predicates.getSlot(0), None)
     predicates.updateSlot(0, false)
     Seq("%ready", "%p", "%p1024", "%p-1").foreach(name =>
-      assertEquals(predicates.get(RegisterName.applyUnsafe(name)), Some(true))
+      assertEquals(predicates.get(RegisterName.unsafe(name)), Some(true))
     )
     assertEquals(predicates.getSlot(0), Some(false))
   }
@@ -61,7 +60,7 @@ final class PredicateFileSuite extends munit.FunSuite {
       kernel,
       geometry,
       Map.empty,
-      net.kurobako.gemstone.memory.ArrayCheckedMemory.allocate(0)
+      net.kurobako.gemstone.memory.ArrayCheckedMemory.allocate(NonNegativeInt(0))
     )
     assert(result.left.toOption.exists(_.message.contains("undefined register %p63")), result.toString)
   }

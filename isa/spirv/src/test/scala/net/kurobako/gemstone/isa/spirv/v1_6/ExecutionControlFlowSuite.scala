@@ -8,8 +8,7 @@ import net.kurobako.gemstone.Vec
 import net.kurobako.gemstone.binary.ByteRange
 import net.kurobako.gemstone.binary.LittleEndian
 import net.kurobako.gemstone.binary.ScalarByteWidth
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
+import net.kurobako.gemstone.{NonEmptyVec, NonNegativeInt, NonNegativeLong, PositiveInt, PositiveLong}
 
 import java.util.concurrent.atomic.AtomicReference
 final class ExecutionControlFlowSuite extends munit.FunSuite with ExecutionTestSupport {
@@ -60,8 +59,8 @@ final class ExecutionControlFlowSuite extends munit.FunSuite with ExecutionTestS
         Dimensions.One,
         Dimensions.One,
         Vec(
-          KernelTask.Argument.Memory(allocation, 0L),
-          KernelTask.Argument.Scalar(LittleEndian.toVec(pointer, ScalarByteWidth.Qword))
+          KernelTask.Argument.Memory(allocation, NonNegativeLong(0L)),
+          KernelTask.Argument.Scalar(LittleEndian.toVec(pointer, ScalarByteWidth(8)))
         )
       )
       .toOption
@@ -129,8 +128,8 @@ final class ExecutionControlFlowSuite extends munit.FunSuite with ExecutionTestS
         Dimensions.One,
         Dimensions.One,
         Vec(
-          KernelTask.Argument.Memory(allocation, 0L),
-          KernelTask.Argument.Scalar(LittleEndian.toVec(41L, ScalarByteWidth.Dword))
+          KernelTask.Argument.Memory(allocation, NonNegativeLong(0L)),
+          KernelTask.Argument.Scalar(LittleEndian.toVec(41L, ScalarByteWidth(4)))
         )
       )
       .toOption
@@ -180,14 +179,14 @@ final class ExecutionControlFlowSuite extends munit.FunSuite with ExecutionTestS
         Dimensions.One,
         Dimensions.One,
         Vec(
-          KernelTask.Argument.Memory(allocation, 0L),
+          KernelTask.Argument.Memory(allocation, NonNegativeLong(0L)),
           KernelTask.Argument.Scalar(LittleEndian.toVec(
             java.lang.Double.doubleToRawLongBits(3.0),
-            ScalarByteWidth.Qword
+            ScalarByteWidth(8)
           )),
           KernelTask.Argument.Scalar(LittleEndian.toVec(
             java.lang.Double.doubleToRawLongBits(4.0),
-            ScalarByteWidth.Qword
+            ScalarByteWidth(8)
           ))
         )
       )
@@ -243,7 +242,7 @@ final class ExecutionControlFlowSuite extends munit.FunSuite with ExecutionTestS
         Dimensions.One,
         Dimensions.One,
         Vec(
-          KernelTask.Argument.Memory(allocation, 0L),
+          KernelTask.Argument.Memory(allocation, NonNegativeLong(0L)),
           KernelTask.Argument.Scalar(LittleEndian.toVec(
             java.lang.Float.floatToRawIntBits(a).toLong,
             ScalarByteWidth.Dword
@@ -306,7 +305,7 @@ final class ExecutionControlFlowSuite extends munit.FunSuite with ExecutionTestS
         Dimensions.One,
         Dimensions.One,
         Vec(
-          KernelTask.Argument.Memory(allocation, 0L),
+          KernelTask.Argument.Memory(allocation, NonNegativeLong(0L)),
           KernelTask.Argument.Scalar(LittleEndian.toVec(
             java.lang.Float.floatToRawIntBits(4.0f).toLong,
             ScalarByteWidth.Dword
@@ -319,7 +318,7 @@ final class ExecutionControlFlowSuite extends munit.FunSuite with ExecutionTestS
     assertEquals(executeUnchecked(module, dispatch, memory), Right(()))
     assertEquals(
       memory.bytes,
-      LittleEndian.toVec(java.lang.Float.floatToRawIntBits(0.25f).toLong, ScalarByteWidth.Dword)
+      LittleEndian.toVec(java.lang.Float.floatToRawIntBits(0.25f).toLong, ScalarByteWidth(4))
     )
   }
 
@@ -361,7 +360,7 @@ final class ExecutionControlFlowSuite extends munit.FunSuite with ExecutionTestS
         Dimensions.One,
         Dimensions.One,
         Vec(
-          KernelTask.Argument.Memory(allocation, 0L),
+          KernelTask.Argument.Memory(allocation, NonNegativeLong(0L)),
           KernelTask.Argument.Scalar(LittleEndian.toVec(
             java.lang.Float.floatToRawIntBits(0.5f).toLong,
             ScalarByteWidth.Dword
@@ -414,7 +413,7 @@ final class ExecutionControlFlowSuite extends munit.FunSuite with ExecutionTestS
         Dimensions.One,
         Dimensions.One,
         Vec(
-          KernelTask.Argument.Memory(allocation, 0L),
+          KernelTask.Argument.Memory(allocation, NonNegativeLong(0L)),
           KernelTask.Argument.Scalar(LittleEndian.toVec(
             java.lang.Float.floatToRawIntBits(0.5f).toLong,
             ScalarByteWidth.Dword
@@ -486,8 +485,8 @@ final class ExecutionControlFlowSuite extends munit.FunSuite with ExecutionTestS
         Dimensions.One,
         Dimensions.One,
         Vec(
-          KernelTask.Argument.Memory(allocation, 4L),
-          KernelTask.Argument.Scalar(LittleEndian.toVec(8L, ScalarByteWidth.Dword))
+          KernelTask.Argument.Memory(allocation, NonNegativeLong(4L)),
+          KernelTask.Argument.Scalar(LittleEndian.toVec(8L, ScalarByteWidth(4)))
         )
       )
       .toOption
@@ -496,7 +495,10 @@ final class ExecutionControlFlowSuite extends munit.FunSuite with ExecutionTestS
     val decoded = ISA.decode(ISA.encode(module).toOption.get).toOption.get
     assertEquals(executeUnchecked(decoded, dispatch, memory), Right(()))
     assertEquals(memory.bytes.take(4), Vec.fill(4)(0.toByte))
-    assertEquals(memory.bytes.drop(4), Vec.from((0L until 8L).flatMap(LittleEndian.toVec(_, ScalarByteWidth.Dword))))
+    assertEquals(
+      memory.bytes.drop(4),
+      Vec.from((0L until 8L).flatMap(LittleEndian.toVec(_, ScalarByteWidth(4))))
+    )
   }
 
   test("dispatch validates lifetime markers around function objects") {
@@ -535,7 +537,8 @@ final class ExecutionControlFlowSuite extends munit.FunSuite with ExecutionTestS
       Instruction.Return(),
       Instruction.FunctionEnd()
     )
-    val module     = Module(Header(ISA.version, Word(0), Word(20), Word(0)), instructions, Endianness.Little)
+    val module =
+      Module(Header(ISA.version, Word(0), Word(20), Word(0)), instructions, Endianness.Little)
     val allocation = MemoryRegion(3L)
     val memory     = ArrayMemory(allocation, 4)
     val dispatch   = KernelTask
@@ -543,7 +546,7 @@ final class ExecutionControlFlowSuite extends munit.FunSuite with ExecutionTestS
         KernelName("lifetime"),
         Dimensions.One,
         Dimensions.One,
-        Vec(KernelTask.Argument.Memory(allocation, 0L))
+        Vec(KernelTask.Argument.Memory(allocation, NonNegativeLong(0L)))
       )
       .toOption
       .get

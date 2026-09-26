@@ -7,16 +7,16 @@ import net.kurobako.gemstone.Vec
 /** Deterministic canonical printer. Parsing its output must reproduce the same syntax tree. */
 object Printer extends net.kurobako.gemstone.isa.Printer[Program] {
   def render(operand: Operand): String = operand match {
-    case Operand.Immediate(raw)             => raw.value
-    case Operand.Register(name, None)       => name.value
-    case Operand.Register(name, Some(part)) => s"$name.${part.value}"
-    case Operand.Symbol(name)               => name.value
+    case Operand.Immediate(raw)             => raw.raw
+    case Operand.Register(name, None)       => name.raw
+    case Operand.Register(name, Some(part)) => s"$name.${part.raw}"
+    case Operand.Symbol(name)               => name.raw
     case Operand.StringLiteral(contents)    => s"\"$contents\""
-    case Operand.Qualifier(path)            => path.map(part => "." + part.value).mkString
+    case Operand.Qualifier(path)            => path.toVector.map(part => "." + part.raw).mkString
     case Operand.VectorLiteral(items)       => items.map(render(_)).mkString("{", ", ", "}")
     case Operand.Parenthesized(items)       => items.map(render(_)).mkString("(", ", ", ")")
     case Operand.Address(items)             => items.map(render(_)).mkString("[", ", ", "]")
-    case Operand.Qualified(base, qualifier) => s"${render(base)}.${qualifier.value}"
+    case Operand.Qualified(base, qualifier) => s"${render(base)}.${qualifier.raw}"
     case Operand.Index(base, index)         => s"${render(base)}[${render(index)}]"
     case Operand.Add(left, right)           => s"${render(left)}+${render(right)}"
     case Operand.Subtract(left, right)      => s"${render(left)}-${render(right)}"
@@ -33,12 +33,12 @@ object Printer extends net.kurobako.gemstone.isa.Printer[Program] {
     val qualifiers = parameter.qualifiers.map { qualifier =>
       qualifier match {
         case DeclarationQualifier.Alignment(bytes) => s".align $bytes"
-        case DeclarationQualifier.Attribute(name)  => "." + name.value
-        case DeclarationQualifier.Value(value)     => value.value
+        case DeclarationQualifier.Attribute(name)  => "." + name.raw
+        case DeclarationQualifier.Value(value)     => value.raw
       }
     }.mkString(" ")
     val dimensions = parameter.dimensions.map(dimension => s"[${render(dimension)}]").mkString
-    Vec(qualifiers, "." + parameter.elementType.mnemonic, parameter.name.value + dimensions)
+    Vec(qualifiers, "." + parameter.elementType.mnemonic, parameter.name.raw + dimensions)
       .filter(_.nonEmpty).mkString(" ")
   }
 
@@ -46,7 +46,7 @@ object Printer extends net.kurobako.gemstone.isa.Printer[Program] {
     val prefix       = instruction.pred.map(predication => s"${render(predication)} ").getOrElse("")
     val operandsText =
       if (instruction.operands.isEmpty) "" else instruction.operands.map(render(_)).mkString(" ", ", ", "")
-    InstructionText.applyUnsafe(s"$prefix${instruction.qualifiedOpcode}$operandsText;")
+    InstructionText.unsafe(s"$prefix${instruction.qualifiedOpcode}$operandsText;")
   }
 
   def render(statement: Statement): String = statement match {
@@ -54,15 +54,15 @@ object Printer extends net.kurobako.gemstone.isa.Printer[Program] {
     case Statement.Data(addressSpace, qualifiers, elementType, name, count, initializer) =>
       val qualifierText = qualifiers.flatMap {
         case DeclarationQualifier.Alignment(bytes) => Vec(".align", bytes.toString)
-        case DeclarationQualifier.Attribute(name)  => Vec("." + name.value)
-        case DeclarationQualifier.Value(value)     => Vec(value.value)
+        case DeclarationQualifier.Attribute(name)  => Vec("." + name.raw)
+        case DeclarationQualifier.Value(value)     => Vec(value.raw)
       }
       val prefix = (Vec("." + addressSpace.mnemonic) ++ qualifierText ++ Vec("." + elementType.mnemonic)).mkString(" ")
       val extent = count.fold("")(value => s"[$value]")
       val values = if (initializer.isEmpty) "" else initializer.map(render(_)).mkString(" = {", ", ", "}")
       s"$prefix $name$extent$values;"
     case Statement.Directive(path, arguments, terminator) =>
-      val head = path.map(part => "." + part.value).mkString
+      val head = path.toVector.map(part => "." + part.raw).mkString
       val tail = arguments.zipWithIndex.map { case (argument, index) =>
         val separator =
           if (index == 0 || argument.separator == DirectiveSeparator.Space) " " else ", "
@@ -70,10 +70,10 @@ object Printer extends net.kurobako.gemstone.isa.Printer[Program] {
       }.mkString
       val suffix = if (terminator == DirectiveTerminator.Semicolon) ";" else ""
       head + tail + suffix
-    case Statement.Instruction(instruction)                             => render(instruction).value
+    case Statement.Instruction(instruction)                             => render(instruction).raw
     case Statement.UnsupportedInstruction(opcode, operands, mods, pred) =>
       val prefix    = pred.map(value => s"${render(value)} ").getOrElse("")
-      val qualified = (opcode.value +: mods.map(_.name.value)).mkString(".")
+      val qualified = (opcode.raw +: mods.map(_.name.raw)).mkString(".")
       val tail      = if (operands.isEmpty) "" else operands.map(render(_)).mkString(" ", ", ", "")
       s"$prefix$qualified$tail;"
     case Statement.Block(body)                            => renderBody(body)

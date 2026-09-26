@@ -13,10 +13,7 @@ import net.kurobako.gemstone.vm.{
   Scheduler,
   TaskControl
 }
-import net.kurobako.gemstone.Vec
-
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
+import net.kurobako.gemstone.{NonNegativeLong, PositiveLong, Vec}
 
 trait RuntimeBackend {
   def encoding: String
@@ -52,20 +49,20 @@ object RuntimeBackend {
       def bind(
           name: GlobalName,
           region: MemoryRegion,
-          offset: Long :| Positive0,
-          regionSize: Long :| Positive,
+          offset: NonNegativeLong,
+          regionSize: PositiveLong,
           memory: Memory
       ): Either[Error, Unit]
 
       def write(
           name: GlobalName,
-          offset: Long :| Positive0,
+          offset: NonNegativeLong,
           bytes: Vec[Byte]
       ): Either[Error, Unit]
     }
 
     object Globals {
-      final case class Image(size: Long :| Positive0, initial: Vec[Byte])
+      final case class Image(size: NonNegativeLong, initial: Vec[Byte])
     }
   }
 

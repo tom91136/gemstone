@@ -3,13 +3,10 @@ package net.kurobako.gemstone.isa.spirv.v1_6
 import VMIR.*
 import VMCollectives.openCLBroadcastScope
 
-import net.kurobako.gemstone.Vec
+import net.kurobako.gemstone.{NonEmptyVec, Vec}
 import net.kurobako.gemstone.binary.{BitWidth, FloatingPointWidth, LittleEndian, ScalarByteWidth}
 import net.kurobako.gemstone.isa.{KernelName, ValidationOutcome}
 import net.kurobako.gemstone.vm.Fault
-
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
 
 import scala.collection.mutable
 import scala.util.control.NonFatal
@@ -18,8 +15,8 @@ private[v1_6] object VMCompiler {
   import Operand.{id, unsigned}
 
   // OpSpecConstantOp can embed any pure opcode; the evaluator supports these two.
-  private val CompositeExtractOpcode = Instruction.Definition.CompositeExtract.opcodeNumber.value.toLong
-  private val UDivOpcode             = Instruction.Definition.UDiv.opcodeNumber.value.toLong
+  private val CompositeExtractOpcode = Instruction.Definition.CompositeExtract.opcodeNumber.raw.toLong
+  private val UDivOpcode             = Instruction.Definition.UDiv.opcodeNumber.raw.toLong
 
   private def isFunctionEnd(instruction: Instruction): Boolean = instruction match {
     case Instruction.FunctionEnd() => true
@@ -44,9 +41,9 @@ private[v1_6] object VMCompiler {
     Validation.validate(module, environment) match {
       case ValidationOutcome.Accepted         => compileUnchecked(module)
       case ValidationOutcome.Rejected(issues) =>
-        Left(Fault.InvalidTask(issues.map(_.message).mkString("invalid SPIR-V module: ", "; ", "")))
+        Left(Fault.InvalidTask(issues.toVector.map(_.message).mkString("invalid SPIR-V module: ", "; ", "")))
       case ValidationOutcome.Incomplete(issues) =>
-        Left(Fault.Unsupported(issues.map(_.message).mkString("unsupported SPIR-V module: ", "; ", "")))
+        Left(Fault.Unsupported(issues.toVector.map(_.message).mkString("unsupported SPIR-V module: ", "; ", "")))
     }
 
   // Module compilation fills indexed tables in one pass and stops at the first malformed instruction.
@@ -81,15 +78,17 @@ private[v1_6] object VMCompiler {
 
     module.instructions.foreach {
       case Instruction.Name(target, name) =>
-        functionNames.update(id(target), FunctionName.applyUnsafe(literalString(name)))
+        functionNames.update(id(target), FunctionName.unsafe(literalString(name)))
       case Instruction.Decorate(target, decoration)
-          if decoration.words.size >= 2 && unsigned(decoration) == 41L =>
+          if decoration.words.length >= 2 && unsigned(decoration) == 41L =>
         // Optimized/linker-produced modules may omit OpName for imported
         // builtins but retain their LinkageAttributes decoration.
         functionNames.update(
           id(target),
-          FunctionName.applyUnsafe(
-            literalString(decoration.copy(words = decoration.words.drop(1).refineUnsafe[MinLength[1]]))
+          FunctionName.unsafe(
+            literalString(decoration.copy(words =
+              NonEmptyVec.unsafeFromVec(Vec.from(decoration.words.toVector.drop(1)))
+            ))
           )
         )
       case _ => ()
@@ -105,7 +104,7 @@ private[v1_6] object VMCompiler {
           if (bits < 8 || bits > 64 || bits % 8 != 0)
             return Left(Fault.Unsupported(s"SPIR-V integer width $bits is unsupported"))
           // The preceding guard proves the SPIR-V scalar bit-width range at the decode boundary.
-          types.update(id(dest), RuntimeType.Integer(BitWidth.applyUnsafe(bits), unsigned(signedness) != 0L))
+          types.update(id(dest), RuntimeType.Integer(BitWidth.unsafe(bits), unsigned(signedness) != 0L))
         case Instruction.TypeFloat(dest, width, _) =>
           val bits = id(width)
           if (!Vec(16, 32, 64).contains(bits))
@@ -113,7 +112,7 @@ private[v1_6] object VMCompiler {
               Fault.Unsupported(s"SPIR-V floating-point width $bits is unsupported")
             )
           // The preceding closed-domain check proves the supported interchange width.
-          types.update(id(dest), RuntimeType.Floating(FloatingPointWidth.applyUnsafe(bits)))
+          types.update(id(dest), RuntimeType.Floating(FloatingPointWidth.unsafe(bits)))
         case Instruction.TypeVector(dest, component, count) =>
           val componentCount = id(count)
           if (componentCount <= 0)
@@ -199,28 +198,29 @@ private[v1_6] object VMCompiler {
             id(dest),
             Global(id(resultType), id(storageClass), initializer.map(id(_)))
           )
-        case Instruction.Decorate(target, decoration) if decoration.words.size >= 2 && unsigned(decoration) == 11L =>
-          builtins.update(id(target), decoration.words(1).bits)
-        case Instruction.Decorate(target, decoration) if decoration.words.size >= 2 && unsigned(decoration) == 33L =>
-          descriptorSlots.update(id(target), Math.toIntExact(decoration.words(1).toUnsigned))
-        case Instruction.Decorate(target, decoration) if decoration.words.size >= 2 && unsigned(decoration) == 34L =>
-          descriptorSets.update(id(target), Math.toIntExact(decoration.words(1).toUnsigned))
-        case Instruction.Decorate(target, decoration) if decoration.words.size >= 2 && unsigned(decoration) == 6L =>
-          arrayStrides.update(id(target), Math.toIntExact(decoration.words(1).toUnsigned))
+        case Instruction.Decorate(target, decoration) if decoration.words.length >= 2 && unsigned(decoration) == 11L =>
+          builtins.update(id(target), decoration.words.getUnsafe(1).raw)
+        case Instruction.Decorate(target, decoration) if decoration.words.length >= 2 && unsigned(decoration) == 33L =>
+          descriptorSlots.update(id(target), Math.toIntExact(decoration.words.getUnsafe(1).toUnsigned.raw))
+        case Instruction.Decorate(target, decoration) if decoration.words.length >= 2 && unsigned(decoration) == 34L =>
+          descriptorSets.update(id(target), Math.toIntExact(decoration.words.getUnsafe(1).toUnsigned.raw))
+        case Instruction.Decorate(target, decoration) if decoration.words.length >= 2 && unsigned(decoration) == 6L =>
+          arrayStrides.update(id(target), Math.toIntExact(decoration.words.getUnsafe(1).toUnsigned.raw))
         case Instruction.Decorate(target, decoration) if unsigned(decoration) == 10L =>
           val _ = packedStructures.add(id(target))
         case Instruction.Decorate(target, decoration)
-            if decoration.words.size >= 2 && unsigned(decoration) == 38L && decoration.words(1).toUnsigned == 2L =>
+            if decoration.words.length >= 2 && unsigned(decoration) == 38L &&
+              decoration.words.getUnsafe(1).toUnsigned.raw == 2L =>
           val _ = byValueParameters.add(id(target)) // FuncParamAttr ByVal
         case Instruction.Decorate(target, decoration) if unsigned(decoration) == 28L =>
           val _ = saturatedConversions.add(id(target))
-        case Instruction.Decorate(target, decoration) if decoration.words.size >= 2 && unsigned(decoration) == 39L =>
-          roundingModes.update(id(target), decoration.words(1).bits)
+        case Instruction.Decorate(target, decoration) if decoration.words.length >= 2 && unsigned(decoration) == 39L =>
+          roundingModes.update(id(target), decoration.words.getUnsafe(1).raw)
         case Instruction.MemberDecorate(structureType, member, decoration)
-            if decoration.words.size >= 2 && unsigned(decoration) == 35L =>
+            if decoration.words.length >= 2 && unsigned(decoration) == 35L =>
           memberOffsets.update(
             id(structureType) -> Math.toIntExact(unsigned(member)),
-            Math.toIntExact(decoration.words(1).toUnsigned)
+            Math.toIntExact(decoration.words.getUnsafe(1).toUnsigned.raw)
           )
         case Instruction.ExtInstImport(dest, name) =>
           val decodedName = literalString(name)
@@ -245,34 +245,34 @@ private[v1_6] object VMCompiler {
           }
         case Instruction.ExecutionMode(entryPoint, mode) =>
           unsigned(mode) match {
-            case 35L if mode.words.size >= 2 =>
-              val size = mode.words(1).toUnsigned
+            case 35L if mode.words.length >= 2 =>
+              val size = mode.words.getUnsafe(1).toUnsigned.raw
               if (size == 0L || size > Int.MaxValue.toLong)
                 return Left(Fault.InvalidTask(s"SPIR-V SubgroupSize $size is invalid"))
               subgroupSizes.update(id(entryPoint), size.toInt)
-            case 17L if mode.words.size >= 4 =>
-              localSize(mode.words(1), mode.words(2), mode.words(3)).foreach(size =>
+            case 17L if mode.words.length >= 4 =>
+              localSize(mode.words.getUnsafe(1), mode.words.getUnsafe(2), mode.words.getUnsafe(3)).foreach(size =>
                 workGroupSizes.update(id(entryPoint), size)
               )
-            case 18L if mode.words.size >= 4 =>
-              localSize(mode.words(1), mode.words(2), mode.words(3)).foreach(size =>
+            case 18L if mode.words.length >= 4 =>
+              localSize(mode.words.getUnsafe(1), mode.words.getUnsafe(2), mode.words.getUnsafe(3)).foreach(size =>
                 workGroupSizeHints.update(id(entryPoint), size)
               )
-            case 38L if mode.words.size >= 4 =>
-              localSizeId(constants, mode.words(1), mode.words(2), mode.words(3))
+            case 38L if mode.words.length >= 4 =>
+              localSizeId(constants, mode.words.getUnsafe(1), mode.words.getUnsafe(2), mode.words.getUnsafe(3))
                 .foreach(size => workGroupSizes.update(id(entryPoint), size))
-            case 39L if mode.words.size >= 4 =>
-              localSizeId(constants, mode.words(1), mode.words(2), mode.words(3))
+            case 39L if mode.words.length >= 4 =>
+              localSizeId(constants, mode.words.getUnsafe(1), mode.words.getUnsafe(2), mode.words.getUnsafe(3))
                 .foreach(size => workGroupSizeHints.update(id(entryPoint), size))
             case _ => ()
           }
         case Instruction.ExecutionModeId(entryPoint, mode) =>
           unsigned(mode) match {
-            case 38L if mode.words.size >= 4 =>
-              localSizeId(constants, mode.words(1), mode.words(2), mode.words(3))
+            case 38L if mode.words.length >= 4 =>
+              localSizeId(constants, mode.words.getUnsafe(1), mode.words.getUnsafe(2), mode.words.getUnsafe(3))
                 .foreach(size => workGroupSizes.update(id(entryPoint), size))
-            case 39L if mode.words.size >= 4 =>
-              localSizeId(constants, mode.words(1), mode.words(2), mode.words(3))
+            case 39L if mode.words.length >= 4 =>
+              localSizeId(constants, mode.words.getUnsafe(1), mode.words.getUnsafe(2), mode.words.getUnsafe(3))
                 .foreach(size => workGroupSizeHints.update(id(entryPoint), size))
             case _ => ()
           }
@@ -395,7 +395,7 @@ private[v1_6] object VMCompiler {
           _: Instruction.GroupNonUniformBallot |
           _: Instruction.ControlBarrier => true
       case Instruction.FunctionCall(_, _, called, _) =>
-        functionNames.get(id(called)).exists(name => isOpenCLCollective(name.value))
+        functionNames.get(id(called)).exists(name => isOpenCLCollective(name.raw))
       case _ => false
     }
 
@@ -448,7 +448,7 @@ private[v1_6] object VMCompiler {
     else Some((x.toInt, y.toInt, z.toInt))
 
   private def localSize(x: Word, y: Word, z: Word): Option[(Int, Int, Int)] =
-    positiveTriple(x.toUnsigned, y.toUnsigned, z.toUnsigned)
+    positiveTriple(x.toUnsigned.raw, y.toUnsigned.raw, z.toUnsigned.raw)
 
   private def localSizeId(
       constants: collection.Map[Int, Constant],
@@ -457,9 +457,9 @@ private[v1_6] object VMCompiler {
       z: Word
   ): Option[(Int, Int, Int)] =
     for {
-      xValue <- constants.get(x.bits).flatMap(scalarBits(_))
-      yValue <- constants.get(y.bits).flatMap(scalarBits(_))
-      zValue <- constants.get(z.bits).flatMap(scalarBits(_))
+      xValue <- constants.get(x.raw).flatMap(scalarBits(_))
+      yValue <- constants.get(y.raw).flatMap(scalarBits(_))
+      zValue <- constants.get(z.raw).flatMap(scalarBits(_))
       size   <- positiveTriple(xValue, yValue, zValue)
     } yield size
 
@@ -472,16 +472,16 @@ private[v1_6] object VMCompiler {
   private def literalBits(operand: Operand): Long = {
     var result = 0L
     var index  = 0
-    while (index < operand.words.size && index < 2) {
-      result |= operand.words(index).toUnsigned << (index * 32)
+    while (index < operand.words.length && index < 2) {
+      result |= operand.words.getUnsafe(index).toUnsigned.raw << (index * 32)
       index += 1
     }
     result
   }
 
   private def literalString(operand: Operand): String = {
-    val bytes = operand.words.flatMap { word =>
-      LittleEndian.toVec(word.bits.toLong, ScalarByteWidth.Dword)
+    val bytes = operand.words.toVector.flatMap { word =>
+      LittleEndian.toVec(word.raw.toLong, ScalarByteWidth.Dword)
     }.takeWhile(_ != 0)
     String(bytes.toArray, java.nio.charset.StandardCharsets.UTF_8)
   }

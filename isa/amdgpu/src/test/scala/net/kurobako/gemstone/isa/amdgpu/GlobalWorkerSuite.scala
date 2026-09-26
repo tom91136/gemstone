@@ -2,9 +2,7 @@ package net.kurobako.gemstone.isa.amdgpu
 
 import CodeObject.*
 
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
-import net.kurobako.gemstone.Vec
+import net.kurobako.gemstone.{NonNegativeInt, NonNegativeLong, PositiveInt, PositiveLong, Vec}
 import net.kurobako.gemstone.binary.{LittleEndian, ScalarByteWidth}
 import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.vm.*
@@ -21,24 +19,24 @@ final class GlobalWorkerSuite extends munit.FunSuite with CodeObjectTestSupport 
     0xe05c1000L, 0x80010100L, 0xbf8c0f70L, 0xbe8a00ffL, 0x4000L, 0xbe8b0080L, 0xdc7c8000L, 0xa0100L, 0xbf810000L
   ).flatMap(w => LittleEndian.toVec(w, ScalarByteWidth.Dword))
   private object UnboundMemory extends Memory with TestAddressSpace {
-    override protected val regionSizes: Iterable[(MemoryRegion, Long)]            = Seq.empty
-    def read(id: MemoryRegion, offset: Long :| Positive0, size: Int :| Positive0) =
+    override protected val regionSizes: Iterable[(MemoryRegion, Long)]        = Seq.empty
+    def read(id: MemoryRegion, offset: NonNegativeLong, size: NonNegativeInt) =
       Left(Fault.Backend("unexpected external memory read"))
-    def write(id: MemoryRegion, offset: Long :| Positive0, bytes: Vec[Byte]) =
+    def write(id: MemoryRegion, offset: NonNegativeLong, bytes: Vec[Byte]) =
       Left(Fault.Backend("unexpected external memory write"))
   }
   test("buffer loads and wide stores use unbound ELF globals on worker threads") {
     final class Workers extends Scheduler with AutoCloseable {
-      val parallelism: Int :| Positive = 4
-      val calls                        = AtomicInteger()
-      private val executor             = Executors.newFixedThreadPool(parallelism)
-      override def shouldParallel(tasks: Long :| Positive0, workItems: Long :| Positive0) = tasks > 1
-      def parallelFor(tasks: Long :| Positive0)(task: Long :| Positive0 => Either[Fault, Unit])
+      val parallelism: PositiveInt = PositiveInt(4)
+      val calls                    = AtomicInteger()
+      private val executor         = Executors.newFixedThreadPool(parallelism.raw)
+      override def shouldParallel(tasks: NonNegativeLong, workItems: NonNegativeLong) = tasks.raw > 1
+      def parallelFor(tasks: NonNegativeLong)(task: NonNegativeLong => Either[Fault, Unit])
           : Either[Fault, Unit] = {
         calls.incrementAndGet()
         val futures = Vec.newBuilder[java.util.concurrent.Future[Either[Fault, Unit]]]
-        (0L until tasks).foreach(i =>
-          futures += executor.submit[Either[Fault, Unit]](() => task(i.refineUnsafe[Positive0]))
+        (0L until tasks.raw).foreach(i =>
+          futures += executor.submit[Either[Fault, Unit]](() => task(NonNegativeLong.unsafe(i)))
         )
         futures.result().foldLeft[Either[Fault, Unit]](Right(()))((r, f) =>
           r.flatMap(_ => f.get(5, TimeUnit.SECONDS))
@@ -107,15 +105,15 @@ final class GlobalWorkerSuite extends munit.FunSuite with CodeObjectTestSupport 
       val snapshots                                                      = mutable.ArrayBuffer.empty[Vec[Byte]]
       override protected val regionSizes: Iterable[(MemoryRegion, Long)] =
         Seq(input -> original.length.toLong, output -> destination.length.toLong)
-      def read(id: MemoryRegion, offset: Long :| Positive0, size: Int :| Positive0) = {
+      def read(id: MemoryRegion, offset: NonNegativeLong, size: NonNegativeInt) = {
         assertEquals(id, input)
-        val snapshot = original.slice(offset.toInt, offset.toInt + size)
+        val snapshot = original.slice(offset.raw.toInt, offset.raw.toInt + size.raw)
         snapshots += snapshot
         Right(snapshot)
       }
-      def write(id: MemoryRegion, offset: Long :| Positive0, bytes: Vec[Byte]) = {
+      def write(id: MemoryRegion, offset: NonNegativeLong, bytes: Vec[Byte]) = {
         assertEquals(id, output)
-        val _ = bytes.copyToArray(destination, offset.toInt, bytes.size)
+        val _ = bytes.copyToArray(destination, offset.raw.toInt, bytes.size)
         Right(())
       }
     }
@@ -125,9 +123,12 @@ final class GlobalWorkerSuite extends munit.FunSuite with CodeObjectTestSupport 
     val kernel   = CodeObjectKernel("kernel", Target("gfx900"), 16, 0, 0, 0x80, 0x08, code)
     val dispatch = KernelTask.validated(
       KernelName("kernel"),
-      Dimensions(4, 1, 1),
+      testDimensions(4, 1, 1),
       Dimensions.One,
-      Vec(KernelTask.Argument.Memory(input, 0), KernelTask.Argument.Memory(output, 0))
+      Vec(
+        KernelTask.Argument.Memory(input, NonNegativeLong(0L)),
+        KernelTask.Argument.Memory(output, NonNegativeLong(0L))
+      )
     ).toOption.get
     assertEquals(executeKernel(compileKernel(kernel), dispatch, memory), Right(()))
     assertEquals(Vec.from(memory.destination), original)
@@ -153,8 +154,8 @@ final class GlobalWorkerSuite extends munit.FunSuite with CodeObjectTestSupport 
     for (
       extra <- Seq(
         KernelTask.Argument.Scalar(Vec[Byte](1)),
-        KernelTask.Argument.Memory(MemoryRegion(1), 0),
-        KernelTask.Argument.Local(4)
+        KernelTask.Argument.Memory(MemoryRegion(1), NonNegativeLong(0L)),
+        KernelTask.Argument.Local(PositiveLong(4L))
       )
     ) {
       assert(run(base, Vec(word, extra)).isLeft)

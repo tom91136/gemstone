@@ -1,7 +1,6 @@
 package net.kurobako.gemstone.vm
 
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
+import net.kurobako.gemstone.{NonNegativeLong, PositiveInt, PositiveLong}
 
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicLong}
 import scala.annotation.tailrec
@@ -12,16 +11,16 @@ final class TaskControl private (
     val observation: ObservationContext,
     private val budget: TaskControl.Budget
 ) {
-  def checkpoint(cost: Int :| Positive = 1): Either[Fault, Unit] =
-    checkpoint(cost.toLong.refineUnsafe[Positive])
+  def checkpoint(cost: PositiveInt = PositiveInt.One): Either[Fault, Unit] =
+    checkpoint(cost.toLong)
 
-  def checkpoint(cost: Long :| Positive): Either[Fault, Unit] =
+  def checkpoint(cost: PositiveLong): Either[Fault, Unit] =
     if (cancellation.isCancelled) Left(Fault.Cancelled)
-    else budget.consume(cost)
+    else budget.consume(cost.raw)
 
-  def usedInstructions: Long :| Positive0 = budget.used.refineUnsafe[Positive0]
+  def usedInstructions: NonNegativeLong = NonNegativeLong.unsafe(budget.used)
 
-  private[gemstone] def remainingInstructions: Long :| Positive0 = budget.remaining.refineUnsafe[Positive0]
+  private[gemstone] def remainingInstructions: NonNegativeLong = NonNegativeLong.unsafe(budget.remaining)
 }
 
 object TaskControl {
@@ -48,12 +47,17 @@ object TaskControl {
       observation: ObservationContext = ObservationContext.Unscoped,
       scheduler: Scheduler = Scheduler.Sequential
   ): TaskControl =
-    TaskControl(limits, cancellation, observation, Budget(limits.maxInstructions, scheduler.parallelism > 1))
+    TaskControl(
+      limits,
+      cancellation,
+      observation,
+      Budget(limits.maxInstructions.raw, scheduler.parallelism.raw > 1)
+    )
 
   def default: TaskControl = forScheduler()
 
   private sealed trait Budget {
-    def limit: Long :| Positive
+    def limit: Long
     def used: Long
     final def remaining: Long = limit - used
     def consume(cost: Long): Either[Fault, Unit]
@@ -62,24 +66,24 @@ object TaskControl {
   private object Budget {
     private val Accepted: Either[Fault, Unit] = Right(())
 
-    def apply(limit: Long :| Positive, concurrent: Boolean): Budget =
+    def apply(limit: Long, concurrent: Boolean): Budget =
       if (concurrent) Concurrent(limit) else Sequential(limit)
 
-    private final class Sequential(val limit: Long :| Positive) extends Budget {
+    private final class Sequential(val limit: Long) extends Budget {
       @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
       private var consumed = 0L
 
       override def used: Long = consumed
 
       override def consume(cost: Long): Either[Fault, Unit] =
-        if (cost > limit - consumed) Left(Fault.BudgetExceeded(limit))
+        if (cost > limit - consumed) Left(Fault.BudgetExceeded(PositiveLong.unsafe(limit)))
         else {
           consumed += cost
           Accepted
         }
     }
 
-    private final class Concurrent(val limit: Long :| Positive) extends Budget {
+    private final class Concurrent(val limit: Long) extends Budget {
       private val consumed = AtomicLong()
 
       override def used: Long = math.min(limit, consumed.get())
@@ -93,14 +97,14 @@ object TaskControl {
         if (previous < limit) Accepted
         else {
           val _ = consumed.decrementAndGet()
-          Left(Fault.BudgetExceeded(limit))
+          Left(Fault.BudgetExceeded(PositiveLong.unsafe(limit)))
         }
       }
 
       @tailrec
       private def reserve(increment: Long): Either[Fault, Unit] = {
         val current = consumed.get()
-        if (increment > limit - current) Left(Fault.BudgetExceeded(limit))
+        if (increment > limit - current) Left(Fault.BudgetExceeded(PositiveLong.unsafe(limit)))
         else if (consumed.compareAndSet(current, current + increment)) Accepted
         else reserve(increment)
       }

@@ -2,14 +2,11 @@ package net.kurobako.gemstone.isa.amdgpu
 
 import Program.*
 
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
-
 import net.kurobako.gemstone.Vec
 
 final class InstructionSuite extends munit.FunSuite {
   test("every generated form descriptor decodes directly to its parameterized enum case") {
-    val opcodes = Instruction.definitions.map(_.opcode).distinct.sortBy(_.value)
+    val opcodes = Instruction.definitions.map(_.opcode).distinct.sortBy(_.raw)
     assertEquals(opcodes.size, 2407)
     Instruction.definitions.foreach { definition =>
       definition.decoder.operandCounts.foreach { operandCount =>

@@ -1,5 +1,6 @@
 package net.kurobako.gemstone.isa.amdgpu
 
+import net.kurobako.gemstone.PositiveInt
 import net.kurobako.gemstone.Vec
 import net.kurobako.gemstone.Vec.*
 import Program.*
@@ -7,8 +8,6 @@ import Program.*
 import cats.data.Chain
 import cats.parse.Parser as P
 import cats.syntax.all.*
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
 
 import scala.annotation.tailrec
 import scala.util.Try
@@ -18,8 +17,8 @@ object Parser extends net.kurobako.gemstone.isa.Decoder[String, Program] {
 
   private def parseError(line: Int, column: Int, message: String): ParseError =
     ParseError(
-      line.refineUnsafe[Positive],
-      column.refineUnsafe[Positive],
+      PositiveInt.unsafe(line),
+      PositiveInt.unsafe(column),
       message
     )
 
@@ -164,10 +163,10 @@ object Parser extends net.kurobako.gemstone.isa.Decoder[String, Program] {
     val colon = topLevelColon(text)
     if (colon > 0 && colon < text.length - 1 && isIdentifier(text.take(colon)))
       ModifierValue.either(text.drop(colon + 1)).toOption.map(value =>
-        Modifier(ModifierName.applyUnsafe(text.take(colon).toLowerCase(java.util.Locale.ROOT)), Some(value))
+        Modifier(ModifierName.unsafe(text.take(colon).toLowerCase(java.util.Locale.ROOT)), Some(value))
       )
     else if (KnownFlagModifiers.contains(text.toLowerCase(java.util.Locale.ROOT)))
-      Some(Modifier(ModifierName.applyUnsafe(text.toLowerCase(java.util.Locale.ROOT))))
+      Some(Modifier(ModifierName.unsafe(text.toLowerCase(java.util.Locale.ROOT))))
     else None
   }
 

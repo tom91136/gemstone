@@ -2,9 +2,7 @@ package net.kurobako.gemstone.isa.amdgpu
 
 import CodeObject.*
 
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
-import net.kurobako.gemstone.Vec
+import net.kurobako.gemstone.{NonNegativeInt, NonNegativeLong, Vec}
 import net.kurobako.gemstone.binary.{LittleEndian, ScalarByteWidth}
 import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.vm.*
@@ -19,12 +17,12 @@ final class ScalarNotSuite extends munit.FunSuite with CodeObjectTestSupport {
   )
   private val output = MemoryRegion(1)
   private final class Memory extends net.kurobako.gemstone.vm.Memory with TestAddressSpace {
-    val bytes                                                                     = Array.ofDim[Byte](16)
-    override protected val regionSizes: Iterable[(MemoryRegion, Long)]            = Seq(output -> bytes.length.toLong)
-    def read(id: MemoryRegion, offset: Long :| Positive0, size: Int :| Positive0) =
-      Right(Vec.from(bytes.slice(offset.toInt, offset.toInt + size)))
-    def write(id: MemoryRegion, offset: Long :| Positive0, value: Vec[Byte]) = {
-      val _ = value.copyToArray(bytes, offset.toInt, value.size); Right(())
+    val bytes                                                                 = Array.ofDim[Byte](16)
+    override protected val regionSizes: Iterable[(MemoryRegion, Long)]        = Seq(output -> bytes.length.toLong)
+    def read(id: MemoryRegion, offset: NonNegativeLong, size: NonNegativeInt) =
+      Right(Vec.from(bytes.slice(offset.raw.toInt, offset.raw.toInt + size.raw)))
+    def write(id: MemoryRegion, offset: NonNegativeLong, value: Vec[Byte]) = {
+      val _ = value.copyToArray(bytes, offset.raw.toInt, value.size); Right(())
     }
   }
   test("scalar NOT writes full width and sets or clears SCC independently of its previous value") {
@@ -45,8 +43,8 @@ final class ScalarNotSuite extends munit.FunSuite with CodeObjectTestSupport {
         Dimensions.One,
         Dimensions.One,
         Vec(
-          KernelTask.Argument.Scalar(LittleEndian.toVec(input, ScalarByteWidth.Qword)),
-          KernelTask.Argument.Memory(output, 0)
+          KernelTask.Argument.Scalar(LittleEndian.toVec(input, ScalarByteWidth(8))),
+          KernelTask.Argument.Memory(output, NonNegativeLong(0L))
         )
       ).toOption.get
       val memory = Memory()

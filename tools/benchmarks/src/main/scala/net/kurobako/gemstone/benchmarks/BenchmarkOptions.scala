@@ -1,10 +1,10 @@
 package net.kurobako.gemstone.benchmarks
 
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
+import net.kurobako.gemstone.NonNegativeInt
+import net.kurobako.gemstone.PositiveInt
 
 final case class BenchmarkOptions(
-    warmups: Int :| Positive0,
-    samples: Int :| Positive,
+    warmups: NonNegativeInt,
+    samples: PositiveInt,
     invocation: BenchmarkInvocation
 )

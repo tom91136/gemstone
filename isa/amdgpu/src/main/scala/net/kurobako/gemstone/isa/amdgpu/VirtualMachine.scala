@@ -1,7 +1,11 @@
 package net.kurobako.gemstone.isa.amdgpu
 
+import scala.compiletime.{constValue, error}
+
 import CodeObject.Program
 
+import net.kurobako.gemstone.NonNegativeLong
+import net.kurobako.gemstone.PositiveLong
 import net.kurobako.gemstone.Vec
 import net.kurobako.gemstone.binary.BitWidth
 import net.kurobako.gemstone.binary.Bits
@@ -19,9 +23,6 @@ import net.kurobako.gemstone.vm.Observer
 import net.kurobako.gemstone.vm.Result
 import net.kurobako.gemstone.vm.Scheduler
 import net.kurobako.gemstone.vm.TaskControl
-
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
 
 final class VirtualMachine(
     override val observer: Observer[Event],
@@ -54,14 +55,14 @@ final class VirtualMachine(
   def global(
       program: LoadedProgram,
       name: GlobalName
-  ): Either[Fault, (Long :| Positive0, Vec[Byte])] = program.global(name)
+  ): Either[Fault, (NonNegativeLong, Vec[Byte])] = program.global(name)
 
   def bindGlobal(
       program: LoadedProgram,
       name: GlobalName,
       region: MemoryRegion,
-      offset: Long :| Positive0,
-      regionSize: Long :| Positive,
+      offset: NonNegativeLong,
+      regionSize: PositiveLong,
       memory: Memory
   ): Either[Fault, Unit] =
     program.bindGlobal(name, region, offset, regionSize, memory)
@@ -69,7 +70,7 @@ final class VirtualMachine(
   def writeGlobal(
       program: LoadedProgram,
       name: GlobalName,
-      offset: Long :| Positive0,
+      offset: NonNegativeLong,
       bytes: Vec[Byte]
   ): Either[Fault, Unit] = program.writeGlobal(name, offset, bytes)
 
@@ -77,22 +78,58 @@ final class VirtualMachine(
 }
 
 object VirtualMachine {
-  private[amdgpu] type LaneCount = LaneCount.T
-  private[amdgpu] object LaneCount extends RefinedType[Int, Interval.Closed[1, 64]] {
+  private[amdgpu] opaque type LaneCount = Int
+  private[amdgpu] object LaneCount {
+    inline def either(value: Int): Either[String, LaneCount] =
+      if (value >= 1 && value <= 64) Right(value) else Left(s"lane count must be between 1 and 64: $value")
+
+    inline def unsafe(value: Int): LaneCount =
+      either(value).fold(message => throw IllegalArgumentException(message), identity)
+
+    inline def apply[A <: Int & Singleton](inline value: A): LaneCount =
+      inline if constValue[A] >= 1 && constValue[A] <= 64 then value else error("lane count must be between 1 and 64")
+
     extension (lanes: LaneCount) {
-      @SuppressWarnings(Array("scalafix:GemstoneNoAssume"))
-      def bitWidth: BitWidth = BitWidth.assume(lanes.value)
+      inline def raw: Int    = lanes
+      def bitWidth: BitWidth = BitWidth.unsafe(lanes)
     }
   }
 
-  private[amdgpu] type LaneIndex = LaneIndex.T
-  private[amdgpu] object LaneIndex extends RefinedType[Int, Interval.Closed[0, 63]]
+  private[amdgpu] opaque type LaneIndex = Int
+  private[amdgpu] object LaneIndex {
+    inline def either(value: Int): Either[String, LaneIndex] =
+      if (value >= 0 && value <= 63) Right(value) else Left(s"lane index must be between 0 and 63: $value")
 
-  private[amdgpu] type WaveSize = WaveSize.T
-  private[amdgpu] object WaveSize extends RefinedType[Int, In[(32, 64)]]
+    inline def unsafe(value: Int): LaneIndex =
+      either(value).fold(message => throw IllegalArgumentException(message), identity)
+
+    inline def apply[A <: Int & Singleton](inline value: A): LaneIndex =
+      inline if constValue[A] >= 0 && constValue[A] <= 63 then value else error("lane index must be between 0 and 63")
+
+    extension (lane: LaneIndex) {
+      inline def raw: Int = lane
+    }
+  }
+
+  private[amdgpu] opaque type WaveSize = Int
+  private[amdgpu] object WaveSize {
+    inline def either(value: Int): Either[String, WaveSize] =
+      if (value == 32 || value == 64) Right(value) else Left(s"wave size must be 32 or 64: $value")
+
+    inline def unsafe(value: Int): WaveSize =
+      either(value).fold(message => throw IllegalArgumentException(message), identity)
+
+    inline def apply[A <: Int & Singleton](inline value: A): WaveSize =
+      inline if constValue[A] == 32 || constValue[A] == 64 then value else error("wave size must be 32 or 64")
+
+    extension (size: WaveSize) {
+      inline def raw: Int = size
+    }
+  }
 
   /** Mutable architectural VCC/EXEC storage for one wave. */
   private[amdgpu] final class LaneBits(lanes: LaneCount, initial: Long) {
+    import LaneCount.bitWidth
     private val laneLimit = Bits.mask(lanes.bitWidth)
     @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
     private var value = initial & laneLimit
@@ -135,12 +172,11 @@ object VirtualMachine {
       }
     }
 
-    def count: Int        = bitCount
-    def isEmpty: Boolean  = bitCount == 0
-    def nonEmpty: Boolean = bitCount != 0
-    @SuppressWarnings(Array("scalafix:GemstoneNoAssume"))
+    def count: Int               = bitCount
+    def isEmpty: Boolean         = bitCount == 0
+    def nonEmpty: Boolean        = bitCount != 0
     def first: Option[LaneIndex] =
-      Option.when(value != 0L)(LaneIndex.assume(java.lang.Long.numberOfTrailingZeros(value)))
+      Option.when(value != 0L)(LaneIndex.unsafe(java.lang.Long.numberOfTrailingZeros(value)))
   }
 
   /** Dense interpreter register banks are allocated on first access; null is the allocation-free hot-path sentinel. */
@@ -150,7 +186,7 @@ object VirtualMachine {
     @SuppressWarnings(Array("scalafix:DisableSyntax.null"))
     def apply(index: Int): Array[Long] = registers(index) match {
       case null =>
-        val allocated = Array.ofDim[Long](lanes.value)
+        val allocated = Array.ofDim[Long](lanes)
         registers(index) = allocated
         allocated
       case value => value
@@ -159,7 +195,7 @@ object VirtualMachine {
 
   /** Per-lane scratch is allocated on first access; null is the allocation-free hot-path sentinel. */
   private[amdgpu] final class ScratchMemory(lanes: LaneCount, bytesPerLane: Int) {
-    private val values = Array.ofDim[Array[Byte] | Null](lanes.value)
+    private val values = Array.ofDim[Array[Byte] | Null](lanes)
 
     @SuppressWarnings(Array("scalafix:DisableSyntax.null"))
     def apply(lane: Int): Array[Byte] = values(lane) match {

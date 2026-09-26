@@ -8,8 +8,7 @@ import net.kurobako.gemstone.Vec
 import net.kurobako.gemstone.binary.ByteRange
 import net.kurobako.gemstone.binary.LittleEndian
 import net.kurobako.gemstone.binary.ScalarByteWidth
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
+import net.kurobako.gemstone.{NonEmptyVec, NonNegativeInt, NonNegativeLong, PositiveInt, PositiveLong}
 
 import java.util.concurrent.atomic.AtomicReference
 final class ExecutionAtomicSuite extends munit.FunSuite with ExecutionTestSupport {
@@ -79,7 +78,7 @@ final class ExecutionAtomicSuite extends munit.FunSuite with ExecutionTestSuppor
         KernelName("atomic_flag"),
         Dimensions.One,
         Dimensions.One,
-        Vec(KernelTask.Argument.Memory(allocation, 0L))
+        Vec(KernelTask.Argument.Memory(allocation, NonNegativeLong(0L)))
       )
       .toOption
       .get
@@ -142,13 +141,16 @@ final class ExecutionAtomicSuite extends munit.FunSuite with ExecutionTestSuppor
     )
     val allocation = MemoryRegion(12L)
     val memory     = ArrayMemory(allocation, 24)
-    assertEquals(memory.write(allocation, 0L, LittleEndian.toVec(10L, ScalarByteWidth.Qword)), Right(()))
+    assertEquals(
+      memory.write(allocation, NonNegativeLong(0L), LittleEndian.toVec(10L, ScalarByteWidth(8))),
+      Right(())
+    )
     val dispatch = KernelTask
       .validated(
         KernelName("atomics"),
         Dimensions.One,
         Dimensions.One,
-        Vec(KernelTask.Argument.Memory(allocation, 0L))
+        Vec(KernelTask.Argument.Memory(allocation, NonNegativeLong(0L)))
       )
       .toOption
       .get
@@ -201,13 +203,16 @@ final class ExecutionAtomicSuite extends munit.FunSuite with ExecutionTestSuppor
       )
       val allocation = MemoryRegion(120L)
       val memory     = ArrayMemory(allocation, 8)
-      assertEquals(memory.write(allocation, 0L, LittleEndian.toVec(initial, ScalarByteWidth.Dword)), Right(()))
+      assertEquals(
+        memory.write(allocation, NonNegativeLong(0L), LittleEndian.toVec(initial, ScalarByteWidth(4))),
+        Right(())
+      )
       val dispatch = KernelTask
         .validated(
           KernelName("atomic"),
           Dimensions.One,
           Dimensions.One,
-          Vec(KernelTask.Argument.Memory(allocation, 0L))
+          Vec(KernelTask.Argument.Memory(allocation, NonNegativeLong(0L)))
         )
         .toOption
         .get
@@ -286,7 +291,7 @@ final class ExecutionAtomicSuite extends munit.FunSuite with ExecutionTestSuppor
         KernelName("atomic_float"),
         Dimensions.One,
         Dimensions.One,
-        Vec(KernelTask.Argument.Memory(allocation, 0L))
+        Vec(KernelTask.Argument.Memory(allocation, NonNegativeLong(0L)))
       )
       .toOption
       .get
@@ -300,13 +305,13 @@ final class ExecutionAtomicSuite extends munit.FunSuite with ExecutionTestSuppor
   }
 
   test("dirty-page flush preserves sparse runs and writes crossing bitmap and page boundaries") {
-    val offsets = Vec[Long :| Positive0](
-      0L.refineUnsafe[Positive0],
-      8L.refineUnsafe[Positive0],
-      62L.refineUnsafe[Positive0],
-      66L.refineUnsafe[Positive0],
-      4094L.refineUnsafe[Positive0],
-      8191L.refineUnsafe[Positive0]
+    val offsets = Vec[NonNegativeLong](
+      NonNegativeLong(0L),
+      NonNegativeLong(8L),
+      NonNegativeLong(62L),
+      NonNegativeLong(66L),
+      NonNegativeLong(4094L),
+      NonNegativeLong(8191L)
     )
     val parameters   = offsets.indices.map(index => operand("IdResult", 10 + index))
     val voidType     = operand("IdResult", 1)
@@ -359,8 +364,8 @@ final class ExecutionAtomicSuite extends munit.FunSuite with ExecutionTestSuppor
     assertEquals(writes.get(), Vec(0L -> 4, 8L -> 4, 62L -> 8, 4094L -> 2, 4096L -> 2, 8191L -> 1, 8192L -> 3))
     val expected = Array.ofDim[Byte](8200)
     offsets.foreach { offset =>
-      val arrayOffset = offset.toInt.refineEither[Positive0].fold(message => fail(message), value => value)
-      LittleEndian.write(0x12345678L, expected, arrayOffset, ScalarByteWidth.Dword)
+      val arrayOffset = NonNegativeInt.unsafe(offset.raw.toInt)
+      LittleEndian.write(0x12345678L, expected, arrayOffset.raw, ScalarByteWidth(4))
     }
     assertEquals(memory.bytes, Vec.from(expected))
   }
@@ -368,17 +373,16 @@ final class ExecutionAtomicSuite extends munit.FunSuite with ExecutionTestSuppor
   test("cross-workgroup IDs, partial extents and workgroup barriers stay isolated across launches") {
     for {
       groups   <- CrossWorkgroupFixture.groups
-      local    <- Vec[Int :| Positive](31, 32, 33)
+      local    <- Vec[PositiveInt](PositiveInt(31), PositiveInt(32), PositiveInt(33))
       parallel <- Vec(false, true)
       barrier  <- Vec(false, true)
-      producer <- if (barrier) Vec(2, local - 1) else Vec(2)
+      producer <- if (barrier) Vec(2, local.raw - 1) else Vec(2)
     } {
-      val count = (local * groups - (if (barrier) 0 else 1)).refineEither[Positive]
-        .fold(message => fail(message), value => value)
-      val offset: Int :| Positive0 = 7
-      val allocation               = MemoryRegion(300L)
-      val memory                   = ArrayMemory(allocation, (offset + count + 2) * 4)
-      val prepared                 = loadUnchecked(CrossWorkgroupFixture.geometry(barrier, producer)).toOption.get
+      val count                  = PositiveInt.unsafe((local * groups).raw - (if (barrier) 0 else 1))
+      val offset: NonNegativeInt = NonNegativeInt(7)
+      val allocation             = MemoryRegion(300L)
+      val memory                 = ArrayMemory(allocation, ((offset + count).raw + 2) * 4)
+      val prepared               = loadUnchecked(CrossWorkgroupFixture.geometry(barrier, producer)).toOption.get
       for (seed <- Vec(1, 9)) {
         val schedule  = CrossWorkgroupFixture.Interleaving()
         val scheduler = if (parallel) schedule else Scheduler.Sequential
@@ -389,26 +393,26 @@ final class ExecutionAtomicSuite extends munit.FunSuite with ExecutionTestSuppor
           testDimensions(local),
           testDimensions(groups),
           Vec(
-            KernelTask.Argument.Memory(allocation, 4L),
-            KernelTask.Argument.Scalar(LittleEndian.toVec(seed.toLong, ScalarByteWidth.Dword)),
-            KernelTask.Argument.Local(4L)
+            KernelTask.Argument.Memory(allocation, NonNegativeLong(4L)),
+            KernelTask.Argument.Scalar(LittleEndian.toVec(seed.toLong, ScalarByteWidth(4))),
+            KernelTask.Argument.Local(PositiveLong(4L))
           ),
           globalSize = Some(testDimensions(count).toGlobalDimensions),
-          globalOffset = Coordinates(offset, 0, 0)
+          globalOffset = Coordinates(offset, NonNegativeInt.Zero, NonNegativeInt.Zero)
         ).toOption.get
         assertEquals(
           VMInterpreter.execute(prepared, dispatch, memory, control, scheduler, Observer.discard),
           Right(()),
           s"groups=$groups local=$local parallel=$parallel barrier=$barrier"
         )
-        assertEquals(schedule.calls.get(), if (parallel && groups > 1) 1 else 0)
-        val expected = Vec.from(0 until count).flatMap { index =>
+        assertEquals(schedule.calls.get(), if (parallel && groups > PositiveInt.One) 1 else 0)
+        val expected = Vec.from(0 until count.raw).flatMap { index =>
           LittleEndian.toVec(
-            (index / local + seed) * 1000L + (index % local) * 10L + offset + index,
-            ScalarByteWidth.Dword
+            (index / local.raw + seed) * 1000L + (index % local.raw) * 10L + offset.raw + index,
+            ScalarByteWidth(4)
           )
         }
-        assertEquals(memory.bytes, Vec.fill((offset + 1) * 4)(0.toByte) ++ expected ++ Vec.fill(4)(0.toByte))
+        assertEquals(memory.bytes, Vec.fill((offset.raw + 1) * 4)(0.toByte) ++ expected ++ Vec.fill(4)(0.toByte))
       }
     }
   }
@@ -420,9 +424,12 @@ final class ExecutionAtomicSuite extends munit.FunSuite with ExecutionTestSuppor
       parallel <- Vec(false, true)
     } {
       val allocation = MemoryRegion(301L)
-      val memory     = ArrayMemory(allocation, 12 + groups * 8)
+      val memory     = ArrayMemory(allocation, 12 + groups.raw * 8)
       for (seed <- Vec(17L, 91L)) {
-        assertEquals(memory.write(allocation, 0L, Vec.fill(12 + groups * 8)(0.toByte)), Right(()))
+        assertEquals(
+          memory.write(allocation, NonNegativeLong(0L), Vec.fill(12 + groups.raw * 8)(0.toByte)),
+          Right(())
+        )
         val schedule  = CrossWorkgroupFixture.Interleaving()
         val scheduler = if (parallel) schedule else Scheduler.Sequential
         val control   = if (parallel) TaskControl.forScheduler(cancellation = schedule, scheduler = scheduler)
@@ -432,11 +439,11 @@ final class ExecutionAtomicSuite extends munit.FunSuite with ExecutionTestSuppor
           Dimensions.One,
           testDimensions(groups),
           Vec(
-            KernelTask.Argument.Memory(allocation, 12L),
-            KernelTask.Argument.Memory(allocation, 0L),
-            KernelTask.Argument.Memory(allocation, 4L),
-            KernelTask.Argument.Memory(allocation, 8L),
-            KernelTask.Argument.Scalar(LittleEndian.toVec(seed, ScalarByteWidth.Dword))
+            KernelTask.Argument.Memory(allocation, NonNegativeLong(12L)),
+            KernelTask.Argument.Memory(allocation, NonNegativeLong(0L)),
+            KernelTask.Argument.Memory(allocation, NonNegativeLong(4L)),
+            KernelTask.Argument.Memory(allocation, NonNegativeLong(8L)),
+            KernelTask.Argument.Scalar(LittleEndian.toVec(seed, ScalarByteWidth(4)))
           )
         ).toOption.get
         assertEquals(
@@ -445,12 +452,12 @@ final class ExecutionAtomicSuite extends munit.FunSuite with ExecutionTestSuppor
         )
         val words = memory.bytes.grouped(4).map(x => LittleEndian.decode(x, 0, ScalarByteWidth.Dword)).toVector
         assertEquals(words.take(3), Vector(groups.toLong, seed, 1L))
-        assertEquals(words.drop(3).grouped(2).map(_.head).toVector.sorted, (0L until groups.toLong).toVector)
+        assertEquals(words.drop(3).grouped(2).map(_.head).toVector.sorted, (0L until groups.raw.toLong).toVector)
         val observations = words.drop(3).grouped(2).map(_(1)).toVector
         assert(observations.forall(x => x == 0L || x == seed))
         assert(observations.contains(seed))
-        if (parallel) assertEquals(schedule.calls.get(), if (groups > 1) 1 else 0)
-        if (groups > 1 && !parallel) {
+        if (parallel) assertEquals(schedule.calls.get(), if (groups > PositiveInt.One) 1 else 0)
+        if (groups > PositiveInt.One && !parallel) {
           val consumers = words.drop(3).grouped(2).filter(_.head != 0L).toVector
           assert(consumers.nonEmpty)
           assert(consumers.forall(_(1) == seed))
@@ -464,11 +471,11 @@ final class ExecutionAtomicSuite extends munit.FunSuite with ExecutionTestSuppor
           VMInterpreter.execute(prepared, dispatch, memory, observeControl, scheduler, Observer.discard),
           Right(())
         )
-        val consumed = memory.bytes.grouped(4).map(x => LittleEndian.decode(x, 0, ScalarByteWidth.Dword)).toVector
-        assertEquals(consumed.take(3), Vector(groups.toLong * 2, seed, 1L))
+        val consumed = memory.bytes.grouped(4).map(x => LittleEndian.decode(x, 0, ScalarByteWidth(4))).toVector
+        assertEquals(consumed.take(3), Vector(groups.raw.toLong * 2, seed, 1L))
         assertEquals(
           consumed.drop(3).grouped(2).map(_.head).toVector.sorted,
-          (groups.toLong until groups.toLong * 2).toVector
+          (groups.raw.toLong until groups.raw.toLong * 2).toVector
         )
         assert(consumed.drop(3).grouped(2).forall(_(1) == seed))
       }

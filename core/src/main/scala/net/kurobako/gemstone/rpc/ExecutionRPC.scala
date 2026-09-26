@@ -1,12 +1,17 @@
 package net.kurobako.gemstone.rpc
 
-import net.kurobako.gemstone.{NoNul, Vec, WorkDimension}
+import net.kurobako.gemstone.{
+  NonEmptyString,
+  NonNegativeInt,
+  NonNegativeLong,
+  PositiveInt,
+  PositiveLong,
+  Vec,
+  WorkDimension
+}
 import net.kurobako.gemstone.memory.{AllocationKind, GuestAddress}
 import net.kurobako.gemstone.rpc.ExecutionProtocol.*
 import net.kurobako.gemstone.rpc.Wire.Codec
-
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
 
 object ExecutionRPC {
   private inline val IntBytes                       = 4
@@ -23,46 +28,46 @@ object ExecutionRPC {
   private inline val ResponsePayloadSizeOffsetValue = ResponseStatusOffsetValue + IntBytes
   private inline val ResponseHeaderBytesValue       = ResponsePayloadSizeOffsetValue + IntBytes
 
-  val Name: String :| (MinLength[1] & NoNul) = "gemstone.execution"
-  val RequestMagic: Int                      = 0x474d4532
-  val ResponseMagic: Int                     = 0x474d4632
-  val MaximumPayload: Int :| Positive        = 134217728
-  val MaximumElements: Int :| Positive       = 16384
-  val MaximumTextBytes: Int :| Positive      = 8192
-  val Limits: Wire.Limits                    = Wire.Limits(
+  val Name: NonEmptyString          = NonEmptyString("gemstone.execution")
+  val RequestMagic: Int             = 0x474d4532
+  val ResponseMagic: Int            = 0x474d4632
+  val MaximumPayload: PositiveInt   = PositiveInt(134217728)
+  val MaximumElements: PositiveInt  = PositiveInt(16384)
+  val MaximumTextBytes: PositiveInt = PositiveInt(8192)
+  val Limits: Wire.Limits           = Wire.Limits(
     MaximumElements,
     MaximumPayload,
     MaximumTextBytes
   )
 
-  val RequestFingerprintOffset: Int :| Positive = RequestFingerprintOffsetValue
-  val RequestClientOffset: Int :| Positive      = RequestClientOffsetValue
-  val RequestSessionHighOffset: Int :| Positive = RequestSessionHighOffsetValue
-  val RequestSessionLowOffset: Int :| Positive  = RequestSessionLowOffsetValue
-  val RequestOperationOffset: Int :| Positive   = RequestOperationOffsetValue
-  val RequestPayloadSizeOffset: Int :| Positive = RequestPayloadSizeOffsetValue
-  val RequestHeaderBytes: Int :| Positive       = RequestHeaderBytesValue
+  val RequestFingerprintOffset: PositiveInt = PositiveInt.unsafe(RequestFingerprintOffsetValue)
+  val RequestClientOffset: PositiveInt      = PositiveInt.unsafe(RequestClientOffsetValue)
+  val RequestSessionHighOffset: PositiveInt = PositiveInt.unsafe(RequestSessionHighOffsetValue)
+  val RequestSessionLowOffset: PositiveInt  = PositiveInt.unsafe(RequestSessionLowOffsetValue)
+  val RequestOperationOffset: PositiveInt   = PositiveInt.unsafe(RequestOperationOffsetValue)
+  val RequestPayloadSizeOffset: PositiveInt = PositiveInt.unsafe(RequestPayloadSizeOffsetValue)
+  val RequestHeaderBytes: PositiveInt       = PositiveInt.unsafe(RequestHeaderBytesValue)
 
-  val ResponseFingerprintOffset: Int :| Positive = ResponseFingerprintOffsetValue
-  val ResponseStatusOffset: Int :| Positive      = ResponseStatusOffsetValue
-  val ResponsePayloadSizeOffset: Int :| Positive = ResponsePayloadSizeOffsetValue
-  val ResponseHeaderBytes: Int :| Positive       = ResponseHeaderBytesValue
+  val ResponseFingerprintOffset: PositiveInt = PositiveInt.unsafe(ResponseFingerprintOffsetValue)
+  val ResponseStatusOffset: PositiveInt      = PositiveInt.unsafe(ResponseStatusOffsetValue)
+  val ResponsePayloadSizeOffset: PositiveInt = PositiveInt.unsafe(ResponsePayloadSizeOffsetValue)
+  val ResponseHeaderBytes: PositiveInt       = PositiveInt.unsafe(ResponseHeaderBytesValue)
 
   enum Operation[Reply](using val replyCodec: Codec[Reply]) derives Wire.Protocol {
     case Ping                                                                     extends Operation[Unit]
     case EnableHostMemory                                                         extends Operation[Unit]
     case PollHostMemory(completion: CompletionId)                                 extends Operation[HostMemoryBatch]
     case SupplyHostMemory(completion: CompletionId, ranges: Vec[HostMemoryBytes]) extends Operation[Unit]
-    case RegisterAllocation(kind: AllocationKind, size: Long :| Positive)
+    case RegisterAllocation(kind: AllocationKind, size: PositiveLong)
         extends Operation[AllocationId]
     case SupplyHostSync(completion: CompletionId, ticket: Long, observed: Long) extends Operation[Unit]
     case RegisterAllocationAddress(allocation: AllocationId, nativeBase: GuestAddress, hostBacked: Boolean = false)
         extends Operation[Unit]
     case ReleaseAllocation(allocation: AllocationId)
         extends Operation[Unit]
-    case WriteAllocation(allocation: AllocationId, offset: Long :| Positive0, bytes: Vec[Byte])
+    case WriteAllocation(allocation: AllocationId, offset: NonNegativeLong, bytes: Vec[Byte])
         extends Operation[Unit]
-    case ReadAllocation(allocation: AllocationId, offset: Long :| Positive0, size: Int :| Positive0)
+    case ReadAllocation(allocation: AllocationId, offset: NonNegativeLong, size: NonNegativeInt)
         extends Operation[Vec[Byte]]
     case LoadProgram(encoding: String, image: Vec[Byte])
         extends Operation[ProgramId]
@@ -82,9 +87,9 @@ object ExecutionRPC {
         extends Operation[BlasResult]
     case DescribeGlobal(program: ProgramId, name: GlobalName)
         extends Operation[ProgramGlobal]
-    case BindProgramGlobal(program: ProgramId, name: GlobalName, allocation: AllocationId, offset: Long :| Positive0)
+    case BindProgramGlobal(program: ProgramId, name: GlobalName, allocation: AllocationId, offset: NonNegativeLong)
         extends Operation[Unit]
-    case WriteProgramGlobal(program: ProgramId, name: GlobalName, offset: Long :| Positive0, bytes: Vec[Byte])
+    case WriteProgramGlobal(program: ProgramId, name: GlobalName, offset: NonNegativeLong, bytes: Vec[Byte])
         extends Operation[Unit]
     case Launch(
         program: ProgramId,
@@ -94,8 +99,8 @@ object ExecutionRPC {
         globalSize: GlobalDimensions,
         workDim: WorkDimension,
         globalOffset: Coordinates,
-        privateSegmentBytes: Int :| Positive0,
-        groupSegmentBytes: Int :| Positive0,
+        privateSegmentBytes: NonNegativeInt,
+        groupSegmentBytes: NonNegativeInt,
         arguments: Vec[KernelArgument],
         pointerRelocations: Vec[PointerRelocation],
         discoverArgumentRelocations: Boolean = false
@@ -114,7 +119,7 @@ object ExecutionRPC {
         extends Operation[Unit]
   }
 
-  lazy val Schema: Wire.ProtocolShape                 = Wire.Protocol[Operation].schema[ExecutionFailure](Name)
-  lazy val Identity: String :| (MinLength[1] & NoNul) =
-    s"$Name@${java.lang.Long.toUnsignedString(Schema.fingerprint, 16)}".refineUnsafe[MinLength[1] & NoNul]
+  lazy val Schema: Wire.ProtocolShape = Wire.Protocol[Operation].schema[ExecutionFailure](Name)
+  lazy val Identity: NonEmptyString   =
+    NonEmptyString.unsafe(s"$Name@${java.lang.Long.toUnsignedString(Schema.fingerprint, 16)}")
 }

@@ -4,12 +4,10 @@ import net.kurobako.gemstone.server.execution.ExecutionService
 import net.kurobako.gemstone.server.transport.ServerControl
 import net.kurobako.gemstone.server.transport.Transport.*
 import net.kurobako.gemstone.server.GemstoneRPCServer
-import net.kurobako.gemstone.{NoNul, Vec}
+import net.kurobako.gemstone.{CompileTime, NoNulString, Vec}
 
 import cats.syntax.all.*
 import com.monovore.decline.{Argument, Opts}
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
 
 import java.nio.file.{Files, Path}
 import java.util.concurrent.TimeUnit
@@ -17,15 +15,33 @@ import java.util.concurrent.atomic.AtomicBoolean
 import scala.util.Using
 
 object Launcher {
-  type Executable = Executable.T
-  object Executable extends RefinedType[String, MinLength[1] & NoNul]
+  opaque type Executable = String
+
+  object Executable {
+    inline def either(value: String): Either[String, Executable] =
+      if (value.isEmpty) Left("value must not be empty")
+      else if (value.view.contains('\u0000')) Left("value must not contain a NUL character")
+      else Right(value)
+
+    inline def unsafe(value: String): Executable =
+      either(value).fold(message => throw IllegalArgumentException(message), identity)
+
+    inline def apply[A <: String & Singleton](inline value: A)(using CompileTime.NonEmptyNoNul[A]): Executable =
+      value
+
+    extension (value: Executable) {
+      inline def raw: String = value
+    }
+  }
+
+  import Executable.raw
 
   final case class Options(
       apis: Set[ComputeAPI],
       serverPort: Option[RPCPort],
       layout: RuntimeLayout,
       executable: Executable,
-      arguments: Vec[String :| NoNul]
+      arguments: Vec[NoNulString]
   )
 
   private final class RunningProcess(val process: Process) extends AutoCloseable {
@@ -75,7 +91,7 @@ object Launcher {
       executable <- Executable.either(command.head)
         .leftMap(_ => "command executable must be non-empty and contain no NUL characters")
       arguments <- command.tail.zipWithIndex.traverse { case (argument, index) =>
-        argument.refineEither[NoNul]
+        NoNulString.either(argument)
           .leftMap(_ => s"command argument ${index + 1} contains a NUL character")
       }
     } yield executable -> Vec.from(arguments)).toValidatedNel
@@ -105,7 +121,7 @@ object Launcher {
       2
     } else {
       val launched = launch(options.apis, layout, sys.env, options.serverPort) { environment =>
-        val builder = ProcessBuilder((options.executable.value +: options.arguments)*).inheritIO()
+        val builder = ProcessBuilder((options.executable.raw +: options.arguments.map(_.raw))*).inheritIO()
         environment.applyTo(builder.environment())
         Using.resource(RunningProcess(builder.start()))(running => waitForChild(running.process))
       }
@@ -155,8 +171,8 @@ object Launcher {
       val inheritedPreload     = inherited.get("LD_PRELOAD").filter(_.nonEmpty).toVector
       val inheritedLibraryPath = inherited.get("LD_LIBRARY_PATH").filter(_.nonEmpty).toVector
       val common               = Map(
-        EnvironmentNames.RpcPort   -> s"${port.value}",
-        EnvironmentNames.RpcClient -> s"${client.value}"
+        EnvironmentNames.RpcPort   -> s"${port.raw}",
+        EnvironmentNames.RpcClient -> s"${client.raw}"
       )
       val dynamic = Map.newBuilder[String, String]
       if (preload.nonEmpty) dynamic += "LD_PRELOAD" -> (preload.map(path => s"$path") ++ inheritedPreload).mkString(":")

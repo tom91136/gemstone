@@ -1,6 +1,6 @@
 package net.kurobako.gemstone.server.execution
 
-import net.kurobako.gemstone.Vec
+import net.kurobako.gemstone.{NonNegativeLong, PositiveLong, Vec}
 import net.kurobako.gemstone.isa.GlobalName
 import net.kurobako.gemstone.isa.KernelMetadata
 import net.kurobako.gemstone.isa.KernelName
@@ -10,9 +10,6 @@ import net.kurobako.gemstone.isa.ptx.v9_3.VirtualMachine as PTXMachine
 import net.kurobako.gemstone.vm.AddressSpace
 import net.kurobako.gemstone.vm.Memory
 import net.kurobako.gemstone.vm.MemoryRegion
-
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
 
 import java.nio.charset.StandardCharsets
 
@@ -51,13 +48,13 @@ object PTXRuntimeBackend extends RuntimeBackend {
     override def bind(
         name: GlobalName,
         region: MemoryRegion,
-        offset: Long :| Positive0,
-        regionSize: Long :| Positive,
+        offset: NonNegativeLong,
+        regionSize: PositiveLong,
         memory: Memory
     ): Either[RuntimeBackend.Error, Unit] = memory match {
       case addresses: AddressSpace =>
         machine.global(loaded, name).left.map(_ =>
-          RuntimeBackend.Error.NotFound(s"PTX global '${name.value}' is not present")
+          RuntimeBackend.Error.NotFound(s"PTX global '${name.raw}' is not present")
         )
           .flatMap(_ =>
             machine.bindGlobal(loaded, name, region, offset, regionSize, addresses)
@@ -68,7 +65,7 @@ object PTXRuntimeBackend extends RuntimeBackend {
 
     override def write(
         name: GlobalName,
-        offset: Long :| Positive0,
+        offset: NonNegativeLong,
         bytes: Vec[Byte]
     ): Either[RuntimeBackend.Error, Unit] = Left(RuntimeBackend.Error.Unsupported("PTX globals are not writable"))
   }

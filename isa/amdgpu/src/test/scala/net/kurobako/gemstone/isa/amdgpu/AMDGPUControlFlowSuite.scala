@@ -5,10 +5,7 @@ import VirtualMachine.*
 import CodeObject.*
 import VMIR.*
 
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
-
-import net.kurobako.gemstone.Vec
+import net.kurobako.gemstone.{PositiveInt, PositiveLong, Vec}
 import net.kurobako.gemstone.binary.{Bits, ByteRange}
 import net.kurobako.gemstone.binary.IEEE754
 import net.kurobako.gemstone.binary.LittleEndian
@@ -333,7 +330,8 @@ final class AMDGPUControlFlowSuite extends munit.FunSuite with CodeObjectTestSup
 
     val executable = compileKernel(kernel)
     assertEquals(executeKernel(executable, dispatch, TestMemory()), Right(()))
-    val limited = TaskControl.forScheduler(TaskLimits(maxInstructions = 1L, quantum = 1))
+    val limited =
+      TaskControl.forScheduler(TaskLimits(maxInstructions = PositiveLong(1L), quantum = PositiveInt(1)))
     assert(
       executeKernel(executable, dispatch, TestMemory(), limited).left
         .exists(_.message.contains("instruction budget of 1"))
@@ -383,7 +381,7 @@ final class AMDGPUControlFlowSuite extends munit.FunSuite with CodeObjectTestSup
     )
     val dispatch = KernelTask.validated(
       KernelName("divergent_barrier"),
-      Dimensions(64, 1, 1),
+      testDimensions(64, 1, 1),
       Dimensions.One,
       Vec.empty
     ).toOption.get

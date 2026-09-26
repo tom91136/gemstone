@@ -5,6 +5,10 @@ import Program.*
 import VMIR.*
 import VMExecution.*
 
+import net.kurobako.gemstone.NonEmptyString
+import net.kurobako.gemstone.NonEmptyVec
+import net.kurobako.gemstone.NonNegativeInt
+import net.kurobako.gemstone.PositiveInt
 import net.kurobako.gemstone.Vec
 
 import net.kurobako.gemstone.binary.Binary16
@@ -12,11 +16,9 @@ import net.kurobako.gemstone.binary.Binary32
 import net.kurobako.gemstone.binary.BitWidth as BinaryBitWidth
 import net.kurobako.gemstone.binary.Bits
 import net.kurobako.gemstone.binary.Bits.low32
-import net.kurobako.gemstone.binary.FloatingPointWidth
 import net.kurobako.gemstone.binary.IEEE754
 import net.kurobako.gemstone.binary.LittleEndian
 import net.kurobako.gemstone.binary.ScalarByteWidth
-import net.kurobako.gemstone.isa.KernelName
 import net.kurobako.gemstone.vm.LaunchGeometry
 import net.kurobako.gemstone.vm.LaunchGeometry.Axis
 import net.kurobako.gemstone.vm.LaunchGeometry.Dimensions
@@ -26,8 +28,6 @@ import net.kurobako.gemstone.memory.DeviceAllocationMemory
 import net.kurobako.gemstone.memory.MemoryValueByteWidth
 
 import cats.syntax.all.*
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
 
 import scala.collection.mutable
 
@@ -63,7 +63,7 @@ private object VMSemantics {
 
   @SuppressWarnings(Array("scalafix:GemstoneNoAssume"))
   private inline def memoryByteCount(width: BitWidth): MemoryValueByteWidth =
-    MemoryValueByteWidth.assume(byteCount(width).value)
+    MemoryValueByteWidth.unsafe(byteCount(width).raw)
 
   private def stageResult(
       effects: VMStateEffects,
@@ -109,21 +109,27 @@ private object VMSemantics {
         case VMIR.Instruction.LoadParameter(destinations, parameter, offset, elementWidth, signed) =>
           val elementBytes   = byteCount(elementWidth)
           val argumentValues = context.arguments.get(parameter).map { argument =>
-            if (offset < 0 || offset > argument.bytes.length - elementBytes.value * destinations.size)
+            if (
+              offset < NonNegativeInt.Zero || offset.raw > argument.bytes.length - elementBytes.raw * destinations.size
+            )
               Left(ExecutionFault.InvalidState(
                 s"parameter $parameter load at $offset exceeds ${argument.bytes.length} bytes"
               ))
             else
               Right(Array.tabulate(destinations.size) { index =>
-                val byteOffset = offset + index * elementBytes.value
-                loadBits(LittleEndian.decode(argument.bytes, byteOffset, elementBytes), elementWidth, signed)
+                val byteOffset = offset.raw + index * elementBytes.raw
+                loadBits(
+                  LittleEndian.decode(argument.bytes.toVector.toArray, byteOffset, elementBytes),
+                  elementWidth,
+                  signed
+                )
               })
           }
           var failure: Option[ExecutionFault] = None
           context.active.foreachLane { lane =>
             if (failure.isEmpty)
               context.state.parameters(lane).get(parameter) match {
-                case Some(value) if offset == 0 && destinations.size == 1 =>
+                case Some(value) if offset == NonNegativeInt.Zero && destinations.size == 1 =>
                   effects.stageRegister(lane, destinations.head, loadBits(value, elementWidth, signed))
                 case Some(_) =>
                   failure = Some(ExecutionFault.InvalidState(
@@ -163,7 +169,7 @@ private object VMSemantics {
                     .readLittleEndian(GuestAddress(rawAddress), memoryByteCount(width))
                     .leftMap(error =>
                       ExecutionFault.Memory(
-                        s"pc ${context.pc.value}, lane $lane: ${error.message}"
+                        s"pc ${context.pc.raw}, lane $lane: ${error.message}"
                       )
                     )
                     .map(value => loadBits(value, width, signed))
@@ -175,7 +181,7 @@ private object VMSemantics {
           forEveryLane(context) { lane =>
             val writes = context.read(lane, address).flatMap { rawAddress =>
               destinations.zipWithIndex.traverse { case (destination, index) =>
-                val elementAddress = rawAddress + index.toLong * byteCount(width).value.toLong
+                val elementAddress = rawAddress + index.toLong * byteCount(width).raw.toLong
                 context.state.readParameterBuffer(elementAddress, byteCount(width)) match {
                   case Some(loaded) =>
                     Right(VMStateWrite.Register(lane, destination, loadBits(loaded, width, signed)))
@@ -196,7 +202,7 @@ private object VMSemantics {
                       .readLittleEndian(GuestAddress(elementAddress), memoryByteCount(width))
                       .leftMap(error =>
                         ExecutionFault.Memory(
-                          s"pc ${context.pc.value}, lane $lane: ${error.message}"
+                          s"pc ${context.pc.raw}, lane $lane: ${error.message}"
                         )
                       )
                       .map(loaded =>
@@ -217,8 +223,8 @@ private object VMSemantics {
               case Left(fault)  => Left(fault)
               case Right(value) =>
                 val stored = truncate(value, elementWidth)
-                effects.stage(VMStateWrite.ParameterBytes(lane, parameter, offset, elementWidth, stored))
-                if (offset == 0)
+                effects.stage(VMStateWrite.ParameterBytes(lane, parameter, offset.raw, elementWidth, stored))
+                if (offset == NonNegativeInt.Zero)
                   effects.stage(VMStateWrite.Parameter(lane, parameter, stored))
                 source match {
                   case Value.Register(name) if context.state.functionRegisters(lane).contains(name) =>
@@ -405,7 +411,7 @@ private object VMSemantics {
       effects: VMStateEffects
   ): Either[ExecutionFault, Step] = instruction match {
     case VMIR.Instruction.LoadGlobal(destination, address, width, signed) =>
-      prepareGlobalReads(context, address, byteCount(width).value, false).flatMap { _ =>
+      prepareGlobalReads(context, address, byteCount(width).raw, false).flatMap { _ =>
         var failure: Option[ExecutionFault] = None
         context.active.foreachLane { lane =>
           if (failure.isEmpty) {
@@ -417,7 +423,7 @@ private object VMSemantics {
                 context.memory.readLittleEndian(GuestAddress(rawAddress), memoryByteCount(width)) match {
                   case Left(error) =>
                     failure = Some(ExecutionFault.Memory(
-                      s"pc ${context.pc.value}, lane $lane: ${error.message}"
+                      s"pc ${context.pc.raw}, lane $lane: ${error.message}"
                     ))
                   case Right(value) =>
                     effects.stageRegister(lane, destination, loadBits(value, width, signed))
@@ -431,7 +437,7 @@ private object VMSemantics {
         }
       }
     case VMIR.Instruction.LoadGeneric(destination, address, width, signed) =>
-      prepareGlobalReads(context, address, byteCount(width).value, true).flatMap { _ =>
+      prepareGlobalReads(context, address, byteCount(width).raw, true).flatMap { _ =>
         var failure: Option[ExecutionFault] = None
         context.active.foreachLane { lane =>
           if (failure.isEmpty) {
@@ -455,7 +461,7 @@ private object VMSemantics {
                 context.memory.readLittleEndian(GuestAddress(rawAddress), memoryByteCount(width)) match {
                   case Left(error) =>
                     failure = Some(ExecutionFault.Memory(
-                      s"pc ${context.pc.value}, lane $lane: ${error.message}"
+                      s"pc ${context.pc.raw}, lane $lane: ${error.message}"
                     ))
                   case Right(value) =>
                     effects.stageRegister(lane, destination, loadBits(value, width, signed))
@@ -469,7 +475,7 @@ private object VMSemantics {
         }
       }
     case VMIR.Instruction.LoadGlobalVector(destinations, address, width, signed) =>
-      prepareGlobalReads(context, address, destinations.size * byteCount(width).value, false).flatMap { _ =>
+      prepareGlobalReads(context, address, destinations.size * byteCount(width).raw, false).flatMap { _ =>
         forEveryLane(context) { lane =>
           val writes = context.read(lane, address).flatMap { rawAddress =>
             if (coherentGlobalVector(context, rawAddress, destinations.size, width))
@@ -477,12 +483,12 @@ private object VMSemantics {
             else destinations.zipWithIndex.traverse { case (destination, index) =>
               context.memory
                 .readLittleEndian(
-                  GuestAddress(rawAddress + index.toLong * byteCount(width).value.toLong),
+                  GuestAddress(rawAddress + index.toLong * byteCount(width).raw.toLong),
                   memoryByteCount(width)
                 )
                 .leftMap(error =>
                   ExecutionFault.Memory(
-                    s"pc ${context.pc.value}, lane $lane: ${error.message}"
+                    s"pc ${context.pc.raw}, lane $lane: ${error.message}"
                   )
                 )
                 .map(value =>
@@ -498,13 +504,13 @@ private object VMSemantics {
         }.map(_ => Step.Advance)
       }
     case VMIR.Instruction.LoadGenericVector(destinations, address, width, signed) =>
-      prepareGlobalReads(context, address, destinations.size * byteCount(width).value, true).flatMap { _ =>
+      prepareGlobalReads(context, address, destinations.size * byteCount(width).raw, true).flatMap { _ =>
         forEveryLane(context) { lane =>
           val writes = context.read(lane, address).flatMap { rawAddress =>
             if (coherentGlobalVector(context, rawAddress, destinations.size, width))
               loadCoherentVector(context, lane, rawAddress, destinations, width, signed)
             else destinations.zipWithIndex.traverse { case (destination, index) =>
-              val elementAddress = rawAddress + index.toLong * byteCount(width).value.toLong
+              val elementAddress = rawAddress + index.toLong * byteCount(width).raw.toLong
               context.state.readParameterBuffer(elementAddress, byteCount(width)) match {
                 case Some(value) => Right(VMStateWrite.Register(
                     lane,
@@ -528,7 +534,7 @@ private object VMSemantics {
                     .readLittleEndian(GuestAddress(elementAddress), memoryByteCount(width))
                     .leftMap(error =>
                       ExecutionFault.Memory(
-                        s"pc ${context.pc.value}, lane $lane: ${error.message}"
+                        s"pc ${context.pc.raw}, lane $lane: ${error.message}"
                       )
                     )
                     .map(value =>
@@ -548,7 +554,7 @@ private object VMSemantics {
       context.active.foreachLane { lane =>
         val rawAddress = readFast(context, lane, address)
         val value      = readFast(context, lane, source)
-        if (context.state.parameterBufferRange(rawAddress, byteCount(width).value).nonEmpty)
+        if (context.state.parameterBufferRange(rawAddress, byteCount(width).raw).nonEmpty)
           effects.stage(VMStateWrite.ParameterBuffer(rawAddress, width, value))
         else effects.stageMemory(lane, GuestAddress(rawAddress), width, value)
       }
@@ -557,7 +563,7 @@ private object VMSemantics {
       context.active.foreachLane { lane =>
         val rawAddress = readFast(context, lane, address)
         val value      = readFast(context, lane, source)
-        if (context.state.parameterBufferRange(rawAddress, byteCount(width).value).nonEmpty)
+        if (context.state.parameterBufferRange(rawAddress, byteCount(width).raw).nonEmpty)
           effects.stage(VMStateWrite.ParameterBuffer(rawAddress, width, value))
         else if (isSharedAddress(rawAddress)) effects.stage(VMStateWrite.Shared(lane, rawAddress, width, value))
         else if (isLocalAddress(rawAddress)) effects.stage(VMStateWrite.Local(lane, rawAddress, width, value))
@@ -571,7 +577,7 @@ private object VMSemantics {
             storeCoherentVector(context, lane, rawAddress, sources, width)
           else sources.zipWithIndex.traverse { case (source, index) =>
             context.read(lane, source).map { value =>
-              val elementAddress = rawAddress + index.toLong * byteCount(width).value.toLong
+              val elementAddress = rawAddress + index.toLong * byteCount(width).raw.toLong
               if (isSharedAddress(elementAddress))
                 VMStateWrite.Shared(lane, elementAddress, width, value)
               else if (isLocalAddress(elementAddress))
@@ -602,7 +608,7 @@ private object VMSemantics {
               lane,
               destination,
               loadBits(
-                context.state.readShared(rawAddress + index.toLong * byteCount(width).value.toLong, width),
+                context.state.readShared(rawAddress + index.toLong * byteCount(width).raw.toLong, width),
                 width,
                 signed
               )
@@ -630,7 +636,7 @@ private object VMSemantics {
               lane,
               destination,
               loadBits(
-                context.state.readLocal(lane, rawAddress + index.toLong * byteCount(width).value.toLong, width),
+                context.state.readLocal(lane, rawAddress + index.toLong * byteCount(width).raw.toLong, width),
                 width,
                 signed
               )
@@ -654,7 +660,7 @@ private object VMSemantics {
             context.read(lane, source).map(value =>
               VMStateWrite.Shared(
                 lane,
-                rawAddress + index.toLong * byteCount(width).value.toLong,
+                rawAddress + index.toLong * byteCount(width).raw.toLong,
                 width,
                 value
               )
@@ -678,7 +684,7 @@ private object VMSemantics {
             context.read(lane, source).map(value =>
               VMStateWrite.Local(
                 lane,
-                rawAddress + index.toLong * byteCount(width).value.toLong,
+                rawAddress + index.toLong * byteCount(width).raw.toLong,
                 width,
                 value
               )
@@ -692,13 +698,13 @@ private object VMSemantics {
         val writes = for {
           destinationAddress <- context.read(lane, destination)
           sourceAddress      <- context.read(lane, source)
-          pending            <- Vec.from(0 until size by 8).traverse { offset =>
-            val width = BitWidth.assume(Math.min(8, size - offset) * 8)
+          pending            <- Vec.from(0 until size.raw by 8).traverse { offset =>
+            val width = BitWidth.unsafe(Math.min(8, size.raw - offset) * 8)
             context.memory
               .readLittleEndian(GuestAddress(sourceAddress + offset.toLong), memoryByteCount(width))
               .leftMap(error =>
                 ExecutionFault.Memory(
-                  s"pc ${context.pc.value}, lane $lane: ${error.message}"
+                  s"pc ${context.pc.raw}, lane $lane: ${error.message}"
                 )
               )
               .map(value =>
@@ -923,9 +929,9 @@ private object VMSemantics {
     case VMIR.Instruction.BarrierSync(id) =>
       // A workgroup barrier is identified by its hardware barrier slot, not
       // by the static PC at which a divergent cohort happens to arrive.
-      Right(Step.Suspend(WaitKey(WaitScope.Workgroup, id.toLong, 0L)))
+      Right(Step.Suspend(WaitKey(WaitScope.Workgroup, id.raw.toLong, 0L)))
     case VMIR.Instruction.BarrierReduce(_, id, _, _) =>
-      Right(Step.Suspend(WaitKey(WaitScope.Workgroup, id.toLong, 0L)))
+      Right(Step.Suspend(WaitKey(WaitScope.Workgroup, id.raw.toLong, 0L)))
     case VMIR.Instruction.WarpBarrier(memberMask) =>
       var firstLane = -1
       context.active.foreachLane { lane => if (firstLane < 0) firstLane = lane }
@@ -944,7 +950,7 @@ private object VMSemantics {
           if (mismatch)
             Left(ExecutionFault.InvalidState("bar.warp.sync member mask differs across active lanes"))
           else
-            Right(Step.Suspend(WaitKey(WaitScope.Warp, memberMaskValue, context.pc.value.toLong)))
+            Right(Step.Suspend(WaitKey(WaitScope.Warp, memberMaskValue, context.pc.raw.toLong)))
       }
     case VMIR.Instruction.MemoryBarrier =>
       context.memory.fence().leftMap(error => ExecutionFault.Memory(error.message)).map(_ => Step.Advance)
@@ -987,7 +993,7 @@ private object VMSemantics {
         }
       }.map(_ => Step.Advance)
     case VMIR.Instruction.Trap =>
-      Left(ExecutionFault.ArchitecturalTrap("ptx", 0L, context.pc))
+      Left(ExecutionFault.ArchitecturalTrap(NonEmptyString("ptx"), 0L, context.pc))
     case VMIR.Instruction.Return => Right(Step.Exit(context.active))
     case other                   => Left(ExecutionFault.InvalidState(s"unhandled compiled PTX instruction $other"))
   }
@@ -1002,7 +1008,7 @@ private object VMSemantics {
       count: Int,
       width: BitWidth
   ): Boolean = {
-    val size = count * byteCount(width).value
+    val size = count * byteCount(width).raw
     size > 0 && size <= 16 && (size & (size - 1)) == 0 && (address & (size - 1).toLong) == 0L &&
     !isSharedAddress(address) && !isLocalAddress(address) &&
     context.state.parameterBufferRange(address, size).isEmpty
@@ -1014,7 +1020,7 @@ private object VMSemantics {
       size: Int,
       generic: Boolean
   ): Either[ExecutionFault, Unit] = {
-    val ranges = Vec.newBuilder[(GuestAddress, Int :| Positive0)]
+    val ranges = Vec.newBuilder[(GuestAddress, NonNegativeInt)]
     context.active.foreachLane { lane =>
       val raw = readFast(context, lane, address)
       if (
@@ -1023,7 +1029,7 @@ private object VMSemantics {
           size
         ).isEmpty && (!generic || (!isSharedAddress(raw) && !isLocalAddress(raw)))
       ) {
-        val _ = ranges += ((GuestAddress(raw), size.refineUnsafe[Positive0]))
+        val _ = ranges += ((GuestAddress(raw), NonNegativeInt.unsafe(size)))
       }
     }
     context.memory.prepareReads(ranges.result()).leftMap(error => ExecutionFault.Memory(error.message))
@@ -1037,34 +1043,34 @@ private object VMSemantics {
       width: BitWidth,
       signed: Boolean
   ): Either[ExecutionFault, Vec[VMStateWrite]] =
-    if (destinations.nonEmpty && destinations.size * byteCount(width).value <= 8) {
-      val packedBytes = MemoryValueByteWidth.applyUnsafe(destinations.size * byteCount(width).value)
+    if (destinations.nonEmpty && destinations.size * byteCount(width).raw <= 8) {
+      val packedBytes = MemoryValueByteWidth.unsafe(destinations.size * byteCount(width).raw)
       context.memory.readLittleEndian(GuestAddress(address), packedBytes)
         .leftMap(error =>
-          ExecutionFault.Memory(s"pc ${context.pc.value}, lane $lane: ${error.message}")
+          ExecutionFault.Memory(s"pc ${context.pc.raw}, lane $lane: ${error.message}")
         )
         .map { packed =>
           destinations.zipWithIndex.map { case (destination, index) =>
             VMStateWrite.Register(
               lane,
               destination,
-              loadBits(packed >>> (index * width.value), width, signed)
+              loadBits(packed >>> (index * width.raw), width, signed)
             )
           }
         }
 
     } else {
-      val totalBytes = Math.multiplyExact(destinations.size, byteCount(width).value).refineUnsafe[Positive0]
+      val totalBytes = NonNegativeInt.unsafe(Math.multiplyExact(destinations.size, byteCount(width).raw))
       context.memory.readBytes(GuestAddress(address), totalBytes)
         .leftMap(error =>
-          ExecutionFault.Memory(s"pc ${context.pc.value}, lane $lane: ${error.message}")
+          ExecutionFault.Memory(s"pc ${context.pc.raw}, lane $lane: ${error.message}")
         )
         .map { bytes =>
           destinations.zipWithIndex.map { case (destination, index) =>
             val value =
               net.kurobako.gemstone.binary.LittleEndian.decode(
                 bytes,
-                (index * byteCount(width).value).refineUnsafe[Positive0],
+                index * byteCount(width).raw,
                 byteCount(width)
               )
             VMStateWrite.Register(lane, destination, loadBits(value, width, signed))
@@ -1079,14 +1085,14 @@ private object VMSemantics {
       sources: Vec[Value],
       width: BitWidth
   ): Either[ExecutionFault, Vec[VMStateWrite]] =
-    if (sources.nonEmpty && sources.size * byteCount(width).value <= 8) {
+    if (sources.nonEmpty && sources.size * byteCount(width).raw <= 8) {
       sources.zipWithIndex.foldLeft[Either[ExecutionFault, Long]](Right(0L)) { case (result, (source, index)) =>
         for {
           packed <- result
           value  <- context.read(lane, source)
-        } yield packed | (truncate(value, width) << (index * width.value))
+        } yield packed | (truncate(value, width) << (index * width.raw))
       }.map { packed =>
-        val packedWidth = BitWidth.applyUnsafe(sources.size * width.value)
+        val packedWidth = BitWidth.unsafe(sources.size * width.raw)
         Vec(VMStateWrite.Memory(lane, GuestAddress(address), packedWidth, packed))
       }
 
@@ -1129,18 +1135,18 @@ private object VMSemantics {
       )
       true
     case VMIR.Instruction.MoveSplit(destinations, source, partWidth) =>
-      val lowIndex  = if (destinations(0).value == "_") -1 else VMRegisterFile.index(destinations(0))
-      val highIndex = if (destinations(1).value == "_") -1 else VMRegisterFile.index(destinations(1))
+      val lowIndex  = if (destinations(0).raw == "_") -1 else VMRegisterFile.index(destinations(0))
+      val highIndex = if (destinations(1).raw == "_") -1 else VMRegisterFile.index(destinations(1))
       context.active.foreachLane { lane =>
         val value = readFast(context, lane, source)
-        if (destinations(0).value != "_")
+        if (destinations(0).raw != "_")
           writeRegister(context.state.registers(lane), destinations(0), lowIndex, truncate(value, partWidth))
-        if (destinations(1).value != "_")
+        if (destinations(1).raw != "_")
           writeRegister(
             context.state.registers(lane),
             destinations(1),
             highIndex,
-            truncate(value >>> partWidth.value, partWidth)
+            truncate(value >>> partWidth.raw, partWidth)
           )
       }
       true
@@ -1154,7 +1160,7 @@ private object VMSemantics {
           context.state.registers(lane),
           destination,
           destinationIndex,
-          truncate((low & truncate(-1L, partWidth)) | (truncate(high, partWidth) << partWidth.value), combinedWidth)
+          truncate((low & truncate(-1L, partWidth)) | (truncate(high, partWidth) << partWidth.raw), combinedWidth)
         )
       }
       true
@@ -1499,7 +1505,7 @@ private object VMSemantics {
     def writeLocalPointer(index: Int, value: Long): Unit =
       if (index < parameters.size) context.state.writeLocal(lane, parameter(index), BitWidth(32), value)
 
-    name.value match {
+    name.raw match {
       case "cudaGetDevice" =>
         writeLocalPointer(0, 0L)
         returnValue(0L)
@@ -1540,7 +1546,7 @@ private object VMSemantics {
             allocation match {
               case Left(fault)    => Some(Left(fault))
               case Right(address) =>
-                returnValue(address.value)
+                returnValue(address.raw)
                 Some(Right(()))
             }
           case _ => Some(Left(ExecutionFault.InvalidState("device malloc requires dynamic address memory")))
@@ -1611,10 +1617,10 @@ private object VMSemantics {
           while (index < function.parameters.size && argumentFailure.isEmpty) {
             val width  = function.parameterWidths(index)
             val offset = function.parameterOffsets(index)
-            context.state.readParameterBufferBytes(buffer + offset.toLong, width) match {
+            context.state.readParameterBufferBytes(buffer + offset.raw.toLong, width.raw) match {
               case Some(bytes) =>
                 childArguments(function.parameters(index)) =
-                  Argument(Vec.unsafeFromArray(bytes).refineUnsafe[MinLength[1]])
+                  Argument(NonEmptyVec.unsafeFromVec(Vec.unsafeFromArray(bytes)))
               case None => argumentFailure = Some(ExecutionFault.InvalidState(
                   s"cudaLaunchDevice parameter buffer 0x${java.lang.Long.toUnsignedString(buffer, 16)} is out of range"
                 ))
@@ -1634,7 +1640,7 @@ private object VMSemantics {
                 case Right(value) =>
                   VMInterpreter.execute(
                     Kernel(
-                      net.kurobako.gemstone.isa.KernelName(function.name.value),
+                      net.kurobako.gemstone.isa.KernelName(function.name.toNonEmptyString),
                       function.parameters.zip(function.parameterWidths).map { case (name, width) =>
                         KernelParameter(name, width)
                       },
@@ -1669,7 +1675,7 @@ private object VMSemantics {
     case Value.Symbol(name)         =>
       context.state.parameterAddresses.get(name)
         .orElse(context.kernel.sharedSymbols.get(name))
-        .orElse(context.kernel.globalSymbols.get(name).map(_.value))
+        .orElse(context.kernel.globalSymbols.get(name).map(_.raw))
         .getOrElse(0L)
     case Value.Immediate(immediate)  => immediate
     case Value.Address(base, offset) => readFast(context, lane, base) + offset
@@ -1681,24 +1687,24 @@ private object VMSemantics {
     case Value.LaneMaskLess          => (1L << (lane & 31)) - 1L
     case Value.LaneMaskEqual         => 1L << (lane & 31)
     case Value.ThreadId(axis)        =>
-      val sizeX = context.geometry.groupSize.x
+      val sizeX = context.geometry.groupSize.x.raw
       val index = axis match {
         case Axis.X => lane           % sizeX
-        case Axis.Y => (lane / sizeX) % context.geometry.groupSize.y
-        case Axis.Z => lane / sizeX / context.geometry.groupSize.y
+        case Axis.Y => (lane / sizeX) % context.geometry.groupSize.y.raw
+        case Axis.Z => lane / sizeX / context.geometry.groupSize.y.raw
       }
       index.toLong
-    case Value.BlockId(axis)  => axis.select(context.group).toLong
-    case Value.BlockDim(axis) => axis.select(context.geometry.groupSize).toLong
-    case Value.GridDim(axis)  => axis.select(context.geometry.groupCount).toLong
+    case Value.BlockId(axis)  => axis.select(context.group).raw.toLong
+    case Value.BlockDim(axis) => axis.select(context.geometry.groupSize).raw.toLong
+    case Value.GridDim(axis)  => axis.select(context.geometry.groupCount).raw.toLong
     case Value.Function(name) => throw IllegalStateException(s"function symbol $name is not numeric")
   }
 
   private def dimensions(x: Int, y: Int, z: Int): Either[String, Dimensions] =
     (
-      x.refineEither[Positive],
-      y.refineEither[Positive],
-      z.refineEither[Positive]
+      PositiveInt.either(x),
+      PositiveInt.either(y),
+      PositiveInt.either(z)
     ).mapN((x, y, z) => Dimensions(x, y, z))
 
   // Preserve the first lane fault without evaluating later lanes after failure.
@@ -1732,7 +1738,7 @@ private object VMSemantics {
       case IntegerUnaryOperation.BitwiseNot       => ~value
       case IntegerUnaryOperation.PopulationCount  => bitCount(value, width).toLong
       case IntegerUnaryOperation.LeadingZeroCount =>
-        if (width.value == 32) Integer.numberOfLeadingZeros(Bits.signed32(value)).toLong
+        if (width.raw == 32) Integer.numberOfLeadingZeros(Bits.signed32(value)).toLong
         else java.lang.Long.numberOfLeadingZeros(value).toLong
       case IntegerUnaryOperation.BitReverse => reverseBits(value, width)
     }
@@ -1745,8 +1751,8 @@ private object VMSemantics {
   private def funnelShiftResult(low: Long, high: Long, amount: Long, left: Boolean, clamp: Boolean): Long = {
     val shift = if (clamp) Math.min(amount & 0xffffffffL, 32L).toInt else (amount & 31L).toInt
     val pair  = (low & 0xffffffffL) | ((high & 0xffffffffL) << 32)
-    if (left) low32((pair << shift) >>> 32)
-    else low32(pair >>> shift)
+    if (left) low32((pair << shift) >>> 32).raw
+    else low32(pair >>> shift).raw
   }
 
   private def integerBinaryResult(
@@ -1765,27 +1771,27 @@ private object VMSemantics {
       case IntegerOperation.MultiplyHigh(signed)   => multiplyHigh(left, right, width, signed)
       case IntegerOperation.Divide(signed)         => divideInteger(left, right, width, signed)
       case IntegerOperation.Remainder(signed)      => remainderInteger(left, right, width, signed)
-      case IntegerOperation.MultiplyWideUnsigned16 => Bits.low16(left) * Bits.low16(right)
+      case IntegerOperation.MultiplyWideUnsigned16 => Bits.low16(left).raw * Bits.low16(right).raw
       case IntegerOperation.MultiplyWideSigned16   =>
         signExtend(left, BitWidth(16)) * signExtend(right, BitWidth(16))
-      case IntegerOperation.MultiplyWideUnsigned32 => low32(left) * low32(right)
+      case IntegerOperation.MultiplyWideUnsigned32 => low32(left).raw * low32(right).raw
       case IntegerOperation.MultiplyWideSigned32   => left.toInt.toLong * right.toInt.toLong
       case IntegerOperation.Minimum(signed)        =>
         if (signed) Math.min(signExtend(left, width), signExtend(right, width))
-        else if (width.value == 64) {
+        else if (width.raw == 64) {
           if (java.lang.Long.compareUnsigned(left, right) <= 0) left else right
         } else Math.min(truncate(left, width), truncate(right, width))
       case IntegerOperation.Maximum(signed) =>
         if (signed) Math.max(signExtend(left, width), signExtend(right, width))
-        else if (width.value == 64) {
+        else if (width.raw == 64) {
           if (java.lang.Long.compareUnsigned(left, right) >= 0) left else right
         } else Math.max(truncate(left, width), truncate(right, width))
-      case IntegerOperation.ShiftLeft         => left << (right & (width.value - 1).toLong).toInt
+      case IntegerOperation.ShiftLeft         => left << (right & (width.raw - 1).toLong).toInt
       case IntegerOperation.ShiftRightLogical =>
-        if (width.value == 32) Bits.low32(left) >>> (right & 31L).toInt
+        if (width.raw == 32) Bits.low32(left).raw >>> (right & 31L).toInt
         else left >>> (right & 63L).toInt
       case IntegerOperation.ShiftRightArithmetic =>
-        if (width.value == 32) (left.toInt >> (right & 31L).toInt).toLong
+        if (width.raw == 32) (left.toInt >> (right & 31L).toInt).toLong
         else left >> (right & 63L).toInt
     }
     truncate(result, width)
@@ -1797,7 +1803,7 @@ private object VMSemantics {
       rightBits: Long,
       width: FloatWidth
   ): Long =
-    if (width.value == 16) {
+    if (width.raw == 16) {
       val left   = IEEE754.binary16ToFloat(Binary16.low(leftBits))
       val right  = IEEE754.binary16ToFloat(Binary16.low(rightBits))
       val result = operation match {
@@ -1809,8 +1815,8 @@ private object VMSemantics {
         case FloatOperation.Maximum  => Math.max(left, right)
         case FloatOperation.CopySign => Math.copySign(right, left)
       }
-      IEEE754.floatToBinary16(result).value
-    } else if (width.value == 32) {
+      IEEE754.floatToBinary16(result).raw
+    } else if (width.raw == 32) {
       val left   = IEEE754.binary32ToFloat(Binary32.low(leftBits))
       val right  = IEEE754.binary32ToFloat(Binary32.low(rightBits))
       val result = operation match {
@@ -1822,7 +1828,7 @@ private object VMSemantics {
         case FloatOperation.Maximum  => Math.max(left, right)
         case FloatOperation.CopySign => Math.copySign(right, left)
       }
-      IEEE754.floatToBinary32(result).value
+      IEEE754.floatToBinary32(result).raw
     } else {
       val left   = IEEE754.binary64ToDouble(leftBits)
       val right  = IEEE754.binary64ToDouble(rightBits)
@@ -1839,22 +1845,22 @@ private object VMSemantics {
     }
 
   private def fusedMultiplyAddBits(leftBits: Long, rightBits: Long, addendBits: Long, width: FloatWidth): Long =
-    if (width.value == 16)
+    if (width.raw == 16)
       IEEE754.floatToBinary16(
         Math.fma(
           IEEE754.binary16ToFloat(Binary16.low(leftBits)),
           IEEE754.binary16ToFloat(Binary16.low(rightBits)),
           IEEE754.binary16ToFloat(Binary16.low(addendBits))
         )
-      ).value
-    else if (width.value == 32)
+      ).raw
+    else if (width.raw == 32)
       IEEE754.floatToBinary32(
         Math.fma(
           IEEE754.binary32ToFloat(Binary32.low(leftBits)),
           IEEE754.binary32ToFloat(Binary32.low(rightBits)),
           IEEE754.binary32ToFloat(Binary32.low(addendBits))
         )
-      ).value
+      ).raw
     else
       IEEE754.doubleToBinary64(
         Math.fma(
@@ -1867,7 +1873,7 @@ private object VMSemantics {
   // Sign-bit operations return before the floating conversion path.
   @SuppressWarnings(Array("scalafix:DisableSyntax.return"))
   private def floatUnaryBits(operation: FloatUnaryOperation, bits: Long, width: FloatWidth): Long =
-    if (width.value == 16) {
+    if (width.raw == 16) {
       val halfBits = truncate(bits, BitWidth(16))
       operation match {
         case FloatUnaryOperation.Negate   => halfBits ^ 0x8000L
@@ -1886,9 +1892,9 @@ private object VMSemantics {
             case FloatUnaryOperation.Cosine               => Math.cos(value.toDouble).toFloat
             case FloatUnaryOperation.Tanh                 => Math.tanh(value.toDouble).toFloat
           }
-          IEEE754.floatToBinary16(result).value
+          IEEE754.floatToBinary16(result).raw
       }
-    } else if (width.value == 32) {
+    } else if (width.raw == 32) {
       val value  = IEEE754.binary32ToFloat(Binary32.low(bits))
       val result = operation match {
         case FloatUnaryOperation.Negate               => return bits ^ (1L << 31)
@@ -1902,7 +1908,7 @@ private object VMSemantics {
         case FloatUnaryOperation.Cosine               => Math.cos(value.toDouble).toFloat
         case FloatUnaryOperation.Tanh                 => Math.tanh(value.toDouble).toFloat
       }
-      IEEE754.floatToBinary32(result).value
+      IEEE754.floatToBinary32(result).raw
     } else {
       val value  = IEEE754.binary64ToDouble(bits)
       val result = operation match {
@@ -1926,7 +1932,7 @@ private object VMSemantics {
     else IEEE754.binary16ToFloat(Binary16.low(bits))
 
   private def packedFloatBits(value: Float, bf16: Boolean): Long =
-    if (bf16) bfloat16FromFloat(value, Some(ConversionRounding.RN)) else IEEE754.floatToBinary16(value).value
+    if (bf16) bfloat16FromFloat(value, Some(ConversionRounding.RN)) else IEEE754.floatToBinary16(value).raw
 
   private def packedFmaBits(left: Long, right: Long, addend: Long, bf16: Boolean): Long = {
     val low = packedFloatBits(
@@ -1984,14 +1990,14 @@ private object VMSemantics {
   private def bitFind(value: Long, width: BitWidth, signed: Boolean, shiftAmount: Boolean): Long = {
     val bits   = truncate(value, width)
     val search =
-      if (signed && ((bits >>> (width.value - 1)) & 1L) != 0L) truncate(~bits, width)
+      if (signed && ((bits >>> (width.raw - 1)) & 1L) != 0L) truncate(~bits, width)
       else bits
     val position =
       if (search == 0L) -1
-      else if (width.value == 32) 31 - Integer.numberOfLeadingZeros(search.toInt)
+      else if (width.raw == 32) 31 - Integer.numberOfLeadingZeros(search.toInt)
       else 63 - java.lang.Long.numberOfLeadingZeros(search)
     if (position < 0) 0xffffffffL
-    else if (shiftAmount) (width.value - 1 - position).toLong
+    else if (shiftAmount) (width.raw - 1 - position).toLong
     else position.toLong
   }
 
@@ -2025,12 +2031,12 @@ private object VMSemantics {
     val sourceBits = truncate(source, width)
     val bitStart   = (start & 0xffL).toInt
     val bitCount   = (count & 0xffL).toInt
-    if (bitStart >= width.value || bitCount == 0) 0L
+    if (bitStart >= width.raw || bitCount == 0) 0L
     else {
-      val extractedWidth    = Math.min(bitCount, width.value - bitStart)
+      val extractedWidth    = Math.min(bitCount, width.raw - bitStart)
       val mask              = if (extractedWidth == 64) -1L else (1L << extractedWidth) - 1L
       val extracted         = (sourceBits >>> bitStart) & mask
-      val extractedBitWidth = BinaryBitWidth.assume(extractedWidth)
+      val extractedBitWidth = BinaryBitWidth.unsafe(extractedWidth)
       truncate(if (signed) Bits.signExtend(extracted, extractedBitWidth) else extracted, width)
     }
   }
@@ -2056,7 +2062,7 @@ private object VMSemantics {
       if (signed) BigInt(signExtend(left, width)) else BigInt(java.lang.Long.toUnsignedString(truncate(left, width)))
     val rightValue =
       if (signed) BigInt(signExtend(right, width)) else BigInt(java.lang.Long.toUnsignedString(truncate(right, width)))
-    ((leftValue * rightValue) >> width.value).longValue
+    ((leftValue * rightValue) >> width.raw).longValue
   }
 
   private def unsignedMultiplyHigh(left: Long, right: Long): Long = {
@@ -2081,8 +2087,8 @@ private object VMSemantics {
     val firstOverflow = java.lang.Long.compareUnsigned(first, left) < 0
     val result        = if (carryIn) first + 1L else first
     val nextOverflow  = carryIn && java.lang.Long.compareUnsigned(result, first) < 0
-    if (width.value == 64) result -> (firstOverflow || nextOverflow)
-    else truncate(result, width)  -> ((result >>> width.value) != 0L)
+    if (width.raw == 64) result  -> (firstOverflow || nextOverflow)
+    else truncate(result, width) -> ((result >>> width.raw) != 0L)
   }
 
   private[v9_3] def integerMultiplyAdd(
@@ -2105,8 +2111,8 @@ private object VMSemantics {
       val secondCarry  = useCarry && java.lang.Long.compareUnsigned(result, first) < 0
       val overflowHigh = productHigh + (if (firstCarry || secondCarry) 1L else 0L)
       val overflow     =
-        if (resultWidth.value == 64) overflowHigh != 0L
-        else overflowHigh != 0L || (result >>> resultWidth.value) != 0L
+        if (resultWidth.raw == 64) overflowHigh != 0L
+        else overflowHigh != 0L || (result >>> resultWidth.raw) != 0L
       truncate(result, resultWidth) -> overflow
     case IntegerMultiplyAddOperation.High(operandWidth, resultWidth, usesCarry, _) =>
       val leftValue   = truncate(left, operandWidth)
@@ -2114,9 +2120,9 @@ private object VMSemantics {
       val productLow  = leftValue * rightValue
       val productHigh = unsignedMultiplyHigh(leftValue, rightValue)
       val high        =
-        if (operandWidth.value == 64) productHigh
+        if (operandWidth.raw == 64) productHigh
         else truncate(
-          (productLow >>> operandWidth.value) | (productHigh << (64 - operandWidth.value)),
+          (productLow >>> operandWidth.raw) | (productHigh << (64 - operandWidth.raw)),
           operandWidth
         )
       val addendValue = truncate(addend, resultWidth)
@@ -2134,7 +2140,7 @@ private object VMSemantics {
       BigInt(java.lang.Long.toUnsignedString(truncate(left, width))) +
         BigInt(java.lang.Long.toUnsignedString(truncate(right, width))) +
         (if (usesCarry && carryIn) 1 else 0)
-    (truncate(sum.longValue, width), (sum >> width.value) != 0)
+    (truncate(sum.longValue, width), (sum >> width.raw) != 0)
   }
 
   private def integerSubWithBorrow(
@@ -2155,11 +2161,11 @@ private object VMSemantics {
   private def insertBits(insert: Long, base: Long, start: Long, count: Long, width: BitWidth): Long = {
     val bitStart = (start & 0xffL).toInt
     val bitCount = (count & 0xffL).toInt
-    if (bitCount == 0 || bitStart >= width.value) truncate(base, width)
+    if (bitCount == 0 || bitStart >= width.raw) truncate(base, width)
     else {
-      val insertedWidth    = Math.min(bitCount, width.value - bitStart)
+      val insertedWidth    = Math.min(bitCount, width.raw - bitStart)
       val fieldMask        = if (insertedWidth == 64) -1L else ((1L << insertedWidth) - 1L) << bitStart
-      val insertedBitWidth = BinaryBitWidth.assume(insertedWidth)
+      val insertedBitWidth = BinaryBitWidth.unsafe(insertedWidth)
       truncate((base & ~fieldMask) | ((insert & Bits.truncate(-1L, insertedBitWidth)) << bitStart), width)
     }
   }
@@ -2198,7 +2204,7 @@ private object VMSemantics {
       val divisor  = signExtend(rightBits, width)
       if (dividend == Long.MinValue && divisor == -1L) Long.MinValue
       else dividend / divisor
-    } else if (width.value == 64) java.lang.Long.divideUnsigned(leftBits, rightBits)
+    } else if (width.raw == 64) java.lang.Long.divideUnsigned(leftBits, rightBits)
     else leftBits / rightBits
   }
 
@@ -2211,7 +2217,7 @@ private object VMSemantics {
       val divisor  = signExtend(rightBits, width)
       if (dividend == Long.MinValue && divisor == -1L) 0L
       else dividend % divisor
-    } else if (width.value == 64) java.lang.Long.remainderUnsigned(leftBits, rightBits)
+    } else if (width.raw == 64) java.lang.Long.remainderUnsigned(leftBits, rightBits)
     else leftBits % rightBits
   }
 
@@ -2228,16 +2234,16 @@ private object VMSemantics {
       if (kind == 'f' || kind == 'b') {
         val leftFloat =
           if (kind == 'b') IEEE754.binary32ToFloat(Binary32.low(leftValue << 16)).toDouble
-          else IEEE754.toDouble(leftValue, FloatingPointWidth.applyUnsafe(width.value))
+          else IEEE754.toDouble(leftValue, width.asFloatingPointWidth)
         val rightFloat =
           if (kind == 'b') IEEE754.binary32ToFloat(Binary32.low(rightValue << 16)).toDouble
-          else IEEE754.toDouble(rightValue, FloatingPointWidth.applyUnsafe(width.value))
+          else IEEE754.toDouble(rightValue, width.asFloatingPointWidth)
         val order = if (leftFloat < rightFloat) -1 else if (leftFloat > rightFloat) 1 else 0
         order -> (leftFloat.isNaN || rightFloat.isNaN)
       } else {
         val integerOrder =
           if (kind == 's') java.lang.Long.compare(signExtend(leftValue, width), signExtend(rightValue, width))
-          else if (width.value == 64) java.lang.Long.compareUnsigned(leftValue, rightValue)
+          else if (width.raw == 64) java.lang.Long.compareUnsigned(leftValue, rightValue)
           else java.lang.Long.compare(leftValue, rightValue)
         integerOrder -> false
       }
@@ -2286,7 +2292,7 @@ private object VMSemantics {
     lazy val floatingSource =
       if (sourceIsBf16)
         IEEE754.binary32ToFloat(Binary32.low(truncate(value, BitWidth(16)) << 16)).toDouble
-      else IEEE754.toDouble(value, FloatingPointWidth.applyUnsafe(sourceWidth.value))
+      else IEEE754.toDouble(value, sourceWidth.asFloatingPointWidth)
 
     if (destinationIsBf16) {
       val floating =
@@ -2294,7 +2300,7 @@ private object VMSemantics {
         else {
           val sourceBits = truncate(value, sourceWidth)
           val integer    = if (sourceKind == 's') signExtend(sourceBits, sourceWidth) else sourceBits
-          if (sourceKind == 'u' && sourceWidth.value == 64 && integer < 0)
+          if (sourceKind == 'u' && sourceWidth.raw == 64 && integer < 0)
             BigInt(java.lang.Long.toUnsignedString(integer)).toDouble
           else integer.toDouble
         }
@@ -2314,7 +2320,7 @@ private object VMSemantics {
           case Some(ConversionRounding.RPI) => Some(Math.ceil(floating))
           case _                            => None
         }
-        IEEE754.fromDouble(integral.getOrElse(floating), FloatingPointWidth.applyUnsafe(destinationWidth.value))
+        IEEE754.fromDouble(integral.getOrElse(floating), destinationWidth.asFloatingPointWidth)
       } else {
         val rounded = rounding match {
           case Some(ConversionRounding.RN) | Some(ConversionRounding.RNI) => Math.rint(floating)
@@ -2331,18 +2337,18 @@ private object VMSemantics {
         else sourceBits
       if (destinationKind == 'f') {
         val floating =
-          if (sourceKind == 'u' && sourceWidth.value == 64 && integer < 0)
+          if (sourceKind == 'u' && sourceWidth.raw == 64 && integer < 0)
             BigInt(java.lang.Long.toUnsignedString(integer)).toDouble
           else integer.toDouble
-        IEEE754.fromDouble(floating, FloatingPointWidth.applyUnsafe(destinationWidth.value))
+        IEEE754.fromDouble(floating, destinationWidth.asFloatingPointWidth)
       } else truncate(integer, destinationWidth)
     }
   }
 
   private def bfloat16FromFloat(value: Float, rounding: Option[ConversionRounding]): Long = {
     val bits    = IEEE754.floatToBinary32(value)
-    val upper   = (bits.value >>> 16) & 0xffffL
-    val lower   = bits.value & 0xffffL
+    val upper   = (bits.raw >>> 16) & 0xffffL
+    val lower   = bits.raw & 0xffffL
     val rounded = rounding match {
       case Some(ConversionRounding.RZ) | Some(ConversionRounding.RZI)                                => upper
       case Some(ConversionRounding.RM) | Some(ConversionRounding.RMI) if value < 0.0f && lower != 0L => upper + 1L

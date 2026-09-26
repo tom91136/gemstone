@@ -1,11 +1,10 @@
 package net.kurobako.gemstone.server
 
+import net.kurobako.gemstone.*
+
 import net.kurobako.gemstone.rpc.ExecutionRPC
 import net.kurobako.gemstone.server.transport.ExecutionRPCProtocol
 import net.kurobako.gemstone.server.transport.Transport.*
-
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
 
 import java.io.{BufferedInputStream, ByteArrayInputStream, DataInputStream, InputStream, PushbackInputStream}
 import java.nio.ByteBuffer
@@ -37,7 +36,7 @@ final class RPCInputStreamSuite extends munit.FunSuite {
     test(s"client identity peek preserves fragmented large consecutive frames readFully=$fully socket=$socket") {
       val client = ClientId(0x0102030405060708L)
       val prefix = ByteBuffer.allocate(ExecutionRPCProtocol.RequestIdentityBytesAfterMagic)
-        .putLong(ExecutionRPC.Schema.fingerprint).putLong(client.value).array()
+        .putLong(ExecutionRPC.Schema.fingerprint).putLong(client.raw).array()
       val body    = Array.tabulate[Byte](17003)(index => (index * 17 + 3).toByte)
       val frame   = prefix ++ body
       val data    = frame ++ frame

@@ -7,9 +7,8 @@ import cats.data.State
 import cats.syntax.all.*
 import com.monovore.decline.Command
 import com.monovore.decline.Opts
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
-import net.kurobako.gemstone.NoNul
+import net.kurobako.gemstone.NonEmptyString
+import net.kurobako.gemstone.PositiveInt
 import upickle.default.read
 
 /** Materializes the pinned Clang declarations as checked-in Scala API traits. The generated source is deliberately
@@ -43,7 +42,7 @@ object GenerateAPISurfaces {
       packageName: String,
       traitName: String,
       output: Path,
-      versions: Vector[(String, String :| (MinLength[1] & NoNul))]
+      versions: Vector[(String, NonEmptyString)]
   )
 
   private val command = Command("GenerateAPISurfaces", "Generate Scala API surfaces")((
@@ -65,7 +64,7 @@ object GenerateAPISurfaces {
     )
     val versions =
       Vector(request.cuda, request.hip, request.hsa, request.levelZero, request.openCL, request.vulkan).map { version =>
-        version.refineEither[MinLength[1] & NoNul].fold(
+        NonEmptyString.either(version).fold(
           message => throw IllegalArgumentException(s"invalid header version: $message"),
           value => value
         )
@@ -115,21 +114,21 @@ object GenerateAPISurfaces {
       )
     )
     val byName: Map[String, GenerateOfficialAPIManifest.Surface] =
-      manifest.surfaces.map(surface => (surface.name.value: String) -> surface).toMap
+      manifest.surfaces.map(surface => (surface.name.raw: String) -> surface).toMap
     targets.foreach { target =>
       val surfaces  = target.manifestNames.map(name => byName.getOrElse(name, missing(name)))
       val functions = surfaces.flatMap(_.functions)
-      val typedefs  = surfaces.flatMap(_.callbackTypedefs).groupBy(_.name.value)
+      val typedefs  = surfaces.flatMap(_.callbackTypedefs).groupBy(_.name.raw)
       val conflicts = typedefs.collect {
         case (name, definitions) if definitions.map(_.cType).distinct.size > 1 => name
       }
       if (conflicts.nonEmpty)
         throw IllegalArgumentException(s"conflicting callback typedefs: ${conflicts.toVector.sorted.mkString(", ")}")
       val callbackTypedefs: Map[String, String] = typedefs.view.map { case (name, definitions) =>
-        (name: String) -> (definitions.head.cType.value: String)
+        (name: String) -> (definitions.head.cType.raw: String)
       }.toMap
       val renderedFunctions = functions
-      val functionCount     = renderedFunctions.size.refineEither[Positive].fold(
+      val functionCount     = PositiveInt.either(renderedFunctions.size).fold(
         message => throw IllegalArgumentException(s"${target.traitName} has no declarations: $message"),
         value => value
       )
@@ -160,23 +159,23 @@ object GenerateAPISurfaces {
       target: Target,
       functions: Vector[GenerateOfficialAPIManifest.Function],
       callbackTypedefs: Map[String, String],
-      surfaceSize: Int :| Positive
+      surfaceSize: PositiveInt
   ): String = {
     val rendered = functions.traverse { function =>
       val (_, namedParameters) = function.parameters.zipWithIndex.foldLeft(
         (Set.empty[String], Vector.empty[(String, String)])
       ) { case ((used, result), (parameter, index)) =>
-        val base = identifier(parameter.name.map(_.value).getOrElse(s"arg$index"))
+        val base = identifier(parameter.name.map(_.raw).getOrElse(s"arg$index"))
         val name = Iterator.from(1).map(i => if (i == 1) base else s"${base}_$i").find(name => !used(name))
           .getOrElse(throw IllegalStateException(s"cannot allocate a unique Scala name for $base"))
-        (used + name, result :+ (name -> parameter.cType.value))
+        (used + name, result :+ (name -> parameter.cType.raw))
       }
       for {
         parameters <- namedParameters.traverse { case (name, cType) =>
           mapType(cType.trim, callbackTypedefs).map(scalaType => s"$name: $scalaType")
         }
-        returnType <- mapType(function.returnType.value.trim, callbackTypedefs)
-      } yield s"  def ${identifier(function.name.value)}(${parameters.mkString(", ")}): $returnType = unsupported"
+        returnType <- mapType(function.returnType.raw.trim, callbackTypedefs)
+      } yield s"  def ${identifier(function.name.raw)}(${parameters.mkString(", ")}): $returnType = unsupported"
     }
     val (aliases, declarations) = rendered.run(Aliases.empty).value
     val aliasLines              = aliases.entries.sortBy(_._1).map {
@@ -184,21 +183,20 @@ object GenerateAPISurfaces {
         s"  type ${identifier(name)} = $definition"
     }
     val versionLines = target.versions.map { case (name, value) =>
-      s"  val $name: String :| (MinLength[1] & NoNul) = ${literal(value)}"
+      s"  val $name: NonEmptyString = NonEmptyString(${literal(value.raw)})"
     }
     GeneratedHeader.scala("from pinned official headers by GenerateAPISurfaces") +
       s"""|package ${target.packageName}
         |
-        |import io.github.iltotore.iron.*
-        |import io.github.iltotore.iron.constraint.all.*
-        |import net.kurobako.gemstone.NoNul
+        |import net.kurobako.gemstone.NonEmptyString
+        |import net.kurobako.gemstone.PositiveInt
         |import net.kurobako.gemstone.abi.ABI.*
         |
         |${GeneratedHeader.annotation()}object ${target.traitName} {
         |${aliasLines.mkString("\n")}
         |
         |${versionLines.mkString("\n")}
-        |  val FunctionCount: Int :| Positive = $surfaceSize
+        |  val FunctionCount: PositiveInt = PositiveInt($surfaceSize)
         |}
         |
         |import ${target.traitName}.*

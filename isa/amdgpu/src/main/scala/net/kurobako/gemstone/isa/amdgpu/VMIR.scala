@@ -1,13 +1,80 @@
 package net.kurobako.gemstone.isa.amdgpu
 
-import CodeObject.*
+import scala.compiletime.{constValue, error}
 
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
+import CodeObject.*
 
 import net.kurobako.gemstone.Vec
 import net.kurobako.gemstone.binary.BitWidth
+
 private[amdgpu] object VMIR {
+
+  private[amdgpu] opaque type TransferByteCount = Int
+  private[amdgpu] object TransferByteCount {
+    inline def either(value: Int): Either[String, TransferByteCount] =
+      if (value >= 1 && value <= 16) Right(value) else Left(s"byte count must be between 1 and 16: $value")
+
+    inline def unsafe(value: Int): TransferByteCount =
+      either(value).fold(message => throw IllegalArgumentException(message), identity)
+
+    inline def apply[A <: Int & Singleton](inline value: A): TransferByteCount =
+      inline if constValue[A] >= 1 && constValue[A] <= 16 then value else error("byte count must be between 1 and 16")
+
+    extension (bytes: TransferByteCount) {
+      inline def raw: Int = bytes
+    }
+  }
+
+  private[amdgpu] opaque type NarrowTransferByteCount = Int
+  private[amdgpu] object NarrowTransferByteCount {
+    inline def either(value: Int): Either[String, NarrowTransferByteCount] =
+      if (value >= 1 && value <= 2) Right(value) else Left(s"byte count must be between 1 and 2: $value")
+
+    inline def unsafe(value: Int): NarrowTransferByteCount =
+      either(value).fold(message => throw IllegalArgumentException(message), identity)
+
+    inline def apply[A <: Int & Singleton](inline value: A): NarrowTransferByteCount =
+      inline if constValue[A] >= 1 && constValue[A] <= 2 then value else error("byte count must be between 1 and 2")
+
+    extension (bytes: NarrowTransferByteCount) {
+      inline def raw: Int = bytes
+    }
+  }
+
+  private[amdgpu] opaque type AtomicByteCount = Int
+  private[amdgpu] object AtomicByteCount {
+    inline def either(value: Int): Either[String, AtomicByteCount] =
+      if (value >= 4 && value <= 8) Right(value) else Left(s"atomic byte count must be between 4 and 8: $value")
+
+    inline def unsafe(value: Int): AtomicByteCount =
+      either(value).fold(message => throw IllegalArgumentException(message), identity)
+
+    inline def apply[A <: Int & Singleton](inline value: A): AtomicByteCount =
+      inline if constValue[A] >= 4 && constValue[A] <= 8 then value
+      else error("atomic byte count must be between 4 and 8")
+
+    extension (bytes: AtomicByteCount) {
+      inline def raw: Int = bytes
+    }
+  }
+
+  private[amdgpu] opaque type SubDwordShift = Int
+  private[amdgpu] object SubDwordShift {
+    inline def either(value: Int): Either[String, SubDwordShift] =
+      if (value >= 0 && value <= 24) Right(value) else Left(s"sub-dword shift must be between 0 and 24: $value")
+
+    inline def unsafe(value: Int): SubDwordShift =
+      either(value).fold(message => throw IllegalArgumentException(message), identity)
+
+    inline def apply[A <: Int & Singleton](inline value: A): SubDwordShift =
+      inline if constValue[A] >= 0 && constValue[A] <= 24 then value
+      else error("sub-dword shift must be between 0 and 24")
+
+    extension (shift: SubDwordShift) {
+      inline def raw: Int = shift
+    }
+  }
+
   private[amdgpu] enum ScalarBranchCondition {
     case Always, SccZero, SccNonZero, VccZero, VccNonZero, ExecZero, ExecNonZero
   }
@@ -28,16 +95,16 @@ private[amdgpu] object VMIR {
 
   private[amdgpu] enum SubDwordSelection(
       val width: BitWidth,
-      val shift: Int :| Interval.Closed[0, 24],
+      val shift: SubDwordShift,
       val upperBit: BitWidth
   ) {
-    case Byte0 extends SubDwordSelection(BitWidth(8), 0, BitWidth(8))
-    case Byte1 extends SubDwordSelection(BitWidth(8), 8, BitWidth(16))
-    case Byte2 extends SubDwordSelection(BitWidth(8), 16, BitWidth(24))
-    case Byte3 extends SubDwordSelection(BitWidth(8), 24, BitWidth(32))
-    case Word0 extends SubDwordSelection(BitWidth(16), 0, BitWidth(16))
-    case Word1 extends SubDwordSelection(BitWidth(16), 16, BitWidth(32))
-    case DWord extends SubDwordSelection(BitWidth(32), 0, BitWidth(32))
+    case Byte0 extends SubDwordSelection(BitWidth(8), SubDwordShift(0), BitWidth(8))
+    case Byte1 extends SubDwordSelection(BitWidth(8), SubDwordShift(8), BitWidth(16))
+    case Byte2 extends SubDwordSelection(BitWidth(8), SubDwordShift(16), BitWidth(24))
+    case Byte3 extends SubDwordSelection(BitWidth(8), SubDwordShift(24), BitWidth(32))
+    case Word0 extends SubDwordSelection(BitWidth(16), SubDwordShift(0), BitWidth(16))
+    case Word1 extends SubDwordSelection(BitWidth(16), SubDwordShift(16), BitWidth(32))
+    case DWord extends SubDwordSelection(BitWidth(32), SubDwordShift(0), BitWidth(32))
   }
 
   private[amdgpu] enum SubDwordDestinationUnused {
@@ -501,7 +568,7 @@ private[amdgpu] object VMIR {
         dest: Int,
         address: Int,
         scalarAddress: Option[Int],
-        bytes: Int :| Interval.Closed[1, 16],
+        bytes: TransferByteCount,
         offset: Int,
         coherent: Boolean
     )
@@ -509,7 +576,7 @@ private[amdgpu] object VMIR {
         dest: Int,
         address: Int,
         scalarAddress: Option[Int],
-        bytes: Int :| Interval.Closed[1, 2],
+        bytes: NarrowTransferByteCount,
         offset: Int
     )
     case GlobalLoadD16(dest: Int, address: Int, scalarAddress: Option[Int], offset: Int, high: Boolean)
@@ -517,14 +584,14 @@ private[amdgpu] object VMIR {
         address: Int,
         scalarAddress: Option[Int],
         src: Int,
-        bytes: Int :| Interval.Closed[1, 16],
+        bytes: TransferByteCount,
         offset: Int
     )
     case GlobalStoreD16High(
         address: Int,
         scalarAddress: Option[Int],
         src: Int,
-        bytes: Int :| Interval.Closed[1, 2],
+        bytes: NarrowTransferByteCount,
         offset: Int
     )
     case GlobalAtomicAdd(
@@ -532,7 +599,7 @@ private[amdgpu] object VMIR {
         address: Int,
         scalarAddress: Option[Int],
         src: Int,
-        bytes: Int :| Interval.Closed[4, 8],
+        bytes: AtomicByteCount,
         offset: Int,
         returnValue: Boolean
     )
@@ -541,7 +608,7 @@ private[amdgpu] object VMIR {
         address: Int,
         scalarAddress: Option[Int],
         src: Int,
-        bytes: Int :| Interval.Closed[4, 8],
+        bytes: AtomicByteCount,
         offset: Int,
         returnValue: Boolean
     )
@@ -551,7 +618,7 @@ private[amdgpu] object VMIR {
         address: Int,
         scalarAddress: Option[Int],
         src: Int,
-        bytes: Int :| Interval.Closed[4, 8],
+        bytes: AtomicByteCount,
         offset: Int,
         returnValue: Boolean
     )
@@ -560,7 +627,7 @@ private[amdgpu] object VMIR {
         address: Int,
         scalarAddress: Option[Int],
         src: Int,
-        bytes: Int :| Interval.Closed[4, 8],
+        bytes: AtomicByteCount,
         offset: Int,
         returnValue: Boolean
     )
@@ -570,21 +637,21 @@ private[amdgpu] object VMIR {
         scalarAddress: Option[Int],
         compareSrc: Int,
         swapSrc: Int,
-        bytes: Int :| Interval.Closed[4, 8],
+        bytes: AtomicByteCount,
         offset: Int,
         returnValue: Boolean
     )
-    case FlatLoad(dest: Int, address: Int, bytes: Int :| Interval.Closed[1, 16], offset: Int, coherent: Boolean)
-    case FlatLoadSigned(dest: Int, address: Int, bytes: Int :| Interval.Closed[1, 2], offset: Int)
-    case FlatStore(address: Int, src: Int, bytes: Int :| Interval.Closed[1, 16], offset: Int)
-    case FlatStoreD16High(address: Int, src: Int, bytes: Int :| Interval.Closed[1, 2], offset: Int)
+    case FlatLoad(dest: Int, address: Int, bytes: TransferByteCount, offset: Int, coherent: Boolean = false)
+    case FlatLoadSigned(dest: Int, address: Int, bytes: NarrowTransferByteCount, offset: Int)
+    case FlatStore(address: Int, src: Int, bytes: TransferByteCount, offset: Int)
+    case FlatStoreD16High(address: Int, src: Int, bytes: NarrowTransferByteCount, offset: Int)
     case BufferCacheInvalidate
     case BufferLoad(
         dest: Int,
         address: Option[Int],
         resource: Int,
         scalarOffset: Option[Int],
-        bytes: Int :| Interval.Closed[1, 16],
+        bytes: TransferByteCount,
         offset: Int
     )
     case BufferLoadD16(
@@ -592,7 +659,7 @@ private[amdgpu] object VMIR {
         address: Option[Int],
         resource: Int,
         scalarOffset: Option[Int],
-        bytes: Int :| Interval.Closed[1, 2],
+        bytes: NarrowTransferByteCount,
         offset: Int,
         high: Boolean
     )
@@ -601,7 +668,7 @@ private[amdgpu] object VMIR {
         resource: Int,
         scalarOffset: Option[Int],
         src: Int,
-        bytes: Int :| Interval.Closed[1, 16],
+        bytes: TransferByteCount,
         offset: Int
     )
     case BufferStoreD16High(
@@ -609,13 +676,13 @@ private[amdgpu] object VMIR {
         resource: Int,
         scalarOffset: Option[Int],
         src: Int,
-        bytes: Int :| Interval.Closed[1, 2],
+        bytes: NarrowTransferByteCount,
         offset: Int
     )
-    case DSRead(dest: Int, address: Int, bytes: Int :| Interval.Closed[1, 16], offsetA: Int, offsetB: Option[Int])
-    case DSSignedRead(dest: Int, address: Int, bytes: Int :| Interval.Closed[1, 2], offsetA: Int, offsetB: Option[Int])
-    case DSReadD16(dest: Int, address: Int, bytes: Int :| Interval.Closed[1, 2], offset: Int, high: Boolean)
-    case DSSignedReadD16(dest: Int, address: Int, bytes: Int :| Interval.Closed[1, 2], offset: Int, high: Boolean)
+    case DSRead(dest: Int, address: Int, bytes: TransferByteCount, offsetA: Int, offsetB: Option[Int])
+    case DSSignedRead(dest: Int, address: Int, bytes: NarrowTransferByteCount, offsetA: Int, offsetB: Option[Int])
+    case DSReadD16(dest: Int, address: Int, bytes: NarrowTransferByteCount, offset: Int, high: Boolean)
+    case DSSignedReadD16(dest: Int, address: Int, bytes: NarrowTransferByteCount, offset: Int, high: Boolean)
     case DSPermute(dest: Int, address: Int, src: Int, offset: Int)
     case DSBPermute(dest: Int, address: Int, src: Int, offset: Int)
     case DSSwizzle(dest: Int, src: Int, control: Int)
@@ -624,7 +691,7 @@ private[amdgpu] object VMIR {
         dest: Int,
         address: Int,
         src: Int,
-        bytes: Int :| Interval.Closed[4, 8],
+        bytes: AtomicByteCount,
         offset: Int,
         returnValue: Boolean
     )
@@ -632,7 +699,7 @@ private[amdgpu] object VMIR {
         address: Int,
         srcA: Int,
         srcB: Option[Int],
-        bytes: Int :| Interval.Closed[1, 16],
+        bytes: TransferByteCount,
         offsetA: Int,
         offsetB: Option[Int]
     )

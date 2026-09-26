@@ -1,11 +1,10 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
+import net.kurobako.gemstone.{NonEmptyString, NonEmptyVec, NonNegativeInt, NonNegativeLong, PositiveInt, PositiveLong}
+
 import Program.*
 
 import ISA.*
-
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
 
 import net.kurobako.gemstone.Vec
 
@@ -55,7 +54,7 @@ final class SyntaxSuite extends munit.FunSuite {
     }
 
   test("version and instruction specifications are generated at package level") {
-    assertEquals(Instruction.version, Version(9, 3))
+    assertEquals(Instruction.version, Version(PositiveInt(9), NonNegativeInt(3)))
     assert(Instruction.definitions.size >= 170)
   }
 
@@ -65,8 +64,8 @@ final class SyntaxSuite extends munit.FunSuite {
             instruction @ Instruction.LdGlobalNc(destination, address, None, modifiers, Some(predicate))
           ) =>
         assertEquals(predicate.negated, false)
-        assertEquals(instruction.opcode.value, "ld.global.nc")
-        assertEquals(modifiers.map(_.name.value).toSeq, Seq("L1::evict_last", "v2", "f64"))
+        assertEquals(instruction.opcode.raw, "ld.global.nc")
+        assertEquals(modifiers.map(_.name.raw).toSeq, Seq("L1::evict_last", "v2", "f64"))
         assert(Operand.isVectorLiteral(destination))
         assert(Operand.isAddress(address))
       case other => fail(s"unexpected statement: $other")
@@ -79,7 +78,7 @@ final class SyntaxSuite extends munit.FunSuite {
     )
     parsed match {
       case Statement.Instruction(instruction) =>
-        assert(instruction.mods.exists(_.name.value == "collector::b2::use"))
+        assert(instruction.mods.exists(_.name.raw == "collector::b2::use"))
         assert(Printer.render(Program(Vec(parsed))).contains("collector::b2::use"))
       case other => fail(s"unexpected statement: $other")
     }
@@ -115,8 +114,8 @@ final class SyntaxSuite extends munit.FunSuite {
     }
     assertEquals(statements.statements.size, 4)
     statements.statements.last match {
-      case Statement.Entry(true, name, parameters, body) if name.value == "kernel" =>
-        assertEquals(parameters.map(_.name.value).toSeq, Seq("pointer"))
+      case Statement.Entry(true, name, parameters, body) if name.raw == "kernel" =>
+        assertEquals(parameters.map(_.name.raw).toSeq, Seq("pointer"))
         assert(body.contains(Statement.Label(LabelName("again"))))
         assertEquals(body.collect { case _: Statement.Instruction => 1 }.sum, 2)
       case other => fail(s"unexpected statement: $other")
@@ -150,9 +149,9 @@ final class SyntaxSuite extends munit.FunSuite {
 
   test("data declarations retain structured storage, type, extent, and initializer") {
     statement(".global .align 4 .b8 table[4] = {65, 144, 67, 60};") match {
-      case Statement.Data(DataAddressSpace.Global, qualifiers, DataType.B8, name, Some(4), initializer)
-          if name == SymbolName("table") =>
-        assertEquals(qualifiers.toSeq, Seq(DeclarationQualifier.Alignment(4)))
+      case Statement.Data(DataAddressSpace.Global, qualifiers, DataType.B8, name, Some(count), initializer)
+          if name == SymbolName("table") && count.raw == 4 =>
+        assertEquals(qualifiers.toSeq, Seq(DeclarationQualifier.Alignment(PositiveInt(4))))
         assertEquals(initializer.size, 4)
       case other => fail(s"unexpected declaration: $other")
     }
@@ -166,7 +165,7 @@ final class SyntaxSuite extends munit.FunSuite {
           qualifiers.toSeq,
           Seq(
             DeclarationQualifier.Attribute(QualifierName("extern")),
-            DeclarationQualifier.Alignment(16)
+            DeclarationQualifier.Alignment(PositiveInt(16))
           )
         )
         assertEquals(initializer, Vec.empty[Operand])
@@ -190,7 +189,7 @@ final class SyntaxSuite extends munit.FunSuite {
 
   test("syntax errors report a source location") {
     val error = Parser.parse("add.u32 %r0, [;").left.toOption.get
-    assertEquals(error.line, 1)
-    assert(error.column > 0)
+    assertEquals(error.line.raw, 1)
+    assert(error.column.raw > 0)
   }
 }

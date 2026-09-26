@@ -1,11 +1,9 @@
 package net.kurobako.gemstone.isa.spirv.v1_6
 
-import net.kurobako.gemstone.NoNul
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
+import net.kurobako.gemstone.NonEmptyString
 
 final case class OperandShape(
     kind: SPIRVOperandKind,
-    name: String :| (MinLength[1] & NoNul),
+    name: NonEmptyString,
     quantifier: OperandQuantifier
 )

@@ -1,7 +1,6 @@
 package net.kurobako.gemstone.benchmarks
 
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
+import net.kurobako.gemstone.NonNegativeLong
 
 import java.lang.management.ManagementFactory
 import java.nio.file.Path
@@ -17,8 +16,10 @@ object PlatformMetrics {
     case _ => None
   }
 
-  def allocatedBytes: Option[Long :| Positive0] =
-    allocationBean.flatMap(_.getThreadAllocatedBytes(Thread.currentThread().threadId()).refineOption[Positive0])
+  def allocatedBytes: Option[NonNegativeLong] =
+    allocationBean.flatMap(bean =>
+      NonNegativeLong.either(bean.getThreadAllocatedBytes(Thread.currentThread().threadId())).toOption
+    )
 
   def startRecording(destination: Option[Path]): AutoCloseable = destination match {
     case None       => () => ()

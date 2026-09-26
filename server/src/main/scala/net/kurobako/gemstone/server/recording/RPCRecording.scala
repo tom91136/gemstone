@@ -7,11 +7,11 @@ final class RPCRecording(writer: RPCJournal.Writer, source: InputStream, destina
     extends AutoCloseable {
   private final class Frame extends ByteArrayOutputStream {
     override def write(value: Int): Unit = {
-      if (count >= writer.header.limits.maxFrameBytes) throw IOException("recording frame limit exceeded")
+      if (count >= writer.header.limits.maxFrameBytes.raw) throw IOException("recording frame limit exceeded")
       super.write(value)
     }
     override def write(bytes: Array[Byte], offset: Int, size: Int): Unit = {
-      if (size > writer.header.limits.maxFrameBytes - count) throw IOException("recording frame limit exceeded")
+      if (size > writer.header.limits.maxFrameBytes.raw - count) throw IOException("recording frame limit exceeded")
       super.write(bytes, offset, size)
     }
     def take(): Array[Byte] = { val result = toByteArray; reset(); result }

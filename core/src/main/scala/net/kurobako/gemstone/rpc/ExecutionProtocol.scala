@@ -1,12 +1,9 @@
 package net.kurobako.gemstone.rpc
 
-import net.kurobako.gemstone.Vec
+import net.kurobako.gemstone.{NonNegativeInt, NonNegativeLong, PositiveInt, PositiveLong, Vec}
 import net.kurobako.gemstone.isa.SymbolValidation
 import net.kurobako.gemstone.memory.GuestAddress
 import net.kurobako.gemstone.rpc.Wire.Codec
-
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
 
 /** Process-neutral values carried by [[ExecutionRPC]]. */
 object ExecutionProtocol {
@@ -14,31 +11,31 @@ object ExecutionProtocol {
   export net.kurobako.gemstone.rpc.{AllocationId, CompletionId, ProgramId}
 
   final case class Dimensions(
-      x: Int :| Positive,
-      y: Int :| Positive,
-      z: Int :| Positive
+      x: PositiveInt,
+      y: PositiveInt,
+      z: PositiveInt
   ) derives Codec {
     def toGlobalDimensions: GlobalDimensions =
       GlobalDimensions(
-        x.toLong.refineUnsafe[Positive],
-        y.toLong.refineUnsafe[Positive],
-        z.toLong.refineUnsafe[Positive]
+        x.toLong,
+        y.toLong,
+        z.toLong
       )
   }
 
   object Dimensions {
-    val One: Dimensions = Dimensions(1, 1, 1)
+    val One: Dimensions = Dimensions(PositiveInt.One, PositiveInt.One, PositiveInt.One)
   }
 
-  final case class Coordinates(x: Int :| Positive0, y: Int :| Positive0, z: Int :| Positive0) derives Codec
+  final case class Coordinates(x: NonNegativeInt, y: NonNegativeInt, z: NonNegativeInt) derives Codec
 
   final case class GlobalDimensions(
-      x: Long :| Positive,
-      y: Long :| Positive,
-      z: Long :| Positive
+      x: PositiveLong,
+      y: PositiveLong,
+      z: PositiveLong
   ) derives Codec
 
-  final case class HostMemoryRange(address: GuestAddress, size: Int :| Positive) derives Codec
+  final case class HostMemoryRange(address: GuestAddress, size: PositiveInt) derives Codec
   final case class HostMemoryBytes(address: GuestAddress, bytes: Vec[Byte], atomicWidth: Int = 0) derives Codec
   final case class HostMemoryAtomic(address: GuestAddress, size: Int, expected: Long, desired: Long) derives Codec
   final case class HostMemorySync(ticket: Long, atomic: Option[HostMemoryAtomic]) derives Codec
@@ -51,20 +48,20 @@ object ExecutionProtocol {
 
   enum KernelArgument derives Codec {
     case Scalar(bytes: Vec[Byte])
-    case Allocation(id: AllocationId, offset: Long :| Positive0)
-    case Local(size: Long :| Positive)
+    case Allocation(id: AllocationId, offset: NonNegativeLong)
+    case Local(size: PositiveLong)
   }
 
   enum RelocationSource derives Codec {
     case Allocation(id: AllocationId)
-    case Argument(index: Int :| Positive0)
+    case Argument(index: NonNegativeInt)
   }
 
   final case class PointerRelocation(
       source: RelocationSource,
-      sourceOffset: Long :| Positive0,
+      sourceOffset: NonNegativeLong,
       target: AllocationId,
-      targetOffset: Long :| Positive0
+      targetOffset: NonNegativeLong
   ) derives Codec
 
   enum ExecutionFailure derives Codec {
@@ -96,8 +93,8 @@ object ExecutionProtocol {
 
   final case class DirtyRange(
       allocation: AllocationId,
-      offset: Long :| Positive0,
-      size: Int :| Positive
+      offset: NonNegativeLong,
+      size: PositiveInt
   ) derives Codec
 
   enum KernelParameterKind derives Codec {
@@ -107,31 +104,31 @@ object ExecutionProtocol {
   }
 
   final case class KernelParameterMetadata(
-      width: Int :| Positive,
-      offset: Int :| Positive0,
+      width: PositiveInt,
+      offset: NonNegativeInt,
       kind: KernelParameterKind,
       containsPointers: Boolean
   ) derives Codec
 
   final case class KernelMetadata private (
-      argumentBlockSize: Int :| Positive0,
-      explicitParameterCount: Int :| Positive0,
+      argumentBlockSize: NonNegativeInt,
+      explicitParameterCount: NonNegativeInt,
       parameters: Vec[KernelParameterMetadata],
       requiredWorkGroupSize: Option[Dimensions],
       workGroupSizeHint: Option[Dimensions],
-      bindingIndices: Vec[Int :| Positive0],
-      entryPointId: Option[Int :| Positive0]
+      bindingIndices: Vec[NonNegativeInt],
+      entryPointId: Option[NonNegativeInt]
   )
 
   object KernelMetadata {
     def validated(
-        argumentBlockSize: Int :| Positive0,
-        explicitParameterCount: Int :| Positive0,
+        argumentBlockSize: NonNegativeInt,
+        explicitParameterCount: NonNegativeInt,
         parameters: Vec[KernelParameterMetadata],
         requiredWorkGroupSize: Option[Dimensions] = None,
         workGroupSizeHint: Option[Dimensions] = None,
-        bindingIndices: Vec[Int :| Positive0] = Vec.empty,
-        entryPointId: Option[Int :| Positive0] = None
+        bindingIndices: Vec[NonNegativeInt] = Vec.empty,
+        entryPointId: Option[NonNegativeInt] = None
     ): Either[String, KernelMetadata] =
       SymbolValidation
         .kernelParameters(
@@ -182,8 +179,8 @@ object ExecutionProtocol {
     case F64
   }
 
-  final case class BlasVector(allocation: AllocationId, offset: Long :| Positive0, increment: Int) derives Codec
-  final case class BlasMatrix(allocation: AllocationId, offset: Long :| Positive0, leading: Int) derives Codec
+  final case class BlasVector(allocation: AllocationId, offset: NonNegativeLong, increment: Int) derives Codec
+  final case class BlasMatrix(allocation: AllocationId, offset: NonNegativeLong, leading: Int) derives Codec
 
   final case class BlasRequest(
       operation: BlasOperation,
@@ -210,13 +207,13 @@ object ExecutionProtocol {
   final case class BlasResult(scalar: Vec[Byte]) derives Codec
 
   final case class SpecializationConstant(
-      specId: Int :| Positive0,
+      specId: NonNegativeInt,
       value: Vec[Byte]
   ) derives Codec
 
   final case class SpecializationInfo(
-      specId: Int :| Positive0,
-      byteSize: Int :| Positive
+      specId: NonNegativeInt,
+      byteSize: PositiveInt
   ) derives Codec
 
   final case class ProgramKernel(name: KernelName, linkageName: LinkageName) derives Codec
@@ -224,16 +221,16 @@ object ExecutionProtocol {
   final case class ProgramGlobalMetadata private (
       name: GlobalName,
       virtualAddress: Option[GuestAddress],
-      size: Long :| Positive0,
-      pointerOffsets: Vec[Int :| Positive0]
+      size: NonNegativeLong,
+      pointerOffsets: Vec[NonNegativeInt]
   )
 
   object ProgramGlobalMetadata {
     def validated(
         name: GlobalName,
         virtualAddress: Option[GuestAddress],
-        size: Long :| Positive0,
-        pointerOffsets: Vec[Int :| Positive0]
+        size: NonNegativeLong,
+        pointerOffsets: Vec[NonNegativeInt]
     ): Either[String, ProgramGlobalMetadata] =
       SymbolValidation
         .globalPointerOffsets(size, pointerOffsets)
@@ -249,12 +246,12 @@ object ExecutionProtocol {
       globals: Vec[ProgramGlobalMetadata]
   ) derives Codec
 
-  final case class ProgramGlobal private (size: Long :| Positive0, initial: Vec[Byte])
+  final case class ProgramGlobal private (size: NonNegativeLong, initial: Vec[Byte])
 
   object ProgramGlobal {
-    def validated(size: Long :| Positive0, initial: Vec[Byte]): Either[String, ProgramGlobal] =
+    def validated(size: NonNegativeLong, initial: Vec[Byte]): Either[String, ProgramGlobal] =
       Either.cond(
-        initial.length.toLong <= size,
+        initial.length.toLong <= size.raw,
         ProgramGlobal(size, initial),
         "program-global initial contents exceed its size"
       )

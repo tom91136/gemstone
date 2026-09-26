@@ -1,8 +1,5 @@
 package net.kurobako.gemstone
 
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
-
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.atomic.AtomicInteger
 import scala.util.Using
@@ -18,7 +15,7 @@ final class LRUCacheSuite extends munit.FunSuite {
   }
 
   test("values are reused and the least recently used value is evicted") {
-    val cache = LRUCache[String, String](2)
+    val cache = LRUCache[String, String](PositiveInt(2))
     assertEquals(cache.get("a")("value-a"), "value-a")
     assertEquals(cache.get("b")("value-b"), "value-b")
     assertEquals(cache.get("a")(fail("duplicate computation")), "value-a")
@@ -28,14 +25,14 @@ final class LRUCacheSuite extends munit.FunSuite {
   }
 
   test("failed computation wakes subsequent readers with the original error") {
-    val cache = LRUCache[String, Int](2)
+    val cache = LRUCache[String, Int](PositiveInt(2))
     val error = intercept[IllegalArgumentException](cache.get("bad")(throw IllegalArgumentException("invalid value")))
     assertEquals(error.getMessage, "invalid value")
     assertEquals(intercept[IllegalArgumentException](cache.get("bad")(42)).getMessage, "invalid value")
   }
 
   test("concurrent readers share one in-flight computation") {
-    val cache          = LRUCache[String, Int](2)
+    val cache          = LRUCache[String, Int](PositiveInt(2))
     val entered        = CountDownLatch(8)
     val release        = CountDownLatch(1)
     val calls          = AtomicInteger()
@@ -62,7 +59,7 @@ final class LRUCacheSuite extends munit.FunSuite {
   }
 
   test("single-flight remains exact while the completed LRU is at capacity") {
-    val cache         = LRUCache[String, Int](1)
+    val cache         = LRUCache[String, Int](PositiveInt(1))
     val firstEntered  = CountDownLatch(1)
     val releaseFirst  = CountDownLatch(1)
     val secondEntered = CountDownLatch(1)

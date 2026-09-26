@@ -1,10 +1,9 @@
 package net.kurobako.gemstone.memory
 
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
+import net.kurobako.gemstone.{NonEmptyString, NonNegativeInt}
 
 final case class Allocation(
     start: GuestAddress,
-    size: Int :| Positive0,
-    provenance: String :| MinLength[1]
+    size: NonNegativeInt,
+    provenance: NonEmptyString
 )

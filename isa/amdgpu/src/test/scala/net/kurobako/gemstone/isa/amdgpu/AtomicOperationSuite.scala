@@ -2,10 +2,7 @@ package net.kurobako.gemstone.isa.amdgpu
 
 import CodeObject.*
 
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
-
-import net.kurobako.gemstone.Vec
+import net.kurobako.gemstone.{NonNegativeInt, NonNegativeLong, Vec}
 import net.kurobako.gemstone.binary.{ByteRange, LittleEndian, ScalarByteWidth}
 import net.kurobako.gemstone.concurrent.withLock
 import net.kurobako.gemstone.isa.*
@@ -24,25 +21,25 @@ final class AtomicOperationSuite extends munit.FunSuite with CodeObjectTestSuppo
     val bytes                                                          = Array.ofDim[Byte](16 + groups * 8)
     private val lock                                                   = ReentrantLock()
     override protected val regionSizes: Iterable[(MemoryRegion, Long)] = Seq(allocation -> bytes.length.toLong)
-    LittleEndian.write(old, bytes, 0, ScalarByteWidth.Qword)
-    def read(id: MemoryRegion, offset: Long :| Positive0, size: Int :| Positive0) =
+    LittleEndian.write(old, bytes, 0, ScalarByteWidth(8))
+    def read(id: MemoryRegion, offset: NonNegativeLong, size: NonNegativeInt) =
       Either.cond(
-        id == allocation && ByteRange.contains(bytes.length, offset, size),
-        Vec.from(bytes.slice(offset.toInt, offset.toInt + size)),
+        id == allocation && ByteRange.contains(bytes.length, offset.raw, size.raw),
+        Vec.from(bytes.slice(offset.raw.toInt, offset.raw.toInt + size.raw)),
         Fault.InvalidTask("test read bounds")
       )
-    def write(id: MemoryRegion, offset: Long :| Positive0, value: Vec[Byte]) = {
-      assert(id == allocation && ByteRange.contains(bytes.length, offset, value.size))
-      val _ = value.copyToArray(bytes, offset.toInt, value.size); Right(())
+    def write(id: MemoryRegion, offset: NonNegativeLong, value: Vec[Byte]) = {
+      assert(id == allocation && ByteRange.contains(bytes.length, offset.raw, value.size))
+      val _ = value.copyToArray(bytes, offset.raw.toInt, value.size); Right(())
     }
     override def atomicModifyValue(
         id: MemoryRegion,
-        offset: Long :| Positive0,
+        offset: NonNegativeLong,
         size: MemoryValueByteWidth
     )(update: Long => Long): Either[Fault, Long] = lock.withLock {
       val scalarWidth = size.scalarByteWidth
-      if (id == allocation && ByteRange.contains(bytes.length, offset, size.value)) {
-        val arrayOffset = offset.toInt
+      if (id == allocation && ByteRange.contains(bytes.length, offset.raw, size.raw)) {
+        val arrayOffset = offset.raw.toInt
         val previous    = LittleEndian.decode(bytes, arrayOffset, scalarWidth)
         LittleEndian.write(update(previous), bytes, arrayOffset, scalarWidth)
         Right(previous)
@@ -84,9 +81,9 @@ final class AtomicOperationSuite extends munit.FunSuite with CodeObjectTestSuppo
       Dimensions.One,
       testDimensions(groups),
       Vec(
-        KernelTask.Argument.Memory(allocation, 0),
-        KernelTask.Argument.Scalar(LittleEndian.toVec(operand, ScalarByteWidth.Qword)),
-        KernelTask.Argument.Scalar(LittleEndian.toVec(7, ScalarByteWidth.Qword))
+        KernelTask.Argument.Memory(allocation, NonNegativeLong(0L)),
+        KernelTask.Argument.Scalar(LittleEndian.toVec(operand, ScalarByteWidth(8))),
+        KernelTask.Argument.Scalar(LittleEndian.toVec(7, ScalarByteWidth(8)))
       )
     ).toOption.get
     val memory   = Memory(groups, old)

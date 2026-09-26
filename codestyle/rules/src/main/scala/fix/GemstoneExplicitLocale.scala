@@ -13,7 +13,7 @@ final class GemstoneExplicitLocale extends SyntacticRule("GemstoneExplicitLocale
   }.asPatch
 
   private def hasArguments(select: Term.Select): Boolean = select.parent match {
-    case Some(Term.Apply(`select`, arguments)) => arguments.nonEmpty
-    case _                                     => false
+    case Some(Term.Apply.After_4_6_0(`select`, arguments)) => arguments.values.nonEmpty
+    case _                                                 => false
   }
 }

@@ -1,15 +1,25 @@
 package net.kurobako.gemstone.memory
 
+import scala.compiletime.{constValue, error}
+
+import net.kurobako.gemstone.NonNegativeInt
 import net.kurobako.gemstone.binary.ScalarByteWidth
 
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
+/** A memory value width in bytes, from one to eight. */
+opaque type MemoryValueByteWidth = Int
 
-type MemoryValueByteWidth = MemoryValueByteWidth.T
-object MemoryValueByteWidth extends RefinedType[Int, Interval.Closed[1, 8]] {
-  given (Interval.Closed[1, 8] ==> Positive0)             = Implication()
-  given (Interval.Closed[1, 8] ==> Positive)              = Implication()
-  given (Interval.Closed[1, 8] ==> Interval.Closed[0, 8]) = Implication()
+object MemoryValueByteWidth {
+  inline def either(value: Int): Either[String, MemoryValueByteWidth] =
+    if (value >= 1 && value <= 8) Right(value) else Left(s"memory value width must be between 1 and 8: $value")
+
+  inline def unsafe(value: Int): MemoryValueByteWidth =
+    either(value).fold(message => throw IllegalArgumentException(message), identity)
+
+  inline def apply[A <: Int & Singleton](inline value: A): MemoryValueByteWidth =
+    inline if constValue[A] >= 1 && constValue[A] <= 8 then value
+    else error("memory value width must be between 1 and 8")
+
+  given Ordering[MemoryValueByteWidth] = Ordering.Int
 
   val Byte  = MemoryValueByteWidth(1)
   val Word  = MemoryValueByteWidth(2)
@@ -17,9 +27,10 @@ object MemoryValueByteWidth extends RefinedType[Int, Interval.Closed[1, 8]] {
   val Qword = MemoryValueByteWidth(8)
 
   extension (width: MemoryValueByteWidth) {
-    private[gemstone] def nonNegative: Int :| Positive0 = width.value
+    inline def raw: Int = width
 
-    @SuppressWarnings(Array("scalafix:GemstoneNoAssume"))
-    private[gemstone] def scalarByteWidth: ScalarByteWidth = ScalarByteWidth.assume(width.value)
+    private[gemstone] def nonNegative: NonNegativeInt = NonNegativeInt.unsafe(width)
+
+    private[gemstone] def scalarByteWidth: ScalarByteWidth = ScalarByteWidth.unsafe(width)
   }
 }

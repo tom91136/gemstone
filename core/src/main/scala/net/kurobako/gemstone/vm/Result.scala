@@ -1,6 +1,5 @@
 package net.kurobako.gemstone.vm
 
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
+import net.kurobako.gemstone.NonNegativeLong
 
-final case class Result(instructions: Long :| Positive0)
+final case class Result(instructions: NonNegativeLong)

@@ -2,9 +2,7 @@ package net.kurobako.gemstone.isa.amdgpu
 
 import CodeObject.*
 
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
-import net.kurobako.gemstone.Vec
+import net.kurobako.gemstone.{NonNegativeInt, NonNegativeLong, PositiveLong, Vec}
 import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.Dimensions
@@ -23,10 +21,10 @@ final class GlobalBindingSuite extends munit.FunSuite with CodeObjectTestSupport
     override protected def regionSizes: Iterable[(MemoryRegion, Long)]       = storage.view.mapValues(_.length.toLong)
     override protected def regionAddress(region: MemoryRegion): GuestAddress =
       nativeAddresses.getOrElse(region, super.regionAddress(region))
-    override def read(id: MemoryRegion, offset: Long :| Positive0, size: Int :| Positive0) =
-      Right(Vec.from(storage(id).slice(offset.toInt, offset.toInt + size)))
-    override def write(id: MemoryRegion, offset: Long :| Positive0, bytes: Vec[Byte]) = {
-      val _ = bytes.copyToArray(storage(id), offset.toInt, bytes.size); Right(())
+    override def read(id: MemoryRegion, offset: NonNegativeLong, size: NonNegativeInt) =
+      Right(Vec.from(storage(id).slice(offset.raw.toInt, offset.raw.toInt + size.raw)))
+    override def write(id: MemoryRegion, offset: NonNegativeLong, bytes: Vec[Byte]) = {
+      val _ = bytes.copyToArray(storage(id), offset.raw.toInt, bytes.size); Right(())
     }
   }
   test("bound ELF global and kernel allocation pointer use one backing across dispatches") {
@@ -50,10 +48,16 @@ final class GlobalBindingSuite extends munit.FunSuite with CodeObjectTestSupport
       KernelName("kernel"),
       Dimensions.One,
       Dimensions.One,
-      Vec(KernelTask.Argument.Memory(global, 8), KernelTask.Argument.Memory(output, 0))
+      Vec(
+        KernelTask.Argument.Memory(global, NonNegativeLong(8L)),
+        KernelTask.Argument.Memory(output, NonNegativeLong(0L))
+      )
     ).toOption.get
     for (value <- Seq(41L, 100L)) {
-      assertEquals(memory.write(global, 8, LittleEndian.toVec(value, ScalarByteWidth.Dword)), Right(()))
+      assertEquals(
+        memory.write(global, NonNegativeLong(8L), LittleEndian.toVec(value, ScalarByteWidth(4))),
+        Right(())
+      )
       assertEquals(
         VMInterpreter.execute(
           prepared,
@@ -62,7 +66,13 @@ final class GlobalBindingSuite extends munit.FunSuite with CodeObjectTestSupport
           memory,
           TaskControl.default,
           Scheduler.Sequential,
-          Vec(VMLoadedProgram.GlobalBinding(0x3000, 16, global, 8, 32))
+          Vec(VMLoadedProgram.GlobalBinding(
+            0x3000,
+            NonNegativeInt(16),
+            global,
+            NonNegativeLong(8L),
+            PositiveLong(32L)
+          ))
         ),
         Right(())
       )
@@ -88,19 +98,28 @@ final class GlobalBindingSuite extends munit.FunSuite with CodeObjectTestSupport
       globalMemory = Array(0x3000L -> Array.ofDim[Byte](16))
     )
     val prepared = VMCompiler.compile(kernel).toOption.get
-    val bindings = Vec(VMLoadedProgram.GlobalBinding(0x3000L, 16, global, 8, 32))
-    assertEquals(memory.write(global, 8, LittleEndian.toVec(41L, ScalarByteWidth.Dword)), Right(()))
+    val bindings = Vec(VMLoadedProgram.GlobalBinding(
+      0x3000L,
+      NonNegativeInt(16),
+      global,
+      NonNegativeLong(8L),
+      PositiveLong(32L)
+    ))
+    assertEquals(
+      memory.write(global, NonNegativeLong(8L), LittleEndian.toVec(41L, ScalarByteWidth(4))),
+      Right(())
+    )
     for (
       (pointer, equal, value) <- Seq(
-        (KernelTask.Argument.Memory(global, 8), 1L, 42L),
-        (KernelTask.Argument.Scalar(LittleEndian.toVec(0x8008L, ScalarByteWidth.Qword)), 0L, 43L)
+        (KernelTask.Argument.Memory(global, NonNegativeLong(8L)), 1L, 42L),
+        (KernelTask.Argument.Scalar(LittleEndian.toVec(0x8008L, ScalarByteWidth(8))), 0L, 43L)
       )
     ) {
       val dispatch = KernelTask.validated(
         KernelName("kernel"),
         Dimensions.One,
         Dimensions.One,
-        Vec(pointer, KernelTask.Argument.Memory(output, 0))
+        Vec(pointer, KernelTask.Argument.Memory(output, NonNegativeLong(0L)))
       ).toOption.get
       assertEquals(
         VMInterpreter.execute(

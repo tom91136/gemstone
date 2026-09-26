@@ -25,13 +25,13 @@ final class ProcessExitSuite extends munit.FunSuite {
       val result = Launcher.launch(apis, layout, Map.empty, Some(server.port)) { environment =>
         val first  = environment.set("GEMSTONE_RPC_CLIENT")
         val second = Launcher.launch(apis, layout, Map.empty, Some(server.port)) { other =>
-          assertEquals(other.set("GEMSTONE_RPC_PORT"), server.port.value.toString)
+          assertEquals(other.set("GEMSTONE_RPC_PORT"), server.port.raw.toString)
           other.set("GEMSTONE_RPC_CLIENT")
         }
         first -> second
       }
       assert(result.exists { case (first, second) =>
-        first != server.client.value.toString && second.exists(_ != first)
+        first != server.client.raw.toString && second.exists(_ != first)
       })
     }
   }

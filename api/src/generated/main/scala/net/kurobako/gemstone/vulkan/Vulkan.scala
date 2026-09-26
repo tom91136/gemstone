@@ -1,9 +1,7 @@
 // Generated from pinned official headers by GenerateAPISurfaces. Regenerate with: sbt codegen
 package net.kurobako.gemstone.vulkan
 
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
-import net.kurobako.gemstone.NoNul
+import net.kurobako.gemstone.{NonEmptyString, PositiveInt}
 import net.kurobako.gemstone.abi.ABI.*
 
 @javax.annotation.processing.Generated(Array("sbt codegen"))
@@ -504,8 +502,8 @@ object Vulkan {
   type uint32_t = CValue["uint32_t"]
   type uint64_t = CValue["uint64_t"]
 
-  val HeaderVersion: String :| (MinLength[1] & NoNul) = "v1.4.341"
-  val FunctionCount: Int :| Positive = 719
+  val HeaderVersion: NonEmptyString = NonEmptyString("v1.4.341")
+  val FunctionCount: PositiveInt = PositiveInt(719)
 }
 
 import Vulkan.*

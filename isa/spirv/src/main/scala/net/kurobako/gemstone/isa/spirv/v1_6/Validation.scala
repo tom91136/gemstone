@@ -1,11 +1,9 @@
 package net.kurobako.gemstone.isa.spirv.v1_6
 
-import net.kurobako.gemstone.Vec
+import net.kurobako.gemstone.{NonEmptyVec, Vec}
 import net.kurobako.gemstone.isa.ValidationOutcome
 
 import cats.data.Chain
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
 
 object Validation {
   enum Issue {
@@ -88,24 +86,25 @@ object Validation {
 
   private def validateEnvironment(module: Module, requirements: Requirements): ValidationOutcome[Issue] = {
     val headerIssues =
-      issueWhen(module.header.bound.toUnsigned == 0L)(Issue.InvalidHeader("id bound must be non-zero")) ++
-        issueWhen(module.header.schema.toUnsigned != 0L)(Issue.InvalidHeader("reserved schema word must be zero"))
+      issueWhen(module.header.bound.toUnsigned.raw == 0L)(Issue.InvalidHeader("id bound must be non-zero")) ++
+        issueWhen(module.header.schema.toUnsigned.raw != 0L)(Issue.InvalidHeader("reserved schema word must be zero"))
     val unsupported = Option.when(
       module.header.version.major > ISA.version.major ||
-        (module.header.version.major == ISA.version.major && module.header.version.minor > ISA.version.minor)
+        (module.header.version.major == ISA.version.major &&
+          module.header.version.minor > ISA.version.minor)
     )(Issue.UnsupportedVersion(module.header.version))
     val facts = module.instructions.foldLeft(Facts(false, false, false, Chain.empty)) {
       case (state, Instruction.Capability(capability)) => capability.singleWord match {
-          case Right(word) if word.toUnsigned == requirements.capabilityWord => state.copy(hasCapability = true)
-          case Right(_)                                                      => state
-          case Left(detail)                                                  => state.copy(issues =
+          case Right(word) if word.toUnsigned.raw == requirements.capabilityWord => state.copy(hasCapability = true)
+          case Right(_)                                                          => state
+          case Left(detail)                                                      => state.copy(issues =
               state.issues.append(Issue.MalformedOperand(SPIRVOpcode("OpCapability"), detail))
             )
         }
       case (state, Instruction.EntryPoint(executionModel, _, _, _)) => executionModel.singleWord match {
-          case Right(word) if word.toUnsigned == requirements.entryPointWord => state.copy(hasEntryPoint = true)
-          case Right(_)                                                      => state
-          case Left(detail)                                                  => state.copy(issues =
+          case Right(word) if word.toUnsigned.raw == requirements.entryPointWord => state.copy(hasEntryPoint = true)
+          case Right(_)                                                          => state
+          case Left(detail)                                                      => state.copy(issues =
               state.issues.append(Issue.MalformedOperand(SPIRVOpcode("OpEntryPoint"), detail))
             )
         }
@@ -113,7 +112,7 @@ object Validation {
         (addressingModel.singleWord, memoryModel.singleWord) match {
           case (Right(addressing), Right(memory)) =>
             state.copy(hasMemoryModel =
-              state.hasMemoryModel || requirements.acceptsMemoryModel(addressing.toUnsigned, memory.toUnsigned)
+              state.hasMemoryModel || requirements.acceptsMemoryModel(addressing.toUnsigned.raw, memory.toUnsigned.raw)
             )
           case (Left(detail), _) => state.copy(issues =
               state.issues.append(Issue.MalformedOperand(SPIRVOpcode("OpMemoryModel"), detail))
@@ -131,8 +130,8 @@ object Validation {
         issueWhen(!facts.hasMemoryModel)(requirements.missingMemoryModel)).toVector.view
     )
     val unsupportedIssues = Vec.from(unsupported.toVector.view)
-    if (invalidIssues.nonEmpty) ValidationOutcome.Rejected(invalidIssues.refineUnsafe[MinLength[1]])
-    else if (unsupportedIssues.nonEmpty) ValidationOutcome.Incomplete(unsupportedIssues.refineUnsafe[MinLength[1]])
+    if (invalidIssues.nonEmpty) ValidationOutcome.Rejected(NonEmptyVec.unsafeFromVec(invalidIssues))
+    else if (unsupportedIssues.nonEmpty) ValidationOutcome.Incomplete(NonEmptyVec.unsafeFromVec(unsupportedIssues))
     else ValidationOutcome.Accepted
   }
 }

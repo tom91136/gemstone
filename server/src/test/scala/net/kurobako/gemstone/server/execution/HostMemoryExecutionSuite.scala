@@ -1,5 +1,7 @@
 package net.kurobako.gemstone.server.execution
 
+import net.kurobako.gemstone.*
+
 import net.kurobako.gemstone.Vec
 import net.kurobako.gemstone.Vec.*
 import net.kurobako.gemstone.binary.{LittleEndian, ScalarByteWidth}
@@ -19,23 +21,20 @@ import net.kurobako.gemstone.isa.spirv.v1_6.{
 import net.kurobako.gemstone.rpc.ExecutionProtocol.*
 import net.kurobako.gemstone.vm.*
 
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
-
 import java.nio.charset.StandardCharsets
 import scala.collection.mutable
 import scala.util.Using
 
 final class HostMemoryExecutionSuite extends munit.FunSuite {
-  private def encoded(value: Long, size: Int): Vec[Byte] = LittleEndian.toVec(value, ScalarByteWidth.applyUnsafe(size))
+  private def encoded(value: Long, size: Int): Vec[Byte] = LittleEndian.toVec(value, ScalarByteWidth.unsafe(size))
   private def scalar(value: Long, size: Int = 8): KernelTask.Argument = KernelTask.Argument.Scalar(encoded(value, size))
   private def bytes(address: Long, value: Long, size: Int): Map[Long, Byte] =
     encoded(value, size).zipWithIndex.map((byte, index) => (address + index.toLong) -> byte).toMap
 
   private object Async extends Scheduler {
-    override val parallelism                                                                 = 1
-    override def shouldParallel(tasks: Long :| Positive0, items: Long :| Positive0): Boolean = false
-    override def parallelFor(tasks: Long :| Positive0)(task: Long :| Positive0 => Either[Fault, Unit])
+    override val parallelism                                                             = PositiveInt(1)
+    override def shouldParallel(tasks: NonNegativeLong, items: NonNegativeLong): Boolean = false
+    override def parallelFor(tasks: NonNegativeLong)(task: NonNegativeLong => Either[Fault, Unit])
         : Either[Fault, Unit] =
       Scheduler.Sequential.parallelFor(tasks)(task)
     override def schedule(runnable: Runnable): Unit = {
@@ -64,14 +63,14 @@ final class HostMemoryExecutionSuite extends munit.FunSuite {
       assertEquals(service.enableHostMemory(), Right(()))
       fragments.foreach { (address, contents) =>
         val allocation =
-          service.registerAllocation(contents.size.toLong.refineUnsafe[Positive], AllocationKind.Shared).toOption.get
+          service.registerAllocation(PositiveLong.unsafe(contents.size.toLong), AllocationKind.Shared).toOption.get
         assertEquals(service.registerAllocationAddress(allocation, GuestAddress(address), hostBacked), Right(()))
-        assertEquals(service.write(allocation, 0L, contents), Right(()))
+        assertEquals(service.write(allocation, NonNegativeLong(0L), contents), Right(()))
       }
       val program = service.load(encoding, image).toOption.get
       val task    = KernelTask.validated(
         KernelName("probe"),
-        LaunchGeometry.Dimensions(lanes.refineUnsafe[Positive], 1, 1),
+        LaunchGeometry.Dimensions(PositiveInt.unsafe(lanes), PositiveInt(1), PositiveInt(1)),
         LaunchGeometry.Dimensions.One,
         arguments,
         pointerRelocations = relocations
@@ -86,19 +85,19 @@ final class HostMemoryExecutionSuite extends munit.FunSuite {
         val batch = service.pollHostMemory(completion).fold(error => fail(error.message), identity)
         reads ++= batch.reads
         batch.writes.foreach(range =>
-          range.bytes.zipWithIndex.foreach((byte, index) => writes.update(range.address.value + index, byte))
+          range.bytes.zipWithIndex.foreach((byte, index) => writes.update(range.address.raw + index, byte))
         )
         batch.writes.foreach(range =>
-          range.bytes.zipWithIndex.foreach((byte, index) => native.update(range.address.value + index, byte))
+          range.bytes.zipWithIndex.foreach((byte, index) => native.update(range.address.raw + index, byte))
         )
         batch.sync.foreach { sync =>
           native ++= beforeSync(sync, native.toMap)
           val observed = sync.atomic.fold(0L) { request =>
             val observed = (0 until request.size).foldLeft(0L)((value, index) =>
-              value | ((native(request.address.value + index).toLong & 255L) << (index * 8))
+              value | ((native(request.address.raw + index).toLong & 255L) << (index * 8))
             )
             if (observed == request.expected) {
-              val updated = bytes(request.address.value, request.desired, request.size)
+              val updated = bytes(request.address.raw, request.desired, request.size)
               native ++= updated
               writes ++= updated
             }
@@ -114,8 +113,8 @@ final class HostMemoryExecutionSuite extends munit.FunSuite {
             native ++= beforeRead(range, native)
             HostMemoryBytes(
               range.address,
-              Vec.from((0 until range.size).map { index =>
-                val address = range.address.value + index
+              Vec.from((0 until range.size.raw).map { index =>
+                val address = range.address.raw + index
                 native.getOrElse(address, fail(s"speculative host read at 0x${address.toHexString}"))
               })
             )
@@ -145,7 +144,7 @@ final class HostMemoryExecutionSuite extends munit.FunSuite {
     val (reads, writes, batches) = run(source, 32, Vec(scalar(0x1000), scalar(0x8000), scalar(stride, 4)), host)
     assertEquals(batches, 1)
     assertEquals(reads.size, if (stride == 1) 1 else 32)
-    assertEquals(reads.map(_.size.toInt).sum, 128)
+    assertEquals(reads.map(_.size.raw).sum, 128)
     assertEquals(writes, (0 until 32).flatMap(i => bytes(0x8000L + i * stride * 4, i + 1, 4)).toMap)
   }
 
@@ -164,7 +163,7 @@ final class HostMemoryExecutionSuite extends munit.FunSuite {
       indices.distinct.flatMap(i => bytes(0x4000L + i * 4, i + 9, 4)).toMap
     val (reads, writes, batches) = run(source, 32, Vec(scalar(0x1000), scalar(0x4000), scalar(0x8000)), host)
     assertEquals(batches, 2)
-    assertEquals(reads.map(_.size.toInt).sum, 128 + 7 * 4)
+    assertEquals(reads.map(_.size.raw).sum, 128 + 7 * 4)
     assertEquals(writes, indices.zipWithIndex.flatMap((value, i) => bytes(0x8000L + i * 4, value + 9, 4)).toMap)
   }
 
@@ -185,7 +184,7 @@ final class HostMemoryExecutionSuite extends munit.FunSuite {
       bytes(address, nodes.lift(i + 1).getOrElse(0L), 8) ++ bytes(address + 8, i + 1, 4)
     }.toMap
     val (reads, writes, batches) = run(source, 1, Vec(scalar(nodes.head), scalar(0x8000)), host)
-    assertEquals(reads.map(_.size.toInt).sum, 4096 * 12)
+    assertEquals(reads.map(_.size.raw).sum, 4096 * 12)
     assertEquals(batches, 4096 * 2)
     assertEquals(writes, bytes(0x8000, 4096L * 4097 / 2, 4))
   }
@@ -217,7 +216,7 @@ final class HostMemoryExecutionSuite extends munit.FunSuite {
       }"""
     val (reads, writes, batches) = run(source, 32, Vec(scalar(0x1000)), bytes(0x1000, 7, 4))
     assertEquals(batches, 0)
-    assertEquals(reads.map(_.size.toInt).sum, 0)
+    assertEquals(reads.map(_.size.raw).sum, 0)
     assertEquals(writes, bytes(0x1000, 39, 4))
   }
 
@@ -275,7 +274,7 @@ final class HostMemoryExecutionSuite extends munit.FunSuite {
       bytes(0x1000, 7, width / 8) ++ bytes(0x3000, 0, 4),
       List(0x2000L -> encoded(1, width / 8)),
       beforeRead = (range, native) =>
-        if (range.address.value == 0x3000) {
+        if (range.address.raw == 0x3000) {
           if (release) {
             assertEquals((0 until width / 8).map(i => native(0x1000L + i)), encoded(73, width / 8).toSeq)
             Map.empty
@@ -301,12 +300,12 @@ final class HostMemoryExecutionSuite extends munit.FunSuite {
       List(0x1000L -> Vec.fill(64)(0.toByte), 0x8000L -> Vec.fill(64)(0.toByte)),
       hostBacked = true
     )
-    assertEquals(reads, Vector(HostMemoryRange(GuestAddress(0x100c), 4)))
+    assertEquals(reads, Vector(HostMemoryRange(GuestAddress(0x100cL), PositiveInt(4))))
     assertEquals(writes, bytes(0x8004, 73, 4))
   }
 
   private def operand(kind: String, words: Int*): Operand =
-    Operand(SPIRVOperandKind.either(kind).toOption.get, Vec.from(words.map(Word(_))).refineUnsafe[MinLength[1]])
+    Operand(SPIRVOperandKind.either(kind).toOption.get, NonEmptyVec.unsafeFromVec(Vec.from(words.map(Word(_)))))
   private def id(value: Int): Operand = operand("IdRef", value)
 
   // This oracle checks the interpreter's publication/cache boundary, independently of
@@ -328,7 +327,7 @@ final class HostMemoryExecutionSuite extends munit.FunSuite {
       }
     )
     assertEquals(fences.size, 1, "fence must publish preceding writes before execution proceeds")
-    assertEquals(reads.count(_.address.value == 0x1000L), 2, "fence must invalidate cached host reads")
+    assertEquals(reads.count(_.address.raw == 0x1000L), 2, "fence must invalidate cached host reads")
     assertEquals(writes, (if (writeBefore) bytes(0x8000, 7, 4) else Map.empty[Long, Byte]) ++ bytes(0x8004, 9, 4))
   }
 
@@ -424,8 +423,8 @@ final class HostMemoryExecutionSuite extends munit.FunSuite {
       SPIRV.encode(module).toOption.get,
       1,
       Vec(
-        KernelTask.Argument.Memory(MemoryRegion(1), 8L),
-        KernelTask.Argument.Memory(MemoryRegion(2), 0L),
+        KernelTask.Argument.Memory(MemoryRegion(1), NonNegativeLong(8L)),
+        KernelTask.Argument.Memory(MemoryRegion(2), NonNegativeLong(0L)),
         scalar(0x8000)
       ),
       bytes(0x1008, 0x4000, 8) ++ bytes(0x4000, 11, 4) ++ bytes(0x5000, 29, 4),
@@ -436,7 +435,12 @@ final class HostMemoryExecutionSuite extends munit.FunSuite {
         bytes(0x1008, 0x5000, 8)
       },
       relocations = if (relocated)
-        Vec(KernelTask.PointerRelocation(KernelTask.RelocationSource.Memory(MemoryRegion(1)), 8L, MemoryRegion(2), 0L))
+        Vec(KernelTask.PointerRelocation(
+          KernelTask.RelocationSource.Memory(MemoryRegion(1)),
+          NonNegativeLong(8L),
+          MemoryRegion(2),
+          NonNegativeLong(0L)
+        ))
       else Vec.empty,
       afterCompletion = values =>
         assertEquals(
@@ -527,13 +531,13 @@ final class HostMemoryExecutionSuite extends munit.FunSuite {
       SPIRVRuntimeBackend(Validation.Environment.OpenCLCompute).encoding,
       SPIRV.encode(module).toOption.get,
       1,
-      Vec(KernelTask.Argument.Memory(MemoryRegion(1), offset.refineUnsafe[Positive0])),
+      Vec(KernelTask.Argument.Memory(MemoryRegion(1), NonNegativeLong.unsafe(offset))),
       bytes(0x1000 + offset, 0x8000, 8),
       List(0x1000L -> Vec.fill(24)(0.toByte)),
       hostBacked = true
     )
-    assertEquals(reads.map(_.address.value), Vector(0x1000 + offset))
-    assertEquals(reads.map(_.size.toInt), Vector(8))
+    assertEquals(reads.map(_.address.raw), Vector(0x1000 + offset))
+    assertEquals(reads.map(_.size.raw), Vector(8))
     assertEquals(writes, bytes(0x8000, 97, 4))
   }
 
@@ -577,7 +581,7 @@ final class HostMemoryExecutionSuite extends munit.FunSuite {
       runImage(encoding, SPIRV.encode(module).toOption.get, 32, Vec(scalar(0x1000), scalar(0x8000)), host)
     assertEquals(batches, 1)
     assertEquals(reads.size, if (stride == 1) 1 else 32)
-    assertEquals(reads.map(_.size.toInt).sum, 128)
+    assertEquals(reads.map(_.size.raw).sum, 128)
     assertEquals(writes, (0 until 32).flatMap(i => bytes(0x8000L + i * stride * 4, i + 17, 4)).toMap)
   }
 

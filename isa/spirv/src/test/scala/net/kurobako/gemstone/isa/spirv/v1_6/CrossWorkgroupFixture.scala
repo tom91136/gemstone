@@ -5,20 +5,18 @@ import net.kurobako.gemstone.vm.LaunchGeometry.{Coordinates, Dimensions, GlobalD
 
 import net.kurobako.gemstone.concurrent.withLock
 
-import net.kurobako.gemstone.{PlatformTime, Vec}
+import net.kurobako.gemstone.{NonEmptyVec, NonNegativeLong, PlatformTime, PositiveInt, Vec}
 import net.kurobako.gemstone.binary.LittleEndian
 import net.kurobako.gemstone.binary.ScalarByteWidth
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
 import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.locks.ReentrantLock
 
 /** Test-only cooperative interleaving: at most P workgroups run, one instruction at a time. */
 private[v1_6] object CrossWorkgroupFixture {
-  val groups: Vec[Int :| Positive]           = Vec(1, 2, 3, 5, 9)
+  val groups: Vec[PositiveInt]               = Vec(1, 2, 3, 5, 9).map(PositiveInt.unsafe)
   def o(kind: String, values: Int*): Operand = Operand(
     SPIRVOperandKind.either(kind).fold(message => throw IllegalArgumentException(message), valid => valid),
-    Vec.from(values.map(Word(_))).refineEither[MinLength[1]]
+    NonEmptyVec.fromVec(Vec.from(values.map(Word(_))))
       .fold(message => throw IllegalArgumentException(message), value => value)
   )
   def id(value: Int): Operand              = o("IdRef", value)
@@ -28,11 +26,11 @@ private[v1_6] object CrossWorkgroupFixture {
     val bytes = checked.getBytes(java.nio.charset.StandardCharsets.UTF_8) :+ 0.toByte
     Operand(
       SPIRVOperandKind.either("LiteralString").fold(message => throw IllegalArgumentException(message), valid => valid),
-      Vec.from(bytes.grouped(4).map { group =>
+      NonEmptyVec.unsafeFromVec(Vec.from(bytes.grouped(4).map { group =>
         val width = ScalarByteWidth.either(group.length)
           .fold(message => throw IllegalArgumentException(message), value => value)
         Word(LittleEndian.decode(group, 0, width).toInt)
-      }).refineUnsafe[MinLength[1]]
+      }))
     )
   }
 
@@ -180,7 +178,9 @@ private[v1_6] object CrossWorkgroupFixture {
   // Mutable turns and membership model deterministic interleaving in this final scheduler fixture.
   // Mutable scheduler state and fail-fast return are deliberate in this deterministic concurrency fixture.
   @SuppressWarnings(Array("scalafix:DisableSyntax.var", "scalafix:DisableSyntax.return"))
-  final class Interleaving(val parallelism: Int :| Positive = 4) extends Scheduler with TaskControl.Cancellation {
+  final class Interleaving(val parallelism: PositiveInt = PositiveInt(4))
+      extends Scheduler
+      with TaskControl.Cancellation {
     val calls                   = java.util.concurrent.atomic.AtomicInteger(0)
     private val lock            = ReentrantLock()
     private val changed         = lock.newCondition()
@@ -210,14 +210,14 @@ private[v1_6] object CrossWorkgroupFixture {
       }
       false
     }
-    override def shouldParallel(tasks: Long :| Positive0, workItems: Long :| Positive0): Boolean = tasks > 1L
+    override def shouldParallel(tasks: NonNegativeLong, workItems: NonNegativeLong): Boolean = tasks.raw > 1L
     // Stop the deterministic schedule at the first worker failure.
-    override def parallelFor(tasks: Long :| Positive0)(task: (Long :| Positive0) => Either[Fault, Unit])
+    override def parallelFor(tasks: NonNegativeLong)(task: NonNegativeLong => Either[Fault, Unit])
         : Either[Fault, Unit] = {
       calls.incrementAndGet()
       var first = 0L
-      while (first < tasks) {
-        val count = math.min(parallelism.toLong, tasks - first).toInt
+      while (first < tasks.raw) {
+        val count = math.min(parallelism.raw.toLong, tasks.raw - first).toInt
         live = Array.fill(count)(true); entered = Array.fill(count)(false); turn = 0
         deadline = PlatformTime.monotonicNanos + 10_000_000_000L
         val failure = AtomicReference(Option.empty[Fault])
@@ -227,7 +227,7 @@ private[v1_6] object CrossWorkgroupFixture {
             () => {
               slot.set(index)
               // The batching loop keeps base + index in [0, tasks).
-              try task((base + index).refineUnsafe[Positive0]).left.foreach(x => failure.compareAndSet(None, Some(x)))
+              try task(NonNegativeLong.unsafe(base + index)).left.foreach(x => failure.compareAndSet(None, Some(x)))
               catch {
                 case error: Throwable =>
                   val detail =

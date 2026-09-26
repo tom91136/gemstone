@@ -1,12 +1,11 @@
 package net.kurobako.gemstone.isa.spirv.v1_6
 
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
+import net.kurobako.gemstone.NonNegativeInt
 
 enum ModuleDecodeError {
-  case Instruction(index: Int :| Positive0, error: InstructionDecodeError)
+  case Instruction(index: NonNegativeInt, error: InstructionDecodeError)
 
-  def message: String = (this match {
+  def message: String = this match {
     case Instruction(index, error) => s"instruction $index: ${error.message}"
-  }).refineUnsafe[MinLength[1]]
+  }
 }

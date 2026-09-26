@@ -1,6 +1,6 @@
 package net.kurobako.gemstone.server.execution
 
-import net.kurobako.gemstone.Vec
+import net.kurobako.gemstone.{NonNegativeLong, PositiveLong, Vec}
 import net.kurobako.gemstone.isa.GlobalName
 import net.kurobako.gemstone.isa.KernelMetadata
 import net.kurobako.gemstone.isa.KernelName
@@ -9,9 +9,6 @@ import net.kurobako.gemstone.isa.amdgpu.CodeObject
 import net.kurobako.gemstone.isa.amdgpu.VirtualMachine as AMDGPUMachine
 import net.kurobako.gemstone.vm.Memory
 import net.kurobako.gemstone.vm.MemoryRegion
-
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
 
 object HSARuntimeBackend extends RuntimeBackend {
   override val encoding: String = "hsa-code-object"
@@ -47,15 +44,15 @@ object HSARuntimeBackend extends RuntimeBackend {
     override def bind(
         name: GlobalName,
         region: MemoryRegion,
-        offset: Long :| Positive0,
-        regionSize: Long :| Positive,
+        offset: NonNegativeLong,
+        regionSize: PositiveLong,
         memory: Memory
     ): Either[RuntimeBackend.Error, Unit] =
       machine.bindGlobal(loaded, name, region, offset, regionSize, memory).left.map(RuntimeBackend.Error.Execution(_))
 
     override def write(
         name: GlobalName,
-        offset: Long :| Positive0,
+        offset: NonNegativeLong,
         bytes: Vec[Byte]
     ): Either[RuntimeBackend.Error, Unit] =
       machine.writeGlobal(loaded, name, offset, bytes).left.map(RuntimeBackend.Error.Execution(_))

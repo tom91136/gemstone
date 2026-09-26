@@ -1,21 +1,54 @@
 package net.kurobako.gemstone.isa.spirv.v1_6
 
-import net.kurobako.gemstone.{NoNul, Vec}
+import net.kurobako.gemstone.CompileTime
+
+import net.kurobako.gemstone.Vec
 import net.kurobako.gemstone.binary.{BitWidth, FloatingPointWidth}
 import net.kurobako.gemstone.isa.KernelName
 import net.kurobako.gemstone.vm.Fault
 
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
-
 private[v1_6] object VMIR {
   import Operand.id
 
-  type FunctionName = FunctionName.T
-  object FunctionName extends RefinedType[String, NoNul]
+  /** A function name that carries no NUL character. May be empty. */
+  opaque type FunctionName = String
 
-  type InstructionSetName = InstructionSetName.T
-  object InstructionSetName extends RefinedType[String, MinLength[1] & NoNul]
+  object FunctionName {
+
+    inline def either(value: String): Either[String, FunctionName] =
+      if (value.view.contains('\u0000')) Left("function name must not contain a NUL character") else Right(value)
+
+    inline def unsafe(value: String): FunctionName =
+      either(value).fold(message => throw IllegalArgumentException(message), identity)
+
+    inline def apply[A <: String & Singleton](inline value: A)(using CompileTime.NoNul[A]): FunctionName =
+      value
+
+    extension (value: FunctionName) {
+      inline def raw: String = value
+    }
+  }
+
+  /** A non-empty extended instruction-set name that carries no NUL character. */
+  opaque type InstructionSetName = String
+
+  object InstructionSetName {
+
+    inline def either(value: String): Either[String, InstructionSetName] =
+      if (value.isEmpty) Left("instruction-set name must not be empty")
+      else if (value.view.contains('\u0000')) Left("instruction-set name must not contain a NUL character")
+      else Right(value)
+
+    inline def unsafe(value: String): InstructionSetName =
+      either(value).fold(message => throw IllegalArgumentException(message), identity)
+
+    inline def apply[A <: String & Singleton](inline value: A)(using CompileTime.NonEmptyNoNul[A]): InstructionSetName =
+      value
+
+    extension (value: InstructionSetName) {
+      inline def raw: String = value
+    }
+  }
 
   enum RuntimeType {
     case Void

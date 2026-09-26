@@ -57,7 +57,7 @@ object GemstoneCLI {
     case Right(action) => action match {
         case Action.Inspect(file) => Console.println(RPCJournal.inspect(file))
         case Action.Replay(file)  =>
-          val protocolIdentity = RPCJournal.ProtocolIdentity.either(ExecutionRPC.Identity)
+          val protocolIdentity = RPCJournal.ProtocolIdentity.either(ExecutionRPC.Identity.raw)
             .fold(
               message => throw IllegalStateException(s"invalid execution protocol identity: $message"),
               value => value
@@ -88,19 +88,19 @@ object GemstoneCLI {
     Using.resource(GemstoneRPCServer.start(limits, environment)) { running =>
       portFile.foreach { file =>
         Option(file.getParent).foreach(Files.createDirectories(_))
-        Files.writeString(file, s"${running.port.value}\n", StandardCharsets.US_ASCII)
+        Files.writeString(file, s"${running.port.raw}\n", StandardCharsets.US_ASCII)
         restrictToOwner(file)
       }
       endpointFile.foreach { file =>
         Option(file.getParent).foreach(Files.createDirectories(_))
         Files.writeString(
           file,
-          s"""{"port":${running.port.value},"client":${running.client.value}}""",
+          s"""{"port":${running.port.raw},"client":${running.client.raw}}""",
           StandardCharsets.US_ASCII
         )
         restrictToOwner(file)
       }
-      Console.println(s"gemstone RPC server listening on 127.0.0.1:${running.port.value}")
+      Console.println(s"gemstone RPC server listening on 127.0.0.1:${running.port.raw}")
       Console.out.flush()
       running.await()
     }

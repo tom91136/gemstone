@@ -1,9 +1,7 @@
 package net.kurobako.gemstone.server
 
-import net.kurobako.gemstone.NoNul
+import net.kurobako.gemstone.{NoNulString, NonEmptyVec, PositiveInt, PositiveLong}
 import net.kurobako.gemstone.vm.TaskLimits
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
 import java.nio.file.Files
 import scala.concurrent.duration.*
 import net.kurobako.gemstone.launcher.Environment
@@ -25,19 +23,19 @@ final class CUDACrossWorkgroupSuite extends munit.FunSuite {
       assert(Files.isRegularFile(runtime), s"CUDA runtime is missing: $runtime")
       assert(Files.isExecutable(client), s"CUDA test executable is missing: $client")
       Using.resource(GemstoneRPCServer.start(
-        TaskLimits(1000000, 32),
+        TaskLimits(PositiveLong(1000000L), PositiveInt(32)),
         Map("GEMSTONE_EXECUTION_PARALLELISM" -> workers.toString)
       )) { server =>
         val result = NativeTestProcess.run(
-          Vector(
-            client.toString.refineUnsafe[NoNul],
-            "~[unified-memory]".refineUnsafe[NoNul]
-          ).refineUnsafe[MinLength[1]],
+          NonEmptyVec(
+            NoNulString.unsafe(client.toString),
+            NoNulString.unsafe("~[unified-memory]")
+          ),
           directory,
           Environment(
             Map(
-              "GEMSTONE_RPC_PORT"      -> server.port.value.toString,
-              "GEMSTONE_RPC_CLIENT"    -> server.client.value.toString,
+              "GEMSTONE_RPC_PORT"      -> server.port.raw.toString,
+              "GEMSTONE_RPC_CLIENT"    -> server.client.raw.toString,
               "GEMSTONE_TEST_LIBRARY"  -> runtime.toString,
               "GEMSTONE_SYSTEM_PAGING" -> "1"
             ),
@@ -65,17 +63,17 @@ final class CUDACrossWorkgroupSuite extends munit.FunSuite {
     )
   ) test(name) {
     val directory = runtimeDirectory
-    Using.resource(GemstoneRPCServer.start(TaskLimits(1000000, 32), Map.empty)) { server =>
+    Using.resource(GemstoneRPCServer.start(TaskLimits(PositiveLong(1000000L), PositiveInt(32)), Map.empty)) { server =>
       val result = NativeTestProcess.run(
-        Vector(
-          directory.resolve("cuda_cross_workgroup_test").toString.refineUnsafe[NoNul],
-          name.refineUnsafe[NoNul]
-        ).refineUnsafe[MinLength[1]],
+        NonEmptyVec(
+          NoNulString.unsafe(directory.resolve("cuda_cross_workgroup_test").toString),
+          NoNulString.unsafe(name)
+        ),
         directory,
         Environment(
           Map(
-            "GEMSTONE_RPC_PORT"     -> server.port.value.toString,
-            "GEMSTONE_RPC_CLIENT"   -> server.client.value.toString,
+            "GEMSTONE_RPC_PORT"     -> server.port.raw.toString,
+            "GEMSTONE_RPC_CLIENT"   -> server.client.raw.toString,
             "GEMSTONE_TEST_LIBRARY" -> directory.resolve("libcuda.so.1").toString
           ),
           Set("GEMSTONE_SYSTEM_PAGING")

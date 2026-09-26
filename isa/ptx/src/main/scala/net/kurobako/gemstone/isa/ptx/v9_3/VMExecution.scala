@@ -3,11 +3,9 @@ package net.kurobako.gemstone.isa.ptx.v9_3
 import Program.{Opcode, RegisterName}
 import VMIR.Pc
 
-import net.kurobako.gemstone.NoNul
+import net.kurobako.gemstone.NonEmptyString
+import net.kurobako.gemstone.PositiveLong
 import net.kurobako.gemstone.vm.Fault
-
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
 
 private[v9_3] object VMExecution {
   enum WaitScope {
@@ -26,8 +24,8 @@ private[v9_3] object VMExecution {
     case InvalidState(detail: String)
     case UndefinedRegister(name: RegisterName, pc: Pc, lane: Int)
     case Memory(detail: String)
-    case ArchitecturalTrap(isa: String :| (MinLength[1] & NoNul), code: Long, pc: Pc)
-    case BudgetExceeded(limit: Long :| Positive)
+    case ArchitecturalTrap(isa: NonEmptyString, code: Long, pc: Pc)
+    case BudgetExceeded(limit: PositiveLong)
     case Cancelled
     case Deadlock(detail: String)
 
@@ -35,9 +33,9 @@ private[v9_3] object VMExecution {
       case Unsupported(opcode, detail)       => s"unsupported instruction $opcode: $detail"
       case InvalidProgram(detail)            => s"invalid program: $detail"
       case InvalidState(detail)              => s"invalid execution state: $detail"
-      case UndefinedRegister(name, pc, lane) => s"lane $lane: undefined register $name at pc ${pc.value}"
+      case UndefinedRegister(name, pc, lane) => s"lane $lane: undefined register $name at pc ${pc.raw}"
       case Memory(detail)                    => detail
-      case ArchitecturalTrap(isa, code, pc)  => s"$isa trap $code at pc ${pc.value}"
+      case ArchitecturalTrap(isa, code, pc)  => s"$isa trap $code at pc ${pc.raw}"
       case BudgetExceeded(limit)             => s"instruction budget of $limit was exhausted"
       case Cancelled                         => "execution was cancelled"
       case Deadlock(detail)                  => s"execution deadlocked: $detail"

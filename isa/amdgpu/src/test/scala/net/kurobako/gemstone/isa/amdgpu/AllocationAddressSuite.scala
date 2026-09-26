@@ -2,9 +2,7 @@ package net.kurobako.gemstone.isa.amdgpu
 
 import CodeObject.*
 
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
-import net.kurobako.gemstone.Vec
+import net.kurobako.gemstone.{NonNegativeInt, NonNegativeLong, Vec}
 import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.Dimensions
@@ -27,21 +25,24 @@ final class AllocationAddressSuite extends munit.FunSuite with CodeObjectTestSup
     val storage = Map(env -> Array.ofDim[Byte](32), nested -> Array.ofDim[Byte](16), output -> Array.ofDim[Byte](16))
     override protected def regionSizes: Iterable[(MemoryRegion, Long)]       = storage.view.mapValues(_.length.toLong)
     override protected def regionAddress(region: MemoryRegion): GuestAddress = nativeAddresses(region)
-    override def read(id: MemoryRegion, offset: Long :| Positive0, size: Int :| Positive0) =
-      if (!storage.contains(id) || offset > storage(id).length - size)
+    override def read(id: MemoryRegion, offset: NonNegativeLong, size: NonNegativeInt) =
+      if (!storage.contains(id) || offset.raw > storage(id).length - size.raw)
         Left(Fault.InvalidTask("test memory bounds"))
-      else Right(Vec.from(storage(id).slice(offset.toInt, offset.toInt + size)))
-    override def write(id: MemoryRegion, offset: Long :| Positive0, bytes: Vec[Byte]) =
-      if (!storage.contains(id) || offset > storage(id).length - bytes.size)
+      else Right(Vec.from(storage(id).slice(offset.raw.toInt, offset.raw.toInt + size.raw)))
+    override def write(id: MemoryRegion, offset: NonNegativeLong, bytes: Vec[Byte]) =
+      if (!storage.contains(id) || offset.raw > storage(id).length - bytes.size)
         Left(Fault.InvalidTask("test memory bounds"))
-      else { val _ = bytes.copyToArray(storage(id), offset.toInt, bytes.size); Right(()) }
+      else { val _ = bytes.copyToArray(storage(id), offset.raw.toInt, bytes.size); Right(()) }
   }
   private val kernel   = CodeObjectKernel("kernel", Target("gfx900"), 16, 0, 0, 0x80, 0x08, code)
   private val dispatch = KernelTask.validated(
     KernelName("kernel"),
     Dimensions.One,
     Dimensions.One,
-    Vec(KernelTask.Argument.Memory(env, 0), KernelTask.Argument.Memory(output, 0))
+    Vec(
+      KernelTask.Argument.Memory(env, NonNegativeLong(0L)),
+      KernelTask.Argument.Memory(output, NonNegativeLong(0L))
+    )
   ).toOption.get
   private def run(memory: Memory, value: CodeObjectKernel = kernel) =
     executeKernel(

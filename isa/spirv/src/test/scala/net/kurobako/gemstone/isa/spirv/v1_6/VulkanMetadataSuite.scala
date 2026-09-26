@@ -1,10 +1,7 @@
 package net.kurobako.gemstone.isa.spirv.v1_6
 
-import net.kurobako.gemstone.Vec
+import net.kurobako.gemstone.{NonNegativeInt, PositiveInt, Vec}
 import net.kurobako.gemstone.isa.{KernelMetadata, KernelName}
-
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
 
 final class VulkanMetadataSuite extends munit.FunSuite with ExecutionTestSupport {
   private def function(entry: Operand): Vec[Instruction] =
@@ -31,7 +28,10 @@ final class VulkanMetadataSuite extends munit.FunSuite with ExecutionTestSupport
         function(entry),
       Endianness.Little
     )
-    assertEquals(metadata(module, "main").requiredWorkGroupSize, Some(KernelMetadata.WorkGroupSize(8, 2, 1)))
+    assertEquals(
+      metadata(module, "main").requiredWorkGroupSize,
+      Some(KernelMetadata.WorkGroupSize(PositiveInt(8), PositiveInt(2), PositiveInt(1)))
+    )
   }
 
   test("required work-group size comes from LocalSizeId constants") {
@@ -48,7 +48,10 @@ final class VulkanMetadataSuite extends munit.FunSuite with ExecutionTestSupport
       ) ++ function(entry),
       Endianness.Little
     )
-    assertEquals(metadata(module, "main").requiredWorkGroupSize, Some(KernelMetadata.WorkGroupSize(4, 3, 2)))
+    assertEquals(
+      metadata(module, "main").requiredWorkGroupSize,
+      Some(KernelMetadata.WorkGroupSize(PositiveInt(4), PositiveInt(3), PositiveInt(2)))
+    )
   }
 
   test("required work-group size comes from the WorkgroupSize builtin") {
@@ -71,7 +74,10 @@ final class VulkanMetadataSuite extends munit.FunSuite with ExecutionTestSupport
       ) ++ function(entry),
       Endianness.Little
     )
-    assertEquals(metadata(module, "main").requiredWorkGroupSize, Some(KernelMetadata.WorkGroupSize(4, 3, 2)))
+    assertEquals(
+      metadata(module, "main").requiredWorkGroupSize,
+      Some(KernelMetadata.WorkGroupSize(PositiveInt(4), PositiveInt(3), PositiveInt(2)))
+    )
   }
 
   test("descriptor bindings are scoped to the selected entry point") {
@@ -91,7 +97,7 @@ final class VulkanMetadataSuite extends munit.FunSuite with ExecutionTestSupport
       ) ++ function(first) ++ function(second),
       Endianness.Little
     )
-    assertEquals(metadata(module, "first").bindingIndices, Vec(3))
-    assertEquals(metadata(module, "second").bindingIndices, Vec(5))
+    assertEquals(metadata(module, "first").bindingIndices, Vec(NonNegativeInt(3)))
+    assertEquals(metadata(module, "second").bindingIndices, Vec(NonNegativeInt(5)))
   }
 }

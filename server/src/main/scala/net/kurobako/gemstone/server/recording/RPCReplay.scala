@@ -1,15 +1,12 @@
 package net.kurobako.gemstone.server.recording
 
-import net.kurobako.gemstone.PlatformTime
+import net.kurobako.gemstone.{NonNegativeInt, NonNegativeLong, PlatformTime, PositiveInt}
 import net.kurobako.gemstone.rpc.ExecutionRPC
 import net.kurobako.gemstone.rpc.ExecutionProtocol.CompletionStatus
 import net.kurobako.gemstone.rpc.ExecutionRPC.Operation
 import net.kurobako.gemstone.rpc.Wire
 import net.kurobako.gemstone.server.transport.ServerControl
 import net.kurobako.gemstone.server.transport.Transport.*
-
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
 
 import java.io.{DataInputStream, DataOutputStream, IOException}
 import java.net.{InetAddress, InetSocketAddress, Socket}
@@ -26,21 +23,21 @@ object RPCReplay {
   final case class Options(
       archive: Path,
       protocolIdentity: RPCJournal.ProtocolIdentity,
-      timeoutMillis: Int :| Positive = 300000,
+      timeoutMillis: PositiveInt = PositiveInt(300000),
       limits: RPCJournal.Limits = RPCJournal.Limits()
   )
   final case class Report(
-      events: Int :| Positive0,
-      requests: Int :| Positive0,
-      extraCompletionPolls: Long :| Positive0
+      events: NonNegativeInt,
+      requests: NonNegativeInt,
+      extraCompletionPolls: NonNegativeLong
   )
 
-  private def connect(endpoint: Target, timeoutMillis: Int :| Positive): ReplayConnection = {
+  private def connect(endpoint: Target, timeoutMillis: PositiveInt): ReplayConnection = {
     val socket = Socket()
     // Ownership transfers only after the connection and stream wrappers are established.
     try {
-      socket.connect(InetSocketAddress(InetAddress.getLoopbackAddress, endpoint.port.value), timeoutMillis)
-      socket.setSoTimeout(timeoutMillis)
+      socket.connect(InetSocketAddress(InetAddress.getLoopbackAddress, endpoint.port.raw), timeoutMillis.raw)
+      socket.setSoTimeout(timeoutMillis.raw)
       ReplayConnection(socket, DataInputStream(socket.getInputStream), DataOutputStream(socket.getOutputStream))
     } catch {
       case error: Exception =>
@@ -88,7 +85,7 @@ object RPCReplay {
     @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
     private var failed         = false
     private def report: Report =
-      Report(cursor.refineUnsafe[Positive0], requests.refineUnsafe[Positive0], polls.refineUnsafe[Positive0])
+      Report(NonNegativeInt.unsafe(cursor), NonNegativeInt.unsafe(requests), NonNegativeLong.unsafe(polls))
 
     private def assignedClient(client: RPCJournal.RecordedClientId): ClientId = clients.get(client) match {
       case Some(assigned) => assigned
@@ -99,14 +96,14 @@ object RPCReplay {
     }
     private def identified(frame: Array[Byte], client: RPCJournal.RecordedClientId): Array[Byte] = {
       val result = frame.clone()
-      ByteBuffer.wrap(result).putLong(ExecutionRPC.RequestClientOffset, assignedClient(client).value)
+      ByteBuffer.wrap(result).putLong(ExecutionRPC.RequestClientOffset.raw, assignedClient(client).raw)
       result
     }
     private def receive(active: Active, kind: RPCJournal.Kind): Array[Byte] = {
       val input       = active.wire.input
       val magic       = input.readInt()
       val fingerprint = input.readLong()
-      val prefix      = java.nio.ByteBuffer.allocate(ExecutionRPC.ResponseHeaderBytes)
+      val prefix      = java.nio.ByteBuffer.allocate(ExecutionRPC.ResponseHeaderBytes.raw)
       prefix.putInt(magic); prefix.putLong(fingerprint)
       val payloadBytes = if (magic == ExecutionRPC.ResponseMagic) {
         prefix.putInt(input.readInt())
@@ -114,18 +111,18 @@ object RPCReplay {
         prefix.putInt(payload)
         payload
       } else throw IOException(f"RPC replay: unexpected response magic 0x$magic%08x")
-      if (payloadBytes < 0 || payloadBytes > options.limits.maxFrameBytes - ExecutionRPC.ResponseHeaderBytes)
+      if (payloadBytes < 0 || payloadBytes > options.limits.maxFrameBytes.raw - ExecutionRPC.ResponseHeaderBytes.raw)
         throw IOException("RPC replay: response exceeds frame bounds")
-      val size  = payloadBytes.refineUnsafe[Positive0]
-      val frame = Array.ofDim[Byte](ExecutionRPC.ResponseHeaderBytes + size)
-      Array.copy(prefix.array(), 0, frame, 0, ExecutionRPC.ResponseHeaderBytes)
-      input.readFully(frame, ExecutionRPC.ResponseHeaderBytes, size)
+      val size  = NonNegativeInt.unsafe(payloadBytes)
+      val frame = Array.ofDim[Byte]((ExecutionRPC.ResponseHeaderBytes + size).raw)
+      Array.copy(prefix.array(), 0, frame, 0, ExecutionRPC.ResponseHeaderBytes.raw)
+      input.readFully(frame, ExecutionRPC.ResponseHeaderBytes.raw, size.raw)
       RPCJournal.Frames.validate(kind, frame, options.limits.maxFrameBytes, normalized = false)
       frame
     }
     private def isQuery(frame: Array[Byte]): Boolean = {
-      val operationId = RPCJournal.Frames.long(frame, ExecutionRPC.RequestOperationOffset)
-      val payload     = java.util.Arrays.copyOfRange(frame, ExecutionRPC.RequestHeaderBytes, frame.length)
+      val operationId = RPCJournal.Frames.long(frame, ExecutionRPC.RequestOperationOffset.raw)
+      val payload     = java.util.Arrays.copyOfRange(frame, ExecutionRPC.RequestHeaderBytes.raw, frame.length)
       Wire.Protocol[Operation].decodePayload(operationId, payload, ExecutionRPC.Limits).exists { decoded =>
         decoded.value match {
           case Operation.QueryCompletion(_) => true
@@ -135,11 +132,11 @@ object RPCReplay {
     }
     private def completion(frame: Array[Byte]): Option[CompletionStatus] =
       Option.when(
-        frame.length >= ExecutionRPC.ResponseHeaderBytes &&
+        frame.length >= ExecutionRPC.ResponseHeaderBytes.raw &&
           RPCJournal.Frames.magic(frame) == ExecutionRPC.ResponseMagic &&
-          RPCJournal.Frames.integer(frame, ExecutionRPC.ResponseStatusOffset) == 0
+          RPCJournal.Frames.integer(frame, ExecutionRPC.ResponseStatusOffset.raw) == 0
       ) {
-        val payload = java.util.Arrays.copyOfRange(frame, ExecutionRPC.ResponseHeaderBytes, frame.length)
+        val payload = java.util.Arrays.copyOfRange(frame, ExecutionRPC.ResponseHeaderBytes.raw, frame.length)
         summon[Wire.Codec[CompletionStatus]].decode(payload, ExecutionRPC.Limits).toOption
       }.flatten
     private def compare(event: RPCJournal.Event, expected: Array[Byte], active: Active): Unit = {
@@ -147,7 +144,7 @@ object RPCReplay {
       var actual = receive(active, event.kind)
       if (event.kind == RPCJournal.Kind.Response && isQuery(active.request)) {
         if (!completion(expected).contains(CompletionStatus.Pending)) {
-          val deadline = PlatformTime.monotonicNanos + options.timeoutMillis.toLong * 1000000L
+          val deadline = PlatformTime.monotonicNanos + options.timeoutMillis.raw.toLong * 1000000L
           while (completion(actual).contains(CompletionStatus.Pending)) {
             if (PlatformTime.monotonicNanos >= deadline)
               throw IOException(s"RPC replay: completion remained pending at event ${event.sequence}")
@@ -228,7 +225,7 @@ object RPCReplay {
     try {
       if (!reader.summary.replayable)
         throw IOException(
-          s"RPC replay: archive is not replayable: ${reader.summary.reason.map(_.value).getOrElse("unknown reason")}"
+          s"RPC replay: archive is not replayable: ${reader.summary.reason.map(_.raw).getOrElse("unknown reason")}"
         )
       if (reader.summary.header.protocolIdentity != options.protocolIdentity)
         throw IOException("RPC replay: execution protocol identity differs")

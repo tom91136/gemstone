@@ -1,5 +1,7 @@
 package net.kurobako.gemstone.server.execution
 
+import net.kurobako.gemstone.*
+
 import net.kurobako.gemstone.Vec
 import net.kurobako.gemstone.isa.KernelMetadata
 import net.kurobako.gemstone.isa.KernelName
@@ -7,9 +9,6 @@ import net.kurobako.gemstone.isa.LinkageName
 import net.kurobako.gemstone.isa.KernelSymbol
 import net.kurobako.gemstone.isa.ProgramSymbols
 import net.kurobako.gemstone.vm.*
-
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
 
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
@@ -21,13 +20,13 @@ final class RuntimeBoundarySuite extends munit.FunSuite {
   private object EmptyMemory extends Memory {
     override def read(
         region: MemoryRegion,
-        offset: Long :| Positive0,
-        size: Int :| Positive0
+        offset: NonNegativeLong,
+        size: NonNegativeInt
     ): Either[Fault, Vec[Byte]] = Left(Fault.Memory("unexpected read"))
 
     override def write(
         region: MemoryRegion,
-        offset: Long :| Positive0,
+        offset: NonNegativeLong,
         bytes: Vec[Byte]
     ): Either[Fault, Unit] = Left(Fault.Memory("unexpected write"))
   }
@@ -49,8 +48,12 @@ final class RuntimeBoundarySuite extends munit.FunSuite {
       Right(ProgramSymbols(Vec(KernelSymbol(Name, LinkageName("main"))), Vec.empty))
 
     override def kernel(name: KernelName): Either[RuntimeBackend.Error, KernelMetadata] =
-      if (name == Name) KernelMetadata.validated(0, 0, Vec.empty).left.map(RuntimeBackend.Error.Invalid(_))
-      else Left(RuntimeBackend.Error.NotFound(s"unknown kernel: ${name.value}"))
+      if (name == Name) KernelMetadata.validated(
+        NonNegativeInt(0),
+        NonNegativeInt(0),
+        Vec.empty
+      ).left.map(RuntimeBackend.Error.Invalid(_))
+      else Left(RuntimeBackend.Error.NotFound(s"unknown kernel: ${name.raw}"))
 
     override val globals: Option[RuntimeBackend.Program.Globals] = None
 
@@ -87,7 +90,7 @@ final class RuntimeBoundarySuite extends munit.FunSuite {
     ).toOption.get
     val control = TaskControl.forScheduler(observation = token)
 
-    assertEquals(program.execute(task, EmptyMemory, control), Right(Result(1L)))
+    assertEquals(program.execute(task, EmptyMemory, control), Right(Result(NonNegativeLong(1L))))
     assertEquals(observed.get(), Vec(Event.Print("test", Vec.empty)))
     program.close()
     assert(program.execute(task, EmptyMemory, control).isLeft)

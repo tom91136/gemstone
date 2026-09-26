@@ -6,9 +6,7 @@ object GeneratedHeader {
   /** Repository command that regenerates every checked-in generated artifact. */
   val Regenerate = "sbt codegen"
 
-  def scala(subject: String, assume: Boolean = false): String =
-    line("//", subject) +
-      (if (assume) "// scalafix:off GemstoneNoAssume; values were validated by the generator\n" else "")
+  def scala(subject: String): String = line("//", subject)
 
   def cpp(subject: String): String = s"/* Generated $subject. Regenerate with: $Regenerate */\n"
 

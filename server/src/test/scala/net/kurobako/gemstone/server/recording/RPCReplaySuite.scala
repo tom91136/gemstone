@@ -1,11 +1,10 @@
 package net.kurobako.gemstone.server.recording
 
+import net.kurobako.gemstone.*
+
 import net.kurobako.gemstone.rpc.ExecutionRPC
 import net.kurobako.gemstone.server.transport.ServerControl
 import net.kurobako.gemstone.server.transport.Transport.*
-
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
 
 import java.io.{DataInputStream, DataOutputStream, EOFException, IOException}
 import java.net.{InetAddress, ServerSocket, Socket, SocketException}
@@ -66,13 +65,13 @@ final class RPCReplaySuite extends munit.FunSuite {
           output.flush(); active = false
         } else {
           assertEquals(magic, ExecutionRPC.RequestMagic)
-          val header = ExecutionRPC.RequestHeaderBytes
+          val header = ExecutionRPC.RequestHeaderBytes.raw
           val prefix = Array.ofDim[Byte](header); ByteBuffer.wrap(prefix).putInt(magic)
           input.readFully(prefix, 4, header - 4)
-          val extra = RPCJournal.Frames.integer(prefix, ExecutionRPC.RequestPayloadSizeOffset)
+          val extra = RPCJournal.Frames.integer(prefix, ExecutionRPC.RequestPayloadSizeOffset.raw)
           assert(extra >= 0 && extra <= 4096)
           val frame  = java.util.Arrays.copyOf(prefix, header + extra); input.readFully(frame, header, extra)
-          val client = ByteBuffer.wrap(frame).getLong(ExecutionRPC.RequestClientOffset)
+          val client = ByteBuffer.wrap(frame).getLong(ExecutionRPC.RequestClientOffset.raw)
           assert(client != 23L); clients.add(client)
           handle(frame, input, output); output.flush()
         }
@@ -99,14 +98,19 @@ final class RPCReplaySuite extends munit.FunSuite {
       val arrivals = CountDownLatch(2)
       val peer     = Peer { (request, _, out) =>
         assertEquals(
-          RPCJournal.Frames.normalized(RPCJournal.Kind.Request, request, 4096).toSeq,
-          RPCJournal.Frames.normalized(RPCJournal.Kind.Request, execution(session = 77), 4096).toSeq
+          RPCJournal.Frames.normalized(RPCJournal.Kind.Request, request, RPCJournal.FrameByteSize(4096)).toSeq,
+          RPCJournal.Frames.normalized(
+            RPCJournal.Kind.Request,
+            execution(session = 77),
+            RPCJournal.FrameByteSize(4096)
+          ).toSeq
         )
         arrivals.countDown(); val arrived = arrivals.await(2, TimeUnit.SECONDS); assert(arrived); out.write(response())
       }
       Using.resource(peer) { peer =>
-        val result = RPCReplay.run(RPCReplay.Options(file, schema, 3000), _ => peer.endpoint)
-        assertEquals(result.requests, 2); assertEquals(peer.registered.get(), 2); assertEquals(peer.clients.size(), 2)
+        val result = RPCReplay.run(RPCReplay.Options(file, schema, PositiveInt(3000)), _ => peer.endpoint)
+        assertEquals(result.requests.raw, 2); assertEquals(peer.registered.get(), 2);
+        assertEquals(peer.clients.size(), 2)
         peer.verify()
       }
     }
@@ -121,8 +125,8 @@ final class RPCReplaySuite extends munit.FunSuite {
       val calls = AtomicInteger()
       val peer  = Peer((_, _, out) => out.write(completion(if (early || calls.incrementAndGet() >= 4) 2 else 1)))
       Using.resource(peer) { peer =>
-        val result = RPCReplay.run(RPCReplay.Options(file, schema, 3000), _ => peer.endpoint)
-        assertEquals(result.extraCompletionPolls, if (early) 0L else 2L)
+        val result = RPCReplay.run(RPCReplay.Options(file, schema, PositiveInt(3000)), _ => peer.endpoint)
+        assertEquals(result.extraCompletionPolls.raw, if (early) 0L else 2L)
         peer.verify()
       }
     }
@@ -137,7 +141,10 @@ final class RPCReplaySuite extends munit.FunSuite {
       }
       val peer = Peer((_, _, out) => out.write(if (failed) completion(0) else completion(1)))
       Using.resource(peer) { peer =>
-        val error = intercept[IOException](RPCReplay.run(RPCReplay.Options(file, schema, 1000), _ => peer.endpoint))
+        val error = intercept[IOException](RPCReplay.run(
+          RPCReplay.Options(file, schema, PositiveInt(1000)),
+          _ => peer.endpoint
+        ))
         assert(
           error.getMessage.contains(if (failed) "frame differs" else "completion remained pending"),
           error.getMessage
@@ -155,8 +162,8 @@ final class RPCReplaySuite extends munit.FunSuite {
       val calls = AtomicInteger()
       val peer  = Peer((_, _, out) => out.write(if (calls.incrementAndGet() < 3) completion(1) else completion(0)))
       Using.resource(peer) { peer =>
-        val report = RPCReplay.run(RPCReplay.Options(file, schema, 3000), _ => peer.endpoint)
-        assertEquals(report.extraCompletionPolls, 2L)
+        val report = RPCReplay.run(RPCReplay.Options(file, schema, PositiveInt(3000)), _ => peer.endpoint)
+        assertEquals(report.extraCompletionPolls.raw, 2L)
         peer.verify()
       }
     }
@@ -171,7 +178,7 @@ final class RPCReplaySuite extends munit.FunSuite {
       val peer   = Peer((_, _, out) => out.write(response(1)))
       Using.resource(peer) { peer =>
         val e = intercept[IOException](RPCReplay.run(
-          RPCReplay.Options(file, schema, 3000),
+          RPCReplay.Options(file, schema, PositiveInt(3000)),
           _ =>
             RPCReplay.Target(peer.endpoint.port, () => { closed.set(true); peer.close() })
         ))

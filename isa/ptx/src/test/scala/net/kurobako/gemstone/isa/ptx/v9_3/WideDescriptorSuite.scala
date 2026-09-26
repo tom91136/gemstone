@@ -1,11 +1,10 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
+import net.kurobako.gemstone.{NonEmptyString, NonEmptyVec, NonNegativeInt, NonNegativeLong, PositiveInt, PositiveLong}
+
 import Program.*
 
 import VMIR.*
-
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
 
 import net.kurobako.gemstone.Vec
 import net.kurobako.gemstone.memory.*
@@ -18,22 +17,25 @@ final class WideDescriptorSuite extends munit.FunSuite {
   private val values = (0 until 4096).map { index =>
     val x = (index * 17 + 11) % 23 - 11; x * x
   }
-  private val first                     = values.take(896).sum.toDouble
-  private val partial                   = values.slice(896, 1792).sum.toDouble
-  private val inclusive                 = first + partial
-  private val current                   = values.slice(1792, 2688).sum.toDouble
-  private val expected                  = values.take(2688).sum.toDouble
-  private val geometry                  = LaunchGeometry.forLaunch(Dimensions.One, Dimensions(3, 1, 1)).toOption.get
-  private def bits(value: Double): Long = java.lang.Double.doubleToRawLongBits(value)
+  private val first     = values.take(896).sum.toDouble
+  private val partial   = values.slice(896, 1792).sum.toDouble
+  private val inclusive = first + partial
+  private val current   = values.slice(1792, 2688).sum.toDouble
+  private val expected  = values.take(2688).sum.toDouble
+  private val geometry  = LaunchGeometry.forLaunch(
+    Dimensions.One,
+    Dimensions(PositiveInt(3), PositiveInt(1), PositiveInt(1))
+  ).toOption.get
+  private def bits(value: Double): Long      = java.lang.Double.doubleToRawLongBits(value)
   private def literal(value: Double): String = "0d" + java.lang.Long.toHexString(bits(value))
 
   // Interleaving controls and observations are confined to this final test fixture.
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private final class DescriptorMemory extends AddressMemory {
-    val backing                                  = ArrayCheckedMemory.allocate(64, GuestAddress(0x10000000000L))
-    val base                                     = backing.allocation.start
-    var transition                               = false
-    val observed                                 = mutable.ArrayBuffer.empty[(Long, Double)]
+    val backing    = ArrayCheckedMemory.allocate(NonNegativeInt(64), GuestAddress(0x10000000000L))
+    val base       = backing.allocation.start
+    var transition = false
+    val observed   = mutable.ArrayBuffer.empty[(Long, Double)]
     def set(status: Long, payload: Double): Unit = {
       backing.writeLittleEndian(base, status, MemoryValueByteWidth.Qword).toOption.get
       backing.writeLittleEndian(base.offset(8), bits(payload), MemoryValueByteWidth.Qword).toOption.get
@@ -62,15 +64,15 @@ final class WideDescriptorSuite extends munit.FunSuite {
       observe()
       result
     }
-    override def readBytes(address: GuestAddress, size: Int :| Positive0): Either[MemoryError, Vec[Byte]] = {
+    override def readBytes(address: GuestAddress, size: NonNegativeInt): Either[MemoryError, Vec[Byte]] = {
       val result = backing.validateRange(address, size).map(_ =>
-        Vec.from((0 until size).map(index => backing.readInt8(address.offset(index)).toOption.get))
+        Vec.from((0 until size.raw).map(index => backing.readInt8(address.offset(index.toLong)).toOption.get))
       )
       afterRead(address)
       result
     }
     override def writeBytes(address: GuestAddress, bytes: Vec[Byte]): Either[MemoryError, Unit] = {
-      val result = backing.validateRange(address, bytes.size.refineUnsafe[Positive0]).map { _ =>
+      val result = backing.validateRange(address, NonNegativeInt.unsafe(bytes.size)).map { _ =>
         bytes.zipWithIndex.foreach { case (byte, index) => backing.writeInt8(address.offset(index), byte).toOption.get }
       }
       observe()
@@ -108,7 +110,7 @@ final class WideDescriptorSuite extends munit.FunSuite {
     val result = VMInterpreter.execute(
       kernel,
       geometry,
-      Map(ParameterName("memory") -> Argument(memory.base.value)),
+      Map(ParameterName("memory") -> Argument.fromLong(memory.base.raw)),
       memory
     )
     assert(result.isRight, result.toString)
@@ -139,7 +141,7 @@ final class WideDescriptorSuite extends munit.FunSuite {
     val result = VMInterpreter.execute(
       kernel,
       geometry,
-      Map(ParameterName("memory") -> Argument(memory.base.value)),
+      Map(ParameterName("memory") -> Argument.fromLong(memory.base.raw)),
       memory
     )
     assert(result.isRight, result.toString)

@@ -8,8 +8,7 @@ import net.kurobako.gemstone.Vec
 import net.kurobako.gemstone.binary.ByteRange
 import net.kurobako.gemstone.binary.LittleEndian
 import net.kurobako.gemstone.binary.ScalarByteWidth
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
+import net.kurobako.gemstone.{NonEmptyVec, NonNegativeInt, NonNegativeLong, PositiveInt, PositiveLong}
 
 import java.util.concurrent.atomic.AtomicReference
 final class ExecutionLayoutSuite extends munit.FunSuite with ExecutionTestSupport {
@@ -66,10 +65,10 @@ final class ExecutionLayoutSuite extends munit.FunSuite with ExecutionTestSuppor
     val dispatch   = KernelTask
       .validated(
         KernelName("fill"),
-        Dimensions(4, 1, 1),
-        Dimensions(2, 1, 1),
+        Dimensions(PositiveInt(4), PositiveInt(1), PositiveInt(1)),
+        Dimensions(PositiveInt(2), PositiveInt(1), PositiveInt(1)),
         Vec(
-          KernelTask.Argument.Memory(allocation, 4L),
+          KernelTask.Argument.Memory(allocation, NonNegativeLong(4L)),
           KernelTask.Argument.Scalar(LittleEndian.toVec(0x12345678L, ScalarByteWidth(4)))
         )
       )
@@ -77,21 +76,25 @@ final class ExecutionLayoutSuite extends munit.FunSuite with ExecutionTestSuppor
       .get
 
     val prepared = loadUnchecked(module).toOption.get
-    val limited  = TaskControl.forScheduler(TaskLimits(maxInstructions = 1L, quantum = 1))
+    val limited  =
+      TaskControl.forScheduler(TaskLimits(maxInstructions = PositiveLong(1L), quantum = PositiveInt(1)))
     assert(
       executeLoaded(prepared, dispatch, memory, limited).left.exists(_.message.contains("instruction budget of 1"))
     )
     assertEquals(executeUnchecked(module, dispatch, memory), Right(()))
     assertEquals(memory.bytes.take(4), Vec.fill(4)(0.toByte))
-    assertEquals(memory.bytes.slice(4, 36), Vec.fill(8)(LittleEndian.toVec(0x12345678L, ScalarByteWidth(4))).flatten)
+    assertEquals(
+      memory.bytes.slice(4, 36),
+      Vec.fill(8)(LittleEndian.toVec(0x12345678L, ScalarByteWidth(4))).flatten
+    )
     assertEquals(memory.bytes.drop(36), Vec.fill(4)(0.toByte))
 
     val parallelCalls = java.util.concurrent.atomic.AtomicInteger(0)
     final class RecordingParallelism extends Scheduler {
-      override val parallelism                                                                     = 4
-      override def shouldParallel(tasks: Long :| Positive0, workItems: Long :| Positive0): Boolean = tasks > 1L
-      override def parallelFor(tasks: Long :| Positive0)(
-          task: (Long :| Positive0) => Either[Fault, Unit]
+      override val parallelism                                                                 = PositiveInt(4)
+      override def shouldParallel(tasks: NonNegativeLong, workItems: NonNegativeLong): Boolean = tasks.raw > 1L
+      override def parallelFor(tasks: NonNegativeLong)(
+          task: NonNegativeLong => Either[Fault, Unit]
       ) = {
         parallelCalls.incrementAndGet()
         Scheduler.Sequential.parallelFor(tasks)(task)
@@ -149,10 +152,10 @@ final class ExecutionLayoutSuite extends munit.FunSuite with ExecutionTestSuppor
     val workgroupDispatch   = KernelTask
       .validated(
         KernelName("fill"),
-        Dimensions(4, 1, 1),
-        Dimensions(2, 1, 1),
+        Dimensions(PositiveInt(4), PositiveInt(1), PositiveInt(1)),
+        Dimensions(PositiveInt(2), PositiveInt(1), PositiveInt(1)),
         Vec(
-          KernelTask.Argument.Memory(workgroupAllocation, 4L),
+          KernelTask.Argument.Memory(workgroupAllocation, NonNegativeLong(4L)),
           KernelTask.Argument.Scalar(LittleEndian.toVec(0x12345678L, ScalarByteWidth(4)))
         )
       )
@@ -229,14 +232,15 @@ final class ExecutionLayoutSuite extends munit.FunSuite with ExecutionTestSuppor
       Instruction.Return(),
       Instruction.FunctionEnd()
     )
-    val module     = Module(Header(ISA.version, Word(0), Word(19), Word(0)), instructions, Endianness.Little)
+    val module =
+      Module(Header(ISA.version, Word(0), Word(19), Word(0)), instructions, Endianness.Little)
     val allocation = MemoryRegion(31L)
     val dispatch   = KernelTask
       .validated(
         KernelName("subgroups"),
-        Dimensions(64, 1, 1),
+        Dimensions(PositiveInt(64), PositiveInt(1), PositiveInt(1)),
         Dimensions.One,
-        Vec(KernelTask.Argument.Memory(allocation, 0L))
+        Vec(KernelTask.Argument.Memory(allocation, NonNegativeLong(0L)))
       )
       .toOption
       .get
@@ -276,7 +280,10 @@ final class ExecutionLayoutSuite extends munit.FunSuite with ExecutionTestSuppor
     )
     val numEnqueuedSubgroupsMemory = ArrayMemory(allocation, 256)
     assertEquals(executeUnchecked(numEnqueuedSubgroupsModule, dispatch, numEnqueuedSubgroupsMemory), Right(()))
-    assertEquals(numEnqueuedSubgroupsMemory.bytes, Vec.fill(64)(LittleEndian.toVec(2L, ScalarByteWidth(4))).flatten)
+    assertEquals(
+      numEnqueuedSubgroupsMemory.bytes,
+      Vec.fill(64)(LittleEndian.toVec(2L, ScalarByteWidth(4))).flatten
+    )
 
     val undefModule = module.copy(instructions =
       instructions.updated(22, Instruction.Store(destination, undefValue, None))
@@ -338,7 +345,7 @@ final class ExecutionLayoutSuite extends munit.FunSuite with ExecutionTestSuppor
         KernelName("global"),
         Dimensions.One,
         Dimensions.One,
-        Vec(KernelTask.Argument.Memory(allocation, 0L))
+        Vec(KernelTask.Argument.Memory(allocation, NonNegativeLong(0L)))
       )
       .toOption
       .get
@@ -390,8 +397,8 @@ final class ExecutionLayoutSuite extends munit.FunSuite with ExecutionTestSuppor
       .validated(
         KernelName("workgroup_lifetime"),
         Dimensions.One,
-        Dimensions(2, 1, 1),
-        Vec(KernelTask.Argument.Memory(allocation, 0L))
+        Dimensions(PositiveInt(2), PositiveInt(1), PositiveInt(1)),
+        Vec(KernelTask.Argument.Memory(allocation, NonNegativeLong(0L)))
       )
       .toOption
       .get
@@ -405,9 +412,9 @@ final class ExecutionLayoutSuite extends munit.FunSuite with ExecutionTestSuppor
     val privateDispatch = KernelTask
       .validated(
         KernelName("private_lifetime"),
-        Dimensions(2, 1, 1),
+        Dimensions(PositiveInt(2), PositiveInt(1), PositiveInt(1)),
         Dimensions.One,
-        Vec(KernelTask.Argument.Memory(allocation, 0L))
+        Vec(KernelTask.Argument.Memory(allocation, NonNegativeLong(0L)))
       )
       .toOption
       .get
@@ -471,7 +478,7 @@ final class ExecutionLayoutSuite extends munit.FunSuite with ExecutionTestSuppor
         KernelName("layout"),
         Dimensions.One,
         Dimensions.One,
-        Vec(KernelTask.Argument.Memory(allocation, 0L))
+        Vec(KernelTask.Argument.Memory(allocation, NonNegativeLong(0L)))
       )
       .toOption
       .get
@@ -479,8 +486,8 @@ final class ExecutionLayoutSuite extends munit.FunSuite with ExecutionTestSuppor
     assertEquals(executeUnchecked(module, dispatch, memory), Right(()))
     val expected        = Array.fill[Byte](96)(0)
     val expectedOffsets = Vec(
-      (0.refineUnsafe[Positive0], 16.refineUnsafe[Positive0], 32.refineUnsafe[Positive0]),
-      (48.refineUnsafe[Positive0], 64.refineUnsafe[Positive0], 80.refineUnsafe[Positive0])
+      (0, 16, 32),
+      (48, 64, 80)
     )
     for ((first, second, third) <- expectedOffsets) {
       LittleEndian.write(5L, expected, first, ScalarByteWidth(4))
@@ -549,13 +556,16 @@ final class ExecutionLayoutSuite extends munit.FunSuite with ExecutionTestSuppor
     )
     val allocation = MemoryRegion(122L)
     val memory     = ArrayMemory(allocation, 40)
-    assertEquals(memory.write(allocation, 12L, Vec(1.toByte)), Right(()))
+    assertEquals(memory.write(allocation, NonNegativeLong(12L), Vec(1.toByte)), Right(()))
     val dispatch = KernelTask
       .validated(
         KernelName("packed_stride"),
         Dimensions.One,
         Dimensions.One,
-        Vec(KernelTask.Argument.Memory(allocation, 0L), KernelTask.Argument.Memory(allocation, 32L))
+        Vec(
+          KernelTask.Argument.Memory(allocation, NonNegativeLong(0L)),
+          KernelTask.Argument.Memory(allocation, NonNegativeLong(32L))
+        )
       )
       .toOption
       .get
@@ -635,31 +645,38 @@ final class ExecutionLayoutSuite extends munit.FunSuite with ExecutionTestSuppor
     )
     for ((needle, output) <- allocationPairs) {
       final class Memory extends net.kurobako.gemstone.vm.Memory {
-        val storage = Map(needle -> LittleEndian.toArray(7L, ScalarByteWidth(4)), output -> Array.ofDim[Byte](16))
+        val storage =
+          Map(needle -> LittleEndian.toArray(7L, ScalarByteWidth(4)), output -> Array.ofDim[Byte](16))
         def read(
             id: MemoryRegion,
-            offset: Long :| Positive0,
-            size: Int :| Positive0
+            offset: NonNegativeLong,
+            size: NonNegativeInt
         ): Either[Fault, Vec[Byte]] =
-          if (offset > storage(id).length - size)
+          if (offset.raw > storage(id).length - size.raw)
             Left(Fault.InvalidTask("test read exceeds allocation"))
-          else Right(Vec.from(storage(id).slice(offset.toInt, offset.toInt + size)))
+          else Right(Vec.from(storage(id).slice(offset.raw.toInt, offset.raw.toInt + size.raw)))
         def write(
             id: MemoryRegion,
-            offset: Long :| Positive0,
+            offset: NonNegativeLong,
             bytes: Vec[Byte]
         ): Either[Fault, Unit] = {
-          val _ = bytes.copyToArray(storage(id), offset.toInt, bytes.size); Right(())
+          val _ = bytes.copyToArray(storage(id), offset.raw.toInt, bytes.size); Right(())
         }
       }
       val memory    = Memory()
-      val aggregate = LittleEndian.toVec(0x12345678L, ScalarByteWidth(8)) ++ LittleEndian.toVec(99L, ScalarByteWidth(8))
-      val dispatch  = KernelTask.validated(
+      val aggregate = LittleEndian.toVec(0x12345678L, ScalarByteWidth(8)) ++
+        LittleEndian.toVec(99L, ScalarByteWidth(8))
+      val dispatch = KernelTask.validated(
         KernelName("byval_bytes"),
         Dimensions.One,
         Dimensions.One,
-        Vec(KernelTask.Argument.Scalar(aggregate), KernelTask.Argument.Memory(output, 0)),
-        pointerRelocations = Vec(KernelTask.PointerRelocation(KernelTask.RelocationSource.Argument(0), 0L, needle, 0L))
+        Vec(KernelTask.Argument.Scalar(aggregate), KernelTask.Argument.Memory(output, NonNegativeLong(0L))),
+        pointerRelocations = Vec(KernelTask.PointerRelocation(
+          KernelTask.RelocationSource.Argument(NonNegativeInt(0)),
+          NonNegativeLong(0L),
+          needle,
+          NonNegativeLong(0L)
+        ))
       ).toOption.get
       assertEquals(executeUnchecked(module, dispatch, memory), Right(()))
       val decodedAggregate = LittleEndian.decode(memory.storage(output), 0, ScalarByteWidth(8))
@@ -714,7 +731,12 @@ final class ExecutionLayoutSuite extends munit.FunSuite with ExecutionTestSuppor
         Dimensions.One,
         Vec(KernelTask.Argument.Scalar(Vec.fill(8)(0.toByte))),
         pointerRelocations =
-          Vec(KernelTask.PointerRelocation(KernelTask.RelocationSource.Argument(0), 0L, allocation, 0L))
+          Vec(KernelTask.PointerRelocation(
+            KernelTask.RelocationSource.Argument(NonNegativeInt(0)),
+            NonNegativeLong(0L),
+            allocation,
+            NonNegativeLong(0L)
+          ))
       )
       .toOption
       .get

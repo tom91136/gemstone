@@ -1,8 +1,7 @@
 package net.kurobako.gemstone.isa.spirv.v1_6
 
 import net.kurobako.gemstone.Vec
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
+import net.kurobako.gemstone.{NonEmptyVec, NonNegativeInt, NonNegativeLong, PositiveInt, PositiveLong}
 
 final class InstructionSuite extends munit.FunSuite {
   test("every grammar opcode decodes to exactly one typed enum case") {
@@ -42,7 +41,8 @@ final class InstructionSuite extends munit.FunSuite {
   }
 
   test("a truncated Phi pair is a typed decode error") {
-    val raw = RawInstruction(Instruction.Definition.Phi.opcodeNumber, Vec(Word(1), Word(2), Word(3)))
+    val raw =
+      RawInstruction(Instruction.Definition.Phi.opcodeNumber, Vec(Word(1), Word(2), Word(3)))
     assertEquals(
       Instruction.decode(raw),
       Left(

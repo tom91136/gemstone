@@ -106,7 +106,7 @@ private[v9_3] final class VMState(
   def bindParameterBuffer(name: ParameterName, bytes: Array[Byte]): Unit = {
     val base = allocateParameterBuffer(bytes.length)
     Array.copy(bytes, 0, parameterBuffers(base), 0, bytes.length)
-    parameterAddresses(SymbolName(name.value)) = base
+    parameterAddresses(SymbolName(name.toNonEmptyString)) = base
   }
 
   def importParameterBuffers(buffers: Map[Long, Array[Byte]]): Unit =
@@ -133,7 +133,7 @@ private[v9_3] final class VMState(
   }
 
   def readParameterBuffer(address: Long, size: ScalarByteWidth): Option[Long] =
-    parameterBufferRange(address, size.value).map { case (bytes, offset) =>
+    parameterBufferRange(address, size.raw).map { case (bytes, offset) =>
       LittleEndian.decode(bytes, offset, size)
     }
 

@@ -6,10 +6,10 @@ import java.nio.file.Path
 import cats.syntax.all.*
 import com.monovore.decline.Command
 import com.monovore.decline.Opts
-import GenerateOfficialAPIManifest.CIdentifier.text
-import GenerateOfficialAPIManifest.CType.text
-import GenerateOfficialAPIManifest.EnumValue.text
-import GenerateOfficialAPIManifest.SurfaceName.text
+import GenerateOfficialAPIManifest.CIdentifier.raw
+import GenerateOfficialAPIManifest.CType.raw
+import GenerateOfficialAPIManifest.EnumValue.raw
+import GenerateOfficialAPIManifest.SurfaceName.raw
 import upickle.default.read
 
 /** Generates native ABI declarations and implementation checks. */
@@ -313,19 +313,19 @@ object GenerateNativeBindings {
       manifest: GenerateOfficialAPIManifest.Manifest
   ): Vector[GeneratedFile] = {
     val byName: Map[String, GenerateOfficialAPIManifest.Surface] =
-      manifest.surfaces.map(surface => surface.name.text -> surface).toMap
+      manifest.surfaces.map(surface => surface.name.raw -> surface).toMap
     val platformFiles: Vector[GeneratedFile] = platforms.flatMap { platform =>
       val functions = platform.surfaces.flatMap(name => byName.getOrElse(name, missingSurface(name)).functions)
-        .distinctBy(_.name).sortBy(_.name.text)
+        .distinctBy(_.name).sortBy(_.name.raw)
       val enumConstants = platform.surfaces.flatMap(name => byName.getOrElse(name, missingSurface(name)).enumConstants)
       val conflicts     = enumConstants.groupBy(_.name).collect {
         case (name, values) if values.map(_.value).distinct.size > 1 =>
-          s"${name.text}: ${values.map(_.value.text).distinct.mkString(" versus ")}"
+          s"${name.raw}: ${values.map(_.value.raw).distinct.mkString(" versus ")}"
       }
       if (conflicts.nonEmpty)
         throw IllegalStateException(s"${platform.name}: conflicting enum constants: ${conflicts.mkString("; ")}")
       val directory = output.resolve(platform.name)
-      val constants = enumConstants.distinctBy(_.name).sortBy(_.name.text)
+      val constants = enumConstants.distinctBy(_.name).sortBy(_.name.raw)
       val layout    = platform.layout.map { spec =>
         directory.resolve(s"gemstone_${platform.name}_layout.cpp") ->
           attributed(renderLayout(platform, spec), manifest)
@@ -363,9 +363,9 @@ object GenerateNativeBindings {
   ): String = {
     val guard        = s"GEMSTONE_${platform.name.toUpperCase(java.util.Locale.ROOT)}_API_H"
     val declarations = functions.map { function =>
-      val functionType = function.functionType.text
+      val functionType = function.functionType.raw
       val open         = functionType.indexOf('(')
-      val signature    = functionType.substring(0, open) + function.name.text + functionType.substring(open)
+      val signature    = functionType.substring(0, open) + function.name.raw + functionType.substring(open)
       s"extern $signature GEMSTONE_PUBLIC_API;"
     }.mkString("\n")
     s"""#ifndef $guard
@@ -394,8 +394,8 @@ object GenerateNativeBindings {
       constants: Vector[GenerateOfficialAPIManifest.EnumConstant]
   ): String = {
     val references = functions.map { function =>
-      val functionType = function.functionType.text
-      val functionName = function.name.text
+      val functionType = function.functionType.raw
+      val functionName = function.name.raw
       val open         = functionType.indexOf('(')
       val pointerType  = functionType.substring(0, open).trim + " (*)" + functionType.substring(open)
       s"using signature_$functionName = $pointerType;\n" +
@@ -405,7 +405,7 @@ object GenerateNativeBindings {
     // Generated literals mirror the pinned headers, so assert each one back against
     // the vendor enumerator to catch drift at compile time.
     val constantChecks = constants.map { constant =>
-      val name = constant.name.text
+      val name = constant.name.raw
       s"static_assert(static_cast<long long>(gemstone::$platform::api::$name) == static_cast<long long>($name));"
     }.mkString("\n")
     s"""#include "gemstone_${platform}_api.h"
@@ -451,7 +451,7 @@ object GenerateNativeBindings {
   ): String = {
     val guard  = s"GEMSTONE_${platform.toUpperCase(java.util.Locale.ROOT)}_CONSTANTS_HPP"
     val values =
-      constants.map(constant => s"inline constexpr auto ${constant.name.text} = ${constant.value.text};").mkString("\n")
+      constants.map(constant => s"inline constexpr auto ${constant.name.raw} = ${constant.value.raw};").mkString("\n")
     s"""#ifndef $guard
        |#define $guard
        |
@@ -468,9 +468,9 @@ object GenerateNativeBindings {
       case Vector(value) => value
       case values        => throw IllegalArgumentException(s"opencl: expected one dispatch table, found ${values.size}")
     }
-    val functions   = surface.functions.map(_.name.text).toSet
+    val functions   = surface.functions.map(_.name.raw).toSet
     val assignments = table.fields.map { field =>
-      val fieldName = field.name.text
+      val fieldName = field.name.raw
       val value     = if (functions(fieldName)) s"&$fieldName" else "nullptr"
       s"  dispatch.$fieldName = $value;"
     }.mkString("\n")
@@ -493,8 +493,8 @@ object GenerateNativeBindings {
     if (surface.dispatchTables.isEmpty)
       throw IllegalStateException("level-zero-ddi: no DDI table records found")
     val clearers = surface.dispatchTables.map { table =>
-      val assignments = table.fields.map(field => s"  table->${field.name.text} = nullptr;").mkString("\n")
-      s"""inline void clear(struct ${table.name.text} *table) {
+      val assignments = table.fields.map(field => s"  table->${field.name.raw} = nullptr;").mkString("\n")
+      s"""inline void clear(struct ${table.name.raw} *table) {
          |$assignments
          |}""".stripMargin
     }.mkString("\n\n")

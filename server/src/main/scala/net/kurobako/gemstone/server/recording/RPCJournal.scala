@@ -1,11 +1,12 @@
 package net.kurobako.gemstone.server.recording
 
-import net.kurobako.gemstone.{NoNul, Vec}
+import scala.compiletime.{constValue, error}
+import net.kurobako.gemstone.CompileTime
+
+import net.kurobako.gemstone.{NonNegativeInt, PositiveInt, PositiveLong, Vec}
 import net.kurobako.gemstone.concurrent.withLock
 import net.kurobako.gemstone.rpc.ExecutionRPC
 
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
 import upickle.default.{ReadWriter, macroRW, readBinary, writeBinary}
 import upickle.implicits.key
 
@@ -31,41 +32,151 @@ object RPCJournal {
   private val FooterReserve          = MetadataRecordLimit.toLong + RecordFramingBytes
   private val FailureReasonMaxLength = 512
 
-  private type MaximumFrameBytes   = 2147479551
-  private type MinimumArchiveBytes = 4104L
-  private type FailureReasonLength = 512
+  private inline val MaximumFrameBytes   = 2147479551
+  private inline val MinimumArchiveBytes = 4104L
 
-  type ProtocolIdentity = ProtocolIdentity.T
-  object ProtocolIdentity extends RefinedType[String, Match["[!-~]{1,128}"]]
+  opaque type ProtocolIdentity = String
 
-  type RecordedClientId = RecordedClientId.T
-  object RecordedClientId extends RefinedType[Long, Positive] {
-    extension (id: RecordedClientId) def next: RecordedClientId = applyUnsafe(Math.addExact(id.value, 1L))
+  object ProtocolIdentity {
+    inline def either(value: String): Either[String, ProtocolIdentity] =
+      if (value.matches("[!-~]{1,128}")) Right(value)
+      else Left("protocol identity must be 1 to 128 printable ASCII characters")
+
+    inline def unsafe(value: String): ProtocolIdentity =
+      either(value).fold(message => throw IllegalArgumentException(message), identity)
+
+    inline def apply[A <: String & Singleton](inline value: A)(using
+        CompileTime.PrintableIdentity[A]
+    ): ProtocolIdentity =
+      value
+
+    extension (value: ProtocolIdentity) {
+      inline def raw: String = value
+    }
   }
 
-  type RecordedConnectionId = RecordedConnectionId.T
-  object RecordedConnectionId extends RefinedType[Long, Positive] {
-    extension (id: RecordedConnectionId) def next: RecordedConnectionId = applyUnsafe(Math.addExact(id.value, 1L))
+  opaque type RecordedClientId = Long
+
+  object RecordedClientId {
+    inline def either(value: Long): Either[String, RecordedClientId] =
+      if (value > 0L) Right(value) else Left(s"client id must be strictly positive: $value")
+
+    inline def unsafe(value: Long): RecordedClientId =
+      either(value).fold(message => throw IllegalArgumentException(message), identity)
+
+    inline def apply[A <: Long & Singleton](inline value: A): RecordedClientId =
+      inline if constValue[A] > 0L then value else error("client id must be strictly positive")
+
+    extension (id: RecordedClientId) {
+      inline def raw: Long       = id
+      def next: RecordedClientId = unsafe(Math.addExact(id, 1L))
+    }
   }
 
-  type EventId = EventId.T
-  object EventId extends RefinedType[Long, Positive0] {
-    extension (id: EventId) def next: EventId = applyUnsafe(Math.addExact(id.value, 1L))
+  opaque type RecordedConnectionId = Long
+
+  object RecordedConnectionId {
+    inline def either(value: Long): Either[String, RecordedConnectionId] =
+      if (value > 0L) Right(value) else Left(s"connection id must be strictly positive: $value")
+
+    inline def unsafe(value: Long): RecordedConnectionId =
+      either(value).fold(message => throw IllegalArgumentException(message), identity)
+
+    inline def apply[A <: Long & Singleton](inline value: A): RecordedConnectionId =
+      inline if constValue[A] > 0L then value else error("connection id must be strictly positive")
+
+    extension (id: RecordedConnectionId) {
+      inline def raw: Long           = id
+      def next: RecordedConnectionId = unsafe(Math.addExact(id, 1L))
+    }
   }
 
-  type FailureReason = FailureReason.T
-  object FailureReason extends RefinedType[String, MinLength[1] & MaxLength[FailureReasonLength] & NoNul]
+  opaque type EventId = Long
+
+  object EventId {
+    inline def either(value: Long): Either[String, EventId] =
+      if (value >= 0L) Right(value) else Left(s"event id must be positive or zero: $value")
+
+    inline def unsafe(value: Long): EventId =
+      either(value).fold(message => throw IllegalArgumentException(message), identity)
+
+    inline def apply[A <: Long & Singleton](inline value: A): EventId =
+      inline if constValue[A] >= 0L then value else error("event id must be positive or zero")
+
+    extension (id: EventId) {
+      inline def raw: Long = id
+      def next: EventId    = unsafe(Math.addExact(id, 1L))
+    }
+  }
+
+  opaque type FailureReason = String
+
+  object FailureReason {
+    inline def either(value: String): Either[String, FailureReason] =
+      if (value.isEmpty) Left("failure reason must not be empty")
+      else if (value.length > FailureReasonMaxLength) Left(s"failure reason exceeds $FailureReasonMaxLength characters")
+      else if (value.view.contains('\u0000')) Left("failure reason must not contain a NUL character")
+      else Right(value)
+
+    inline def unsafe(value: String): FailureReason =
+      either(value).fold(message => throw IllegalArgumentException(message), identity)
+
+    inline def apply[A <: String & Singleton](inline value: A)(using
+        CompileTime.BoundedNonEmptyNoNul[A, 512]
+    ): FailureReason =
+      value
+
+    extension (value: FailureReason) {
+      inline def raw: String = value
+    }
+  }
+
+  opaque type FrameByteSize = Int
+
+  object FrameByteSize {
+    inline def either(value: Int): Either[String, FrameByteSize] =
+      if (value >= 1 && value <= MaximumFrameBytes) Right(value)
+      else Left(s"frame byte size must be between 1 and $MaximumFrameBytes: $value")
+
+    inline def unsafe(value: Int): FrameByteSize =
+      either(value).fold(message => throw IllegalArgumentException(message), identity)
+
+    inline def apply[A <: Int & Singleton](inline value: A): FrameByteSize =
+      inline if constValue[A] >= 1 && constValue[A] <= MaximumFrameBytes then value
+      else error("frame byte size out of range")
+
+    extension (value: FrameByteSize) {
+      inline def raw: Int = value
+    }
+  }
+
+  opaque type ArchiveByteSize = Long
+
+  object ArchiveByteSize {
+    inline def either(value: Long): Either[String, ArchiveByteSize] =
+      if (value > MinimumArchiveBytes) Right(value)
+      else Left(s"archive byte size must exceed $MinimumArchiveBytes: $value")
+
+    inline def unsafe(value: Long): ArchiveByteSize =
+      either(value).fold(message => throw IllegalArgumentException(message), identity)
+
+    inline def apply[A <: Long & Singleton](inline value: A): ArchiveByteSize =
+      inline if constValue[A] > MinimumArchiveBytes then value else error("archive byte size below minimum")
+
+    extension (value: ArchiveByteSize) {
+      inline def raw: Long = value
+    }
+  }
 
   final case class Limits(
-      maxFrameBytes: Int :| Interval.Closed[1, MaximumFrameBytes] = (ExecutionRPC.MaximumPayload + RecordOverheadBytes)
-        .refineUnsafe[Interval.Closed[1, MaximumFrameBytes]],
-      maxArchiveBytes: Long :| Greater[MinimumArchiveBytes] = 8L * 1024 * 1024 * 1024,
-      maxEvents: Int :| Positive = 1000000
+      maxFrameBytes: FrameByteSize = FrameByteSize(134221824),
+      maxArchiveBytes: ArchiveByteSize = ArchiveByteSize(8589934592L),
+      maxEvents: PositiveInt = PositiveInt(1000000)
   )
   final case class ExecutionProfile(
-      maxInstructions: Long :| Positive,
-      quantum: Int :| Positive,
-      parallelism: Int :| Positive
+      maxInstructions: PositiveLong,
+      quantum: PositiveInt,
+      parallelism: PositiveInt
   )
   final case class Header(
       protocolIdentity: ProtocolIdentity,
@@ -86,9 +197,9 @@ object RPCJournal {
   )
   final case class Summary(
       header: Header,
-      events: Int :| Positive0,
-      frames: Int :| Positive0,
-      storedBytes: Long :| Positive,
+      events: NonNegativeInt,
+      frames: NonNegativeInt,
+      storedBytes: PositiveLong,
       replayable: Boolean,
       reason: Option[FailureReason]
   )
@@ -101,13 +212,13 @@ object RPCJournal {
     def normalized(
         kind: Kind,
         bytes: Array[Byte],
-        maximum: Int :| Interval.Closed[1, MaximumFrameBytes]
+        maximum: FrameByteSize
     ): Array[Byte] = {
       validate(kind, bytes, maximum, normalized = false)
       if (kind != Kind.Request) bytes
       else {
         val result = bytes.clone()
-        ByteBuffer.wrap(result).putLong(ExecutionRPC.RequestClientOffset, 0L)
+        ByteBuffer.wrap(result).putLong(ExecutionRPC.RequestClientOffset.raw, 0L)
         result
       }
     }
@@ -115,7 +226,7 @@ object RPCJournal {
     def validate(
         kind: Kind,
         bytes: Array[Byte],
-        maximum: Int :| Interval.Closed[1, MaximumFrameBytes],
+        maximum: FrameByteSize,
         normalized: Boolean
     ): Unit =
       validatePrefix(kind, bytes, bytes.length, maximum, normalized)
@@ -124,26 +235,26 @@ object RPCJournal {
         kind: Kind,
         bytes: Array[Byte],
         frameSize: Int,
-        maximum: Int :| Interval.Closed[1, MaximumFrameBytes],
+        maximum: FrameByteSize,
         normalized: Boolean
     ): Unit = {
       def check(value: Boolean): Unit = if (!value) throw IOException("RPC journal: invalid RPC frame")
       check(bytes.length >= 12 && bytes.length <= frameSize && frameSize <= maximum)
-      check(long(bytes, ExecutionRPC.RequestFingerprintOffset) == ExecutionRPC.Schema.fingerprint)
+      check(long(bytes, ExecutionRPC.RequestFingerprintOffset.raw) == ExecutionRPC.Schema.fingerprint)
       val (header, payload) = kind match {
         case Kind.Request if magic(bytes) == ExecutionRPC.RequestMagic =>
-          check(bytes.length >= ExecutionRPC.RequestHeaderBytes)
-          (ExecutionRPC.RequestHeaderBytes, integer(bytes, ExecutionRPC.RequestPayloadSizeOffset))
+          check(bytes.length >= ExecutionRPC.RequestHeaderBytes.raw)
+          (ExecutionRPC.RequestHeaderBytes.raw, integer(bytes, ExecutionRPC.RequestPayloadSizeOffset.raw))
         case Kind.Response if magic(bytes) == ExecutionRPC.ResponseMagic =>
-          check(bytes.length >= ExecutionRPC.ResponseHeaderBytes)
-          check(integer(bytes, ExecutionRPC.ResponseStatusOffset) == 0 ||
-            integer(bytes, ExecutionRPC.ResponseStatusOffset) == 1)
-          (ExecutionRPC.ResponseHeaderBytes, integer(bytes, ExecutionRPC.ResponsePayloadSizeOffset))
+          check(bytes.length >= ExecutionRPC.ResponseHeaderBytes.raw)
+          check(integer(bytes, ExecutionRPC.ResponseStatusOffset.raw) == 0 ||
+            integer(bytes, ExecutionRPC.ResponseStatusOffset.raw) == 1)
+          (ExecutionRPC.ResponseHeaderBytes.raw, integer(bytes, ExecutionRPC.ResponsePayloadSizeOffset.raw))
         case _ => throw IOException("RPC journal: frame kind/magic differ")
       }
       check(payload >= 0 && header.toLong + payload == frameSize.toLong)
       if (normalized && kind == Kind.Request) {
-        check(ByteBuffer.wrap(bytes).getLong(ExecutionRPC.RequestClientOffset) == 0L)
+        check(ByteBuffer.wrap(bytes).getLong(ExecutionRPC.RequestClientOffset.raw) == 0L)
       }
     }
   }
@@ -328,36 +439,36 @@ object RPCJournal {
     private val encodedHeader = encode(HeaderRecord(
       Format,
       Version,
-      header.protocolIdentity.value,
+      header.protocolIdentity,
       header.limits.maxFrameBytes,
       header.limits.maxArchiveBytes,
-      header.limits.maxEvents,
+      header.limits.maxEvents.raw,
       header.executionProfile.map(profile =>
-        ExecutionProfileRecord(profile.maxInstructions, profile.quantum, profile.parallelism)
+        ExecutionProfileRecord(profile.maxInstructions.raw, profile.quantum.raw, profile.parallelism.raw)
       )
     ))
     ensure(encodedHeader.length <= MetadataRecordLimit, "archive header exceeds its byte limit")
     written = Math.addExact(written, writeRecord(output, encodedHeader))
 
     private def clientId(client: AnyRef): RecordedClientId = Option(clients.get(client)) match {
-      case Some(found) => RecordedClientId.applyUnsafe(found.longValue())
+      case Some(found) => RecordedClientId.unsafe(found.longValue())
       case None        =>
         val id = nextClient
-        nextClient = nextClient.next
-        clients.put(client, id.value)
+        nextClient = RecordedClientId.unsafe(Math.addExact(nextClient, 1L))
+        clients.put(client, id)
         id
     }
     def connection(client: AnyRef): Connection = lock.withLock {
       ensure(!closed, "capture is closed")
       val id = nextConnection
-      nextConnection = nextConnection.next
+      nextConnection = RecordedConnectionId.unsafe(Math.addExact(nextConnection, 1L))
       Connection(this, clientId(client), id)
     }
     def clientClosed(client: AnyRef): Unit = lock.withLock {
       Option(clients.get(client)).foreach(found =>
         append(
           Kind.ClientClose,
-          RecordedClientId.applyUnsafe(found.longValue()),
+          RecordedClientId.unsafe(found.longValue()),
           None,
           Array.emptyByteArray
         )
@@ -380,14 +491,14 @@ object RPCJournal {
       lock.withLock {
         ensure(!closed, "capture is closed")
         try {
-          ensure(sequence.value < header.limits.maxEvents, "event limit exceeded")
+          ensure(sequence < header.limits.maxEvents.raw, "event limit exceeded")
           val frame = Option.when(kind.hasFrame)(RPCJournal.Frames.normalized(kind, bytes, header.limits.maxFrameBytes))
           val eventId = sequence
           val record  = encode(EventRecord(
-            eventId.value,
+            eventId,
             kind.code,
-            client.value,
-            connection.fold(0L)(_.value),
+            client,
+            connection.getOrElse(0L),
             frame
           ))
           val encodedBytes = record.length.toLong + RecordFramingBytes
@@ -399,7 +510,7 @@ object RPCJournal {
           order.accept(event, frame.getOrElse(Array.emptyByteArray))
           written = Math.addExact(written, writeRecord(output, record))
           if (kind.hasFrame) frames += 1
-          sequence = sequence.next
+          sequence = EventId.unsafe(Math.addExact(sequence, 1L))
         } catch {
           case error: Exception =>
             markUnreplayable("capture failed before all events could be written")
@@ -412,7 +523,7 @@ object RPCJournal {
         if (!order.complete && failure.isEmpty)
           failure = Some(FailureReason("capture ended with an open or incomplete exchange"))
         Using.resource(output) { output =>
-          val footer = encode(FooterRecord(sequence.value.toInt, frames, failure.isEmpty, failure.map(_.value)))
+          val footer = encode(FooterRecord(sequence.toInt, frames, failure.isEmpty, failure))
           ensure(footer.length <= MetadataRecordLimit, "archive footer exceeds its byte limit")
           ensure(
             footer.length.toLong + RecordFramingBytes <= header.limits.maxArchiveBytes - written,
@@ -464,8 +575,8 @@ object RPCJournal {
       ) match {
         case Some((_, EventRecord(sequence, kind, client, connection, Some(frame)))) =>
           ensure(
-            sequence == event.sequence.value && kind == event.kind.code && client == event.client.value &&
-              connection == event.connection.fold(0L)(_.value),
+            sequence == event.sequence && kind == event.kind.code && client == event.client &&
+              connection == event.connection.getOrElse(0L),
             "event changed after archive verification"
           )
           RPCJournal.Frames.validate(event.kind, frame, summary.header.limits.maxFrameBytes, normalized = true)
@@ -501,25 +612,26 @@ object RPCJournal {
       case _                              => invalid("archive does not start with a header")
     }
     ensure(headerRecord.format == Format && headerRecord.version == Version, "unknown archive format/version")
-    val maxFrameBytes = headerRecord.maxFrameBytes.refineEither[Interval.Closed[1, MaximumFrameBytes]]
+    val maxFrameBytes = FrameByteSize.either(headerRecord.maxFrameBytes)
       .fold(message => invalid(s"invalid frame byte limit: $message"), value => value)
-    val maxArchiveBytes = headerRecord.maxArchiveBytes.refineEither[Greater[MinimumArchiveBytes]]
+    val maxArchiveBytes = ArchiveByteSize.either(headerRecord.maxArchiveBytes)
       .fold(message => invalid(s"invalid archive byte limit: $message"), value => value)
-    val maxEvents = headerRecord.maxEvents.refineEither[Positive]
+    val maxEvents = PositiveInt.either(headerRecord.maxEvents)
       .fold(message => invalid(s"invalid event limit: $message"), value => value)
     val declared = Limits(maxFrameBytes, maxArchiveBytes, maxEvents)
     ensure(
-      declared.maxFrameBytes <= limits.maxFrameBytes && declared.maxArchiveBytes <= limits.maxArchiveBytes &&
+      declared.maxFrameBytes <= limits.maxFrameBytes &&
+        declared.maxArchiveBytes <= limits.maxArchiveBytes &&
         declared.maxEvents <= limits.maxEvents,
       "archive limits exceed reader limits"
     )
     ensure(input.length() <= declared.maxArchiveBytes, "archive exceeds its declared byte limit")
     val profile = headerRecord.executionProfile.map { profile =>
-      val maxInstructions = profile.maxInstructions.refineEither[Positive]
+      val maxInstructions = PositiveLong.either(profile.maxInstructions)
         .fold(message => invalid(s"invalid maximum instruction count: $message"), value => value)
-      val quantum = profile.quantum.refineEither[Positive]
+      val quantum = PositiveInt.either(profile.quantum)
         .fold(message => invalid(s"invalid execution quantum: $message"), value => value)
-      val parallelism = profile.parallelism.refineEither[Positive]
+      val parallelism = PositiveInt.either(profile.parallelism)
         .fold(message => invalid(s"invalid execution parallelism: $message"), value => value)
       ExecutionProfile(maxInstructions, quantum, parallelism)
     }
@@ -546,7 +658,7 @@ object RPCJournal {
     while (summary.isEmpty)
       readRecord(input, math.max(recordLimit, MetadataRecordLimit)) match {
         case Some((location, EventRecord(sequence, code, client, connection, frame))) =>
-          ensure(count < declared.maxEvents, "too many events")
+          ensure(count < declared.maxEvents.raw, "too many events")
           val kind = Kind.values.find(_.code == code).getOrElse(invalid("unknown event kind"))
           ensure(sequence == count.toLong, "event sequence is not contiguous")
           ensure(frame.nonEmpty == kind.hasFrame, "event frame does not match its kind")
@@ -578,12 +690,12 @@ object RPCJournal {
             !replayable || (order.complete && failure.isEmpty),
             "replayable footer describes incomplete exchanges"
           )
-          val storedBytes = input.length().refineEither[Positive]
+          val storedBytes = PositiveLong.either(input.length())
             .fold(message => invalid(s"invalid archive size: $message"), value => value)
           summary = Some(Summary(
             header,
-            count.refineUnsafe[Positive0],
-            frames.refineUnsafe[Positive0],
+            NonNegativeInt.unsafe(count),
+            NonNegativeInt.unsafe(frames),
             storedBytes,
             replayable,
             failure

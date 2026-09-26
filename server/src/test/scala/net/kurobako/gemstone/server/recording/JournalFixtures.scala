@@ -24,13 +24,13 @@ private object JournalFixtures {
     TemporaryJournal(directory, directory.resolve("recording.gmj"))
   }
 
-  val schema = RPCJournal.ProtocolIdentity.either(ExecutionRPC.Identity)
+  val schema = RPCJournal.ProtocolIdentity.either(ExecutionRPC.Identity.raw)
     .fold(message => throw IllegalStateException(message), value => value)
   private val ping = Wire.Protocol[Operation].encodePayload(Operation.Ping, ExecutionRPC.Limits)
     .fold(message => throw IllegalArgumentException(message), value => value)._1
   def execution(operation: Long = ping, payload: Array[Byte] = Array.emptyByteArray, session: Long = 42): Array[Byte] =
     ByteBuffer.allocate(
-      ExecutionRPC.RequestHeaderBytes + payload.length
+      ExecutionRPC.RequestHeaderBytes.raw + payload.length
     ).putInt(ExecutionRPC.RequestMagic).putLong(ExecutionRPC.Schema.fingerprint)
       .putLong(23L).putLong(session).putLong(17)
       .putLong(operation).putInt(payload.length).put(payload).array()
@@ -40,12 +40,12 @@ private object JournalFixtures {
       magic: Int = ExecutionRPC.ResponseMagic
   ): Array[Byte] =
     ByteBuffer.allocate(
-      ExecutionRPC.ResponseHeaderBytes + payload.length
+      ExecutionRPC.ResponseHeaderBytes.raw + payload.length
     ).putInt(magic).putLong(ExecutionRPC.Schema.fingerprint)
       .putInt(value).putInt(payload.length).put(payload).array()
   def query: Array[Byte] = {
     val (id, payload) = Wire.Protocol[Operation]
-      .encodePayload(Operation.QueryCompletion(CompletionId(1)), ExecutionRPC.Limits)
+      .encodePayload(Operation.QueryCompletion(CompletionId(1L)), ExecutionRPC.Limits)
       .fold(message => throw IllegalArgumentException(message), value => value)
     execution(id, payload)
   }

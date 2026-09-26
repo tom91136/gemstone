@@ -1,7 +1,5 @@
 package net.kurobako.gemstone.binary
 
-import io.github.iltotore.iron.*
-
 /** Raw IEEE-754 interchange encodings used by ISA registers and memory. */
 private[gemstone] object IEEE754 {
   private inline val Binary16Bias        = 15
@@ -12,7 +10,7 @@ private[gemstone] object IEEE754 {
   private inline val Binary16NaN         = 0x7e00
   private inline val Binary32Infinity    = 0x7f800000
 
-  inline def binary32ToFloat(bits: Binary32): Float = java.lang.Float.intBitsToFloat(bits.value.toInt)
+  inline def binary32ToFloat(bits: Binary32): Float = java.lang.Float.intBitsToFloat(bits.raw.toInt)
 
   inline def floatToBinary32(value: Float): Binary32 =
     Binary32.fromLow(Bits.unsigned32(java.lang.Float.floatToRawIntBits(value)))
@@ -23,7 +21,7 @@ private[gemstone] object IEEE754 {
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   def binary16ToFloat(value: Binary16): Float = {
-    val bits16   = value.value.toInt
+    val bits16   = value.raw.toInt
     val sign     = (bits16 & 0x8000) << 16
     val exponent = (bits16 >>> 10) & 0x1f
     val fraction = bits16 & 0x3ff
@@ -97,15 +95,15 @@ private[gemstone] object IEEE754 {
     Binary16.low(encoded)
   }
 
-  def toDouble(bits: Long, width: FloatingPointWidth): Double = width.value match {
+  def toDouble(bits: Long, width: FloatingPointWidth): Double = width.raw match {
     case 16 => binary16ToFloat(Binary16.low(bits)).toDouble
     case 32 => binary32ToFloat(Binary32.fromLow(Bits.low32(bits))).toDouble
     case 64 => binary64ToDouble(bits)
   }
 
-  def fromDouble(value: Double, width: FloatingPointWidth): Long = width.value match {
-    case 16 => doubleToBinary16(value).value
-    case 32 => floatToBinary32(value.toFloat).value
+  def fromDouble(value: Double, width: FloatingPointWidth): Long = width.raw match {
+    case 16 => doubleToBinary16(value).raw
+    case 32 => floatToBinary32(value.toFloat).raw
     case 64 => doubleToBinary64(value)
   }
 }

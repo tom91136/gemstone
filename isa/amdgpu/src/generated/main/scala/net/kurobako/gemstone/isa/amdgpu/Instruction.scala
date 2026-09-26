@@ -1,5 +1,4 @@
 // Generated from the pinned Mesa ACO and AMD machine-readable ISA inputs. Regenerate with: sbt codegen
-// scalafix:off GemstoneNoAssume; values were validated by the generator
 package net.kurobako.gemstone.isa.amdgpu
 
 import net.kurobako.gemstone.Vec
@@ -5965,7 +5964,7 @@ object Instruction {
     final def decode(operands: Vec[Operand], mods: Vec[Modifier]): Vec[Instruction] =
       decoder(operands, mods)
 
-    override final def toString: String = opcode.value
+    override final def toString: String = opcode.raw
   }
 
   private val AllDefinitions: Vec[Definition] = Vec(
@@ -6600,7 +6599,7 @@ object Instruction {
 
   object Definition {
     private lazy val ByOpcode: Map[String, Vec[Definition]] =
-      AllDefinitions.groupBy(_.opcode.value)
+      AllDefinitions.groupBy(_.opcode.raw)
 
     def forOpcode(opcode: String): Vec[Definition] =
       ByOpcode.getOrElse(Opcode.normalize(opcode), Vec.empty[Definition])
@@ -6629,7 +6628,7 @@ object Instruction {
       case Left(DecodeError.UnknownOpcode(_)) =>
         EncodingSuffixes.collectFirst {
           case suffix if name.endsWith(suffix) =>
-            name.dropRight(suffix.length) -> Modifier(ModifierName.assume(suffix.drop(1)))
+            name.dropRight(suffix.length) -> Modifier(ModifierName.unsafe(suffix.drop(1)))
         } match {
           case Some((canonical, modifier)) => decodeWithSuffixes(canonical, operands, modifier +: mods, original)
           case None => Left(DecodeError.UnknownOpcode(original))

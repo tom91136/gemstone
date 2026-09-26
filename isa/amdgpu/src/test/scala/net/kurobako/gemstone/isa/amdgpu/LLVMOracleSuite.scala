@@ -64,7 +64,7 @@ final class LLVMOracleSuite extends munit.FunSuite {
         case Right(program) => program.statements match {
             case Vec(Statement.Instruction(instruction)) =>
               val definitions = encodingsFor(instruction, golden.target)
-              val formats     = definitions.map(_.format.value.toUpperCase(java.util.Locale.ROOT)).distinct
+              val formats     = definitions.map(_.format.raw.toUpperCase(java.util.Locale.ROOT)).distinct
               Binary.encode(instruction, golden.target) match {
                 case Right(actual) =>
                   assert(formats.contains("SOPP"), s"encoded an unimplemented format at ${golden.source}: $formats")

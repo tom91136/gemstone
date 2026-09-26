@@ -1,19 +1,16 @@
 package net.kurobako.gemstone.server.execution
 
-import net.kurobako.gemstone.Vec
+import net.kurobako.gemstone.{NonNegativeLong, Vec}
 import net.kurobako.gemstone.binary.{FloatingPointWidth, IEEE754, LittleEndian, ScalarByteWidth}
 import net.kurobako.gemstone.rpc.AllocationId
 import net.kurobako.gemstone.rpc.ExecutionProtocol.*
 
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
-
 final class BlasMathSuite extends munit.FunSuite {
-  private val x = AllocationId(1)
-  private val y = AllocationId(2)
-  private val a = AllocationId(3)
-  private val b = AllocationId(4)
-  private val c = AllocationId(5)
+  private val x = AllocationId(1L)
+  private val y = AllocationId(2L)
+  private val a = AllocationId(3L)
+  private val b = AllocationId(4L)
+  private val c = AllocationId(5L)
 
   private def f32(values: Float*): Array[Byte] = {
     val bytes = Array.ofDim[Byte](values.size * 4)
@@ -39,7 +36,7 @@ final class BlasMathSuite extends munit.FunSuite {
     entries.toMap.get(_)
 
   private def vector(allocation: AllocationId, increment: Int = 1): Option[BlasVector] =
-    Some(BlasVector(allocation, 0L.refineUnsafe[Positive0], increment))
+    Some(BlasVector(allocation, NonNegativeLong.Zero, increment))
 
   private def request(operation: BlasOperation, element: BlasElement = BlasElement.F32, count: Int = 0) =
     BlasRequest(
@@ -124,7 +121,7 @@ final class BlasMathSuite extends munit.FunSuite {
     val gemv   = request(BlasOperation.Gemv).copy(
       rows = 2,
       columns = 2,
-      a = Some(BlasMatrix(a, 0L.refineUnsafe[Positive0], 2)),
+      a = Some(BlasMatrix(a, NonNegativeLong.Zero, 2)),
       x = vector(x),
       y = vector(y),
       alpha = scalar(1),
@@ -143,9 +140,9 @@ final class BlasMathSuite extends munit.FunSuite {
         rows = 2,
         columns = 2,
         inner = 2,
-        a = Some(BlasMatrix(a, 0L.refineUnsafe[Positive0], 2)),
-        b = Some(BlasMatrix(b, 0L.refineUnsafe[Positive0], 2)),
-        c = Some(BlasMatrix(c, 0L.refineUnsafe[Positive0], 2)),
+        a = Some(BlasMatrix(a, NonNegativeLong.Zero, 2)),
+        b = Some(BlasMatrix(b, NonNegativeLong.Zero, 2)),
+        c = Some(BlasMatrix(c, NonNegativeLong.Zero, 2)),
         alpha = scalar(1),
         beta = scalar(0),
         batch = batch,
@@ -176,9 +173,9 @@ final class BlasMathSuite extends munit.FunSuite {
       rows = 2,
       columns = 2,
       inner = 2,
-      a = Some(BlasMatrix(a, 0L.refineUnsafe[Positive0], 2)),
-      b = Some(BlasMatrix(b, 0L.refineUnsafe[Positive0], 2)),
-      c = Some(BlasMatrix(c, 0L.refineUnsafe[Positive0], 2)),
+      a = Some(BlasMatrix(a, NonNegativeLong.Zero, 2)),
+      b = Some(BlasMatrix(b, NonNegativeLong.Zero, 2)),
+      c = Some(BlasMatrix(c, NonNegativeLong.Zero, 2)),
       alpha = Vec[Byte](0x00, 0x3c),
       beta = Vec[Byte](0x00, 0x00)
     )

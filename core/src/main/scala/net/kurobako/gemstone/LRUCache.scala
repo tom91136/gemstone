@@ -2,16 +2,13 @@ package net.kurobako.gemstone
 
 import net.kurobako.gemstone.concurrent.withLock
 
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
-
 import java.util.concurrent.locks.ReentrantLock
 import scala.jdk.CollectionConverters.*
 import scala.collection.mutable
 import scala.util.Try
 
 /** Bounded LRU reuse of immutable results. Different keys compute concurrently; identical keys share in-flight work. */
-private[gemstone] final class LRUCache[K, V] private (capacity: Int :| Positive) {
+private[gemstone] final class LRUCache[K, V] private (capacity: PositiveInt) {
   private final class Entry {
     private val lock      = ReentrantLock()
     private val completed = lock.newCondition()
@@ -33,7 +30,7 @@ private[gemstone] final class LRUCache[K, V] private (capacity: Int :| Positive)
   private val lock = ReentrantLock()
 
   // Java's LinkedHashMap supplies access ordering; Scala's mutable LinkedHashMap is insertion ordered.
-  private val mutableEntries  = java.util.LinkedHashMap[K, Entry](capacity, 0.75f, true)
+  private val mutableEntries  = java.util.LinkedHashMap[K, Entry](capacity.raw, 0.75f, true)
   private val mutableInFlight = mutable.HashMap.empty[K, Entry]
 
   def get(key: K)(compute: => V): V = getOnce(key)(compute)
@@ -57,7 +54,7 @@ private[gemstone] final class LRUCache[K, V] private (capacity: Int :| Positive)
       lock.withLock {
         val _ = mutableInFlight.remove(key)
         val _ = mutableEntries.put(key, entry)
-        while (mutableEntries.size() > capacity)
+        while (mutableEntries.size() > capacity.raw)
           mutableEntries.keySet().asScala.headOption.foreach(oldest => mutableEntries.remove(oldest))
       }
       computed.fold(error => throw error, identity)
@@ -67,5 +64,5 @@ private[gemstone] final class LRUCache[K, V] private (capacity: Int :| Positive)
 
 private[gemstone] object LRUCache {
   @SuppressWarnings(Array("scalafix:GemstoneNoExplicitNew"))
-  def apply[K, V](capacity: Int :| Positive): LRUCache[K, V] = new LRUCache(capacity)
+  def apply[K, V](capacity: PositiveInt): LRUCache[K, V] = new LRUCache(capacity)
 }

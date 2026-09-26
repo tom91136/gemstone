@@ -1,14 +1,13 @@
 package net.kurobako.gemstone.benchmarks
 
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
+import net.kurobako.gemstone.NonNegativeLong
 
 import java.nio.file.Path
 
 object PlatformMetrics {
   val platform = "native"
 
-  def allocatedBytes: Option[Long :| Positive0] = None
+  def allocatedBytes: Option[NonNegativeLong] = None
 
   def startRecording(destination: Option[Path]): AutoCloseable = destination match {
     case None    => () => ()

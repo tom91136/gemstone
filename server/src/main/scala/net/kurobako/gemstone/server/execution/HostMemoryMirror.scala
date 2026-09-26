@@ -1,11 +1,8 @@
 package net.kurobako.gemstone.server.execution
 
-import net.kurobako.gemstone.Vec
+import net.kurobako.gemstone.{PositiveInt, Vec}
 import net.kurobako.gemstone.memory.GuestAddress
 import net.kurobako.gemstone.rpc.ExecutionProtocol.*
-
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
 
 import scala.collection.mutable
 
@@ -73,7 +70,7 @@ private[execution] final class HostMemoryMirror(maxBatchBytes: Int = 1024 * 1024
         size += 1
         remaining -= 1
       }
-      chunks += HostMemoryRange(GuestAddress(base), size.refineUnsafe[Positive])
+      chunks += HostMemoryRange(GuestAddress(base), PositiveInt.unsafe(size))
     }
     Vec.from(chunks)
   }
@@ -84,7 +81,7 @@ private[execution] final class HostMemoryMirror(maxBatchBytes: Int = 1024 * 1024
   def requests(completion: Long): Vec[HostMemoryRange] = {
     val result = ranges(missing.getOrElse(completion, mutable.TreeSet.empty))
     val sent   = issued.getOrElseUpdate(completion, mutable.TreeSet.empty)
-    result.foreach(range => sent ++= (0 until range.size).map(range.address.value + _.toLong))
+    result.foreach(range => sent ++= (0 until range.size.raw).map(range.address.raw + _.toLong))
     result
   }
 
@@ -93,7 +90,7 @@ private[execution] final class HostMemoryMirror(maxBatchBytes: Int = 1024 * 1024
     val outstanding = issued.getOrElse(completion, mutable.TreeSet.empty[Long])
     val valid       = values.forall(value =>
       value.bytes.indices.forall { index =>
-        val address = value.address.value + index.toLong
+        val address = value.address.raw + index.toLong
         pending.contains(address) || outstanding.contains(address)
       }
     )
@@ -101,7 +98,7 @@ private[execution] final class HostMemoryMirror(maxBatchBytes: Int = 1024 * 1024
     else {
       values.foreach(value =>
         value.bytes.zipWithIndex.foreach { case (byte, index) =>
-          val address = value.address.value + index.toLong
+          val address = value.address.raw + index.toLong
           // A concurrent lane may have written this byte while the request was in flight.
           if (!bytes.contains(address)) bytes.update(address, byte)
           val _ = outstanding.remove(address)
@@ -119,8 +116,8 @@ private[execution] final class HostMemoryMirror(maxBatchBytes: Int = 1024 * 1024
       range =>
         HostMemoryBytes(
           range.address,
-          Vec.from((0 until range.size).map(index => bytes(range.address.value + index.toLong))),
-          atomicWidth(range.address.value)
+          Vec.from((0 until range.size.raw).map(index => bytes(range.address.raw + index.toLong))),
+          atomicWidth(range.address.raw)
         )
     }
   def takeDirty(completion: Long): Vec[HostMemoryBytes] = {
@@ -128,7 +125,7 @@ private[execution] final class HostMemoryMirror(maxBatchBytes: Int = 1024 * 1024
     changed.get(completion).foreach { pending =>
       result.foreach(range =>
         (0 until range.bytes.size).foreach { index =>
-          val _ = pending.remove(range.address.value + index.toLong)
+          val _ = pending.remove(range.address.raw + index.toLong)
         }
       )
     }

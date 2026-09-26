@@ -1,9 +1,24 @@
 package net.kurobako.gemstone.rpc
 
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
+import scala.compiletime.{constValue, error}
 
-type CompletionId = CompletionId.T
-object CompletionId extends RefinedType[Long, Positive] {
-  extension (id: CompletionId) def next: CompletionId = CompletionId.applyUnsafe(Math.addExact(id.value, 1L))
+/** A strictly positive completion identifier. */
+opaque type CompletionId = Long
+
+object CompletionId {
+  inline def either(value: Long): Either[String, CompletionId] =
+    if (value > 0L) Right(value) else Left(s"completion id must be strictly positive: $value")
+
+  inline def unsafe(value: Long): CompletionId =
+    either(value).fold(message => throw IllegalArgumentException(message), identity)
+
+  inline def apply[A <: Long & Singleton](inline value: A): CompletionId =
+    inline if constValue[A] > 0L then value else error("identifier must be strictly positive")
+
+  given Ordering[CompletionId] = Ordering.Long
+
+  extension (id: CompletionId) {
+    inline def raw: Long   = id
+    def next: CompletionId = unsafe(Math.addExact(id, 1L))
+  }
 }

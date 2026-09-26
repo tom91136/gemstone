@@ -1,6 +1,6 @@
 package net.kurobako.gemstone.server.execution
 
-import net.kurobako.gemstone.Vec
+import net.kurobako.gemstone.{NonNegativeLong, PositiveLong, Vec}
 import net.kurobako.gemstone.isa.GlobalName
 import net.kurobako.gemstone.isa.KernelMetadata
 import net.kurobako.gemstone.isa.KernelName
@@ -12,9 +12,6 @@ import net.kurobako.gemstone.isa.spirv.v1_6.Validation
 import net.kurobako.gemstone.isa.spirv.v1_6.VirtualMachine as SPIRVMachine
 import net.kurobako.gemstone.vm.Memory
 import net.kurobako.gemstone.vm.MemoryRegion
-
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
 
 final class SPIRVRuntimeBackend(environment: Validation.Environment, override val encoding: String = "spirv-binary")
     extends RuntimeBackend {
@@ -34,7 +31,7 @@ final class SPIRVRuntimeBackend(environment: Validation.Environment, override va
     override def bindProgramId(id: Long): Unit = machine.bindProgramId(loaded, id)
 
     override def symbols: Either[RuntimeBackend.Error, ProgramSymbols] = open {
-      val kernels = machine.kernelNames(loaded).map(name => KernelSymbol(name, LinkageName(name.value)))
+      val kernels = machine.kernelNames(loaded).map(name => KernelSymbol(name, LinkageName(name.toNonEmptyString)))
       Right(ProgramSymbols(kernels, Vec.empty))
     }
 
@@ -53,8 +50,8 @@ final class SPIRVRuntimeBackend(environment: Validation.Environment, override va
     override def bind(
         name: GlobalName,
         region: MemoryRegion,
-        offset: Long :| Positive0,
-        regionSize: Long :| Positive,
+        offset: NonNegativeLong,
+        regionSize: PositiveLong,
         memory: Memory
     ): Either[RuntimeBackend.Error, Unit] =
       machine.bindGlobal(loaded, name, region, offset, regionSize, memory)
@@ -62,7 +59,7 @@ final class SPIRVRuntimeBackend(environment: Validation.Environment, override va
 
     override def write(
         name: GlobalName,
-        offset: Long :| Positive0,
+        offset: NonNegativeLong,
         bytes: Vec[Byte]
     ): Either[RuntimeBackend.Error, Unit] =
       machine.writeGlobal(loaded, name, offset, bytes).left.map(RuntimeBackend.Error.Execution(_))

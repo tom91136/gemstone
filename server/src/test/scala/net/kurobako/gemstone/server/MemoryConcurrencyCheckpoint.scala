@@ -1,13 +1,12 @@
 package net.kurobako.gemstone.server
 
+import net.kurobako.gemstone.*
+
 import net.kurobako.gemstone.Vec
 import net.kurobako.gemstone.isa.KernelName
 import net.kurobako.gemstone.memory.{GuestAddress, MemoryValueByteWidth}
 import net.kurobako.gemstone.server.execution.RuntimeBackend
 import net.kurobako.gemstone.vm.{AddressSpace, Fault, KernelTask, Memory, MemoryRegion, TaskControl}
-
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
 
 import java.nio.file.{Files, Path}
 import java.util.concurrent.atomic.AtomicInteger
@@ -41,24 +40,24 @@ private final class MemoryConcurrencyCheckpoint(forceContention: Boolean = false
     */
   private final class ContendedMemory(delegate: Memory, addresses: AddressSpace, launch: Int, counter: Long)
       extends Memory with AddressSpace {
-    override def hasNativePointers(region: MemoryRegion): Boolean            = delegate.hasNativePointers(region)
-    override def fenceHostMemory()                                           = delegate.fenceHostMemory()
-    override def flushHostWrites()                                           = delegate.flushHostWrites()
-    override def invalidateHostReads(): Unit                                 = delegate.invalidateHostReads()
-    override def defersHostReads                                             = delegate.defersHostReads
-    override def flushHostReads()                                            = delegate.flushHostReads()
-    override def prepareReads(ranges: Vec[(GuestAddress, Int :| Positive0)]) = addresses.prepareReads(ranges)
-    override def address(region: MemoryRegion, offset: Long :| Positive0)    = addresses.address(region, offset)
-    override def locate(address: GuestAddress, size: Int :| Positive0)       = addresses.locate(address, size)
-    override def read(region: MemoryRegion, offset: Long :| Positive0, size: Int :| Positive0) =
+    override def hasNativePointers(region: MemoryRegion): Boolean          = delegate.hasNativePointers(region)
+    override def fenceHostMemory()                                         = delegate.fenceHostMemory()
+    override def flushHostWrites()                                         = delegate.flushHostWrites()
+    override def invalidateHostReads(): Unit                               = delegate.invalidateHostReads()
+    override def defersHostReads                                           = delegate.defersHostReads
+    override def flushHostReads()                                          = delegate.flushHostReads()
+    override def prepareReads(ranges: Vec[(GuestAddress, NonNegativeInt)]) = addresses.prepareReads(ranges)
+    override def address(region: MemoryRegion, offset: NonNegativeLong)    = addresses.address(region, offset)
+    override def locate(address: GuestAddress, size: NonNegativeInt)       = addresses.locate(address, size)
+    override def read(region: MemoryRegion, offset: NonNegativeLong, size: NonNegativeInt) =
       delegate.read(region, offset, size)
-    override def write(region: MemoryRegion, offset: Long :| Positive0, bytes: Vec[Byte]) =
+    override def write(region: MemoryRegion, offset: NonNegativeLong, bytes: Vec[Byte]) =
       delegate.write(region, offset, bytes)
-    override def readValue(region: MemoryRegion, offset: Long :| Positive0, size: MemoryValueByteWidth) =
+    override def readValue(region: MemoryRegion, offset: NonNegativeLong, size: MemoryValueByteWidth) =
       delegate.readValue(region, offset, size)
-    override def writeValue(region: MemoryRegion, offset: Long :| Positive0, value: Long, size: MemoryValueByteWidth) =
+    override def writeValue(region: MemoryRegion, offset: NonNegativeLong, value: Long, size: MemoryValueByteWidth) =
       delegate.writeValue(region, offset, value, size)
-    override def read(memory: Memory, address: GuestAddress, size: Int :| Positive0) =
+    override def read(memory: Memory, address: GuestAddress, size: NonNegativeInt) =
       addresses.read(delegate, address, size)
     override def write(memory: Memory, address: GuestAddress, bytes: Vec[Byte]) =
       addresses.write(delegate, address, bytes)
@@ -68,7 +67,7 @@ private final class MemoryConcurrencyCheckpoint(forceContention: Boolean = false
       addresses.writeValue(delegate, address, value, size)
     override def atomicModifyValue(
         region: MemoryRegion,
-        offset: Long :| Positive0,
+        offset: NonNegativeLong,
         size: MemoryValueByteWidth
     )(update: Long => Long) =
       addresses.address(region, offset).flatMap(address =>
@@ -85,7 +84,7 @@ private final class MemoryConcurrencyCheckpoint(forceContention: Boolean = false
         address: GuestAddress,
         update: Long => Long
     )(run: (Long => Long) => Either[Fault, Long]): Either[Fault, Long] =
-      if (address.value != counter) run(update)
+      if (address.raw != counter) run(update)
       else {
         val operation = AtomicInteger(-1)
         val attempts  = AtomicInteger()

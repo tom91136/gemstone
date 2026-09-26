@@ -1,8 +1,5 @@
 package net.kurobako.gemstone.isa.amdgpu
 
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
-
 import net.kurobako.gemstone.Vec
 import net.kurobako.gemstone.binary.{Bits, ByteRange, ScalarByteWidth}
 import net.kurobako.gemstone.binary.IEEE754
@@ -25,8 +22,8 @@ final class CodeObjectIndexSuite extends munit.FunSuite with CodeObjectTestSuppo
     assertEquals(indexed.kernelNames, Set("kernel"))
     assertEquals(
       indexed.global(GlobalName("device_global")).map { (address, size) =>
-        val rawAddress: Long = address.value
-        val rawSize: Int     = size
+        val rawAddress: Long = address.raw
+        val rawSize: Int     = size.raw
         rawAddress -> rawSize
       },
       Some(0x3000L -> 16)

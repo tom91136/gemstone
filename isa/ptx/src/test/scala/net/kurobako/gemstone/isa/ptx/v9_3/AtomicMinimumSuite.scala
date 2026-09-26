@@ -1,11 +1,10 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
+import net.kurobako.gemstone.{NonEmptyString, NonEmptyVec, NonNegativeInt, NonNegativeLong, PositiveInt, PositiveLong}
+
 import Program.*
 
 import VMIR.*
-
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
 
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.vm.LaunchGeometry
@@ -18,7 +17,7 @@ final class AtomicMinimumSuite extends munit.FunSuite {
     groups <- Seq(1, 5)
   }
     test(s"unsigned atomic min $space/$width over $groups groups preserves high-bit ordering") {
-      val memory    = ArrayCheckedMemory.allocate((8 * (groups + 1)).refineUnsafe[Positive0], GuestAddress(0x100000))
+      val memory    = ArrayCheckedMemory.allocate(NonNegativeInt.unsafe(8 * (groups + 1)), GuestAddress(0x100000L))
       val max       = if (width == 64) -1L else 0xffffffffL
       val byteWidth = if (width == 64) MemoryValueByteWidth.Qword else MemoryValueByteWidth.Dword
       memory.writeLittleEndian(memory.allocation.start, max, byteWidth).toOption.get
@@ -49,7 +48,7 @@ ret;
       val result   = VMInterpreter.execute(
         kernel,
         geometry,
-        Map(ParameterName("output") -> Argument(memory.allocation.start.value)),
+        Map(ParameterName("output") -> Argument.fromLong(memory.allocation.start.raw)),
         memory
       )
       assert(result.isRight, result.toString)

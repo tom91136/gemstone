@@ -1,13 +1,13 @@
 package net.kurobako.gemstone.codegen
 
+import net.kurobako.gemstone.CompileTime
+
 import java.nio.file.Files
 import java.nio.file.Path
 import cats.syntax.all.*
 import com.monovore.decline.Command
 import com.monovore.decline.Opts
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
-import net.kurobako.gemstone.NoNul
+import net.kurobako.gemstone.NonEmptyString
 import scala.jdk.CollectionConverters.*
 import scala.sys.process.Process
 import scala.util.Using
@@ -17,40 +17,60 @@ import upickle.default.readwriter
 import upickle.default.write
 
 object GenerateOfficialAPIManifest {
-  type CIdentifier = CIdentifier.T
-  object CIdentifier extends RefinedType[String, MinLength[1] & NoNul] {
-    given ReadWriter[CIdentifier] = readwriter[String].bimap(
-      _.value,
-      value => either(value).fold(message => throw IllegalArgumentException(message), valid => valid)
-    )
-    extension (identifier: CIdentifier) def text: String = identifier.value
+  opaque type CIdentifier = String
+  object CIdentifier {
+    def either(value: String): Either[String, CIdentifier] = NonEmptyString.either(value).map(_ => value)
+    def unsafe(value: String): CIdentifier                 =
+      either(value).fold(message => throw IllegalArgumentException(message), identity)
+
+    inline def apply[A <: String & Singleton](inline value: A)(using CompileTime.NonEmptyNoNul[A]): CIdentifier =
+      value
+    given ReadWriter[CIdentifier] = readwriter[String].bimap((value: CIdentifier) => value, unsafe)
+    extension (identifier: CIdentifier) {
+      def raw: String = identifier
+    }
   }
 
-  type CType = CType.T
-  object CType extends RefinedType[String, MinLength[1] & NoNul] {
-    given ReadWriter[CType] = readwriter[String].bimap(
-      _.value,
-      value => either(value).fold(message => throw IllegalArgumentException(message), valid => valid)
-    )
-    extension (cType: CType) def text: String = cType.value
+  opaque type CType = String
+  object CType {
+    def either(value: String): Either[String, CType] = NonEmptyString.either(value).map(_ => value)
+    def unsafe(value: String): CType                 =
+      either(value).fold(message => throw IllegalArgumentException(message), identity)
+
+    inline def apply[A <: String & Singleton](inline value: A)(using CompileTime.NonEmptyNoNul[A]): CType =
+      value
+    given ReadWriter[CType] = readwriter[String].bimap((value: CType) => value, unsafe)
+    extension (cType: CType) {
+      def raw: String = cType
+    }
   }
 
-  type EnumValue = EnumValue.T
-  object EnumValue extends RefinedType[String, MinLength[1] & NoNul] {
-    given ReadWriter[EnumValue] = readwriter[String].bimap(
-      _.value,
-      value => either(value).fold(message => throw IllegalArgumentException(message), valid => valid)
-    )
-    extension (enumValue: EnumValue) def text: String = enumValue.value
+  opaque type EnumValue = String
+  object EnumValue {
+    def either(value: String): Either[String, EnumValue] = NonEmptyString.either(value).map(_ => value)
+    def unsafe(value: String): EnumValue                 =
+      either(value).fold(message => throw IllegalArgumentException(message), identity)
+
+    inline def apply[A <: String & Singleton](inline value: A)(using CompileTime.NonEmptyNoNul[A]): EnumValue =
+      value
+    given ReadWriter[EnumValue] = readwriter[String].bimap((value: EnumValue) => value, unsafe)
+    extension (enumValue: EnumValue) {
+      def raw: String = enumValue
+    }
   }
 
-  type SurfaceName = SurfaceName.T
-  object SurfaceName extends RefinedType[String, MinLength[1] & NoNul] {
-    given ReadWriter[SurfaceName] = readwriter[String].bimap(
-      _.value,
-      value => either(value).fold(message => throw IllegalArgumentException(message), valid => valid)
-    )
-    extension (surfaceName: SurfaceName) def text: String = surfaceName.value
+  opaque type SurfaceName = String
+  object SurfaceName {
+    def either(value: String): Either[String, SurfaceName] = NonEmptyString.either(value).map(_ => value)
+    def unsafe(value: String): SurfaceName                 =
+      either(value).fold(message => throw IllegalArgumentException(message), identity)
+
+    inline def apply[A <: String & Singleton](inline value: A)(using CompileTime.NonEmptyNoNul[A]): SurfaceName =
+      value
+    given ReadWriter[SurfaceName] = readwriter[String].bimap((value: SurfaceName) => value, unsafe)
+    extension (surfaceName: SurfaceName) {
+      def raw: String = surfaceName
+    }
   }
 
   private final case class Request(clang: String, references: Path, output: Path)
@@ -249,29 +269,29 @@ object GenerateOfficialAPIManifest {
       config.headers.flatMap(header => Vector("-include", header)) ++ Vector("-")
     val output    = Process(command).#<(java.io.ByteArrayInputStream(Array.emptyByteArray)).!!
     val root      = read[Node](output)
-    val functions = collect(root).filter(function => config.acceptedName(function.name.value))
+    val functions = collect(root).filter(function => config.acceptedName(function.name))
     val conflicts = functions.groupBy(_.name).collect {
       case (name, entries) if entries.map(_.functionType).distinct.size > 1 =>
-        s"${name.value}: ${entries.map(_.functionType.value).distinct.mkString(" versus ")}"
+        s"${name}: ${entries.map(_.functionType).distinct.mkString(" versus ")}"
     }.toVector
     if (conflicts.nonEmpty)
       throw IllegalStateException(s"${config.name}: conflicting declarations: ${conflicts.mkString("; ")}")
     val allRecords          = collectRecords(root)
     val namedDispatchTables = config.dispatchTables.map { name =>
-      val records = allRecords.filter(_.name.value == name)
+      val records = allRecords.filter(_.name == name)
       if (records.size != 1)
         throw IllegalStateException(s"${config.name}: expected one complete $name record, found ${records.size}")
       records.head
     }
-    val selectedDispatchTables = allRecords.filter(table => config.acceptedDispatchTable(table.name.value))
-    val dispatchTables         = (namedDispatchTables ++ selectedDispatchTables).distinctBy(_.name).sortBy(_.name.value)
+    val selectedDispatchTables = allRecords.filter(table => config.acceptedDispatchTable(table.name))
+    val dispatchTables         = (namedDispatchTables ++ selectedDispatchTables).distinctBy(_.name).sortBy(_.name)
     val callbackTypedefs       = collectTypedefs(root).collect {
-      case (name, cType) if cType.value.contains("(*") => CallbackTypedef(name, cType)
-    }.distinct.sortBy(_.name.value)
-    val enumConstants = collectEnumConstants(root).filter(constant => config.acceptedEnumConstant(constant.name.value))
+      case (name, cType) if cType.contains("(*") => CallbackTypedef(name, cType)
+    }.distinct.sortBy(_.name)
+    val enumConstants = collectEnumConstants(root).filter(constant => config.acceptedEnumConstant(constant.name))
     Surface(
       surfaceName(config.name),
-      functions.distinctBy(_.name).sortBy(_.name.value),
+      functions.distinctBy(_.name).sortBy(_.name),
       callbackTypedefs,
       enumConstants,
       dispatchTables
@@ -302,7 +322,7 @@ object GenerateOfficialAPIManifest {
       case Node(Some("RecordDecl"), Some(name), _, isImplicit, _, _, inner)
           if !isImplicit.getOrElse(false) && inner.exists(_.nonEmpty) =>
         val fields = inner.toVector.flatten.flatMap(collectFields(_))
-          .filter(field => field.cType.value.endsWith("_t *"))
+          .filter(field => field.cType.endsWith("_t *"))
           .distinctBy(_.name)
         Vector(DispatchTable(identifier(name, "dispatch table"), fields))
       case _ => Vector.empty

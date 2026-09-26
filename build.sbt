@@ -21,7 +21,6 @@ lazy val munitVersion         = "1.3.6"
 lazy val catsCoreVersion      = "2.13.0"
 lazy val catsParseVersion     = "1.1.0"
 lazy val declineVersion       = "2.6.2"
-lazy val ironVersion          = "3.3.2"
 lazy val jsoupVersion         = "1.23.2"
 lazy val scribeVersion        = "3.19.0"
 lazy val upickleVersion       = "4.4.3"
@@ -683,9 +682,8 @@ lazy val codestyleRules = project.in(file("codestyle/rules"))
 lazy val codestyleInput = project.in(file("codestyle/input"))
   .disablePlugins(_root_.scalafix.sbt.ScalafixPlugin)
   .settings(
-    publish / skip                              := true,
-    semanticdbEnabled                           := true,
-    libraryDependencies += "io.github.iltotore" %% "iron" % ironVersion
+    publish / skip    := true,
+    semanticdbEnabled := true
   )
 
 lazy val codestyleOutput = project.in(file("codestyle/output"))
@@ -737,11 +735,10 @@ lazy val codegenProject = Project("codegen", file("tools/codegen"))
     libraryDependencies ++= Seq(
       "org.jsoup" % "jsoup" % jsoupVersion,
 
-      "com.lihaoyi"        %% "upickle"       % upickleVersion,
-      "com.monovore"       %% "decline"       % declineVersion,
-      "io.github.iltotore" %% "iron"          % ironVersion,
-      "org.scalameta"      %% "scalafmt-core" % scalafmtVersion,
-      "org.typelevel"      %% "cats-core"     % catsCoreVersion
+      "com.lihaoyi"   %% "upickle"       % upickleVersion,
+      "com.monovore"  %% "decline"       % declineVersion,
+      "org.scalameta" %% "scalafmt-core" % scalafmtVersion,
+      "org.typelevel" %% "cats-core"     % catsCoreVersion
     ),
     prepareAPIReferences := Def.uncached {
       apiReferenceBundle.prepare(
@@ -847,8 +844,7 @@ lazy val core = projectMatrix
     commonSettings,
     name := "gemstone-core",
     libraryDependencies ++= Seq(
-      "io.github.iltotore" %% "iron"      % ironVersion,
-      "org.typelevel"      %% "cats-core" % catsCoreVersion
+      "org.typelevel" %% "cats-core" % catsCoreVersion
     )
   )
   .jvmPlatform(scalaVersions = Seq(scala3Version))
@@ -985,9 +981,8 @@ lazy val ptx = projectMatrix
     checkedInGeneratedSources,
     name := "gemstone-isa-ptx",
     libraryDependencies ++= Seq(
-      "io.github.iltotore" %% "iron"       % ironVersion,
-      "org.typelevel"      %% "cats-core"  % catsCoreVersion,
-      "org.typelevel"      %% "cats-parse" % catsParseVersion
+      "org.typelevel" %% "cats-core"  % catsCoreVersion,
+      "org.typelevel" %% "cats-parse" % catsParseVersion
     ),
     generatePTXSources := Def.uncached {
       val converter  = fileConverter.value
@@ -1039,11 +1034,10 @@ lazy val amdgpu = projectMatrix
     checkedInGeneratedSources,
     name := "gemstone-isa-amdgpu",
     libraryDependencies ++= Seq(
-      "com.lihaoyi"        %% "upickle"    % upickleVersion,
-      "com.outr"           %% "scribe"     % scribeVersion,
-      "io.github.iltotore" %% "iron"       % ironVersion,
-      "org.typelevel"      %% "cats-core"  % catsCoreVersion,
-      "org.typelevel"      %% "cats-parse" % catsParseVersion
+      "com.lihaoyi"   %% "upickle"    % upickleVersion,
+      "com.outr"      %% "scribe"     % scribeVersion,
+      "org.typelevel" %% "cats-core"  % catsCoreVersion,
+      "org.typelevel" %% "cats-parse" % catsParseVersion
     ),
     generateAMDGPUSources := Def.uncached {
       val converter    = fileConverter.value
@@ -1105,8 +1099,7 @@ lazy val spirv = projectMatrix
     checkedInGeneratedSources,
     name := "gemstone-isa-spirv",
     libraryDependencies ++= Seq(
-      "io.github.iltotore" %% "iron"      % ironVersion,
-      "org.typelevel"      %% "cats-core" % catsCoreVersion
+      "org.typelevel" %% "cats-core" % catsCoreVersion
     ),
     generateSPIRVFixtures := Def.uncached {
       val source    = (Test / sourceDirectory).value / "fixtures"
@@ -1179,11 +1172,10 @@ lazy val server = projectMatrix
     commonSettings,
     name := "gemstone-server",
     libraryDependencies ++= Seq(
-      "com.lihaoyi"        %% "upickle"   % upickleVersion,
-      "com.monovore"       %% "decline"   % declineVersion,
-      "com.outr"           %% "scribe"    % scribeVersion,
-      "io.github.iltotore" %% "iron"      % ironVersion,
-      "org.typelevel"      %% "cats-core" % catsCoreVersion
+      "com.lihaoyi"   %% "upickle"   % upickleVersion,
+      "com.monovore"  %% "decline"   % declineVersion,
+      "com.outr"      %% "scribe"    % scribeVersion,
+      "org.typelevel" %% "cats-core" % catsCoreVersion
     ),
     Compile / mainClass := Some(s"$rootPackage.server.cli.GemstoneCLI")
   )
@@ -1216,10 +1208,9 @@ lazy val benchmarks = projectMatrix.in(file("tools/benchmarks"))
     name           := "gemstone-benchmarks",
     publish / skip := true,
     libraryDependencies ++= Seq(
-      "com.lihaoyi"        %% "upickle"   % upickleVersion,
-      "com.monovore"       %% "decline"   % declineVersion,
-      "io.github.iltotore" %% "iron"      % ironVersion,
-      "org.typelevel"      %% "cats-core" % catsCoreVersion
+      "com.lihaoyi"   %% "upickle"   % upickleVersion,
+      "com.monovore"  %% "decline"   % declineVersion,
+      "org.typelevel" %% "cats-core" % catsCoreVersion
     ),
     Compile / mainClass       := Some(s"$rootPackage.benchmarks.BenchmarkRunner"),
     Compile / run / fork      := true,

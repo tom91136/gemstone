@@ -1,9 +1,7 @@
 package net.kurobako.gemstone.server.transport
 
+import net.kurobako.gemstone.PositiveInt
 import Transport.*
-
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
 
 import java.io.{DataInputStream, DataOutputStream, IOException}
 import java.net.{InetAddress, InetSocketAddress, Socket}
@@ -15,9 +13,9 @@ object ServerControl {
   val ReleaseClient  = 3
   val Shutdown       = 4
 
-  private val TimeoutMillis: Int :| Positive = 5000
+  private val TimeoutMillis: PositiveInt = PositiveInt(5000)
 
-  def register(port: RPCPort, timeoutMillis: Int :| Positive = TimeoutMillis): ClientId =
+  def register(port: RPCPort, timeoutMillis: PositiveInt = TimeoutMillis): ClientId =
     exchange(port, timeoutMillis, RegisterClient, None) { input =>
       ClientId.either(input.readLong())
         .fold(
@@ -26,7 +24,7 @@ object ServerControl {
         )
     }
 
-  def release(port: RPCPort, client: ClientId, timeoutMillis: Int :| Positive = TimeoutMillis): Unit =
+  def release(port: RPCPort, client: ClientId, timeoutMillis: PositiveInt = TimeoutMillis): Unit =
     exchange(port, timeoutMillis, ReleaseClient, Some(client)) { input =>
       if (input.readInt() != 0) throw IOException("Gemstone server rejected client release")
     }
@@ -36,16 +34,16 @@ object ServerControl {
       if (input.readInt() != 0) throw IOException("Gemstone server rejected shutdown")
     }
 
-  private def exchange[A](port: RPCPort, timeoutMillis: Int :| Positive, operation: Int, client: Option[ClientId])(
+  private def exchange[A](port: RPCPort, timeoutMillis: PositiveInt, operation: Int, client: Option[ClientId])(
       read: DataInputStream => A
   ): A =
     Using.resource(Socket()) { socket =>
-      socket.connect(InetSocketAddress(InetAddress.getLoopbackAddress, port.value), timeoutMillis)
-      socket.setSoTimeout(timeoutMillis)
+      socket.connect(InetSocketAddress(InetAddress.getLoopbackAddress, port.raw), timeoutMillis.raw)
+      socket.setSoTimeout(timeoutMillis.raw)
       val output = DataOutputStream(socket.getOutputStream)
       output.writeInt(Magic)
       output.writeInt(operation)
-      client.foreach(value => output.writeLong(value.value))
+      client.foreach(value => output.writeLong(value.raw))
       output.flush()
       read(DataInputStream(socket.getInputStream))
     }

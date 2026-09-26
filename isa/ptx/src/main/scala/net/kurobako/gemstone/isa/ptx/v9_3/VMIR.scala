@@ -1,47 +1,83 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
+import scala.compiletime.{constValue, error}
+
 import Program.*
 
+import net.kurobako.gemstone.NonEmptyVec
+import net.kurobako.gemstone.NonNegativeInt
+import net.kurobako.gemstone.PositiveInt
 import net.kurobako.gemstone.Vec
 
-import net.kurobako.gemstone.binary.{BitWidth as BinaryBitWidth, ByteAlignedBitWidth, LittleEndian, ScalarByteWidth}
+import net.kurobako.gemstone.binary.{
+  BitWidth as BinaryBitWidth,
+  ByteAlignedBitWidth,
+  FloatingPointWidth,
+  LittleEndian,
+  ScalarByteWidth
+}
 import net.kurobako.gemstone.isa.KernelName
 import net.kurobako.gemstone.memory.GuestAddress
 import net.kurobako.gemstone.vm.LaunchGeometry.Axis
 
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
-
 private[v9_3] object VMIR {
 
-  type BitWidth = BitWidth.T
-  object BitWidth extends RefinedType[Int, Interval.Closed[8, 64] & Multiple[8]] {
+  opaque type BitWidth = Int
+  object BitWidth {
+    inline def either(value: Int): Either[String, BitWidth] =
+      if (value >= 8 && value <= 64 && value % 8 == 0) Right(value)
+      else Left(s"bit width must be a multiple of 8 between 8 and 64: $value")
+
+    inline def unsafe(value: Int): BitWidth =
+      either(value).fold(message => throw IllegalArgumentException(message), identity)
+
+    inline def apply[A <: Int & Singleton](inline value: A): BitWidth =
+      inline if constValue[A] >= 8 && constValue[A] <= 64 && constValue[A] % 8 == 0 then value
+      else error("bit width must be a multiple of 8 between 8 and 64")
+
     extension (width: BitWidth) {
-      @SuppressWarnings(Array("scalafix:GemstoneNoAssume"))
-      private[v9_3] def asBitWidth: BinaryBitWidth = BinaryBitWidth.assume(width.value)
-      @SuppressWarnings(Array("scalafix:GemstoneNoAssume"))
-      private[v9_3] def asByteAlignedBitWidth: ByteAlignedBitWidth = ByteAlignedBitWidth.assume(width.value)
+      inline def raw: Int                                          = width
+      private[v9_3] def asBitWidth: BinaryBitWidth                 = BinaryBitWidth.unsafe(width)
+      private[v9_3] def asByteAlignedBitWidth: ByteAlignedBitWidth = ByteAlignedBitWidth.unsafe(width)
+      private[v9_3] def asFloatingPointWidth: FloatingPointWidth   = FloatingPointWidth.unsafe(width)
     }
   }
 
-  type FloatWidth = FloatWidth.T
-  object FloatWidth extends RefinedType[Int, In[(16, 32, 64)]] {
+  opaque type FloatWidth = Int
+  object FloatWidth {
+    inline def either(value: Int): Either[String, FloatWidth] =
+      if (value == 16 || value == 32 || value == 64) Right(value)
+      else Left(s"float width must be 16, 32, or 64: $value")
+
+    inline def unsafe(value: Int): FloatWidth =
+      either(value).fold(message => throw IllegalArgumentException(message), identity)
+
+    inline def apply[A <: Int & Singleton](inline value: A): FloatWidth =
+      inline if constValue[A] == 16 || constValue[A] == 32 || constValue[A] == 64 then value
+      else error("float width must be 16, 32, or 64")
+
     extension (width: FloatWidth) {
-      @SuppressWarnings(Array("scalafix:GemstoneNoAssume"))
-      private[v9_3] def asBitWidth: BinaryBitWidth = BinaryBitWidth.assume(width.value)
-      @SuppressWarnings(Array("scalafix:GemstoneNoAssume"))
-      private[v9_3] def asByteAlignedBitWidth: ByteAlignedBitWidth = ByteAlignedBitWidth.assume(width.value)
+      inline def raw: Int                                          = width
+      private[v9_3] def asBitWidth: BinaryBitWidth                 = BinaryBitWidth.unsafe(width)
+      private[v9_3] def asByteAlignedBitWidth: ByteAlignedBitWidth = ByteAlignedBitWidth.unsafe(width)
     }
   }
 
-  type PartWidth = PartWidth.T
-  object PartWidth extends RefinedType[Int, In[(16, 32)]] {
-    extension (width: PartWidth) {
-      @SuppressWarnings(Array("scalafix:GemstoneNoAssume"))
-      private[v9_3] def asBitWidth: BinaryBitWidth = BinaryBitWidth.assume(width.value)
+  opaque type PartWidth = Int
+  object PartWidth {
+    inline def either(value: Int): Either[String, PartWidth] =
+      if (value == 16 || value == 32) Right(value) else Left(s"part width must be 16 or 32: $value")
 
-      @SuppressWarnings(Array("scalafix:GemstoneNoAssume"))
-      private[v9_3] def combined: BitWidth = BitWidth.assume(width.value * 2)
+    inline def unsafe(value: Int): PartWidth =
+      either(value).fold(message => throw IllegalArgumentException(message), identity)
+
+    inline def apply[A <: Int & Singleton](inline value: A): PartWidth =
+      inline if constValue[A] == 16 || constValue[A] == 32 then value else error("part width must be 16 or 32")
+
+    extension (width: PartWidth) {
+      inline def raw: Int                          = width
+      private[v9_3] def asBitWidth: BinaryBitWidth = BinaryBitWidth.unsafe(width)
+      private[v9_3] def combined: BitWidth         = BitWidth.unsafe(width * 2)
     }
   }
 
@@ -219,17 +255,17 @@ private[v9_3] object VMIR {
   }
 
   enum Instruction(private val opcodeText: String) {
-    final val opcode: Opcode = Opcode.applyUnsafe(opcodeText)
+    final val opcode: Opcode = Opcode.unsafe(opcodeText)
 
     case LoadParameter(
         destinations: Vec[RegisterName],
         parameter: ParameterName,
-        offset: Int :| Positive0,
+        offset: NonNegativeInt,
         elementWidth: BitWidth,
         signed: Boolean
     ) extends Instruction(s"ld.param.${if (signed) "s" else "u"}$elementWidth")
 
-    case StoreParameter(parameter: ParameterName, offset: Int :| Positive0, source: Value, elementWidth: BitWidth)
+    case StoreParameter(parameter: ParameterName, offset: NonNegativeInt, source: Value, elementWidth: BitWidth)
         extends Instruction(s"st.param.u$elementWidth")
 
     case LoadParameterIndirect(destination: RegisterName, address: Value, width: BitWidth, signed: Boolean)
@@ -248,10 +284,10 @@ private[v9_3] object VMIR {
     case MovePredicate(destination: RegisterName, source: Value) extends Instruction("mov.pred")
 
     case MoveSplit(destinations: Vec[RegisterName], source: Value, partWidth: PartWidth)
-        extends Instruction(s"mov.b${partWidth.value * 2}")
+        extends Instruction(s"mov.b${partWidth * 2}")
 
     case MoveCombine(destination: RegisterName, sources: Vec[Value], partWidth: PartWidth)
-        extends Instruction(s"mov.b${partWidth.value * 2}")
+        extends Instruction(s"mov.b${partWidth * 2}")
 
     case IntegerUnary(operation: IntegerUnaryOperation, destination: RegisterName, source: Value, width: BitWidth)
         extends Instruction(operation match {
@@ -543,7 +579,7 @@ private[v9_3] object VMIR {
     /** Synchronous model of the PTX asynchronous shared-memory copy. The emulator applies the copy at this instruction;
       * commit/wait operations below remain ordered no-ops because there is no separate copy engine.
       */
-    case AsyncCopy(destination: Value, source: Value, size: Int :| Positive)
+    case AsyncCopy(destination: Value, source: Value, size: PositiveInt)
         extends Instruction("cp.async")
 
     case AsyncCommit extends Instruction("cp.async.commit_group")
@@ -583,11 +619,11 @@ private[v9_3] object VMIR {
 
     case Branch(target: Pc) extends Instruction("bra")
 
-    case BarrierSync(id: Int :| Positive0) extends Instruction("bar.sync")
+    case BarrierSync(id: NonNegativeInt) extends Instruction("bar.sync")
 
     case BarrierReduce(
         destination: RegisterName,
-        id: Int :| Positive0,
+        id: NonNegativeInt,
         predicate: RegisterName,
         operation: PredicateOperation
     ) extends Instruction(s"bar.red.${operation.toString.map(_.toLower)}.pred")
@@ -655,22 +691,22 @@ private[v9_3] object VMIR {
     def opcode: Opcode = instruction.opcode
   }
 
-  final case class KernelParameter(name: ParameterName, widthBytes: Int :| Positive, pointer: Boolean = false)
-  final case class Argument(bytes: Vec[Byte] :| MinLength[1])
+  final case class KernelParameter(name: ParameterName, widthBytes: PositiveInt, pointer: Boolean = false)
+  final case class Argument(bytes: NonEmptyVec[Byte])
 
   final case class DeviceFunction(
       name: FunctionName,
       parameters: Vec[ParameterName],
-      parameterWidths: Vec[Int :| Positive],
-      parameterOffsets: Vec[Int :| Positive0],
+      parameterWidths: Vec[PositiveInt],
+      parameterOffsets: Vec[NonNegativeInt],
       returnParameters: Vec[ParameterName],
       program: ExecutableProgram[PredicatedInstruction],
       sharedSymbols: Map[SymbolName, Long]
   )
 
   object Argument {
-    def apply(value: Long): Argument =
-      Argument(LittleEndian.toVec(value, ScalarByteWidth.Qword).refineUnsafe[MinLength[1]])
+    def fromLong(value: Long): Argument =
+      Argument(NonEmptyVec.unsafeFromVec(LittleEndian.toVec(value, ScalarByteWidth.Qword)))
   }
 
   final case class Kernel(
@@ -685,21 +721,30 @@ private[v9_3] object VMIR {
     def instructions: Vec[Instruction] = program.instructions.map(_.instruction)
   }
 
-  type Pc = Pc.T
-  object Pc extends RefinedType[Int, Positive0] {
-    val Entry: Pc = Pc(0)
+  opaque type Pc = Int
+  object Pc {
+    inline def either(value: Int): Either[String, Pc] =
+      if (value >= 0) Right(value) else Left(s"program counter must be positive or zero: $value")
+
+    inline def unsafe(value: Int): Pc =
+      either(value).fold(message => throw IllegalArgumentException(message), identity)
+
+    inline def apply[A <: Int & Singleton](inline value: A): Pc =
+      inline if constValue[A] >= 0 then value else error("program counter must be positive or zero")
+
+    val Entry: Pc = 0
 
     extension (pc: Pc) {
-      @SuppressWarnings(Array("scalafix:GemstoneNoAssume"))
+      inline def raw: Int  = pc
       def next: Option[Pc] =
-        Option.when(pc.value != Int.MaxValue)(Pc.assume(pc.value + 1))
+        Option.when(pc != Int.MaxValue)(Pc.unsafe(pc + 1))
     }
   }
 
   final case class ExecutableProgram[Instruction](instructions: Vec[Instruction]) {
     def size: Int = instructions.size
 
-    def at(pc: Pc): Option[Instruction] = instructions.lift(pc.value)
+    def at(pc: Pc): Option[Instruction] = instructions.lift(pc)
   }
 
 }

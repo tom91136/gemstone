@@ -18,9 +18,6 @@ import VOP2InstructionDefs.*
 import VOP3InstructionDefs.*
 import VMIR.*
 
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
-
 import net.kurobako.gemstone.Vec
 import net.kurobako.gemstone.Vec.*
 import net.kurobako.gemstone.binary.{BitWidth, Bits, ByteRange, IntFieldWidth, LittleEndian, ScalarByteWidth}
@@ -370,13 +367,13 @@ private[amdgpu] object VMCompiler {
     case _                      => None
   }
 
-  private def dsAtomicByteWidth(operation: DSAtomicOperation): Int :| Interval.Closed[4, 8] = operation match {
+  private def dsAtomicByteWidth(operation: DSAtomicOperation): AtomicByteCount = operation match {
     case DSAtomicOperation.AddU64 | DSAtomicOperation.SubtractU64 | DSAtomicOperation.IncrementU64 |
         DSAtomicOperation.DecrementU64 | DSAtomicOperation.And64 | DSAtomicOperation.Or64 | DSAtomicOperation.Xor64 |
         DSAtomicOperation.MinimumI64 | DSAtomicOperation.MaximumI64 | DSAtomicOperation.MinimumU64 |
         DSAtomicOperation.MaximumU64 | DSAtomicOperation.AddF64 | DSAtomicOperation.MinimumF64 |
-        DSAtomicOperation.MaximumF64 => 8
-    case _ => 4
+        DSAtomicOperation.MaximumF64 => AtomicByteCount(8)
+    case _ => AtomicByteCount(4)
   }
 
   private def dsAtomicReturnsValue(opcode: VendorInstruction): Boolean = opcode match {
@@ -603,7 +600,7 @@ private[amdgpu] object VMCompiler {
           for {
             a <- constant(left)
             b <- constant(right)
-            target = offset.toLong + 4L + Bits.low32(a + b)
+            target = offset.toLong + 4L + Bits.low32(a + b).raw
             instruction <-
               Option.when(target <= Int.MaxValue.toLong)(target.toInt).flatMap(program.instructionIndices.get)
           } yield instruction
@@ -912,13 +909,22 @@ private[amdgpu] object VMCompiler {
       case SWaitcntVscnt | SWaitcntLgkmcnt => Right(Decoded(Instruction.Wait, 4))
       case SMovkI32                        =>
         val immediate = Bits.signedIntField(word, 0, IntFieldWidth(16))
-        Right(Decoded(Instruction.SMoveImmediate(Bits.unsignedIntField(word, 16, IntFieldWidth(7)), immediate), 4))
+        Right(Decoded(
+          Instruction.SMoveImmediate(Bits.unsignedIntField(word, 16, IntFieldWidth(7)), immediate),
+          4
+        ))
       case SMulkI32 =>
         val immediate = Bits.signedIntField(word, 0, IntFieldWidth(16))
-        Right(Decoded(Instruction.SMultiplyImmediate(Bits.unsignedIntField(word, 16, IntFieldWidth(7)), immediate), 4))
+        Right(Decoded(
+          Instruction.SMultiplyImmediate(Bits.unsignedIntField(word, 16, IntFieldWidth(7)), immediate),
+          4
+        ))
       case SAddkI32 =>
         val immediate = Bits.signedIntField(word, 0, IntFieldWidth(16))
-        Right(Decoded(Instruction.SAddImmediate(Bits.unsignedIntField(word, 16, IntFieldWidth(7)), immediate), 4))
+        Right(Decoded(
+          Instruction.SAddImmediate(Bits.unsignedIntField(word, 16, IntFieldWidth(7)), immediate),
+          4
+        ))
       case SSetregB32 | SSetregImm32B32 =>
         // Hardware register writes (notably FLAT_SCR_LO/HI) configure the
         // physical wave, while the virtual machine models scratch storage
@@ -1832,43 +1838,94 @@ private[amdgpu] object VMCompiler {
               )
             )
             .toRight(s"$atomic DS execution is not implemented")
-        case DsWriteB8   => Right(Instruction.DSWrite(address, dataA, None, 1, dsOffset, None))
-        case DsWriteB16  => Right(Instruction.DSWrite(address, dataA, None, 2, dsOffset, None))
-        case DsWriteB32  => Right(Instruction.DSWrite(address, dataA, None, 4, dsOffset, None))
-        case DsWriteB64  => Right(Instruction.DSWrite(address, dataA, None, 8, dsOffset, None))
-        case DsWriteB96  => Right(Instruction.DSWrite(address, dataA, None, 12, dsOffset, None))
+        case DsWriteB8  => Right(Instruction.DSWrite(address, dataA, None, TransferByteCount(1), dsOffset, None))
+        case DsWriteB16 => Right(Instruction.DSWrite(address, dataA, None, TransferByteCount(2), dsOffset, None))
+        case DsWriteB32 => Right(Instruction.DSWrite(address, dataA, None, TransferByteCount(4), dsOffset, None))
+        case DsWriteB64 => Right(Instruction.DSWrite(address, dataA, None, TransferByteCount(8), dsOffset, None))
+        case DsWriteB96 =>
+          Right(Instruction.DSWrite(address, dataA, None, TransferByteCount(12), dsOffset, None))
         case DsWriteB128 =>
-          Right(Instruction.DSWrite(address, dataA, None, 16, dsOffset, None))
+          Right(Instruction.DSWrite(address, dataA, None, TransferByteCount(16), dsOffset, None))
         case DsWriteB8D16Hi  => Right(Instruction.DSWriteD16HighByte(address, dataA, dsOffset))
         case DsWriteB16D16Hi => Right(Instruction.DSWriteD16High(address, dataA, dsOffset))
         case DsWrite2B32     =>
-          Right(Instruction.DSWrite(address, dataA, Some(dataB), 4, offsetA * 4, Some(offsetB * 4)))
+          Right(Instruction.DSWrite(
+            address,
+            dataA,
+            Some(dataB),
+            TransferByteCount(4),
+            offsetA * 4,
+            Some(offsetB * 4)
+          ))
         case DsWrite2B64 =>
-          Right(Instruction.DSWrite(address, dataA, Some(dataB), 8, offsetA * 8, Some(offsetB * 8)))
+          Right(Instruction.DSWrite(
+            address,
+            dataA,
+            Some(dataB),
+            TransferByteCount(8),
+            offsetA * 8,
+            Some(offsetB * 8)
+          ))
         case DsWrite2st64B32 =>
-          Right(Instruction.DSWrite(address, dataA, Some(dataB), 4, offsetA * 64 * 4, Some(offsetB * 64 * 4)))
+          Right(Instruction.DSWrite(
+            address,
+            dataA,
+            Some(dataB),
+            TransferByteCount(4),
+            offsetA * 64 * 4,
+            Some(offsetB * 64 * 4)
+          ))
         case DsWrite2st64B64 =>
-          Right(Instruction.DSWrite(address, dataA, Some(dataB), 8, offsetA * 64 * 8, Some(offsetB * 64 * 8)))
-        case DsReadU8       => Right(Instruction.DSRead(dest, address, 1, dsOffset, None))
-        case DsReadU16      => Right(Instruction.DSRead(dest, address, 2, dsOffset, None))
-        case DsReadI8       => Right(Instruction.DSSignedRead(dest, address, 1, dsOffset, None))
-        case DsReadI16      => Right(Instruction.DSSignedRead(dest, address, 2, dsOffset, None))
-        case DsReadU8D16    => Right(Instruction.DSReadD16(dest, address, 1, dsOffset, false))
-        case DsReadU8D16Hi  => Right(Instruction.DSReadD16(dest, address, 1, dsOffset, true))
-        case DsReadU16D16   => Right(Instruction.DSReadD16(dest, address, 2, dsOffset, false))
-        case DsReadU16D16Hi => Right(Instruction.DSReadD16(dest, address, 2, dsOffset, true))
-        case DsReadI8D16    => Right(Instruction.DSSignedReadD16(dest, address, 1, dsOffset, false))
-        case DsReadI8D16Hi  => Right(Instruction.DSSignedReadD16(dest, address, 1, dsOffset, true))
-        case DsReadB32      => Right(Instruction.DSRead(dest, address, 4, dsOffset, None))
-        case DsReadB96      => Right(Instruction.DSRead(dest, address, 12, dsOffset, None))
-        case DsReadB128     => Right(Instruction.DSRead(dest, address, 16, dsOffset, None))
-        case DsReadB64      => Right(Instruction.DSRead(dest, address, 8, dsOffset, None))
-        case DsRead2B32     => Right(Instruction.DSRead(dest, address, 4, offsetA * 4, Some(offsetB * 4)))
-        case DsRead2B64     => Right(Instruction.DSRead(dest, address, 8, offsetA * 8, Some(offsetB * 8)))
+          Right(Instruction.DSWrite(
+            address,
+            dataA,
+            Some(dataB),
+            TransferByteCount(8),
+            offsetA * 64 * 8,
+            Some(offsetB * 64 * 8)
+          ))
+        case DsReadU8  => Right(Instruction.DSRead(dest, address, TransferByteCount(1), dsOffset, None))
+        case DsReadU16 => Right(Instruction.DSRead(dest, address, TransferByteCount(2), dsOffset, None))
+        case DsReadI8  =>
+          Right(Instruction.DSSignedRead(dest, address, NarrowTransferByteCount(1), dsOffset, None))
+        case DsReadI16 =>
+          Right(Instruction.DSSignedRead(dest, address, NarrowTransferByteCount(2), dsOffset, None))
+        case DsReadU8D16 =>
+          Right(Instruction.DSReadD16(dest, address, NarrowTransferByteCount(1), dsOffset, false))
+        case DsReadU8D16Hi =>
+          Right(Instruction.DSReadD16(dest, address, NarrowTransferByteCount(1), dsOffset, true))
+        case DsReadU16D16 =>
+          Right(Instruction.DSReadD16(dest, address, NarrowTransferByteCount(2), dsOffset, false))
+        case DsReadU16D16Hi =>
+          Right(Instruction.DSReadD16(dest, address, NarrowTransferByteCount(2), dsOffset, true))
+        case DsReadI8D16 =>
+          Right(Instruction.DSSignedReadD16(dest, address, NarrowTransferByteCount(1), dsOffset, false))
+        case DsReadI8D16Hi =>
+          Right(Instruction.DSSignedReadD16(dest, address, NarrowTransferByteCount(1), dsOffset, true))
+        case DsReadB32  => Right(Instruction.DSRead(dest, address, TransferByteCount(4), dsOffset, None))
+        case DsReadB96  => Right(Instruction.DSRead(dest, address, TransferByteCount(12), dsOffset, None))
+        case DsReadB128 => Right(Instruction.DSRead(dest, address, TransferByteCount(16), dsOffset, None))
+        case DsReadB64  => Right(Instruction.DSRead(dest, address, TransferByteCount(8), dsOffset, None))
+        case DsRead2B32 =>
+          Right(Instruction.DSRead(dest, address, TransferByteCount(4), offsetA * 4, Some(offsetB * 4)))
+        case DsRead2B64 =>
+          Right(Instruction.DSRead(dest, address, TransferByteCount(8), offsetA * 8, Some(offsetB * 8)))
         case DsRead2st64B32 =>
-          Right(Instruction.DSRead(dest, address, 4, offsetA * 64 * 4, Some(offsetB * 64 * 4)))
+          Right(Instruction.DSRead(
+            dest,
+            address,
+            TransferByteCount(4),
+            offsetA * 64 * 4,
+            Some(offsetB * 64 * 4)
+          ))
         case DsRead2st64B64 =>
-          Right(Instruction.DSRead(dest, address, 8, offsetA * 64 * 8, Some(offsetB * 64 * 8)))
+          Right(Instruction.DSRead(
+            dest,
+            address,
+            TransferByteCount(8),
+            offsetA * 64 * 8,
+            Some(offsetB * 64 * 8)
+          ))
         case other => Left(s"$other DS execution is not implemented")
       }
     } yield Decoded(operation, 8)
@@ -1878,7 +1935,7 @@ private[amdgpu] object VMCompiler {
       dest: Int,
       address: Int,
       scalar: Option[Int],
-      bytes: Int :| Interval.Closed[1, 16],
+      bytes: TransferByteCount,
       offset: Int,
       coherent: Boolean
   ): Instruction =
@@ -1898,7 +1955,7 @@ private[amdgpu] object VMCompiler {
       dest: Int,
       address: Int,
       scalar: Option[Int],
-      bytes: Int :| Interval.Closed[1, 2],
+      bytes: NarrowTransferByteCount,
       offset: Int
   ): Instruction =
     if (global)
@@ -1928,7 +1985,7 @@ private[amdgpu] object VMCompiler {
       address: Int,
       scalar: Option[Int],
       src: Int,
-      bytes: Int :| Interval.Closed[1, 16],
+      bytes: TransferByteCount,
       offset: Int
   ): Instruction =
     if (global)
@@ -1940,7 +1997,7 @@ private[amdgpu] object VMCompiler {
       address: Int,
       scalar: Option[Int],
       src: Int,
-      bytes: Int :| Interval.Closed[1, 2],
+      bytes: NarrowTransferByteCount,
       offset: Int
   ): Instruction =
     if (global)
@@ -1959,7 +2016,7 @@ private[amdgpu] object VMCompiler {
       address: Int,
       scalar: Option[Int],
       src: Int,
-      bytes: Int :| Interval.Closed[4, 8],
+      bytes: AtomicByteCount,
       compareOffset: Int,
       offset: Int,
       returnValue: Boolean
@@ -2005,44 +2062,44 @@ private[amdgpu] object VMCompiler {
         val scalar = Option.when(!Decoding.isAbsentScalarOffset(scalarAddress))(scalarAddress)
         opcodeDefinition("GLOBAL", Bits.unsignedIntField(word, 18, IntFieldWidth(7)), target).flatMap {
           case GlobalLoadDword =>
-            Right(vmemLoad(true, destination, vectorAddress, scalar, 4, memoryOffset, returnValue))
+            Right(vmemLoad(true, destination, vectorAddress, scalar, TransferByteCount(4), memoryOffset, returnValue))
           case GlobalLoadDwordx2 =>
-            Right(vmemLoad(true, destination, vectorAddress, scalar, 8, memoryOffset, returnValue))
+            Right(vmemLoad(true, destination, vectorAddress, scalar, TransferByteCount(8), memoryOffset, returnValue))
           case GlobalLoadDwordx3 =>
-            Right(vmemLoad(true, destination, vectorAddress, scalar, 12, memoryOffset, returnValue))
+            Right(vmemLoad(true, destination, vectorAddress, scalar, TransferByteCount(12), memoryOffset, returnValue))
           case GlobalLoadDwordx4 =>
-            Right(vmemLoad(true, destination, vectorAddress, scalar, 16, memoryOffset, returnValue))
+            Right(vmemLoad(true, destination, vectorAddress, scalar, TransferByteCount(16), memoryOffset, returnValue))
           case GlobalLoadUbyte =>
-            Right(vmemLoad(true, destination, vectorAddress, scalar, 1, memoryOffset, returnValue))
+            Right(vmemLoad(true, destination, vectorAddress, scalar, TransferByteCount(1), memoryOffset, returnValue))
           case GlobalLoadSbyte =>
-            Right(vmemLoadSigned(true, destination, vectorAddress, scalar, 1, memoryOffset))
+            Right(vmemLoadSigned(true, destination, vectorAddress, scalar, NarrowTransferByteCount(1), memoryOffset))
           case GlobalLoadSshort =>
-            Right(vmemLoadSigned(true, destination, vectorAddress, scalar, 2, memoryOffset))
+            Right(vmemLoadSigned(true, destination, vectorAddress, scalar, NarrowTransferByteCount(2), memoryOffset))
           case GlobalLoadShortD16 =>
             Right(vmemLoadD16(true, destination, vectorAddress, scalar, memoryOffset, false))
           case GlobalLoadShortD16Hi =>
             Right(vmemLoadD16(true, destination, vectorAddress, scalar, memoryOffset, true))
           case GlobalLoadUshort =>
-            Right(vmemLoad(true, destination, vectorAddress, scalar, 2, memoryOffset, returnValue))
+            Right(vmemLoad(true, destination, vectorAddress, scalar, TransferByteCount(2), memoryOffset, returnValue))
           case GlobalStoreDword =>
-            Right(vmemStore(true, vectorAddress, scalar, dataRegister, 4, memoryOffset))
+            Right(vmemStore(true, vectorAddress, scalar, dataRegister, TransferByteCount(4), memoryOffset))
           case GlobalStoreDwordx2 =>
-            Right(vmemStore(true, vectorAddress, scalar, dataRegister, 8, memoryOffset))
+            Right(vmemStore(true, vectorAddress, scalar, dataRegister, TransferByteCount(8), memoryOffset))
           case GlobalStoreDwordx3 =>
-            Right(vmemStore(true, vectorAddress, scalar, dataRegister, 12, memoryOffset))
+            Right(vmemStore(true, vectorAddress, scalar, dataRegister, TransferByteCount(12), memoryOffset))
           case GlobalStoreDwordx4 =>
-            Right(vmemStore(true, vectorAddress, scalar, dataRegister, 16, memoryOffset))
+            Right(vmemStore(true, vectorAddress, scalar, dataRegister, TransferByteCount(16), memoryOffset))
           case GlobalStoreByte =>
-            Right(vmemStore(true, vectorAddress, scalar, dataRegister, 1, memoryOffset))
+            Right(vmemStore(true, vectorAddress, scalar, dataRegister, TransferByteCount(1), memoryOffset))
           case GlobalStoreShort =>
-            Right(vmemStore(true, vectorAddress, scalar, dataRegister, 2, memoryOffset))
+            Right(vmemStore(true, vectorAddress, scalar, dataRegister, TransferByteCount(2), memoryOffset))
           case GlobalAtomicAdd =>
             Right(Instruction.GlobalAtomicAdd(
               dest = destination,
               address = vectorAddress,
               scalarAddress = scalar,
               src = dataRegister,
-              bytes = 4,
+              bytes = AtomicByteCount(4),
               offset = memoryOffset,
               returnValue = returnValue
             ))
@@ -2052,7 +2109,7 @@ private[amdgpu] object VMCompiler {
               address = vectorAddress,
               scalarAddress = scalar,
               src = dataRegister,
-              bytes = 8,
+              bytes = AtomicByteCount(8),
               offset = memoryOffset,
               returnValue = returnValue
             ))
@@ -2062,7 +2119,7 @@ private[amdgpu] object VMCompiler {
               address = vectorAddress,
               scalarAddress = scalar,
               src = dataRegister,
-              bytes = 4,
+              bytes = AtomicByteCount(4),
               offset = memoryOffset,
               returnValue = returnValue
             ))
@@ -2072,7 +2129,7 @@ private[amdgpu] object VMCompiler {
               address = vectorAddress,
               scalarAddress = scalar,
               src = dataRegister,
-              bytes = 8,
+              bytes = AtomicByteCount(8),
               offset = memoryOffset,
               returnValue = returnValue
             ))
@@ -2083,7 +2140,7 @@ private[amdgpu] object VMCompiler {
               vectorAddress,
               scalar,
               dataRegister,
-              4,
+              AtomicByteCount(4),
               1,
               memoryOffset,
               returnValue
@@ -2095,55 +2152,55 @@ private[amdgpu] object VMCompiler {
               vectorAddress,
               scalar,
               dataRegister,
-              8,
+              AtomicByteCount(8),
               2,
               memoryOffset,
               returnValue
             ))
           case GlobalStoreByteD16Hi =>
-            Right(vmemStoreD16(true, vectorAddress, scalar, dataRegister, 1, memoryOffset))
+            Right(vmemStoreD16(true, vectorAddress, scalar, dataRegister, NarrowTransferByteCount(1), memoryOffset))
           case GlobalStoreShortD16Hi =>
-            Right(vmemStoreD16(true, vectorAddress, scalar, dataRegister, 2, memoryOffset))
+            Right(vmemStoreD16(true, vectorAddress, scalar, dataRegister, NarrowTransferByteCount(2), memoryOffset))
           case other => Left(s"$other GLOBAL execution is not implemented")
         }
       } else if (scalarAddress == 0 || Decoding.isAbsentScalarOffset(scalarAddress)) {
         opcodeDefinition("FLAT", Bits.unsignedIntField(word, 18, IntFieldWidth(7)), target).flatMap {
           case FlatLoadUbyte =>
-            Right(vmemLoad(false, destination, vectorAddress, None, 1, memoryOffset, returnValue))
+            Right(vmemLoad(false, destination, vectorAddress, None, TransferByteCount(1), memoryOffset, returnValue))
           case FlatLoadSbyte =>
-            Right(vmemLoadSigned(false, destination, vectorAddress, None, 1, memoryOffset))
+            Right(vmemLoadSigned(false, destination, vectorAddress, None, NarrowTransferByteCount(1), memoryOffset))
           case FlatLoadShortD16 =>
             Right(vmemLoadD16(false, destination, vectorAddress, None, memoryOffset, false))
           case FlatLoadShortD16Hi =>
             Right(vmemLoadD16(false, destination, vectorAddress, None, memoryOffset, true))
           case FlatLoadSshort =>
-            Right(vmemLoadSigned(false, destination, vectorAddress, None, 2, memoryOffset))
+            Right(vmemLoadSigned(false, destination, vectorAddress, None, NarrowTransferByteCount(2), memoryOffset))
           case FlatLoadUshort =>
-            Right(vmemLoad(false, destination, vectorAddress, None, 2, memoryOffset, returnValue))
+            Right(vmemLoad(false, destination, vectorAddress, None, TransferByteCount(2), memoryOffset, returnValue))
           case FlatLoadDword =>
-            Right(vmemLoad(false, destination, vectorAddress, None, 4, memoryOffset, returnValue))
+            Right(vmemLoad(false, destination, vectorAddress, None, TransferByteCount(4), memoryOffset, returnValue))
           case FlatLoadDwordx2 =>
-            Right(vmemLoad(false, destination, vectorAddress, None, 8, memoryOffset, returnValue))
+            Right(vmemLoad(false, destination, vectorAddress, None, TransferByteCount(8), memoryOffset, returnValue))
           case FlatLoadDwordx3 =>
-            Right(vmemLoad(false, destination, vectorAddress, None, 12, memoryOffset, returnValue))
+            Right(vmemLoad(false, destination, vectorAddress, None, TransferByteCount(12), memoryOffset, returnValue))
           case FlatLoadDwordx4 =>
-            Right(vmemLoad(false, destination, vectorAddress, None, 16, memoryOffset, returnValue))
+            Right(vmemLoad(false, destination, vectorAddress, None, TransferByteCount(16), memoryOffset, returnValue))
           case FlatStoreShort =>
-            Right(vmemStore(false, vectorAddress, None, dataRegister, 2, memoryOffset))
+            Right(vmemStore(false, vectorAddress, None, dataRegister, TransferByteCount(2), memoryOffset))
           case FlatStoreByte =>
-            Right(vmemStore(false, vectorAddress, None, dataRegister, 1, memoryOffset))
+            Right(vmemStore(false, vectorAddress, None, dataRegister, TransferByteCount(1), memoryOffset))
           case FlatStoreByteD16Hi =>
-            Right(vmemStoreD16(false, vectorAddress, None, dataRegister, 1, memoryOffset))
+            Right(vmemStoreD16(false, vectorAddress, None, dataRegister, NarrowTransferByteCount(1), memoryOffset))
           case FlatStoreShortD16Hi =>
-            Right(vmemStoreD16(false, vectorAddress, None, dataRegister, 2, memoryOffset))
+            Right(vmemStoreD16(false, vectorAddress, None, dataRegister, NarrowTransferByteCount(2), memoryOffset))
           case FlatStoreDword =>
-            Right(vmemStore(false, vectorAddress, None, dataRegister, 4, memoryOffset))
+            Right(vmemStore(false, vectorAddress, None, dataRegister, TransferByteCount(4), memoryOffset))
           case FlatStoreDwordx2 =>
-            Right(vmemStore(false, vectorAddress, None, dataRegister, 8, memoryOffset))
+            Right(vmemStore(false, vectorAddress, None, dataRegister, TransferByteCount(8), memoryOffset))
           case FlatStoreDwordx3 =>
-            Right(vmemStore(false, vectorAddress, None, dataRegister, 12, memoryOffset))
+            Right(vmemStore(false, vectorAddress, None, dataRegister, TransferByteCount(12), memoryOffset))
           case FlatStoreDwordx4 =>
-            Right(vmemStore(false, vectorAddress, None, dataRegister, 16, memoryOffset))
+            Right(vmemStore(false, vectorAddress, None, dataRegister, TransferByteCount(16), memoryOffset))
           case FlatAtomicCmpswap | FlatAtomicCmpswapB32 =>
             Right(vmemCompareSwap(
               false,
@@ -2151,7 +2208,7 @@ private[amdgpu] object VMCompiler {
               vectorAddress,
               None,
               dataRegister,
-              4,
+              AtomicByteCount(4),
               1,
               memoryOffset,
               returnValue
@@ -2162,7 +2219,7 @@ private[amdgpu] object VMCompiler {
               address = vectorAddress,
               scalarAddress = None,
               src = dataRegister,
-              bytes = 4,
+              bytes = AtomicByteCount(4),
               offset = memoryOffset,
               returnValue = returnValue
             ))
@@ -2172,7 +2229,7 @@ private[amdgpu] object VMCompiler {
               address = vectorAddress,
               scalarAddress = None,
               src = dataRegister,
-              bytes = 8,
+              bytes = AtomicByteCount(8),
               offset = memoryOffset,
               returnValue = returnValue
             ))
@@ -2197,7 +2254,7 @@ private[amdgpu] object VMCompiler {
               address = vectorAddress,
               scalarAddress = None,
               src = dataRegister,
-              bytes = 4,
+              bytes = AtomicByteCount(4),
               offset = memoryOffset,
               returnValue = returnValue
             ))
@@ -2208,7 +2265,7 @@ private[amdgpu] object VMCompiler {
               vectorAddress,
               None,
               dataRegister,
-              8,
+              AtomicByteCount(8),
               2,
               memoryOffset,
               returnValue
@@ -2250,7 +2307,7 @@ private[amdgpu] object VMCompiler {
             address = address,
             resource = resource,
             scalarOffset = scalarOffset,
-            bytes = 4,
+            bytes = TransferByteCount(4),
             offset = immediate
           ))
         case BufferLoadUbyte =>
@@ -2259,7 +2316,7 @@ private[amdgpu] object VMCompiler {
             address = address,
             resource = resource,
             scalarOffset = scalarOffset,
-            bytes = 1,
+            bytes = TransferByteCount(1),
             offset = immediate
           ))
         case BufferLoadDwordx2 =>
@@ -2268,7 +2325,7 @@ private[amdgpu] object VMCompiler {
             address = address,
             resource = resource,
             scalarOffset = scalarOffset,
-            bytes = 8,
+            bytes = TransferByteCount(8),
             offset = immediate
           ))
         case BufferLoadDwordx4 =>
@@ -2277,7 +2334,7 @@ private[amdgpu] object VMCompiler {
             address = address,
             resource = resource,
             scalarOffset = scalarOffset,
-            bytes = 16,
+            bytes = TransferByteCount(16),
             offset = immediate
           ))
         case BufferLoadShortD16 =>
@@ -2286,7 +2343,7 @@ private[amdgpu] object VMCompiler {
             address = address,
             resource = resource,
             scalarOffset = scalarOffset,
-            bytes = 2,
+            bytes = NarrowTransferByteCount(2),
             offset = immediate,
             high = false
           ))
@@ -2296,7 +2353,7 @@ private[amdgpu] object VMCompiler {
             address = address,
             resource = resource,
             scalarOffset = scalarOffset,
-            bytes = 2,
+            bytes = NarrowTransferByteCount(2),
             offset = immediate,
             high = true
           ))
@@ -2306,7 +2363,7 @@ private[amdgpu] object VMCompiler {
             resource = resource,
             scalarOffset = scalarOffset,
             src = dataRegister,
-            bytes = 2,
+            bytes = TransferByteCount(2),
             offset = immediate
           ))
         case BufferStoreByte =>
@@ -2315,7 +2372,7 @@ private[amdgpu] object VMCompiler {
             resource = resource,
             scalarOffset = scalarOffset,
             src = dataRegister,
-            bytes = 1,
+            bytes = TransferByteCount(1),
             offset = immediate
           ))
         case BufferStoreShortD16Hi =>
@@ -2324,7 +2381,7 @@ private[amdgpu] object VMCompiler {
             resource = resource,
             scalarOffset = scalarOffset,
             src = dataRegister,
-            bytes = 2,
+            bytes = NarrowTransferByteCount(2),
             offset = immediate
           ))
         case BufferStoreDword =>
@@ -2333,7 +2390,7 @@ private[amdgpu] object VMCompiler {
             resource = resource,
             scalarOffset = scalarOffset,
             src = dataRegister,
-            bytes = 4,
+            bytes = TransferByteCount(4),
             offset = immediate
           ))
         case BufferStoreDwordx2 =>
@@ -2342,7 +2399,7 @@ private[amdgpu] object VMCompiler {
             resource = resource,
             scalarOffset = scalarOffset,
             src = dataRegister,
-            bytes = 8,
+            bytes = TransferByteCount(8),
             offset = immediate
           ))
         case BufferStoreDwordx4 =>
@@ -2351,7 +2408,7 @@ private[amdgpu] object VMCompiler {
             resource = resource,
             scalarOffset = scalarOffset,
             src = dataRegister,
-            bytes = 16,
+            bytes = TransferByteCount(16),
             offset = immediate
           ))
         case other => Left(s"$other MUBUF execution is not implemented")

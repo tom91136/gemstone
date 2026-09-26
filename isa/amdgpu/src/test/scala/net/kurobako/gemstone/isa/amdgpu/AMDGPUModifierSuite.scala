@@ -2,9 +2,6 @@ package net.kurobako.gemstone.isa.amdgpu
 
 import VMIR.*
 
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
-
 import net.kurobako.gemstone.Vec
 import net.kurobako.gemstone.binary.{Bits, ByteRange}
 import net.kurobako.gemstone.binary.IEEE754
@@ -390,12 +387,12 @@ final class AMDGPUModifierSuite extends munit.FunSuite with CodeObjectTestSuppor
   }
 
   test("gfx900 initial work-item VGPRs use multidimensional local IDs") {
-    val geometry = LaunchGeometry.forLaunch(Dimensions(64, 16, 2), Dimensions.One).toOption.get
-    assertEquals(geometry.localCoordinates(0), Right(Coordinates(0, 0, 0)))
-    assertEquals(geometry.localCoordinates(63), Right(Coordinates(63, 0, 0)))
-    assertEquals(geometry.localCoordinates(64), Right(Coordinates(0, 1, 0)))
-    assertEquals(geometry.localCoordinates(1023), Right(Coordinates(63, 15, 0)))
-    assertEquals(geometry.localCoordinates(1024), Right(Coordinates(0, 0, 1)))
+    val geometry = LaunchGeometry.forLaunch(testDimensions(64, 16, 2), Dimensions.One).toOption.get
+    assertEquals(geometry.localCoordinates(0), Right(testCoordinates(0, 0, 0)))
+    assertEquals(geometry.localCoordinates(63), Right(testCoordinates(63, 0, 0)))
+    assertEquals(geometry.localCoordinates(64), Right(testCoordinates(0, 1, 0)))
+    assertEquals(geometry.localCoordinates(1023), Right(testCoordinates(63, 15, 0)))
+    assertEquals(geometry.localCoordinates(1024), Right(testCoordinates(0, 0, 1)))
   }
 
   test("gfx900 SOPK signed multiply uses a sign-extended immediate and reports overflow") {

@@ -2,6 +2,7 @@ import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
 import sbt.io.IO
+import scala.language.implicitConversions
 import scala.util.Using
 import scala.util.control.NonFatal
 

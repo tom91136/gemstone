@@ -1,12 +1,11 @@
 package net.kurobako.gemstone.benchmarks
 
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
+import net.kurobako.gemstone.{NonNegativeInt, NonNegativeLong, PositiveInt}
 
 final class BenchmarkRunnerSuite extends munit.FunSuite {
   test("catalog names are stable and unique") {
-    assert(PlatformBenchmarks.names.nonEmpty)
-    assertEquals(PlatformBenchmarks.names.distinct, PlatformBenchmarks.names)
+    assert(PlatformBenchmarks.names.toVector.nonEmpty)
+    assertEquals(PlatformBenchmarks.names.toVector.distinct, PlatformBenchmarks.names.toVector)
   }
 
   test("unknown cases fail before measurement") {
@@ -20,8 +19,15 @@ final class BenchmarkRunnerSuite extends munit.FunSuite {
     )
     assertEquals(
       options,
-      BenchmarkOptions(2, 3, BenchmarkInvocation(BenchmarkName("ptx-execution"), Vector("--iterations", "17")))
+      BenchmarkOptions(
+        NonNegativeInt(2),
+        PositiveInt(3),
+        BenchmarkInvocation(BenchmarkName("ptx-execution"), Vector("--iterations", "17"))
+      )
     )
-    assertEquals(BenchmarkRunner.result(options, 1, 99L)("schema").str, "gemstone-benchmark-v1")
+    assertEquals(
+      BenchmarkRunner.result(options, NonNegativeInt(1), NonNegativeLong(99L))("schema").str,
+      "gemstone-benchmark-v1"
+    )
   }
 }

@@ -44,7 +44,7 @@ final class GemstoneFilenameConventions extends SyntacticRule("GemstoneFilenameC
   }
 
   private def packageStats(stat: Stat): List[Stat] = stat match {
-    case pkg: Pkg => pkg.stats.flatMap(packageStats)
+    case pkg: Pkg => pkg.body.stats.flatMap(packageStats)
     case other    => List(other)
   }
 

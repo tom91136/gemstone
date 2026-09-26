@@ -3,10 +3,7 @@ package net.kurobako.gemstone.isa.amdgpu
 import CodeObject.*
 import VMIR.*
 
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
-
-import net.kurobako.gemstone.Vec
+import net.kurobako.gemstone.{NonNegativeInt, NonNegativeLong, PositiveInt, PositiveLong, Vec}
 import net.kurobako.gemstone.memory.GuestAddress
 import net.kurobako.gemstone.binary.{Bits, ByteRange, ScalarByteWidth}
 import net.kurobako.gemstone.binary.IEEE754
@@ -76,11 +73,14 @@ final class CodeObjectExecutionSuite extends munit.FunSuite with CodeObjectTestS
     )
     val dispatch = KernelTask.validated(
       KernelName("vcc_scratch_counter"),
-      Dimensions(32, 1, 1),
+      testDimensions(32, 1, 1),
       Dimensions.One,
       Vec.empty
     ).toOption.get
-    val control = TaskControl.forScheduler(TaskLimits(maxInstructions = 4096L, quantum = 64))
+    val control = TaskControl.forScheduler(TaskLimits(
+      maxInstructions = PositiveLong(4096L),
+      quantum = PositiveInt(64)
+    ))
     assertEquals(executeKernel(compileKernel(kernel), dispatch, TestMemory(), control), Right(()))
   }
 
@@ -133,7 +133,7 @@ final class CodeObjectExecutionSuite extends munit.FunSuite with CodeObjectTestS
       val end    = LittleEndian.toVec(0xbf810000L, ScalarByteWidth.Dword)
       val kernel = CodeObjectKernel(
         "skip_linked_trap",
-        Target(architecture),
+        Target.unsafe(architecture),
         0,
         0,
         0,
@@ -159,7 +159,7 @@ final class CodeObjectExecutionSuite extends munit.FunSuite with CodeObjectTestS
         .flatMap(word => LittleEndian.toVec(word, ScalarByteWidth.Dword))
       val kernel = CodeObjectKernel(
         "execute_trap",
-        Target(architecture),
+        Target.unsafe(architecture),
         0,
         0,
         0,
@@ -238,7 +238,7 @@ final class CodeObjectExecutionSuite extends munit.FunSuite with CodeObjectTestS
     val code = Vec[Byte](0x00, 0x10, 0x68, 0xe0.toByte, 0x01, 0x00, 0x01, 0x80.toByte)
     assertEquals(
       VMCompiler.decodeInstruction(code, Target("gfx1030")),
-      Right(Instruction.BufferStore(Some(1), 4, None, 0, 2, 0))
+      Right(Instruction.BufferStore(Some(1), 4, None, 0, TransferByteCount(2), 0))
     )
     // Point the buffer descriptor at allocation 1 and store v0's low half at byte offset 1.
     val words = Vec[Long](0xbe840380L, 0xbe8503ffL, 0x00004000L, 0xbe860388L, 0xbe870380L,
@@ -256,8 +256,8 @@ final class CodeObjectExecutionSuite extends munit.FunSuite with CodeObjectTestS
     val memory     = TestMemory()
     val allocation = MemoryRegion(1L)
     memory.allocate(allocation, 8)
-    memory.putInt(allocation, 0, 0xa5a5a5a5)
-    memory.putInt(allocation, 4, 0xa5a5a5a5)
+    memory.putInt(allocation, NonNegativeInt(0), 0xa5a5a5a5)
+    memory.putInt(allocation, NonNegativeInt(4), 0xa5a5a5a5)
     val dispatch = KernelTask.validated(
       KernelName("store_short"),
       Dimensions.One,
@@ -265,17 +265,17 @@ final class CodeObjectExecutionSuite extends munit.FunSuite with CodeObjectTestS
       Vec.empty
     ).toOption.get
     assertEquals(executeKernel(compileKernel(kernel), dispatch, memory), Right(()))
-    assertEquals(memory.getInt(allocation, 0), 0xa55678a5)
-    assertEquals(memory.getInt(allocation, 4), 0xa5a5a5a5)
-    memory.putInt(allocation, 0, 0xa5a5a5a5)
+    assertEquals(memory.getInt(allocation, NonNegativeInt(0)), 0xa55678a5)
+    assertEquals(memory.getInt(allocation, NonNegativeInt(4)), 0xa5a5a5a5)
+    memory.putInt(allocation, NonNegativeInt(0), 0xa5a5a5a5)
     val high = kernel.copy(code =
       words.updated(8, 0xe06c1000L).flatMap(word =>
         LittleEndian.toVec(word, ScalarByteWidth.Dword)
       )
     )
     assertEquals(executeKernel(compileKernel(high), dispatch, memory), Right(()))
-    assertEquals(memory.getInt(allocation, 0), 0xa51234a5)
-    assertEquals(memory.getInt(allocation, 4), 0xa5a5a5a5)
+    assertEquals(memory.getInt(allocation, NonNegativeInt(0)), 0xa51234a5)
+    assertEquals(memory.getInt(allocation, NonNegativeInt(4)), 0xa5a5a5a5)
   }
 
   test("gfx1030 scratch buffer scalar offsets use wave-interleaved addresses") {
@@ -311,8 +311,8 @@ final class CodeObjectExecutionSuite extends munit.FunSuite with CodeObjectTestS
       Vec.empty
     ).toOption.get
     assertEquals(executeKernel(compileKernel(kernel), dispatch, memory), Right(()))
-    assertEquals(memory.getInt(allocation, 0), 0x12345678)
-    assertEquals(memory.getInt(allocation, 4), 0x0fedcba9)
+    assertEquals(memory.getInt(allocation, NonNegativeInt(0)), 0x12345678)
+    assertEquals(memory.getInt(allocation, NonNegativeInt(4)), 0x0fedcba9)
   }
 
   test("gfx1030 VOP3 frexp mantissa applies the absolute source modifier") {
@@ -343,7 +343,7 @@ final class CodeObjectExecutionSuite extends munit.FunSuite with CodeObjectTestS
       Vec.empty
     ).toOption.get
     assertEquals(executeKernel(compileKernel(kernel), dispatch, memory), Right(()))
-    assertEquals(memory.getInt(allocation, 0), java.lang.Float.floatToRawIntBits(0.75f))
+    assertEquals(memory.getInt(allocation, NonNegativeInt(0)), java.lang.Float.floatToRawIntBits(0.75f))
   }
 
   test("gfx1030 VOP3 f32 to f64 conversion applies the absolute source modifier") {
@@ -372,8 +372,8 @@ final class CodeObjectExecutionSuite extends munit.FunSuite with CodeObjectTestS
       Vec.empty
     ).toOption.get
     assertEquals(executeKernel(compileKernel(kernel), dispatch, memory), Right(()))
-    assertEquals(memory.getInt(allocation, 0), 0)
-    assertEquals(memory.getInt(allocation, 4), 0x40180000)
+    assertEquals(memory.getInt(allocation, NonNegativeInt(0)), 0)
+    assertEquals(memory.getInt(allocation, NonNegativeInt(4)), 0x40180000)
   }
 
   test("gfx900 transfers control through a linked device-function call and return") {
@@ -478,28 +478,28 @@ final class CodeObjectExecutionSuite extends munit.FunSuite with CodeObjectTestS
     memory.allocate(unused, 256)
     val expected = Array.tabulate(64)(index => index * 97 - 11)
     expected.zipWithIndex.foreach { case (value, index) =>
-      memory.putInt(input, (index * 4).refineUnsafe[Positive0], value)
+      memory.putInt(input, NonNegativeInt.unsafe(index * 4), value)
     }
 
-    val batches = scala.collection.mutable.ArrayBuffer.empty[Vec[(GuestAddress, Int :| Positive0)]]
+    val batches = scala.collection.mutable.ArrayBuffer.empty[Vec[(GuestAddress, NonNegativeInt)]]
     final class TrackedMemory extends Memory with AddressSpace {
       private val pending                                = java.util.concurrent.atomic.AtomicBoolean(!rawPointers)
       override def flushHostReads(): Either[Fault, Unit] = { pending.set(false); Right(()) }
-      override def read(region: MemoryRegion, offset: Long :| Positive0, size: Int :| Positive0) =
+      override def read(region: MemoryRegion, offset: NonNegativeLong, size: NonNegativeInt) =
         if (pending.get()) Left(Fault.PendingMemory) else memory.read(region, offset, size)
-      override def write(region: MemoryRegion, offset: Long :| Positive0, bytes: Vec[Byte]) =
+      override def write(region: MemoryRegion, offset: NonNegativeLong, bytes: Vec[Byte]) =
         memory.write(region, offset, bytes)
-      override def address(region: MemoryRegion, offset: Long :| Positive0)    = memory.address(region, offset)
-      override def locate(address: GuestAddress, size: Int :| Positive0)       = memory.locate(address, size)
-      override def prepareReads(ranges: Vec[(GuestAddress, Int :| Positive0)]) = { batches += ranges; Right(()) }
+      override def address(region: MemoryRegion, offset: NonNegativeLong)    = memory.address(region, offset)
+      override def locate(address: GuestAddress, size: NonNegativeInt)       = memory.locate(address, size)
+      override def prepareReads(ranges: Vec[(GuestAddress, NonNegativeInt)]) = { batches += ranges; Right(()) }
     }
     val tracked                                            = TrackedMemory()
     def pointer(region: MemoryRegion): KernelTask.Argument =
       if (rawPointers) KernelTask.Argument.Scalar(LittleEndian.toVec(
-        memory.address(region, 0L).toOption.get.value,
-        ScalarByteWidth.Qword
+        memory.address(region, NonNegativeLong(0L)).toOption.get.raw,
+        ScalarByteWidth(8)
       ))
-      else KernelTask.Argument.Memory(region, 0L)
+      else KernelTask.Argument.Memory(region, NonNegativeLong(0L))
     val zero      = KernelTask.Argument.Scalar(Vec.fill(8)(0.toByte))
     val arguments = Vec(
       pointer(input),
@@ -515,7 +515,7 @@ final class CodeObjectExecutionSuite extends munit.FunSuite with CodeObjectTestS
     )
     val dispatch = KernelTask.validated(
       KernelName("vector_copy"),
-      Dimensions(64, 1, 1),
+      testDimensions(64, 1, 1),
       Dimensions.One,
       arguments
     ).toOption.get
@@ -524,14 +524,14 @@ final class CodeObjectExecutionSuite extends munit.FunSuite with CodeObjectTestS
     if (rawPointers) {
       assertEquals(batches.size, 1)
       assertEquals(batches.head.size, 64)
-      assertEquals(batches.head.map(_._2.toInt).sum, 256)
+      assertEquals(batches.head.map(_._2.raw).sum, 256)
       assertEquals(
-        batches.head.map(_._1.value).toSeq,
-        (0 until 64).map(i => memory.address(input, (i * 4L).refineUnsafe[Positive0]).toOption.get.value)
+        batches.head.map(_._1.raw).toSeq,
+        (0 until 64).map(i => memory.address(input, NonNegativeLong.unsafe(i * 4L)).toOption.get.raw)
       )
     }
     assertEquals(
-      Array.tabulate(64)(index => memory.getInt(output, (index * 4).refineUnsafe[Positive0])).toSeq,
+      Array.tabulate(64)(index => memory.getInt(output, NonNegativeInt.unsafe(index * 4))).toSeq,
       expected.toSeq
     )
   }

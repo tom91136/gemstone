@@ -1,9 +1,7 @@
 // Generated from pinned official headers by GenerateAPISurfaces. Regenerate with: sbt codegen
 package net.kurobako.gemstone.levelzero
 
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
-import net.kurobako.gemstone.NoNul
+import net.kurobako.gemstone.{NonEmptyString, PositiveInt}
 import net.kurobako.gemstone.abi.ABI.*
 
 @javax.annotation.processing.Generated(Array("sbt codegen"))
@@ -280,8 +278,8 @@ object LevelZero {
   type zex_mem_graph_free_callback_fn_t =
     CallbackTypedef["zex_mem_graph_free_callback_fn_t", Tuple1[OpaquePointer], Unit]
 
-  val HeaderVersion: String :| (MinLength[1] & NoNul) = "1.33.1"
-  val FunctionCount: Int :| Positive = 485
+  val HeaderVersion: NonEmptyString = NonEmptyString("1.33.1")
+  val FunctionCount: PositiveInt = PositiveInt(485)
 }
 
 import LevelZero.*

@@ -5,44 +5,47 @@ import net.kurobako.gemstone.vm.LaunchGeometry.{Coordinates, Dimensions, GlobalD
 
 import net.kurobako.gemstone.Vec
 import net.kurobako.gemstone.binary.{ByteRange, FloatingPointWidth, IEEE754, LittleEndian, ScalarByteWidth}
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
+import net.kurobako.gemstone.{NonEmptyVec, NonNegativeInt, NonNegativeLong, PositiveInt, PositiveLong}
 
 final class PrecisionLayoutSuite extends munit.FunSuite with ExecutionTestSupport {
   private def o(kind: String, values: Int*): Operand = Operand(
     SPIRVOperandKind.either(kind).fold(message => fail(message), valid => valid),
-    Vec.from(values.map(Word(_))).refineEither[MinLength[1]]
+    NonEmptyVec.fromVec(Vec.from(values.map(Word(_))))
       .fold(message => throw IllegalArgumentException(message), value => value)
   )
   private def r(value: Int)                                   = o("IdResult", value)
   private def literal(value: Long, width: FloatingPointWidth) = {
-    val byteWidth = ScalarByteWidth.applyUnsafe(width.value / 8)
+    val byteWidth = width.scalarByteWidth
     Operand(
       SPIRVOperandKind("LiteralContextDependentNumber"),
-      Vec.from(LittleEndian.toArray(value, byteWidth).grouped(4).map { bytes =>
+      NonEmptyVec.unsafeFromVec(Vec.from(LittleEndian.toArray(value, byteWidth).grouped(4).map { bytes =>
         val chunkWidth = ScalarByteWidth.either(bytes.length)
           .fold(message => throw IllegalArgumentException(message), value => value)
         Word(LittleEndian.decode(bytes, 0, chunkWidth).toInt)
-      }).refineUnsafe[MinLength[1]]
+      }))
     )
   }
   private val entry      = Operand(SPIRVOperandKind("LiteralString"), Vec.nonEmpty(Word(0x6b)))
   private val allocation = MemoryRegion(1)
   private final class Memory(size: Int) extends net.kurobako.gemstone.vm.Memory {
-    val bytes                                                                       = Array.ofDim[Byte](size)
-    def read(id: MemoryRegion, offset: Long :| Positive0, length: Int :| Positive0) = {
-      assert(id == allocation && ByteRange.contains(size, offset, length))
-      Right(Vec.from(bytes.slice(offset.toInt, offset.toInt + length)))
+    val bytes                                                                   = Array.ofDim[Byte](size)
+    def read(id: MemoryRegion, offset: NonNegativeLong, length: NonNegativeInt) = {
+      assert(id == allocation && ByteRange.contains(size, offset.raw, length.raw.toLong))
+      Right(Vec.from(bytes.slice(offset.raw.toInt, offset.raw.toInt + length.raw)))
     }
-    def write(id: MemoryRegion, offset: Long :| Positive0, value: Vec[Byte]) = {
-      assert(id == allocation && ByteRange.contains(size, offset, value.size))
-      val _ = value.copyToArray(bytes, offset.toInt, value.size); Right(())
+    def write(id: MemoryRegion, offset: NonNegativeLong, value: Vec[Byte]) = {
+      assert(id == allocation && ByteRange.contains(size, offset.raw, value.size))
+      val _ = value.copyToArray(bytes, offset.raw.toInt, value.size); Right(())
     }
   }
   private def run(instructions: Vec[Instruction], args: Vec[KernelTask.Argument], memory: Memory): Unit = {
     val profile = Vec.from(Seq(4, 6, 7, 9, 10, 11).map(value => Instruction.Capability(o("Capability", value)))) :+
       Instruction.MemoryModel(o("AddressingModel", 2), o("MemoryModel", 2))
-    val module   = Module(Header(ISA.version, Word(0), Word(64), Word(0)), profile ++ instructions, Endianness.Little)
+    val module = Module(
+      Header(ISA.version, Word(0), Word(64), Word(0)),
+      profile ++ instructions,
+      Endianness.Little
+    )
     val dispatch =
       KernelTask.validated(KernelName("k"), Dimensions.One, Dimensions.One, args).toOption.get
     assertEquals(
@@ -68,24 +71,24 @@ final class PrecisionLayoutSuite extends munit.FunSuite with ExecutionTestSuppor
     byValue <- Seq(false, true)
   }
     test(
-      s"natural OpenCL vector layout width=${width.value} lanes=$count byval=$byValue preserves struct array stride"
+      s"natural OpenCL vector layout width=${width.raw} lanes=$count byval=$byValue preserves struct array stride"
     ) {
-      val byteWidth = ScalarByteWidth.applyUnsafe(width.value / 8)
-      val align     = byteWidth.value * (if (count == 3) 4 else count)
+      val byteWidth = width.scalarByteWidth
+      val align     = byteWidth.raw * (if (count == 3) 4 else count)
       val size      = align * 2
       val expected  = Array.ofDim[Byte](size * 2)
       for (base <- Seq(0, size)) {
-        val baseOffset = base.refineEither[Positive0].fold(message => fail(message), value => value)
-        LittleEndian.write(IEEE754.fromDouble(2.25, width), expected, baseOffset, byteWidth)
+        val baseOffset = NonNegativeInt.either(base).fold(message => fail(message), value => value)
+        LittleEndian.write(IEEE754.fromDouble(2.25, width), expected, baseOffset.raw, byteWidth)
         for (lane <- 0 until count) {
-          val laneOffset = (base + align + lane * byteWidth.value).refineEither[Positive0]
+          val laneOffset = NonNegativeInt.either(base + align + lane * byteWidth.raw)
             .fold(message => fail(message), value => value)
-          LittleEndian.write(IEEE754.fromDouble(1.5, width), expected, laneOffset, byteWidth)
+          LittleEndian.write(IEEE754.fromDouble(1.5, width), expected, laneOffset.raw, byteWidth)
         }
       }
       val definitions = Vec[Instruction](
         Instruction.TypeVoid(r(1)),
-        Instruction.TypeFloat(r(2), o("LiteralInteger", width.value), None),
+        Instruction.TypeFloat(r(2), o("LiteralInteger", width.raw), None),
         Instruction.TypeVector(r(3), r(2), o("LiteralInteger", count)),
         Instruction.TypeStruct(r(4), Vec(r(2), r(3))),
         Instruction.TypePointer(r(5), o("StorageClass", 5), r(4)),
@@ -116,7 +119,7 @@ final class PrecisionLayoutSuite extends munit.FunSuite with ExecutionTestSuppor
         )
       val args =
         (if (byValue) Vec[KernelTask.Argument](KernelTask.Argument.Scalar(Vec.from(expected.take(size))))
-         else Vec.empty[KernelTask.Argument]) :+ KernelTask.Argument.Memory(allocation, 0)
+         else Vec.empty[KernelTask.Argument]) :+ KernelTask.Argument.Memory(allocation, NonNegativeLong(0L))
       val memory = Memory(expected.length)
       run(instructions, args, memory)
       assertEquals(memory.bytes.toSeq, expected.toSeq)
@@ -146,7 +149,7 @@ final class PrecisionLayoutSuite extends munit.FunSuite with ExecutionTestSuppor
         Instruction.FunctionEnd()
       )
       val memory = Memory(2)
-      run(instructions, Vec(KernelTask.Argument.Memory(allocation, 0)), memory)
-      assertEquals(LittleEndian.decode(memory.bytes, 0, ScalarByteWidth.Word), expected)
+      run(instructions, Vec(KernelTask.Argument.Memory(allocation, NonNegativeLong(0L))), memory)
+      assertEquals(LittleEndian.decode(memory.bytes, 0, ScalarByteWidth(2)), expected)
     }
 }

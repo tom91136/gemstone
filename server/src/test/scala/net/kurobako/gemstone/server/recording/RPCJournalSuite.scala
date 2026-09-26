@@ -1,10 +1,9 @@
 package net.kurobako.gemstone.server.recording
 
+import net.kurobako.gemstone.*
+
 import net.kurobako.gemstone.rpc.ExecutionRPC
 import net.kurobako.gemstone.server.transport.Transport.*
-
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
 
 import java.io.{IOException, RandomAccessFile}
 import java.nio.file.Files
@@ -25,13 +24,20 @@ final class RPCJournalSuite extends munit.FunSuite {
       Using.resource(RPCJournal.open(file)) { reader =>
         assert(reader.summary.replayable)
         assertEquals(reader.events.size, 6)
-        assertEquals(reader.summary.frames, 4)
+        assertEquals(reader.summary.frames.raw, 4)
         assertEquals(
           reader.events.filter(_.kind == RPCJournal.Kind.Request).map(_.client).toSet,
           Set(RPCJournal.RecordedClientId(1L))
         )
         val first = reader.frame(reader.events.head)
-        assertEquals(first.toSeq, RPCJournal.Frames.normalized(RPCJournal.Kind.Request, execution(), 4096).toSeq)
+        assertEquals(
+          first.toSeq,
+          RPCJournal.Frames.normalized(
+            RPCJournal.Kind.Request,
+            execution(),
+            RPCJournal.FrameByteSize(4096)
+          ).toSeq
+        )
         first(0) = 0
         assertEquals(RPCJournal.Frames.magic(reader.frame(reader.events.head)), ExecutionRPC.RequestMagic)
       }
@@ -40,8 +46,9 @@ final class RPCJournalSuite extends munit.FunSuite {
   }
   test("execution profile survives the archive and reaches the fresh endpoint factory") {
     temporary { file =>
-      val profile = RPCJournal.ExecutionProfile(2000000000L, 8192, 8)
-      val writer  = RPCJournal.Writer(file, RPCJournal.Header(schema, executionProfile = Some(profile)))
+      val profile =
+        RPCJournal.ExecutionProfile(PositiveLong(2000000000L), PositiveInt(8192), PositiveInt(8))
+      val writer = RPCJournal.Writer(file, RPCJournal.Header(schema, executionProfile = Some(profile)))
       writer.close()
       val observed = AtomicReference(Option.empty[RPCJournal.ExecutionProfile])
       val closed   = AtomicBoolean(false)
@@ -51,7 +58,7 @@ final class RPCJournalSuite extends munit.FunSuite {
           header => {
             observed.set(header.executionProfile); RPCReplay.Target(RPCPort(1), () => closed.set(true))
           }
-        ).events,
+        ).events.raw,
         0
       )
       assertEquals(observed.get(), Some(profile)); assert(closed.get())
@@ -80,7 +87,7 @@ final class RPCJournalSuite extends munit.FunSuite {
       }
       val summary = RPCJournal.inspect(file)
       assert(!summary.replayable)
-      assert(summary.reason.exists(_.value.contains("incomplete")))
+      assert(summary.reason.exists(_.raw.contains("incomplete")))
       val started = AtomicBoolean(false)
       val _       = intercept[IOException](RPCReplay.run(
         RPCReplay.Options(file, schema),
@@ -90,7 +97,7 @@ final class RPCJournalSuite extends munit.FunSuite {
     }
     temporary { file =>
       val frame   = execution(3, Array.ofDim[Byte](5))
-      val maximum = (frame.length - 1).refineEither[Interval.Closed[1, 2147479551]]
+      val maximum = RPCJournal.FrameByteSize.either(frame.length - 1)
         .fold(message => fail(message), value => value)
       val writer = RPCJournal.Writer(
         file,
@@ -104,8 +111,9 @@ final class RPCJournalSuite extends munit.FunSuite {
   }
   test("frame bounds include headers and lifecycle ordering is validated") {
     temporary { file =>
-      val writer = RPCJournal.Writer(file, RPCJournal.Header(schema, RPCJournal.Limits(maxEvents = 2)))
-      val c      = writer.connection(Object())
+      val writer =
+        RPCJournal.Writer(file, RPCJournal.Header(schema, RPCJournal.Limits(maxEvents = PositiveInt(2))))
+      val c = writer.connection(Object())
       c.request(execution()); c.response(response())
       val _ = intercept[IOException](c.close())
       writer.close()

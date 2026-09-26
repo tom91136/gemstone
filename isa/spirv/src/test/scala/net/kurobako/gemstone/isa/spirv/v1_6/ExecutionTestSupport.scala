@@ -3,14 +3,12 @@ import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.{Coordinates, Dimensions, GlobalDimensions}
 
-import net.kurobako.gemstone.Vec
+import net.kurobako.gemstone.{NonEmptyVec, NonNegativeInt, NonNegativeLong, PositiveInt, Vec}
 
 import net.kurobako.gemstone.binary.ByteRange
 import net.kurobako.gemstone.binary.LittleEndian
 import net.kurobako.gemstone.binary.ScalarByteWidth
 import net.kurobako.gemstone.concurrent.withLock
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
 import net.kurobako.gemstone.memory.MemoryValueByteWidth
 
 import java.util.concurrent.atomic.AtomicReference
@@ -38,9 +36,9 @@ private trait ExecutionTestSupport { self: munit.FunSuite =>
     VMInterpreter.execute(program, task, memory, control, scheduler, observer)
 
   protected final def testDimensions(
-      x: Int :| Positive,
-      y: Int :| Positive = 1,
-      z: Int :| Positive = 1
+      x: PositiveInt,
+      y: PositiveInt = PositiveInt.One,
+      z: PositiveInt = PositiveInt.One
   ): Dimensions = Dimensions(x, y, z)
 
   protected final class ArrayMemory(
@@ -55,21 +53,21 @@ private trait ExecutionTestSupport { self: munit.FunSuite =>
 
     override def read(
         id: MemoryRegion,
-        offset: Long :| Positive0,
-        size: Int :| Positive0
+        offset: NonNegativeLong,
+        size: NonNegativeInt
     ): Either[Fault, Vec[Byte]] =
-      checked(id, offset, size).map(start => content.get().slice(start, start + size))
+      checked(id, offset, size).map(start => content.get().slice(start, start + size.raw))
 
     override def write(
         id: MemoryRegion,
-        offset: Long :| Positive0,
+        offset: NonNegativeLong,
         bytes: Vec[Byte]
     ): Either[Fault, Unit] =
       // Collection sizes are non-negative by construction.
-      checked(id, offset, bytes.size.refineUnsafe[Positive0]) match {
+      checked(id, offset, NonNegativeInt.unsafe(bytes.size)) match {
         case Left(error)  => Left(error)
         case Right(start) =>
-          written(offset, bytes.size)
+          written(offset.raw, bytes.size)
           content.updateAndGet(current =>
             Vec.from(current.take(start).view ++ bytes.view ++ current.drop(start + bytes.size))
           )
@@ -78,7 +76,7 @@ private trait ExecutionTestSupport { self: munit.FunSuite =>
 
     override def atomicModifyValue(
         id: MemoryRegion,
-        offset: Long :| Positive0,
+        offset: NonNegativeLong,
         size: MemoryValueByteWidth
     )(update: Long => Long): Either[Fault, Long] = atomicLock.withLock {
       checked(id, offset, size.nonNegative) match {
@@ -88,7 +86,7 @@ private trait ExecutionTestSupport { self: munit.FunSuite =>
           val current     = content.get()
           val previous    = LittleEndian.decode(current, start, scalarWidth)
           val replacement = LittleEndian.toVec(update(previous), scalarWidth)
-          written(offset, replacement.size)
+          written(offset.raw, replacement.size)
           content.set(
             Vec.from(current.take(start).view ++ replacement.view ++ current.drop(start + replacement.size))
           )
@@ -98,19 +96,19 @@ private trait ExecutionTestSupport { self: munit.FunSuite =>
 
     private def checked(
         id: MemoryRegion,
-        offset: Long :| Positive0,
-        length: Int :| Positive0
-    ): Either[Fault, Int :| Positive0] =
+        offset: NonNegativeLong,
+        length: NonNegativeInt
+    ): Either[Fault, Int] =
       Either.cond(
-        id == expectedId && ByteRange.contains(size, offset, length.toLong),
-        offset.toInt.refineUnsafe[Positive0],
+        id == expectedId && ByteRange.contains(size, offset.raw, length.raw.toLong),
+        offset.raw.toInt,
         Fault.InvalidTask(s"invalid test memory access at $offset + $length")
       )
   }
 
   protected def operand(kind: String, values: Int*): Operand = Operand(
     SPIRVOperandKind.either(kind).fold(message => fail(message), valid => valid),
-    Vec.from(values.map(Word(_))).refineEither[MinLength[1]]
+    NonEmptyVec.fromVec(Vec.from(values.map(Word(_))))
       .fold(message => throw IllegalArgumentException(message), value => value)
   )
 
@@ -128,6 +126,6 @@ private trait ExecutionTestSupport { self: munit.FunSuite =>
       val width = ScalarByteWidth.either(group.length).fold(message => fail(message), value => value)
       Word(LittleEndian.decode(group, 0, width).toInt)
     }
-    Operand(SPIRVOperandKind("LiteralString"), Vec.from(words).refineUnsafe[MinLength[1]])
+    Operand(SPIRVOperandKind("LiteralString"), NonEmptyVec.unsafeFromVec(Vec.from(words)))
   }
 }

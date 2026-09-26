@@ -1,11 +1,10 @@
 package net.kurobako.gemstone.isa.ptx.v9_3
 
+import net.kurobako.gemstone.{NonEmptyString, NonEmptyVec, NonNegativeInt, NonNegativeLong, PositiveInt, PositiveLong}
+
 import Program.*
 
 import VMIR.*
-
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
 
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.vm.LaunchGeometry
@@ -20,12 +19,12 @@ final class CoherentVectorSuite extends munit.FunSuite {
   // Interleaving controls and observations are confined to this final test fixture.
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private final class InterleavingMemory extends AddressMemory {
-    val backing                                   = ArrayCheckedMemory.allocate(32, GuestAddress(0x10000000000L))
-    val base                                      = backing.allocation.start
-    val observed                                  = mutable.ArrayBuffer.empty[Long]
-    var changeAfterRead                           = false
-    override def readInt8(address: GuestAddress)  = backing.readInt8(address)
-    override def readInt32(address: GuestAddress) = backing.readInt32(address)
+    val backing         = ArrayCheckedMemory.allocate(NonNegativeInt(32), GuestAddress(0x10000000000L))
+    val base            = backing.allocation.start
+    val observed        = mutable.ArrayBuffer.empty[Long]
+    var changeAfterRead = false
+    override def readInt8(address: GuestAddress)               = backing.readInt8(address)
+    override def readInt32(address: GuestAddress)              = backing.readInt32(address)
     override def writeInt8(address: GuestAddress, value: Byte) = backing.writeInt8(address, value)
     override def writeInt32(address: GuestAddress, value: Int) = backing.writeInt32(address, value)
     override def readLittleEndian(address: GuestAddress, size: MemoryValueByteWidth) = {
@@ -59,7 +58,7 @@ final class CoherentVectorSuite extends munit.FunSuite {
     assert(VMInterpreter.execute(
       kernel,
       geometry,
-      Map(ParameterName("output") -> Argument(memory.base.value)),
+      Map(ParameterName("output") -> Argument.fromLong(memory.base.raw)),
       memory
     ).isRight)
     assert(memory.observed.nonEmpty)
@@ -85,7 +84,7 @@ final class CoherentVectorSuite extends munit.FunSuite {
     assert(VMInterpreter.execute(
       kernel,
       geometry,
-      Map(ParameterName("input") -> Argument(memory.base.value)),
+      Map(ParameterName("input") -> Argument.fromLong(memory.base.raw)),
       memory
     ).isRight)
     assertEquals(memory.backing.readLittleEndian(memory.base.offset(8), MemoryValueByteWidth.Qword), Right(packed))

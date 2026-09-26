@@ -8,8 +8,6 @@ import java.nio.ByteBuffer
 import java.nio.file.Files
 import java.nio.file.Path
 import com.monovore.decline.Opts
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
 import scala.util.Using
 
 /** Repeated identical frames measure inspection work separately from capture and replay. */
@@ -38,7 +36,7 @@ object JournalInspectionBenchmark {
       arguments.toSeq,
       Opts.argument[String]("journal").map(Path.of(_))
     )
-    val protocolIdentity = RPCJournal.ProtocolIdentity.either(ExecutionRPC.Identity)
+    val protocolIdentity = RPCJournal.ProtocolIdentity.either(ExecutionRPC.Identity.raw)
       .fold(error => throw IllegalArgumentException(error), value => value)
     Using.resource(RPCJournal.Writer(file, RPCJournal.Header(protocolIdentity))) { writer =>
       Using.resource(writer.connection(Object())) { connection =>
@@ -59,11 +57,11 @@ object JournalInspectionBenchmark {
         start <- allocated
         end   <- PlatformMetrics.allocatedBytes
         if end >= start
-      } yield (end - start).refineUnsafe[Positive0]
-      if (summary.events != 401 || summary.frames != 400 || !summary.replayable)
+      } yield end - start
+      if (summary.events.raw != 401 || summary.frames.raw != 400 || !summary.replayable)
         throw IllegalStateException(s"unexpected journal summary: $summary")
       Console.out.println(
-        s"INSPECT sample=$sample nanos=$nanos allocated=${bytes.getOrElse(-1L)} " +
+        s"INSPECT sample=$sample nanos=$nanos allocated=${bytes.fold(-1L)(_.raw)} " +
           s"events=${summary.events} frames=${summary.frames} archive=${Files.size(file)}"
       )
     }

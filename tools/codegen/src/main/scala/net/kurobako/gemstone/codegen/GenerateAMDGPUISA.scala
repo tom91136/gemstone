@@ -47,7 +47,7 @@ for name in sorted(module.instructions):
         opcode = getattr(instruction.op, generation)
         if opcode >= 0:
             print("\t".join((generation.upper(), name, instruction.format.name, str(opcode),
-                              instruction.cls.value, ";".join(operands), "mesa-aco")))
+                              instruction.cls.raw, ";".join(operands), "mesa-aco")))
 """
   final case class Operand(
       field: String,
@@ -330,7 +330,7 @@ for name in sorted(module.instructions):
     }
     val definitionChunkNames = definitionChunks.map(chunk => s"${chunk.objectName}.definitions").mkString(", ")
     val instructionCases     = forms.map(form => renderInstructionCase(form, definitionReferences(form.opcode)))
-    val main = GeneratedHeader.scala("from the pinned Mesa ACO and AMD machine-readable ISA inputs", assume = true) +
+    val main                 = GeneratedHeader.scala("from the pinned Mesa ACO and AMD machine-readable ISA inputs") +
       s"""|package net.kurobako.gemstone.isa.amdgpu
         |
         |import net.kurobako.gemstone.Vec
@@ -401,7 +401,7 @@ for name in sorted(module.instructions):
         |    final def decode(operands: Vec[Operand], mods: Vec[Modifier]): Vec[Instruction] =
         |      decoder(operands, mods)
         |
-        |    override final def toString: String = opcode.value
+        |    override final def toString: String = opcode.raw
         |  }
         |
         |  private val AllDefinitions: Vec[Definition] = Vec($definitionChunkNames).flatten
@@ -413,7 +413,7 @@ for name in sorted(module.instructions):
         |
         |  object Definition {
         |    private lazy val ByOpcode: Map[String, Vec[Definition]] =
-        |      AllDefinitions.groupBy(_.opcode.value)
+        |      AllDefinitions.groupBy(_.opcode.raw)
         |
         |    def forOpcode(opcode: String): Vec[Definition] =
         |      ByOpcode.getOrElse(Opcode.normalize(opcode), Vec.empty[Definition])
@@ -442,7 +442,7 @@ for name in sorted(module.instructions):
         |      case Left(DecodeError.UnknownOpcode(_)) =>
         |        EncodingSuffixes.collectFirst {
         |          case suffix if name.endsWith(suffix) =>
-        |            name.dropRight(suffix.length) -> Modifier(ModifierName.assume(suffix.drop(1)))
+        |            name.dropRight(suffix.length) -> Modifier(ModifierName.unsafe(suffix.drop(1)))
         |        } match {
         |          case Some((canonical, modifier)) => decodeWithSuffixes(canonical, operands, modifier +: mods, original)
         |          case None                        => Left(DecodeError.UnknownOpcode(original))
@@ -479,7 +479,7 @@ for name in sorted(module.instructions):
       groups: Vector[Vector[InstructionForm]],
       metadataIdByOpcode: Map[String, Int]
   ): String =
-    GeneratedHeader.scala("from the pinned Mesa ACO and AMD machine-readable ISA inputs", assume = true) +
+    GeneratedHeader.scala("from the pinned Mesa ACO and AMD machine-readable ISA inputs") +
       s"""|package net.kurobako.gemstone.isa.amdgpu
           |
           |import net.kurobako.gemstone.Vec
@@ -676,7 +676,7 @@ for name in sorted(module.instructions):
       s"form(${form.operandCount})(($operandParameter, mods) => Instruction.${form.caseName}(${arguments.mkString(", ")}))"
     }
     s"""|  case object ${first.definitionName} extends Definition(
-        |    Opcode.assume(${literal(first.opcode)}),
+        |    Opcode(${literal(first.opcode)}),
         |    decoder(${decoders.mkString(", ")}),
         |    $metadataId
         |  )""".stripMargin

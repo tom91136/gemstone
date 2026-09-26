@@ -1,6 +1,6 @@
 package net.kurobako.gemstone.isa.amdgpu
 
-import net.kurobako.gemstone.Vec
+import net.kurobako.gemstone.{NonNegativeLong, PositiveLong, Vec}
 import net.kurobako.gemstone.Vec.*
 import net.kurobako.gemstone.concurrent.withLock
 import net.kurobako.gemstone.isa.{
@@ -19,8 +19,6 @@ import net.kurobako.gemstone.isa.amdgpu.VMLoadedProgram.GlobalBinding
 import net.kurobako.gemstone.vm.{Fault, Memory, MemoryRegion}
 
 import cats.syntax.all.*
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
 
 import java.util.concurrent.locks.ReentrantLock
 import scala.collection.mutable
@@ -155,11 +153,11 @@ private[amdgpu] object VMLoader {
 
     def symbols: Either[Fault, ProgramSymbols] = initialized.map(_.symbols)
 
-    def global(name: GlobalName): Either[Fault, (Long :| Positive0, Vec[Byte])] =
+    def global(name: GlobalName): Either[Fault, (NonNegativeLong, Vec[Byte])] =
       initialized.flatMap { program =>
         program.index.globalData(name)
           .leftMap(error => Fault.Memory(error.message))
-          .map { case (_, initial) => initial.size.toLong.refineUnsafe[Positive0] -> initial }
+          .map { case (_, initial) => NonNegativeLong.unsafe(initial.size.toLong) -> initial }
       }
 
     private final case class Bound(value: GlobalBinding, memory: Memory)
@@ -175,8 +173,8 @@ private[amdgpu] object VMLoader {
     def bindGlobal(
         name: GlobalName,
         allocation: MemoryRegion,
-        offset: Long :| Positive0,
-        allocationSize: Long :| Positive,
+        offset: NonNegativeLong,
+        allocationSize: PositiveLong,
         memory: Memory
     ): Either[Fault, Unit] = bindingLock.withLock {
       initialized match {
@@ -186,10 +184,11 @@ private[amdgpu] object VMLoader {
             .leftMap(error => Fault.Memory(error.message)) match {
             case Left(error)                    => Left(error)
             case Right((guestAddress, initial)) =>
-              val address = guestAddress.value
+              val address = guestAddress.raw
               if (
-                offset > allocationSize || initial.size.toLong > allocationSize - offset ||
-                address < offset || address > Long.MaxValue - initial.size.toLong
+                offset.raw > allocationSize.raw ||
+                initial.size.toLong > (allocationSize.toNonNegative - offset).raw ||
+                address < offset.raw || address > Long.MaxValue - initial.size.toLong
               )
                 Left(Fault.InvalidTask("global binding exceeds allocation or virtual address range"))
               else {
@@ -208,10 +207,11 @@ private[amdgpu] object VMLoader {
                 else if (old.nonEmpty) Right(())
                 else if (
                   bound.values.view.exists { entry =>
-                    val other       = entry.value
-                    val overlaps    = address < other.address + other.size && other.address < address + initial.size
+                    val other    = entry.value
+                    val overlaps = address < other.address + other.size.raw &&
+                      other.address < address + initial.size
                     val sameMapping = allocation == other.allocation &&
-                      address - offset == other.address - other.offset &&
+                      address - offset.raw == other.address - other.offset.raw &&
                       allocationSize == other.allocationSize && (entry.memory eq memory)
                     (overlaps && !sameMapping) || (allocation == other.allocation && !sameMapping)
                   }
@@ -219,10 +219,10 @@ private[amdgpu] object VMLoader {
                 else {
                   // Adding an overlapping symbol alias must not overwrite already-live bound bytes with old initializers.
                   val covered = bound.values.view.map(_.value).filter(other =>
-                    address < other.address + other.size && other.address < address + initial.size
+                    address < other.address + other.size.raw && other.address < address + initial.size
                   ).map(other =>
                     (math.max(address, other.address) - address).toInt ->
-                      (math.min(address + initial.size, other.address + other.size) - address).toInt
+                      (math.min(address + initial.size, other.address + other.size.raw) - address).toInt
                   ).toVec.sortBy(_._1)
                   val gaps       = Vec.newBuilder[(Int, Int)]
                   var coveredEnd = 0
@@ -256,7 +256,7 @@ private[amdgpu] object VMLoader {
 
     def writeGlobal(
         name: GlobalName,
-        offset: Long :| Positive0,
+        offset: NonNegativeLong,
         bytes: Vec[Byte]
     ): Either[Fault, Unit] =
       bindingLock.withLock {
@@ -267,27 +267,28 @@ private[amdgpu] object VMLoader {
               .toRight(Fault.Memory(s"AMDGPU global $name is not present")) match {
               case Left(error)                 => Left(error)
               case Right((guestAddress, size)) =>
-                val address = guestAddress.value
-                if (offset > size || bytes.size.toLong > size.toLong - offset)
+                val address = guestAddress.raw
+                if (offset.raw > size.raw || bytes.size.toLong > size.raw.toLong - offset.raw)
                   Left(Fault.InvalidTask("global write exceeds symbol bounds"))
                 else {
-                  val start   = address + offset
+                  val start   = address + offset.raw
                   val covered = bound.values.view.find(entry =>
                     start >= entry.value.address &&
-                      start - entry.value.address <= entry.value.size.toLong - bytes.size
+                      start - entry.value.address <= entry.value.size.raw.toLong - bytes.size
                   )
                   covered match {
                     case Some(entry) =>
                       entry.memory.write(
                         entry.value.allocation,
-                        (entry.value.offset + start - entry.value.address).refineUnsafe[Positive0],
+                        NonNegativeLong.unsafe(entry.value.offset.raw + start - entry.value.address),
                         bytes
                       )
                     case None
                         if bound.values.view.forall(entry =>
-                          start >= entry.value.address + entry.value.size || start + bytes.size <= entry.value.address
+                          start >= entry.value.address + entry.value.size.raw ||
+                            start + bytes.size <= entry.value.address
                         ) =>
-                      program.index.writeGlobal(name, offset, bytes).leftMap(error =>
+                      program.index.writeGlobal(name, offset.raw, bytes).leftMap(error =>
                         Fault.InvalidTask(error.message)
                       )
                     case None =>
@@ -298,16 +299,18 @@ private[amdgpu] object VMLoader {
                             case Right(_)        =>
                               bound.values.view.find(entry =>
                                 start + index >= entry.value.address &&
-                                  start + index < entry.value.address + entry.value.size
+                                  start + index < entry.value.address + entry.value.size.raw
                               ) match {
                                 case Some(entry) =>
                                   entry.memory.write(
                                     entry.value.allocation,
-                                    (entry.value.offset + start + index - entry.value.address).refineUnsafe[Positive0],
+                                    NonNegativeLong.unsafe(
+                                      entry.value.offset.raw + start + index - entry.value.address
+                                    ),
                                     Vec(byte)
                                   )
                                 case None =>
-                                  program.index.writeGlobal(name, offset + index, Vec(byte))
+                                  program.index.writeGlobal(name, offset.raw + index, Vec(byte))
                                     .leftMap(error => Fault.InvalidTask(error.message))
                               }
                           }
@@ -333,7 +336,7 @@ private[amdgpu] object VMLoader {
               .map(_.getOrElse(Vec.empty[CodeObjectMetadata.KernelManifest]))
             selected <- AMDGPUKernelVariants.select(
               indexed.kernelNames,
-              indexed.target.name,
+              indexed.target.name.raw,
               name =>
                 indexed.kernel(name).exists { kernel =>
                   val code = Vec.toArray(kernel.code)
@@ -344,9 +347,9 @@ private[amdgpu] object VMLoader {
             ).leftMap(detail => Fault.InvalidTask(detail))
             metadata = manifests.view.flatMap(manifest =>
               Vec(
-                manifest.name.value                      -> manifest.metadata,
-                manifest.symbol.value                    -> manifest.metadata,
-                manifest.symbol.value.stripSuffix(".kd") -> manifest.metadata
+                manifest.name.raw                      -> manifest.metadata,
+                manifest.symbol.raw                    -> manifest.metadata,
+                manifest.symbol.raw.stripSuffix(".kd") -> manifest.metadata
               )
             ).toMap
             kernelSymbols <-
@@ -366,12 +369,12 @@ private[amdgpu] object VMLoader {
                   )
                 } yield KernelSymbol(kernelName, linkageName)
               }.map(Vec.from)
-            kernelLinkage: Set[String] = kernelSymbols.view.map(_.linkageName.value: String).toSet
-            globals <- indexed.globals.filterNot(global => kernelLinkage.contains(global.name.value)).traverse { global =>
+            kernelLinkage: Set[String] = kernelSymbols.view.map(_.linkageName.raw: String).toSet
+            globals <- indexed.globals.filterNot(global => kernelLinkage.contains(global.name.raw)).traverse { global =>
               GlobalSymbol.validated(
                 global.name,
                 Some(global.address),
-                global.size.toLong.refineUnsafe[Positive0],
+                global.size.toLong,
                 global.pointerOffsets
               ).leftMap(detail => Fault.InvalidTask(detail))
             }

@@ -1,8 +1,5 @@
 package net.kurobako.gemstone.isa.amdgpu
 
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
-
 import net.kurobako.gemstone.Vec
 import net.kurobako.gemstone.isa.{KernelMetadata, KernelName, LinkageName}
 
@@ -18,12 +15,12 @@ final class CodeObjectMetadataSuite extends munit.FunSuite {
     val kernel = result.head
     assertEquals(kernel.name, KernelName("add"))
     assertEquals(kernel.symbol, LinkageName("add.kd"))
-    assertEquals(kernel.metadata.argumentBlockSize, 20)
-    assertEquals(kernel.metadata.explicitParameterCount, 3)
+    assertEquals(kernel.metadata.argumentBlockSize.raw, 20)
+    assertEquals(kernel.metadata.explicitParameterCount.raw, 3)
     assertEquals(kernel.hiddenArguments, Vec.empty[CodeObjectMetadata.HiddenArgument])
     assertEquals(
       kernel.metadata.parameters.map(parameter =>
-        (parameter.offset, parameter.width, parameter.kind, parameter.containsPointers)
+        (parameter.offset.raw, parameter.width.raw, parameter.kind, parameter.containsPointers)
       ),
       Vec(
         (0, 8, KernelMetadata.ParameterKind.Memory, false),
@@ -37,9 +34,9 @@ final class CodeObjectMetadataSuite extends munit.FunSuite {
     val manifest = CodeObjectMetadata.decode(Vec.unsafeFromArray(codeObject(hidden = true))).toOption.get.head
     val metadata = manifest.metadata
 
-    assertEquals(metadata.argumentBlockSize, 24)
+    assertEquals(metadata.argumentBlockSize.raw, 24)
     assertEquals(metadata.parameters.size, 4)
-    assertEquals(metadata.explicitParameterCount, 3)
+    assertEquals(metadata.explicitParameterCount.raw, 3)
     assertEquals(
       manifest.hiddenArguments,
       Vec(CodeObjectMetadata.HiddenArgument("hidden_block_count_x", 20, 4))

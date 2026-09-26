@@ -1,8 +1,6 @@
 package net.kurobako.gemstone.isa.spirv.v1_6
 
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
-
+import net.kurobako.gemstone.NonNegativeLong
 import net.kurobako.gemstone.concurrent.withLock
 import net.kurobako.gemstone.vm.Event
 
@@ -10,14 +8,14 @@ import java.util.concurrent.locks.ReentrantLock
 
 object Performance {
   final case class Snapshot(
-      dispatches: Long :| Positive0,
-      collectiveDispatches: Long :| Positive0,
-      invocations: Long :| Positive0,
-      instructions: Long :| Positive0,
-      invocationValueInstances: Long :| Positive0,
-      denseValueSlots: Long :| Positive0,
-      estimatedDenseValueBytes: Long :| Positive0,
-      elapsedNanos: Long :| Positive0
+      dispatches: NonNegativeLong,
+      collectiveDispatches: NonNegativeLong,
+      invocations: NonNegativeLong,
+      instructions: NonNegativeLong,
+      invocationValueInstances: NonNegativeLong,
+      denseValueSlots: NonNegativeLong,
+      estimatedDenseValueBytes: NonNegativeLong,
+      elapsedNanos: NonNegativeLong
   )
 
   final case class Observation(snapshot: Snapshot) extends Event
@@ -74,27 +72,29 @@ object Performance {
     private[v1_6] def merge(other: Metrics): Unit = {
       val snapshot = other.snapshot
       lock.withLock {
-        dispatchCount = saturatedAdd(dispatchCount, snapshot.dispatches)
-        collectiveDispatchCount = saturatedAdd(collectiveDispatchCount, snapshot.collectiveDispatches)
-        invocationCount = saturatedAdd(invocationCount, snapshot.invocations)
-        instructionCount = saturatedAdd(instructionCount, snapshot.instructions)
-        invocationValueInstanceCount = saturatedAdd(invocationValueInstanceCount, snapshot.invocationValueInstances)
-        denseValueSlotCount = saturatedAdd(denseValueSlotCount, snapshot.denseValueSlots)
-        estimatedDenseValueByteCount = saturatedAdd(estimatedDenseValueByteCount, snapshot.estimatedDenseValueBytes)
-        dispatchElapsedNanos = saturatedAdd(dispatchElapsedNanos, snapshot.elapsedNanos)
+        dispatchCount = saturatedAdd(dispatchCount, snapshot.dispatches.raw)
+        collectiveDispatchCount = saturatedAdd(collectiveDispatchCount, snapshot.collectiveDispatches.raw)
+        invocationCount = saturatedAdd(invocationCount, snapshot.invocations.raw)
+        instructionCount = saturatedAdd(instructionCount, snapshot.instructions.raw)
+        invocationValueInstanceCount =
+          saturatedAdd(invocationValueInstanceCount, snapshot.invocationValueInstances.raw)
+        denseValueSlotCount = saturatedAdd(denseValueSlotCount, snapshot.denseValueSlots.raw)
+        estimatedDenseValueByteCount =
+          saturatedAdd(estimatedDenseValueByteCount, snapshot.estimatedDenseValueBytes.raw)
+        dispatchElapsedNanos = saturatedAdd(dispatchElapsedNanos, snapshot.elapsedNanos.raw)
       }
     }
 
     def snapshot: Snapshot = lock.withLock {
       Snapshot(
-        dispatchCount.refineUnsafe[Positive0],
-        collectiveDispatchCount.refineUnsafe[Positive0],
-        invocationCount.refineUnsafe[Positive0],
-        instructionCount.refineUnsafe[Positive0],
-        invocationValueInstanceCount.refineUnsafe[Positive0],
-        denseValueSlotCount.refineUnsafe[Positive0],
-        estimatedDenseValueByteCount.refineUnsafe[Positive0],
-        dispatchElapsedNanos.refineUnsafe[Positive0]
+        NonNegativeLong.unsafe(dispatchCount),
+        NonNegativeLong.unsafe(collectiveDispatchCount),
+        NonNegativeLong.unsafe(invocationCount),
+        NonNegativeLong.unsafe(instructionCount),
+        NonNegativeLong.unsafe(invocationValueInstanceCount),
+        NonNegativeLong.unsafe(denseValueSlotCount),
+        NonNegativeLong.unsafe(estimatedDenseValueByteCount),
+        NonNegativeLong.unsafe(dispatchElapsedNanos)
       )
     }
   }

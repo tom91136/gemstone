@@ -2,7 +2,6 @@ package net.kurobako.gemstone.server.transport
 
 import Transport.*
 
-import net.kurobako.gemstone.isa.KernelName as ISAKernelName
 import net.kurobako.gemstone.rpc.ExecutionRPC
 import net.kurobako.gemstone.rpc.ExecutionRPC.Operation
 import net.kurobako.gemstone.rpc.ExecutionProtocol.*
@@ -20,9 +19,9 @@ import scala.compiletime.error
 
 object ExecutionRPCProtocol {
   val RequestIdentityBytesAfterMagic =
-    ExecutionRPC.RequestClientOffset + java.lang.Long.BYTES - java.lang.Integer.BYTES
-  val RequestClientOffsetAfterMagic = ExecutionRPC.RequestClientOffset - java.lang.Integer.BYTES
-  private val MaximumErrorTextBytes = ExecutionRPC.MaximumTextBytes: Int
+    ExecutionRPC.RequestClientOffset.raw + java.lang.Long.BYTES - java.lang.Integer.BYTES
+  val RequestClientOffsetAfterMagic = ExecutionRPC.RequestClientOffset.raw - java.lang.Integer.BYTES
+  private val MaximumErrorTextBytes = ExecutionRPC.MaximumTextBytes.raw
 
   opaque type SessionId = (Long, Long)
 
@@ -57,7 +56,7 @@ object ExecutionRPCProtocol {
       val sessionLow  = input.readLong()
       val operationId = input.readLong()
       val payloadSize = input.readInt()
-      if (payloadSize < 0 || payloadSize > ExecutionRPC.MaximumPayload)
+      if (payloadSize < 0 || payloadSize > ExecutionRPC.MaximumPayload.raw)
         throw IllegalArgumentException(s"invalid execution payload size: $payloadSize")
       val payload   = readExactly(input, payloadSize, IllegalArgumentException(_))
       val validated = for {
@@ -67,7 +66,7 @@ object ExecutionRPCProtocol {
           ExecutionFailure.InvalidRequest("execution RPC schema differs from the server")
         )
         _ <- Either.cond(
-          client == expectedClient.value,
+          client == expectedClient.raw,
           (),
           ExecutionFailure.InvalidRequest("client identity changed")
         )
@@ -164,12 +163,12 @@ object ExecutionRPCProtocol {
           discoverArgumentRelocations
         ) =>
       val created = KernelTask.validated(
-        kernelName = ISAKernelName(kernelName.value),
+        kernelName = kernelName,
         groupSize = LaunchGeometry.Dimensions(groupSize.x, groupSize.y, groupSize.z),
         groupCount = LaunchGeometry.Dimensions(groupCount.x, groupCount.y, groupCount.z),
         arguments = arguments.map {
           case KernelArgument.Scalar(bytes)          => KernelTask.Argument.Scalar(bytes)
-          case KernelArgument.Allocation(id, offset) => KernelTask.Argument.Memory(MemoryRegion(id.value), offset)
+          case KernelArgument.Allocation(id, offset) => KernelTask.Argument.Memory(MemoryRegion(id.raw), offset)
           case KernelArgument.Local(size)            => KernelTask.Argument.Local(size)
         },
         globalSize = Some(LaunchGeometry.GlobalDimensions(globalSize.x, globalSize.y, globalSize.z)),
@@ -178,11 +177,11 @@ object ExecutionRPCProtocol {
         pointerRelocations = pointerRelocations.map { relocation =>
           KernelTask.PointerRelocation(
             relocation.source match {
-              case RelocationSource.Allocation(id)  => KernelTask.RelocationSource.Memory(MemoryRegion(id.value))
+              case RelocationSource.Allocation(id)  => KernelTask.RelocationSource.Memory(MemoryRegion(id.raw))
               case RelocationSource.Argument(index) => KernelTask.RelocationSource.Argument(index)
             },
             relocation.sourceOffset,
-            MemoryRegion(relocation.target.value),
+            MemoryRegion(relocation.target.raw),
             relocation.targetOffset
           )
         },
@@ -226,8 +225,8 @@ object ExecutionRPCProtocol {
           .fold(message => throw IllegalArgumentException(s"cannot encode execution failure: $message"), value => value)
         1 -> encoded
     }
-    if (payload.length > ExecutionRPC.MaximumPayload)
-      throw IllegalArgumentException(s"execution response exceeds ${ExecutionRPC.MaximumPayload} bytes")
+    if (payload.length > ExecutionRPC.MaximumPayload.raw)
+      throw IllegalArgumentException(s"execution response exceeds ${ExecutionRPC.MaximumPayload.raw} bytes")
     output.writeInt(ExecutionRPC.ResponseMagic)
     output.writeLong(ExecutionRPC.Schema.fingerprint)
     output.writeInt(status)

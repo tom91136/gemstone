@@ -7,7 +7,7 @@ import scalafix.v1.*
 /** Prohibits JVM monitor locking in favour of explicit concurrent primitives. */
 final class GemstoneNoIntrinsicLocks extends SyntacticRule("GemstoneNoIntrinsicLocks") {
   override def fix(using document: SyntacticDocument): Patch = document.tree.collect {
-    case Term.Apply(select @ Term.Select(_, Term.Name("synchronized")), _) =>
+    case Term.Apply.After_4_6_0(select @ Term.Select(_, Term.Name("synchronized")), _) =>
       Patch.lint(
         Diagnostic(
           id = "intrinsic-lock",
@@ -15,7 +15,7 @@ final class GemstoneNoIntrinsicLocks extends SyntacticRule("GemstoneNoIntrinsicL
           position = select.name.pos
         )
       )
-    case Term.Apply(name @ Term.Name("synchronized"), _) =>
+    case Term.Apply.After_4_6_0(name @ Term.Name("synchronized"), _) =>
       Patch.lint(
         Diagnostic(
           id = "intrinsic-lock",

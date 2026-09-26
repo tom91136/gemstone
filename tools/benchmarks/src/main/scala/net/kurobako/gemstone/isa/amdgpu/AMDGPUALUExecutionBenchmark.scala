@@ -2,7 +2,7 @@ package net.kurobako.gemstone.isa.amdgpu
 
 import CodeObject.*
 
-import net.kurobako.gemstone.{PlatformTime, Vec}
+import net.kurobako.gemstone.{NonNegativeInt, NonNegativeLong, PlatformTime, PositiveInt, Vec}
 import net.kurobako.gemstone.binary.LittleEndian
 import net.kurobako.gemstone.binary.ScalarByteWidth
 import net.kurobako.gemstone.benchmarks.BenchmarkArguments
@@ -14,8 +14,6 @@ import net.kurobako.gemstone.vm.LaunchGeometry.Dimensions
 
 import cats.syntax.all.*
 import com.monovore.decline.Opts
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
 
 import java.nio.file.Path
 import scala.util.Using
@@ -27,18 +25,18 @@ object AMDGPUALUExecutionBenchmark {
   }
 
   private final case class Options(
-      measured: Int :| Positive,
-      warmup: Option[Int :| Positive0],
-      instructionCount: Int :| Positive0,
+      measured: PositiveInt,
+      warmup: Option[NonNegativeInt],
+      instructionCount: NonNegativeInt,
       mode: Mode
   )
   private val options = (
     Opts.option[Int]("measured", help = "Measured dispatches").withDefault(50)
-      .validate("measured dispatches must be positive")(_ > 0).map(_.refineUnsafe[Positive]),
+      .validate("measured dispatches must be positive")(_ > 0).map(PositiveInt.unsafe),
     Opts.option[Int]("warmup", help = "Warmup dispatches").validate("warmup dispatches must be non-negative")(_ >= 0)
-      .map(_.refineUnsafe[Positive0]).orNone,
+      .map(NonNegativeInt.unsafe).orNone,
     Opts.option[Int]("instructions", help = "ALU instructions per dispatch").withDefault(512)
-      .validate("instruction count must be non-negative")(_ >= 0).map(_.refineUnsafe[Positive0]),
+      .validate("instruction count must be non-negative")(_ >= 0).map(NonNegativeInt.unsafe),
     Opts.option[String]("mode", help = "Instruction mode: move or binary").withDefault("move")
       .validate("mode must be move or binary")(value => value == "move" || value == "binary")
       .map(value => if (value == "binary") Mode.Binary else Mode.Move)
@@ -48,13 +46,13 @@ object AMDGPUALUExecutionBenchmark {
     override protected val regionSizes: Iterable[(MemoryRegion, Long)] = Seq.empty
     override def read(
         id: MemoryRegion,
-        offset: Long :| Positive0,
-        size: Int :| Positive0
+        offset: NonNegativeLong,
+        size: NonNegativeInt
     ): Either[Fault, Vec[Byte]] =
       Left(Fault.Backend("ALU benchmark unexpectedly read memory"))
     override def write(
         id: MemoryRegion,
-        offset: Long :| Positive0,
+        offset: NonNegativeLong,
         bytes: Vec[Byte]
     ): Either[Fault, Unit] =
       Left(Fault.Backend("ALU benchmark unexpectedly wrote memory"))
@@ -65,7 +63,7 @@ object AMDGPUALUExecutionBenchmark {
   def run(arguments: Array[String]): Unit = {
     val parsed           = BenchmarkArguments.parse(BenchmarkName("amdgpu-alu"), arguments.toSeq, options)
     val measured         = parsed.measured
-    val warmup           = parsed.warmup.getOrElse(math.max(10, measured / 10).refineUnsafe[Positive0])
+    val warmup           = parsed.warmup.getOrElse(NonNegativeInt.unsafe(math.max(10, measured.raw / 10)))
     val instructionCount = parsed.instructionCount
     val mode             = parsed.mode
     val instruction      = mode match {
@@ -73,14 +71,14 @@ object AMDGPUALUExecutionBenchmark {
       // gfx9 VOP2 v_add_f32 v0, v1, v2
       case Mode.Binary => 0x02000501L
     }
-    val words    = Vec.from(Iterator.fill(instructionCount)(instruction) ++ Iterator.single(0xbf810000L))
+    val words    = Vec.from(Iterator.fill(instructionCount.raw)(instruction) ++ Iterator.single(0xbf810000L))
     val code     = words.flatMap(word => LittleEndian.toVec(word, ScalarByteWidth(4)))
     val kernel   = CodeObjectKernel("alu", Target("gfx900"), 0, 0, 0, 0, 0, code)
     val prepared =
       VMCompiler.compile(kernel).fold(failure => throw RuntimeException(failure.message), value => value)
     val dispatch = KernelTask.validated(
       KernelName("alu"),
-      Dimensions(64, 1, 1),
+      Dimensions(PositiveInt(64), PositiveInt.One, PositiveInt.One),
       Dimensions.One,
       Vec.empty
     ).fold(message => throw IllegalArgumentException(message), value => value)
@@ -99,7 +97,7 @@ object AMDGPUALUExecutionBenchmark {
       )
 
     var iteration = 0
-    while (iteration < warmup) {
+    while (iteration < warmup.raw) {
       execute()
       iteration += 1
     }
@@ -108,23 +106,24 @@ object AMDGPUALUExecutionBenchmark {
         val before  = PlatformMetrics.allocatedBytes
         val started = PlatformTime.monotonicNanos
         iteration = 0
-        while (iteration < measured) {
+        while (iteration < measured.raw) {
           execute()
           iteration += 1
         }
         (
           before,
-          math.max(0L, PlatformTime.monotonicNanos - started).refineUnsafe[Positive0],
+          NonNegativeLong.unsafe(math.max(0L, PlatformTime.monotonicNanos - started)),
           PlatformMetrics.allocatedBytes
         )
       }
     Console.out.println(
-      f"amdgpu-alu benchmark mode=${mode.toString.toLowerCase(java.util.Locale.ROOT)} dispatches=$measured warmup=$warmup instructions_per_dispatch=${instructionCount +
+      f"amdgpu-alu benchmark mode=${mode.toString.toLowerCase(java.util.Locale.ROOT)} dispatches=$measured warmup=$warmup instructions_per_dispatch=${instructionCount.raw +
           1} " +
-        f"elapsed_ms=${elapsed / 1000000.0}%.3f ns_per_dispatch=${elapsed.toDouble / measured.toDouble}%.1f " +
+        f"elapsed_ms=${elapsed.raw / 1000000.0}%.3f ns_per_dispatch=${elapsed.raw.toDouble / measured.raw.toDouble}%.1f " +
         f"allocated_bytes_per_dispatch=${(allocatedBefore, allocatedAfter) match {
-            case (Some(before), Some(after)) if after >= before => (after - before).toDouble / measured.toDouble
-            case _                                              => Double.NaN
+            case (Some(before), Some(after)) if after >= before =>
+              (after - before).raw.toDouble / measured.raw.toDouble
+            case _ => Double.NaN
           }}%.1f"
     )
   }

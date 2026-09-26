@@ -2,12 +2,11 @@ package net.kurobako.gemstone.isa.ptx.v9_3
 
 import Program.*
 
+import net.kurobako.gemstone.NonEmptyVec
 import net.kurobako.gemstone.Vec
 import net.kurobako.gemstone.Vec.*
 import net.kurobako.gemstone.isa.ValidationOutcome
 
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
 import Metadata.*
 import ISA.*
 
@@ -31,7 +30,7 @@ object Validator {
       version: Version,
       target: Target
   ): ValidationOutcome[Issue] = {
-    val candidates = instruction.meta.entries
+    val candidates = Vec.from(instruction.meta.entries.toVector)
     val available  = candidates.filter(info => version >= info.introduced && target >= info.minimumTarget)
     if (available.isEmpty) {
       val versionErrors = candidates.filter(_.introduced > version).map(info =>
@@ -40,7 +39,7 @@ object Validator {
       val targetErrors = candidates.filter(_.minimumTarget > target).map(info =>
         Issue.TargetTooOld(instruction.opcode, info.minimumTarget, target)
       )
-      ValidationOutcome.Rejected((versionErrors ++ targetErrors).distinct.refineUnsafe[MinLength[1]])
+      ValidationOutcome.Rejected(NonEmptyVec.unsafeFromVec((versionErrors ++ targetErrors).distinct))
     } else validateForms(instruction, available.flatMap(_.forms))
   }
 
@@ -77,7 +76,7 @@ object Validator {
           ValidationOutcome.Rejected(
             Vec.nonEmpty(Issue.InvalidModifiers(
               instruction.opcode,
-              s"unsupported modifier set: ${modifiers.view.map(_.value).toArray.sorted.mkString(".")}"
+              s"unsupported modifier set: ${modifiers.view.map(_.raw).toArray.sorted.mkString(".")}"
             ))
           )
         else {
@@ -101,8 +100,8 @@ object Validator {
     }
 
   private def modifiersMatch(actual: Set[ModifierName], form: InstructionForm): Boolean = {
-    val allowed  = form.requiredModifierGroups.flatten.toSet ++ form.optionalModifiers
-    val required = form.requiredModifierGroups.forall(group => actual.count(group.contains) == 1)
+    val allowed  = form.requiredModifierGroups.flatMap(_.raw).toSet ++ form.optionalModifiers
+    val required = form.requiredModifierGroups.forall(group => actual.count(group.raw.contains) == 1)
     required && actual.subsetOf(allowed)
   }
 

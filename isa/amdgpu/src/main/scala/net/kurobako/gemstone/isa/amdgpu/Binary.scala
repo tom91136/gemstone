@@ -35,7 +35,7 @@ object Binary {
     val definitions = encodingsFor(instruction, target)
     if (definitions.isEmpty) Left(CodecError.UnsupportedInstruction(instruction.opcode, target))
     else {
-      val formats = definitions.map(_.format.value.toUpperCase(java.util.Locale.ROOT)).distinct.sorted
+      val formats = definitions.map(_.format.raw.toUpperCase(java.util.Locale.ROOT)).distinct.sorted
       if (formats.contains("SOPP"))
         encodeSOPP(instruction, target).leftMap {
           case CodecError.InvalidOperand(_)
@@ -55,7 +55,7 @@ object Binary {
       instruction: Instruction,
       target: Target
   ): Either[CodecError, Vec[Byte]] = {
-    val definitions = encodingsFor(instruction, target).filter(_.format.value == "SOPP")
+    val definitions = encodingsFor(instruction, target).filter(_.format.raw == "SOPP")
     val encodings   = definitions.map(_.opcode).distinct
     if (encodings.size > 1)
       Left(CodecError.AmbiguousInstruction(instruction.opcode, target))
@@ -84,7 +84,7 @@ object Binary {
       else {
         val opcode  = Bits.unsignedIntField(word, SOPPOpcodeShift, IntFieldWidth(7))
         val matches = Instruction.definitions.filter(definition =>
-          encodingsFor(definition, target).exists(info => info.format.value == "SOPP" && info.opcode == opcode)
+          encodingsFor(definition, target).exists(info => info.format.raw == "SOPP" && info.opcode == opcode)
         )
         val names = matches.map(_.opcode).distinct
         if (names.size > 1)
@@ -98,7 +98,7 @@ object Binary {
             CodecError.InvalidEncoding(s"unknown SOPP opcode $opcode for ${target.name}")
           )
             .flatMap { definition =>
-              val value    = BigInt(Bits.low16(word))
+              val value    = BigInt(Bits.low16(word).raw)
               val operands =
                 if (!matches.exists(_.decoder.operandCounts.contains(0)) || value != 0)
                   Vec(Operand.IntegerLiteral(value, 10))
@@ -121,7 +121,7 @@ object Binary {
       Left(CodecError.InvalidOperand(s"SOPP does not accept modifiers: ${instruction.mods.mkString(", ")}"))
     case Vec()                                                                      => Right(0L)
     case Vec(Operand.IntegerLiteral(value, _)) if value >= -32768 && value <= 65535 =>
-      Right(Bits.low16(value.toLong))
+      Right(Bits.low16(value.toLong).raw)
     case Vec(operand) => Left(CodecError.InvalidOperand(s"SOPP requires a 16-bit integer, found $operand"))
     case operands     => Left(CodecError.InvalidOperand(s"SOPP accepts at most one operand, found ${operands.size}"))
   }

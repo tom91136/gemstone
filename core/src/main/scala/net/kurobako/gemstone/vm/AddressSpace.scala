@@ -1,31 +1,28 @@
 package net.kurobako.gemstone.vm
 
-import net.kurobako.gemstone.Vec
+import net.kurobako.gemstone.{NonNegativeInt, NonNegativeLong, Vec}
 import net.kurobako.gemstone.Vec.*
 import net.kurobako.gemstone.memory.GuestAddress
 import net.kurobako.gemstone.memory.MemoryValueByteWidth
 
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
-
 trait AddressSpace {
   @scala.annotation.nowarn("msg=unused explicit parameter")
-  def prepareReads(ranges: Vec[(GuestAddress, Int :| Positive0)]): Either[Fault, Unit] = Right(())
+  def prepareReads(ranges: Vec[(GuestAddress, NonNegativeInt)]): Either[Fault, Unit] = Right(())
 
   def address(
       region: MemoryRegion,
-      offset: Long :| Positive0
+      offset: NonNegativeLong
   ): Either[Fault, GuestAddress]
 
   def locate(
       address: GuestAddress,
-      size: Int :| Positive0
+      size: NonNegativeInt
   ): Either[Fault, AddressSpace.Location]
 
   /** Resolve and read in one operation. Implementations that own both the address map and memory can override this
     * boundary to avoid allocating an intermediate [[AddressSpace.Location]].
     */
-  def read(memory: Memory, address: GuestAddress, size: Int :| Positive0): Either[Fault, Vec[Byte]] =
+  def read(memory: Memory, address: GuestAddress, size: NonNegativeInt): Either[Fault, Vec[Byte]] =
     locate(address, size) match {
       case Left(error)     => Left(error)
       case Right(location) => memory.read(location.region, location.offset, size)
@@ -70,5 +67,5 @@ trait AddressSpace {
 }
 
 object AddressSpace {
-  final case class Location(region: MemoryRegion, offset: Long :| Positive0)
+  final case class Location(region: MemoryRegion, offset: NonNegativeLong)
 }

@@ -2,15 +2,12 @@ package net.kurobako.gemstone.isa.amdgpu
 
 import CodeObject.*
 
-import net.kurobako.gemstone.Vec
+import net.kurobako.gemstone.{NonNegativeInt, PositiveInt, Vec}
 import net.kurobako.gemstone.binary.ByteRange
 import net.kurobako.gemstone.binary.LittleEndian
 import net.kurobako.gemstone.isa.KernelMetadata
 import net.kurobako.gemstone.isa.KernelName
 import net.kurobako.gemstone.isa.LinkageName
-
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
 
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -136,10 +133,10 @@ object CodeObjectMetadata {
           case (Some(offset), Some(width), Some(valueKind)) if width > 0 =>
             val allocation = Set("global_buffer", "by_reference", "queue").contains(valueKind)
             for {
-              refinedWidth <- width.refineEither[Positive].left.map(_ =>
+              refinedWidth <- PositiveInt.either(width).left.map(_ =>
                 CodeObjectError.Invalid("AMDGPU kernel argument width must be positive")
               )
-              refinedOffset <- offset.refineEither[Positive0].left.map(_ =>
+              refinedOffset <- NonNegativeInt.either(offset).left.map(_ =>
                 CodeObjectError.Invalid("AMDGPU kernel argument offset must be non-negative")
               )
               _ <- Either.cond(
@@ -199,10 +196,10 @@ object CodeObjectMetadata {
               refinedSymbol <- LinkageName.either(symbol).left.map(_ =>
                 CodeObjectError.Invalid("AMDGPU kernel symbol must be non-empty and contain no NUL")
               )
-              refinedBlockSize <- blockSize.refineEither[Positive0].left.map(_ =>
+              refinedBlockSize <- NonNegativeInt.either(blockSize).left.map(_ =>
                 CodeObjectError.Invalid("AMDGPU kernarg block size must be non-negative")
               )
-              refinedParameterCount <- sorted.count(_._2.isEmpty).refineEither[Positive0].left.map(_ =>
+              refinedParameterCount <- NonNegativeInt.either(sorted.count(_._2.isEmpty)).left.map(_ =>
                 CodeObjectError.Invalid("AMDGPU explicit parameter count must be non-negative")
               )
               metadata <- KernelMetadata.validated(refinedBlockSize, refinedParameterCount, sorted.map(_._1))
@@ -215,7 +212,7 @@ object CodeObjectMetadata {
               refinedSymbol,
               metadata,
               sorted.collect { case (parameter, Some(kind)) =>
-                HiddenArgument(kind, parameter.offset, parameter.width)
+                HiddenArgument(kind, parameter.offset.raw, parameter.width.raw)
               }
             )
           case (Some(name), Some(symbol), Some(0), None) =>
@@ -226,7 +223,11 @@ object CodeObjectMetadata {
               refinedSymbol <- LinkageName.either(symbol).left.map(_ =>
                 CodeObjectError.Invalid("AMDGPU kernel symbol must be non-empty and contain no NUL")
               )
-              metadata <- KernelMetadata.validated(0, 0, Vec.empty[KernelMetadata.Parameter])
+              metadata <- KernelMetadata.validated(
+                NonNegativeInt.Zero,
+                NonNegativeInt.Zero,
+                Vec.empty[KernelMetadata.Parameter]
+              )
                 .left.map { detail =>
                   val raw: String = detail
                   CodeObjectError.Invalid(raw)

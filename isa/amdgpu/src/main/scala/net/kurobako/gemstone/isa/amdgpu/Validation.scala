@@ -6,8 +6,6 @@ import net.kurobako.gemstone.isa.ValidationOutcome
 import Metadata.*
 import Program.*
 
-import io.github.iltotore.iron.*
-
 /** Conservative target-aware validation. An outcome is `Accepted` only when all constraints for an implemented format
   * are enforced. Known but not-yet-normalized formats are fail-closed as `Incomplete`.
   */
@@ -42,7 +40,7 @@ object Validation {
         Vec.nonEmpty(Issue.UnsupportedInstruction(instruction.opcode, target))
       )
     else {
-      val formats = definitions.map(_.format.value.toUpperCase(java.util.Locale.ROOT)).distinct
+      val formats = definitions.map(_.format.raw.toUpperCase(java.util.Locale.ROOT)).distinct
       if (formats.contains("SOPP")) validateSOPP(instruction, target, definitions)
       else unsupported(
         s"operand constraints are not normalized for ${formats.sorted.mkString(",")}"
@@ -88,7 +86,7 @@ object Validation {
       operand: Operand,
       info: OperandInfo
   ): Option[String] =
-    if (info.kind.value == "LABEL")
+    if (info.kind.raw == "LABEL")
       operand match {
         case Operand.IntegerLiteral(value, _) if value >= -32768 && value <= 32767 => None
         case Operand.Identifier(_)                                                 => None

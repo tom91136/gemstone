@@ -78,7 +78,7 @@ private[v1_6] final class VMLoadedProgram(val ir: VMIR.Program) {
           rightConstant.isDefined,
           leftConstant.getOrElse(0L),
           rightConstant.getOrElse(0L),
-          if (width.value == 64) -1L else (1L << width.value) - 1L
+          if (width.raw == 64) -1L else (1L << width.raw) - 1L
         )
       case _ => null // scalafix:ok DisableSyntax.null
     }

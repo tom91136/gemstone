@@ -1,11 +1,10 @@
 package net.kurobako.gemstone.isa.spirv.v1_6
 
+import net.kurobako.gemstone.NonNegativeInt
 import net.kurobako.gemstone.Vec
 import net.kurobako.gemstone.isa.ValidationOutcome
 
 import cats.syntax.all.*
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
 
 object ISA extends net.kurobako.gemstone.isa.Decoder[Vec[Byte], Module] {
   override type Error = DecodeError
@@ -26,7 +25,7 @@ object ISA extends net.kurobako.gemstone.isa.Decoder[Vec[Byte], Module] {
     module.instructions.zipWithIndex
       .traverse { case (instruction, index) =>
         Instruction.decode(instruction).leftMap(error =>
-          ModuleDecodeError.Instruction(index.refineUnsafe[Positive0], error)
+          ModuleDecodeError.Instruction(NonNegativeInt.unsafe(index), error)
         )
       }
       .map(Module(module.header, _, module.endianness))

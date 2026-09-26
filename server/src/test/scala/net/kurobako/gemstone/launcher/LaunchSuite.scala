@@ -37,7 +37,7 @@ final class LaunchSuite extends munit.FunSuite {
 
     assertEquals(parsed.apis, Set(ComputeAPI.HIP, ComputeAPI.HSA))
     assertEquals(parsed.serverPort, None)
-    assertEquals(parsed.executable.value, "application")
+    assertEquals(parsed.executable.raw, "application")
     assertEquals(parsed.arguments.map(argument => s"$argument").toVector, Vector("argument"))
   }
 
@@ -65,8 +65,8 @@ final class LaunchSuite extends munit.FunSuite {
     assertEquals(environment.set("OCL_ICD_FILENAMES"), s"${layout.library(ComputeAPI.OpenCL)}")
     assertEquals(environment.set("OCL_ICD_VENDORS"), s"${layout.library(ComputeAPI.OpenCL)}")
     assertEquals(environment.set("ZE_ENABLE_ALT_DRIVERS"), s"${layout.library(ComputeAPI.LevelZero)}")
-    assertEquals(environment.set("GEMSTONE_RPC_PORT"), s"${port.value}")
-    assertEquals(environment.set("GEMSTONE_RPC_CLIENT"), s"${client.value}")
+    assertEquals(environment.set("GEMSTONE_RPC_PORT"), s"${port.raw}")
+    assertEquals(environment.set("GEMSTONE_RPC_CLIENT"), s"${client.raw}")
   }
 
   test("Vulkan loader directory is absent when Vulkan is not selected") {
@@ -101,7 +101,7 @@ final class LaunchSuite extends munit.FunSuite {
     val result = Launcher.launch(
       Set(ComputeAPI.CUDA),
       layout,
-      Map(ExecutionService.MaxInstructionsEnvironment -> "not-a-number")
+      Map(ExecutionService.MaxInstructionsEnvironment.raw -> "not-a-number")
     )(_ => 0)
     assert(result.isLeft)
     assert(result.swap.exists(_.contains("invalid execution profile")))

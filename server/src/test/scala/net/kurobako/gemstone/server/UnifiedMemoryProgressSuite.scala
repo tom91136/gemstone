@@ -1,15 +1,13 @@
 package net.kurobako.gemstone.server
 
-import net.kurobako.gemstone.NoNul
+import net.kurobako.gemstone.*
+
 import net.kurobako.gemstone.launcher.Environment
 import net.kurobako.gemstone.vm.TaskLimits
 import net.kurobako.gemstone.rpc.{ExecutionRPC, Wire}
 import net.kurobako.gemstone.rpc.ExecutionRPC.Operation
 import net.kurobako.gemstone.server.recording.RPCJournal
 import scala.collection.mutable
-
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
 
 import java.nio.file.Files
 import scala.concurrent.duration.*
@@ -66,11 +64,11 @@ final class UnifiedMemoryProgressSuite extends munit.FunSuite {
       Using.resource(if (concurrent)
         GemstoneRPCServer.startWith(
           checkpoint.backends,
-          TaskLimits(if (atomicProbe) 100000 else 10000000, 64),
-          30000,
+          TaskLimits(PositiveLong.unsafe((if (atomicProbe) 100000 else 10000000).toLong), PositiveInt(64)),
+          PositiveInt(30000),
           environment
         )
-      else GemstoneRPCServer.start(TaskLimits(10000000, 64), environment)) {
+      else GemstoneRPCServer.start(TaskLimits(PositiveLong(10000000L), PositiveInt(64)), environment)) {
         server =>
           val libraryPath = List(directory.toString, sys.env.getOrElse("LD_LIBRARY_PATH", "")).mkString(":")
           val probes      =
@@ -84,8 +82,8 @@ final class UnifiedMemoryProgressSuite extends munit.FunSuite {
           val base = Map(
             "GEMSTONE_MEMORY_PROBE"           -> probes.mkString(","),
             "GEMSTONE_MEMORY_ALLOCATION_KIND" -> allocationKind,
-            "GEMSTONE_RPC_PORT"               -> server.port.value.toString,
-            "GEMSTONE_RPC_CLIENT"             -> server.client.value.toString,
+            "GEMSTONE_RPC_PORT"               -> server.port.raw.toString,
+            "GEMSTONE_RPC_CLIENT"             -> server.client.raw.toString,
             "LD_LIBRARY_PATH"                 -> libraryPath,
             "ZE_ENABLE_ALT_DRIVERS"           -> directory.resolve("libze_gemstone.so.1").toString,
             "ZE_ENABLE_LOADER_DEBUG_TRACE"    -> "0",
@@ -99,7 +97,7 @@ final class UnifiedMemoryProgressSuite extends munit.FunSuite {
           val paging    = if (ordinary) Map("GEMSTONE_SYSTEM_PAGING" -> "1") else Map.empty[String, String]
           val arguments = Vector(client.toString) ++ (if (ordinary) Vector("ordinary") else Vector.empty)
           val result    = NativeTestProcess.run(
-            arguments.map(_.refineUnsafe[NoNul]).refineUnsafe[MinLength[1]],
+            NonEmptyVec.unsafeFromVec(Vec.from(arguments).map(NoNulString.unsafe)),
             directory,
             Environment(
               base ++ paging,
@@ -137,25 +135,25 @@ final class UnifiedMemoryProgressSuite extends munit.FunSuite {
         val hostAllocations = mutable.Set.empty[Long]
         journal.events.filter(_.kind == RPCJournal.Kind.Request).foreach { event =>
           val frame       = journal.frame(event)
-          val operationId = RPCJournal.Frames.long(frame, ExecutionRPC.RequestOperationOffset)
-          val payload     = java.util.Arrays.copyOfRange(frame, ExecutionRPC.RequestHeaderBytes, frame.length)
+          val operationId = RPCJournal.Frames.long(frame, ExecutionRPC.RequestOperationOffset.raw)
+          val payload     = java.util.Arrays.copyOfRange(frame, ExecutionRPC.RequestHeaderBytes.raw, frame.length)
           val request     = Wire.Protocol[Operation].decodePayload(operationId, payload, ExecutionRPC.Limits)
             .fold(message => fail(message), identity).value
           request match {
             case Operation.RegisterAllocationAddress(allocation, _, true) =>
-              val _ = hostAllocations.add(allocation.value)
+              val _ = hostAllocations.add(allocation.raw)
             case Operation.SupplyHostMemory(_, ranges) =>
               ranges.foreach { range =>
                 assert(
                   !atomicWords.exists((begin, end) =>
-                    range.address.value < end && begin < range.address.value + range.bytes.size
+                    range.address.raw < end && begin < range.address.raw + range.bytes.size
                   ),
                   "an atomic control word was fetched by an ordinary host read"
                 )
               }
             case Operation.WriteAllocation(allocation, _, _) =>
-              assert(!hostAllocations.contains(allocation.value), "host-backed storage was uploaded speculatively")
-            case Operation.ReleaseAllocation(allocation) => val _ = hostAllocations.remove(allocation.value)
+              assert(!hostAllocations.contains(allocation.raw), "host-backed storage was uploaded speculatively")
+            case Operation.ReleaseAllocation(allocation) => val _ = hostAllocations.remove(allocation.raw)
             case _                                       => ()
           }
         }

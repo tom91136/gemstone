@@ -1,13 +1,12 @@
 package net.kurobako.gemstone.server
 
+import net.kurobako.gemstone.*
+
 import net.kurobako.gemstone.rpc.ExecutionProtocol.ExecutionFailure
 import net.kurobako.gemstone.rpc.ExecutionRPC
 import net.kurobako.gemstone.rpc.ExecutionRPC.Operation
 import net.kurobako.gemstone.rpc.Wire
 import net.kurobako.gemstone.server.transport.Transport.*
-
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
 
 import java.io.{DataInputStream, DataOutputStream, IOException}
 import java.net.Socket
@@ -18,7 +17,7 @@ private final class ExecutionRPCTestClient(
     process: Long = 42L,
     incarnation: Long = 17L
 ) extends AutoCloseable {
-  private val socket = Socket("127.0.0.1", port.value)
+  private val socket = Socket("127.0.0.1", port.raw)
   socket.setSoTimeout(10000)
   private val input  = DataInputStream(socket.getInputStream)
   private val output = DataOutputStream(socket.getOutputStream)
@@ -28,7 +27,7 @@ private final class ExecutionRPCTestClient(
       .fold(message => throw IllegalArgumentException(message), value => value)
     output.writeInt(ExecutionRPC.RequestMagic)
     output.writeLong(ExecutionRPC.Schema.fingerprint)
-    output.writeLong(client.value)
+    output.writeLong(client.raw)
     output.writeLong(process)
     output.writeLong(incarnation)
     output.writeLong(operationId)

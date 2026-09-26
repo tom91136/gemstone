@@ -1,10 +1,8 @@
 package net.kurobako.gemstone.server
 
-import net.kurobako.gemstone.NoNul
-import net.kurobako.gemstone.launcher.Environment
+import net.kurobako.gemstone.*
 
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
+import net.kurobako.gemstone.launcher.Environment
 
 import scala.concurrent.duration.*
 import scala.util.Using
@@ -15,15 +13,13 @@ final class CUDABoundarySuite extends munit.FunSuite {
     val directory = NativeTestProcess.nativeDirectory
     Using.resource(GemstoneRPCServer.start()) { server =>
       val result = NativeTestProcess.run(
-        Vector(
-          directory.resolve("cuda_execution_unavailable_smoke").toString.refineUnsafe[NoNul]
-        ).refineUnsafe[MinLength[1]],
+        NonEmptyVec(NoNulString.unsafe(directory.resolve("cuda_execution_unavailable_smoke").toString)),
         directory,
         Environment(
           Map(
             "LD_LIBRARY_PATH"     -> directory.toString,
-            "GEMSTONE_RPC_PORT"   -> server.port.value.toString,
-            "GEMSTONE_RPC_CLIENT" -> (server.client.value + 1L).toString
+            "GEMSTONE_RPC_PORT"   -> server.port.raw.toString,
+            "GEMSTONE_RPC_CLIENT" -> (server.client.raw + 1L).toString
           ),
           Set.empty
         ),

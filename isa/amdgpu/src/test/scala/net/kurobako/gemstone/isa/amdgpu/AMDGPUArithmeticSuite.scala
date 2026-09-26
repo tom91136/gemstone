@@ -3,10 +3,7 @@ package net.kurobako.gemstone.isa.amdgpu
 import CodeObject.*
 import VMIR.*
 
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
-
-import net.kurobako.gemstone.Vec
+import net.kurobako.gemstone.{NonNegativeLong, Vec}
 import net.kurobako.gemstone.binary.{Bits, ByteRange}
 import net.kurobako.gemstone.binary.IEEE754
 import net.kurobako.gemstone.binary.LittleEndian
@@ -191,15 +188,15 @@ final class AMDGPUArithmeticSuite extends munit.FunSuite with CodeObjectTestSupp
     val addend        = IEEE754.floatToBinary32(-onePlusTwoUlp)
 
     assertEquals(
-      VMInterpreter.fmaF32(VectorMadF32Operation.FusedMultiplyAdd, left.value, right.value, addend.value),
+      VMInterpreter.fmaF32(VectorMadF32Operation.FusedMultiplyAdd, left.raw, right.raw, addend.raw),
       IEEE754.floatToBinary32(Math.scalb(1.0f, -46))
     )
     assertEquals(
-      VMInterpreter.fmaF32(VectorMadF32Operation.MultiplyAdd, left.value, right.value, addend.value),
+      VMInterpreter.fmaF32(VectorMadF32Operation.MultiplyAdd, left.raw, right.raw, addend.raw),
       IEEE754.floatToBinary32(0.0f)
     )
     assertEquals(
-      VMInterpreter.fmaF32(VectorMadF32Operation.MultiplyAdd, left.value, right.value, addend.value),
+      VMInterpreter.fmaF32(VectorMadF32Operation.MultiplyAdd, left.raw, right.raw, addend.raw),
       IEEE754.floatToBinary32(0.0f)
     )
   }
@@ -293,12 +290,13 @@ final class AMDGPUArithmeticSuite extends munit.FunSuite with CodeObjectTestSupp
 
   test("dot2c f32-f16 computes both packed halves before accumulation") {
     def packed(low: Float, high: Float): Long =
-      Bits.low16(IEEE754.floatToBinary16(low).value) | (Bits.low16(IEEE754.floatToBinary16(high).value) << 16)
+      Bits.low16(IEEE754.floatToBinary16(low).raw).raw |
+        (Bits.low16(IEEE754.floatToBinary16(high).raw).raw << 16)
 
     val result = VMInterpreter.dot2F32F16(
       packed(1.0f, 2.0f),
       packed(3.0f, 4.0f),
-      IEEE754.floatToBinary32(5.0f).value,
+      IEEE754.floatToBinary32(5.0f).raw,
       accumulate = true
     )
     assertEquals(IEEE754.binary32ToFloat(result), 16.0f)
@@ -306,7 +304,8 @@ final class AMDGPUArithmeticSuite extends munit.FunSuite with CodeObjectTestSupp
 
   test("gfx900 packed-half FMA applies operand selection, negation, and clamp independently") {
     def packed(low: Float, high: Float): Long =
-      Bits.low16(IEEE754.floatToBinary16(low).value) | (Bits.low16(IEEE754.floatToBinary16(high).value) << 16)
+      Bits.low16(IEEE754.floatToBinary16(low).raw).raw |
+        (Bits.low16(IEEE754.floatToBinary16(high).raw).raw << 16)
 
     assertEquals(
       VMInterpreter.packedFmaF16(
@@ -352,7 +351,10 @@ final class AMDGPUArithmeticSuite extends munit.FunSuite with CodeObjectTestSupp
     assertEquals(
       VMInterpreter.effectiveKernargSize(
         kernel,
-        Vec(KernelTask.Argument.Memory(allocation, 0L), KernelTask.Argument.Scalar(Vec.fill(12)(0.toByte)))
+        Vec(
+          KernelTask.Argument.Memory(allocation, NonNegativeLong(0L)),
+          KernelTask.Argument.Scalar(Vec.fill(12)(0.toByte))
+        )
       ),
       Right(20)
     )

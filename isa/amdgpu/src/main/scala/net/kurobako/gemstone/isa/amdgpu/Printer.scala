@@ -12,7 +12,7 @@ object Printer extends net.kurobako.gemstone.isa.Printer[Program] {
       modifier.value.fold(modifier.name)(value => s"${modifier.name}:$value")
     }
     val tail = operands ++ modifiers
-    if (tail.isEmpty) instruction.opcode.value
+    if (tail.isEmpty) instruction.opcode.raw
     else {
       val operandText  = operands.mkString(", ")
       val modifierText = modifiers.mkString(" ")

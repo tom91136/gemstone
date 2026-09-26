@@ -1,11 +1,8 @@
 package net.kurobako.gemstone.server
 
-import net.kurobako.gemstone.NoNul
+import net.kurobako.gemstone.{NoNulString, NonEmptyVec, PositiveInt, PositiveLong}
 import net.kurobako.gemstone.launcher.Environment
 import net.kurobako.gemstone.vm.TaskLimits
-
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
 
 import java.nio.file.Files
 import scala.concurrent.duration.*
@@ -24,17 +21,17 @@ final class UnifiedMemoryReviewSuite extends munit.FunSuite {
       val _       = Files.writeString(icd, directory.resolve("libOpenCL_gemstone.so.1").toString + "\n")
       try
         Using.resource(GemstoneRPCServer.start(
-          TaskLimits(1000000000, 64),
+          TaskLimits(PositiveLong(1000000000L), PositiveInt(64)),
           Map("GEMSTONE_EXECUTION_PARALLELISM" -> "2")
         )) { server =>
           val result = NativeTestProcess.run(
-            Vector(client.toString.refineUnsafe[NoNul]).refineUnsafe[MinLength[1]],
+            NonEmptyVec(NoNulString.unsafe(client.toString)),
             directory,
             Environment(
               Map(
                 "GEMSTONE_MEMORY_PROBE" -> "review",
-                "GEMSTONE_RPC_PORT"     -> server.port.value.toString,
-                "GEMSTONE_RPC_CLIENT"   -> server.client.value.toString,
+                "GEMSTONE_RPC_PORT"     -> server.port.raw.toString,
+                "GEMSTONE_RPC_CLIENT"   -> server.client.raw.toString,
                 "LD_LIBRARY_PATH"       ->
                   List(directory.toString, sys.env.getOrElse("LD_LIBRARY_PATH", "")).mkString(":"),
                 "ZE_ENABLE_ALT_DRIVERS" -> directory.resolve("libze_gemstone.so.1").toString,

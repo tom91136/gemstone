@@ -1,33 +1,33 @@
 package net.kurobako.gemstone.rpc
 
-import net.kurobako.gemstone.Vec
+import net.kurobako.gemstone.{NonNegativeInt, NonNegativeLong, PositiveInt, PositiveLong, Vec, WorkDimension}
 import net.kurobako.gemstone.memory.{AllocationKind, GuestAddress}
 import net.kurobako.gemstone.rpc.ExecutionRPC.Operation
 import net.kurobako.gemstone.rpc.ExecutionProtocol.*
 
-import io.github.iltotore.iron.*
-import io.github.iltotore.iron.constraint.all.*
-
 final class ExecutionRPCSuite extends munit.FunSuite {
-  private val allocation = AllocationId(1)
-  private val program    = ProgramId(2)
-  private val completion = CompletionId(3)
+  private val allocation = AllocationId(1L)
+  private val program    = ProgramId(2L)
+  private val completion = CompletionId(3L)
 
   private val operations: Vector[Operation[?]] = Vector(
     Operation.Ping,
     Operation.EnableHostMemory,
     Operation.PollHostMemory(completion),
-    Operation.SupplyHostMemory(completion, Vec(HostMemoryBytes(GuestAddress(0x1000), Vec[Byte](1, 2)))),
+    Operation.SupplyHostMemory(completion, Vec(HostMemoryBytes(GuestAddress(0x1000L), Vec[Byte](1, 2)))),
     Operation.SupplyHostSync(completion, 71, -1L),
-    Operation.RegisterAllocation(AllocationKind.Shared, 64),
+    Operation.RegisterAllocation(AllocationKind.Shared, PositiveLong(64L)),
     Operation.RegisterAllocationAddress(allocation, GuestAddress(0x1000L)),
     Operation.RegisterAllocationAddress(allocation, GuestAddress(0x1000L), true),
     Operation.ReleaseAllocation(allocation),
-    Operation.WriteAllocation(allocation, 4, Vec[Byte](1, 2, 3)),
-    Operation.ReadAllocation(allocation, 4, 3),
+    Operation.WriteAllocation(allocation, NonNegativeLong(4L), Vec[Byte](1, 2, 3)),
+    Operation.ReadAllocation(allocation, NonNegativeLong(4L), NonNegativeInt(3)),
     Operation.LoadProgram("spirv-binary", Vec[Byte](3, 2, 35, 7)),
     Operation.DescribeSpecialization(Vec[Byte](3, 2, 35, 7)),
-    Operation.SpecializeImage(Vec[Byte](3, 2, 35, 7), Vec(SpecializationConstant(101, Vec[Byte](1, 2, 3, 4)))),
+    Operation.SpecializeImage(
+      Vec[Byte](3, 2, 35, 7),
+      Vec(SpecializationConstant(NonNegativeInt(101), Vec[Byte](1, 2, 3, 4)))
+    ),
     Operation.UnloadProgram(program),
     Operation.DescribeProgram(program),
     Operation.DescribeKernel(program, KernelName("kernel")),
@@ -54,20 +54,25 @@ final class ExecutionRPCSuite extends munit.FunSuite {
       0
     )),
     Operation.DescribeGlobal(program, GlobalName("global")),
-    Operation.BindProgramGlobal(program, GlobalName("global"), allocation, 8),
-    Operation.WriteProgramGlobal(program, GlobalName("global"), 8, Vec[Byte](4, 5)),
+    Operation.BindProgramGlobal(program, GlobalName("global"), allocation, NonNegativeLong(8L)),
+    Operation.WriteProgramGlobal(program, GlobalName("global"), NonNegativeLong(8L), Vec[Byte](4, 5)),
     Operation.Launch(
       program,
       KernelName("kernel"),
       Dimensions.One,
       Dimensions.One,
       Dimensions.One.toGlobalDimensions,
-      3,
-      Coordinates(0, 0, 0),
-      0,
-      16,
-      Vec(KernelArgument.Allocation(allocation, 0), KernelArgument.Scalar(Vec[Byte](9))),
-      Vec(PointerRelocation(RelocationSource.Allocation(allocation), 0, allocation, 8))
+      WorkDimension.Three,
+      Coordinates(NonNegativeInt.Zero, NonNegativeInt.Zero, NonNegativeInt.Zero),
+      NonNegativeInt.Zero,
+      NonNegativeInt(16),
+      Vec(KernelArgument.Allocation(allocation, NonNegativeLong.Zero), KernelArgument.Scalar(Vec[Byte](9))),
+      Vec(PointerRelocation(
+        RelocationSource.Allocation(allocation),
+        NonNegativeLong.Zero,
+        allocation,
+        NonNegativeLong(8L)
+      ))
     ),
     Operation.QueryCompletion(completion),
     Operation.AwaitCompletion(completion),
@@ -109,8 +114,8 @@ final class ExecutionRPCSuite extends munit.FunSuite {
     )
     assert(ExecutionRPC.Schema.canonical.contains("alias(KernelName,text)[minimum-length[1],not-contains[00]]"))
     assertEquals(
-      ExecutionRPC.Identity,
-      s"${ExecutionRPC.Name}@${java.lang.Long.toUnsignedString(ExecutionRPC.Schema.fingerprint, 16)}"
+      ExecutionRPC.Identity.raw,
+      s"${ExecutionRPC.Name.raw}@${java.lang.Long.toUnsignedString(ExecutionRPC.Schema.fingerprint, 16)}"
     )
   }
 
@@ -133,7 +138,11 @@ final class ExecutionRPCSuite extends munit.FunSuite {
   }
 
   test("encoding enforces total, text, and collection limits before producing bytes") {
-    val limits = Wire.Limits(maximumElements = 1, maximumBytes = 12, maximumTextBytes = 3)
+    val limits = Wire.Limits(
+      maximumElements = PositiveInt(1),
+      maximumBytes = PositiveInt(12),
+      maximumTextBytes = PositiveInt(3)
+    )
     assert(Wire.Codec[String].encode("four", limits).isLeft)
     assert(Wire.Codec[Vec[Int]].encode(Vec(1, 2), limits).isLeft)
     assert(Wire.Codec[Vec[Byte]].encode(Vec.fill(12)(1.toByte), limits).isLeft)
@@ -141,7 +150,7 @@ final class ExecutionRPCSuite extends munit.FunSuite {
   }
 
   test("maximum-sized element collections decode without consuming the call stack") {
-    val values = Vec.fill(ExecutionRPC.MaximumElements)(1)
+    val values = Vec.fill(ExecutionRPC.MaximumElements.raw)(1)
     assertEquals(
       Wire.Codec[Vec[Int]].encode(values, ExecutionRPC.Limits)
         .flatMap(Wire.Codec[Vec[Int]].decode(_, ExecutionRPC.Limits)),
